@@ -53,6 +53,12 @@ taken by Ken, implemented here.
    published evidence. Toolchain, Cargo config, manifests, the lockfile,
    `clippy.toml`, `.config/nextest.toml`, and the Just recipes remain inputs.
 
+Amended 2026-09-19 (2026-09-19-nightly-scope): the nightly is WSL2's alone.
+`schedule` left `ubuntu-latest`'s and `windows-latest`'s `events` — Windows is
+proven by every push to `main`, and Linux joins the nightly only as WSL2's
+producer, cell-less — and the nightly plans what changed since the last
+successful nightly rather than the full workspace.
+
 Two consequences follow:
 
 - **A push to `main` after a validated pull request runs only the deferred

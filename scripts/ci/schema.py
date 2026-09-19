@@ -282,6 +282,11 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     "event": False,
     "deferred_environments": False,
     "proven_environments": False,
+    #: Environments in the plan's table for their build records and preflight
+    #: runner alone (`{name, for}`): the event did not schedule them, but a
+    #: scheduled archive-only guest runs what they compile. Optional and absent
+    #: rather than empty (fixes/2026-09-19-nightly-scope).
+    "producing_environments": False,
 }
 
 #: `paths` and `counts` are present exactly when `diff_available` is true, and
@@ -914,6 +919,39 @@ def validate_resolved_plan(document: Any) -> list[str]:
                 problems += _str_list(f"resolved plan {field} events", entry["events"], EVENTS)
             else:
                 problems += _member(f"resolved plan {field} event", entry["event"], EVENTS, "malformed-receipt")
+    if "producing_environments" in document:
+        entries = document["producing_environments"]
+        if not isinstance(entries, list) or not entries:
+            problems.append(
+                "malformed-receipt: resolved plan producing_environments must be a non-empty list"
+            )
+        else:
+            for entry in entries:
+                if not isinstance(entry, dict) or set(entry) != {"name", "for"}:
+                    problems.append(
+                        "malformed-receipt: resolved plan producing_environments entries carry "
+                        "exactly 'name' and 'for'"
+                    )
+                    continue
+                problems += _member(
+                    "resolved plan producing_environments name", entry["name"], ENVIRONMENTS, "unknown-environment"
+                )
+                # A producer is in the table — its owner job and preflight
+                # runner come from there — and its guests are scheduled ones.
+                if entry["name"] not in scheduled:
+                    problems.append(
+                        f"malformed-receipt: resolved plan producing_environments names "
+                        f"{entry['name']!r}, which is not in the plan's environment table"
+                    )
+                guests = entry["for"]
+                if not isinstance(guests, list) or not guests or not all(
+                    isinstance(guest, str) and guest in scheduled and guest != entry["name"]
+                    for guest in guests
+                ):
+                    problems.append(
+                        f"malformed-receipt: resolved plan producing_environments entry "
+                        f"{entry['name']!r} must name scheduled guests it produces for"
+                    )
     return problems
 
 

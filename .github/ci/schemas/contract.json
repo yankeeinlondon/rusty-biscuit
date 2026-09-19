@@ -26,7 +26,8 @@
       "flags": true,
       "event": false,
       "deferred_environments": false,
-      "proven_environments": false
+      "proven_environments": false,
+      "producing_environments": false
     },
     "area": {
       "area": true,

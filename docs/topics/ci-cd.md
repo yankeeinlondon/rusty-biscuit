@@ -193,8 +193,10 @@ GitHub events that schedule it, and the planner plans nothing for an environment
 not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
 (`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
 latter normally from the pre-push hook's local evidence; a push to `main` adds `windows-latest`;
-the nightly run (08:00 UTC) plans the full workspace for `ubuntu-latest`, `windows-latest`, and
-`wsl2-ubuntu`; `workflow_dispatch` plans every environment. A push to `main` whose pull request
+the nightly run (08:00 UTC) plans `wsl2-ubuntu` alone over the packages that changed since the
+last successful nightly, with `ubuntu-latest` joining cell-less as the producer of their archives
+(`fixes/2026-09-19-nightly-scope`); `workflow_dispatch` plans every environment over the full
+workspace. A push to `main` whose pull request
 validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
 environment for a pull request from its next push.
 

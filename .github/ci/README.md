@@ -365,18 +365,24 @@ compile contract (below), and a `capabilities` map over a closed vocabulary:
 
 `events` names the GitHub events (`pull_request`, `push`, `schedule`,
 `workflow_dispatch`) that schedule the environment. The planner takes
-`--event`; an environment the event does not schedule contributes no cell, no
-build record, and no preflight runner, and is recorded in the plan's
-`deferred_environments` with the events that will run it. The shipped policy
-(fixes/2026-09-18-ci-cadence, decided 2026-09-18 while the repository has no
-users): `ubuntu-latest` on every event; `macos-latest` on `pull_request`,
-`push`, and `workflow_dispatch`, since the development Mac proves it on every
-push through the hook; `windows-latest` on `push`, `schedule`, and
-`workflow_dispatch`; `wsl2-ubuntu` on `schedule` and `workflow_dispatch` only.
-So a pull request proves Linux and macOS, a push to `main` adds Windows, and
-the nightly `schedule` (08:00 UTC, `ci.yml`) adds WSL2 over the full
-workspace. The `ci:all-os` label plans every environment for a pull request;
-it is read from the event payload, so it takes effect on the next push.
+`--event`; an environment the event does not schedule contributes no cell and
+is recorded in the plan's `deferred_environments` with the events that will
+run it. One exception: an unscheduled environment that **produces** for a
+scheduled archive-only guest stays in the plan's table for its build records
+and its preflight runner, still cell-less, and is listed in
+`producing_environments` as `{name, for}` instead of in `deferred_environments`
+(fixes/2026-09-19-nightly-scope). The shipped policy
+(fixes/2026-09-18-ci-cadence, narrowed 2026-09-19): `ubuntu-latest` on
+`pull_request`, `push`, and `workflow_dispatch`; `macos-latest` the same,
+since the development Mac proves it on every push through the hook;
+`windows-latest` on `push` and `workflow_dispatch`; `wsl2-ubuntu` on
+`schedule` and `workflow_dispatch` only. So a pull request proves Linux and
+macOS, a push to `main` adds Windows, and the nightly `schedule` (08:00 UTC,
+`ci.yml`) runs WSL2 alone — over the packages that changed since the last
+successful nightly (`reuse_validation.py nightly-base`; the full workspace
+when there is none), with Linux compiling their archives and hosting nothing
+else. The `ci:all-os` label plans every environment for a pull request; it is
+read from the event payload, so it takes effect on the next push.
 
 `lint` and `check` are single-environment gates hosted on `ubuntu-latest`, so
 a plan that does not carry Linux (a push whose pull request validation proved
