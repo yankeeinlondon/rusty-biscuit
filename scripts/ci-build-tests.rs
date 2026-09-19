@@ -880,7 +880,12 @@ fn the_javascript_publisher_reads_a_fixture_generated_from_this_report() {
 /// Cargo is resolved at run time, never through `env!("CARGO")`: that value
 /// is the PRODUCER's toolchain path, and this suite runs from an archive on a
 /// consumer that provisions its own (run 35326800778 failed 14 fixtures here
-/// with `NotFound` for the baked path).
+/// with `NotFound` for the baked path). Where the build lands is Cargo's
+/// answer too, read from its `compiler-artifact` message: under an archive
+/// this process runs from nextest's extracted temp tree, under a
+/// `<triple>/debug` profile directory, while the rebuild goes to the
+/// checkout's own `target/debug` — a path assumed beside `current_exe()`
+/// named nothing on either environment of run 35405580517.
 pub(crate) fn shipped_wrapper() -> PathBuf {
     let exe = env::current_exe().expect("the test binary has a path");
     let profile_dir = exe
@@ -888,19 +893,34 @@ pub(crate) fn shipped_wrapper() -> PathBuf {
         .and_then(Path::parent)
         .expect("…/target/<profile>/deps/<test binary>")
         .to_path_buf();
-    let binary = profile_dir.join(format!("ci-build{}", env::consts::EXE_SUFFIX));
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    let status = Command::new(cargo_bin())
+    let output = Command::new(cargo_bin())
         .arg("build")
-        .arg("--quiet")
+        .arg("--message-format=json-render-diagnostics")
         .args(["--no-default-features", "--features", "build-tools"])
         .arg("--manifest-path")
         .arg(&manifest)
         .arg("--bin")
         .arg("ci-build")
-        .status()
+        .output()
         .expect("building the ci-build binary");
-    assert!(status.success(), "ci-build must build before it can be driven");
+    assert!(
+        output.status.success(),
+        "ci-build must build before it can be driven:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let binary = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| {
+            message["reason"] == "compiler-artifact"
+                && message["target"]["name"] == "ci-build"
+                && message["target"]["kind"]
+                    .as_array()
+                    .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+        })
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .expect("cargo reports the ci-build executable it built");
     assert!(binary.exists(), "expected {} to exist", binary.display());
     private_handle(&profile_dir, &binary)
 }
