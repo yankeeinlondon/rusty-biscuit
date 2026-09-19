@@ -25,7 +25,7 @@ contents: "<< ./some-content.md as string"
 
 Let's discuss some basic rules that the `<< {source}` directive uses for typing:
 
-1. the `as` operator consumes a "type" as defined by [SimplifiedSchema](../topics/simplified-schemas.md)
+1. the `as` operator consumes a "type" as defined by [SimplifiedSchema](../topics/schemas/simplified-schemas.md)
 2. the `as` operator is purely optional and without it Darkmatter will specify the return type purely on the file's file extension:
     - `.md` -> string
     - `.txt` / `.text` -> string
