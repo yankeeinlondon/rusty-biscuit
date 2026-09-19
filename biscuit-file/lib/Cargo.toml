@@ -105,3 +105,8 @@ harness = false
 [[test]]
 name = "fetch_integration"
 required-features = ["fetch"]
+
+# CI policy: the L1 suite runs with `fetch`, which gates the fetch helper unit
+# tests and the `fetch_integration` target (wiremock; no external network).
+[package.metadata.ci.tests]
+features = ["fetch"]

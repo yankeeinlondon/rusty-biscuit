@@ -89,7 +89,9 @@ pub struct FetchResponse {
     pub etag: Option<String>,
     /// `Last-Modified` header, if present.
     pub last_modified: Option<String>,
-    /// `Cache-Control` header, if present.
+    /// Every `Cache-Control` field line, joined with `", "` in wire order
+    /// (RFC 9110 §5.3), so a directive on any line (e.g. `no-store`) is
+    /// visible; `None` when the response carries no such field.
     pub cache_control: Option<String>,
 }
 
@@ -218,11 +220,7 @@ pub async fn fetch(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let cache_control = response
-        .headers()
-        .get("cache-control")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    let cache_control = combined_cache_control(response.headers());
 
     let body = response.bytes().await.map_err(FetchError::BodyReadFailed)?;
 
@@ -240,6 +238,18 @@ pub async fn fetch(
         last_modified,
         cache_control,
     })
+}
+
+fn combined_cache_control(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let lines: Vec<String> = headers
+        .get_all(reqwest::header::CACHE_CONTROL)
+        .iter()
+        // Lossy rather than skipped: a line whose only non-ASCII byte sits in
+        // an extension value may still carry `no-store`, and dropping it
+        // would let the caller store a response the origin forbade storing.
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join(", "))
 }
 
 /// Perform an async HTTP POST with the same scheme and host policy enforcement
@@ -289,11 +299,7 @@ pub async fn post(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let cache_control = response
-        .headers()
-        .get("cache-control")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    let cache_control = combined_cache_control(response.headers());
 
     let body = response.bytes().await.map_err(FetchError::BodyReadFailed)?;
 
@@ -406,6 +412,42 @@ mod tests {
         assert!(policy.is_allowed("a.com"));
         assert!(policy.is_allowed("b.com"));
         assert!(!policy.is_allowed("c.com"));
+    }
+
+    #[test]
+    fn combined_cache_control_joins_every_field_line_in_order() {
+        use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.append(CACHE_CONTROL, HeaderValue::from_static("max-age=3600"));
+        headers.append(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        assert_eq!(
+            combined_cache_control(&headers).as_deref(),
+            Some("max-age=3600, no-store")
+        );
+    }
+
+    #[test]
+    fn combined_cache_control_is_none_without_the_field() {
+        assert_eq!(
+            combined_cache_control(&reqwest::header::HeaderMap::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn combined_cache_control_keeps_a_non_ascii_line_readable() {
+        use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.append(CACHE_CONTROL, HeaderValue::from_static("max-age=3600"));
+        headers.append(
+            CACHE_CONTROL,
+            HeaderValue::from_bytes(b"no-store, ext=\"caf\xe9\"").unwrap(),
+        );
+        let combined = combined_cache_control(&headers).unwrap();
+        assert!(
+            combined.starts_with("max-age=3600, no-store, ext="),
+            "{combined}"
+        );
     }
 
     #[test]
