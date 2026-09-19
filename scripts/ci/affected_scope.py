@@ -101,9 +101,11 @@ GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
 # PRODUCES. `local_evidence.gate_global_inputs` leaves them out of a cell's
 # gate-input identity, so editing a workflow no longer invalidates every
 # published local cell (fixes/2026-09-18-ci-cadence, decision 5). The toolchain
-# pin, Cargo config, the root manifest, the lockfile, `clippy.toml`,
-# `.config/nextest.toml`, and the Just recipes stay inputs: each changes what
-# a local run compiles or executes.
+# pin, Cargo config, the root manifest, the lockfile, `clippy.toml`, and
+# `.config/nextest.toml` stay inputs: each changes what a local run compiles
+# or executes. So do the Just recipes CI reaches — by recipe, through
+# `local_evidence.just_gate_inputs`, with the same closure that decides
+# selection above (fixes/2026-09-19-just-recipe-identity).
 ORCHESTRATION_PATHS = {
     ".github/ci/environments.json",
     ".github/workflows/_package-ci.yml",

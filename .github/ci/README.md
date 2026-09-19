@@ -282,9 +282,11 @@ is satisfied only by the package's passing L1 on the same environment.
 
 A receipt from an **older head** is accepted only when the cell's *gate-input
 identity* is unchanged: the `git ls-tree` entries of the tested package's build
-closure (dev-dependencies included) plus that gate's global inputs. Both trees
-are present locally, so the comparison is made rather than read out of the
-receipt. `schema_version: 1` notes predate per-cell outcomes; they are accepted
+closure (dev-dependencies included) plus that gate's global inputs, plus the
+Just recipes the gate's CI entry recipes reach — compared by recipe, with the
+same closure that decides selection, so an edit to a recipe CI never runs
+invalidates nothing. Both trees are present locally, so the comparison is
+made rather than read out of the receipt. `schema_version: 1` notes predate per-cell outcomes; they are accepted
 on exact tree identity only, pass-only, whole-environment, are never upgraded
 in place, and render their measurements as `not recorded (v1 receipt)`.
 

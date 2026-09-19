@@ -749,8 +749,14 @@ Ordinary complete failures still publish their measured outcomes.
 A receipt from an **older head** is reusable only when the cell's gate-input
 identity is unchanged — the `git ls-tree` entries of the tested package's build
 closure (dev-dependencies included, and the lockfile) plus that gate's global
-inputs. Verification recomputes that over both trees rather than trusting the
-identity the receipt stored. The planner's orchestration files
+inputs, plus the Just recipes the gate's CI entry recipes reach. The Just
+files are the one input read finer than a file: `just_gate_inputs` takes the
+same recipe closure `just_change_gates` uses for selection, so a recipe CI
+never runs (`pre-push`, `cross-check`, all of `just/plan.just`) moves no
+identity, while an edit to `_test` or `_tier_filter` moves every test-tier
+cell (fixes/2026-09-19-just-recipe-identity; before it, any edit under
+`just/` invalidated every published cell). Verification recomputes that over
+both trees rather than trusting the identity the receipt stored. The planner's orchestration files
 (`ORCHESTRATION_PATHS`: `ci.yml`, `_package-ci.yml`, `_wsl-ci.yml`,
 `environments.json`, `affected_scope.py`, `.github/actions/`) are **not**
 gate inputs: they decide what CI runs, never what a local gate produces, so a

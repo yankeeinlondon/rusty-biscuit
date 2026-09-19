@@ -110,33 +110,100 @@ def gate_global_inputs(gate: str) -> list[str]:
     the opposite reason: they decide what CI runs, not what a local gate
     produces, so an older result under a different workflow still describes
     the same build.
+
+    The Just files are not paths here at all. They enter the identity by
+    recipe through [`just_gate_inputs`], exactly as they enter selection: the
+    root justfile and `just/` hold some 7,000 lines, and a whole-file identity
+    made an edit to a planning or notification recipe invalidate every
+    published cell while the planner, reading the same edit by recipe,
+    scheduled nothing.
     """
-    planner_gate = gate if gate in ("lint", "check") else "test"
+    planner_gate = planner_gate_of(gate)
     paths = set(affected_scope.GLOBAL_PATHS_ALL_GATES)
     paths |= set(affected_scope.GLOBAL_PATHS_BY_GATE[planner_gate])
-    paths |= set(affected_scope.JUST_PATHS)
     paths |= {prefix.rstrip("/") for prefix in affected_scope.GLOBAL_PREFIXES_ALL_GATES}
-    paths |= {prefix.rstrip("/") for prefix in affected_scope.JUST_PREFIXES}
     paths.add(affected_scope.LOCKFILE_PATH)
     paths -= set(affected_scope.ORCHESTRATION_PATHS)
     paths -= {prefix.rstrip("/") for prefix in affected_scope.ORCHESTRATION_PREFIXES}
     return sorted(paths)
 
 
-def gate_input_identity(paths: list[str] | tuple[str, ...], ref: str) -> str:
-    """The identity of `paths` as they stand at `ref`.
+def planner_gate_of(gate: str) -> str:
+    """The planner's gate a cell gate is scheduled under: `L1`, `L2`, and
+    `browser` are all `test`."""
+    return gate if gate in ("lint", "check") else "test"
 
-    Git's own hashing boundary is the whole rule: the identity is over the
+
+def just_sources_at_ref(ref: str) -> dict[str, str]:
+    """The root justfile and the `just/*.just` modules as they stand at `ref`.
+
+    The same file set `affected_scope.just_sources` reads from disk, taken
+    from the tree instead so two revisions can be compared without checking
+    either out. A file absent at `ref` is absent from the result.
+    """
+    listing = git_optional("ls-tree", "-r", "--name-only", "--full-tree", ref, "--", "justfile", "just")
+    sources: dict[str, str] = {}
+    for path in sorted((listing or "").splitlines()):
+        path = path.strip()
+        is_module = path.startswith("just/") and path.endswith(".just") and path.count("/") == 1
+        if path != "justfile" and not is_module:
+            continue
+        text = git_optional("show", f"{ref}:{path}")
+        if text is not None:
+            sources[path] = text
+    return sources
+
+
+def just_gate_inputs(gate: str, ref: str) -> list[str]:
+    """The Just text that decides what `gate` executes, as it stands at `ref`.
+
+    One rule with the planner's `just_change_gates`, read from the tree: the
+    recipes reachable from the gate's CI entry recipes (`CI_RECIPES_BY_GATE`
+    and `CI_RECIPES_ALL_GATES`) through header dependencies and `just <name>`
+    calls, with comments and blank lines dropped, plus every line outside a
+    recipe (settings, imports, assignments), which is conservatively global to
+    every gate. A recipe nothing in CI reaches — `pre-push`, `cross-check`,
+    the whole of `just/plan.just` — contributes nothing, so editing it leaves
+    every published cell reusable.
+
+    Order is preserved inside a recipe: swapping two commands is a different
+    recipe, and a set would call it the same one.
+    """
+    recipes: dict[str, dict[str, Any]] = {}
+    entries: list[str] = []
+    for path, text in sorted(just_sources_at_ref(ref).items()):
+        parsed, other = affected_scope.parse_just_recipes(text)
+        recipes.update(parsed)
+        entries.extend(f"{path}: {line}" for line in other)
+    entries_recipes = (
+        *affected_scope.CI_RECIPES_ALL_GATES,
+        *affected_scope.CI_RECIPES_BY_GATE[planner_gate_of(gate)],
+    )
+    for name in sorted(affected_scope.just_recipe_closure(recipes, entries_recipes)):
+        recipe = recipes.get(name)
+        if recipe is not None:
+            entries.extend(f"{name}: {line}" for line in recipe["lines"])
+    return entries
+
+
+def gate_input_identity(
+    paths: list[str] | tuple[str, ...], ref: str, gate: str | None = None
+) -> str:
+    """The identity of `paths` as they stand at `ref`, plus the Just recipes
+    `gate` executes there when a gate is named.
+
+    Git's own hashing boundary is the rule for paths: the identity is over the
     `git ls-tree` entries — mode, type, object ID, path — for each input, so
     two trees agree exactly when Git says the content agrees. A path absent at
     `ref` contributes nothing, which is what makes an input that exists on
-    neither side identical on both.
+    neither side identical on both. The Just recipes are the one input read
+    finer than a file: see [`just_gate_inputs`].
 
     ## Examples
 
     ```python
-    before = gate_input_identity(["claudine/lib"], "HEAD~1")
-    after = gate_input_identity(["claudine/lib"], "HEAD")
+    before = gate_input_identity(["claudine/lib"], "HEAD~1", "L1")
+    after = gate_input_identity(["claudine/lib"], "HEAD", "L1")
     ```
     """
     entries: list[str] = []
@@ -144,7 +211,10 @@ def gate_input_identity(paths: list[str] | tuple[str, ...], ref: str) -> str:
         listing = git_optional("ls-tree", "-r", "--full-tree", ref, "--", path)
         if listing:
             entries.extend(line for line in listing.splitlines() if line.strip())
-    return schema.identity("\n".join(sorted(set(entries))))
+    ordered = sorted(set(entries))
+    if gate is not None:
+        ordered.extend(just_gate_inputs(gate, ref))
+    return schema.identity("\n".join(ordered))
 
 
 def cell_input_paths(plan: dict[str, Any], package: str, gate: str) -> list[str] | None:
@@ -346,8 +416,8 @@ def verify_cells(
                             "with this head cannot be established"
                         )
                         continue
-                    if gate_input_identity(paths, note_commit) != gate_input_identity(
-                        paths, head_sha
+                    if gate_input_identity(paths, note_commit, cell["gate"]) != gate_input_identity(
+                        paths, head_sha, cell["gate"]
                     ):
                         rejections.append(
                             f"gate-inputs-changed: {label} was tested on {note_commit[:9]}, "
@@ -724,7 +794,7 @@ def receipt_cell(
         "counts": counts,
         "duration_s": record.get("duration_s", 0),
         "gate_input_identity": (
-            gate_input_identity(paths, head) if paths else schema.identity(f"{package}/{gate}")
+            gate_input_identity(paths, head, gate) if paths else schema.identity(f"{package}/{gate}")
         ),
         "backends": backends,
         "report": record.get("xml", ""),
