@@ -886,10 +886,14 @@ the confirmed requirements:
 
 ### Risk assessment outcome
 
-Independent review found no warranted separate spike. No prototype or spike
-was performed. The existing lookup and schema-loader inventories, coordinated
-migration planning, and lasting contract tests are sufficient to address the
-identified risks. The implementation plan must cover lifecycle event-time
+The initial review found no warranted separate spike. On 2026-09-19 the human
+requested two bounded spikes for provenance transfer and DMLS failure recovery.
+Both were run; [spike-results.md](spike-results.md) records the real-library and
+protocol evidence separately from test-only prototypes. The findings identify
+atomic value/metadata publication, preserved completion state, shared effective
+schema contributions, and refresh identity as concrete design requirements.
+They do not constitute production implementation or approval of the unfinished
+technical design. The implementation plan must cover lifecycle event-time
 evaluation, shell preflight, sequence preflight, and a non-Claudine lookup
 implementation without expanding the confirmed scope.
 

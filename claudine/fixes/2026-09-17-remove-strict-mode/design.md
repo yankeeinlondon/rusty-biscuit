@@ -1,16 +1,17 @@
 # Remove Strict Mode: Technical Design
 
 Status: **technical design in progress; not ready for implementation planning**.
-Last updated: 2026-09-18.
+Last updated: 2026-09-19.
 
 ## Relationship to the specification
 
 [spec.md](spec.md) is authoritative for behavior, scope, ownership, and acceptance
 criteria. This document records technical decisions only after explicit human
 agreement. Open decisions below must be resolved here before implementation
-planning; they are not delegated to a future plan. No prototype has been
-performed, and current investigations have not identified a question requiring
-one.
+planning; they are not delegated to a future plan. The human-requested
+[provenance and editor-recovery spikes](spike-results.md) were run on 2026-09-19.
+Their test-only prototypes and current-behavior characterizations inform the
+remaining interfaces; they do not approve a production implementation.
 
 The required result is one Darkmatter expression model: missing document
 properties evaluate to `null`, while actual expression failures and unavailable
