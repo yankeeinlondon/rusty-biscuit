@@ -5755,7 +5755,9 @@ fn the_owner_job_reports_its_queue_and_upload_windows() {
         "queue time is measured from the moment the plan that names this leg existed"
     );
     let publisher = std::fs::read_to_string(repo_root().join("scripts/ci/artifacts/publish.cjs")).unwrap();
-    assert!(publisher.contains("upload_seconds: (Date.now() - start) / 1000"));
+    // Whole seconds: the rollup reads `ProducerStageSeconds` as integers and a
+    // fractional window failed every area's audit on run 35412170320.
+    assert!(publisher.contains("upload_seconds: Math.round((Date.now() - start) / 1000)"));
     assert!(publisher.contains("status.stage_seconds.queue_seconds = queueSeconds"));
     let scope = job_block("ci.yml", "  scope:");
     assert!(

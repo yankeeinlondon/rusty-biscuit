@@ -55,7 +55,10 @@ async function publish({plan, producer, out, verifier, upload, jobStatus, queueS
       }
     }
     if (status.result !== 'success') failed = true;
-    status.stage_seconds = {upload_seconds: (Date.now() - start) / 1000};
+    // Whole seconds, like every other `*_seconds` field: the rollup reads
+    // `ProducerStageSeconds` as integers and refused `1.472` for every area on
+    // run 35412170320.
+    status.stage_seconds = {upload_seconds: Math.round((Date.now() - start) / 1000)};
     if (Number.isFinite(queueSeconds)) status.stage_seconds.queue_seconds = queueSeconds;
     const dir = path.join(out, `build-status-${pkg}-${producer}-${key}`);
     await fs.mkdir(dir, {recursive: true});

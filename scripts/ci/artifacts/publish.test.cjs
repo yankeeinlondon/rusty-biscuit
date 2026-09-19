@@ -88,6 +88,12 @@ test('partial owners retain package identities, isolate uploads, and account for
     assert.equal(alpha.stage, 'upload'); assert.equal(alpha.result, 'failure');
     assert.equal(beta.result, 'success');
     assert.equal(gamma.stage, 'produce'); assert.equal(gamma.result, 'failure');
+    // The rollup reads both windows as integers (`ProducerStageSeconds`); a
+    // fractional upload window fails every area's audit.
+    for (const status of [alpha, beta, gamma]) {
+      assert(Number.isInteger(status.stage_seconds.upload_seconds), `upload_seconds must be whole seconds: ${JSON.stringify(status.stage_seconds)}`);
+      assert.equal(status.stage_seconds.queue_seconds, 2);
+    }
   } finally { await fs.rm(out, {recursive: true, force: true}); }
 });
 
