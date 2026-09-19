@@ -251,6 +251,22 @@ belong here.
   with follow-up investigation sections are likewise one `planning(<area>):`
   commit, subject shaped `confirm <decisions> and record <investigations>`
   (see `44b5fcfe0`, following the `538734269` precedent).
+- A missed prior-cycle close can be combined with the current cycle's
+  close in one `planning(<area>):` commit. When a fix's review cycle work
+  spans multiple orchestrators (or a prior close simply never landed) and
+  the prior `review-N.md` is still `implemented: false` while finding
+  code already shipped, the catch-up commit flips the prior review's
+  `implemented: true`, adds `next:`/`log:`/`implemented_by:` to chain it
+  forward, then adds the current `review-M.md` (implemented) and
+  `review-(M+1).md` (new), bumps `review_iterations` by the cumulative
+  delta, and backfills the missing `## Implementation of Review Findings
+  #N` log sections for both cycles in one hunk (the prior cycle's
+  "Successful Completion" summary and the current cycle's iteration record
+  land together because the log body is a single continuous block). Body
+  must explicitly say "cycle N was not formally closed when its findings
+  landed in <list-of-fix-commits>" so reviewers understand the retroactive
+  flip. See `3ccedd9d9` (research-metadata-pipeline close cycle 2 and
+  open cycle 3, retroactively closing cycle 1 alongside it).
 - A review-to-implement iteration — an `implementation-log.md` section
   "Implementation of Review Findings #N" recording the fixes applied to a
   review's findings — is `planning(<area>): record review-to-implement
