@@ -37,9 +37,6 @@ success:
                 ? ctx.area
                 : ctx.repo
         }}
-    stack:
-        - action:
-              - shell: "just gitnexus"
 ---
 
 # Commit Staged Files

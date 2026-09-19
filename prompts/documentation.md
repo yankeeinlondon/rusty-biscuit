@@ -11,8 +11,8 @@ operation:
 
 ---
 
-::block when="file_exists({{doc.doc}})"
-::block when="file_empty({{doc.doc}})"
+::block when="file_exists(doc.doc)"
+::block when="file_empty(doc.doc)"
 - save the documentation to {{doc.doc}}
     - NOTE: the file already exists but is _empty_ so you will be creating this document
 ::end-block
