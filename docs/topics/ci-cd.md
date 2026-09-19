@@ -96,8 +96,9 @@ answer, and two receipts on one environment covering different packages combine 
 each cell is resolved by the newest note that qualifies for it. A receipt from an
 **older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
 `git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
-included) plus that gate's global inputs — and the comparison is recomputed over both trees
-rather than read out of the receipt. `schema_version: 1` notes are exact-tree, pass-only,
+included) plus that gate's global inputs, plus the Just recipes the gate's CI entry recipes
+reach, compared by recipe rather than by file — and the comparison is recomputed over both
+trees rather than read out of the receipt. `schema_version: 1` notes are exact-tree, pass-only,
 whole-environment, never upgraded in place, and render their measurements as
 `not recorded (v1 receipt)`.
 

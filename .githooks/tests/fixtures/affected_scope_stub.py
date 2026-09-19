@@ -43,13 +43,25 @@ FIXED_BUILD_KEY = "a1b2c3d4e5f60718"
 
 GLOBAL_PATHS_ALL_GATES = ()
 GLOBAL_PATHS_BY_GATE = {"lint": (), "check": (), "test": ()}
-JUST_PATHS = ()
 GLOBAL_PREFIXES_ALL_GATES = ()
-JUST_PREFIXES = ()
 ORCHESTRATION_PATHS = ()
 ORCHESTRATION_PREFIXES = ()
 LOCKFILE_PATH = "Cargo.lock"
 EVENT_NAMES = ("pull_request", "push", "schedule", "workflow_dispatch")
+
+# The Just recipes a gate's identity covers (`local_evidence.just_gate_inputs`):
+# no fixture repository holds a justfile, so no recipe is reachable and the
+# parser sees nothing. Present so the identity can be computed at all.
+CI_RECIPES_BY_GATE = {"lint": (), "check": (), "test": ()}
+CI_RECIPES_ALL_GATES = ()
+
+
+def parse_just_recipes(text: str) -> tuple[dict, list]:
+    return {}, []
+
+
+def just_recipe_closure(recipes: dict, entries: tuple) -> set:
+    return set()
 
 
 def preflight_reason() -> str:
