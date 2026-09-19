@@ -27,12 +27,12 @@ use schematic_gen::export::openapi::write_openapi_grouped;
 use schematic_gen::export::postman::{write_postman, write_postman_grouped};
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
-/// the gen crate's `CARGO_MANIFEST_DIR` so the tests work regardless of the
+/// the gen crate's manifest directory so the tests work regardless of the
 /// caller's current working directory.
 fn schematic_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR points at `<repo>/schematic/gen`. The committed
-    // artifacts live in `<repo>/schematic/openapi` and `<repo>/schematic/postman`.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // The manifest directory is `<repo>/schematic/gen`. The committed artifacts
+    // live in `<repo>/schematic/openapi` and `<repo>/schematic/postman`.
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("schematic/gen has a parent")
         .to_path_buf()

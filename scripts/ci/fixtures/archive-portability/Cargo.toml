@@ -1,0 +1,6 @@
+# Deliberately its own workspace: the fixture is compiled by the `ci-build`
+# integration suite into a throwaway target tree, and must never join the
+# monorepo's member list or share its lockfile.
+[workspace]
+resolver = "2"
+members = ["crate", "dylib", "sidecar"]

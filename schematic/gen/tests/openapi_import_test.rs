@@ -1,10 +1,15 @@
 //! Integration tests for OpenAPI import pipeline.
 
+use biscuit_test_harness::manifest_dir;
 use schematic_gen::import_pipeline::{ImportOptions, run_import};
 
 /// Returns path to a test fixture file.
 fn fixture_path(name: &str) -> String {
-    format!("{}/tests/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name)
+    manifest_dir!()
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 #[test]

@@ -699,7 +699,7 @@ fn ambient_context_escape_rejects_a_directory_outside_the_workspace() {
     let fixture = CliProcessFixture::named("fixture-ambient-context-rejected");
     let _ = fixture
         .command_builder()
-        .ambient_context(Path::new(env!("CARGO_MANIFEST_DIR")));
+        .ambient_context(&biscuit_test_harness::manifest_dir!());
 }
 
 #[test]
@@ -1000,7 +1000,7 @@ fn topology_builders_keep_references_relative() {
 #[test]
 fn copy_tree_relocates_shipped_content_byte_for_byte() {
     let fixture = CliProcessFixture::named("fixture-copy-tree");
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let source = biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("example-docs")
         .join("rendering");

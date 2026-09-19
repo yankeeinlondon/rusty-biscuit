@@ -661,10 +661,9 @@ fn codex_fixture_agent_message_does_not_leak_as_provider_extension() {
 
 #[test]
 fn codex_fixture_full_replay_produces_no_provider_extensions() {
-    let fixture = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/providers/codex.ndjson"
-    ))
+    let fixture = std::fs::read_to_string(
+        biscuit_test_harness::manifest_dir!().join("tests/fixtures/providers/codex.ndjson"),
+    )
     .expect("codex.ndjson must exist — Task 1 should have created it");
 
     let (events, mut parser) = new_parser();

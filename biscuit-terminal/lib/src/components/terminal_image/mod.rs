@@ -577,7 +577,7 @@ impl TerminalImage {
 
         // tiny_skia stores premultiplied alpha — demultiply for image::RgbaImage
         let mut rgba = pixmap.data().to_vec();
-        for chunk in rgba.chunks_exact_mut(4) {
+        for chunk in rgba.as_chunks_mut::<4>().0 {
             let a = chunk[3] as u16;
             if a > 0 && a < 255 {
                 chunk[0] = ((chunk[0] as u16 * 255 + a / 2) / a).min(255) as u8;

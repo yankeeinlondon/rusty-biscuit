@@ -428,9 +428,8 @@ fn strip_comments(src: &str) -> String {
 #[test]
 fn provider_legacy_files_only_shrink() {
     use std::fs;
-    use std::path::Path;
 
-    let provider_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider");
+    let provider_dir = biscuit_test_harness::manifest_dir!().join("src/provider");
     let mut unexpected = Vec::new();
     for entry in fs::read_dir(&provider_dir).expect("src/provider must be readable") {
         let path = entry.expect("readable dir entry").path();
@@ -1115,9 +1114,8 @@ fn adapter_detects_known_kimi_payloads() {
 #[test]
 fn detect_from_payload_has_no_provider_specific_branches() {
     use std::fs;
-    use std::path::Path;
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider/methods.rs");
+    let path = biscuit_test_harness::manifest_dir!().join("src/provider/methods.rs");
     let source = fs::read_to_string(&path).expect("methods.rs is readable");
     let stripped = strip_comments(&source);
 

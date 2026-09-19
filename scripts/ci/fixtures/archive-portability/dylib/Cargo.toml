@@ -1,0 +1,12 @@
+[package]
+name = "archive-portability-dylib"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "archive_portability_dylib"
+path = "src/lib.rs"
+# A Rust `dylib`, not an rlib: the consumer must find this file beside the test
+# binaries at run time, which is exactly the relocation hazard under test.
+crate-type = ["dylib"]

@@ -11,6 +11,84 @@
     }
   ],
   "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "builds": [
+    {
+      "artifact": "build-alpha-macos-latest-616c7068611f6d73",
+      "compatibility_reason": "aarch64-apple-darwin archive produced on macos-latest",
+      "compatible_environments": [
+        "macos-latest"
+      ],
+      "consumers": [
+        {
+          "environment": "macos-latest",
+          "gate": "L1"
+        }
+      ],
+      "identity": {
+        "archive_format": "tar.zst",
+        "archive_includes": [],
+        "cargo_config": [],
+        "features": "",
+        "host": "aarch64-apple-darwin",
+        "linker": "cc",
+        "lockfile": "aaaabbbbccccdddd",
+        "native": [],
+        "nextest": "latest",
+        "package": "alpha",
+        "profile": "test",
+        "rust": "1.97.1",
+        "rustflags": "",
+        "sidecars": [],
+        "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "target": "aarch64-apple-darwin",
+        "target_kinds": [
+          "lib",
+          "test"
+        ]
+      },
+      "key": "616c7068611f6d73",
+      "package": "alpha",
+      "producer": "macos-latest"
+    },
+    {
+      "artifact": "build-beta-macos-latest-626574611f6d6172",
+      "compatibility_reason": "aarch64-apple-darwin archive produced on macos-latest",
+      "compatible_environments": [
+        "macos-latest"
+      ],
+      "consumers": [
+        {
+          "environment": "macos-latest",
+          "gate": "L1"
+        }
+      ],
+      "identity": {
+        "archive_format": "tar.zst",
+        "archive_includes": [],
+        "cargo_config": [],
+        "features": "",
+        "host": "aarch64-apple-darwin",
+        "linker": "cc",
+        "lockfile": "aaaabbbbccccdddd",
+        "native": [],
+        "nextest": "latest",
+        "package": "beta",
+        "profile": "test",
+        "rust": "1.97.1",
+        "rustflags": "",
+        "sidecars": [],
+        "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "target": "aarch64-apple-darwin",
+        "target_kinds": [
+          "lib",
+          "test"
+        ]
+      },
+      "key": "626574611f6d6172",
+      "package": "beta",
+      "producer": "macos-latest"
+    }
+  ],
   "cells": [
     {
       "area": "pkg",
@@ -30,6 +108,7 @@
     },
     {
       "area": "pkg",
+      "build": "616c7068611f6d73",
       "compile_coverage_from": "L1",
       "environment": "macos-latest",
       "execution": "execute",
@@ -62,6 +141,7 @@
     },
     {
       "area": "pkg",
+      "build": "626574611f6d6172",
       "compile_coverage_from": "L1",
       "environment": "macos-latest",
       "execution": "execute",
@@ -152,6 +232,7 @@
   "job_estimate": 4,
   "packages": [
     {
+      "archive_includes": [],
       "area": "pkg",
       "check_args": "-p alpha",
       "companion_suites": [],
@@ -168,6 +249,7 @@
       "package": "alpha",
       "runner_tools": [],
       "selection_reason": "source change",
+      "sidecars": [],
       "targets": [
         "lib",
         "test"
@@ -178,6 +260,7 @@
       ]
     },
     {
+      "archive_includes": [],
       "area": "pkg",
       "check_args": "-p beta",
       "companion_suites": [],
@@ -191,6 +274,7 @@
       "package": "beta",
       "runner_tools": [],
       "selection_reason": "source change",
+      "sidecars": [],
       "targets": [
         "lib",
         "test"
@@ -208,7 +292,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 3,
+  "schema_version": 4,
   "source_packages": [
     "alpha",
     "beta"

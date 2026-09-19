@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn resolver_inventory_has_one_projection_adapter_and_no_discovery_fallbacks() {
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let source_root = biscuit_test_harness::manifest_dir!().join("src");
         let mut stack = vec![source_root.clone()];
         let mut adapter_files = Vec::new();
         while let Some(directory) = stack.pop() {

@@ -1183,6 +1183,7 @@ dependencies = [
 name = "biscuit-file"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "bytes",
  "criterion",
  "dirs",
@@ -1216,6 +1217,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-file",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "color-eyre",
  "predicates",
@@ -2145,6 +2147,7 @@ dependencies = [
  "biscuit-hash",
  "biscuit-speaks",
  "biscuit-terminal",
+ "biscuit-test-harness",
  "chrono",
  "chrono-tz",
  "claudine-catalog-types",
@@ -4051,9 +4054,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.9"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
 name = "finl_unicode"
@@ -9547,6 +9550,7 @@ version = "0.1.0"
 dependencies = [
  "alsa",
  "biscuit-hash",
+ "biscuit-test-harness",
  "chrono",
  "coreaudio-sys",
  "fs4",
@@ -10796,9 +10800,12 @@ name = "repo-deps"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "biscuit-hash",
  "biscuit-terminal",
  "cargo_metadata 0.18.1",
  "ctrlc",
+ "find-msvc-tools",
+ "object",
  "quick-xml 0.38.4",
  "rstest 0.23.0",
  "serde",
@@ -10905,6 +10912,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-file",
  "biscuit-speaks",
+ "biscuit-test-harness",
  "chrono",
  "clap 4.6.1",
  "darkmatter",
@@ -12344,6 +12352,7 @@ dependencies = [
  "base64 0.22.1",
  "biscuit-file",
  "biscuit-hash",
+ "biscuit-test-harness",
  "chrono",
  "core-foundation 0.10.1",
  "coreaudio-sys",
@@ -13689,6 +13698,7 @@ dependencies = [
 name = "test-toolkit"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "clap 4.6.1",
  "fs4",
  "serde_json",
@@ -14392,6 +14402,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-file",
  "biscuit-hash",
+ "biscuit-test-harness",
  "criterion",
  "ignore",
  "memchr",
@@ -14942,6 +14953,7 @@ dependencies = [
 name = "unchained-ai-gen"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "chrono",
  "clap 4.6.1",
  "reqwest 0.13.2",
@@ -15445,6 +15457,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "visualizer"
 version = "0.1.0"
 dependencies = [
+ "biscuit-test-harness",
  "serde",
  "serde_json",
  "tauri",
@@ -17064,6 +17077,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-terminal",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "color-eyre",
  "dirs",

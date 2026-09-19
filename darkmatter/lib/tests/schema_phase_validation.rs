@@ -521,8 +521,9 @@ fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
 }
 
 fn repo_root() -> std::path::PathBuf {
-    // CARGO_MANIFEST_DIR is `<repo>/darkmatter/lib`.
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    // The manifest directory is `<repo>/darkmatter/lib`.
+    let crate_dir = biscuit_test_harness::manifest_dir!();
+    crate_dir
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above darkmatter/lib")

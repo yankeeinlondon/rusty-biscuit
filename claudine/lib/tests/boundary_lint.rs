@@ -31,12 +31,10 @@
 //! finding. A repo-wide ban would false-positive on those, so the guard matches
 //! the exact converted constructions only.
 
-use std::path::Path;
-
-/// `CARGO_MANIFEST_DIR` for a lib integration test is the lib crate root
+/// The manifest directory of a lib integration test is the lib crate root
 /// (`claudine/lib`), so source paths resolve regardless of the invoking CWD.
 fn read_source(relative: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    let path = biscuit_test_harness::manifest_dir!().join(relative);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
 }
@@ -73,10 +71,10 @@ fn resolve_proxy_target_does_not_flatten_harness_error() {
     );
 }
 
-/// `CARGO_MANIFEST_DIR` for the lib crate is `claudine/lib`; the CLI proxy
+/// The manifest directory for the lib crate is `claudine/lib`; the CLI proxy
 /// routes live one directory over, under `claudine/cli`.
 fn read_cli_source(relative: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("../cli")
         .join(relative);
     std::fs::read_to_string(&path)
@@ -144,11 +142,11 @@ fn control_dispatch_does_not_bypass_the_existence_check() {
     );
 }
 
-/// `CARGO_MANIFEST_DIR` for the lib crate is `claudine/lib`; the
+/// The manifest directory for the lib crate is `claudine/lib`; the
 /// Claudine-executed Darkmatter compose surfaces live two directories over,
 /// under `darkmatter/lib`.
 fn read_darkmatter_source(relative: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("../../darkmatter/lib")
         .join(relative);
     std::fs::read_to_string(&path)

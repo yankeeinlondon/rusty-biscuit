@@ -2617,7 +2617,7 @@ async fn browser_mermaid_theme_variables_differ_by_color_mode() {
 
 /// Absolute path to the vendored Mermaid `dist/` tree for the pinned version.
 fn mermaid_fixture_dist() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("tests/fixtures/mermaid")
         .join(MERMAID_VERSION)
         .join("dist")

@@ -58,7 +58,7 @@ const TEMP_DIR_VARIABLE: &str = if cfg!(windows) {
 
 /// The canonical checkout root, when the test binary still resides in one.
 pub fn checkout_root() -> Option<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .and_then(|checkout| checkout.canonicalize().ok())

@@ -4,17 +4,30 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# `repo-deps` and `drift` link the monorepo's own crates (biscuit-terminal,
-# sniff) plus cargo_metadata; `ci-rollup` links none of them. Cargo compiles the
-# union of a package's dependencies regardless of which bin is selected, so
-# without this split the CI job whose entire purpose is to be the fast,
-# always-runs required check would pay for gix, duckdb, and the terminal
+# Cargo compiles the union of a package's enabled dependencies regardless of
+# which bin is selected, so the bins are split across three feature levels by
+# how much they are allowed to cost.
+#
+# `ci-rollup` links none of the monorepo's crates: it is the fast, always-runs
+# merge-gate binary and must never pay for gix, duckdb, or the terminal
 # renderer. CI builds it as:
 #     cargo run -p repo-deps --no-default-features --bin ci-rollup
+#
+# `build-tools` is the middle level, for the two binaries the *planner* depends
+# on. `affected_scope.py` computes every planned build key through `ci-build`,
+# so that binary is now on the critical path of every scope calculation —
+# including the pre-push hook's. Putting it behind `local-tools` would make
+# resolving a plan compile sniff's duckdb and gix closure to answer a hash:
+#     cargo run -p repo-deps \
+#       --no-default-features --features build-tools --bin ci-build
+#
+# `local-tools` adds the workspace-inspecting crates only `repo-deps` and
+# `drift` need.
 [features]
 default = ["local-tools"]
+build-tools = ["dep:biscuit-hash", "dep:biscuit-terminal", "dep:object", "dep:find-msvc-tools"]
 local-tools = [
-    "dep:biscuit-terminal",
+    "build-tools",
     "dep:cargo_metadata",
     "dep:ctrlc",
     "dep:sniff",
@@ -33,7 +46,12 @@ required-features = ["local-tools"]
 [[bin]]
 name = "ci-plan"
 path = "ci-plan.rs"
-required-features = ["local-tools"]
+required-features = ["build-tools"]
+
+[[bin]]
+name = "ci-build"
+path = "ci-build.rs"
+required-features = ["build-tools"]
 
 [[bin]]
 name = "ci-rollup"
@@ -46,16 +64,25 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.0"
 
+# `blake3` is the archive/sidecar checksum: an artifact that crosses a machine
+# boundary needs a cryptographic digest, while `xx_hash` (the default feature)
+# stays the fast identity hash for plan keys and counter event files.
+biscuit-hash = { path = "../biscuit-hash/lib", optional = true, features = ["blake3"] }
 biscuit-terminal = { path = "../biscuit-terminal/lib", optional = true }
 cargo_metadata = { version = "0.18", optional = true }
 ctrlc = { version = "3.4", optional = true }
 sniff = { path = "../sniff/lib", optional = true }
 
+object = { version = "0.37.3", default-features = false, features = ["read", "std"], optional = true }
+
+find-msvc-tools = { version = "0.1.12", optional = true }
+
 [dev-dependencies]
 rstest = "0.23"
 
-# The L1 suite covers `ci-rollup`, `ci-plan`, and `drift`, all of which need the
-# default `local-tools` feature; declaring no `features` here is what selects it.
+# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, and `drift`, all of
+# which need the default `local-tools` feature; declaring no `features` here is
+# what selects it.
 #
 # The planner's Python contracts are this package's companion suites: they test
 # `scripts/ci/`, they are not reachable through `cargo nextest`, and every one
@@ -64,9 +91,12 @@ rstest = "0.23"
 [package.metadata.ci.tests]
 tiers = ["L1"]
 companion-suites = [
+    "artifact-publisher",
     "test_affected_scope.py",
+    "test_build_key.py",
     "test_ci_local.py",
     "test_constraints.py",
+    "test_cross_check.py",
     "test_evidence_reuse.py",
     "test_local_evidence.py",
     "test_publish_gaps.py",

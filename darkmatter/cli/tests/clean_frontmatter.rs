@@ -30,7 +30,7 @@ fn doc(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 /// Acceptance row G reuses these verbatim across D-1..D-9 so pre- and
 /// post-change behavior is comparable against the same bytes.
 fn baseline(name: &str) -> String {
-    let features = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let features = biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("features");
     let feature = "2026-07-14-invalid-frontmatter";

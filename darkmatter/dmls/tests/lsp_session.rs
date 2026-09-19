@@ -5296,7 +5296,7 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
 fn meta_schema_phase7_shipped_schema_provider_path() {
     let workspace = LspWorkspace::new();
     let shipped =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let path = workspace.path().join("darkmatter.yaml");
     std::fs::write(&path, &text).unwrap();
@@ -5328,7 +5328,7 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     let workspace = LspWorkspace::new();
     let shipped =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let path = workspace.path().join("darkmatter.yaml");
     std::fs::write(&path, &text).unwrap();
@@ -5861,7 +5861,7 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
 /// under `root`, so a resolved `file://` target lands on the same headings the
 /// shipped doc carries.
 fn install_topic_doc(root: &std::path::Path) -> std::path::PathBuf {
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let source = biscuit_test_harness::manifest_dir!()
         .join("../docs/topics/darkmatter-expressions.md");
     let destination = root.join("darkmatter/docs/topics/darkmatter-expressions.md");
     std::fs::create_dir_all(destination.parent().unwrap()).unwrap();

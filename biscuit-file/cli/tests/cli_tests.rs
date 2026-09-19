@@ -1,3 +1,4 @@
+use biscuit_test_harness::manifest_dir;
 use assert_cmd::Command;
 use predicates::prelude::*;
 
@@ -6,7 +7,11 @@ fn bf() -> Command {
 }
 
 fn fixture(name: &str) -> String {
-    format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+    manifest_dir!()
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 /// Runs a successful `bf` invocation and returns its stdout without the

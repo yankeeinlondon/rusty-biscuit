@@ -14,7 +14,7 @@ use unchained_ai_gen::catalog::{
 const EXPECTED_SCHEMA_VERSION: u32 = 2;
 
 fn artifact_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("artifacts")
         .join(name)

@@ -971,10 +971,10 @@ fn test_monorepo_standards_serialize_with_kebab_case_ids() {
 // Phase 8: acceptance — parity, catalog assertability, authority delegation
 // ============================================================================
 
-/// Walk up from `CARGO_MANIFEST_DIR` looking for the rusty-biscuit workspace
-/// root. Returns `None` when the test is run outside this repo.
+/// Walk up from the crate's manifest directory looking for the rusty-biscuit
+/// workspace root. Returns `None` when the test is run outside this repo.
 fn rusty_biscuit_repo_root() -> Option<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
     let mut current = manifest_dir.as_path();
     while let Some(parent) = current.parent() {
         current = parent;

@@ -277,7 +277,11 @@ tiers = ["L1", "L2"]
 features = ["daemon-tests", "terminal-tests"]
 local-features = []
 l2-backends = ["tmux", "wezterm"]
-runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture", "l2-parallel-self-spawn"]
+runner-tools = ["ai-provider-stubs", "l2-parallel-self-spawn"]
+# The `md` binary and the L2 harness broker are other packages' compile-time
+# tools, so the producer builds them as sidecars rather than this package's
+# consumer provisioning them.
+sidecars = ["backend-proof", "darkmatter-md-fixture", "harness-broker"]
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libasound2-dev"]

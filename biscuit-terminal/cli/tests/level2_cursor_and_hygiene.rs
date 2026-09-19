@@ -13,6 +13,7 @@
 
 mod common;
 
+use biscuit_test_harness::manifest_dir;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -34,8 +35,11 @@ static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{}/tests/fixtures/{}", manifest_dir, name)
+    manifest_dir!()
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 /// Positions the cursor at a known row using `tput` so that image
@@ -104,22 +108,23 @@ fn level2_cursor_lands_below_rendered_image() {
         "renderer must report at least one image row; got {image_rows}. plain:\n{plain}",
     );
 
-    // Locate the bt invocation row in the *captured* pane. This is our
-    // capture-relative anchor for `R` (the row at which bt began
-    // rendering). `cursor BEFORE` reports R+1 in absolute pane terms
-    // because it is queried after the command-line newline; the image
-    // therefore begins on the line directly below the bt invocation.
-    let bt_invocation_row = find_row_of(plain, "image --debug").unwrap_or_else(|| {
-        panic!("could not locate the `image --debug` invocation row. plain:\n{plain}")
-    });
-    let image_top_row = bt_invocation_row + 1;
+    // `cursor BEFORE` is the terminal's own DSR answer, taken after the
+    // command-line newline, so it is the 1-based screen row the image
+    // starts on. The capture is the visible screen (`wezterm cli get-text`
+    // with no `--start-line`), so the 0-based capture index is one less.
+    // The command echo is deliberately not used as an anchor: the binary's
+    // absolute path wraps at any column on a long checkout, splitting
+    // `image --debug` across rows.
+    let image_top_row = (cursor_before_row as usize)
+        .checked_sub(1)
+        .unwrap_or_else(|| panic!("cursor BEFORE row is 1-based; got 0. plain:\n{plain}"));
     let expected_min_row = image_top_row + image_rows as usize;
 
     let sentinel_row = find_row_of(plain, "SENTINEL_BELOW_IMAGE").unwrap_or_else(|| {
         panic!(
             "SENTINEL_BELOW_IMAGE not found in pane after image render.\n\
              cursor_before_row={cursor_before_row} image_rows={image_rows}\n\
-             bt_invocation_row={bt_invocation_row} image_top_row={image_top_row}\n\
+             image_top_row={image_top_row}\n\
              plain:\n{plain}"
         )
     });

@@ -34,23 +34,42 @@ expression text.
 `scripts/ci/affected_scope.py` is the canonical deterministic calculator for
 local and hosted runs. Its package policy is deliberately narrow:
 
+- **Environments are scheduled by event** (fixes/2026-09-18-ci-cadence). Each
+  record in `environments.json` names the GitHub events that schedule it; the
+  planner takes `--event`, plans nothing (no cell, build, or preflight runner)
+  for an environment the event does not schedule, and records it in the
+  plan's `deferred_environments`. Policy as of 2026-09-18: a pull request
+  proves `ubuntu-latest` and `macos-latest` (the latter normally from the
+  hook's local evidence); a push to `main` adds `windows-latest`; the nightly
+  `schedule` (`0 8 * * *`, its own concurrency group) plans the full
+  workspace for `ubuntu-latest`, `windows-latest`, and `wsl2-ubuntu`;
+  `workflow_dispatch` plans everything. The `ci:all-os` label plans every
+  environment for a pull request and takes effect on the next push. A push
+  whose pull request validation is reused plans with `--proven-event
+  pull_request`: the proven environments land in `proven_environments`, so
+  only Windows runs, and an empty plan skips everything as before. The hook
+  plans `push` for `main` and `pull_request` for every other branch, and
+  `scope-verify --event` refuses a receipt planned for another event
+  (`scope-event-mismatch`). Without `--event`, every environment is planned.
 - A package owning changed source receives lint, L1, and its declared higher
   tiers — and `check` when it declares `example` or `bench` targets or has
   unchanged direct reverse dependents. The L1 build already compiles the
   `lib`, `bin`, and `test` kinds, so a separate compile job exists for the
-  kinds no test gate produces: one check cell per native environment, running
-  `cargo check -p <pkg>` with explicit `--examples`/`--benches` selectors
-  (`check_args`), never `--all-targets`. A check cell is satisfied by the
-  package's passing per-cell L1 receipt on the same environment
-  (`check_evidence`), so the host that just built and tested the package is
-  not compile-checked again. The reused cell links that receipt with no test
-  counts; a version-1 whole-environment note never satisfies it, and the
-  `ubuntu-latest` cell that compiles unchanged dependents is never reusable.
-  `_wsl-ci.yml` takes `archive-args` (package and features only) so those
-  selectors cannot reach the guest's archive build. Every cell
-  records `target_kinds` and `compile_coverage_from`, and an archive-only
-  environment names the runner that built its archive rather than claiming to
-  have compiled anything.
+  kinds no test gate produces: one check cell on `CHECK_ENVIRONMENT`
+  (`ubuntu-latest`, like lint), running `cargo check -p <pkg>` with explicit
+  `--examples`/`--benches` selectors (`check_args`), never `--all-targets`.
+  A plan that does not carry that environment lints and checks nowhere. The
+  check cell is satisfied by the package's passing per-cell L1 receipt on the
+  same environment (`check_evidence`), so a host that just built and tested
+  the package there is not compile-checked again. The reused cell links that
+  receipt with no test counts; a version-1 whole-environment note never
+  satisfies it, and the cell that compiles unchanged dependents is never
+  reusable.
+  `_wsl-ci.yml` declares no archive selector at all — the guest is handed the
+  plan's build records and downloads one — so a check selector has nowhere to
+  leak into. Every cell records `target_kinds` and `compile_coverage_from`, and
+  an archive-only environment names the runner that built its archive rather
+  than claiming to have compiled anything.
 - An unchanged direct reverse dependency is **reported by name** in the plan's
   `reverse_dependencies` and selected nowhere: no area, no job, no result cell.
   It used to receive a compile-check entry, which presented an untested area as
@@ -98,7 +117,15 @@ computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
 committed mapping file.
 
-`RESOLVED_PLAN_SCHEMA_VERSION` is **3**. Version 3 added the required
+`RESOLVED_PLAN_SCHEMA_VERSION` is **4**. Two changes each called themselves
+version 3 on separate branches — build records, and the `change_inventory`
+below — so "3" named two incompatible shapes and a document from either branch
+was refused for a *missing field* rather than a version skew. 4 names the union.
+The validator now checks the version before the field set for that reason: an
+older document usually differs in both, and the field complaint sends the reader
+after a corrupt document.
+
+Version 3 added the required
 `change_inventory`: the calculator's own input paths, normalized to one
 repository-relative spelling, sorted, de-duplicated, and bucketed exhaustively
 into `configuration`, `documentation`, `source`, `other` with per-bucket and
@@ -166,9 +193,12 @@ semantics:
   Validation evidence never reopens selection: on a hit with accepted cells,
   `affected_scope.py --apply-to` overlays them on the carried plan and
   re-projects `scope.json` from it, reading nothing from the checkout. The
-  plan is schema version 2 so that it can — it carries its `environments`
-  table, per-package `l1_include_slow`/`exclusion`, and per-cell `reusable`;
-  a version-1 receipt misses as `scope-schema`.
+  plan is schema version 3 so that it can — it carries its `environments`
+  table, per-package `l1_include_slow`/`exclusion`, per-cell `reusable`, and
+  (since version 3) its `builds[]` records; an older receipt misses as
+  `scope-schema` rather than being partially upgraded. The overlay derives no
+  build key: it only drops the demand a satisfied cell no longer makes, which
+  is what keeps the valid-receipt path free of a Rust toolchain.
 - Only a complete passing cell is reusable. CI omits exactly those host cells;
   a complete failure remains published for diagnosis but is rejected with
   `failed-cell` and scheduled again. This rule is enforced by both the
@@ -277,6 +307,322 @@ Two rules the presentation depends on, both cheap to break:
   sibling cells that still require execution. Only recovery, diagnostic, and
   advisory steps may carry `continue-on-error`; workflow contract tests pin
   these properties.
+
+## Producing and consuming a Nextest archive
+
+`fixes/2026-09-12-single-os-compile/` splits a test cell in two: a native
+**producer** compiles one immutable archive per planned build key, and every
+**consumer** verifies and executes those exact outputs without a compiler.
+`ci-build produce` and `ci-build verify` (`scripts/ci-build-archive.rs`) are the
+two halves; the plan's `builds[]` records are their only scheduling input.
+
+Four facts about `cargo nextest` this cost real time to learn, on 0.9.136:
+
+- **`archive.include` accepts `relative-to = "target"` only.** There is no
+  `"workspace-root"`. A repository *file* therefore cannot enter an archive that
+  way — which is fine, because every consumer already checks the source out and
+  `--workspace-remap` points the run-time `CARGO_MANIFEST_DIR` at it. Archive
+  includes are **build outputs**.
+- **A tool config's `profile.default` loses to the repository's.** Passing
+  `--tool-config-file` with a `[profile.default] archive.include` is silently
+  ignored when `.config/nextest.toml` sets the same key. A **named** profile in
+  the tool config wins, so `produce` writes `[profile.ci-build-archive]` and
+  passes `--profile ci-build-archive` — and merges the repository's own
+  `profile.default` entries in, because replacing them would quietly drop
+  whatever the repository declared from every archive.
+- **A workspace `dylib` is not archived.** Test binaries, non-test `bin`
+  targets, build-script output directories, and linked paths are; a `dylib` and
+  an example are not. That is what `archive-includes` exists for.
+- **An include only COPIES; an example is never built.** `cargo nextest archive`
+  builds lib, bin, and test targets, so a declared `examples/<name>` include
+  would error on a file that was never going to exist. `ci-build produce`
+  therefore builds each declared example first. This was live: the repository's
+  own `profile.default.archive.include` carried `discovery_probe` for two
+  hard-coded layouts with `on-missing = "ignore"`, which matched neither the
+  macOS nor the Windows producer and silently shipped `biscuit-terminal`
+  archives without the example its PTY tests panic on. It is now
+  `biscuit-terminal`'s own `archive-includes` entry.
+- **`nextest list --message-format json` is the inventory.** `rust-binaries`
+  gives every binary id and `rust-build-meta` gives the non-test binaries,
+  build-script output directories, and linked paths — so the manifest's
+  inventory and runtime assets are *discovered*, not restated.
+
+A verification failure is a **verdict, not an error**: `ci-build verify` answers
+a versioned document, exits `3` (distinct from `2`, a tool failure), and never
+compiles a replacement for what it refused. Codes come from
+`schema.BUILD_REJECTIONS`, asserted against `contract.json` from the Rust side.
+
+All three canonical tier recipes (`_test`, `_test_l2`, `_test_browser`) accept
+archive mode: `-p <pkg>` moves into the filterset because `--archive-file`
+forbids it, `_archive_drop_build_flags` removes the Cargo build flags, and a
+missing `cargo-nextest` is a hard error — the `cargo test` fallback recompiles,
+which is the one thing an archive consumer must never do.
+
+`scripts/ci/fixtures/archive-portability/` is the proof: a three-member
+workspace carrying one of every payload class, built in one checkout and run
+from another with the producer's target directory renamed away and no Cargo,
+rustc, or linker on `PATH`.
+
+### The owner job, and what it is not
+
+`ci.yml`'s `build` job uses one matrix leg per producer environment from
+`build_owners`. `scripts/ci/produce-owner.sh` invokes the producer once without
+`--key`, sharing its target tree across package invocations. The programmatic
+publisher in `scripts/ci/artifacts/` uploads separate package-keyed archives and
+statuses, including successful records when a sibling fails. Artifact transport
+must not change build ownership. Its Node dependencies are pinned by `npm ci`.
+
+Manifest generation 3 verifies clean tracked source at the planned commit on
+both boundaries. That makes the checkout ref part of the contract: every
+`actions/checkout` in `ci.yml`, `_area-ci.yml`, `_package-ci.yml`, and
+`_wsl-ci.yml` is pinned, because `pull_request` otherwise checks out GitHub's
+merge branch and no job could produce or verify. `ci.yml` resolves the revision
+once as `github.event.pull_request.head.sha || github.sha` for the two jobs that
+precede the plan; the scope job then publishes the plan's own `head`, and the
+reusable workflows are handed it as a required `tested-revision` input rather
+than recomputing it. `scripts/cross-check.sh` meets the same contract by
+committing the local tree as one throwaway commit, shipping it as a `git
+bundle`, and naming it as the plan's head — no host applies a patch.
+
+Native requirements are observed from payload binaries and
+resolved again on the consumer; external library hashes/Mach-O UUIDs must match.
+This conservative compatibility rule can reject ABI-compatible library upgrades.
+`--source-tree` only asserts the observed Git tree; it cannot override it.
+The producer-scoped workflow entry point is covered by a real-Cargo shared-dependency
+fixture. Opt-in measurements include per-record counts and owner totals in each
+package artifact; hosted comparisons still decide the architecture's acceptance.
+
+Declaring `executes` in `environments.json` is what makes an environment a
+producer, and all three own the archive their consumers execute: Linux (with the
+WSL2 guest it hosts), macOS, and native Windows. There is no held-back state —
+Task 6.5 removed the `archive_cutover` migration switch together with the
+compile-in-place paths it guarded, and a contract that still carries the field
+is refused. **No test tier installs a toolchain or restores a Cargo cache**, and
+`just _ci_build_consumer` refuses a cell the plan names no build for rather than
+answering "compile in place": on a toolchain-free consumer that fallback would
+not even fail honestly.
+
+**The runner label is not the compatibility authority.** `ci-build produce`
+refuses a record at the `preflight` stage — before it compiles, per record, so a
+sibling key still finishes — when `rustc -vV`'s host is not the record's `host`,
+or when the toolchain has no standard library for its `target`. Compiler host
+and target are keyed inputs, so an archive produced by the wrong toolchain
+verifies fine (the consumer compares against the *planned* key) and hands its
+consumers binaries of another machine.
+
+**Consumer paths are spelled for the consumer's own OS.** Under Git Bash — what
+`shell: bash` gets on a Windows runner — `$PWD` is `/d/a/repo`, which
+`--workspace-remap`, insta, and the JUnit staging root cannot open, while
+`$RUNNER_TEMP` is a Windows path in the same shell. `just _native_path` answers
+the drive-qualified forward-slash spelling (`cygpath -m`, no `\\?\` prefix, the
+one form both MSYS and Win32 accept) and `_ci_build_verify` computes the
+workspace once, publishing it as the `workspace` step output that all three
+tiers bind to `ARCHIVE_WORKSPACE`.
+
+**`check` and `lint` compile on purpose and are counted as their own
+configurations.** Clippy is another compiler driver with its own flags, and
+check-only example/bench kinds may emit no executable, so neither consumes an
+archive. Both jobs now carry the command-scoped compiler-work counter under
+`check <environment>` / `lint ubuntu-latest`, so a post-cutover measurement
+shows one archive plus two *named* configurations rather than an unexplained
+second compile.
+
+**A build is not a result cell.** It has no `{package, environment, tier}`
+identity, publishes no JUnit or `status-…` artifact, and is never baselined. It
+publishes `build-status-<package>-<producer>-<key>/build-status.json` under
+`always()` — success, compile failure, upload failure, cancellation — and
+`runner_loss.py attribute --plan` synthesizes one from the plan when the owner's
+runner died. `ci-rollup` renders a dependent cell as
+`MISSING — blocked by build <key> …`, which blocks and which the skip baseline
+cannot excuse; an unrelated key proceeds, and a real test result outranks the
+diagnostic.
+
+The producer stages `ci-build` itself inside the artifact. A consumer with no
+Cargo — the WSL2 guest above all — cannot build a verifier, and shipping it
+separately would let the archive and its verifier drift apart. Verification runs
+**in the guest**, not on its Windows host: `host_runtime()` reads `cfg!`, so a
+host-side run would report `msvc` and prove nothing about the machine that runs
+the tests.
+
+The guest clones to a path of its own (`GUEST_ROOT`), unrelated to the
+producer's. It previously recreated the manifest's `producer_workspace`, because
+`--workspace-remap` rewrites only the run-time `CARGO_MANIFEST_DIR` and ~160
+test sites read the compile-time `env!`. Those sites now use
+`biscuit_test_harness::manifest_dir!()`;
+`tools/test-toolkit/tests/archive_path_guard.rs` scans the repository and fails
+on a new one, and the `slow_` relocation fixtures in
+`scripts/ci-build-archive-tests.rs` produce a real package's archive, delete the
+producer's checkout, and run it from somewhere else. `producer_workspace` stays
+in the manifest as provenance inside the realized digest, and nothing executes
+by it.
+
+### What each stage cost, and why three numbers are observed from outside
+
+Seven windows are reported, never folded into one another: producer **queue**,
+**compile+archive**, and **upload**; consumer **download**, **verify**,
+**extract**, and **execute**. The point is negative — a measurement must not be
+able to hide transfer or setup inside test time.
+
+Three of them no tool can see from inside itself, so the workflow observes them
+between steps. Queueing closes before `ci-build` starts (`scope` publishes a
+`plan_epoch`; the owner marks its own start) and the upload opens after it exits,
+and both are merged into `build-status.json` as `stage_seconds`. An artifact
+download is an action rather than a command, so a `transfer` marker step opens
+the window and `_ci_build_verify` closes it.
+
+**Extraction is the verifier's, deliberately.** `cargo nextest run
+--archive-file` extracts inside the run, so a consumer cannot time that
+extraction apart from its tests without replacing `--archive-file` with
+`--binaries-metadata`/`--target-dir-remap` in every tier recipe. The verifier
+already performs a full `--extract-to` of the same archive on the same host
+(listing the inventory requires it), and `ci-build verify --verdict-out` reports
+that window as `extract_ms`. Same for compile and archive on the producer side:
+one `cargo nextest archive` command, one number, named for what it measures.
+
+**Seconds outside, milliseconds inside.** macOS and Git Bash have no
+`date +%s%3N`, so workflow-observed windows are whole seconds and tool-measured
+ones are milliseconds; the unit is in every field name. An **absent**
+measurement stays absent — `ci-rollup` renders `—`, never `0s`, and a status
+step omits the object rather than publishing zeros. Both status scripts treat a
+malformed measurement as absent too: they run under `always()` and are the
+cell's only evidence, so instrumentation must not be able to lose it.
+
+The WSL2 guest cannot write `$GITHUB_OUTPUT` (it is a Windows path), so it
+leaves `wsl-timing/verify.seconds`, `wsl-timing/l1.seconds`, and a copy of the
+verdict in the 9p workspace and the host's status step reads them — the same
+reason the manifest is read on the host.
+
+`ci-rollup` renders **Build provenance** (one row per executing cell: planned
+key, realized digest, producer, and its four stages) and **Build records** (one
+row per key: producer, result, queue, compile+archive, upload). Neither table is
+an identity: artifacts, receipts, baselines, and JUnit stay keyed on
+`{package, environment, tier}`, and no gate outcome is derived from either.
+
+`ci-rollup` keeps writing plain GFM rather than the `renderable` Markdown tree.
+That is not an oversight: it is the always-runs merge-gate binary, it links none
+of the monorepo's crates, and its only output target is GitHub's own renderer.
+`ci-plan` and `ci-build` do render through `TerminalRenderable`.
+
+## Two traps in the workflow files themselves
+
+`actionlint`'s `github` context model **does not include `run_started_at`**,
+even though GitHub documents and populates it. A workflow that reads it lints
+red on the required `actionlint` check with "property is not defined in object
+type". Carry the run id and attempt plus a `date +%s` taken in the job's first
+step instead, and join them against the jobs API wherever the reader lives.
+That is also the portable choice: parsing an ISO timestamp in a workflow needs
+GNU `date -d` on Linux and BSD `date -jf` on macOS.
+
+**`RUSTC_WRAPPER` is per-command, never per-job.** All four reader-facing
+workflows set `RUSTC_WRAPPER: ""` at workflow level to clear a stray host
+value. The Phase 1 compiler-work counter of
+`fixes/2026-09-12-single-os-compile/` is the only thing that ever sets a
+non-empty one, and it does so in a single gate step's own `env:`, sourced from
+the preceding step's output. A job-level value would also wrap the runner-tool
+stub builds and the counter's own build, mixing wrapped and unwrapped units in
+one `target/`. `ci_workflow_contracts::the_compiler_work_wrapper_is_never_global`
+enforces the rule; the switch that enables any of it,
+`measure-compiler-work`, is exposed on `ci.yml`'s `workflow_dispatch` alone and
+defaults false at every level of the chain.
+
+**The counter's report crosses into JavaScript.** `ci-build`'s `Report` is
+serialized into each manifest's `compiler_work`, and
+`scripts/ci/artifacts/publish.cjs` reads `compiler_invocations` and
+`compiler_ms` out of it by name to build the owner aggregate that AC8's
+compile-once claim is read from. Node cannot see the Rust struct, so its test
+asserts against `scripts/fixtures/compiler-work/publisher-documents.json`,
+which `ci-build-tests.rs::the_javascript_publisher_reads_a_fixture_generated_from_this_report`
+generates and compares byte for byte. Renaming a `Report` field turns that test
+red; regenerate with `BLESS_COMPILER_WORK_FIXTURE=1` and update the publisher in
+the same change. Nothing selects that suite through a Cargo package or a pnpm
+workspace entry, so its `SUITE_REGISTRY` entry `artifact-publisher` is the only
+thing that schedules it. The fixture lives outside `scripts/ci/` because
+`build_baseline_revision.py` carries it with the instrument and refuses a
+constructed revision that adds a `scripts/ci/` path.
+
+## Where CI's own suites run, and where area drift is enforced
+
+**CI runs no separate job for its own tooling.** Those suites are scheduled by
+`SUITE_REGISTRY` in `scripts/ci/affected_scope.py` and executed by
+`scripts/ci/companion_suites.py` from the `Companion suites` step of
+`_package-ci.yml`'s `test` job (and `Companion suites (lint)` in `lint`, for a
+suite declaring a `lint_recipe`). A registered suite must also be named in its
+owner's `companion-suites` manifest list, or `validate_suite_registry` refuses
+the plan — registration alone schedules nothing.
+
+`repo-deps` owns the thirteen `scripts/ci/test_*.py` planner contracts plus
+`artifact-publisher`; its Rust binaries (`ci-rollup`, `ci-plan`, `ci-build`,
+`drift`) run in its own `repo-deps-l1` cell. `test-toolkit` owns
+`ci_workflow_contracts` (`test-toolkit-l1`), `test-audit-typecheck`, and
+`test-audit-vitest`.
+
+The sniff area contracts (`scripts/ci/test_resolved_plan.py`, class
+`AreaGroupingTests`) are enforced **on the merge path**, by `ci.yml`'s own
+`area-drift` job:
+`ci-gate` folds `needs.area-drift.result` like every other blocking job. The
+job builds `sniff-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
+sets `BISCUIT_REQUIRE_SNIFF=1` so an absent sniff **fails** rather than skips.
+
+It is a job of its own rather than a companion suite because a release
+`sniff-cli` measures 264.6s cold / 99.5s warm, and because a sniff compile
+error would then redden a package's ordinary test cell rather than the check
+that exists to report it. What makes the cost acceptable is scope. A
+second planner flag, `area_drift`, schedules the job, and it is true for
+`sniff/**`, `scripts/ci/affected_scope.py`,
+`scripts/ci/test_resolved_plan.py`, **and every `Cargo.toml` at any depth** — a
+manifest that appears or moves re-maps areas without touching either
+implementation, and `git diff --name-only` cannot say which manifest edits did.
+On every other pull request the job is `skipped`, which the fold accepts.
+
+`.github/workflows/area-drift.yml` keeps only its schedule and
+`workflow_dispatch`, as the backstop for the one defect the gate job cannot
+catch: the gate job is scheduled *by* the planner, so a bug in `area_drift`
+itself would skip the check silently. Its `pull_request` trigger is gone —
+on a pull request the gate job already runs the identical class.
+
+The contract asks sniff what area a *directory* resolves to; the cheaper
+inverted query (areas, then packages per area) answers a different question and
+loses `biscuit-test-harness`, which is the one divergence
+`SNIFF_SELF_INCONSISTENT` exists to record.
+
+Three rules when adding a Python suite to the registry:
+
+- **Gate every host tool through `scripts/ci/tool_guard.py`.**
+  `require_tools("just", "jq", enforced_by=…)` (or the `@requires_tools` class
+  decorator) skips where the tool is genuinely absent and **fails** where a job
+  declared it provisioned with `BISCUIT_REQUIRE_<TOOL>=1`. `enforced_by` is
+  keyword-only with no default, so a guard cannot be written without naming the
+  job that does run the contract — a skip saying only "requires just" claims
+  nothing about coverage. The declaration is **per job, never a blanket fail
+  under `CI`**: `preflight` runs on up to three operating systems and
+  provisions neither `sniff` nor `jq`, so a global rule would turn macOS and
+  Windows red on every push. Today `_package-ci.yml`'s `Companion suites` step
+  declares `BISCUIT_REQUIRE_CARGO`/`JUST`/`JQ`/`BASH`, and `area-drift`
+  declares `SNIFF`.
+  `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_that_enforces_it`
+  holds both directions: a guard whose variable no job sets, and a variable no
+  guard reads.
+- **Check what the suite needs from Git history.** The registry vocabulary has
+  no fetch-depth field and nothing consumes one, so history is a *job-side*
+  guarantee: `_package-ci.yml`'s `test` job checks out with
+  `fetch-depth: ${{ inputs.companion-suites != '[]' && '0' || '1' }}`, which
+  gives full history to the packages declaring companions and depth 1 to the
+  rest. The digits are quoted because GitHub reads a bare `0` as false, which
+  would yield 1 on both branches. `test_build_baseline_revision.py` resolves
+  `BASE_REVISION`; at depth 1 that revision is absent and the suite reported
+  **11 tests green having run 3**.
+- **Expect no ordering control.** The registry cannot say "run after the step
+  that built what I shell out to". `test_build_key.py` therefore runs where
+  `ci-build` is not on disk and `build_key.py` falls back to `cargo run`:
+  correct, but ~14–26s rather than the 0.1s it costs beside a built binary.
+
+The `just ci-local` self-test list is spelled out in four coupled files
+(`just/ci-local.just`, `scripts/ci/test_ci_local.py` twice, and
+`.githooks/tests/test-pre-push.sh`). Editing the recipe alone produces ten
+failures — the fixtures stub each suite by name.
+
+Measurements: `reviews/2026-09-15-python-test-code/spike-3-results.md` and
+`spike-4-results.md`.
 
 ## The merge gate
 
@@ -404,7 +750,12 @@ A receipt from an **older head** is reusable only when the cell's gate-input
 identity is unchanged — the `git ls-tree` entries of the tested package's build
 closure (dev-dependencies included, and the lockfile) plus that gate's global
 inputs. Verification recomputes that over both trees rather than trusting the
-identity the receipt stored. `schema_version: 1` notes are exact-tree,
+identity the receipt stored. The planner's orchestration files
+(`ORCHESTRATION_PATHS`: `ci.yml`, `_package-ci.yml`, `_wsl-ci.yml`,
+`environments.json`, `affected_scope.py`, `.github/actions/`) are **not**
+gate inputs: they decide what CI runs, never what a local gate produces, so a
+workflow edit leaves every published cell reusable. Before that rule one such
+edit invalidated 38 cells and cost a 45-minute pre-push. `schema_version: 1` notes are exact-tree,
 pass-only, whole-environment, never upgraded in place, and render their
 measurements as `not recorded (v1 receipt)`.
 
@@ -525,6 +876,17 @@ validation was run separately on the exact clean outgoing head and its receipt
 was published and verified, the branch transfer can use `--no-verify` without
 repeating that validation. Otherwise, the absence of qualifying evidence leaves
 the corresponding CI cells scheduled. The flag itself excludes no environment.
+
+A hook run long enough to select the whole workspace (a workflow-file or
+`.config/nextest.toml` change; about 45 minutes on the development Mac,
+2026-09-17) can outlive the SSH transport Git opened before the hook started.
+The symptom is `Pre-push validation passed.` followed by `git push` exiting
+141 (SIGPIPE) with the branch ref unchanged on the remote, while the hook's
+own note push of the evidence went through on its own connection. The hook
+did not fail and nothing needs bypassing: run `git push` again. The published
+receipt already covers the head, so the hook reuses every cell and finishes in
+minutes, and the transfer completes. Confirm with `git ls-remote --heads
+origin <branch>` after every push rather than trusting the exit code.
 
 Mode intent is:
 

@@ -4926,7 +4926,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     let events_log = root.join("events.log");
     write_phase_recording_goose(&bin_dir, &events_log);
 
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = biscuit_test_harness::manifest_dir!();
     let repo_root = manifest
         .ancestors()
         .nth(2)
@@ -5049,7 +5049,7 @@ exit 0
         ),
     );
 
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = biscuit_test_harness::manifest_dir!();
     let repo_root = manifest
         .ancestors()
         .nth(2)

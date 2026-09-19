@@ -1,0 +1,82 @@
+{
+  "alpha": {
+    "compiler_invocations": 3,
+    "compiler_ms": 260,
+    "event_schema_version": 1,
+    "events_read": 4,
+    "primary_invocations": 1,
+    "probes": 1,
+    "schema_version": 1,
+    "slices": [
+      {
+        "compiler_invocations": 3,
+        "compiler_ms": 260,
+        "configuration": "L1 ubuntu-latest",
+        "distinct_crates": 3,
+        "failed_invocations": 0,
+        "package": "alpha",
+        "primary_invocations": 1,
+        "probes": 1,
+        "window_ms": 120
+      }
+    ],
+    "window_ms": 120
+  },
+  "beta": {
+    "compiler_invocations": 2,
+    "compiler_ms": 90,
+    "event_schema_version": 1,
+    "events_read": 2,
+    "primary_invocations": 0,
+    "probes": 0,
+    "schema_version": 1,
+    "slices": [
+      {
+        "compiler_invocations": 1,
+        "compiler_ms": 40,
+        "configuration": "L1 ubuntu-latest",
+        "distinct_crates": 1,
+        "failed_invocations": 0,
+        "package": "beta",
+        "primary_invocations": 0,
+        "probes": 0,
+        "window_ms": 40
+      },
+      {
+        "compiler_invocations": 1,
+        "compiler_ms": 50,
+        "configuration": "L2 ubuntu-latest",
+        "distinct_crates": 1,
+        "failed_invocations": 0,
+        "package": "beta",
+        "primary_invocations": 0,
+        "probes": 0,
+        "window_ms": 50
+      }
+    ],
+    "window_ms": 150
+  },
+  "probes_only": {
+    "compiler_invocations": 0,
+    "compiler_ms": 0,
+    "event_schema_version": 1,
+    "events_read": 2,
+    "primary_invocations": 0,
+    "probes": 2,
+    "schema_version": 1,
+    "slices": [
+      {
+        "compiler_invocations": 0,
+        "compiler_ms": 0,
+        "configuration": "L1 ubuntu-latest",
+        "distinct_crates": 0,
+        "failed_invocations": 0,
+        "package": "gamma",
+        "primary_invocations": 0,
+        "probes": 2,
+        "window_ms": 0
+      }
+    ],
+    "window_ms": 0
+  }
+}

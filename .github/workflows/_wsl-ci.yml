@@ -31,26 +31,35 @@ name: wsl-ci
 # penalty is severe for a build tree, and ext4 is also where real WSL developers
 # keep their repos, so this is the configuration worth testing.
 #
-# BUILD ONCE, RUN IN THE GUEST
+# THERE IS NO ARCHIVE JOB HERE ANY MORE
 #
-# `cargo nextest archive` builds `x86_64-unknown-linux-gnu` on `ubuntu-latest`
-# and the guest only *runs* the archived binaries. No rustup, no toolchain, no
-# compile inside WSL, and the binaries are byte-identical to the Linux leg's, so
-# a `wsl2-ubuntu` failure is an environment difference rather than a build
-# difference. L1 ONLY — the L2 tier needs the broker binary and a live tmux
-# server, which an archive does not carry; the environment capability table
-# (`.github/ci/environments.json`) records `wsl2-ubuntu` as archive-only with no
-# tmux, so the rollup renders the package's L2 cell there as a POLICY GAP.
+# This workflow used to own a `ubuntu-latest` job that built a package-local
+# `cargo nextest archive` for the guest alone — a second compile of binaries the
+# native Linux L1 leg had already produced. The archive now comes from the
+# run's single Linux build owner (`ci.yml`'s `build` job), and the guest
+# downloads the SAME artifact, checksum, and realized digest that the native
+# Linux L1, L2, and browser cells consume. `wsl2-ubuntu` stays its own result
+# cell: one build, two environments, two cells.
+#
+# No rustup, no toolchain, no compile inside WSL — the guest only *runs* the
+# archived binaries. L1 ONLY: the L2 tier needs a live tmux server, and the
+# environment capability table (`.github/ci/environments.json`) records
+# `wsl2-ubuntu` as archive-only with no tmux, so the rollup renders the
+# package's L2 cell there as a POLICY GAP.
 
 on:
   workflow_call:
     inputs:
+      tested-revision:
+        description: "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will verify an archive against. The guest clone below inherits it from the runner checkout. Required, and never recomputed here — see the `env:` comment in `ci.yml`."
+        type: string
+        required: true
       package:
         description: "Cargo package name; the unit of selection, execution, and result identity (e.g. sniff-cli)."
         type: string
         required: true
-      archive-args:
-        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote'). Never a target selector: the guest runs what the L1 archive built."
+      builds:
+        description: "JSON array of the package's build records from the resolved plan. The record whose consumers name `{wsl2-ubuntu, L1}` is the artifact this guest downloads; it is the same record the native Linux tiers consume."
         type: string
         required: true
       test-args:
@@ -62,43 +71,11 @@ on:
         type: boolean
         default: false
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary; messenger-desktop-stubs is delivered as a Linux sidecar."
+        description: "JSON array from the closed runner-tool vocabulary. Compile-time tools reach the guest as verified build sidecars, never as a guest-side build."
         type: string
         default: '[]'
       native:
-        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. Both the archive builder and the guest consume the ubuntu-latest list."
-        type: string
-        default: '{}'
-      distribution:
-        description: "WSL distribution to provision."
-        type: string
-        default: Ubuntu-24.04
-  workflow_dispatch:
-    inputs:
-      package:
-        description: "Cargo package to run inside WSL2."
-        type: string
-        required: true
-        default: sniff
-      archive-args:
-        description: "Cargo package selector and features for the archive build."
-        type: string
-        required: true
-        default: "-p sniff --features remote"
-      test-args:
-        description: "Extra args forwarded to the canonical test recipe."
-        type: string
-        default: "--features remote"
-      l1-include-slow:
-        description: "Keep `slow_` tests inside the L1 selection."
-        type: boolean
-        default: false
-      runner-tools:
-        description: "JSON array of package-owned runner tools."
-        type: string
-        default: '[]'
-      native:
-        description: "JSON map of runner OS -> system packages."
+        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. The guest consumes the ubuntu-latest list: an archived binary that dynamically links a library the guest lacks fails here, not in the producer."
         type: string
         default: '{}'
       distribution:
@@ -108,143 +85,23 @@ on:
 
 env:
   # No rustc wrapper is tracked by the repository; cleared explicitly so a stray
-  # environment value cannot reach the archive build.
+  # environment value cannot reach anything this workflow runs. Nothing here
+  # compiles, so this is belt and braces.
   RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   COLORTERM: truecolor
   NEXTEST_PROFILE: ci
-  ARCHIVE_NAME: nextest-archive.tar.zst
   # Used for both the host and guest so they run the same recipes. The guest
   # downloads this exact release without querying GitHub's latest-release API.
   JUST_VERSION: "1.58.0"
 
 jobs:
-  # Linux build host. Produces the artifact the guest consumes; nothing here
-  # touches WSL.
-  archive:
-    name: archive (${{ inputs.package }} for wsl2)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install just
-        uses: extractions/setup-just@v4
-        with:
-          just-version: ${{ env.JUST_VERSION }}
-      # Every test binary in the archive carries this job's workspace path baked
-      # in as `env!("CARGO_MANIFEST_DIR")`, and the guest clones itself to the
-      # same literal so those fixtures resolve. Nothing else enforces that
-      # coupling, so assert it here — a mismatch caught now is one clear error,
-      # where a mismatch discovered later is every fixture-reading test in the
-      # package failing on a missing file and looking like a code regression.
-      - name: Verify the guest path assumption holds
-        shell: bash
-        run: |
-          set -euo pipefail
-          expected="/home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}"
-          if [ "$GITHUB_WORKSPACE" != "$expected" ]; then
-            echo "The WSL2 guest clones to '$expected', but this archive is being" >&2
-            echo "built at '$GITHUB_WORKSPACE'." >&2
-            echo "Every env!(\"CARGO_MANIFEST_DIR\") fixture lookup would miss in the guest." >&2
-            echo "Update GUEST_ROOT in .github/workflows/_wsl-ci.yml to match." >&2
-            exit 1
-          fi
-          echo "archive build path matches the guest clone path: $expected"
-      - name: Verify the archive passthrough is wired
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The guest has no Cargo, so the canonical recipes must be able to (a)
-          # invoke the standalone `cargo-nextest` binary, (b) forward
-          # --archive-file/--workspace-remap untouched, and (c) stage their JUnit
-          # report without shelling out to `cargo metadata`. Fail here, with a
-          # pointer, rather than deep inside `wsl-bash` with a confusing error.
-          missing=()
-          for knob in BISCUIT_NEXTEST_BIN BISCUIT_JUNIT_TARGET_DIR BISCUIT_JUNIT_WORKSPACE_ROOT; do
-            grep -q "$knob" just/devops.just || missing+=("$knob")
-          done
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "just/devops.just is missing the WSL archive passthrough: ${missing[*]}" >&2
-            echo "See fixes/2026-07-27-refactor/wsl-archive-requirements.md for the exact contract." >&2
-            exit 1
-          fi
-      # The package's own native requirements AND any it compiles from its
-      # dependency closure: the scope job computed the union, and an archived
-      # binary that dynamically links a library the guest lacks fails there,
-      # not here — so both sides install it.
-      - name: Install native prerequisites
-        shell: bash
-        env:
-          NATIVE: ${{ inputs.native }}
-        run: |
-          set -euo pipefail
-          packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<"$NATIVE")"
-          native_args=()
-          while IFS= read -r package; do
-            if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
-          if [ ${#native_args[@]} -gt 0 ]; then
-            just _ensure-native-libs "${native_args[@]}"
-          fi
-      - name: Set up the pinned Rust toolchain
-        run: rustup show
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: package-ci-${{ inputs.package }}-test-ubuntu-latest
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-      - name: Build the nextest archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          # An explicit --target keeps the archived binaries unambiguously
-          # x86_64-unknown-linux-gnu, which is exactly what the guest executes.
-          cargo nextest archive \
-            --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
-            --target x86_64-unknown-linux-gnu \
-            ${{ inputs.archive-args }}
-      - name: Build messenger desktop stub sidecar
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
-          build_args=(--all-features -p messenger --target x86_64-unknown-linux-gnu)
-          for stub in $stubs; do
-            build_args+=(--bin "$stub")
-          done
-          cargo build "${build_args[@]}"
-
-          sidecar="$RUNNER_TEMP/messenger-desktop-stubs"
-          mkdir -p "$sidecar"
-          for stub in $stubs; do
-            source="target/x86_64-unknown-linux-gnu/debug/$stub"
-            [ -x "$source" ] || { echo "Linux messenger stub missing: $source" >&2; exit 1; }
-            cp "$source" "$sidecar/$stub"
-          done
-      - name: Upload the nextest archive
-        uses: actions/upload-artifact@v6
-        with:
-          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
-          path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
-          retention-days: 1
-          if-no-files-found: error
-      - name: Upload the messenger desktop stub sidecar
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
-          path: ${{ runner.temp }}/messenger-desktop-stubs
-          retention-days: 1
-          if-no-files-found: error
-
-  # A static name: this job carries `needs:`, so a skip would otherwise reach
-  # the Checks tab as the raw `${{ inputs.package }}` expression (AC10). The
-  # package comes from the caller's job label.
+  # A static name: this job carries `needs:` nothing but is still skippable
+  # through its caller, so a skip would otherwise reach the Checks tab as the
+  # raw `${{ inputs.package }}` expression (AC10). The package comes from the
+  # caller's job label.
   wsl:
     name: test (wsl2-ubuntu)
-    needs: archive
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -252,47 +109,75 @@ jobs:
       # though the runner label is `windows-latest`; stamping the label here
       # would silently merge this leg into the native Windows rollup cell.
       BISCUIT_CI_ENVIRONMENT: wsl2-ubuntu
-      # The guest checkout must sit at the SAME ABSOLUTE PATH the archive was
-      # built at, because `env!("CARGO_MANIFEST_DIR")` is a string literal
-      # compiled into every test binary. `--workspace-remap` cannot touch it —
-      # that only tells nextest where the workspace root moved to — so any test
-      # resolving a fixture through the macro opened a path that did not exist
-      # in the guest and failed on a missing file, not on its own assertion.
-      #
-      # The archive is built by the `archive` job on `ubuntu-latest`, where
-      # `GITHUB_WORKSPACE` is `/home/runner/work/<repo>/<repo>`. Deriving it from
-      # the repository name keeps the two ends coupled through one expression
-      # rather than a hardcoded string that drifts if the repo is renamed. The
-      # verification step below asserts the coupling actually holds rather than
-      # trusting it.
-      GUEST_ROOT: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}
-      # Pinned rather than defaulted. The guest's staging root is the one path
-      # two different `wsl-bash` invocations must agree on — the tests write it,
-      # and a later step copies it across the 9p mount for upload — and each
-      # invocation gets a fresh environment, so the value is declared once here
-      # and interpolated into both.
-      # Spelled out rather than built from `GUEST_ROOT`: one `env:` entry cannot
-      # reference another in the same block.
-      BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/target/nextest/ci-reports
       # The package's declared L1 contract (`l1-include-slow` in
       # `[package.metadata.ci.tests]`), re-exported inside the guest below so
       # darkmatter's `slow_` tests run here exactly as on the native legs.
       BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
+      # Where the archive, its manifest, and the verifier land in the guest —
+      # deliberately NOT inside the checkout, so nothing about the extraction
+      # can be confused with the source tree.
+      GUEST_BUILD: /home/biscuit/build
+      # Where the source lands in the guest. A path of this leg's own choosing,
+      # unrelated to the producer's: `--workspace-remap` rewrites the run-time
+      # `CARGO_MANIFEST_DIR`, and no archive-executed target reads the
+      # compile-time one any more (`tools/test-toolkit/tests/archive_path_guard.rs`
+      # is what keeps that true). Picking a path that cannot coincide with a
+      # hosted runner's workspace is the point: if a baked producer path ever
+      # returns, it resolves to nothing here and the cell fails.
+      GUEST_ROOT: /home/biscuit/checkout
     steps:
       - uses: actions/checkout@v5
-      # Inside the workspace, not RUNNER_TEMP: the guest reaches this through
+        with:
+          ref: ${{ inputs.tested-revision }}
+      # Which build record this cell consumes. The answer is the same artifact
+      # name the native Linux L1 leg downloads; the two environments share one
+      # compile and publish two result cells.
+      - name: Resolve this cell's build record
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          record="$(jq -ce '[.[] | select(any(.consumers[]; .environment == "wsl2-ubuntu" and .gate == "L1"))] | first' <<<'${{ inputs.builds }}')"
+          {
+            echo "artifact=$(jq -r '.artifact' <<<"$record")"
+            echo "key=$(jq -r '.key' <<<"$record")"
+            echo "producer=$(jq -r '.producer' <<<"$record")"
+          } >>"$GITHUB_OUTPUT"
+      # Inside the workspace, not RUNNER_TEMP: the guest reaches these through
       # the 9p mount by resolving `pwd`, which needs no environment forwarding.
-      - name: Download the nextest archive
+      - name: Download the resolved execution plan
         uses: actions/download-artifact@v7
         with:
-          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
-          path: ${{ github.workspace }}/nextest-archive
-      - name: Download the messenger desktop stub sidecar
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+          name: ci-resolved-plan
+          path: ${{ github.workspace }}/ci-resolved-plan
+      # Transfer clock. An artifact download is an action, not a command, so its
+      # cost can only be observed between two steps; the manifest read below
+      # closes the window.
+      - name: Mark the build transfer start
+        id: transfer
+        shell: bash
+        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+      - name: Download this cell's build
         uses: actions/download-artifact@v7
         with:
-          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
-          path: ${{ github.workspace }}/messenger-desktop-stubs
+          name: ${{ steps.build.outputs.artifact }}
+          path: ${{ github.workspace }}/ci-build-artifact
+      # Read on the HOST, not in the guest. `wsl-bash` forwards only WSLENV-
+      # listed variables and `$GITHUB_OUTPUT` is a Windows path the guest cannot
+      # write, so every value a later guest step needs is resolved here and
+      # reaches it through GitHub expression interpolation.
+      - name: Read the producer's manifest
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="ci-build-artifact/${{ steps.build.outputs.artifact }}.manifest.json"
+          [ -f "$manifest" ] || { echo "the build artifact carries no manifest at $manifest" >&2; exit 1; }
+          {
+            echo "digest=$(jq -er '.digest' "$manifest")"
+            echo "archive_name=$(jq -er '.archive.file' "$manifest")"
+            echo "download_seconds=$(( $(date +%s) - ${{ steps.transfer.outputs.epoch }} ))"
+          } >>"$GITHUB_OUTPUT"
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
       #
@@ -432,7 +317,10 @@ jobs:
           # `_ensure-native-libs`) keep working if ever invoked as the user.
           echo 'biscuit ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/biscuit
           chmod 0440 /etc/sudoers.d/biscuit
-      - name: Clone the repository onto ext4
+      # Source and build go to INDEPENDENT guest paths: the archive, its
+      # manifest, and the verifier live under `$GUEST_BUILD`, never inside the
+      # checkout, so nothing about the extraction can be mistaken for source.
+      - name: Place the source and the build in the guest
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
@@ -441,35 +329,23 @@ jobs:
           workspace="$(pwd)"
           git config --global --add safe.directory '*'
           revision="$(git -C "$workspace" rev-parse HEAD)"
-          rm -rf "${{ env.GUEST_ROOT }}"
+
+          guest_root='${{ env.GUEST_ROOT }}'
+          rm -rf "$guest_root" '${{ env.GUEST_BUILD }}'
           # `git clone` creates the leaf but not the intervening directories, and
-          # the guest has no `/home/runner/work` until something makes it.
-          mkdir -p "$(dirname "${{ env.GUEST_ROOT }}")"
+          # the guest has no such path until something makes it.
+          mkdir -p "$(dirname "$guest_root")" '${{ env.GUEST_BUILD }}'
           # Building over the workspace pays the 9p boundary penalty on every
           # file access; ext4 is both faster and where real WSL developers keep
           # their repositories, so it is the configuration worth testing.
-          git clone --no-hardlinks "$workspace" "${{ env.GUEST_ROOT }}"
-          git -C "${{ env.GUEST_ROOT }}" checkout --detach "$revision"
-          cp "$workspace/nextest-archive/nextest-archive.tar.zst" /home/runner/
-          # The test step runs as `biscuit` (see the user-creation step); the
-          # tree it executes in must be writable by that user, not root.
-          chown -R biscuit:biscuit /home/runner
-      - name: Copy messenger desktop stubs onto ext4
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
-        shell: wsl-bash {0}
-        run: |
-          set -euo pipefail
-          workspace="$(pwd)"
-          sidecar=/home/runner/messenger-desktop-stubs
-          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
-          mkdir -p "$sidecar"
-          for stub in $stubs; do
-            source="$workspace/messenger-desktop-stubs/$stub"
-            [ -f "$source" ] || { echo "messenger sidecar fixture missing: $source" >&2; exit 1; }
-            cp "$source" "$sidecar/$stub"
-            chmod 0755 "$sidecar/$stub"
-          done
-          chown -R biscuit:biscuit "$sidecar"
+          git clone --no-hardlinks "$workspace" "$guest_root"
+          git -C "$guest_root" checkout --detach "$revision"
+
+          cp -R "$workspace/ci-build-artifact/." '${{ env.GUEST_BUILD }}/'
+          cp "$workspace/ci-resolved-plan/resolved-plan.json" '${{ env.GUEST_BUILD }}/'
+          # The test step runs as `biscuit` (see the user-creation step); every
+          # tree it touches must be writable by that user, not root.
+          chown -R biscuit:biscuit "$guest_root" '${{ env.GUEST_BUILD }}' /home/biscuit
       - name: Install just and cargo-nextest in the guest
         shell: wsl-bash {0}
         run: |
@@ -499,14 +375,14 @@ jobs:
         run: |
           set -euo pipefail
           # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package
-          # list — the same dependency-closure union the archive builder
-          # installed. Satisfying only the builder is insufficient when an
-          # archived binary dynamically links a library the guest lacks.
+          # list — the same dependency-closure union the producer installed.
+          # Satisfying only the producer is insufficient when an archived binary
+          # dynamically links a library the guest lacks.
           #
           # Interpolated, NOT read from `env:`: step env lives on the Windows
           # host process, and `wsl-bash` forwards only WSLENV-listed variables
           # into the guest — an `env:`-sourced $NATIVE is unbound here.
-          cd "${{ env.GUEST_ROOT }}"
+          cd '${{ env.GUEST_ROOT }}'
           packages="$(jq -r '."ubuntu-latest" // [] | .[]' <<<'${{ inputs.native }}')"
           native_args=()
           while IFS= read -r package; do
@@ -515,6 +391,41 @@ jobs:
           if [ ${#native_args[@]} -gt 0 ]; then
             just _ensure-native-libs "${native_args[@]}"
           fi
+      # STRICT VERIFICATION, IN THE GUEST, BEFORE ANYTHING IS EXTRACTED.
+      #
+      # It runs here rather than on the Windows host because the predicates that
+      # matter are the GUEST's: architecture, ABI, libc, and the dynamic
+      # libraries the archived binaries will actually resolve against. A
+      # verifier executed on the host would report `msvc` and prove nothing
+      # about the machine that runs the tests. The verifier is the Linux
+      # `ci-build` the producer shipped inside the artifact — the guest has no
+      # Cargo and could not build one.
+      - name: Verify the build in the guest
+        id: verified
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # The 9p workspace, before the `cd`: `$GITHUB_OUTPUT` is a Windows
+          # path this guest cannot write, so every measurement the host needs
+          # crosses back as a file the status step reads (the same reason the
+          # manifest is read on the host).
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-timing"
+          cd '${{ env.GUEST_ROOT }}'
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          started="$(date +%s)"
+          status=0
+          just _ci_build_verify \
+            '${{ env.GUEST_BUILD }}' \
+            '${{ steps.build.outputs.artifact }}' \
+            wsl2-ubuntu \
+            '${{ env.GUEST_BUILD }}/resolved-plan.json' || status=$?
+          echo "$(( $(date +%s) - started ))" >"$workspace/wsl-timing/verify.seconds"
+          # Written whether or not the build was accepted: a refused cell's
+          # transfer and verification cost is exactly what a reader wants.
+          cp '${{ env.GUEST_BUILD }}/${{ steps.build.outputs.artifact }}.verdict.json' \
+            "$workspace/wsl-timing/verdict.json" 2>/dev/null || true
+          exit "$status"
       # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
       #
       # THE CONFIRMED FAILURE, AND WHY THE CENSUS RUNS *BEFORE* EXTRACTION
@@ -586,6 +497,8 @@ jobs:
       - name: L1 tests from the archive
         id: l1
         shell: wsl-bash {0}
+        env:
+          GUEST_ROOT: ${{ env.GUEST_ROOT }}
         run: |
           set -euo pipefail
           # Drop to the unprivileged user: root ignores file permissions, which
@@ -610,6 +523,7 @@ jobs:
           export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
           export COLORTERM='${{ env.COLORTERM }}'
           export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
+          guest_root='${{ env.GUEST_ROOT }}'
           # WSL appends the Windows host PATH by default. On hosted runners that
           # adds dozens of /mnt/c entries, so every intentionally missing binary
           # probe crosses the 9p boundary dozens of times. Claudine performs many
@@ -618,35 +532,36 @@ jobs:
           # hours. The guest is intentionally self-contained and installs every
           # required executable under the standard Linux prefixes above.
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          if [ "$(jq -r 'contains(["messenger-desktop-stubs"])' <<<'${{ inputs.runner-tools }}')" = "true" ]; then
-            export MESSENGER_STUB_BIN_DIR=/home/runner/messenger-desktop-stubs
-            for stub in stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter; do
-              [ -x "$MESSENGER_STUB_BIN_DIR/$stub" ] || {
-                echo "messenger sidecar fixture unavailable in guest: $MESSENGER_STUB_BIN_DIR/$stub" >&2
-                exit 1
-              }
-            done
-            if command -v cargo >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1; then
-              echo "messenger WSL2 tests require a toolchain-free unprivileged guest" >&2
-              exit 1
+          # Every compile-time tool the package declared reaches the guest as a
+          # VERIFIED build sidecar. Nothing is built here, and the guest proves
+          # it has no toolchain to build one with.
+          sidecars='${{ env.GUEST_BUILD }}/${{ steps.build.outputs.artifact }}-sidecars'
+          if [ -d "$sidecars" ]; then
+            export PATH="$sidecars:$PATH"
+            if [ -x "$sidecars/stub_dunstify" ]; then
+              export MESSENGER_STUB_BIN_DIR="$sidecars"
             fi
+          fi
+          if command -v cargo >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1; then
+            echo "the wsl2-ubuntu cell requires a toolchain-free unprivileged guest" >&2
+            exit 1
           fi
           # No Cargo in the guest, so the canonical recipe must reach nextest as
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
           export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
-          export BISCUIT_JUNIT_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
-          export BISCUIT_JUNIT_TARGET_DIR="${{ env.GUEST_ROOT }}/target"
+          export BISCUIT_JUNIT_WORKSPACE_ROOT="$guest_root"
+          export BISCUIT_JUNIT_TARGET_DIR="$guest_root/target"
           # insta finds the workspace root by running `cargo metadata`; with no
           # cargo in the guest its manifest-dir fallback DOUBLES the snapshot
           # path (darkmatter/lib/darkmatter/lib/...), every .snap looks absent,
           # and each snapshot test fails while rendering correct output — 165
           # phantom failures on run 30791562395. Pin the root explicitly.
-          export INSTA_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
-          export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
+          export INSTA_WORKSPACE_ROOT="$guest_root"
+          export BISCUIT_JUNIT_STAGE_DIR="$guest_root/target/nextest/ci-reports"
 
-          archive=/home/runner/nextest-archive.tar.zst
-          [ -f "$archive" ] || { echo "nextest archive missing at $archive" >&2; exit 1; }
+          archive='${{ env.GUEST_BUILD }}/${{ steps.manifest.outputs.archive_name }}'
+          [ -f "$archive" ] || { echo "the verified archive is missing at $archive" >&2; exit 1; }
 
           # DIAGNOSTIC ONLY. Started HERE rather than in its own step so it is
           # unambiguously alive across extraction — a background process from an
@@ -675,16 +590,25 @@ jobs:
           setsid nohup /tmp/biscuit-sampler.sh \
             "$workspace/wsl-diag/guest-resources.log" >/dev/null 2>&1 &
 
-          # --workspace-remap is not optional: the archive records the BUILD
-          # host's source paths, and the guest checkout is somewhere else.
-          # Declared feature flags are passed along and dropped by
+          # --workspace-remap is not optional: the archive records the PRODUCER's
+          # source paths, and the guest checkout is its own clone. Declared
+          # feature flags are passed along and dropped by
           # `_archive_drop_build_flags` — they were baked into the archive.
-          cd "${{ env.GUEST_ROOT }}"
+          cd "$guest_root"
+          started="$(date +%s)"
+          status=0
           just _test "${{ inputs.package }}" \
             --no-fail-fast \
             --archive-file "$archive" \
-            --workspace-remap "${{ env.GUEST_ROOT }}" \
-            ${{ inputs.test-args }}
+            --workspace-remap "$guest_root" \
+            ${{ inputs.test-args }} || status=$?
+          # The gate's own window, recorded whether it passed or failed and
+          # carried back across the 9p mount for the host's status step. It
+          # contains the extraction nextest performs inside the run, which is
+          # why the verifier reports its own extraction separately.
+          mkdir -p "$workspace/wsl-timing"
+          echo "$(( $(date +%s) - started ))" >"$workspace/wsl-timing/l1.seconds"
+          exit "$status"
       - name: Stage the JUnit reports for upload
         id: stage_junit
         if: ${{ !cancelled() }}
@@ -699,7 +623,8 @@ jobs:
           # The CONTENTS of the staging root, so `manifest.jsonl` lands at the
           # artifact root. `ci-rollup` reads the manifest only from there;
           # copying `target/nextest/` instead would bury it one level down.
-          cp -R '${{ env.BISCUIT_JUNIT_STAGE_DIR }}/.' "$workspace/wsl-junit/" 2>/dev/null || true
+          cp -R '${{ env.GUEST_ROOT }}/target/nextest/ci-reports/.' \
+            "$workspace/wsl-junit/" 2>/dev/null || true
           # Staging must never change the tier's outcome.
           exit 0
       - name: Upload wsl2-ubuntu L1 JUnit
@@ -772,13 +697,19 @@ jobs:
           }
           $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
       - name: Upload WSL2 diagnostics
-        if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
+        # A refused build skips the test step, so the verdict document — the
+        # only machine-readable record of WHY the guest refused — has to ride
+        # along on a verification failure too. The status artifact carries
+        # only the outcome.
+        if: ${{ !cancelled() && (steps.l1.outcome == 'failure' || steps.verified.outcome == 'failure') }}
         uses: actions/upload-artifact@v6
         with:
           # A prefix `ci-rollup` does not walk: this is evidence for a human
           # reading a failure, never an input to a cell's verdict.
           name: wsl-diag-${{ inputs.package }}-wsl2-ubuntu
-          path: wsl-diag
+          path: |
+            wsl-diag
+            wsl-timing/verdict.json
           if-no-files-found: ignore
           retention-days: 3
       # `L1`, not `wsl`: `ci-rollup` keys a status by TIER, and this job produces
@@ -799,6 +730,11 @@ jobs:
           PROVISION_FIRST: ${{ steps.provision.outcome }}
           L1: ${{ steps.l1.outcome }}
           STAGED: ${{ steps.stage_junit.outcome }}
+          VERIFIED: ${{ steps.verified.outcome }}
+          BUILD_KEY: ${{ steps.build.outputs.key }}
+          BUILD_PRODUCER: ${{ steps.build.outputs.producer }}
+          BUILD_DIGEST: ${{ steps.manifest.outputs.digest }}
+          DOWNLOAD_SECONDS: ${{ steps.manifest.outputs.download_seconds }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -823,18 +759,55 @@ jobs:
           detail=""
           if [ "$PROVISION" != "success" ]; then
             detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
+          elif [ "$VERIFIED" != "success" ]; then
+            detail="build ${BUILD_KEY} produced on ${BUILD_PRODUCER} was refused by the guest's verification (${VERIFIED}); no test was started and nothing was compiled to replace it"
           elif [ "$STAGED" != "success" ]; then
             detail="the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected"
           fi
-          if [ -n "$detail" ]; then
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" "$detail" \
-              >"$RUNNER_TEMP/status/status.json"
-          else
-            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
-              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$result" \
-              >"$RUNNER_TEMP/status/status.json"
+          # This cell's stages. The guest cannot write `$GITHUB_OUTPUT`, so each
+          # window it measured crossed the 9p mount as a file; a guest that died
+          # leaves none, and the stage reports 0 rather than a fabricated
+          # duration. Reporting only — the cell's identity stays
+          # {package, environment, gate}.
+          # Anything that is not a plain count reports 0. This step runs under
+          # `always()` and is the cell's only evidence: instrumentation must not
+          # be able to lose it.
+          number() {
+            case "${1:-}" in
+              ''|*[!0-9]*) echo 0 ;;
+              *) echo "$1" ;;
+            esac
+          }
+          read_seconds() {
+            if [ -f "wsl-timing/$1" ]; then
+              number "$(tr -cd '0-9' <"wsl-timing/$1")"
+            else
+              echo 0
+            fi
+          }
+          extract_ms=0
+          if [ -f wsl-timing/verdict.json ]; then
+            extract_ms="$(jq -r '.timings.extract_ms // 0' wsl-timing/verdict.json 2>/dev/null || echo 0)"
           fi
+          timings="$(jq -cn \
+            --argjson download "$(number "${DOWNLOAD_SECONDS:-}")" \
+            --argjson verify "$(read_seconds verify.seconds)" \
+            --argjson extract "$(number "$extract_ms")" \
+            --argjson execute "$(read_seconds l1.seconds)" \
+            '{download_seconds: $download, verify_seconds: $verify,
+              extract_ms: $extract, execute_seconds: $execute}')"
+          jq -cn \
+            --arg package "$PACKAGE" --arg job "$JOB" --arg environment "$ENVIRONMENT" \
+            --arg result "$result" --arg detail "$detail" \
+            --arg key "${BUILD_KEY:-}" --arg producer "${BUILD_PRODUCER:-}" \
+            --arg digest "${BUILD_DIGEST:-}" \
+            --argjson timings "$timings" \
+            '{package: $package, job: $job, environment: $environment, result: $result}
+             + (if $detail == "" then {} else {detail: $detail} end)
+             + (if $key == "" then {}
+                else {build: {key: $key, producer: $producer, digest: $digest}} end)
+             + {timings: $timings}' \
+            >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
         uses: actions/upload-artifact@v6

@@ -48,7 +48,7 @@ fn fixture(process: &CliProcessFixture, document_frontmatter: &str) -> PathBuf {
 fn dialect_fixture(process: &CliProcessFixture) {
     let root = process.cwd();
     initialize_repository(root);
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/schema-triggers");
+    let source = biscuit_test_harness::manifest_dir!().join("../tests/fixtures/schema-triggers");
     for directory in ["schemas", "docs"] {
         for entry in std::fs::read_dir(source.join(directory)).unwrap() {
             let entry = entry.unwrap();

@@ -252,9 +252,9 @@ pub struct CliProcessFixture {
 /// can actually act on.
 const TEMP_DIR_VARIABLE: &str = if cfg!(windows) { "TMP (or TEMP)" } else { "TMPDIR" };
 
-/// The rusty-biscuit checkout this test binary was compiled from.
+/// The rusty-biscuit checkout this test binary is running against.
 ///
-/// `CARGO_MANIFEST_DIR` alone is the *crate* directory (`claudine/cli`), which
+/// The manifest directory alone is the *crate* directory (`claudine/cli`), which
 /// is too narrow a boundary to be useful: the temp directory that provoked this
 /// guard was `<checkout>/target/tmpdir-probe`, outside the crate and still
 /// inside the checkout. The nearest ancestor carrying a `.git` entry — a
@@ -267,7 +267,7 @@ const TEMP_DIR_VARIABLE: &str = if cfg!(windows) { "TMP (or TEMP)" } else { "TMP
 /// `cargo nextest archive` run: there is no checkout at that path to be
 /// captured by.
 fn checkout_root() -> Option<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .and_then(|checkout| checkout.canonicalize().ok())

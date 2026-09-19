@@ -464,10 +464,10 @@ fn a_relocated_temp_dir_outside_the_checkout_does_not_change_the_result() {
 /// panicking and non-panicking paths.
 #[test]
 fn a_checkout_ancestor_temp_dir_is_refused_at_construction() {
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let checkout = biscuit_test_harness::manifest_dir!()
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
-        .expect("this test binary was compiled from a checkout")
+        .expect("this test binary runs from a checkout")
         .to_path_buf();
     // Under `target/`: gitignored, disposable, and outside the crate.
     let inside = checkout.join("target/contamination-probe-tmpdir");

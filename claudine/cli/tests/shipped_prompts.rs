@@ -7,7 +7,7 @@ mod common;
 use common::{CliProcessFixture, write, write_executable};
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/cli parent")
         .parent()

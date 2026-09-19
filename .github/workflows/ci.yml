@@ -1,8 +1,13 @@
 name: ci
 
-# Dependency-aware CI for pull requests and pushes to main. A main push reuses
-# successful PR validation only with an identical tested tree and integration
-# base; missing evidence falls back to the normal grid. Source-changed workspace
+# Dependency-aware CI for pull requests, pushes to main, and a nightly full
+# run. Each environment names the events that schedule it in
+# `.github/ci/environments.json`: a pull request proves Linux (and macOS,
+# normally from the hook's local evidence), a push to main adds Windows, and
+# the nightly run adds WSL2. A main push reuses successful PR validation only
+# with an identical tested tree and integration base, and then plans only the
+# environments the push event adds; missing evidence falls back to the normal
+# grid. Source-changed workspace
 # packages receive every gate; an unchanged direct reverse dependency receives
 # no area, no job, and no result cell, and is reported by name instead. The
 # result is fanned out one caller identity per selected package AREA, with each
@@ -25,14 +30,56 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  # The nightly full-workspace run. Which environments it plans is the
+  # environment table's decision, not this file's: `wsl2-ubuntu` names only
+  # `schedule` and `workflow_dispatch` in its `events`, `windows-latest` names
+  # `push` as well, and neither runs on a pull request
+  # (fixes/2026-09-18-ci-cadence). macOS is deliberately absent from the
+  # schedule: the development Mac proves it on every push through the hook.
+  schedule:
+    - cron: "0 8 * * *"
+  # `measure-compiler-work` is the Phase 1 baseline switch of
+  # `fixes/2026-09-12-single-os-compile/plan.md`. It is OFF for every ordinary
+  # run — pull request, push, and an unattended dispatch alike — because it
+  # builds one extra tool in each measured job and this repository tracks no
+  # rustc wrapper. On, it sets `RUSTC_WRAPPER` on the measured Cargo/Nextest
+  # command ALONE and publishes the compiler-work counts beside that cell's
+  # existing status. It changes no cell, no artifact name, and no gate.
+  workflow_dispatch:
+    inputs:
+      measure-compiler-work:
+        description: "Count actual rustc invocations around each measured test command. Baseline collection only."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# The nightly run keeps its own group so it neither cancels a push to `main`
+# that lands during it nor is cancelled by one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
+
+# THE tested revision, for the two jobs that run before a plan exists.
+#
+# `pull_request` checks out GitHub's MERGE branch by default — a commit GitHub
+# recreates and never guarantees to be stable — while the plan is labelled with
+# `github.event.pull_request.head.sha`. `ci-build` binds an archive to
+# `plan.head` and refuses any other checkout (`build-source-mismatch`), so the
+# default merge checkout left the owner unable to produce and every consumer
+# unable to verify, and scope read `cargo metadata` from a revision the plan
+# did not name. The PR head is immutable and is the revision the plan already
+# names, so that is the one this run tests end to end. `github.sha` covers
+# `push` and `workflow_dispatch`, which carry no pull-request payload;
+# `_area-ci.yml` resolves its check-run SHA the same way.
+#
+# Once the plan exists this expression is not evaluated again: every later job
+# checks out `needs.scope.outputs.head`, and every reusable workflow receives
+# it as `tested-revision`. The document decides which checkout may produce and
+# verify its archives, so the document is what downstream jobs read.
+env:
+  TESTED_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   validation:
@@ -48,6 +95,8 @@ jobs:
       run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TESTED_REVISION }}
       - name: Verify prior PR validation
         id: reuse
         continue-on-error: true
@@ -59,8 +108,12 @@ jobs:
   scope:
     name: Determine affected scope
     needs: validation
-    # PR/manual runs and failed lookups fall back to normal scope calculation.
-    if: ${{ !cancelled() && needs.validation.outputs.reuse != 'true' }}
+    # Always, including on a reused PR validation: that reuse proves the
+    # environments the pull request event schedules, and the push event may
+    # schedule more (Windows). Scope plans exactly the difference, which is
+    # nothing when the events agree — and then every job downstream skips as
+    # before.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       scheduled_areas: ${{ steps.scope.outputs.scheduled_areas }}
@@ -76,9 +129,25 @@ jobs:
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
       job_estimate: ${{ steps.scope.outputs.job_estimate }}
+      area_drift: ${{ steps.scope.outputs.area_drift }}
+      has_builds: ${{ steps.scope.outputs.has_builds }}
+      build_artifacts: ${{ steps.scope.outputs.build_artifacts }}
+      build_producers: ${{ steps.scope.outputs.build_producers }}
+      build_owner_runners: ${{ steps.scope.outputs.build_owner_runners }}
+      build_runners: ${{ steps.scope.outputs.build_runners }}
+      # The plan's own `head`. Every job downstream of this one checks this
+      # revision out, so a consumer's tree is the tree its archive was bound
+      # to and `ci-build` has nothing to refuse.
+      head: ${{ steps.scope.outputs.head }}
+      # When the plan became available. Every owner leg's queue time is measured
+      # against it: an owner cannot start before the plan that names it exists,
+      # so this — not the run's own creation — is the moment it became
+      # schedulable.
+      plan_epoch: ${{ steps.plan_published.outputs.epoch }}
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ env.TESTED_REVISION }}
           fetch-depth: 0
       - name: Fetch local test evidence
         continue-on-error: true
@@ -95,12 +164,19 @@ jobs:
           PUSH_HEAD: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          # The `ci:all-os` label plans every environment for this pull
+          # request. Read from the event payload, so it takes effect on the
+          # next push after it is applied.
+          ALL_ENVIRONMENTS: ${{ contains(github.event.pull_request.labels.*.name, 'ci:all-os') }}
+          # A reused PR validation proves the environments the pull request
+          # event schedules; this push plans only the rest.
+          PROVEN_BY_PULL_REQUEST: ${{ needs.validation.outputs.reuse }}
         run: |
           set -euo pipefail
           scope_args=()
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            # A manual full run has no diff range. Its plan records the
-            # all-zero "no such object" ID as the base, the same identity a
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
+            # A manual or nightly full run has no diff range. Its plan records
+            # the all-zero "no such object" ID as the base, the same identity a
             # branch-creating push carries in `github.event.before`, and the
             # tested head; no receipt is verified against that pair.
             base="0000000000000000000000000000000000000000"
@@ -123,24 +199,37 @@ jobs:
             fi
           fi
 
+          # The event decides which environments are planned
+          # (`environments.json` `events`); a scope receipt planned for
+          # another event is refused below for the same reason.
+          event_args=(--event "$EVENT_NAME")
+          if [[ "$EVENT_NAME" == "pull_request" && "${ALL_ENVIRONMENTS:-}" == "true" ]]; then
+            event_args+=(--all-environments)
+          fi
+          if [[ "$EVENT_NAME" == "push" && "${PROVEN_BY_PULL_REQUEST:-}" == "true" ]]; then
+            event_args+=(--proven-event pull_request)
+          fi
           # Ahead of the file list: after its `--` argparse reads everything,
           # options included, as a path.
-          scope_args=(--plan-out resolved-plan.json --base "$base" --head "$head" "${scope_args[@]}")
+          scope_args=(--plan-out resolved-plan.json --base "$base" --head "$head" "${event_args[@]}" "${scope_args[@]}")
 
           # A scope receipt on refs/notes/ci-local/scope that binds this
           # event's exact {base, head, tree} IS the plan: selection never runs
           # again for it, with or without validation evidence. Any miss — no
-          # note, another schema, head, tree, or base, or a malformed document
-          # — calculates scope exactly as before. A manual run and a
-          # branch-creating push carry no comparison base and never consult
-          # the note.
+          # note, another schema, head, tree, base, or event, or a malformed
+          # document — calculates scope exactly as before. A manual or nightly
+          # run and a branch-creating push carry no comparison base and never
+          # consult the note, and a push whose pull request validation is
+          # reused plans a narrower set than any receipt holds.
           local_scope=0
           scope_source="CI (no comparison base)"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            scope_source="CI (workflow_dispatch ignores local scope)"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
+            scope_source="CI ($EVENT_NAME ignores local scope)"
+          elif [[ "$EVENT_NAME" == "push" && "${PROVEN_BY_PULL_REQUEST:-}" == "true" ]]; then
+            scope_source="CI (reused pull request validation narrows the plan)"
           elif [[ -n "$base" && ! "$base" =~ ^0+$ ]]; then
             if python3 scripts/ci/local_evidence.py scope-verify \
-                --base "$base" --head "$head" \
+                --base "$base" --head "$head" --event "$EVENT_NAME" \
                 --plan-out resolved-plan.json --scope-out scope.json \
                 --reason-out scope-reason.txt; then
               local_scope=1
@@ -163,7 +252,7 @@ jobs:
             scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
           fi
           evidence_failure=""
-          if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+          if [[ "$EVENT_NAME" != "workflow_dispatch" && "$EVENT_NAME" != "schedule" ]]; then
             # Per CELL, across every environment's notes ref at once: a macOS
             # receipt and a prior WSL cross-check receipt both contribute.
             # Each accepted cell has its EXECUTION omitted while staying a
@@ -259,10 +348,21 @@ jobs:
             echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
+            echo "area_drift=$(jq -r '.flags.area_drift' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
             echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
             echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
+            # Scheduling is a projection of the plan's producer owners.
+            echo "has_builds=$(jq -r '.build_artifacts | length > 0' <<<"$scope_json")"
+            echo "build_producers=$(jq -c '[.build_owners[].environment]' <<<"$scope_json")"
+            echo "build_owner_runners=$(jq -c '[.build_owners[] | {key: .environment, value: .runner}] | from_entries' <<<"$scope_json")"
+            echo "build_artifacts=$(jq -c '.build_artifacts' <<<"$scope_json")"
+            echo "build_runners=$(jq -c '.build_runners' <<<"$scope_json")"
+            # Read back from the WRITTEN plan, not from `$head`: every later
+            # checkout in this run is this value, and `ci-build` refuses any
+            # checkout that is not `plan.head`.
+            echo "head=$(jq -r '.head' resolved-plan.json)"
           } >>"$GITHUB_OUTPUT"
 
           # Evidence provenance, read from the WRITTEN plan (the authority on
@@ -285,8 +385,8 @@ jobs:
               else "\($rejections | length) rejection(s): \(
                 [$rejections[] | split(":")[0]] | group_by(.) | map("\(.[0]) (\(length))") | join(", "))"
               end' resolved-plan.json)"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            validation_environments="n/a (workflow_dispatch runs no verifier)"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
+            validation_environments="n/a ($EVENT_NAME runs no verifier)"
           else
             consulted="$(git for-each-ref --format='%(refname:strip=3)' 'refs/notes/ci-local/' \
               | jq -Rrs '[split("\n")[] | select(length > 0 and . != "scope")] | join(", ")')"
@@ -350,7 +450,12 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-      - name: Record the tested PR merge
+      - name: Mark the plan as published
+        id: plan_published
+        shell: bash
+        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+
+      - name: Record the tested PR head
         id: receipt
         if: github.event_name == 'pull_request'
         run: python3 scripts/ci/reuse_validation.py record
@@ -402,6 +507,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ needs.scope.outputs.head }}
           fetch-depth: 0
       - name: Set up the pinned Rust toolchain
         run: rustup show
@@ -428,6 +534,148 @@ jobs:
       - name: Validate canonical area recipes
         run: just check-canonical
 
+  # One runner per producer, with separate package invocations sharing its
+  # target tree. Artifact publication retains the plan's per-package names.
+  build:
+    needs: [scope, preflight]
+    # A boolean, exactly as `area-ci` reads `has_packages`. A skipped scope job
+    # (the reuse path) leaves every output EMPTY, and an emptiness test against
+    # `'[]'` would read as "there are builds" and fan out over `fromJSON('')`.
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.has_builds == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.scope.outputs.build_producers) }}
+    runs-on: ${{ fromJSON(needs.scope.outputs.build_owner_runners)[matrix.build] }}
+    # One owner builds every key the plan gives it, serially. A full-workspace
+    # plan is 26 keys; the first hosted run showed Ubuntu reaching 20 of them
+    # in 60 minutes cold (fixes/2026-09-18-ci-cadence, decision 4).
+    timeout-minutes: 180
+    env:
+      # The repository tracks no rustc wrapper. The producer is the one job in
+      # the run that compiles the package under test, so a stray value here
+      # would reach every consumer's binaries at once.
+      RUSTC_WRAPPER: ""
+      NEXTEST_PROFILE: ci
+      COLORTERM: truecolor
+    steps:
+      # Queue clock. `plan_epoch` is when this leg became schedulable; the
+      # difference is the time it spent waiting for a runner, which the
+      # reporting contract requires apart from compile and upload.
+      - name: Mark the owner's start
+        id: job_start
+        shell: bash
+        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      - name: Download the resolved package policy
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-scope
+          path: ci-artifacts/ci-scope
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Resolve this owner's build records
+        id: slice
+        shell: bash
+        env:
+          PRODUCER: ${{ matrix.build }}
+        run: |
+          set -euo pipefail
+          owner="$(jq -ce --arg producer "$PRODUCER" \
+            '.build_owners[] | select(.environment == $producer)' \
+            ci-artifacts/ci-scope/scope.json)"
+          {
+            echo "producer=$PRODUCER"
+            echo "native=$(jq -c '.native' <<<"$owner")"
+          } >>"$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install artifact transport
+        run: npm ci --prefix scripts/ci/artifacts --ignore-scripts --no-audit --no-fund
+      - name: Install just
+        uses: extractions/setup-just@v4
+      # The union of `[package.metadata.ci.native]` across this record's build
+      # closure, as the planner computed it for THIS producer's runner label. A
+      # consumer installs its own runtime requirements separately: what the
+      # archive needs to LINK and what its tests need to RUN are not the same
+      # list.
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ steps.slice.outputs.native }}
+        run: |
+          set -euo pipefail
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done < <(jq -r '.[]' <<<"$NATIVE")
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # The producer cache. Both workspaces in one entry: `scripts/` builds the
+      # producer tool itself and has no cache of its own anywhere else in this
+      # workflow, and a second `rust-cache` step would install a second post-job
+      # save racing the first.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: build-owner-${{ steps.slice.outputs.producer }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      # `--no-default-features --features build-tools` keeps `sniff` — and so
+      # duckdb and gix — out of the producer tool. Same shape as the coverage
+      # audit's `ci-rollup` build.
+      - name: Build the producer tool
+        shell: bash
+        run: |
+          cargo build --release \
+            -p repo-deps \
+            --no-default-features --features build-tools --bin ci-build
+      - name: Produce the archives
+        id: produce
+        shell: bash
+        env:
+          MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
+          PRODUCER: ${{ matrix.build }}
+        run: bash scripts/ci/produce-owner.sh
+      - name: Publish package builds and statuses
+        if: ${{ always() }}
+        uses: actions/github-script@v8
+        env:
+          PRODUCER: ${{ matrix.build }}
+          JOB_STATUS: ${{ job.status }}
+          PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
+          JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
+        with:
+          script: |
+            const path = require('node:path');
+            const fs = require('node:fs');
+            const root = process.env.GITHUB_WORKSPACE;
+            const {DefaultArtifactClient} = require(path.join(root, 'scripts/ci/artifacts/node_modules/@actions/artifact'));
+            const {publish} = require(path.join(root, 'scripts/ci/artifacts/publish.cjs'));
+            const client = new DefaultArtifactClient();
+            const ok = await publish({
+              plan: JSON.parse(fs.readFileSync('ci-artifacts/ci-resolved-plan/resolved-plan.json', 'utf8')),
+              producer: process.env.PRODUCER,
+              out: path.join(process.env.RUNNER_TEMP, 'build'),
+              verifier: path.join(root, 'target/release/ci-build' + (process.platform === 'win32' ? '.exe' : '')),
+              jobStatus: process.env.JOB_STATUS,
+              queueSeconds: process.env.PLAN_EPOCH && process.env.JOB_EPOCH
+                ? Number(process.env.JOB_EPOCH) - Number(process.env.PLAN_EPOCH) : undefined,
+              upload: (...args) => client.uploadArtifact(...args),
+            });
+            if (!ok) core.setFailed('One or more package builds could not be published');
+
   # One caller identity per selected AREA — the top-level entry a reader sees
   # for the tested half of the run (AC2). The area's packages, their gates, and
   # its own rollup all live inside `_area-ci.yml` and render underneath it.
@@ -451,7 +699,12 @@ jobs:
   # own tests on its own compile check, inside `_package-ci.yml`, where the
   # predictor is exact and cannot block anything it is unrelated to.
   area-ci:
-    needs: [scope, preflight]
+    # `build` is a WAIT, not a gate: a consumer must not start before its
+    # archive exists, and `!cancelled()` is what keeps one failed owner leg from
+    # skipping every area. A cell whose build failed reports the named build
+    # record through its own verification step and its area's rollup; an area
+    # whose packages are unrelated to the failed key proceeds untouched.
+    needs: [scope, preflight, build]
     if: >-
       !cancelled() &&
       needs.scope.outputs.has_packages == 'true'
@@ -476,11 +729,75 @@ jobs:
         area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}
     uses: ./.github/workflows/_area-ci.yml
     with:
+      tested-revision: ${{ needs.scope.outputs.head }}
       area: ${{ matrix.area }}
       slug: ${{ fromJSON(needs.scope.outputs.area_slugs)[matrix.area] }}
       packages: ${{ toJSON(fromJSON(needs.scope.outputs.area_matrix)[matrix.area]) }}
       accepted-gaps: ${{ contains(fromJSON(needs.scope.outputs.gap_areas), matrix.area) }}
+      # `inputs` is null on every event but `workflow_dispatch`, and
+      # `null == true` is false — so this is `false` for a pull request and a
+      # push without needing an event-name guard.
+      measure-compiler-work: ${{ inputs.measure-compiler-work == true }}
     secrets: inherit
+
+  # AC15 makes `sniff` the authority on package areas: `affected_scope.py`
+  # replicates sniff's rule and owns no mapping of its own. Nothing but this
+  # contract notices when the two diverge — a stale rule fans work out to the
+  # wrong area and every other check stays green — and no fixture can stand in
+  # for it, because asking the other tool is the whole point.
+  #
+  # It is a job of its own rather than a companion suite of `repo-deps` for two
+  # reasons. A release `sniff-cli` costs 1m39s warm and 4m25s cold (measured on
+  # a 16-core M4 at four Cargo jobs; `reviews/2026-09-15-python-test-code/
+  # spike-4-results.md`), and `repo-deps`' own cell is an archive consumer that
+  # compiles nothing; and building a workspace package inside that cell would
+  # turn the planner's own gate red for a sniff compile error, which is not
+  # what it reports. Its own `area_drift` flag —
+  # sniff, the planner, the contract suite, and every package manifest —
+  # confines the cost to the pull requests that can actually move either side
+  # of the equivalence. `ci-gate` folds `skipped` as a pass, so every other
+  # pull request pays nothing and is blocked by nothing.
+  area-drift:
+    name: area-drift (planner areas match sniff)
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.area_drift == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The repository tracks no rustc wrapper; cleared explicitly so a stray
+      # environment value cannot silently intercept this job's build.
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # No native-prerequisites step: nothing in sniff-cli's build closure
+      # declares `[package.metadata.ci.native]`, and this workflow's build
+      # owner compiles every package on this runner from that same union.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: area-drift
+      - name: Build the area authority
+        run: cargo build -p sniff-cli --release
+      # The class holds the three sniff contracts plus the four pure-planner
+      # area fixtures; running the class rather than the file keeps this job's
+      # red confined to area derivation. `BISCUIT_REQUIRE_SNIFF` is what makes
+      # the run honest: with it set, an absent binary fails `require_sniff()`
+      # instead of skipping three tests green.
+      - name: Enforce the planner's area mapping against sniff
+        env:
+          BISCUIT_REQUIRE_SNIFF: "1"
+        run: |
+          set -euo pipefail
+          export PATH="${GITHUB_WORKSPACE}/target/release:${PATH}"
+          sniff --version
+          python3 scripts/ci/test_resolved_plan.py AreaGroupingTests
+
 
   # THE single required branch-protection check: a policy-free fold.
   #
@@ -529,7 +846,16 @@ jobs:
       - validation
       - scope
       - preflight
+      # INFRASTRUCTURE, not a cell. A build that failed to COMPILE is already
+      # visible where cell outcomes live: the rollup renders every dependent
+      # cell MISSING and names the record. What no cell can show is an owner
+      # that never reached a compile — a lost runner, a cancellation, an
+      # archive that could not be uploaded — so the owner's own result is
+      # folded here. It publishes no `status-`/JUnit artifact of its own, and
+      # `continue-on-error` (which would hide it) is forbidden on it.
+      - build
       - area-ci
+      - area-drift
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -541,7 +867,9 @@ jobs:
             validation:${{ needs.validation.result }}
             scope:${{ needs.scope.result }}
             preflight:${{ needs.preflight.result }}
+            build:${{ needs.build.result }}
             area-ci:${{ needs.area-ci.result }}
+            area-drift:${{ needs.area-drift.result }}
         run: |
           set -euo pipefail
           blocking=""
@@ -618,16 +946,20 @@ jobs:
             echo ""
             echo "This push has the same Git tree and integration base as a successful PR validation."
             echo ""
-            echo "This run executed no package cell; the authoritative results are the linked run's."
+            echo "The environments the pull request event schedules were proven there; this run planned only the environments the push event adds (the plan's \`proven_environments\` names the rest)."
             echo ""
             echo "[Original validation]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN)"
           } >>"$GITHUB_STEP_SUMMARY"
       # --- mode 2: a successful scope --------------------------------------
+      # Also on reuse: scope still ran, for the environments the pull request
+      # event did not schedule, and the report renders what it planned.
       - name: Check out the repository
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
       - name: Download the resolved execution plan
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         uses: actions/download-artifact@v7
         with:
           name: ci-resolved-plan
@@ -637,7 +969,7 @@ jobs:
       # states the absence. Every area uploads its slice under `always()`, so a
       # missing one here means the area never started.
       - name: Download this run's area result slices
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
@@ -645,12 +977,12 @@ jobs:
           path: ci-artifacts
           merge-multiple: false
       - name: Set up the pinned Rust toolchain
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         run: rustup show
       # `--no-default-features` deselects biscuit-terminal, sniff, and
       # cargo_metadata, which this bin does not need. Measured: ~8s versus 40s+.
       - name: Build ci-rollup
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         run: |
           cargo build --release \
             -p repo-deps \
@@ -660,7 +992,7 @@ jobs:
       # slice (what was measured). It applies no baseline, gap, missing-cell, or
       # merge policy, and it states when a run required no package test.
       - name: Render the run report
-        if: ${{ needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success' }}
+        if: ${{ needs.scope.result == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -673,15 +1005,12 @@ jobs:
             --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
             "${args[@]}"
       # --- mode 3: a failed or cancelled bootstrap -------------------------
-      # Spelled as the negation of modes 1 and 2 rather than as a condition of
-      # its own, because the three modes have to be exhaustive as well as
-      # exclusive and a hand-rolled third condition drops whatever neither of
-      # the other two happens to cover. The previous `reuse != 'true'` did both:
-      # it doubled up with mode 2 on every successful scope, and it left the run
-      # with no report at all when a reuse-marked validation did not itself
-      # succeed.
+      # Exactly the negation of mode 2, so the two are exhaustive as well as
+      # exclusive: scope now runs on every event, reuse included, and mode 1
+      # is an additional note on top of whichever of the two applies rather
+      # than a third branch of its own.
       - name: Classify the first actionable failure
-        if: ${{ !(needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true') && !(needs.validation.outputs.reuse != 'true' && needs.scope.result == 'success') }}
+        if: ${{ needs.scope.result != 'success' }}
         shell: bash
         env:
           # Listed in dependency order: an earlier stage's failure or

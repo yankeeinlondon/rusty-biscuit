@@ -207,7 +207,7 @@ impl Harness {
 /// Reads a committed manifest fixture by stem (Architecture Decision A: the
 /// measured bytes are frozen and hashed in `benchmarks/manifest.yaml`).
 pub(crate) fn fixture_text(stem: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path)

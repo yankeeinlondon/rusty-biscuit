@@ -32,14 +32,27 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import schema  # noqa: E402  (needs the path insert above when run as a script)
+import build_key  # noqa: E402  (needs the path insert above when run as a script)
+import schema  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
 ENVIRONMENTS_CONFIG = ROOT / ".github" / "ci" / "environments.json"
 
+#: Version 2 added the per-environment `build` contract: the compile-affecting
+#: inputs a native producer declares and the predicates an archive-only
+#: environment is checked against. Version 3 added `events`, the GitHub events
+#: that schedule the environment (fixes/2026-09-18-ci-cadence).
+ENVIRONMENTS_SCHEMA_VERSION = 3
+
 # The environment names the policy table declares, for argument validation.
 ENVIRONMENTS = schema.ENVIRONMENTS
+
+#: The GitHub events a run can carry, as `github.event_name` spells them. An
+#: environment's `events` names the subset that schedules it; a planner run
+#: without an event (a developer's `just ci-local --plan`, the test suites)
+#: plans every environment.
+EVENT_NAMES = schema.EVENTS
 
 # The three verdicts CI can produce per package.
 GATES = ("lint", "check", "test")
@@ -83,6 +96,22 @@ GLOBAL_PATHS = (
     GLOBAL_PATHS_ALL_GATES | JUST_PATHS | set().union(*GLOBAL_PATHS_BY_GATE.values())
 )
 GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
+
+# The global inputs that decide what CI RUNS and never what a local gate
+# PRODUCES. `local_evidence.gate_global_inputs` leaves them out of a cell's
+# gate-input identity, so editing a workflow no longer invalidates every
+# published local cell (fixes/2026-09-18-ci-cadence, decision 5). The toolchain
+# pin, Cargo config, the root manifest, the lockfile, `clippy.toml`,
+# `.config/nextest.toml`, and the Just recipes stay inputs: each changes what
+# a local run compiles or executes.
+ORCHESTRATION_PATHS = {
+    ".github/ci/environments.json",
+    ".github/workflows/_package-ci.yml",
+    ".github/workflows/_wsl-ci.yml",
+    ".github/workflows/ci.yml",
+    "scripts/ci/affected_scope.py",
+}
+ORCHESTRATION_PREFIXES = (".github/actions/",)
 
 # Deliberately NOT in GLOBAL_PATHS. Every dependency add or removal rewrites the
 # lockfile, so treating the filename as global escalated the most routine change
@@ -197,8 +226,10 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
         }
         for suite in (
             "test_affected_scope.py",
+            "test_build_key.py",
             "test_ci_local.py",
             "test_constraints.py",
+            "test_cross_check.py",
             "test_evidence_reuse.py",
             "test_local_evidence.py",
             "test_publish_gaps.py",
@@ -207,6 +238,20 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_runner_loss.py",
             "test_schema.py",
         )
+    },
+    # The build owner's artifact publisher: no Cargo package and no pnpm
+    # workspace entry selects it, so this registration is the only thing that
+    # schedules its suite. The glob stays quoted -- given a bare directory
+    # `node --test` resolves it as a module and exits without having run a
+    # test (measured on Node 22.20).
+    "artifact-publisher": {
+        "owner": "repo-deps",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "node --test 'scripts/ci/artifacts/*.test.cjs'",
+        "node": True,
+        "counts": None,
+        "counts_reason": "node --test emits TAP, which no counts strategy reads",
     },
 }
 
@@ -237,10 +282,40 @@ SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
     "tools/test-toolkit/Cargo.toml": ("test-toolkit",),
 }
 
-# Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
-# runner OS before fan-out; a package-local change validates only the scope host
-# plus the runner OSes its selected packages' environments actually land on.
-ALL_RUNNER_OS = ["macos-latest", "ubuntu-latest", "windows-latest"]
+# AC15 makes `sniff` the authority on package areas: this planner replicates
+# sniff's rule and owns no mapping of its own. Nothing but the contracts in
+# `test_resolved_plan.py::AreaGroupingTests` notices when the two diverge — a
+# stale rule fans work out to the wrong area and every other check stays green
+# — and those contracts need the real binary, which only `ci.yml`'s
+# `area-drift` job provisions. This flag is what schedules that job, so it must
+# cover every change that can move either side of the equivalence.
+#
+# Suite ownership cannot serve: `SUITE_OWNER_PREFIXES` / `SUITE_OWNER_PATHS`
+# select the package that owns a changed CI input, so a change to sniff's own
+# detection rule would schedule the contracts nowhere.
+AREA_DRIFT_PREFIXES = ("sniff/",)
+AREA_DRIFT_PATHS = {
+    "scripts/ci/affected_scope.py",
+    "scripts/ci/test_resolved_plan.py",
+}
+
+# A package's area is a function of WHERE its manifest sits, so a manifest that
+# appears, moves, or disappears re-maps areas without touching sniff or this
+# file — the case a path list keyed on the two implementations structurally
+# cannot see. Every `Cargo.toml` at every depth therefore counts, fixture
+# manifests included: `sniff repo package-area` answers per directory, so a
+# manifest in an unusual location is precisely the input that separates the two
+# rules, and nothing distinguishes a fixture manifest from a real one without
+# reading it. The change list is `git diff --name-only`, which carries no
+# add/modify/delete status, so "a manifest moved" is not separable from "a
+# dependency was bumped" either. The over-approximation costs one parallel job
+# that `ci-gate` folds; the miss it prevents is silent.
+AREA_DRIFT_MANIFEST = "Cargo.toml"
+
+# Bootstrap-preflight breadth (D3). A full-scope run validates every runner OS
+# the plan's environments land on before fan-out; a package-local change
+# validates only the scope host plus the runner OSes its selected packages'
+# environments actually land on.
 SCOPE_HOST_OS = "ubuntu-latest"
 
 KNOWN_L2_BACKENDS = {"tmux", "wezterm", "kitty", "apple-terminal"}
@@ -248,17 +323,39 @@ KNOWN_TIERS = {"L1", "L2", "browser"}
 EXCLUSION_CLASSES = {"capability", "promotion-pending", "time-bounded"}
 
 # `runner-tools` is a CLOSED vocabulary implemented by the reusable workflow,
-# not an arbitrary command surface.
+# not an arbitrary command surface. Everything left here is a RUNTIME facility
+# the consumer provisions for itself; the compile-time entries moved to
+# `sidecars` (see [`SIDECAR_TABLE`]) because a consumer with no Cargo cannot
+# build one.
 KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
-    "darkmatter-md-fixture",
-    "messenger-desktop-stubs",
     "node-22",
     "pnpm-10",
     "l2-parallel-self-spawn",
     "neovim",
     "zed-extension",
 }
+
+# The named build sidecars, declared as data rather than as a shell command a
+# package could spell any way it liked. `ci-build produce` reads the same file
+# to learn which package and binaries each name compiles.
+SIDECAR_TABLE = ".github/ci/sidecars.json"
+SIDECAR_SCHEMA_VERSION = 1
+
+# The one L2 backend a CI runner provides. A package whose L2 declares only GUI
+# terminal emulators renders a governed capability gap and never executes the
+# tier there.
+CI_HOSTABLE_L2_BACKEND = "tmux"
+
+# What `just _test_l2` needs on a consumer that has no Cargo: the broker that
+# owns the shared terminal pane, and the proof that a required backend actually
+# drove a test. Both were recipe-time `cargo` invocations before the cutover.
+HOSTABLE_L2_SIDECARS = ("backend-proof", "harness-broker")
+
+# The only substitutions an `archive-includes` entry may carry. A dynamic
+# library is `libfoo.so`, `libfoo.dylib`, and `foo.dll` on the three producers,
+# and making a package spell all three is three chances to get one wrong.
+INCLUDE_PLACEHOLDERS = ("{DLL_PREFIX}", "{DLL_SUFFIX}", "{EXE_SUFFIX}")
 
 # `[package.metadata.ci]` field vocabulary. Unknown fields fail loudly — a typo
 # here silently mis-scopes CI otherwise.
@@ -273,12 +370,26 @@ CI_TEST_FIELDS = {
     "runner-tools",
     "companion-suites",
     "requires-toolchain",
+    #: Build outputs the package's archive must carry, relative to the profile
+    #: output directory (`examples/discovery_probe`, not
+    #: `target/debug/examples/discovery_probe`) — the producer supplies the
+    #: `<triple>/<profile>` prefix its own invocation created.
+    "archive-includes",
+    #: Named build sidecars from [`SIDECAR_TABLE`]: another package's binaries,
+    #: compiled by the producer and shipped beside the archive.
+    "sidecars",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
 # Where `_package-ci.yml` runs clippy. A cell carries it so the lint gate's
 # environment is visible in the matrix (AC10) instead of being implied.
 LINT_ENVIRONMENT = "ubuntu-latest"
+
+# Where the `example` and `bench` kinds are compiled. One environment, like
+# lint: compiling them once is the coverage, compiling them per operating
+# system was cost (fixes/2026-09-18-ci-cadence, decision 3). The archive-only
+# guest this host builds for is stood for here as before.
+CHECK_ENVIRONMENT = "ubuntu-latest"
 
 # The gates the L1 build itself compiles. A separate check cell is scheduled
 # only for required kinds outside this set (spec section 1.7).
@@ -398,6 +509,40 @@ KNOWN_CAPABILITIES = {
     "archive_only",
 }
 
+#: The compile-affecting inputs a native producer declares. Every one of them
+#: enters the planned build key, so adding a field here changes every key — a
+#: field that describes the WORKFLOW rather than the compilation does not belong
+#: in this table at all. `archive_cutover` was the one exception, and Task 6.5
+#: removed it with the compile-in-place paths it guarded.
+PRODUCER_BUILD_FIELDS = {
+    "host",
+    "target",
+    "profile",
+    "rustflags",
+    "cargo_config",
+    "linker",
+    "archive_format",
+    "nextest",
+    "executes",
+    "runtime",
+}
+
+#: What an archive-only environment declares. It compiles nothing, so it has no
+#: compiler host, target, profile, or `executes` list — only the predicates a
+#: producer's archive is checked against and the tool it runs that archive with.
+CONSUMER_BUILD_FIELDS = {"nextest", "runtime"}
+
+#: The predicates that decide whether one environment may execute another's
+#: archive. Spec section 5: a runner-image, architecture, distribution, or
+#: native-dependency change that breaks the predicate must create another build
+#: key or fail planning, never move compilation into a toolchain-free guest.
+RUNTIME_PREDICATE_FIELDS = {"arch", "abi", "libc", "native_libraries"}
+
+#: The predicates that must be *equal* for a cross-environment edge. ABI and
+#: libc together are what make native Windows and WSL2 structurally unpairable
+#: even before the hosting rule below is applied.
+RUNTIME_EQUAL_PREDICATES = ("arch", "abi", "libc")
+
 
 def load_environments(path: Path, today: date | None = None) -> list[dict[str, Any]]:
     """Load and validate the environment capability table.
@@ -423,8 +568,10 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
 
     if not isinstance(document, dict) or not isinstance(document.get("environments"), list):
         raise RuntimeError(f"{path}: must be an object with an 'environments' list")
-    if document.get("schema_version") != 1:
-        raise RuntimeError(f"{path}: schema_version must be 1")
+    if document.get("schema_version") != ENVIRONMENTS_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"{path}: schema_version must be {ENVIRONMENTS_SCHEMA_VERSION}"
+        )
 
     environments = document["environments"]
     names: set[str] = set()
@@ -432,12 +579,23 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
         label = environment.get("name", f"<record {index}>") if isinstance(environment, dict) else f"<record {index}>"
         if not isinstance(environment, dict):
             raise RuntimeError(f"environments[{index}] must be an object")
-        unknown = environment.keys() - {"name", "runner", "native_key", "capabilities"}
+        unknown = environment.keys() - {"name", "runner", "native_key", "events", "capabilities", "build"}
         if unknown:
             raise RuntimeError(f"environment '{label}' has unknown field(s): {sorted(unknown)}")
         for field in ("name", "runner", "native_key"):
             if not isinstance(environment.get(field), str) or not environment[field].strip():
                 raise RuntimeError(f"environment '{label}' must give a non-empty '{field}'")
+        events = environment.get("events")
+        if (
+            not isinstance(events, list)
+            or not events
+            or any(event not in EVENT_NAMES for event in events)
+            or len(set(events)) != len(events)
+        ):
+            raise RuntimeError(
+                f"environment '{label}' must give a non-empty 'events' list drawn from "
+                f"{list(EVENT_NAMES)} without repeats"
+            )
         if environment["name"] in names:
             raise RuntimeError(f"duplicate environment '{environment['name']}'")
         names.add(environment["name"])
@@ -492,7 +650,228 @@ def load_environments(path: Path, today: date | None = None) -> list[dict[str, A
                 "its runner; an archive-only environment is hosted by another runner"
             )
 
+    validate_build_contracts(environments)
     return environments
+
+
+def validate_build_contracts(environments: list[dict[str, Any]]) -> None:
+    """Validate every environment's compile contract and compatibility edges.
+
+    Each native producer declares the compile-affecting inputs the planned
+    build key is computed from; each archive-only environment declares only the
+    predicates its producer's archive is checked against.
+
+    Compatibility is declared, never inferred from an OS name. A producer may
+    name itself and, beyond that, only an archive-only environment it is
+    already the `native_key` of — so `ubuntu-latest -> wsl2-ubuntu` is the sole
+    cross-environment edge this table can express and native Windows cannot
+    reach the WSL2 guest at all, independently of the ABI and libc comparison
+    that would also refuse it.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending environment and field.
+    """
+    by_name = {environment["name"]: environment for environment in environments}
+    producers = {
+        environment["name"] for environment in native_environments(environments)
+    }
+    for environment in environments:
+        name = environment["name"]
+        contract = environment.get("build")
+        if not isinstance(contract, dict):
+            raise RuntimeError(f"environment '{name}' must declare a 'build' contract")
+        expected = PRODUCER_BUILD_FIELDS if name in producers else CONSUMER_BUILD_FIELDS
+        if contract.keys() != expected:
+            raise RuntimeError(
+                f"environment '{name}' build contract must declare exactly "
+                f"{sorted(expected)}; got {sorted(contract)}"
+            )
+        _validate_runtime_predicates(name, contract.get("runtime"))
+        if not isinstance(contract.get("nextest"), str) or not contract["nextest"].strip():
+            raise RuntimeError(
+                f"environment '{name}' build contract must give a non-empty 'nextest' "
+                "version specifier"
+            )
+        if name in producers:
+            _validate_producer_contract(name, contract)
+
+    for environment in environments:
+        name = environment["name"]
+        if name not in producers:
+            continue
+        for executed in environment["build"]["executes"]:
+            if executed == name:
+                continue
+            guest = by_name.get(executed)
+            if guest is None:
+                raise RuntimeError(
+                    f"environment '{name}' declares it executes '{executed}', which is "
+                    "not an environment in this table"
+                )
+            if not capability(guest, "archive_only") or guest["native_key"] != name:
+                raise RuntimeError(
+                    f"environment '{name}' declares it executes '{executed}', but a "
+                    "producer may only serve an archive-only environment it hosts "
+                    f"(native_key '{name}'); '{executed}' names "
+                    f"'{guest['native_key']}'"
+                )
+            _validate_compatibility(name, environment["build"], executed, guest["build"])
+
+    for environment in environments:
+        name = environment["name"]
+        if name in producers:
+            continue
+        owners = [
+            producer
+            for producer in producers
+            if name in by_name[producer]["build"]["executes"]
+        ]
+        if owners != [environment["native_key"]]:
+            raise RuntimeError(
+                f"archive-only environment '{name}' must be executed by exactly its "
+                f"native_key '{environment['native_key']}'; the table says "
+                f"{owners or 'no producer'}"
+            )
+
+
+def _validate_runtime_predicates(label: str, runtime: Any) -> None:
+    if not isinstance(runtime, dict) or runtime.keys() != RUNTIME_PREDICATE_FIELDS:
+        raise RuntimeError(
+            f"environment '{label}' build.runtime must declare exactly "
+            f"{sorted(RUNTIME_PREDICATE_FIELDS)}"
+        )
+    for field in RUNTIME_EQUAL_PREDICATES:
+        if not isinstance(runtime[field], str) or not runtime[field].strip():
+            raise RuntimeError(
+                f"environment '{label}' build.runtime '{field}' must be a non-empty string"
+            )
+    libraries = runtime["native_libraries"]
+    if not isinstance(libraries, list) or not all(
+        isinstance(item, str) for item in libraries
+    ):
+        raise RuntimeError(
+            f"environment '{label}' build.runtime native_libraries must be a list of strings"
+        )
+    if libraries != sorted(libraries):
+        raise RuntimeError(
+            f"environment '{label}' build.runtime native_libraries must be sorted"
+        )
+
+
+def _validate_producer_contract(label: str, contract: dict[str, Any]) -> None:
+    for field in ("host", "target", "profile", "linker", "archive_format"):
+        if not isinstance(contract[field], str) or not contract[field].strip():
+            raise RuntimeError(
+                f"environment '{label}' build '{field}' must be a non-empty string"
+            )
+    if not isinstance(contract["rustflags"], str):
+        raise RuntimeError(
+            f"environment '{label}' build rustflags must be a string; declare '' for none"
+        )
+    config = contract["cargo_config"]
+    if not isinstance(config, list) or not all(isinstance(item, str) for item in config):
+        raise RuntimeError(
+            f"environment '{label}' build cargo_config must be a list of "
+            "repository-relative paths"
+        )
+    if config != sorted(config):
+        raise RuntimeError(f"environment '{label}' build cargo_config must be sorted")
+    executes = contract["executes"]
+    if not isinstance(executes, list) or not all(isinstance(item, str) for item in executes):
+        raise RuntimeError(
+            f"environment '{label}' build executes must be a list of environment names"
+        )
+    if len(set(executes)) != len(executes) or executes != sorted(executes):
+        raise RuntimeError(
+            f"environment '{label}' build executes must be sorted and free of duplicates"
+        )
+    if label not in executes:
+        raise RuntimeError(
+            f"environment '{label}' build executes must include '{label}': a producer "
+            "always executes what it compiles"
+        )
+
+
+def _validate_compatibility(
+    producer: str,
+    producer_build: dict[str, Any],
+    guest: str,
+    guest_build: dict[str, Any],
+) -> None:
+    for field in RUNTIME_EQUAL_PREDICATES:
+        if producer_build["runtime"][field] != guest_build["runtime"][field]:
+            raise RuntimeError(
+                f"environment '{producer}' cannot execute in '{guest}': {field} is "
+                f"{producer_build['runtime'][field]!r} on the producer and "
+                f"{guest_build['runtime'][field]!r} on the consumer"
+            )
+    missing = set(producer_build["runtime"]["native_libraries"]) - set(
+        guest_build["runtime"]["native_libraries"]
+    )
+    if missing:
+        raise RuntimeError(
+            f"environment '{producer}' cannot execute in '{guest}': the consumer does "
+            f"not provide {sorted(missing)}"
+        )
+    if producer_build["nextest"] != guest_build["nextest"]:
+        raise RuntimeError(
+            f"environment '{producer}' cannot execute in '{guest}': the archive is "
+            f"produced with nextest {producer_build['nextest']!r} and run with "
+            f"{guest_build['nextest']!r}"
+        )
+
+
+def build_contract(environments: list[dict[str, Any]], producer: str) -> dict[str, Any]:
+    """The producer contract of one native environment.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when `producer` is absent or is not a producer.
+    """
+    for environment in environments:
+        if environment["name"] == producer and "executes" in environment.get("build", {}):
+            return environment["build"]
+    raise RuntimeError(
+        f"'{producer}' declares no producer build contract in the plan's environment table"
+    )
+
+
+def archive_producers(environments: list[dict[str, Any]]) -> set[str]:
+    """Every environment that produces an archive its consumers execute.
+
+    That is every native producer: the plan derives a build record for every
+    executing L1, L2, or browser cell, and since
+    `fixes/2026-09-12-single-os-compile` Task 6.5 there is no environment whose
+    consumers compile in place. The function remains because the two
+    workflow-facing projections — the owner matrix and a package's
+    per-environment build references — are defined over producers rather than
+    over records, and an environment that declares no `executes` list (the WSL2
+    guest) owns nothing.
+    """
+    return {
+        environment["name"]
+        for environment in environments
+        if "executes" in environment.get("build", {})
+    }
+
+
+def producer_of(environments: list[dict[str, Any]], execution: str) -> str:
+    """The environment that compiles for `execution`.
+
+    An environment that holds a toolchain compiles for itself; an archive-only
+    guest is compiled for by the producer that declares it in `executes`.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when no producer claims `execution`.
+    """
+    for environment in environments:
+        if "executes" in environment.get("build", {}) and execution in environment["build"]["executes"]:
+            return environment["name"]
+    raise RuntimeError(
+        f"no environment in the plan's table declares it executes '{execution}'"
+    )
 
 
 def native_environments(environments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -837,6 +1216,9 @@ def validate_package_ci(
             f"vocabulary is closed: {sorted(KNOWN_RUNNER_TOOLS)}"
         )
 
+    validate_archive_includes(label, tests.get("archive-includes", []))
+    validate_sidecars(label, tests.get("sidecars", []), root)
+
     suites = tests.get("companion-suites", [])
     if not isinstance(suites, list) or not all(isinstance(s, str) for s in suites):
         raise RuntimeError(
@@ -877,6 +1259,136 @@ def validate_package_ci(
                 )
 
 
+def load_sidecars(root: Path) -> dict[str, dict[str, Any]]:
+    """The closed build-sidecar vocabulary, from the one file that owns it.
+
+    Read rather than restated so the planner and `ci-build produce` cannot
+    disagree about which names exist.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when the table is absent, unreadable, or written to
+    a generation this planner does not understand.
+    """
+    path = root / SIDECAR_TABLE
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot read the build-sidecar table {path}: {error}") from error
+    version = document.get("schema_version")
+    if version != SIDECAR_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"{path} is sidecar schema version {version}, this planner reads "
+            f"{SIDECAR_SCHEMA_VERSION}"
+        )
+    sidecars = document.get("sidecars")
+    if not isinstance(sidecars, dict):
+        raise RuntimeError(f"{path} field 'sidecars' must be an object")
+    return sidecars
+
+
+def validate_archive_includes(label: str, entries: Any) -> None:
+    """Validate a package's declared archive includes.
+
+    Each entry names a build output relative to the profile directory. The
+    shape is checked here rather than at produce time because a malformed path
+    is a scheduling-time mistake: it would otherwise surface as a failed
+    producer minutes into a CI run.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the offending entry.
+    """
+    if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+        raise RuntimeError(
+            f"{label}.tests field 'archive-includes' must be a list of paths"
+        )
+    for entry in entries:
+        residue = entry
+        for placeholder in INCLUDE_PLACEHOLDERS:
+            residue = residue.replace(placeholder, "")
+        if not entry or entry != entry.strip():
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} is empty or padded with whitespace"
+            )
+        if "{" in residue or "}" in residue:
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} uses an unknown placeholder; "
+                f"known: {list(INCLUDE_PLACEHOLDERS)}"
+            )
+        if "\\" in entry:
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} must use forward slashes; one "
+                "spelling has to travel between a Windows producer and its consumer"
+            )
+        if entry.startswith("/") or (len(entry) > 1 and entry[1] == ":"):
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} must be relative to the profile "
+                "output directory, not absolute"
+            )
+        if ".." in entry.split("/"):
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} escapes the target directory"
+            )
+        if entry.split("/")[0] in {"debug", "release", "target"}:
+            raise RuntimeError(
+                f"{label}.tests archive include {entry!r} names its own profile directory; "
+                "entries are relative to it, and the producer supplies the "
+                "<triple>/<profile> prefix its invocation created"
+            )
+
+
+def missing_tier_sidecars(record: dict[str, Any]) -> list[str]:
+    """The sidecars a package's CI-hostable L2 tier needs and does not declare.
+
+    `just _test_l2` spawns the harness broker and runs the backend proof. Both
+    were `cargo` invocations at recipe time; an archive consumer has no Cargo,
+    so a package that executes L2 on a runner and declares neither would reach
+    a compiler it does not have — the one repair the specification forbids,
+    discovered inside a tier rather than before the run.
+
+    Scoped to `tmux` because it is the only L2 backend a runner provides: a
+    package whose L2 declares GUI emulators alone renders a governed capability
+    gap, never executes the tier, and declaring the sidecars there would compile
+    two binaries for no reader and change its build key for nothing.
+
+    Answered rather than raised, because this is a property of the REAL
+    workspace: a synthetic L2 fixture models scheduling, has no recipe to run,
+    and must not be made to carry a declaration it has no use for.
+    """
+    if "L2" not in record.get("tiers", []):
+        return []
+    if CI_HOSTABLE_L2_BACKEND not in record.get("l2_backends", []):
+        return []
+    declared = record.get("sidecars", [])
+    return [name for name in HOSTABLE_L2_SIDECARS if name not in declared]
+
+
+def validate_sidecars(label: str, names: Any, root: Path) -> None:
+    """Validate a package's declared build sidecars against the closed table.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the unknown or duplicated sidecar.
+    """
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise RuntimeError(f"{label}.tests field 'sidecars' must be a list of sidecar names")
+    if len(set(names)) != len(names):
+        raise RuntimeError(f"{label}.tests field 'sidecars' has duplicates: {names}")
+    if not names:
+        # The table is read only by a package that names something in it, so a
+        # workspace with no sidecars at all — every synthetic fixture, and most
+        # real packages — never has to carry one.
+        return
+    known = load_sidecars(root)
+    unknown = [name for name in names if name not in known]
+    if unknown:
+        raise RuntimeError(
+            f"{label}.tests names unknown build sidecar(s) {unknown}; the vocabulary is "
+            f"closed by {SIDECAR_TABLE}: {sorted(known)}"
+        )
+
+
 def package_ci_policy(
     packages: dict[str, dict[str, Any]],
     runner_labels: set[str],
@@ -906,11 +1418,13 @@ def package_ci_policy(
             "features": tests.get("features", []),
             "all_features": tests.get("all-features", False),
             "l1_include_slow": tests.get("l1-include-slow", False),
-            "runner_tools": tests.get("runner-tools", []),
             "companion_suites": tests.get("companion-suites", []),
             "requires_toolchain": tests.get("requires-toolchain", False),
             "native": ci.get("native", {}),
+            "archive_includes": tests.get("archive-includes", []),
+            "sidecars": tests.get("sidecars", []),
         }
+        record["runner_tools"] = sorted(tests.get("runner-tools", []))
         if not record["gates"]:
             record["exclusion"] = {
                 "exclusion_class": ci["exclusion-class"],
@@ -1928,20 +2442,24 @@ def package_cells(
             cell["prohibition"] = constraint
         cells.append(cell)
 
-    add(
-        LINT_ENVIRONMENT,
-        "lint",
-        target_kinds,
-        # Clippy builds the package, but the check contract is about target
-        # coverage and clippy's target selection is the lint recipe's, not the
-        # plan's. Crediting it here would claim coverage nothing asserts.
-        "",
-        f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
-        reusable=False,
-        companions=companion_records(
-            record["companion_suites"], LINT_ENVIRONMENT, "lint"
-        ),
-    )
+    # Lint, like check, lives on one environment; a plan that does not carry
+    # it (a push whose pull request validation proved Linux) lints nowhere,
+    # because that validation already did.
+    if any(environment["name"] == LINT_ENVIRONMENT for environment in environments):
+        add(
+            LINT_ENVIRONMENT,
+            "lint",
+            target_kinds,
+            # Clippy builds the package, but the check contract is about target
+            # coverage and clippy's target selection is the lint recipe's, not
+            # the plan's. Crediting it here would claim coverage nothing asserts.
+            "",
+            f"lint gate for {package}, hosted on {LINT_ENVIRONMENT}",
+            reusable=False,
+            companions=companion_records(
+                record["companion_suites"], LINT_ENVIRONMENT, "lint"
+            ),
+        )
 
     unchecked = uncovered_target_kinds(target_kinds)
     seam = sorted(dependents)
@@ -1950,8 +2468,13 @@ def package_cells(
         f"public API: {', '.join(seam)}"
     )
     if unchecked:
+        # One environment, whichever the event scheduled: a plan that does not
+        # carry the check host (a run scheduling only deferred environments)
+        # checks nowhere, and its L1 builds still compile the L1 kinds.
         for environment in native_environments(environments):
             name = environment["name"]
+            if name != CHECK_ENVIRONMENT:
+                continue
             # The guest whose archive this runner builds never compiles, so
             # this cell is the only compile coverage those kinds get there.
             stands_for = [
@@ -1966,7 +2489,7 @@ def package_cells(
                 unchecked,
                 "check",
                 f"{', '.join(unchecked)} target(s) are compiled by no test gate; "
-                f"checked on {name}"
+                f"checked on {name} only"
                 + (
                     f", which also stands for {', '.join(stands_for)} "
                     "(archive built here, never compiles)"
@@ -2066,12 +2589,17 @@ def matrix_record(
     environments: list[dict[str, Any]],
     gates: set[str] | frozenset[str] = frozenset(GATES),
     executing: set[tuple[str, str]] | None = None,
+    builds: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """The workflow-facing shape of one gating package's plan record.
 
     `executing` is the `{environment, gate}` set the canonical plan resolved
     to hosted execution. This projection adapts those cells to workflow
     inputs without selecting work again.
+
+    `builds` are the plan's build records for this package, already derived.
+    A consumer job reads the key and artifact from here rather than matching a
+    package against an owner matrix itself.
 
     `record` is the plan's package record and `environments` the plan's own
     table: the projection reads nothing the plan does not carry, which is what
@@ -2160,11 +2688,38 @@ def matrix_record(
             or (testing and {"node-22", "pnpm-10"} & set(record["runner_tools"]))
             else []
         ),
+        # A `requires-toolchain` suite drives `cargo`/`rustc` itself, and its
+        # binaries arrive in an archive that carries no toolchain. Where the
+        # environment claims `cargo_toolchain`, the consumer must provision the
+        # pinned toolchain once, before any test runs: a hosted runner's rustup
+        # proxy otherwise auto-installs the pin on first use, and concurrent
+        # tests racing that install corrupted rustup's download directory (run
+        # 35326800778, `repo-deps`, `test-toolkit`). Where the environment
+        # lacks the capability, the L1 cell is a governed gap instead.
+        "toolchain_environments": (
+            [
+                environment["name"]
+                for environment in native_environments(environments)
+                if capability(environment, "cargo_toolchain")
+                and runs(environment["name"], "L1")
+            ]
+            if testing and record.get("requires_toolchain", False)
+            else []
+        ),
         "wsl": testing
         and any(
             capability(environment, "archive_only") and runs(environment["name"], "L1")
             for environment in environments
         ),
+        "builds": [
+            {
+                "key": build["key"],
+                "producer": build["producer"],
+                "artifact": build["artifact"],
+                "consumers": build["consumers"],
+            }
+            for build in builds
+        ],
     }
 
 
@@ -2234,6 +2789,371 @@ def policy_record(
     return shaped
 
 
+# ---------------------------------------------------------------------------
+# Build records — fixes/2026-09-12-single-os-compile
+# ---------------------------------------------------------------------------
+
+_TOOLCHAIN_CHANNEL = re.compile(r'^\s*channel\s*=\s*"([^"]+)"', re.MULTILINE)
+
+#: Keyed by the lockfile's own bytes, so a fixture that rewrites `Cargo.lock`
+#: gets a fresh digest while a suite resolving forty plans pays for one helper
+#: invocation.
+_LOCKFILE_DIGESTS: dict[str, str] = {}
+
+
+def rust_channel(root: Path) -> str:
+    """The pinned toolchain, read from the one file that owns it.
+
+    `rust-toolchain.toml` is the repository's single toolchain authority, so the
+    build key reads it rather than letting `environments.json` carry a second
+    copy that could disagree with what CI actually installs.
+
+    ## Errors
+
+    Raises ``RuntimeError`` when the file is missing or names no channel.
+    """
+    path = root / "rust-toolchain.toml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeError(f"cannot read the pinned toolchain from {path}: {error}") from error
+    found = _TOOLCHAIN_CHANNEL.search(text)
+    if not found:
+        raise RuntimeError(f"{path} declares no [toolchain] channel")
+    return found.group(1)
+
+
+def lockfile_digest(root: Path) -> str:
+    """The build key's stand-in for the resolved dependency graph.
+
+    Digested through the same `ci-build` boundary as the key itself: a second
+    hashing implementation inside one contract is how two "identical" digests
+    silently diverge.
+    """
+    text = (root / LOCKFILE_PATH).read_text(encoding="utf-8")
+    cached = _LOCKFILE_DIGESTS.get(text)
+    if cached is None:
+        cached = build_key.planned_keys([text])[0]
+        _LOCKFILE_DIGESTS[text] = cached
+    return cached
+
+
+def build_identity(
+    record: dict[str, Any],
+    contract: dict[str, Any],
+    target_kinds: Sequence[str],
+    *,
+    producer: str,
+    source_commit: str,
+    lockfile: str,
+    rust: str,
+) -> dict[str, Any]:
+    """Every plan-known compile-affecting input of one package's archive.
+
+    Discovered inputs — the linker's actual version, the native libraries the
+    binaries turned out to link, the archive checksums — are the producer's
+    realized manifest, not this. What is here is exactly what the planner can
+    assert before anything compiles.
+    """
+    return {
+        "source_commit": source_commit,
+        "lockfile": lockfile,
+        "rust": rust,
+        "nextest": contract["nextest"],
+        "host": contract["host"],
+        "target": contract["target"],
+        "profile": contract["profile"],
+        "rustflags": contract["rustflags"],
+        "cargo_config": list(contract["cargo_config"]),
+        "linker": contract["linker"],
+        "archive_format": contract["archive_format"],
+        "package": record["package"],
+        "target_kinds": [kind for kind in target_kinds if kind in L1_TARGET_KINDS],
+        "features": record["test_args"],
+        # `native` is declared per runner label, and a producer's label is its
+        # own name; the archive-only guest installs the same list but compiles
+        # nothing, so the producer's entry is the one that shaped the build.
+        "native": sorted(record["native"].get(producer, [])),
+        # Declared by the package, and in the key because changing either set
+        # changes what the producer emits and therefore what a consumer must
+        # find. Sorted so two packages that declare the same set in a different
+        # order do not split a key over nothing.
+        "archive_includes": sorted(record["archive_includes"]),
+        "sidecars": sorted(record["sidecars"]),
+    }
+
+
+def compatibility_reason(
+    producer: str, contract: dict[str, Any], guests: Sequence[str]
+) -> str:
+    """Why this archive may run where the plan says it may."""
+    predicates = contract["runtime"]
+    base = (
+        f"{contract['target']} archive produced on {producer} "
+        f"({predicates['arch']}/{predicates['abi']}/{predicates['libc']})"
+    )
+    if not guests:
+        return f"{base}; consumed only by its own producer environment"
+    return (
+        f"{base}; also executable in {', '.join(guests)} — same architecture, ABI, and "
+        f"libc, hosted by {producer}"
+    )
+
+
+def derive_build_records(
+    cells: list[dict[str, Any]],
+    package_records: list[dict[str, Any]],
+    environments: list[dict[str, Any]],
+    root: Path,
+    head: str,
+) -> list[dict[str, Any]]:
+    """One build record per distinct planned key, with its cells attached.
+
+    Derivation happens *after* evidence has been applied to the cells, which is
+    what makes "an all-reused plan schedules no owner" a property of the
+    document rather than of a workflow condition. It reopens nothing: affected
+    scope, package policy, tier policy, and gap policy are already decided, and
+    this reads only the cells they produced.
+
+    Cells are mutated in place to carry their `build` reference.
+
+    ## Returns
+
+    The records, sorted by `{package, producer, key}`.
+    """
+    demand = [
+        cell
+        for cell in cells
+        if cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES
+    ]
+    for cell in cells:
+        cell.pop("build", None)
+    if not demand:
+        return []
+
+    by_package = {entry["package"]: entry for entry in package_records}
+    rust = rust_channel(root)
+    lockfile = lockfile_digest(root)
+
+    identities: dict[tuple[str, str], dict[str, Any]] = {}
+    for cell in demand:
+        producer = producer_of(environments, cell["environment"])
+        slot = (cell["package"], producer)
+        if slot in identities:
+            continue
+        record = by_package[cell["package"]]
+        identities[slot] = build_identity(
+            record,
+            build_contract(environments, producer),
+            record["targets"],
+            producer=producer,
+            source_commit=head,
+            lockfile=lockfile,
+            rust=rust,
+        )
+
+    slots = sorted(identities)
+    keys = build_key.planned_keys(
+        [schema.canonical(identities[slot]) for slot in slots]
+    )
+    key_of = dict(zip(slots, keys))
+
+    builds: dict[str, dict[str, Any]] = {}
+    for cell in demand:
+        producer = producer_of(environments, cell["environment"])
+        slot = (cell["package"], producer)
+        key = key_of[slot]
+        cell["build"] = key
+        record = builds.get(key)
+        if record is None:
+            contract = build_contract(environments, producer)
+            guests = [name for name in contract["executes"] if name != producer]
+            record = {
+                "key": key,
+                "package": cell["package"],
+                "producer": producer,
+                "artifact": f"build-{cell['package']}-{producer}-{key}",
+                "compatible_environments": sorted(contract["executes"]),
+                "compatibility_reason": compatibility_reason(producer, contract, guests),
+                "consumers": [],
+                "identity": identities[slot],
+            }
+            builds[key] = record
+        record["consumers"].append(
+            {"environment": cell["environment"], "gate": cell["gate"]}
+        )
+
+    for record in builds.values():
+        record["consumers"].sort(key=lambda entry: (entry["environment"], entry["gate"]))
+    return sorted(
+        builds.values(),
+        key=lambda record: (record["package"], record["producer"], record["key"]),
+    )
+
+
+def prune_build_records(
+    builds: list[dict[str, Any]], cells: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Drop the consumer demand that verified evidence removed.
+
+    The overlay never derives a key — the carried plan already computed every
+    one, and `--apply-to` reads nothing from the checkout, which is what keeps
+    the valid-receipt path free of a Rust toolchain. It only removes: a cell
+    resolved to reuse stops referencing its build, and a record whose last
+    consumer is satisfied is removed rather than left for an owner to compile
+    for nobody.
+    """
+    demanded: dict[str, list[dict[str, str]]] = {}
+    for cell in cells:
+        if cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES:
+            if "build" in cell:
+                demanded.setdefault(cell["build"], []).append(
+                    {"environment": cell["environment"], "gate": cell["gate"]}
+                )
+        else:
+            cell.pop("build", None)
+
+    kept = []
+    for record in builds:
+        consumers = demanded.get(record["key"])
+        if not consumers:
+            continue
+        kept.append(
+            {
+                **record,
+                "consumers": sorted(
+                    consumers, key=lambda entry: (entry["environment"], entry["gate"])
+                ),
+            }
+        )
+    return kept
+
+
+def archive_builds(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """The plan's build records an owner job produces.
+
+    Every record, unless the plan somehow carries one owned by an environment
+    that declares no producer contract — which `validate_resolved_plan` refuses
+    and this filter therefore never has to drop.
+    """
+    producers = archive_producers(plan["environments"])
+    return [record for record in plan["builds"] if record["producer"] in producers]
+
+
+def build_owner_matrix(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """The deterministic native build-owner projection of a resolved plan.
+
+    One entry per producer environment that owns at least one record, carrying
+    the runner label a workflow needs and the records themselves. A projection,
+    never a second calculation: the plan's `builds` list is its only input, so a
+    workflow reading this cannot schedule a build the plan did not resolve.
+    """
+    runners = {
+        environment["name"]: environment["runner"]
+        for environment in plan["environments"]
+    }
+    natives = {entry["package"]: entry.get("native", {}) for entry in plan["packages"]}
+    owners: dict[str, dict[str, Any]] = {}
+    for record in archive_builds(plan):
+        owner = owners.setdefault(
+            record["producer"],
+            {
+                "environment": record["producer"],
+                "runner": runners.get(record["producer"], record["producer"]),
+                "packages": [],
+                "builds": [],
+            },
+        )
+        owner["builds"].append(
+            {
+                "key": record["key"],
+                "package": record["package"],
+                "artifact": record["artifact"],
+                "consumers": record["consumers"],
+                "compatible_environments": record["compatible_environments"],
+                # The prerequisites this record's own compile needs, spelled for
+                # the producer's runner label. The owner job installs the union
+                # of what it is about to compile and nothing else.
+                "native": sorted(natives.get(record["package"], {}).get(record["producer"], [])),
+            }
+        )
+    for owner in owners.values():
+        owner["packages"] = sorted({entry["package"] for entry in owner["builds"]})
+        owner["builds"].sort(key=lambda entry: (entry["package"], entry["key"]))
+        owner["native"] = sorted(
+            {name for entry in owner["builds"] for name in entry["native"]}
+        )
+    return [owners[name] for name in sorted(owners)]
+
+
+def build_slices(owners: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Package-keyed artifact inventory for diagnostics, never a job matrix."""
+    slices = [
+        {
+            "artifact": entry["artifact"],
+            "key": entry["key"],
+            "package": entry["package"],
+            "producer": owner["environment"],
+            "runner": owner["runner"],
+            "consumers": entry["consumers"],
+            "compatible_environments": entry["compatible_environments"],
+            "native": entry["native"],
+        }
+        for owner in owners
+        for entry in owner["builds"]
+    ]
+    slices.sort(key=lambda entry: entry["artifact"])
+    return slices
+
+
+def environment_events(environment: dict[str, Any]) -> list[str]:
+    """The events that schedule `environment`; every event when undeclared.
+
+    A hand-built record (the suites' fixtures, a plan from before the field
+    existed) is scheduled everywhere, which is the behavior every such caller
+    already relied on.
+    """
+    return list(environment.get("events") or EVENT_NAMES)
+
+
+def schedule_environments(
+    environments: list[dict[str, Any]],
+    event: str | None,
+    all_environments: bool = False,
+    proven_event: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split the table into the environments this run plans and those it does not.
+
+    ## Returns
+
+    `(scheduled, deferred, proven)`. `deferred` holds the environments `event`
+    does not schedule, each as `{name, events}` so a reader sees which event
+    will. `proven` holds the environments a `proven_event` run already
+    validated for this tree — a push to `main` after a green pull request
+    plans only what the pull request could not — as `{name, event}`. With no
+    `event`, or with `all_environments`, everything is scheduled and both
+    lists are empty; a `proven_event` still applies.
+    """
+    if event is not None and event not in EVENT_NAMES:
+        raise RuntimeError(f"unknown event {event!r}; expected one of {list(EVENT_NAMES)}")
+    if proven_event is not None and proven_event not in EVENT_NAMES:
+        raise RuntimeError(
+            f"unknown proven event {proven_event!r}; expected one of {list(EVENT_NAMES)}"
+        )
+    scheduled: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    proven: list[dict[str, Any]] = []
+    for environment in environments:
+        events = environment_events(environment)
+        if proven_event is not None and proven_event in events:
+            proven.append({"name": environment["name"], "event": proven_event})
+        elif event is None or all_environments or event in events:
+            scheduled.append(environment)
+        else:
+            deferred.append({"name": environment["name"], "events": events})
+    return scheduled, deferred, proven
+
+
 def calculate_scope(
     files: list[str],
     root: Path,
@@ -2251,6 +3171,9 @@ def calculate_scope(
     evidence_rejections: list[str] | None = None,
     base: str = NULL_OID,
     head: str = NULL_OID,
+    event: str | None = None,
+    all_environments: bool = False,
+    proven_event: str | None = None,
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -2268,8 +3191,18 @@ def calculate_scope(
     `prohibitions` maps an environment to the recorded constraint forbidding
     it. A prohibited cell is never scheduled and is listed in
     `prohibited_cells`, which is what `just ci-local --plan` refuses on.
+
+    `event` is the GitHub event this plan is for. An environment the event
+    does not schedule contributes no cell, no build, and no preflight runner,
+    and is listed in `deferred_environments`; `all_environments` overrides that
+    (the `ci:all-os` label). `proven_event` names an event whose run already
+    validated this tree, so its environments are listed in
+    `proven_environments` and planned nowhere. See `schedule_environments`.
     """
     packages = workspace_packages(metadata)
+    environments, deferred_environments, proven_environments = schedule_environments(
+        environments, event, all_environments, proven_event
+    )
 
     full_gates = set(GATES) if force_all else set()
     full_scope = bool(full_gates)
@@ -2371,7 +3304,10 @@ def calculate_scope(
             "l2_backends": record["l2_backends"],
             "runner_tools": record["runner_tools"],
             "companion_suites": record["companion_suites"],
+            "archive_includes": record["archive_includes"],
+            "sidecars": record["sidecars"],
             "l1_include_slow": record["l1_include_slow"],
+            "requires_toolchain": record["requires_toolchain"],
             "native": native_closure(package_id, metadata, packages, policy),
             "input_paths": closure_directories(
                 package_id, root, metadata, packages
@@ -2395,6 +3331,11 @@ def calculate_scope(
             f"{MATRIX_LIMIT}-job matrix ceiling; the fan-out must be grouped"
         )
 
+    # After every cell's execution is decided, never before: a cell satisfied by
+    # verified evidence or standing as a governed gap creates no consumer
+    # demand, so an all-reused plan derives no build and schedules no owner.
+    builds = derive_build_records(cells, package_records, environments, root, head)
+
     outcomes = outcome_fields(cells, gating, full_scope, environments, evidence_rejections)
 
     # Area flags drive test-shaped specialized jobs and therefore follow only
@@ -2408,8 +3349,15 @@ def calculate_scope(
         directory: directory in top_dirs
         for directory in ("claudine", "darkmatter", "sniff", "playa")
     }
+    normalized_files = [raw.replace("\\", "/").removeprefix("./") for raw in files]
+    flags["area_drift"] = any(
+        path.startswith(AREA_DRIFT_PREFIXES)
+        or path in AREA_DRIFT_PATHS
+        or path.rpartition("/")[2] == AREA_DRIFT_MANIFEST
+        for path in normalized_files
+    )
 
-    return {
+    plan: dict[str, Any] = {
         "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
         "base": base,
         "head": head,
@@ -2431,6 +3379,7 @@ def calculate_scope(
         ),
         "environments": environments,
         "cells": cells,
+        "builds": builds,
         "accepted_evidence": outcomes["accepted_evidence"],
         "evidence_rejections": outcomes["evidence_rejections"],
         "policy_gaps": outcomes["policy_gaps"],
@@ -2440,6 +3389,16 @@ def calculate_scope(
         "preflight_reason": outcomes["preflight_reason"],
         "flags": flags,
     }
+    # Optional, and absent rather than empty: a plan resolved without an event
+    # is byte-identical to one from before the field existed (R9: the schema
+    # version follows the required set).
+    if event is not None:
+        plan["event"] = event
+    if deferred_environments:
+        plan["deferred_environments"] = deferred_environments
+    if proven_environments:
+        plan["proven_environments"] = proven_environments
+    return plan
 
 
 def outcome_fields(
@@ -2535,6 +3494,7 @@ def apply_accepted_cells(
         evidence = cell_evidence(cell, accepted, whole_environments)
         if evidence is not None:
             mark_reused(cell, evidence)
+    applied["builds"] = prune_build_records(applied["builds"], applied["cells"])
     gating = [entry for entry in applied["packages"] if entry["gates"]]
     applied.update(
         outcome_fields(
@@ -2571,6 +3531,8 @@ def non_gating_package_record(
         "l2_backends": [],
         "runner_tools": [],
         "companion_suites": [],
+        "archive_includes": [],
+        "sidecars": [],
         "l1_include_slow": record["l1_include_slow"],
         "native": {},
         "exclusion": record["exclusion"],
@@ -2757,10 +3719,13 @@ def classify_preflight(
     of ``"full"``, ``"package"``, or ``"documentation"``.
     """
     if full_scope:
+        # Every runner the plan's environments land on — the table after the
+        # event filtered it, so a scheduled run preflights no runner that
+        # hosts nothing that night.
         return (
             "full",
-            list(ALL_RUNNER_OS),
-            "explicit full-scope request selects every runner OS",
+            sorted({SCOPE_HOST_OS, *(environment["runner"] for environment in environments)}),
+            "explicit full-scope request selects every scheduled runner OS",
         )
 
     if gating:
@@ -2823,6 +3788,13 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
                 (cell["environment"], cell["gate"])
             )
 
+    # A package's matrix entry is what tells `_package-ci.yml` which build each
+    # of its environments consumes; naming a record no owner job will produce
+    # would send a consumer looking for an artifact that does not exist.
+    builds_by_package: dict[str, list[dict[str, Any]]] = {}
+    for record in archive_builds(plan):
+        builds_by_package.setdefault(record["package"], []).append(record)
+
     matrix = []
     for entry in plan["packages"]:
         if not entry["gates"]:
@@ -2835,12 +3807,16 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
                 environments,
                 gates,
                 executing=executing.get(entry["package"], set()),
+                builds=builds_by_package.get(entry["package"], ()),
             )
         )
 
     area_matrix: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for entry in matrix:
         area_matrix.setdefault(entry["area"], {"include": []})["include"].append(entry)
+
+    owners = build_owner_matrix(plan)
+    slices = build_slices(owners)
 
     return {
         "packages": [entry["package"] for entry in plan["packages"]],
@@ -2860,6 +3836,10 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
             policy_record(entry, {"test"} if entry["tiers"] else set())
             for entry in plan["packages"]
         ],
+        "build_owners": owners,
+        "build_slices": slices,
+        "build_artifacts": [entry["artifact"] for entry in slices],
+        "build_runners": {entry["artifact"]: entry["runner"] for entry in slices},
         "job_estimate": plan["job_estimate"],
         "flags": plan["flags"],
     }
@@ -2927,12 +3907,38 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base", default=NULL_OID, help="base revision under test")
     parser.add_argument("--head", default=NULL_OID, help="head revision under test")
+    parser.add_argument(
+        "--event",
+        choices=EVENT_NAMES,
+        help=(
+            "the GitHub event this plan is for; an environment the event does "
+            "not schedule is deferred, not planned. Omitted: every environment"
+        ),
+    )
+    parser.add_argument(
+        "--all-environments",
+        action="store_true",
+        help="plan every environment regardless of --event (the ci:all-os label)",
+    )
+    parser.add_argument(
+        "--proven-event",
+        choices=EVENT_NAMES,
+        metavar="EVENT",
+        help=(
+            "an event whose run already validated this tree; its environments "
+            "are listed as proven and planned nowhere"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args()
-    if args.apply_to and (args.all or args.files or args.constraints):
+    if args.apply_to and (
+        args.all or args.files or args.constraints
+        or args.event or args.all_environments or args.proven_event
+    ):
         parser.error(
             "--apply-to applies evidence to a carried plan and performs no "
-            "selection: it cannot be combined with --all, --constraints, or a file list"
+            "selection: it cannot be combined with --all, --constraints, --event, "
+            "--all-environments, --proven-event, or a file list"
         )
     return args
 
@@ -3024,6 +4030,9 @@ def main() -> None:
             evidence_rejections=evidence_rejections,
             base=args.base,
             head=args.head,
+            event=args.event,
+            all_environments=args.all_environments,
+            proven_event=args.proven_event,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")

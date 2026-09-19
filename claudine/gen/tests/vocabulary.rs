@@ -11,9 +11,13 @@ use claudine_gen::{RESEARCH_TOPIC, build_vocabulary, load_error_vocabulary};
 
 /// The claudine package-area root (parent of this crate's manifest dir).
 fn area() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("gen crate lives under the claudine package area")
+    static AREA: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    AREA.get_or_init(|| {
+        biscuit_test_harness::manifest_dir!()
+            .parent()
+            .expect("gen crate lives under the claudine package area")
+            .to_path_buf()
+    })
 }
 
 /// Every provider that owns a structured stream parser (Kilo shares

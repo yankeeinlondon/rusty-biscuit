@@ -32,10 +32,14 @@ the output.
 ## `just cross-check`
 
 `scripts/cross-check.sh` (root `just cross-check <package> [--os
-linux|windows|wsl|macos|all] [nextest args]`) syncs a standing clone to
+linux|windows|wsl|macos|all] [nextest args]`) commits your working tree
+(tracked edits and untracked, non-ignored files) as one throwaway commit over
 `origin/<branch>` (falls back to `origin/main` when the branch is unpushed),
-applies the local tree's difference as one patch (tracked and untracked
-files), and runs the package's L1 suite there. Compile caches stay warm
+ships that commit as a `git bundle`, checks the standing clone out at it, and
+runs the package's L1 suite there. Your branch, index, and stash stack are
+untouched and nothing is signed. The commit is the tested revision and the
+plan's `head`, which is what lets archive mode run at all: `ci-build` refuses
+any checkout that is not `plan.head` or whose tracked tree is dirty. Compile caches stay warm
 between runs. It reads `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and
 `BUILD_MACOS`. The default `--os all` runs on every declared OS except the
 one the script is running on, since the local suite already covers it; the
@@ -50,19 +54,19 @@ to the run.
 The hosts are shared. Each run holds a per-host lock
 (`ci-verification/.cross-check.lock`, an atomically created directory with an
 `owner` file naming the user, branch, base SHA, and start time) for the whole
-reset, apply, and test sequence, so overlapping runs queue instead of
+reset, checkout, and test sequence, so overlapping runs queue instead of
 clobbering the clone. A waiter prints the owner and gives up after 30 minutes
 with exit 75. A lock left by a dead run is reported, never removed by the
 script; only its owner removes it by hand. Never work in the standing clone
 directly; use your own worktree for ad hoc sessions.
 
 - Verify the banner line `cross-check: <pkg> @ origin/<branch> (<sha>) + N
-  patch line(s)` before trusting a result. If in doubt, confirm the remote
-  head: `ssh "$BUILD_WIN" "git -C W:\ci-verification\rusty-biscuit log -1
-  --oneline"`.
-- A clone left dirty by an earlier failed patch used to make the checkout
-  fail silently and apply the patch onto the old tree. The script now resets
-  and cleans first; recover an older clone by hand with `git reset --hard;
+  changed file(s) as <rev>` before trusting a result. If in doubt, confirm the
+  remote head: `ssh "$BUILD_WIN" "git -C W:\ci-verification\rusty-biscuit log
+  -1 --oneline"` — it is `<rev>`.
+- A clone left dirty by an earlier run used to make the checkout fail silently
+  and test the old tree. The script resets and cleans before checking the
+  tested revision out; recover an older clone by hand with `git reset --hard;
   git clean -fdq; git checkout --detach <sha>` over SSH.
 - Positional filter args are nextest test-name substrings. A binary name
   matches nothing ("0 tests run"). `-E 'test(...)'` breaks the recipe's
@@ -71,6 +75,11 @@ directly; use your own worktree for ad hoc sessions.
 - Child-process stderr is not shown by a remote test failure. A probe that
   must be read back can append to `W:\ci-verification\probe.txt` and be read
   with `ssh "$BUILD_WIN" "Get-Content W:\ci-verification\probe.txt"`.
+- `BUILD_WIN` has **no usable `python3`**: the name resolves to a Cygwin shim
+  pointing at a deleted `Python313\python.exe`, so a command that merely probes
+  for `python3` finds one and then fails on use. A working 3.13 is reachable
+  only as `py`. Anything that runs `scripts/ci/*.py` over SSH must spell `py`
+  (measured 2026-09-15).
 - The `wsl` leg can print `FAIL` in the summary after a run whose own
   `cross-check-exit:` marker is `0` and whose every test passed. Read the
   marker, not the summary, before calling the leg red. Observed 2026-09-15:

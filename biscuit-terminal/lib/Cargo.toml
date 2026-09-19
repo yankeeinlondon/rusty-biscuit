@@ -76,6 +76,7 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 libc = "0.2"
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
 # feature so the terminal perf-gate test (`tests/perf_gate.rs`) can observe the
 # `NodeAttrs::data` access counter while folding a corpus. The feature is unioned
@@ -113,3 +114,8 @@ tiers = ["L1", "L2", "browser"]
 l2-backends = ["wezterm"]
 features = ["image", "terminal-tests", "browser-tests"]
 local-features = ["image"]
+# The PTY tests spawn this example from `<profile>/examples/` beside the test
+# binaries. `cargo nextest archive` builds lib, bin, and test targets and never
+# examples, so the producer both builds it and carries it; a consumer that had
+# to build it for itself has no Cargo to do it with.
+archive-includes = ["examples/discovery_probe{EXE_SUFFIX}"]

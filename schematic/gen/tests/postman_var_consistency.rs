@@ -22,7 +22,7 @@
 //!   directly in `collection.variable[*].key`.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::Value;
 
@@ -86,9 +86,9 @@ fn is_identifier_like(s: &str) -> bool {
 /// holds committed artifacts. The integration test runs from
 /// `schematic/gen/`, so `../postman/` is the canonical location.
 fn postman_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
-        .expect("CARGO_MANIFEST_DIR has a parent")
+        .expect("schematic/gen has a parent")
         .join("postman")
 }
 

@@ -114,6 +114,18 @@ belong here.
   `git show :Cargo.lock | grep '"<dep>"'` against the staged manifest; a lock
   entry with no declaring manifest in the same commit is an orphan. In a
   parallel batch the manifest's group commits first, or absorbs the lock.
+- A workflow `BISCUIT_REQUIRE_<TOOL>: "1"` declaration on a step is coupled
+  to a `require_tools("<tool>", ...)` call in the Python suite that step
+  runs: the env var only does work when the guard reads it, and the guard
+  only fails (vs. skips) when the var is set. Either half alone is dead —
+  declaration without consumer is a marker no test reads, consumer without
+  declaration is a guard that can only ever skip. When splitting the work
+  into multiple commits, ship the declaration alongside its consumer in
+  the commit that introduces the guard, or accept the intermediate state
+  where one half is dead until the matching half catches up. The
+  `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_
+  that_enforces_it` test pins both directions: a guard whose variable no
+  job sets, and a variable no guard reads.
 
 ## Path-Limited Commits
 
@@ -416,9 +428,28 @@ belong here.
   paths — empirically verified with `AM file1.txt / A  file2.txt` plus
   `git commit --only -- file1.txt`, which leaves `A  file2.txt` staged.
 - A brief that pairs a pathspec file with `xargs -I {} git commit …` yields N
-  stacked commits (a 35-path refactor landed as 35 identical commits). Say
-  explicitly: one invocation with all paths positional, or
-  `--pathspec-from-file`, never a per-path loop.
+    stacked commits (a 35-path refactor landed as 35 identical commits). Say
+    explicitly: one invocation with all paths positional, or
+    `--pathspec-from-file`, never a per-path loop.
+- For 100+ path commits (e.g. the `*/tests/*` mass sweep that landed
+    archive-compatible `manifest_dir!()` across the monorepo), construct the
+    pathspec with `git diff --cached --name-only <scope-glob> > /tmp/paths.txt`
+    and then `git commit --only -F msg --pathspec-from-file=/tmp/paths.txt`.
+    Two hazards the per-line file avoids that an inline arg list does not:
+    (a) shell expansion of a glob inside the args (`git commit … -- '*/tests/*'
+    '*/benches/*' …` lets zsh expand `*/tests/*` against the current
+    worktree, producing a `pathspec 'file1 file2 …' did not match` failure
+    that surfaces as a noise wall); (b) shell ARG_MAX limits when the path
+    list is in the thousands. Verify by counting `wc -l < /tmp/paths.txt`
+    against `git diff --cached --name-only <scope-glob> | wc -l`.
+- When a glob pathspec misses a few paths (e.g. `*/tests/*` did not match
+    `claudine/gen/src/agent_errors_check/review6_tests.rs` and
+    `playa/lib/src/detached/tests.rs` — both `src/*tests.rs` unit-test
+    files whose path the glob did not reach), ship the missed paths as a
+    *follow-up* `test(<scope>): follow-up …` commit rather than amending the
+    mass commit. The corpus guard in `test-toolkit::archive_path_guard`
+    catches the same miss next run, so the follow-up is documentation, not
+    drift.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
     <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
     and the paths reappear staged for a single recommit.
@@ -522,6 +553,36 @@ belong here.
   commits of the same fix even when they share a package area with the
   fix's scope — the implementer's "unrelated" is a stronger signal than
   the orchestrator's "lives in the same directory tree".
+- A cycle close that moves a fix/feature directory into `_completed/`
+  often unblocks one or more downstream plans whose `depends_on` lists
+  the closing cycle's `spec.md` (those plans typically carry
+  `status: blocked` in their frontmatter and a matching `blocked_on`
+  entry). The unblock is its own `planning(<area>):` sibling commit:
+  drop `status: blocked` from the downstream plan's frontmatter in a
+  separate `--only -- <downstream-plan-path>` invocation. Do not bundle
+  the unblock into the cycle-close commit — the downstream plan lives
+  in a different fix directory with its own lifecycle, and reviewers
+  need the unblock visible as a deliberate scheduling decision. The
+  unblock body should name the satisfied `depends_on` prerequisite and
+  reference the cycle-close commit's hash (e.g. "the cicd-cleanup
+  cycle is moved to _completed/ in <hash>") so the relationship is
+  auditable without `git log --graph`. A wholesale same-file
+  whitespace reformat that rides along with the `status: blocked`
+  removal (typical of an editor that auto-indents nested list items)
+  is part of the same cohesive edit, not a second semantic group —
+  do not split it into a separate commit just because the diff is
+  ~290+/290- of pure indentation.
+- A cycle close into `_completed/` is valid even when the moved spec
+  still shows `implemented: false`, e.g. when the only remaining
+  work is a branch-protection migration that requires separate human
+  approval (the `ci-verdict` → `ci-gate` switch in
+  `fixes/2026-09-11-cicd-cleanup/closure.md` C10 is the canonical
+  example). The `_completed/` move closes the planning surface; the
+  `implemented: false` flag is the implementation sign-off gate and
+  is independent. Call this out in the cycle-close body so reviewers
+  don't mistake the move for a full implementation sign-off, and so
+  the closure-checklist items still "Waiting for proof / approval"
+  are visible rather than buried.
 - A `RESOLVED_PLAN_SCHEMA_VERSION` bump is one inseparable change with the
   new required fields in `scripts/ci/schema.py`, the regenerated
   `.github/ci/schemas/contract.json`, the version constant in any Rust

@@ -106,7 +106,7 @@ fn every_case_renders_non_empty() {
 
 #[test]
 fn warning_layout_matrix_snapshots_disabled_pending_table_width_contract() {
-    let spec = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let spec = biscuit_test_harness::manifest_dir!()
         .join("../fixes/2026-07-22-table-width/spec.md");
     assert!(
         spec.is_file(),
