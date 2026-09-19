@@ -320,10 +320,10 @@ jobs:
       # WHY A SECOND ATTEMPT SURVIVES
       #
       # Provisioning can still fail for reasons unrelated to `--update` — the
-      # distribution appx download and the guest's own apt step both cross the
-      # network. `continue-on-error` on the first attempt is what makes the
-      # second reachable; the second is NOT `continue-on-error`, because a guest
-      # that cannot be provisioned twice must still turn the cell red.
+      # distribution download crosses the network. `continue-on-error` on the
+      # first attempt is what makes the second reachable; the second is NOT
+      # `continue-on-error`, because a guest that cannot be provisioned twice
+      # must still turn the cell red.
       #
       # The 90s wait is retained but no longer rests on the contention theory it
       # was written for. Run 30755610413 does not support that theory: claudine's
@@ -336,8 +336,21 @@ jobs:
       # timeout. Ten minutes covers a slow 300 MB distribution download and
       # turns that hang into a retry. It cannot reach the other failure shape —
       # the hosted runner itself dying ("lost communication with the server",
-      # three times on 2026-08-27/28) — which `ci-infra-retry.yml` handles by
-      # rerunning the failed jobs once from outside the run.
+      # three times on 2026-08-27/28, again on 2026-09-18 in run 35308326156) —
+      # which `ci-infra-retry.yml` handles by rerunning the failed jobs once
+      # from outside the run.
+      #
+      # WHY THE ACTION REGISTERS THE DISTRIBUTION AND NOTHING MORE
+      #
+      # A lost runner leaves no log; the only record GitHub keeps is which step
+      # was in progress. With `additional-packages` set, one step covered three
+      # different operations — the image download, `wsl --install --no-launch`
+      # (registration, no VM), and the guest's first boot to run apt — so every
+      # loss so far reads "Provision the WSL2 guest" and says nothing about
+      # which of them the host did not survive. The first boot and the package
+      # install are therefore their own steps below, and the action is asked
+      # only for registration and the `wsl-bash` wrapper, which it generates
+      # regardless and which resolves the default distribution at call time.
       - name: Provision the WSL2 guest
         id: provision
         continue-on-error: true
@@ -346,10 +359,6 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          # jq is NOT optional: the guest's native-prerequisites step parses the
-          # scope-computed package list with it, for every package, before any
-          # recipe that could bootstrap it has run.
-          additional-packages: ca-certificates curl git xz-utils jq
       - name: Let the endpoint settle before a second attempt
         if: ${{ steps.provision.outcome == 'failure' }}
         shell: bash
@@ -362,8 +371,13 @@ jobs:
         with:
           distribution: ${{ inputs.distribution }}
           set-as-default: true
-          additional-packages: ca-certificates curl git xz-utils jq
-      - name: Verify the guest is WSL2
+      # The first `wsl-bash` call after `--no-launch` registration is what starts
+      # the guest VM. It is its own step so a runner lost here is attributed to
+      # the boot, not to the download or registration before it. No second
+      # attempt: a boot that fails with the runner still alive has not been
+      # observed, and a lost runner cannot be retried from inside the job.
+      - name: Boot the guest and verify it is WSL2
+        timeout-minutes: 10
         shell: wsl-bash {0}
         run: |
           set -euo pipefail
@@ -381,6 +395,28 @@ jobs:
               exit 1
               ;;
           esac
+      # Previously the action's `additional-packages`, run inside its single
+      # step. jq is NOT optional: the guest's native-prerequisites step parses
+      # the scope-computed package list with it, for every package, before any
+      # recipe that could bootstrap it has run. The retry loop keeps the
+      # tolerance for a flaky mirror that the action's second attempt used to
+      # provide for this phase.
+      - name: Install guest packages
+        timeout-minutes: 10
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          for attempt in 1 2 3; do
+            if apt-get update && apt-get install --yes --no-install-recommends \
+                ca-certificates curl git xz-utils jq; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying in 30s" >&2
+            sleep 30
+          done
+          echo "guest package installation failed three times" >&2
+          exit 1
       # The default wsl-bash user is root, and root ignores file permissions —
       # which silently inverts every permission-denial test fixture (a readonly
       # file that must fail validation validates; a copy rigged to fail

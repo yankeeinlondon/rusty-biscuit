@@ -67,6 +67,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   empty program frame. It can reproduce in isolation, so isolation does not
   discriminate; the tell is prompt text in the `plain:` block and no program
   output. Dismiss or configure the tool on the host; do not chase the diff.
+- **`tmux send-keys failed` on the first send of an L2 run, green when rerun
+  alone.** Another test run on this host (a second worktree's `just test-l2`
+  or pre-push hook; check `ps` for `biscuit-harness-broker`, `nextest`, or
+  `just ci-local`) spawned its own harness and its stale-resource reaper
+  killed this run's shared session, whose tag named the already-exited
+  broker. Fixed by tagging with the recipe's pid
+  (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
+  send error now carries tmux's own message and the live session list. If
+  it recurs, read that list before blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` spawns `defaults read
   com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,

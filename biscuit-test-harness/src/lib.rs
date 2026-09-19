@@ -655,6 +655,30 @@ pub(crate) fn current_process_id() -> u32 {
     std::process::id()
 }
 
+/// Names the process that owns the resources a spawn creates, for stamping
+/// into their tags in place of the spawning process's own pid.
+pub const OWNER_PID_ENV: &str = "BISCUIT_HARNESS_OWNER_PID";
+
+/// The pid a spawned pane, session, or window is tagged with.
+///
+/// Normally the spawning process. `biscuit-harness-broker` is the exception:
+/// it spawns the shared pane and exits, so a tag carrying its pid names a dead
+/// process from the moment tests start, and every reaper on the host — in this
+/// run, or in a concurrent run from another worktree — reads that as a leak
+/// and kills the pane the run is using. The `_test_l2` recipe therefore
+/// exports its own pid as [`OWNER_PID_ENV`], and the tag names the process
+/// that lives for the whole run. A value naming a dead process is ignored; it
+/// can only be stale.
+pub(crate) fn owner_process_id() -> u32 {
+    owner_pid_from(std::env::var(OWNER_PID_ENV).ok().as_deref(), process_is_alive)
+        .unwrap_or_else(current_process_id)
+}
+
+fn owner_pid_from(value: Option<&str>, alive: impl Fn(u32) -> bool) -> Option<u32> {
+    let pid: u32 = value?.trim().parse().ok()?;
+    alive(pid).then_some(pid)
+}
+
 pub(crate) fn process_is_alive(pid: u32) -> bool {
     if pid == current_process_id() {
         return true;
@@ -951,6 +975,19 @@ mod tests {
         // POSIX trick: a single quote inside single-quoted string is
         // closed, escaped, and reopened: `'\''`.
         assert_eq!(h.sent_string(), "MSG='it'\\''s fine' echo hi\n");
+    }
+
+    #[test]
+    fn owner_pid_is_taken_from_the_environment_only_when_that_process_is_alive() {
+        // The broker's own pid is dead by the time tests run; a live owner
+        // exported by the recipe is what keeps a concurrent run's reaper off
+        // the shared session.
+        assert_eq!(owner_pid_from(Some("4242"), |pid| pid == 4242), Some(4242));
+        assert_eq!(owner_pid_from(Some(" 4242\n"), |pid| pid == 4242), Some(4242));
+        assert_eq!(owner_pid_from(Some("4242"), |_| false), None);
+        assert_eq!(owner_pid_from(Some("not-a-pid"), |_| true), None);
+        assert_eq!(owner_pid_from(Some(""), |_| true), None);
+        assert_eq!(owner_pid_from(None, |_| true), None);
     }
 
     /// Confirms the `bash`/`sh` preference: on any developer host where
