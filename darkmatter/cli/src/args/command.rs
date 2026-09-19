@@ -214,11 +214,11 @@ pub enum Command {
         #[arg(long, value_name = "N")]
         remote_concurrency: Option<usize>,
 
-        /// Remote artifact TTL in seconds (default: use server cache headers)
+        /// Freshness lifetime in seconds for transport-cached remote bodies (default: server `max-age`); never makes a `no-store` response storable or a `no-cache` response fresh
         #[arg(long, value_name = "SECONDS")]
         remote_ttl: Option<u64>,
 
-        /// Force revalidation of cached remote artifacts
+        /// Revalidate every transport-cached remote body with a conditional GET, even when fresh
         #[arg(long)]
         remote_refresh: bool,
 
@@ -226,7 +226,13 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = RemoteFreshness::Fallback)]
         remote_freshness: RemoteFreshness,
 
-        /// Cache root for fetched remote URL bodies (composed output is never persisted)
+        /// Transport-artifact cache root: persists raw remote URL response bodies only
+        ///
+        /// Semantic results (composed documents, `::file` children, `::code` /
+        /// `::toc-linking` output) are never persisted. Nothing is created on
+        /// disk until a storable remote response is written. A
+        /// `Cache-Control: no-store` response is never written. A cache root
+        /// never authorizes a host; use `--allow-host`.
         #[arg(long, value_name = "DIR")]
         cache_root: Option<PathBuf>,
     },

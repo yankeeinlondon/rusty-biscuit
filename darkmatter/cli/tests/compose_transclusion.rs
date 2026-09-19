@@ -68,13 +68,13 @@ fn compose_shipped_transclusion_fixture_through_normal_cli_path() {
     fixture.write_file(
         "cwd/compose_child.md",
         include_str!(
-            "../../features/2026-07-15-performance-followup/benchmarks/fixtures/compose_child.md"
+            "../../benchmarks/fixtures/compose_child.md"
         ),
     );
     let document = fixture.write_file(
         "cwd/compose_schema_transclusion.md",
         include_str!(
-            "../../features/2026-07-15-performance-followup/benchmarks/fixtures/compose_schema_transclusion.md"
+            "../../benchmarks/fixtures/compose_schema_transclusion.md"
         ),
     );
 
