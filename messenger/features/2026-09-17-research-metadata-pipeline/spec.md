@@ -23,7 +23,7 @@ created: 2026-09-17
 updated: 2026-09-17
 area: messenger
 clarified: true
-review_iterations: 1
+review_iterations: 3
 reviewed: true
 review_note: "the clarification process served as a review"
 needs_rulings: false

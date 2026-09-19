@@ -28,9 +28,12 @@ human_review_items:
 reviewed_by: codex/default
 created: "2026-09-18T01:00:12-07:00"
 spec: 2026-09-17-research-metadata-pipeline/spec.md
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-09-17-research-metadata-pipeline/spec.md`"
 feature: 2026-09-17-research-metadata-pipeline/review-1.md
+next: 2026-09-17-research-metadata-pipeline/review-2.md
+log: messenger/features/2026-09-17-research-metadata-pipeline/implementation-log.md
+implemented_by: claude/opus
 ---
 
 # Review 1: Research Metadata Pipeline

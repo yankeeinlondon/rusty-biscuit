@@ -438,6 +438,8 @@ documentation:
     - messenger/docs/user-guide.md
 completed_phase: 8
 implemented: false
+implementation_1: "2026-09-18T01:45:22-07:00"
+implementation_2: "2026-09-18T09:01:12-07:00"
 ---
 
 # Implementation Log for 2026-09-17-research-metadata-pipeline (8 phases)
@@ -1790,3 +1792,121 @@ fleet prompt plus `lib/tests/fixtures/research/lifecycle/fleet/`. Script:
         - gates: messenger `just test` 668 passed / 2 skipped; `just lint` clean
 - work completed for 'An empty approver name satisfies the human-approval gate' at 02:03:25
 - starting the work on 'Impossible calendar dates are accepted as research evidence dates' at 02:03:25
+        - discovered (correction to the review's premise): platform documents are schema-validated by Darkmatter before the typed model runs, and its `date` type already refused `retrieved: 2026-09-31`; the paths that relied on `Date::parse` alone were `source-checks.json` `checked_on`, run/review/renewal records, `RunId::parse`, and the CLI `--today` (for example, `checked_on: 2026-09-31` passed the Reconcile stage)
+        - fix at the single parsing boundary in `messenger/lib/src/research/model/common.rs`: `Date::parse` now checks real month lengths through a new `days_in_month(year, month)` helper using the proleptic-Gregorian leap-year rule; `from_unix_days` and `plus_days` construct dates arithmetically and cannot produce impossible days; no date crate was added
+        - errors name the date: serde reports `invalid date \`X\`: expected a real YYYY-MM-DD calendar date`, and the CLI (`messenger/cli/src/research.rs`) exits 2
+        - doc drift fixed: the `Date::parse` doc claimed range checks "(not leap years)" and now states the real rule and that serde, `--today`, and run IDs all go through it
+        - tests (one shared table: Feb 29 in 2024/2000 valid; Feb 29 in 2026/1900, Feb 30/31, day 31 in Apr/Jun/Sep/Nov, day 0, month 0/13 invalid):
+                - `dates_parse_only_real_calendar_days` and `dates_deserialize_only_real_calendar_days` (unit, `common.rs`)
+                - `today_accepts_only_real_calendar_days` (real CLI, `research_cli.rs`)
+                - `an_impossible_evidence_date_cannot_qualify_an_unchanged_renewal` (`research_refresh.rs`): an impossible check date with an impossible `retrieved` fails Reconcile, and a valid check date with an impossible `retrieved` fails Validation; renewal is refused and nothing is published in both cases; the first case was confirmed to go red with the fix neutered
+        - follow-up (not fixed; outside this finding): `refresh_interval_days` has no schema maximum, so an interval of about 2.9 million days or more makes `plus_days` produce a five-digit year, which breaks `Date`'s fixed-width ordering; a schema maximum on the interval is the suggested guard
+        - GitNexus: `Date` and `parse` UNKNOWN; callers confirmed by text search (serde deserializer, CLI `parse_date`, `RunId::parse`, `generate.rs`, tests)
+        - gates: messenger `just test` 672 passed / 2 skipped; `just lint` clean
+- work completed for 'Impossible calendar dates are accepted as research evidence dates' at 02:12:21
+- starting the work on 'Corrupt active-run records are ignored when selecting new work' at 02:12:21
+        - design: selection fails closed per platform through a new `Skip::UnreadableRun { path, error }` rather than failing all selection, so `prepare --dry-run` still reports every platform and unaffected platforms can still be prepared; `path` is the repository-relative run directory with `/` separators, and an unreadable record outranks a readable open run
+                - `StateArea::list` now returns `(PlatformId, path, Result)`, taking the platform from the run's directory rather than the record, so a missing, truncated, or invalid `run.json` always blocks its platform; a record whose `platform_id`/`run_id` disagrees with its directory counts as corrupt
+                - human output reads `blocked, <error>; repair or remove <path>`; `prepare --json` also warns on stderr so `just research-refresh` (which counts `.runs`) cannot report "No platform is due"
+                - audit of `StateArea::list` consumers: `select` changed (it was the bug); CLI `runs` changed (error rows now carry their platform, so `runs --platform` no longer hides them); `cleanup::plan` unchanged (it already protected unreadable records)
+        - concurrency: `prepare` and `prepare --resume` hold `messenger/.research-state/runs/prepare.lock` from selection through run creation, reusing the crate's `PublicationLock` (`File::try_lock`: `flock` on Unix, `LockFileEx` on Windows) widened to `pub(crate)`; the OS releases it when the holder exits, so a crash cannot wedge a platform; a contending caller gets `RefreshError::PrepareBusy { path }` (exit 3)
+        - follow-up raised during review of the subagent's work: a failed run could be reopened with `prepare --resume` after a newer run had already been prepared, leaving two open runs; a new shared `select::blocking_runs(state, except)` now drives both selection and resume, and `resume` refuses under the lock with `RefreshError::OtherRunBlocks { run_id, path, blocker }` (exit 1)
+        - tests (each confirmed red with its fix removed):
+                - library: `an_unreadable_run_record_blocks_its_platform_and_names_its_path`, `concurrent_preparations_leave_exactly_one_open_run` (two threads behind a barrier), `a_held_prepare_lock_refuses_preparation_and_a_released_one_never_lingers`, `resuming_is_refused_while_another_run_for_the_platform_is_open_or_unreadable`
+                - real CLI: `a_corrupt_active_run_record_blocks_prepare_and_names_its_path`, `prepare_is_refused_while_another_process_holds_the_prepare_lock` (deterministic: the test holds the real lock file), `resume_is_refused_while_another_run_for_the_platform_is_open`
+        - docs updated: `list`, `select`, and `state` module docs; `PublicationLock` doc; `prepare`/`resume` `## Errors`; CLI README; user guide; messenger skill `research-contract.md`
+        - GitNexus: `StateArea::list` **HIGH** before editing (3 direct callers, all audited above); `select`, `runs`, `cleanup::plan`, `try_acquire`, `load` LOW; `prepare`, `resume`, `Skip`, `render_selections` UNKNOWN, with callers confirmed by text search to be only the CLI and tests; `detect-changes` reports critical because it links `PublicationLock` to unrelated flows, apparently name matching, since only that type's visibility changed
+        - cross-OS: `just cross-check messenger --os windows` failed before building (`No space left on device` on build-win's `W:` drive; nothing was deleted on the shared host); `--os linux` waited on a build-linux lock held since 2026-09-14 by `nightly-reward-spike` (branch `feat-nightly-perf`), left for its owner; `--os wsl` skipped because it shares the full volume; the lock primitive already has a unit test on `windows-latest` in CI, but the new cross-process lock test has no Windows evidence yet
+        - discovered: an `active` run cannot be rejected (`WrongStatus`), so freeing a platform held by a prepared-but-unlaunched run requires launching it, failing it with `check-run`, then rejecting it; this may deserve a user-guide note or a spec decision
+        - discovered: an external process committed the worktree mid-task (`feef52d55`, `94a94ee6f`, `7b51ee56c`, in Ken's name, not by this session); `feef52d55` captured part of this finding's in-progress changes (`state.rs`, `mod.rs`, CLI, docs) without `select.rs`, `prepare.rs`, `cleanup.rs`, or `fsutil.rs`, so that commit does not compile on its own; the worktree was restored to a complete, green state and the rest is uncommitted
+        - gates: messenger `just test` 679 passed / 2 skipped; `just lint` clean
+- work completed for 'Corrupt active-run records are ignored when selecting new work' at 02:44:42
+- starting the work on 'Prepared runs embed absolute paths and interpolate the repository root into a shell command' at 02:44:42
+        - Claudine execution discovered: `shell:` steps run verbatim through `sh -c` (Unix) or `cmd /D /C` with a raw tail (Windows) after template expansion; `tokenize_words_strict` feeds only preflight approval, not execution; there is no argument-vector form and no per-step working directory; a step runs in Claudine's working directory, which a live run switches to the Git root before agent steps
+        - design (the root never enters the command): validation steps are now `messenger research check-run <run_id> --through <stage> --root .`, whose tail holds only `[A-Za-z0-9 .-]` and reads the same in `sh`, `cmd`, PowerShell, and Claudine's tokenizer; `yaml_single` and the backslash swap were deleted
+        - pass prompts now build every path from `messenger/.research-state/runs/<platform>/<run_id>/…` via a new `run_dir()` and state that paths are relative to the repository root; `Path::display` of the state directory is gone
+        - follow-up raised during review of the subagent's work: relative prompts would be wrong for an explicit `--root` below the Git top level (a regression from this fix), so `prepare` and `prepare --resume` now refuse such a root with `RefreshError::NotRepositoryTopLevel { root, top_level }` (exit 2) before writing anything; a root holding its own `.git` entry counts as top level, and otherwise paths are compared after `fs::canonicalize` (handles macOS `/private/var` and Windows `\\?\\` prefixes); non-Git roots stay allowed
+                - reuses `sniff::filesystem::git::api::repo_root` (the call `resolve_root` already makes); the library's `research` feature now enables its existing optional `sniff` dependency, and `docs/dependencies.md` was updated
+        - tests (each confirmed red with its fix removed):
+                - `prepared_runs_name_no_host_path_and_their_checks_resolve_any_root` (real CLI): roots with a space, `'`, `"`, `$HOME`, backticks, `%PATH%`, non-ASCII, a newline, and all combined (`"` and newline are skipped on Windows, which forbids them in file names); asserts no file in the run directory contains the host prefix, asserts the exact step text, and executes the step through `sh -c` / `cmd /D /C` to prove `.` resolves to the original root
+                - `prepare_refuses_a_root_below_the_git_top_level_and_accepts_the_top_level_or_no_repository` and `resume_refuses_a_root_that_became_a_subdirectory_of_a_git_work_tree` (real CLI)
+        - drift detected and resolved: the Phase 7 claim "No host paths appear in any input" was inaccurate until this change; it now holds and is covered by the new test
+        - docs updated: `prepare.rs` docs and `## Errors`, CLI README, user guide, CLI `--help` exit-status text, messenger skill `research-contract.md`, `docs/dependencies.md`
+        - discovered: `check-run` inside the sequence always uses the real UTC date because `--today` has no environment fallback
+        - Windows: `cargo check -p messenger-cli --tests --target x86_64-pc-windows-gnu` passes (compile evidence only); cross-check rigs were unavailable (see the previous finding), so `windows-latest` CI is the runtime proof
+        - GitNexus: `write_sequence`, `write_inputs`, `prepared`, `prepare`, `resume` UNKNOWN (bare-name lookups matched unrelated `biscuit-terminal` symbols); callers confirmed by text search to be private to `prepare.rs`, the CLI, and tests; `refusal` LOW
+        - gates: messenger `just test` 682 passed / 2 skipped; `just lint` clean
+- work completed for 'Prepared runs embed absolute paths and interpolate the repository root into a shell command' at 03:02:08
+- orchestrator verification at 03:02:08: messenger `just test` 682 passed / 2 skipped (81 slow), `just lint` clean for `messenger` and `messenger-cli`
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1h 17m. During this implementation all 5 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 4 were fixed, 1 was deferred (see reasons below):
+
+- **deferred:** 'The accepted five-platform baseline and its generated publications do not exist'
+        - the live three-pass research for Discord, Slack, Telegram, WhatsApp, and Signal, the independent evidence review, and the initial publication all depend on decisions only the maintainer can make: an AI research agent/model, per-platform elapsed-time and invocation limits (the spec sets no defaults), and a named human approver; this session is non-interactive, and inventing those values or hand-writing platform documents would bypass the budget, the three-pass workflow, and the approval gate the spec requires
+        - the review's `human_review_items` entry lists exactly what the maintainer must supply
+        - the part that did not need a human, the passive Level 1 guard, was implemented: once `messenger/docs/research/publication.json` exists, the corpus suite fails unless every active shipped document is accepted-scope valid and the generated snapshot is drift-free
+- this deferral is not a performance-measurement deferral, so `deferred_perf_measurement` is not set
+- follow-ups discovered during this cycle (not review findings):
+        - `refresh_interval_days` needs a schema maximum to stop `plus_days` from producing five-digit years
+        - an `active` run cannot be rejected, so freeing a platform held by a prepared-but-unlaunched run needs a documented path or a spec decision
+        - `research_publication.rs` and `research_refresh.rs` keep diverging `SHIPPED` lists that could share a test helper
+        - the new cross-process prepare-lock and hostile-root tests have compile evidence for Windows but no Windows runtime evidence yet; build-win's disk is full and build-linux holds a cross-check lock from 2026-09-14 (`nightly-reward-spike`)
+- an external process committed part of this cycle mid-run (`7b51ee56c`, `feef52d55`, `94a94ee6f`); `feef52d55` does not compile on its own because it captured part of finding 4; the remaining changes are uncommitted in the worktree
+
+The files changed in this cycle, in addition to the log:
+
+- `messenger/lib/src/research/model/common.rs`
+- `messenger/lib/src/research/refresh/{input.rs (new), mod.rs, promote.rs, review.rs, state.rs, select.rs, prepare.rs, cleanup.rs}`
+- `messenger/lib/src/research/publish/fsutil.rs`, `messenger/lib/Cargo.toml`
+- `messenger/cli/src/{research.rs, research_lifecycle.rs}`
+- `messenger/lib/tests/{research_corpus.rs, research_refresh.rs}`, `messenger/cli/tests/{research_cli.rs, research_lifecycle_cli.rs}`
+- `messenger/cli/README.md`, `messenger/docs/user-guide.md`, `.claude/skills/messenger/research-contract.md`, `docs/dependencies.md`
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-18T09:01:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/messenger/features/2026-09-17-research-metadata-pipeline/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'The accepted five-platform baseline and its generated publications still do not exist' at 09:01:30
+        - the blockers recorded in review 1 and review 2 are unchanged: no AI research agent/model, no per-platform elapsed-time and launch limits, and no named human approver were supplied with this iteration's prompt, and this session is non-interactive
+        - running the three research passes with invented budgets, or hand-writing platform documents and an approval record, would bypass the budget, three-pass, and approval gates the spec requires, so no attempt was made
+        - the review marks this finding as requiring a human decision (`human_review: true`); its `human_review_items` entry lists what the maintainer must supply
+        - deferred
+- work completed for 'The accepted five-platform baseline and its generated publications still do not exist' at 09:01:30
+- starting the work on 'Unbounded refresh intervals can produce invalid fixed-width dates' at 09:01:30
+        - the spec states no interval semantics beyond "start with a configurable 30-day refresh interval", so the bound is a new, chosen ceiling: `MAX_REFRESH_INTERVAL_DAYS = 3660` (ten 366-day years) in `model/roster.rs`; a decade is far beyond any useful research cadence, and it keeps every `last_updated` through 9989-12-23 representable (9989-12-23 + 3660 = 9999-12-31; the review's "~9989" estimate was eight days generous, caught by a unit test)
+        - `Date::plus_days` is replaced by `Date::checked_plus_days(days) -> Option<Date>`, `None` when the result passes 9999-12-31, so an out-of-range `Date` can no longer be constructed; `Date::from_unix_days` is unchanged (it takes the host clock, not authored input)
+        - schema: `refresh_interval_days` gains `max(3660)` in `docs/platforms.schema.yaml` (roster default) and in `_types.yaml` `RosterPlatform` (per-platform override)
+                - the `_types.yaml` edit changes the document-contract fingerprint (`xxh64:dcdb3d338874ed6d` → `xxh64:d766403489d161d9`); the two fixtures pinning it (`contract/overrides-valid.yaml`, `negative/semantic/sr-override--expired-override.yaml`) were updated to the value computed by `canonical::schema_fingerprint`; there is no published baseline yet, so no accepted document is forced to `schema_changed`, and there is no `just research-*` recipe that regenerates fixtures (none of the recipes produce shipped generated artifacts today)
+        - semantic boundary uses the existing SR-ROSTER rule, no new rule ID: `check_roster` rejects a default or per-platform interval outside `1..=3660` (reachable only for a roster built in code, since the schema rejects it first), and `roster_coverage` reports `/last_updated` when `last_updated` plus the effective interval passes 9999-12-31 (covers late dates the interval ceiling alone cannot protect)
+        - callers: `refresh::select` skips the `Expired`/`Current` computation when the date overflows (the same validation pass already marks the platform `schema_invalid`); `project::project` now returns `Result<Catalog, Vec<Diagnostic>>` and emits the same SR-ROSTER diagnostic instead of a five-digit year, and `Fleet::snapshot` maps it to `GenerateError::Refused` (unreachable from a clean fleet, but not a panic)
+        - GitNexus impact: `plus_days` UNKNOWN (no resolved callers); grep confirmed the only callers were `select.rs` and `project.rs` plus unit tests; `check_roster` and `roster_coverage` report CRITICAL, but the processes listed (`tools/test-audit`, `homelab`) are index noise, and grep shows every real consumer inside the messenger `research` feature; `project_platform` resolved to a wrong symbol id (stale index); no crate outside `messenger/` uses `research::project`, `plus_days`, or the new constant; `detect-changes --scope all` = medium, and its two affected flows belong to other in-progress working-tree changes, not this one
+        - tests added: `project::tests::checked_plus_days_stops_at_the_last_four_digit_year`, `project::tests::the_largest_interval_fits_every_last_updated_through_9989_12_23` (the old `plus_days_crosses_months_years_and_leap_days` was renamed `checked_plus_days_…`), `research_validation::refresh_intervals_past_the_ceiling_are_roster_findings`, `research_validation::a_refresh_date_past_9999_is_a_finding_not_a_catalog_date` (accepted 9989-12-23 projects `refresh_due: 9999-12-31`; 9989-12-24 is an SR-ROSTER finding and `project` refuses it), `research_refresh::a_refresh_date_past_9999_makes_the_document_invalid_not_expired`
+        - fixtures added: `contract/roster-refresh-interval-max.yaml` (3660 accepted, schema and SR-ROSTER), `negative/schema/roster-refresh-interval-above-max.yaml` and `negative/schema/roster-platform-refresh-interval-above-max.yaml` (3661 rejected), `negative/semantic/sr-roster--refresh-due-after-9999.md`; `positive_roster_overrides_and_mappings_fixtures_are_clean` now also checks the new contract roster
+        - red proof (each neutered in turn, then restored with a plain write for a fresh mtime): no 9999 guard in `checked_plus_days` → 5 tests red; no interval range check → the typed-interval test red; no `/last_updated` rule → the catalog, selection, and `identity_rules_reject_their_fixtures` tests red; no schema `max(3660)` → `schema_negative_fixtures_fail_at_their_declared_problem` red
+        - docs updated: `_rules.md` SR-ROSTER row, the `platforms.schema.yaml` header and field comments, `lib/tests/fixtures/research/README.md`, `.claude/skills/messenger/research-contract.md`, and the `Date::parse`, `project`, and `Fleet::snapshot` docs; the messenger README, CLI README, and user guide never describe `refresh_interval_days` or its range, so they are unchanged
+        - portability: pure date arithmetic and YAML, with no OS-specific code
+        - gates (from `messenger/`): `just lint` passed (clippy + fmt, `desktop,research` features); `just test` passed, with 687 tests run, 687 passed, and 2 skipped
+- work completed for 'Unbounded refresh intervals can produce invalid fixed-width dates' at 09:15:51
+- orchestrator verification at 09:15:51: messenger `just test` 687 passed / 2 skipped, `just lint` clean for `messenger` and `messenger-cli`; the change is pure date arithmetic and schema text, so no cross-OS rig run was needed
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 15m. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 1 was deferred (see reasons below):
+
+- **deferred:** 'The accepted five-platform baseline and its generated publications still do not exist'
+        - the three research passes, the independent evidence review, and the initial publication require decisions only the maintainer can make: an AI research agent/model, per-platform elapsed-time and launch limits (the spec sets no defaults), and a named human approver
+        - none of these was supplied for this iteration, and this session is non-interactive; inventing them or hand-writing platform documents would bypass the budget, three-pass, and approval gates the spec requires
+        - the review's `human_review_items` entry lists exactly what the maintainer must supply
+- this deferral is not a performance-measurement deferral, so `deferred_perf_measurement` is not set
+
+The files changed in this cycle, in addition to the log and review file:
+
+- `messenger/lib/src/research/{model/common.rs, model/roster.rs, project.rs, generate.rs, refresh/select.rs, validate/identity.rs, validate/mod.rs}`
+- `messenger/docs/platforms.schema.yaml`, `messenger/docs/research/platforms/{_types.yaml, _rules.md}`
+- `messenger/lib/tests/{research_validation.rs, research_refresh.rs, research_corpus.rs}`
+- `messenger/lib/tests/fixtures/research/{README.md, contract/overrides-valid.yaml, contract/roster-refresh-interval-max.yaml (new), negative/schema/roster-refresh-interval-above-max.yaml (new), negative/schema/roster-platform-refresh-interval-above-max.yaml (new), negative/semantic/sr-roster--refresh-due-after-9999.md (new), negative/semantic/sr-override--expired-override.yaml}`
+- `.claude/skills/messenger/research-contract.md`
