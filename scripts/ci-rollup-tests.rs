@@ -1377,6 +1377,14 @@ fn the_checked_in_environments_table_parses_and_is_well_governed() {
     let text = fs::read_to_string(&path).expect("environments.json is readable");
     let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
 
+    // The version the audit refuses is the one thing `verdict` checks before
+    // it reads a single cell; run 35405580517 failed fourteen area audits on
+    // a table the planner had already moved to 3.
+    assert_eq!(
+        doc.schema_version, ENVIRONMENTS_SCHEMA_VERSION,
+        "the shipped environments table and this tool must agree on the schema version"
+    );
+
     assert_eq!(doc.environments.len(), 4);
     let names: BTreeSet<&str> = doc
         .environments

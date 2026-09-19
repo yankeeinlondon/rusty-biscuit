@@ -79,8 +79,11 @@ const PLAN_SCHEMA_VERSION: u32 = 4;
 
 /// Version of `.github/ci/environments.json`
 /// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2
-/// added the per-environment build contract.
-const ENVIRONMENTS_SCHEMA_VERSION: u32 = 2;
+/// added the per-environment build contract; version 3 the `events` that
+/// schedule each environment, which this tool does not read. Every area's
+/// coverage audit refused the shipped table for two runs when the planner
+/// moved to 3 and this constant did not.
+const ENVIRONMENTS_SCHEMA_VERSION: u32 = 3;
 
 /// How the report spells a measurement that does not exist. Shares its prefix
 /// with the plan's `not recorded (v1 receipt)` so a reader learns one phrase,
