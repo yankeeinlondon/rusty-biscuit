@@ -1,4 +1,5 @@
 ---
+implementation_1: "2026-09-18T00:46:57-07:00"
 fix: 2026-08-02-silent-empty-ctx-values
 plan: plan.md
 source_files_during_phase_1:
@@ -616,3 +617,66 @@ No compose evaluation reads `ctx.*` through the unchecked `get` anymore. The rem
 - `just test-l2`: not run. No terminal or browser surface changed.
 - Cross-OS: not run remotely. The new tests use temp dirs, supplied evidence (no host discovery), and a relative `Path::new(".")` for DateTime-only standalone evaluation, with no path-text assertions. CI covers Linux, Windows, and WSL.
 - No pre-existing failures were encountered.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-18T00:46:57-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/darkmatter/fixes/2026-08-02-silent-empty-ctx-values/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Persistent cache hits discard child partial-capture diagnostics' at 00:47:40
+        - discovered: the code path the finding names no longer exists. Commit `8fc370dae` (2026-09-17 00:44, after this review was written at 2026-09-16 22:26) removed semantic-result persistence; `RunLocalCache` (`lib/src/markdown/compose/cache/runtime.rs`) is now memory-only and the fresh/stale persistent read paths that built `ComposeResult` with `ComposeReport::new()` were deleted. A cache root now persists no composed child, so a warm run recomposes and re-derives the child's warnings.
+        - discovered: the one remaining cache that can serve a child without recomposing it is the run-local single-flight slot. It stores the child's full `ComposeResult` (including `report`), and `render_markdown_transclusion` merges `cached.report` into the parent on a hit as well as on a miss (`transclusion/engine.rs`, `report.merge(cached.report.clone())`), so a run-local hit already replays the child's `PartialRuntimeCapture` warnings without duplicating them relative to an uncached run.
+        - design decision: no production code change. Persisting the report, or regenerating warnings on a hit, would re-introduce the persistence the content-policy fix deleted; the cleanest design is the current one (memory-only results that carry their report). The finding is closed by regression tests that pin the contract on both cache surfaces. No serialization format changed, so no version bump.
+        - tests added (`lib/tests/request_context_epoch.rs`): `persistent_cache::a_child_only_partial_capture_warns_identically_on_cold_and_warm_runs` (root names no discovery-backed group; child's first `ctx.branch` read is captured from unavailable evidence via a new `UnavailableEvidence` extension; cold and warm runs against one cache root report the same `Partial runtime capture for git` warnings, count and content, and persist nothing) and `a_run_local_hit_replays_a_child_only_partial_capture_warning` (same child transcluded twice; asserts a run-local hit occurred and the warnings equal a `CacheAccessMode::Off` run).
+        - test strengthened (`lib/tests/missing_ctx_capture.rs`): `a_captured_group_without_evidence_renders_its_typed_projection` now asserts the report's `Partial runtime capture ...` warnings equal the context's `PartialRuntimeCapture` diagnostics, once each and in order.
+        - mutation check: replacing `report.merge(cached.report.clone())` with a discard made both new cache tests fail; the source was restored byte-for-byte (`cmp` against a backup) and re-verified.
+        - docs: `verification-matrix.md` row 4 now names what is actually asserted and lists the two cache tests; a Review-1 entry was added under "Mutation evidence". No `///`/`//!`, skill, or `darkmatter/docs` contract changed (behavior unchanged). Frontmatter left alone (no per-review-cycle pattern).
+        - gates: targeted `request_context_epoch` + `missing_ctx_capture` 26/26 passed. `just test` (darkmatter, `--no-fail-fast`): 8099 passed, 14 skipped, 9 timed out; the 9 are `markdown::compose::tests::provider_network::*` wiremock tests (an earlier run timed out `remote_fetch::persistent_cache_tests::*` instead) under host load average ~20-24 from other sessions. All 55 `provider_network` + `persistent_cache_tests` tests passed on rerun at `-j 2`. None touch files changed here. `just lint`: green, including the zed-dmls wasm32-wasip2 check.
+        - impact: no library function was edited, so no GitNexus pre-edit impact applies; Claudine not re-tested (no public type changed).
+        - orchestrator verification: `git log` confirms `8fc370dae` (2026-09-17T00:44) removed the persistent compose-result read paths after the review was written (2026-09-16T22:26); the remaining `ComposeReport::new()` sites in `cache/runtime.rs` are all inside unit-test fixtures, not cache-hit paths
+        - resolution: fixed by tests only — the defect's code path no longer exists, and the new cold/warm and run-local-hit regressions pin warning preservation so it cannot reappear
+- work completed for 'Persistent cache hits discard child partial-capture diagnostics' at 01:06:30
+- starting the work on 'Body failures omit the available authored location' at 01:06:30
+        - impact (GitNexus, upstream): `interpolate_text` HIGH (47 impacted, 28 direct: frontmatter interpolation, frontmatter shell expansion, directive targets, body stage); `interpolation_error` MEDIUM (48, 2 direct); `rewrite_directive_targets` LOW (1: body `run_stage`); `interpolation_block` LOW (4); `with_on_disk_source` and `run_inline_pre_operation` UNKNOWN (text search: 3 and 1 callers, all in `compose/pipeline/`). Mitigation for the HIGH risk: `interpolate_text` keeps its signature and behavior byte-for-byte as a thin wrapper; only the body stage calls the new located entry point.
+        - discovered: body offsets from the engine are in the frame of the text it scanned, which is NOT the file: (a) the body is the parsed remainder after frontmatter (lines rejoined with `\n`); (b) text replacement, page blocks, and directive-target rewriting can edit it before interpolation runs; (c) rescans after depth 0 see replacement output; (d) `full_source_context_for_errors` reconstructs text from the current (possibly edited) body, so its line numbers can drift from disk. `Markdown` already retains the exact loaded text (`LoadedSource::text`), which is the authoritative on-disk frame.
+        - design decision: the engine reports the failing expression's byte span only for depth-0 (authored-candidate) expressions; rescans report none. At the body-stage boundary the span is accepted as authored only when the scanned text up to the end of the expression is byte-identical (after line-ending normalization) to the loaded document's body prefix; the line is then the frontmatter-aware file line from `extract_frontmatter_block`. Anything unproven keeps the existing file-identity-only presentation (omit, never guess). The located form is a new `SourceRef::OnDiskLine { context, line }` whose context content is the loaded text, so the rendered excerpt and line agree with disk. `MarkdownError::Interpolation`'s shape is unchanged, so Claudine constructors are untouched.
+        - files changed: `lib/src/markdown/compose/interpolation/rewrite.rs` (new crate-private `LocatedInterpolationError` + `interpolate_text_located`; `interpolate_text` is now a wrapper with identical behavior), `interpolation/mod.rs` (re-exports), `compose/directive_targets.rs` (`rewrite_directive_targets` locates a whole-value `::file`/`::code`/`::url` target failure at its span), `compose/inline/interpolation.rs` (`anchor_authored_failure` + `authored_line` proof), `lib/src/markdown/mod.rs` (`Markdown::loaded_source_context_for_errors`), `lib/src/markdown/types.rs` (public `SourceRef::OnDiskLine { context, line }`, `MarkdownError::with_authored_line`, docs), `lib/src/markdown/errors/blocks.rs` (renders the file link, the line, and a `>`-marked numbered excerpt for `OnDiskLine` in the file-reference and missing-context blocks)
+        - Claudine: no Claudine source constructs or matches `SourceRef` exhaustively (only `SourceRef::Effective` constructions in tests), and `MarkdownError::Interpolation`'s fields are unchanged, so no Claudine edit was needed
+        - tests added: `missing_ctx_capture::a_body_failure_reports_its_authored_file_line_after_frontmatter` (CRLF, four frontmatter lines, earlier successful expressions; asserts `OnDiskLine` file + line 9, and rendered file name, `Expression at line: 9`, and the `>`-marked excerpt line), `…::a_transcluded_child_failure_reports_the_child_file_and_line` (child file, child line 6), `…::a_generated_expression_is_not_reported_at_an_authored_line` (a `{{{ … }}}`-literal frontmatter value substituted into the body and failing on rescan stays file-only `OnDisk`, key `None`, no rendered line), `…::an_expression_after_text_an_earlier_stage_removed_is_not_given_a_line` (a removed page block before the expression: file-only, not the drifted line); unit: `rewrite::tests::located_failure_spans_the_authored_expression`, `…::located_failure_from_replacement_output_has_no_span`, `inline::interpolation::tests::authored_line_*` (4). Two existing tests now assert `OnDiskLine` and the line.
+        - mutation checks: replacing the depth-0 guard with an unconditional span failed `located_failure_from_replacement_output_has_no_span`; removing the prefix proof failed `authored_line_rejects_a_rewritten_prefix` and `…_a_different_expression_at_the_same_offset`. Both sources restored byte-for-byte (`cmp`).
+        - docs: `error-taxonomy.md` (Review 1 bullet on `OnDiskLine`), `verification-matrix.md` row 1, `.claude/skills/darkmatter/errors.md` (line-number frame trap: `full_source_context_for_errors` vs loaded text)
+        - gate: `just test --no-fail-fast`: 8117 passed, 14 skipped, 1 timed out (`persistent_cache_disabled::a_warm_cache_root_never_replays_composed_local_output`, load average ~35). A first fail-fast run had instead timed out 10 `remote_fetch::persistent_cache_tests::*`. Rerun at `-j 2` of that binary plus every `persistent_cache_tests`/`provider_network` test: 60/60 passed.
+        - first `just lint`: clippy `result_large_err` on the new error pair (fixed by boxing its `MarkdownError`) and two `unnecessary_lazy_evaluations` (`then_some`)
+        - gates after the clippy fixes: darkmatter `just lint` green (clippy + zed-dmls wasm32-wasip2 check); targeted rerun of `missing_ctx_capture` plus every interpolation/directive-target/`interpolation_block` test: 411/411 passed
+        - Claudine (public `SourceRef` gained a variant): `just lint` green. `just test --no-fail-fast`: 7031 passed, 9 skipped, 5 failed. None is caused by this change: `shipped_prompt_contract::*` (2) and `shipped_prompt_route_drift::*` (1) fail on the uncommitted `prompts/` edits from other work (e.g. an untracked `prompts/_add/add-expressions.md` whose `description` contains `{{ … }}`), and `composition::schema::tests::shipped_implement_plan_*` (2) fail with `LifecycleObjectDataThroughInterpolationPositional` on the modified `prompts/_implement/implement-plan.md`. No Claudine test references the rendered missing-context block.
+        - GitNexus `detect-changes --scope all`: reports `critical`, but the dirty tree holds 514 changed files from other sessions and the CLI summary is truncated, so it is not a clean check for this change alone
+        - deferred: none. CLI process tests were not added; the rendered block is the same `status_block` the CLI prints, and it is asserted at the library boundary
+- work completed for 'Body failures omit the available authored location' at 02:24:37
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1h 38m. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- 'Persistent cache hits discard child partial-capture diagnostics' was closed with regression tests only: the persistent compose-result read path it named was removed by `8fc370dae` after the review was written, and the remaining run-local cache already replays the child report
+- 'Body failures omit the available authored location' was fixed in the library: body failures now carry a proven authored line (`SourceRef::OnDiskLine`) and fall back to file-only when the line cannot be proven
+- caveats for the reviewer:
+        - under host load (load average 20–35), `just test` had wiremock timeouts in `provider_network::*`, `remote_fetch::persistent_cache_tests::*`, and one `persistent_cache_disabled` test; all passed when rerun at `-j 2`
+        - Claudine `just test` has 5 failures from other sessions' uncommitted `prompts/` edits (`shipped_prompt_contract::*`, `shipped_implement_plan_*`), which this change did not cause; Claudine `just lint` is green
+        - no cross-OS rig run: the changes are line-ending-normalized (a CRLF case is tested) and use temp-dir fixtures without host discovery, so CI covers Linux, Windows, and WSL
+
+The files changed during this cycle are:
+
+- `darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs`
+- `darkmatter/lib/src/markdown/compose/interpolation/mod.rs`
+- `darkmatter/lib/src/markdown/compose/directive_targets.rs`
+- `darkmatter/lib/src/markdown/compose/inline/interpolation.rs`
+- `darkmatter/lib/src/markdown/mod.rs`
+- `darkmatter/lib/src/markdown/types.rs`
+- `darkmatter/lib/src/markdown/errors/blocks.rs`
+- `darkmatter/lib/tests/missing_ctx_capture.rs`
+- `darkmatter/lib/tests/request_context_epoch.rs`
+- `darkmatter/fixes/2026-08-02-silent-empty-ctx-values/error-taxonomy.md`
+- `darkmatter/fixes/2026-08-02-silent-empty-ctx-values/verification-matrix.md`
+- `.claude/skills/darkmatter/errors.md`

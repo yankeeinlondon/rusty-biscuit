@@ -10,7 +10,10 @@ human_review: false
 reviewed_by: codex/default
 created: "2026-09-16T22:26:04-07:00"
 spec: 2026-08-02-silent-empty-ctx-values/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+next: 2026-08-02-silent-empty-ctx-values/review-2.md
+log: darkmatter/fixes/2026-08-02-silent-empty-ctx-values/implementation-log.md
 description: "A **fix** review of `2026-08-02-silent-empty-ctx-values/spec.md`"
 fix: 2026-08-02-silent-empty-ctx-values/review-1.md
 ---

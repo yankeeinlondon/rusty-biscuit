@@ -144,3 +144,13 @@ cannot reach it, so the invariant test is a crate-internal L1 test.
   a file locus. `interpolation_block` renders a dedicated
   "runtime context not captured" or "runtime context projection invariant"
   block with a "Defined in:" link.
+- Review 1: a body failure (body `{{ … }}` or a whole-value `::file`/`::code`/
+  `::url` target) whose expression is proven authored carries
+  `SourceRef::OnDiskLine { context, line }` instead: `context.content` is the
+  loaded file text and `line` is its one-based file line, frontmatter
+  included. The engine reports a span only for first-pass expressions; the
+  body stage accepts it only when the scanned text through the expression is
+  verbatim the loaded body prefix. A rescan-generated expression, or one after
+  text an earlier stage rewrote, keeps file-only `SourceRef::OnDisk`. The block
+  adds the line and a numbered excerpt with the `>` marker on it.
+  `MarkdownError::Interpolation`'s fields are unchanged.

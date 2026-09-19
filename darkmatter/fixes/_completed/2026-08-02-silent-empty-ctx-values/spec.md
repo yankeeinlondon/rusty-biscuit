@@ -9,7 +9,7 @@ reviewed_by: codex/default
 reviewed_on: 2026-09-16
 implemented: true
 implemented_by: claude/default
-review_iterations: 1
+review_iterations: 2
 ---
 
 # A missing runtime value must not render as nothing
