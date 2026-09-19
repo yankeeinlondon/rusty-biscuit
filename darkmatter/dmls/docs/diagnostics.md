@@ -72,6 +72,25 @@ Every diagnostic carries a stable **`source`** (a namespace) and **`code`**
 suppression config on them, so they do not get renamed. They are organized by
 feature layer.
 
+### `dm.*` registry rules
+
+- **Ownership.** `dm.*` is Darkmatter's product diagnostic namespace, not a DMLS
+  one. A code names a *condition*, and every surface that detects that
+  condition — the editor, `md compose` warnings — reports it under the same
+  string. [`codes.rs`](../src/diagnostics/codes.rs) is the registry, and this
+  page documents every code.
+- **One condition, one code.** Never mint a second code for a condition another
+  surface already reports, and never reuse a code for a different condition.
+- **Severity is per surface.** Each surface picks the severity that fits its
+  moment, but the same condition should not contradict itself without reason.
+  `dm.expression.unknown_identifier` is a **Warning** both here and in
+  `md compose`. `dm.expression.malformed` is a Warning squiggle while you type,
+  while compose fails outright on the same expression.
+- **Adding a code.** Add a documented constant to `codes.rs` and a row to the
+  layer table below. A compose-side emitter declares the same string on
+  `ComposeWarning` (as `UNKNOWN_IDENTIFIER_CODE` does). There is no shared
+  cross-crate constant module until a second shared code exists.
+
 ### Layer 0 — Markdown links (`source: darkmatter.links`)
 
 | Code | Meaning |
@@ -140,7 +159,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
-| `dm.expression.unknown_identifier` | An identifier naming no frontmatter key, schema-declared property, `ctx.*`, `env.*`, or function. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter. Content inside a `{{{ … }}}` literal is inert and never diagnosed.) |
+| `dm.expression.unknown_identifier` | **Warning**, matching `md compose`. An identifier, in any operand position and ranged at itself, whose root names no frontmatter key, schema-declared property, reserved root (`ctx`, `env`, `doc`, `current`, `null`, …), runtime-context name, or function. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
 

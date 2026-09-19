@@ -12,10 +12,12 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor, ParseError,
-    SpannedExpr, SpannedExprKind, parse_condition_spanned, parse_spanned,
+    BinaryOp, expression_function_descriptors, ExpressionFinder, ExpressionFunctionDescriptor,
+    ParseError, SpannedExpr, SpannedExprKind, identifier_prefix_start, is_statically_known_root,
+    parse_condition_spanned, parse_spanned, static_variable_reads,
 };
 use darkmatter::markdown::span::SourceSpan;
+use serde::{Deserialize, Serialize};
 
 /// One `{{{ … }}}` interpolation literal with a document-relative span.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,11 +247,7 @@ pub fn completion_partial(text: &str, offset: usize) -> Option<(usize, &str)> {
     if before[open..].contains("}}") {
         return None;
     }
-    let token_start = before
-        .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
-        .map(|index| index + 1)
-        .unwrap_or(0)
-        .max(open + 2);
+    let token_start = identifier_prefix_start(before).max(open + 2);
     Some((token_start, &text[token_start..offset]))
 }
 
@@ -581,19 +579,21 @@ fn hover_markdown_from(
 }
 
 /// Whether a bare identifier `name` names nothing DMLS can resolve — no
-/// frontmatter key, schema property, `ctx.*`/`env.*`/`doc.*` namespace, or
-/// expression function. The single authority for the unknown-root check so the
-/// body-interpolation and frontmatter-expression diagnostics agree.
+/// frontmatter key, schema property, reserved root, bare runtime-context name,
+/// or expression function. The single authority for the unknown-root check so
+/// the body-interpolation and frontmatter-expression diagnostics agree.
 ///
-/// Namespaced roots (`ctx.*`, `env.*`, `doc.*`) and any dotted path are always
-/// treated as known here; the caller supplies frontmatter-key and
-/// schema-property membership.
+/// Reserved roots (`ctx`, `env`, `doc`, `current`, `current_env`, `null`) and
+/// bare runtime-context names come from the library's
+/// [`is_statically_known_root`], so the editor never flags a root the compose
+/// runtime knows. Any dotted path is treated as known; callers pass a root.
+/// The caller supplies frontmatter-key and schema-property membership.
 pub fn is_unknown_root(
     name: &str,
     is_frontmatter_key: impl Fn(&str) -> bool,
     is_schema_property: impl Fn(&str) -> bool,
 ) -> bool {
-    if matches!(name, "ctx" | "env" | "doc") || name.contains('.') {
+    if is_statically_known_root(name) || name.contains('.') {
         return false;
     }
     if function_description(name).is_some() {
@@ -605,26 +605,374 @@ pub fn is_unknown_root(
     !is_schema_property(name)
 }
 
+/// The replacement a dash-separated-key quick-fix applies over its
+/// diagnostic's range. Carried as `Diagnostic.data` (Ruling R-8) so the
+/// code-action provider never reads the message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyReferenceFix {
+    /// The frontmatter key the subtraction's source spells.
+    pub key: String,
+    /// The expression text that references `key`: the bare key when it lexes
+    /// as one identifier, otherwise `doc['key']`.
+    pub replacement: String,
+}
+
+/// One `dm.expression.unknown_identifier` finding. Spans index the expression
+/// text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnknownIdentifierFinding {
+    /// An unhandled `Variable` whose root names nothing DMLS can resolve.
+    Identifier {
+        /// The root (first dotted segment).
+        root: String,
+        /// The `Variable` node's span.
+        span: SourceSpan,
+    },
+    /// A subtraction whose whitespace-free source is exactly a frontmatter
+    /// key. It replaces the generic findings for its operands.
+    DashSeparatedKey {
+        /// The subtraction as authored.
+        authored: String,
+        /// The key its whitespace-free source spells.
+        key: String,
+        /// The subtraction's span.
+        span: SourceSpan,
+        /// `None` when no replacement could be proven to reparse as a
+        /// reference to the key.
+        fix: Option<KeyReferenceFix>,
+    },
+}
+
+/// Every unknown-identifier finding for one parsed expression.
+///
+/// `reparse` is the dialect `expr` was parsed with; a quick-fix is offered
+/// only when the edited expression reparses with the replacement as a single
+/// reference to the key. `is_unknown` classifies a root; `is_key` answers
+/// whether a top-level frontmatter key is present or declared.
+/// `forbidden_quote` is a quote character the replacement must not contain
+/// (the YAML quote style around a frontmatter value).
+///
+/// Absence handling follows the library's static walk
+/// ([`static_variable_reads`]), so the editor suppresses what the runtime
+/// suppresses; it flags both branches because it cannot know which runs.
+pub fn unknown_identifier_findings(
+    expr: &SpannedExpr,
+    source: &str,
+    reparse: fn(&str) -> Result<SpannedExpr, ParseError>,
+    is_unknown: impl Fn(&str) -> bool,
+    is_key: impl Fn(&str) -> bool,
+    forbidden_quote: Option<char>,
+) -> Vec<UnknownIdentifierFinding> {
+    let unknown: Vec<(String, SourceSpan)> = static_variable_reads(expr)
+        .into_iter()
+        .filter(|read| !read.handles_absence && is_unknown(read.root()))
+        .map(|read| (read.root().to_string(), read.span))
+        .collect();
+    if unknown.is_empty() {
+        return Vec::new();
+    }
+
+    let mut dash_keys = Vec::new();
+    collect_dash_keys(expr, source, &unknown, &is_key, &mut dash_keys);
+
+    let mut findings: Vec<UnknownIdentifierFinding> = unknown
+        .into_iter()
+        .filter(|(_, span)| !dash_keys.iter().any(|(chain, _)| contains(chain, span)))
+        .map(|(root, span)| UnknownIdentifierFinding::Identifier { root, span })
+        .collect();
+    findings.extend(dash_keys.into_iter().map(|(span, key)| {
+        UnknownIdentifierFinding::DashSeparatedKey {
+            authored: source[span.clone()].to_string(),
+            fix: key_reference_fix(source, &span, &key, reparse, forbidden_quote),
+            key,
+            span,
+        }
+    }));
+    findings.sort_by_key(|finding| match finding {
+        UnknownIdentifierFinding::Identifier { span, .. }
+        | UnknownIdentifierFinding::DashSeparatedKey { span, .. } => span.start,
+    });
+    findings
+}
+
+fn contains(outer: &SourceSpan, inner: &SourceSpan) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
+
+/// The outermost subtraction chains (`a- b`, `foo--bar`, `a - b - c`) whose
+/// whitespace-free source is a key and which contain an unknown read. A chain
+/// holds only variables, unary minus, and subtraction; any literal or other
+/// operator makes it ordinary arithmetic.
+fn collect_dash_keys(
+    expr: &SpannedExpr,
+    source: &str,
+    unknown: &[(String, SourceSpan)],
+    is_key: &impl Fn(&str) -> bool,
+    out: &mut Vec<(SourceSpan, String)>,
+) {
+    if matches!(expr.kind, SpannedExprKind::Binary { op: BinaryOp::Sub, .. })
+        && is_dash_chain(expr)
+        && unknown.iter().any(|(_, span)| contains(&expr.span, span))
+        && let Some(authored) = source.get(expr.span.clone())
+    {
+        let key: String = authored.chars().filter(|c| !c.is_whitespace()).collect();
+        if is_key(&key) {
+            out.push((expr.span.clone(), key));
+            return;
+        }
+    }
+    for child in children(expr) {
+        collect_dash_keys(child, source, unknown, is_key, out);
+    }
+}
+
+fn is_dash_chain(expr: &SpannedExpr) -> bool {
+    match &expr.kind {
+        SpannedExprKind::Variable(path) => !path.contains('.'),
+        SpannedExprKind::UnaryMinus(inner) => is_dash_chain(inner),
+        SpannedExprKind::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } => is_dash_chain(left) && is_dash_chain(right),
+        _ => false,
+    }
+}
+
+/// The first replacement for `span` that reparses as exactly one reference
+/// to `key`: the bare key, then `doc['key']`.
+fn key_reference_fix(
+    source: &str,
+    span: &SourceSpan,
+    key: &str,
+    reparse: fn(&str) -> Result<SpannedExpr, ParseError>,
+    forbidden_quote: Option<char>,
+) -> Option<KeyReferenceFix> {
+    let bare = key.to_string();
+    let quote = ['\'', '"']
+        .into_iter()
+        .find(|quote| Some(*quote) != forbidden_quote && !key.contains(*quote))
+        .filter(|_| !key.contains('\\'));
+    let bracket = quote.map(|quote| format!("doc[{quote}{key}{quote}]"));
+    std::iter::once(bare)
+        .chain(bracket)
+        .find(|replacement| {
+            let edited = format!("{}{replacement}{}", &source[..span.start], &source[span.end..]);
+            let Ok(parsed) = reparse(&edited) else {
+                return false;
+            };
+            let target = span.start..span.start + replacement.len();
+            node_with_span(&parsed, &target).is_some_and(|node| references_key(node, key))
+        })
+        .map(|replacement| KeyReferenceFix {
+            key: key.to_string(),
+            replacement,
+        })
+}
+
+fn references_key(node: &SpannedExpr, key: &str) -> bool {
+    match &node.kind {
+        SpannedExprKind::Variable(path) => path == key,
+        SpannedExprKind::Index { base, index } => {
+            matches!(&base.kind, SpannedExprKind::Variable(root) if root == "doc")
+                && matches!(&index.kind, SpannedExprKind::StringLiteral(literal) if literal == key)
+        }
+        _ => false,
+    }
+}
+
+fn node_with_span<'a>(expr: &'a SpannedExpr, span: &SourceSpan) -> Option<&'a SpannedExpr> {
+    if expr.span == *span {
+        return Some(expr);
+    }
+    children(expr)
+        .into_iter()
+        .find_map(|child| node_with_span(child, span))
+}
+
+fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
+    match &expr.kind {
+        SpannedExprKind::UnaryNot(inner)
+        | SpannedExprKind::UnaryMinus(inner)
+        | SpannedExprKind::Paren(inner) => vec![inner],
+        SpannedExprKind::Binary { left, right, .. }
+        | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
+        SpannedExprKind::Index { base, index } => vec![base, index],
+        SpannedExprKind::MemberAccess { base, .. } => vec![base],
+        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => vec![condition, then_branch, else_branch],
+        SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
+        SpannedExprKind::ObjectLiteral(entries) => {
+            entries.iter().map(|(_, value)| value).collect()
+        }
+        SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The human-readable message for a finding. Code actions read
+/// [`KeyReferenceFix`] from `Diagnostic.data`, never this text.
+pub fn unknown_identifier_message(finding: &UnknownIdentifierFinding) -> String {
+    match finding {
+        UnknownIdentifierFinding::Identifier { root, .. } => format!(
+            "`{root}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
+        ),
+        UnknownIdentifierFinding::DashSeparatedKey {
+            authored, key, fix: Some(fix), ..
+        } => format!(
+            "`{authored}` is a subtraction, but frontmatter key `{key}` exists; reference it as `{}`",
+            fix.replacement
+        ),
+        UnknownIdentifierFinding::DashSeparatedKey { authored, key, .. } => format!(
+            "`{authored}` is a subtraction, but frontmatter key `{key}` exists"
+        ),
+    }
+}
+
 /// The expression completion partial being typed inside an Expression-typed
 /// frontmatter value, and the document offset where it begins.
 ///
 /// `value_text` is the authored text of the value from its start to the cursor;
 /// `value_start` is that value start's document offset. The token is the
-/// trailing run of identifier/`.` characters (so `ctx.to`, `as_csv(ctx.pa`'s
-/// `ctx.pa`, and a bare `len` all resolve). Always `Some` — an empty partial
+/// trailing identifier partial under the lexer's identifier rule (so `ctx.to`,
+/// `as_csv(ctx.pa`'s `ctx.pa`, a bare `len`, and a kebab `spec-na` all resolve). Always `Some` — an empty partial
 /// offers the full catalog — so the caller decides whether the value is
 /// Expression-typed before calling.
 pub fn value_completion_partial(value_text: &str, value_start: usize) -> (usize, &str) {
-    let token_rel = value_text
-        .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
-        .map(|index| index + 1)
-        .unwrap_or(0);
+    let token_rel = identifier_prefix_start(value_text);
     (value_start + token_rel, &value_text[token_rel..])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Findings for a value-dialect `source` where `keys` are the document's
+    /// frontmatter keys.
+    fn findings_for(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> Vec<UnknownIdentifierFinding> {
+        let expr = parse(source).unwrap();
+        unknown_identifier_findings(
+            &expr,
+            source,
+            parse,
+            |root| is_unknown_root(root, |name| keys.contains(&name), |_| false),
+            |key| keys.contains(&key),
+            forbidden_quote,
+        )
+    }
+
+    fn generic(source: &str, keys: &[&str]) -> Vec<(String, String)> {
+        findings_for(source, keys, None)
+            .into_iter()
+            .map(|finding| match finding {
+                UnknownIdentifierFinding::Identifier { root, span } => (root, source[span].to_string()),
+                other => panic!("{source}: expected only generic findings, got {other:?}"),
+            })
+            .collect()
+    }
+
+    fn dash(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> (String, String, Option<String>) {
+        match findings_for(source, keys, forbidden_quote).as_slice() {
+            [UnknownIdentifierFinding::DashSeparatedKey { authored, key, span, fix }] => {
+                assert_eq!(&source[span.clone()], authored);
+                (authored.clone(), key.clone(), fix.as_ref().map(|fix| fix.replacement.clone()))
+            }
+            other => panic!("{source}: expected one dash-separated-key finding, got {other:?}"),
+        }
+    }
+
+    fn pair(root: &str, text: &str) -> (String, String) {
+        (root.to_string(), text.to_string())
+    }
+
+    #[test]
+    fn every_operand_position_is_checked_at_its_own_span() {
+        let keys = ["known"];
+        assert_eq!(generic("known - bin", &keys), [pair("bin", "bin")]);
+        assert_eq!(
+            generic("known ? then_b : else_b", &keys),
+            [pair("then_b", "then_b"), pair("else_b", "else_b")]
+        );
+        assert_eq!(generic("lower(arg)", &keys), [pair("arg", "arg")]);
+        assert_eq!(generic("known || rhs", &keys), [pair("rhs", "rhs")]);
+        assert_eq!(generic("user.name + 1", &keys), [pair("user", "user.name")]);
+    }
+
+    #[test]
+    fn handled_absence_and_known_roots_are_silent() {
+        for source in [
+            "maybe || \"d\"",
+            "maybe ? maybe : \"none\"",
+            "is_null(maybe)",
+            "isEmpty(maybe)",
+            "ok ? known : null",
+            "repo",
+            "current.cwd",
+            "doc.anything-at-all",
+            "ctx.nope",
+            "length",
+        ] {
+            let found = generic(source, &["known", "ok"]);
+            assert!(found.is_empty(), "{source}: {found:?}");
+        }
+        assert_eq!(generic("is_empty(lower(nested))", &[]), [pair("nested", "nested")]);
+    }
+
+    #[test]
+    fn a_subtraction_spelling_a_key_is_one_finding_with_the_right_replacement() {
+        assert_eq!(
+            dash("foo--bar", &["foo--bar"], None),
+            ("foo--bar".into(), "foo--bar".into(), Some("doc['foo--bar']".into()))
+        );
+        assert_eq!(
+            dash("a- b", &["a-b"], None),
+            ("a- b".into(), "a-b".into(), Some("a-b".into()))
+        );
+        // The YAML quote style around a frontmatter value picks the other quote.
+        assert_eq!(dash("foo--bar", &["foo--bar"], Some('\'')).2.as_deref(), Some("doc[\"foo--bar\"]"));
+        // Only the chain that spells the key is replaced; the outer subtraction
+        // stays arithmetic after the fix.
+        let (authored, _, fix) = match findings_for("a- b - known", &["a-b", "known"], None).as_slice() {
+            [UnknownIdentifierFinding::DashSeparatedKey { authored, key, fix, .. }] => {
+                (authored.clone(), key.clone(), fix.clone())
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(authored, "a- b");
+        assert_eq!(fix.map(|fix| fix.replacement).as_deref(), Some("a-b"));
+    }
+
+    #[test]
+    fn ambiguous_arithmetic_keeps_generic_findings_and_no_fix() {
+        // No key spells the subtraction.
+        assert_eq!(generic("c - d", &[]), [pair("c", "c"), pair("d", "d")]);
+        // A literal operand is ordinary arithmetic even when a key matches.
+        assert_eq!(generic("iteration - 1", &["iteration-1"]), [pair("iteration", "iteration")]);
+        // Both operands known: intentional arithmetic, nothing to report.
+        assert!(findings_for("a - b", &["a", "b", "a-b"], None).is_empty());
+    }
+
+    #[test]
+    fn a_key_no_replacement_can_reference_gets_no_fix() {
+        assert_eq!(key_reference_fix("x", &(0..1), "it's \"q\"", parse, None), None);
+        let fix = key_reference_fix("x", &(0..1), "it's", parse, None).expect("double-quoted bracket");
+        assert_eq!(fix.replacement, "doc[\"it's\"]");
+    }
+
+    #[test]
+    fn the_fix_payload_round_trips_through_json() {
+        let fix = KeyReferenceFix {
+            key: "foo--bar".into(),
+            replacement: "doc['foo--bar']".into(),
+        };
+        let value = serde_json::to_value(&fix).unwrap();
+        assert_eq!(value, serde_json::json!({ "key": "foo--bar", "replacement": "doc['foo--bar']" }));
+        assert_eq!(serde_json::from_value::<KeyReferenceFix>(value).unwrap(), fix);
+    }
 
     #[test]
     fn test_interpolations_found_and_spanned() {
@@ -1157,5 +1505,94 @@ mod tests {
         let enriched = hover_markdown_condition(source, fn_offset, no_fm, no_schema);
         let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
         assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
+    }
+
+    /// Dasherized identifiers: every DMLS cursor scan agrees with the lexer.
+    mod dasherized_identifiers {
+        use super::*;
+
+        fn kebab_scalar(name: &str) -> Option<String> {
+            match name {
+                "spec-name" => Some("alpha".to_string()),
+                "foo" => Some("fval".to_string()),
+                "bar" => Some("bval".to_string()),
+                _ => None,
+            }
+        }
+
+        #[test]
+        fn completion_partial_joins_a_kebab_name_at_every_cursor_position() {
+            let text = "K: {{ spec-name }}";
+            let start = text.find("spec").unwrap();
+            for offset in start..=start + "spec-name".len() {
+                let (token_start, partial) = completion_partial(text, offset).unwrap();
+                assert_eq!(token_start, start, "offset {offset}");
+                assert_eq!(partial, &text[start..offset], "offset {offset}");
+            }
+        }
+
+        #[test]
+        fn completion_partial_does_not_merge_non_joining_dashes() {
+            for (text, partial) in [
+                ("{{ foo--ba", "ba"),
+                ("{{ foo--", ""),
+                ("{{ a - b", "b"),
+                ("{{ a -b", "b"),
+                ("{{ a- b", "b"),
+                ("{{ a -", ""),
+                ("{{ 4-2", "2"),
+            ] {
+                let (token_start, found) = completion_partial(text, text.len()).unwrap();
+                assert_eq!(found, partial, "for {text:?}");
+                assert_eq!(token_start, text.len() - partial.len(), "for {text:?}");
+            }
+        }
+
+        #[test]
+        fn value_completion_partial_follows_the_same_rule() {
+            for (value, partial) in [
+                ("spec-na", "spec-na"),
+                ("upper(doc.spec-", "doc.spec-"),
+                ("is-draft && has-rev", "has-rev"),
+                ("foo--ba", "ba"),
+                ("a - b", "b"),
+                ("ctx.to", "ctx.to"),
+            ] {
+                let (start, found) = value_completion_partial(value, 100);
+                assert_eq!(found, partial, "for {value:?}");
+                assert_eq!(start, 100 + value.len() - partial.len(), "for {value:?}");
+            }
+        }
+
+        #[test]
+        fn hover_resolves_a_kebab_name_at_every_offset_in_both_dialects() {
+            let expression = "spec-name || foo";
+            for offset in 0..="spec-name".len() {
+                for markdown in [
+                    hover_markdown(expression, offset, kebab_scalar, |_| None),
+                    hover_markdown_condition(expression, offset, kebab_scalar, |_| None),
+                ] {
+                    assert!(
+                        markdown.contains("from frontmatter `spec-name`"),
+                        "offset {offset}: {markdown}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn hover_keeps_double_dash_operands_separate() {
+            let expression = "foo--bar";
+            let on_foo = hover_markdown(expression, 1, kebab_scalar, |_| None);
+            assert!(on_foo.contains("from frontmatter `foo`"), "{on_foo}");
+            let on_bar = hover_markdown(expression, expression.len() - 1, kebab_scalar, |_| None);
+            assert!(on_bar.contains("from frontmatter `bar`"), "{on_bar}");
+        }
+
+        #[test]
+        fn root_identifier_keeps_the_whole_kebab_path() {
+            let expr = parse("doc.spec-name").unwrap();
+            assert_eq!(root_identifier(&expr).as_deref(), Some("doc.spec-name"));
+        }
     }
 }

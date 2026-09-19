@@ -27,6 +27,7 @@ use crate::overlay::{
 };
 use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
+use crate::providers::frontmatter::ExpressionValue;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
@@ -68,9 +69,13 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                     &PositionMap::new(),
                     &ValidationOptions::default(),
                 );
-                schema_problem_diagnostics(ctx, ast, bundle, &report, &mut out);
+                // Likewise one expression-value set per publication: it decodes
+                // every Expression-typed value, and both passes read it.
+                let expression_values =
+                    crate::providers::frontmatter::expression_values(ctx, ast);
+                schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
-                expression_diagnostics(ctx, ast, &report, &mut out);
+                expression_diagnostics(ctx, &report, &expression_values, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -215,6 +220,7 @@ fn schema_problem_diagnostics(
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
     report: &ValidationReport,
+    expression_values: &[ExpressionValue<'_>],
     out: &mut Vec<Diagnostic>,
 ) {
     // Expression-typed scalar values are owned by the expression pass:
@@ -223,8 +229,6 @@ fn schema_problem_diagnostics(
     // mismatch is not a real editor error. Both are suppressed here; every
     // unrelated problem (including a genuine mapping/sequence type mismatch,
     // which is not a scalar and never enters this set) is retained.
-    let expression_values =
-        crate::providers::frontmatter::expression_values(ctx, ast);
     let expression_pointers: std::collections::HashSet<&str> = expression_values
         .iter()
         .map(|value| value.entry.pointer.as_str())
@@ -600,8 +604,8 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 
 /// Expression-typed frontmatter value diagnostics: `dm.expression.malformed`
 /// for a value the expression grammar rejects, and
-/// `dm.expression.unknown_identifier` for a bare root that names nothing DMLS
-/// can resolve. Both carry source `darkmatter.frontmatter`; ranges are projected
+/// `dm.expression.unknown_identifier` for each unhandled identifier, in any
+/// operand position, that names nothing DMLS can resolve. Both carry source `darkmatter.frontmatter`; ranges are projected
 /// through the shared YAML-scalar mapper so YAML quotes are excluded.
 ///
 /// `expression_values` includes any property with *any* Expression union arm, so
@@ -609,22 +613,43 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 /// not be flagged malformed. [`union_rejected_paths`] is the shared arbiter.
 fn expression_diagnostics(
     ctx: &DocumentContext,
-    ast: &FrontmatterAst,
     report: &ValidationReport,
+    expression_values: &[ExpressionValue<'_>],
     out: &mut Vec<Diagnostic>,
 ) {
     let union_rejected = union_rejected_paths(report);
+    let known_roots = crate::providers::dsl::KnownRoots::for_document(ctx);
+    // An anchored value and each alias of it are one authored expression,
+    // parsed at most once: whichever Expression-typed property reaches it
+    // first settles it, and a later value with the same span is skipped. A
+    // malformed one only a union arm accepted stays unsettled, its error kept
+    // for a later alias whose property rejects it.
+    let mut settled = std::collections::HashSet::new();
+    let mut unreported_errors = std::collections::HashMap::new();
 
-    for value in crate::providers::frontmatter::expression_values(ctx, ast) {
+    for value in expression_values {
         let expression = value.expression();
-        match crate::overlay::expressions::parse_condition(expression) {
+        let expression_span = value.expression_span();
+        if settled.contains(&expression_span) {
+            continue;
+        }
+        let parsed = match unreported_errors.remove(&expression_span) {
+            Some(error) => Err(error),
+            None => {
+                note_expression_diagnostic_parse();
+                crate::overlay::expressions::parse_condition(expression)
+            }
+        };
+        match parsed {
             Err(error) => {
                 if !union_rejected.contains(value.entry.pointer.as_str()) {
                     // A non-Expression arm validly accepts this value, so the
                     // union validates — a malformed-expression warning would be a
                     // false positive.
+                    unreported_errors.insert(expression_span, error);
                     continue;
                 }
+                settled.insert(expression_span);
                 let at = error.position.min(expression.len());
                 let span = value
                     .project(at..expression.len())
@@ -641,40 +666,93 @@ fn expression_diagnostics(
                 }
             }
             Ok(parsed) => {
-                let Some(name) = crate::overlay::expressions::root_identifier(&parsed) else {
+                settled.insert(expression_span);
+                let Some(known_roots) = &known_roots else {
                     continue;
                 };
-                if !expression_root_is_unknown(ctx, ast, &name) {
-                    continue;
-                }
-                if let Some(range) = ctx.source_map.byte_range_to_lsp(value.expression_span()) {
-                    out.push(diagnostic(
-                        range,
-                        DiagnosticSeverity::INFORMATION,
-                        source::FRONTMATTER,
-                        code::EXPRESSION_UNKNOWN_IDENTIFIER,
-                        format!(
-                            "`{name}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
-                        ),
-                    ));
+                let findings = known_roots.findings(
+                    &parsed,
+                    expression,
+                    crate::overlay::expressions::parse_condition,
+                    yaml_quote(ctx, value),
+                );
+                let first = out.len();
+                for finding in findings {
+                    let span = crate::providers::dsl::finding_span(&finding);
+                    let Some(doc_span) = value.project(span.clone()) else {
+                        continue;
+                    };
+                    // A fix is an edit of authored bytes: withhold it when the
+                    // projection crosses a YAML escape or is only an alias
+                    // token, whose text never equals the expression's.
+                    let finding = if ctx.text.get(doc_span.clone()) == expression.get(span.clone()) {
+                        finding
+                    } else {
+                        without_fix(finding)
+                    };
+                    if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                        let diagnostic = crate::providers::dsl::unknown_identifier_diagnostic(
+                            range,
+                            source::FRONTMATTER,
+                            &finding,
+                        );
+                        // On an alias token every finding shares one range, so
+                        // a repeated identifier would repeat the diagnostic. Only
+                        // this value's findings can match: the token is its own.
+                        if value.is_exact() || !out[first..].contains(&diagnostic) {
+                            out.push(diagnostic);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// Whether a bare expression root resolves to nothing DMLS can name, reusing the
-/// same authority as the body-interpolation diagnostic.
-fn expression_root_is_unknown(ctx: &DocumentContext, ast: &FrontmatterAst, name: &str) -> bool {
-    crate::overlay::expressions::is_unknown_root(
-        name,
-        |name| ast.entry_by_dotted(name).is_some(),
-        |name| {
-            crate::providers::frontmatter::known_shape(ctx)
-                .properties
-                .contains_key(name)
+#[cfg(test)]
+thread_local! {
+    /// Expressions [`expression_diagnostics`] parsed on this thread; the
+    /// shared-alias-target regressions read it.
+    pub(crate) static EXPRESSION_DIAGNOSTIC_PARSES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn note_expression_diagnostic_parse() {
+    #[cfg(test)]
+    EXPRESSION_DIAGNOSTIC_PARSES.with(|parses| parses.set(parses.get() + 1));
+}
+
+/// The YAML quote character around an expression value, which a quick-fix
+/// replacement must not contain.
+///
+/// Read just before the expression's first authored byte rather than from the
+/// entry's value span, which for an alias is the `*name` token, not the quoted
+/// scalar the fix would edit.
+fn yaml_quote(ctx: &DocumentContext, value: &ExpressionValue<'_>) -> Option<char> {
+    ctx.text
+        .get(..value.expression_span().start)
+        .and_then(|before| before.chars().next_back())
+        .filter(|last| matches!(last, '\'' | '"'))
+}
+
+fn without_fix(
+    finding: crate::overlay::expressions::UnknownIdentifierFinding,
+) -> crate::overlay::expressions::UnknownIdentifierFinding {
+    match finding {
+        crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+            authored,
+            key,
+            span,
+            ..
+        } => crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+            authored,
+            key,
+            span,
+            fix: None,
         },
-    )
+        other => other,
+    }
 }
 
 /// `relatedInformation` pointing at a problem's schema origin, when it is a
@@ -1185,7 +1263,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_expression_root_is_informational_frontmatter_diagnostic() {
+    fn unknown_expression_root_is_a_warning_frontmatter_diagnostic() {
         let text = expression_doc("when: mystery");
         diagnostics_for(&text, |diagnostics| {
             let unknown: Vec<&Diagnostic> = diagnostics
@@ -1194,7 +1272,7 @@ mod tests {
                 .collect();
             assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
             assert_eq!(unknown[0].source.as_deref(), Some(source::FRONTMATTER));
-            assert_eq!(unknown[0].severity, Some(DiagnosticSeverity::INFORMATION));
+            assert_eq!(unknown[0].severity, Some(DiagnosticSeverity::WARNING));
         });
     }
 
@@ -1705,5 +1783,145 @@ mod tests {
         let sm = SourceMap::new(uri, 1, PositionEncoding::Utf8, text_arc);
         let range = sm.byte_range_to_lsp(span).unwrap();
         assert_eq!(range.start.line, 2);
+    }
+
+    /// `N` distinct anchors under an untyped key, each read by one
+    /// Expression-typed alias. A publication computes the expression-value set
+    /// once and finds every definition through the YAML tree, so it searches
+    /// no source text; a search per alias read ~N²/2 lines, twice.
+    #[test]
+    fn distinct_expression_aliases_publish_without_searching_the_document() {
+        use crate::providers::frontmatter::EXPRESSION_VALUE_SETS;
+        use darkmatter::markdown::schemas::alias_search_work;
+
+        for count in [150_usize, 300] {
+            let mut text = String::from("---\n$schema:\n");
+            for index in 0..count {
+                text.push_str(&format!("  k{index}: expression\n"));
+            }
+            text.push_str("known: 1\ndefs:\n");
+            let first_definition_line = text.lines().count() as u32;
+            for index in 0..count {
+                text.push_str(&format!("  - &a{index} 'known || id{index}'\n"));
+            }
+            for index in 0..count {
+                text.push_str(&format!("k{index}: *a{index}\n"));
+            }
+            text.push_str("---\n\nbody\n");
+
+            let searched = alias_search_work();
+            let sets = EXPRESSION_VALUE_SETS.with(std::cell::Cell::get);
+            let mut lines: Vec<u32> = diagnostics_for(&text, |diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNKNOWN_IDENTIFIER))
+                    .map(|diagnostic| diagnostic.range.start.line)
+                    .collect()
+            });
+            let searched = alias_search_work() - searched;
+            let sets = EXPRESSION_VALUE_SETS.with(std::cell::Cell::get) - sets;
+
+            lines.sort_unstable();
+            let expected: Vec<u32> = (0..count as u32).map(|index| first_definition_line + index).collect();
+            assert_eq!(lines, expected, "one warning per alias, inside its anchor's scalar");
+            assert_eq!(searched, 0, "source bytes searched for {count} aliases");
+            assert_eq!(sets, 1, "expression-value sets for one publication of {count} aliases");
+        }
+    }
+
+    /// One anchored Expression scalar of growing length read by many aliases.
+    /// The overlay stores the scalar once and a publication decodes it once;
+    /// a copy or decode per alias made both O(aliases × length).
+    #[test]
+    fn many_aliases_of_one_long_expression_share_its_text_and_one_decode() {
+        use super::EXPRESSION_DIAGNOSTIC_PARSES;
+        use crate::overlay::{FmValueKind, FrontmatterAst};
+        use crate::providers::frontmatter::ALIAS_TARGET_DECODES;
+
+        let aliases = 200_usize;
+        for terms in [100_usize, 400] {
+            let mut text = String::from("---\n$schema:\n");
+            for index in 0..aliases {
+                text.push_str(&format!("  k{index}: expression\n"));
+            }
+            let expression = format!("{} || missing", vec!["known"; terms].join(" || "));
+            text.push_str(&format!("known: 1\ndefs:\n  - &shared '{expression}'\n"));
+            let definition_line = text.lines().count() as u32 - 1;
+            for index in 0..aliases {
+                text.push_str(&format!("k{index}: *shared\n"));
+            }
+            text.push_str("---\n\nbody\n");
+
+            let ast = FrontmatterAst::parse(&text).unwrap().ast.unwrap();
+            let targets: Vec<_> = ast
+                .entries()
+                .iter()
+                .filter(|entry| entry.kind == FmValueKind::Alias)
+                .map(|entry| entry.alias_target.clone().expect("a scalar alias target"))
+                .collect();
+            assert_eq!(targets.len(), aliases);
+            assert_eq!(&*targets[0], expression);
+            assert!(
+                targets.iter().all(|target| std::sync::Arc::ptr_eq(target, &targets[0])),
+                "every alias of one anchor shares one stored target ({terms} terms)"
+            );
+
+            let decodes = ALIAS_TARGET_DECODES.with(std::cell::Cell::get);
+            let parses = EXPRESSION_DIAGNOSTIC_PARSES.with(std::cell::Cell::get);
+            let lines: Vec<u32> = diagnostics_for(&text, |diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNKNOWN_IDENTIFIER))
+                    .map(|diagnostic| diagnostic.range.start.line)
+                    .collect()
+            });
+            let decodes = ALIAS_TARGET_DECODES.with(std::cell::Cell::get) - decodes;
+            let parses = EXPRESSION_DIAGNOSTIC_PARSES.with(std::cell::Cell::get) - parses;
+
+            assert_eq!(lines, vec![definition_line], "one warning, inside the anchored scalar");
+            assert_eq!(decodes, 1, "target decodes for one publication of {aliases} aliases ({terms} terms)");
+            assert_eq!(parses, 1, "expression parses for one publication of {aliases} aliases ({terms} terms)");
+        }
+    }
+
+    /// Many aliases of one long malformed scalar whose union-typed properties
+    /// accept it, then one alias under a plain `expression` property that
+    /// rejects it. The scalar is parsed once, and the error kept from the
+    /// accepting aliases still reports exactly once, through the rejecting one.
+    #[test]
+    fn a_malformed_alias_target_is_parsed_once_and_reported_by_the_rejecting_alias() {
+        use super::EXPRESSION_DIAGNOSTIC_PARSES;
+
+        let aliases = 200_usize;
+        for terms in [100_usize, 400] {
+            for last_type in ["expression", "[expression, string]"] {
+                let mut text = String::from("---\n$schema:\n");
+                for index in 0..aliases {
+                    text.push_str(&format!("  k{index}: [expression, string]\n"));
+                }
+                text.push_str(&format!("  last: {last_type}\n"));
+                let expression = format!("{} +", vec!["known"; terms].join(" || "));
+                text.push_str(&format!("known: 1\ndefs:\n  - &shared '{expression}'\n"));
+                let definition_line = text.lines().count() as u32 - 1;
+                for index in 0..aliases {
+                    text.push_str(&format!("k{index}: *shared\n"));
+                }
+                text.push_str("last: *shared\n---\n\nbody\n");
+
+                let parses = EXPRESSION_DIAGNOSTIC_PARSES.with(std::cell::Cell::get);
+                let lines: Vec<u32> = diagnostics_for(&text, |diagnostics| {
+                    diagnostics
+                        .iter()
+                        .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_MALFORMED))
+                        .map(|diagnostic| diagnostic.range.start.line)
+                        .collect()
+                });
+                let parses = EXPRESSION_DIAGNOSTIC_PARSES.with(std::cell::Cell::get) - parses;
+
+                let expected = if last_type == "expression" { vec![definition_line] } else { Vec::new() };
+                assert_eq!(lines, expected, "malformed warnings with `last: {last_type}` ({terms} terms)");
+                assert_eq!(parses, 1, "expression parses with `last: {last_type}` ({terms} terms)");
+            }
+        }
     }
 }

@@ -65,6 +65,9 @@ biscuit-file = { path = "../../biscuit-file/lib", default-features = false, feat
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 [dev-dependencies]
+# The alias-search work counter behind the linear-diagnostics regression; a
+# dev-dependency feature, so no non-test build of dmls compiles it.
+darkmatter = { path = "../lib", features = ["work-counters"] }
 tempfile = "3"
 # Level-2 editor tests (tests/level2_editor_neovim.rs): tier gating and the
 # tmux terminal harness for real-rendering SGR capture.

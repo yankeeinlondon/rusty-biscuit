@@ -17,6 +17,9 @@
 //!   renames the key to its canonical spelling.
 //! - **close an unclosed directive block** — from an unclosed-block diagnostic;
 //!   appends the matching `::end-block` closer.
+//! - **reference a dash-separated key** — from an unknown-identifier diagnostic
+//!   that carries a [`expressions::KeyReferenceFix`] in `data`; replaces the
+//!   subtraction (`foo--bar`) with a reference to the key.
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, NumberOrString, Position, Range,
@@ -26,7 +29,7 @@ use lsp_types::{
 use super::DocumentContext;
 use super::edits::EditBuilder;
 use crate::config::DmlsConfig;
-use crate::diagnostics::codes::code;
+use crate::diagnostics::codes::{code, source};
 use crate::graph::{DocumentId, LinkTarget, NodeId, WorkspaceGraph, normalize_join};
 use crate::overlay::FrontmatterAst;
 use crate::overlay::expressions;
@@ -40,6 +43,7 @@ mod category {
     pub const MIGRATE_STYLE: &str = "migrate-deprecated-style";
     pub const CLOSE_BLOCK: &str = "close-directive-block";
     pub const WRAP_LITERAL: &str = "wrap-in-interpolation-literal";
+    pub const KEY_REFERENCE: &str = "reference-dash-separated-key";
 }
 
 /// Code actions for the current document, driven by the request-context
@@ -76,6 +80,11 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
                 if enabled(ctx.config, category::WRAP_LITERAL) =>
             {
                 wrap_in_interpolation_literal(ctx, diag)
+            }
+            code::EXPRESSION_UNKNOWN_IDENTIFIER
+                if enabled(ctx.config, category::KEY_REFERENCE) =>
+            {
+                reference_dash_separated_key(ctx, diag)
             }
             _ => None,
         };
@@ -365,6 +374,52 @@ fn wrap_in_interpolation_literal(ctx: &DocumentContext, diag: &Diagnostic) -> Op
         edit: Some(builder.build(ctx.profile)),
         ..Default::default()
     })
+}
+
+// ── reference a dash-separated key ──
+
+/// A quick-fix replacing a subtraction such as `foo--bar` with a reference to
+/// the frontmatter key it spells.
+fn reference_dash_separated_key(ctx: &DocumentContext, diag: &Diagnostic) -> Option<CodeAction> {
+    let fix = key_reference_fix(ctx, diag)?;
+    let mut builder = EditBuilder::new();
+    builder.edit(
+        ctx.uri.clone(),
+        TextEdit {
+            range: diag.range,
+            new_text: fix.replacement.clone(),
+        },
+    );
+    Some(CodeAction {
+        title: format!("Reference frontmatter key `{}` as `{}`", fix.key, fix.replacement),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![diag.clone()]),
+        edit: Some(builder.build(ctx.profile)),
+        is_preferred: Some(true),
+        ..Default::default()
+    })
+}
+
+/// The fix carried in the diagnostic's `data`. Not every client echoes `data`
+/// back (DMLS does not negotiate `dataSupport`), so without it the producing
+/// provider's diagnostics are recomputed and the one at the same range is used
+/// (Ruling R-8). The message is never parsed.
+fn key_reference_fix(ctx: &DocumentContext, diag: &Diagnostic) -> Option<expressions::KeyReferenceFix> {
+    let data = match &diag.data {
+        Some(data) => data.clone(),
+        None => {
+            let recomputed = match diag.source.as_deref() {
+                Some(source::FRONTMATTER) => crate::diagnostics::frontmatter::diagnostics(ctx),
+                Some(source::COMPOSE) => super::dsl::diagnostics(ctx),
+                _ => return None,
+            };
+            recomputed
+                .into_iter()
+                .find(|candidate| candidate.range == diag.range && candidate.code == diag.code)?
+                .data?
+        }
+    };
+    serde_json::from_value(data).ok()
 }
 
 // ── shared helpers ──

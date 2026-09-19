@@ -11,16 +11,18 @@
 //! `textEdit` and no snippets (Zed-safe).
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use darkmatter::markdown::schemas::{
     Constraint, DecodedScalar, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor,
-    locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
-    parse_schema_declaration_with_source, schema_constraint_descriptors, schema_type_descriptors,
-    select_literal_discriminant_arm, suggestions_for_def,
+    decode_alias_definition, decode_scalar, decode_scalar_node, effective_property_shape, expression_atom,
+    locate_schema_declaration_cursor, locate_type_definition_cursor, nested_property_shape,
+    parse_property_definition, parse_schema_declaration, parse_schema_declaration_with_source,
+    property_def_at_path, schema_constraint_descriptors, schema_type_descriptors,
+    suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -845,64 +847,102 @@ fn expr_completion_item(
 
 /// An Expression-typed scalar frontmatter value: the authored entry plus the
 /// decoded expression text with a projection from decoded byte offsets back to
-/// authored document bytes (YAML quotes excluded).
+/// authored document bytes (YAML quotes, block-scalar headers, and indentation
+/// excluded).
 pub(crate) struct ExpressionValue<'a> {
-    /// The authored entry — `value_span` is the whole authored value range.
+    /// The authored entry — `value_span` is the whole authored value range,
+    /// or the `*name` token when the value is an alias.
     pub(crate) entry: &'a FmEntry,
-    /// The decoded expression + byte map, relative to `value_span.start`.
-    decoded: DecodedScalar,
+    authored: AuthoredExpression,
+}
+
+/// Where an [`ExpressionValue`]'s text is authored.
+enum AuthoredExpression {
+    /// The decoded expression + byte map, in document offsets, shared by every
+    /// alias of one anchored scalar.
+    Exact(Arc<DecodedScalar>),
+    /// An alias not projected into a defining scalar (a redefined anchor, or
+    /// a scalar the decoder does not reproduce): the parser's resolved text,
+    /// with every range collapsing onto the alias token, the one place the
+    /// value is certainly referenced.
+    AliasToken(Arc<str>),
 }
 
 impl ExpressionValue<'_> {
     /// The decoded expression text the compose parser sees.
     pub(crate) fn expression(&self) -> &str {
-        self.decoded.decoded()
+        match &self.authored {
+            AuthoredExpression::Exact(decoded) => decoded.decoded(),
+            AuthoredExpression::AliasToken(text) => text,
+        }
     }
 
     /// Projects a decoded byte range to a document span, YAML quotes excluded.
     pub(crate) fn project(&self, range: std::ops::Range<usize>) -> Option<SourceSpan> {
-        let base = self.entry.value_span.start;
-        self.decoded.project(range).map(|r| base + r.start..base + r.end)
+        match &self.authored {
+            AuthoredExpression::Exact(decoded) => decoded.project(range),
+            AuthoredExpression::AliasToken(_) => Some(self.entry.value_span.clone()),
+        }
+    }
+
+    /// Whether ranges are exact authored bytes rather than the alias token.
+    pub(crate) fn is_exact(&self) -> bool {
+        matches!(self.authored, AuthoredExpression::Exact(_))
     }
 
     /// The whole decoded-expression authored span (quotes excluded), falling
     /// back to the whole value node when projection is impossible.
     pub(crate) fn expression_span(&self) -> SourceSpan {
-        self.project(0..self.decoded.decoded().len())
+        self.project(0..self.expression().len())
             .unwrap_or_else(|| self.entry.value_span.clone())
     }
 
     /// The decoded byte offset for a document cursor inside the value.
     fn decoded_offset(&self, doc_offset: usize) -> usize {
-        self.decoded
-            .decoded_offset(doc_offset.saturating_sub(self.entry.value_span.start))
+        match &self.authored {
+            AuthoredExpression::Exact(decoded) => decoded.decoded_offset(doc_offset),
+            AuthoredExpression::AliasToken(_) => 0,
+        }
     }
-}
-
-/// Whether an atom is an `expression`-typed scalar.
-fn is_expression(atom: &PropertyAtom) -> bool {
-    matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression))
-}
-
-/// The first `expression`-typed arm of a property, if any — so a union whose
-/// expression arm is not first is still recognized.
-fn expression_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
-    atoms_of(def).iter().find(|atom| is_expression(atom))
 }
 
 /// Every Expression-typed **scalar** frontmatter value, in document order. A
 /// mapping/sequence value on an expression property is intentionally excluded —
 /// it stays a schema type mismatch, not an expression.
+///
+/// The expression text and its projection come from the library's
+/// [`decode_scalar_node`], the decoder composition uses to anchor a failing
+/// frontmatter expression, so a block (`|`, `>`) or multi-line value is parsed
+/// exactly as composition evaluates it. A value is kept only when that decoded
+/// text equals the parser's own [`FmEntry::scalar`]; any disagreement means
+/// the map describes other text, and the value is skipped rather than
+/// mis-projected.
+///
+/// An alias (`*name`) value is the expression its anchor's scalar authors, so
+/// its projection points into that scalar, checked against
+/// [`FmEntry::alias_target`]. The scalar is decoded where the YAML parser
+/// found it ([`FmEntry::alias_target_start`]), never searched for in the text:
+/// a search per alias makes a publication quadratic in the document. Without
+/// that start, or when the decoded text disagrees, the value carries the
+/// parser's resolved text and every range is the alias token, so it is still
+/// diagnosed, never mis-projected.
+///
+/// Each defining scalar is decoded and checked once per call, however many
+/// aliases read it; its aliases share the result.
 pub(crate) fn expression_values<'a>(
     ctx: &DocumentContext,
     ast: &'a FrontmatterAst,
 ) -> Vec<ExpressionValue<'a>> {
+    note_expression_value_set();
     let shape = known_shape(ctx);
     let mut out = Vec::new();
+    let mut definitions: HashMap<usize, Option<Arc<DecodedScalar>>> = HashMap::new();
     for (index, entry) in ast.entries().iter().enumerate() {
-        if entry.kind != FmValueKind::Scalar {
-            continue;
-        }
+        let parsed = match entry.kind {
+            FmValueKind::Scalar => entry.scalar.as_deref(),
+            FmValueKind::Alias => entry.alias_target.as_deref(),
+            _ => continue,
+        };
         let path = ast.key_path_at(index);
         let Some(def) = def_at_path_ctx(ctx, &shape, &path) else {
             continue;
@@ -910,27 +950,76 @@ pub(crate) fn expression_values<'a>(
         if expression_atom(&def).is_none() {
             continue;
         }
-        let Some(raw) = ctx.text.get(entry.value_span.clone()) else {
-            continue;
+        // Every alias carrying one start shares its definition's `alias_target`,
+        // so the text check is as reusable as the decode.
+        let decoded = match entry.alias_target_start {
+            Some(start) => definitions
+                .entry(start)
+                .or_insert_with(|| {
+                    note_alias_target_decode();
+                    decode_alias_definition(ctx.text, start)
+                        .filter(|decoded| parsed == Some(decoded.decoded()))
+                        .map(Arc::new)
+                })
+                .clone(),
+            None if entry.kind == FmValueKind::Alias => None,
+            None => {
+                let parent_indent = source_column(ctx.text, entry.key_span.start);
+                decode_scalar_node(ctx.text, entry.value_span.start, parent_indent)
+                    .map(|(decoded, _)| decoded)
+                    .filter(|decoded| parsed == Some(decoded.decoded()))
+                    .map(Arc::new)
+            }
         };
-        let Some(decoded) = decode_scalar(raw) else {
-            continue;
+        let authored = match (decoded, &entry.alias_target) {
+            (Some(decoded), _) => AuthoredExpression::Exact(decoded),
+            (None, Some(text)) => AuthoredExpression::AliasToken(text.clone()),
+            (None, None) => continue,
         };
-        out.push(ExpressionValue { entry, decoded });
+        out.push(ExpressionValue { entry, authored });
     }
     out
 }
 
+#[cfg(test)]
+thread_local! {
+    /// [`expression_values`] computations on this thread; the diagnostics
+    /// complexity regression reads it.
+    pub(crate) static EXPRESSION_VALUE_SETS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn note_expression_value_set() {
+    #[cfg(test)]
+    EXPRESSION_VALUE_SETS.with(|sets| sets.set(sets.get() + 1));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Alias definitions [`expression_values`] decoded on this thread; the
+    /// shared-alias-target regression reads it.
+    pub(crate) static ALIAS_TARGET_DECODES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn note_alias_target_decode() {
+    #[cfg(test)]
+    ALIAS_TARGET_DECODES.with(|decodes| decodes.set(decodes.get() + 1));
+}
+
 /// The Expression-typed scalar value whose authored value span contains
-/// `offset`.
+/// `offset`. An alias token authors no expression text, so a cursor on it
+/// matches nothing.
 fn expression_value_at<'a>(
     ctx: &DocumentContext,
     ast: &'a FrontmatterAst,
     offset: usize,
 ) -> Option<ExpressionValue<'a>> {
-    expression_values(ctx, ast)
-        .into_iter()
-        .find(|value| value.entry.value_span.contains(&offset))
+    expression_values(ctx, ast).into_iter().find(|value| {
+        value.entry.kind == FmValueKind::Scalar && value.entry.value_span.contains(&offset)
+    })
 }
 
 /// Hover on an Expression-typed frontmatter value, via the shared
@@ -1460,107 +1549,17 @@ pub fn document_symbols(ctx: &DocumentContext) -> Vec<DocumentSymbol> {
 
 /// The effective completion shape: the Darkmatter base properties, overlaid
 /// with each matched extension baseline (e.g. Claudine), then the document's
-/// own `$schema` (document > extension > base — compose precedence).
+/// own `$schema`, assembled by the library's [`effective_property_shape`].
 ///
 /// Exposed for reuse by other frontmatter-aware providers (e.g. navigation).
 pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
-    let mut shape = match darkmatter_base_schema() {
-        SimplifiedSchema::Single(shape) => shape,
-        SimplifiedSchema::Union(_) => SchemaShape::default(),
-    };
-    if let Some(bundle) = ctx.overlay.and_then(|overlay| overlay.bundle()) {
-        for extension in &bundle.extension_shapes {
-            for (name, def) in &extension.properties {
-                shape.properties.insert(name.clone(), def.clone());
-            }
-        }
-        match &bundle.effective.simplified {
-            Some(SimplifiedSchema::Single(document)) => {
-                for (name, def) in &document.properties {
-                    shape.properties.insert(name.clone(), def.clone());
-                }
-            }
-            // A root `$schema` union: overlay the arm a shared literal
-            // discriminant selects (so top-level completion/hover narrows), or
-            // every arm's keys merged when no arm is unambiguously selected.
-            Some(SimplifiedSchema::Union(arms)) => {
-                overlay_root_union(&mut shape, arms, &bundle.frontmatter_json);
-            }
-            None => {}
-        }
-    }
-    shape
-}
-
-/// Overlays a root `$schema` union's arm properties onto the effective
-/// top-level shape.
-///
-/// When the top-level frontmatter mapping selects exactly one arm via the
-/// shared literal discriminant (the Phase-4 [`select_literal_discriminant_arm`]
-/// — never a second, DMLS-only algorithm), only that arm's properties overlay,
-/// so top-level key completion offers just the matched arm's remaining keys.
-/// Before a discriminant is present, or for an unknown, duplicate, or
-/// conflicting discriminant, every inline arm's properties merge instead via
-/// [`merged_root_arm_shape`]: a key present in more than one arm resolves to the
-/// union of those arms' atoms (via [`merge_defs`]), so a shared property whose
-/// type diverges across arms stays a property union rather than collapsing to
-/// the last arm. A file-reference arm contributes no directly-known properties
-/// here.
-fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter_json: &Value) {
-    let arm_json: Vec<Value> = arms.iter().map(root_arm_discriminant_json).collect();
-    match select_literal_discriminant_arm(&arm_json, frontmatter_json) {
-        Some(index) => overlay_arm(shape, &arms[index]),
-        // The merge is across arms only; the merged document shape still takes
-        // precedence over the base/extension baseline it overlays.
-        None => {
-            for (name, def) in merged_root_arm_shape(arms).properties {
-                shape.properties.insert(name, def);
-            }
-        }
-    }
-}
-
-/// Overlays one inline root-union arm's properties, ignoring a file-reference
-/// arm (its properties are not resolved into the arm shape here).
-fn overlay_arm(shape: &mut SchemaShape, arm: &SchemaArm) {
-    if let SchemaArm::Inline(arm_shape) = arm {
-        for (name, def) in &arm_shape.properties {
-            shape.properties.insert(name.clone(), def.clone());
-        }
-    }
-}
-
-/// A merged view of every inline root-union arm's properties, for a root
-/// `$schema` union whose discriminant does not select a single arm. Keys appear
-/// in arm-declaration then property-declaration order; a key contributed by more
-/// than one arm resolves to the union of those arms' atoms (via [`merge_defs`]),
-/// so a same-named property whose type diverges across arms stays a union rather
-/// than collapsing to the last arm. File-reference arms contribute no
-/// properties. The root-`SchemaArm` companion to [`merged_inline_object_shape`].
-fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
-    let mut merged = SchemaShape::default();
-    for arm in arms {
-        let SchemaArm::Inline(arm_shape) = arm else {
-            continue;
-        };
-        for (name, child) in &arm_shape.properties {
-            let combined = match merged.properties.get(name) {
-                Some(existing) => merge_defs(existing, child),
-                None => child.clone(),
-            };
-            merged.properties.insert(name.clone(), combined);
-        }
-    }
-    merged
-}
-
-/// The minimal discriminant JSON for one root-union arm, aligned by index with
-/// the arm slice so the selector's returned index maps back. A file-reference
-/// arm contributes no discriminant properties but still occupies its slot.
-fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
-    match arm {
-        SchemaArm::Inline(shape) => shape_discriminant_json(shape),
-        SchemaArm::FileRef(_) => serde_json::json!({}),
+    match ctx.overlay.and_then(|overlay| overlay.bundle()) {
+        Some(bundle) => effective_property_shape(
+            &bundle.extension_shapes,
+            bundle.effective.simplified.as_ref(),
+            &bundle.frontmatter_json,
+        ),
+        None => effective_property_shape(&[], None, &Value::Null),
     }
 }
 
@@ -1577,140 +1576,15 @@ pub(crate) fn nested_shape<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Opt
 }
 
 /// The nested completion shape for `ancestors`, like [`nested_shape`] but
-/// context-aware at each level.
-///
-/// When an ancestor property is a union of inline-object arms tagged by a shared
-/// `literal(...)` discriminant, and the authored sibling values in the current
-/// mapping select exactly one arm (via the Phase-4
-/// [`select_literal_discriminant_arm`] — never a second, DMLS-only algorithm),
-/// the walk descends into that arm's shape so only its keys are offered. When
-/// narrowing is unavailable (absent/unknown/duplicate/conflicting discriminant,
-/// or an ordinary non-discriminated union), it descends into a MERGED view of
-/// every inline-object arm instead — the [`overlay_root_union`] policy applied
-/// to nested unions — so sibling completion/hover/navigation retain union
-/// behavior rather than guessing the first arm (spec D3 / AC-10). The merged
-/// shape is owned, so this returns a [`SchemaShape`] by value.
+/// context-aware at each level via the library's [`nested_property_shape`]:
+/// a discriminated ancestor union descends into its selected arm, otherwise
+/// into a merged view of every inline-object arm (spec D3 / AC-10).
 fn nested_shape_for_completion(
     ctx: &DocumentContext,
     root: &SchemaShape,
     ancestors: &[&str],
 ) -> Option<SchemaShape> {
-    let mut shape = root.clone();
-    for depth in 0..ancestors.len() {
-        let def = shape.properties.get(ancestors[depth])?;
-        let path = &ancestors[..=depth];
-        let next = match discriminated_arm_shape(ctx, def, path) {
-            Some(selected) => selected.clone(),
-            None => merged_inline_object_shape(def)?,
-        };
-        shape = next;
-    }
-    Some(shape)
-}
-
-/// A merged view of every inline-object arm's properties, for an ancestor union
-/// whose discriminant does not select a single arm. Keys appear in
-/// arm-declaration then property-declaration order; a key contributed by more
-/// than one arm resolves to the union of those arms' atoms (via [`merge_defs`]),
-/// so a same-named property whose type diverges across arms stays a union rather
-/// than collapsing to the first arm. `None` when the property has no
-/// inline-object arm.
-fn merged_inline_object_shape(def: &PropertyDef) -> Option<SchemaShape> {
-    let mut merged: Option<SchemaShape> = None;
-    for atom in atoms_of(def) {
-        let TypeExpr::InlineObject(inner) = &atom.ty else {
-            continue;
-        };
-        let shape = merged.get_or_insert_with(SchemaShape::default);
-        for (name, child) in &inner.properties {
-            let combined = match shape.properties.get(name) {
-                Some(existing) => merge_defs(existing, child),
-                None => child.clone(),
-            };
-            shape.properties.insert(name.clone(), combined);
-        }
-    }
-    merged
-}
-
-/// Merges two property definitions: `existing`'s atoms followed by any of
-/// `incoming`'s atoms not already present, deduped by value and kept in
-/// declaration order. Collapses to [`PropertyDef::Single`] when exactly one atom
-/// survives.
-fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
-    let mut atoms: Vec<PropertyAtom> = atoms_of(existing).to_vec();
-    for atom in atoms_of(incoming) {
-        if !atoms.contains(atom) {
-            atoms.push(atom.clone());
-        }
-    }
-    match atoms.len() {
-        1 => PropertyDef::Single(atoms.into_iter().next().expect("one atom")),
-        _ => PropertyDef::Union(atoms),
-    }
-}
-
-/// The inline-object shape of the union arm a shared literal discriminant selects
-/// for the mapping at `path`, or `None` when the property is not a discriminated
-/// inline-object union or no arm is unambiguously selected.
-///
-/// The authored instance is the already-parsed, correctly-typed frontmatter
-/// mapping at `path` (from the effective schema bundle), so a string `'2'` never
-/// matches a numeric `literal(2)`. Arm projection preserves atom order so the
-/// selector's returned index lines up with [`atoms_of`].
-fn discriminated_arm_shape<'a>(
-    ctx: &DocumentContext,
-    def: &'a PropertyDef,
-    path: &[&str],
-) -> Option<&'a SchemaShape> {
-    let atoms = atoms_of(def);
-    if atoms.len() < 2 {
-        return None;
-    }
-    let arms: Vec<Value> = atoms.iter().map(arm_discriminant_json).collect();
-    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle())?;
-    let instance = navigate_json(&bundle.frontmatter_json, path)?;
-    let index = select_literal_discriminant_arm(&arms, instance)?;
-    match &atoms[index].ty {
-        TypeExpr::InlineObject(shape) => Some(shape),
-        _ => None,
-    }
-}
-
-/// Projects one property-union arm to the minimal JSON the discriminant selector
-/// reads: `{ "properties": { key: { "const": <value> } } }` for each of the
-/// arm's `literal(...)`-typed properties. A non-inline-object arm yields an empty
-/// object (no discriminant properties) but still occupies its slot so the
-/// selector's arm index stays aligned with [`atoms_of`].
-fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
-    match &atom.ty {
-        TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
-        _ => serde_json::json!({}),
-    }
-}
-
-/// The minimal discriminant JSON the selector reads for one inline-object
-/// shape: `{ "properties": { key: { "const": <value> } } }` for each of its
-/// `literal(...)`-typed properties.
-fn shape_discriminant_json(shape: &SchemaShape) -> Value {
-    let mut props = serde_json::Map::new();
-    for (key, def) in &shape.properties {
-        if let PropertyDef::Single(child) = def
-            && let Some(value) = child.literal_value()
-        {
-            props.insert(key.clone(), serde_json::json!({ "const": value }));
-        }
-    }
-    serde_json::json!({ "properties": props })
-}
-
-/// Walks `path` into a JSON object, returning the value at that key path.
-fn navigate_json<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
-    let mut current = root;
-    for segment in path {
-        current = current.as_object()?.get(*segment)?;
-    }
-    Some(current)
+    nested_property_shape(root, authored_frontmatter(ctx), ancestors)
 }
 
 /// The [`PropertyDef`] at a full key `path` (ancestor segments followed by the
@@ -1731,29 +1605,28 @@ pub(crate) fn def_at_path<'a>(root: &'a SchemaShape, path: &[&str]) -> Option<&'
 }
 
 /// The [`PropertyDef`] at a full key `path`, like [`def_at_path`] but
-/// context-aware at each ancestor (via [`nested_shape_for_completion`] → the
-/// Phase-4 [`select_literal_discriminant_arm`]).
+/// context-aware at each ancestor, via the library's
+/// [`property_def_at_path`] against the document's authored frontmatter.
 ///
 /// This is the single context-aware schema-path resolver shared by every
 /// value-oriented capability (value completion, hover, expression
 /// gating/diagnostics, file navigation) so they resolve against the same
-/// selected arm key completion narrows to. A discriminated ancestor a selected
-/// arm resolves descends into exactly that arm; when narrowing is unavailable
-/// the ancestor's inline-object arms merge, so a leaf key present in more than
-/// one arm with divergent types resolves to the union of every arm's atoms (spec
-/// D3 / AC-10). The result is [`Cow`] because a merged leaf must be owned; a
-/// top-level leaf (empty ancestor path) borrows from `root`.
+/// selected arm key completion narrows to (spec D3 / AC-10).
 fn def_at_path_ctx<'a>(
     ctx: &DocumentContext,
     root: &'a SchemaShape,
     path: &[&str],
 ) -> Option<Cow<'a, PropertyDef>> {
-    let (leaf, ancestors) = path.split_last()?;
-    if ancestors.is_empty() {
-        return root.properties.get(*leaf).map(Cow::Borrowed);
-    }
-    let shape = nested_shape_for_completion(ctx, root, ancestors)?;
-    shape.properties.get(*leaf).cloned().map(Cow::Owned)
+    property_def_at_path(root, authored_frontmatter(ctx), path)
+}
+
+/// The authored frontmatter JSON the discriminant selector reads, or `Null`
+/// when the document has no schema bundle (which disables narrowing).
+fn authored_frontmatter<'a>(ctx: &DocumentContext<'a>) -> &'a Value {
+    static NULL: Value = Value::Null;
+    ctx.overlay
+        .and_then(|overlay| overlay.bundle())
+        .map_or(&NULL, |bundle| &bundle.frontmatter_json)
 }
 
 /// A property definition's arms as a slice (one element for a single atom).
