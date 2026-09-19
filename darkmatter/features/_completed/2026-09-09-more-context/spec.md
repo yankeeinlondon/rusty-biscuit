@@ -6,9 +6,9 @@ created: 2026-09-09
 reviewed: true
 reviewed_by: codex/gpt-6-astra
 reviewed_on: "2026-09-11"
-review_iterations: 7
+review_iterations: 5
 clarified: claude/claude-fable-5-1
-rulings: R1-R33 ruled by Ken 2026-09-10/11; folded into body; Q1-Q3 recommendations adopted 2026-09-16 (plan Phase 1, see decisions.md), pending Ken's confirmation
+rulings: R1-R33 ruled by Ken 2026-09-10/11; R34-R37 ruled by Ken 2026-09-17 (Q1-Q3 confirmed, AC29 guard); all folded into body
 inputs:
   - ../../docs/schemas/darkmatter.yaml
   - ../../docs/schemas/expression-functions.yaml
@@ -778,12 +778,24 @@ example, summarizing a website). Invalidating such content requires a
 `ContentPolicy` struct that defines the freshness policy of the cached content.
 Until `ContentPolicy` exists, nothing is cached persistently.
 
+**Reading of "nothing" (R36, 2026-09-17):** no *semantic-result artifact* is
+persisted — no composed document, `::file` child, `::code` / `::toc-linking`
+result, or document snapshot is ever read from or written to `--cache-root`.
+Raw remote-URL response bodies are *transport artifacts*, not semantic
+results; they remain persistable under an explicit `--cache-root` as a
+transport-cache exception governed by HTTP validators and `Cache-Control`
+(`no-store` is never written, `no-cache` always revalidates). The fix deleted
+the semantic-result persistence code rather than disabling it, and a cache
+root never authorizes a host. `docs/topics/caching.md` is the user-facing
+statement of this boundary.
+
 Consequences here: the new `ctx.*` values and `ping` / `ping_under` results
 never participate in any persistent cache, and this feature makes no change to
-the existing volatile-exclusion list in `cache/hashing.rs`. Disabling the
-current `--cache-root` persistent cache and designing `ContentPolicy` are a
-separate fix (`fixes/2026-09-16-content-policy-no-cache`); its cache-disable
-portion ships before this feature.
+the existing volatile-exclusion list in `cache/hashing.rs`. Removing
+semantic-result persistence from `--cache-root` is the separate fix
+`fixes/2026-09-16-content-policy-no-cache`, whose cache-disable portion ships
+before this feature. Designing `ContentPolicy` remains future work; that fix
+records only its contract.
 
 ## Sniff additions
 
@@ -937,6 +949,8 @@ R1–R10 ruled by Ken 2026-09-10; R11–R33 ruled 2026-09-11.
   is cached persistently. New ctx values and ping results never enter a
   persistent cache; the volatile-exclusion list is untouched; disabling
   `--cache-root` and designing `ContentPolicy` are a separate unscheduled fix.
+  (R36 later defines "nothing" as no semantic-result artifact and keeps raw
+  remote-URL bodies as a transport-cache exception.)
 - **R19** — Roster flow detail: unknown `has_agentic_cli` names error (see
   R13).
 - **R20** — Content composed through `as_markdown` is subject to the same
@@ -1026,13 +1040,42 @@ R1–R10 ruled by Ken 2026-09-10; R11–R33 ruled 2026-09-11.
   `current_env.*`. Ken acknowledged this is a change from the current
   environment. `current_env` joins `LATE_BINDING_ROOTS`; the `shell`
   early-binding preflight rejection continues to apply to both roots.
+- **R34** (2026-09-17) — Execution identity (confirms Q1). `ctx.id` and
+  `ctx.sid` hash the four listed inputs plus a per-execution 16-byte CSPRNG
+  nonce drawn once per root compose request and shared by every fragment.
+  Failure to obtain entropy is a typed compose error, never a fixed or
+  time-derived fallback. Identifiers are not reproducible from their inputs;
+  R2 already made them never cache-stable. Keyed BLAKE3 for `sid` was
+  declined: candidate confidentiality is not a requirement of this feature.
+- **R35** (2026-09-17) — Memo scope (confirms Q2). `current.<key>` and
+  `current_env.<key>` are memoized per expression evaluation, per key: repeated
+  reads inside one expression agree, the next expression and every lifecycle
+  event observe the fact afresh, and there is no atomic snapshot across
+  different keys. Whole-document first-read memoization and no memoization
+  were both declined.
+- **R36** (2026-09-17) — Persistent-cache boundary (confirms Q3). R18's
+  "nothing is cached persistently" means no semantic-result artifact: no
+  composed document, operation result, or document snapshot is ever read from
+  or written to `--cache-root`. Raw remote-URL response bodies remain
+  persisted as a transport-cache exception governed by HTTP validators and
+  cache directives. This ruling also answers Q1 of
+  `fixes/2026-09-16-content-policy-no-cache` (option 1).
+- **R37** (2026-09-17) — AC29 migration guard. The clean break of R33 is
+  guarded by an L1 test that greps the AC29 scope for `current.ctx.` /
+  `current.env.` and compares the result against a checked-in allowlist of
+  file path plus expected occurrence count. The test fails on any new
+  occurrence and on any stale entry whose count no longer matches. Only
+  negative tests that prove the old spelling is rejected, and documentation
+  or error text that explains the removed spelling, may be allowlisted; a
+  literal zero-match grep was declined because it would force those tests to
+  obfuscate the spelling they reject.
 
 ## Open Questions
 
 The following review questions exposed conflicts not resolved by the earlier
 rulings. On 2026-09-16 Phase 1 of the plan adopted each recommendation and
-folded it into the body above (`decisions.md`, D1). These outcomes await Ken's
-confirmation; they are not rulings R34+.
+folded it into the body above (`decisions.md`, D1). Ken confirmed all three
+outcomes on 2026-09-17 as **R34** (Q1), **R35** (Q2), and **R36** (Q3).
 
 ### Q1 — Execution identity guarantees (R2)
 
@@ -1106,9 +1149,9 @@ cache-key fields does not prevent stale composed output from containing them.
 was activated as `fixes/2026-09-16-content-policy-no-cache` and its
 cache-disable portion implemented in Phase 1: composed `::file` children,
 `::code` and `::toc-linking` results, and document snapshots are never read
-from or written to the persistent store. Pending Ken's ruling on the fix's
-open question, `--cache-root` stays scoped to raw remote-URL bodies, which
-carry no composed context. A warm-cache regression test proves composed
+from or written to the persistent store. Ken's ruling on the fix's open
+question (R36) keeps `--cache-root` scoped to raw remote-URL bodies
+(transport artifacts), which carry no composed context. A warm-cache regression test proves composed
 output is not replayed.
 
 ## Acceptance Criteria (**R23**)
@@ -1232,8 +1275,12 @@ L1 must pass CI on macOS, Linux, native Windows, and WSL2.
   `current_env`; and a repo-wide grep for `current.ctx.` / `current.env.` over
   code, shipped prompts, user docs, and skills (excluding `target/`,
   `node_modules/`, `.gitnexus/`, features/fixes `_completed` dirs, and the
-  other in-flight feature specs listed in the migration list) returns nothing.
-  Grep-based check at L1.
+  other in-flight feature specs listed in the migration list) matches only a
+  checked-in allowlist of file path plus expected occurrence count (**R37**).
+  Allowlisted occurrences are limited to negative tests that prove the old
+  spelling is rejected and documentation or error text that explains it. An
+  L1 test fails on any occurrence outside the allowlist and on any allowlist
+  entry whose count no longer matches.
 
 Additional review acceptance criteria (Q1–Q3 must be resolved before their
 associated gates can pass):
@@ -1286,8 +1333,9 @@ do not substitute Internet connectivity or silently skip a required leg.
 These files must agree with this spec at completion (AC29). Collectively they describe
 eager `ctx`, lazy `current`, lazy `current_env`, lazy parameterized functions
 (`recent_commits(count)` and later pairs), the pair rule (**R29**), and the
-`current.<key>` / `current_env.<key>` spelling; no `current.ctx.` /
-`current.env.` text remains in them.
+`current.<key>` / `current_env.<key>` spelling; no live `current.ctx.` /
+`current.env.` usage remains in them. A mention that explains the removed
+spelling is permitted only when listed in the **R37** allowlist.
 
 - Claudine skill: `.claude/skills/claudine/SKILL.md`,
   `.claude/skills/claudine/lifecycle.md`,

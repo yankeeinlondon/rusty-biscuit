@@ -124,12 +124,32 @@ docs_updated_during_phase_8:
   - darkmatter/features/2026-09-09-more-context/implementation-log.md
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8: []
-source_files_during_phase_9: []
+source_files_during_phase_9:
+  - darkmatter/lib/src/markdown/compose/icmp.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/pending.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/tests/mod.rs
+  - darkmatter/lib/src/markdown/compose/tests/icmp.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/tests/compose_icmp.rs
 docs_updated_during_phase_9:
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/inline/preflight-checks.md
   - darkmatter/features/2026-09-09-more-context/plan.md
   - darkmatter/features/2026-09-09-more-context/implementation-log.md
 docs_created_during_phase_9: []
-skills_files_updated_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/library-surfaces.md
 source_files_during_phase_10: []
 docs_updated_during_phase_10:
   - darkmatter/features/2026-09-09-more-context/plan.md
@@ -159,7 +179,7 @@ human_review_items:
   - "Build-host storage crisis blocks native Windows and WSL2 evidence (AC14, and Phase 12 generally). W: on build-win-native has 8192 bytes free, so cross-check fails with 'No space left on device' and the WSL guest (VHDX on W:) resets SSH. Read-only inventory: W:\\ci-verification\\rusty-biscuit\\target 95.1 GB (over the 80 GB sweep cap; that standing clone has no .cargo/config.toml target-dir pin), W:\\ci-verification\\rb-pr66 61.4 GB (2026-08-30, another session), W:\\WSL\\Ubuntu-26.04\\ext4.vhdx 130.8 GB. The daily sweep reported success at 04:00. Nothing was deleted because none of it belongs to this session (storage-strategy rule 2). Decide what to remove or compact."
   - "build-linux cross-check lock held since 2026-09-14T18:25Z by purpose=nightly-reward-spike, branch=feat-nightly-perf. It is probably stale, but the script never removes locks. Linux evidence for this phase came from Docker Desktop instead. Remove it if that run is dead."
   - "Confirm three Phase 3 design decisions that later phases build on. (a) Gateways are a separate API, sniff::network::detect_default_gateways(), not a NetworkRequest flag, because detect_network_with_request is GitNexus HIGH. (b) ICMP uses unprivileged datagram sockets with no ping-subprocess fallback, so Linux/WSL2 hosts whose net.ipv4.ping_group_range excludes the process group get IcmpError::NotPermitted, which becomes a compose error per R6. The wsl2-ubuntu CI leg must provide that sysctl for AC14. (c) macOS primary default = first UP default route that is not RTF_IFSCOPE (matches `route get default`); the spec's 'first default route in the dump' did not mention scoped routes."
-  - "Carried from Phases 1-2, still unconfirmed: the retroactive HIGH edit to Darkmatter current_package_context; Q1 execution nonce (blocks Phase 5); Q2 per-expression memo scope (blocks Phase 6); the content-policy-no-cache --cache-root scope ruling (Phase 11/12); explicit review before Phase 10.3 edits CRITICAL capture_at_event."
+  - "Carried from Phases 1-2, still unconfirmed: the retroactive HIGH edit to Darkmatter current_package_context; explicit review before Phase 10.3 edits CRITICAL capture_at_event. Resolved 2026-09-17 by Ken as spec R34-R36: Q1 execution nonce, Q2 per-expression memo scope, and the content-policy-no-cache --cache-root scope (raw remote bodies only). R37 rules the AC29 guard is an allowlist test."
 message_to_agent: >-
   PHASES 6, 7, 8, 9, 10, AND MOST OF 11 NOT IMPLEMENTED (all halted 2026-09-17; only task 11.3, the Sniff READMEs, is done): finish and log Phase 4.7, then Phases 5-10 in order, then rerun Phase 11 for 11.1, 11.2, 11.4-11.7 before Phase 12; finish and log Phase 4.7 and Phase 5 first, and free disk space on the Mac; see human_review_items and the Phase 6 section of implementation-log.md. Phase 3 notes follow.
   Phase 3 added Sniff network primitives; no Darkmatter/Claudine code changed. APIs for Phase 5/7/9:
@@ -299,13 +319,13 @@ shared dispatch/descriptor and evaluation-context changes.
 
 ## Phase 9 — Add ICMP Consent, Preflight, and Functions
 
-- [ ] **9.1 Add a separate ICMP grant policy to `ComposeOptions`.** Parse exact IP and strict CIDR entries from the existing `--allow-host` input, normalize address spelling, retain explicit IPv6 scope constraints, and ensure these grants do not widen `FetchPolicy` HTTP host/wildcard permissions.
-- [ ] **9.2 Model ICMP as typed effects.** Add planned target/timeout/attempt metadata to preflight, support already-approved exact-IP/CIDR capabilities for dynamic targets, emit one warning and no packets on denial, and prohibit evaluation from acquiring consent implicitly.
-- [ ] **9.3 Implement `ping`.** Validate literal IPv4/IPv6/scoped IPv6 with no DNS, checked positive finite timeout defaulting to 100 ms, then map denied/timeout/send-failure outcomes to `null` plus warning/`false`/compose error exactly as specified.
-- [ ] **9.4 Implement `ping_under`.** Validate positive integral attempts defaulting to three, enforce checked bounded total duration, run attempts sequentially, classify replies at-or-after the threshold as late, return true/false/`"unstable"`, and abort on any transport failure.
-- [ ] **9.5 Verify nested and frontmatter policies.** Ensure statically known pings inside `as_markdown` appear in root preflight, runtime revalidates actual targets, and frontmatter/local-only restrictions cannot be bypassed through nesting.
-- [ ] **9.6 Add deterministic consent/function tests.** Cover denied targets/CIDRs, malformed addresses, overflow and non-finite numbers, scoped IPv6, cross-family CIDRs, mixed outcomes, send failure after success, denied multi-attempt no-send, CIDR HTTP non-authorization, and exact descriptor return types.
-- [ ] **Checkpoint 9.** Darkmatter L1 tests pass; AC6-AC8, AC33, and the ICMP portions of AC20/AC32 are satisfied without requiring live Internet connectivity.
+- [x] **9.1 Add a separate ICMP grant policy to `ComposeOptions`.** Parse exact IP and strict CIDR entries from the existing `--allow-host` input, normalize address spelling, retain explicit IPv6 scope constraints, and ensure these grants do not widen `FetchPolicy` HTTP host/wildcard permissions.
+- [x] **9.2 Model ICMP as typed effects.** Add planned target/timeout/attempt metadata to preflight, support already-approved exact-IP/CIDR capabilities for dynamic targets, emit one warning and no packets on denial, and prohibit evaluation from acquiring consent implicitly.
+- [x] **9.3 Implement `ping`.** Validate literal IPv4/IPv6/scoped IPv6 with no DNS, checked positive finite timeout defaulting to 100 ms, then map denied/timeout/send-failure outcomes to `null` plus warning/`false`/compose error exactly as specified.
+- [x] **9.4 Implement `ping_under`.** Validate positive integral attempts defaulting to three, enforce checked bounded total duration, run attempts sequentially, classify replies at-or-after the threshold as late, return true/false/`"unstable"`, and abort on any transport failure.
+- [x] **9.5 Verify nested and frontmatter policies.** Ensure statically known pings inside `as_markdown` appear in root preflight, runtime revalidates actual targets, and frontmatter/local-only restrictions cannot be bypassed through nesting.
+- [x] **9.6 Add deterministic consent/function tests.** Cover denied targets/CIDRs, malformed addresses, overflow and non-finite numbers, scoped IPv6, cross-family CIDRs, mixed outcomes, send failure after success, denied multi-attempt no-send, CIDR HTTP non-authorization, and exact descriptor return types.
+- [x] **Checkpoint 9.** Darkmatter L1 tests pass; AC6-AC8, AC33, and the ICMP portions of AC20/AC32 are satisfied without requiring live Internet connectivity.
 
 ## Phase 10 — Integrate Claudine and Complete the Clean-Break Migration
 
@@ -326,7 +346,7 @@ shared dispatch/descriptor and evaluation-context changes.
 - [ ] **11.4 Update prompts and templates.** Remove sentinel workarounds in `system-prompt.md` and review prompts where classified, retain the implement-plan fallback unchanged, and verify every migrated shipped prompt including `prompts/format.md` composes.
 - [ ] **11.5 Update dependency inventories.** Record all actual direct dependency and feature changes in root and Darkmatter/Sniff/Claudine area `docs/dependencies.md` files; do not document dependencies that were considered but not added.
 - [ ] **11.6 Refresh Markdown hashes through Darkmatter.** For every modified Markdown file with a hash frontmatter property, run `md hash <file>` and write the resulting frontmatter/body hash using the repository's established workflow.
-- [ ] **11.7 Run documentation drift checks.** Execute the scoped grep for `current.ctx.`/`current.env.` excluding the spec-approved historical locations, and the semantic sentinel grep; inspect every remaining hit rather than banning the word `root` globally.
+- [ ] **11.7 Run documentation drift checks.** Add the R37 L1 allowlist test for `current.ctx.`/`current.env.` over the AC29 scope (checked-in file path plus expected count; fails on new occurrences and on stale entries), seed the allowlist only with negative tests and explanatory doc or error text, and run the semantic sentinel grep; inspect every remaining hit rather than banning the word `root` globally.
 - [ ] **Checkpoint 11.** AC29 passes, READMEs and skills describe only implemented behavior, dependency inventories match manifests, shipped prompts compose, and all required Markdown hashes are current.
 
 ## Phase 12 — Full Validation and Release Gate

@@ -8,6 +8,10 @@ decision is listed for Ken's confirmation in the plan's `human_review_items`.
 
 ## D1 — Open-question outcomes (Q1–Q3)
 
+Confirmed by Ken on 2026-09-17 as spec rulings R34 (Q1), R35 (Q2), and
+R36 (Q3). R37, ruled the same day, settles the AC29 migration guard as an
+allowlist test rather than a literal zero-match grep.
+
 | Question | Adopted outcome | Spec sections updated |
 |---|---|---|
 | Q1 execution identity | Per-execution 128-bit random nonce shared by `ctx.id` and `ctx.sid`; typed entropy-failure compose error; versioned, length-prefixed tuple | Document identity, Q1, AC4, AC36 |
