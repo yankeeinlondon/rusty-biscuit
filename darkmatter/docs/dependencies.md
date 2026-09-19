@@ -39,6 +39,15 @@ features their tier requires.
 - `ipnet` parses and matches CIDRs for the `ipv4`/`ipv6` filters and the ICMP
   address grants. It is already in the tree through `sniff`.
 
+## Login-shell Probes
+
+- `windows` (Windows only, `Win32_Foundation` and `Win32_System_JobObjects`)
+  places each `has_alias`/`has_builtin_function`/`has_user_function`/
+  `can_execute` shell query in a kill-on-close Job Object, so a PowerShell
+  profile cannot leave processes running after the query ends. Unix uses the
+  existing `libc` dependency for the equivalent `setsid` session and
+  process-group kill.
+
 ## Compose Text Replacement
 
 - `aho-corasick` powers the `replace:` map matcher in

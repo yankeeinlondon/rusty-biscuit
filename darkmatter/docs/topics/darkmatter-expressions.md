@@ -67,11 +67,13 @@ The principles worth carrying around:
   filesystem, or the function catalog. The same text always yields the same AST;
   an unknown variable or an unknown function is an *evaluation* concern, not a
   parse error.
-- **Identifiers are letters, digits and `_`, and never start with a digit.**
-  Every other character ends an identifier — including `-`, which is always the
-  subtraction operator. A kebab-case frontmatter key such as `spec-name` is
-  therefore reachable only as `doc['spec-name']`, not as `{{ spec-name }}`,
-  which parses as `spec` minus `name`.
+- **Identifiers are letters, digits, `_`, and inner `-`, and never start with
+  a digit.** A `-` joins an identifier only mid-identifier and only when an
+  identifier character follows it, so a kebab-case key such as `spec-name` is
+  simply `{{ spec-name }}`. `a - b`, `a -b`, `4-2`, and `foo--bar` stay
+  subtraction. Subtracting from a name therefore needs whitespace:
+  `iteration - 1`, not `iteration-1`, which names a key. See
+  [lexing](./parsing/lexing.md#--inside-an-identifier).
 - **Dotted paths are one token.** `a.b.c` lexes as a single variable; a `.`
   followed by a digit does not fold, which is why `items.0` is rejected and
   `items[0]` is the array form.
@@ -84,6 +86,12 @@ The principles worth carrying around:
   into `and(…)` / `or(…)` calls in the AST.
 - **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
   composition with an error naming the source line, on every surface.
+- **A missing value is not a failure, but an unknown name warns.** A reference
+  that resolves to nothing renders empty. When no frontmatter key, caller
+  input, or schema property defines its root, composition warns once with
+  `dm.expression.unknown_identifier`, unless the expression handles the
+  absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
+  [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
 
 Full detail lives under [Parsing](./parsing/index.md):
 [scanning](./parsing/scanning.md), [lexing](./parsing/lexing.md), and
@@ -193,6 +201,7 @@ Use interpolation literals when documentation needs to display `{{ ... }}` synta
 Supported variable forms:
 
 - simple keys: `draft`
+- kebab-case keys: `spec-name`, `doc.spec-name`
 - nested keys: `user.role`
 - context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](./context-variables.md)
 - environment keys: `env.AGENT`, `env.HOME`
@@ -232,15 +241,48 @@ access returns `null` and never errors.
 
 ## Namespaces
 
-Three reserved prefixes select a distinct value source. They are intercepted
-before ordinary key lookup, so a frontmatter property that happens to share a
-namespace name never shadows the namespace.
+Five reserved prefixes select a distinct value source. They are intercepted
+before ordinary key lookup, so neither a frontmatter property nor a
+caller-injected global that happens to share a namespace name can shadow the
+namespace.
 
-| Namespace | Resolves to |
-| --- | --- |
-| `doc` / `doc.*` | the **current** document's frontmatter (this document) |
-| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) |
-| `env.*` | process environment variables |
+| Namespace | Resolves to | Observed |
+| --- | --- | --- |
+| `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
+| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) | eager, captured once per request |
+| `env.*` | process environment variables, from the snapshot frozen at capture | eager |
+| `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
+| `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
+
+### The lazy `current` and `current_env` namespaces
+
+`current` mirrors `ctx` key for key and `current_env` mirrors `env` key for
+key. There is no nesting: `current.ctx.x`, `current.env.x`, and
+`current_env.ctx.x` name no member and fail as unknown paths.
+
+- **Freshness.** `ctx.branch` is the branch at the start of the request;
+  `current.branch` is the branch when the expression evaluating it runs.
+- **Memo scope.** A key is observed at most once per expression evaluation, so
+  repeated reads inside one `{{ … }}` span, one `when=` condition, or one `$()`
+  branch agree. The next expression observes the fact afresh.
+- **What never refreshes.** The invocation directory and the root document's
+  identity (`ctx.self`, `ctx.hash`, `ctx.id`, `ctx.sid`) are owned by the
+  request, so `current` reads exactly what `ctx` does for them. The repository
+  root and package topology (`repo`, `repo_root`, `packages`, `area`, and the
+  other repository keys) are fixed by the request's repository observation,
+  made once when the request is created: `current` answers them from that one
+  observation, never by discovering the repository again. Only mutable Git and
+  filesystem facts (`branch`, `recent_commits`, `dirty_files`) and
+  `current_env.*` refresh at reference time.
+- **Cost.** A `current.*` reference adds no eager capture, and an unreached
+  reference observes nothing.
+- **Bare `current`** enumerates the context variable names with no value
+  observed for any of them.
+- **Who supplies the answer.** `md compose` refreshes at the directory the
+  request captured — never the process CWD at reference time. An embedder that
+  drives composition installs its own capability; a key it does not supply
+  resolves to nothing and raises a partial-capture warning rather than falling
+  back to host discovery or to the stale `ctx` value.
 
 ### The `doc` namespace
 
@@ -1078,15 +1120,17 @@ Unsupported or easy-to-misread forms:
 - a single `&`, `|`, or `=` — each is a lexer error; all three are only valid doubled
 - numeric dot access like `foo.0` — use `foo[0]` instead
 - chained comparison like `a < b < c` — use `a < b && b < c`
-- `-` inside a name: `{{ spec-name }}` is `spec` minus `name`, never a reference
-  to a `spec-name` key — use `{{ doc['spec-name'] }}`
+- unspaced subtraction after a name: `{{ iteration-1 }}` reads a key named
+  `iteration-1` (and warns when nothing defines it) — write `{{ iteration - 1 }}`
+- keys the identifier form cannot spell — containing `.` or `--`, starting with
+  a digit, or ending in `-` — use bracket access: `{{ doc['foo--bar'] }}`
 - number forms with an exponent (`1e3`), a leading dot (`.5`), or digit
   separators (`1_000`)
 
 ## Authoring a New Expression Function
 
 Expression functions live in domain modules under
-[`expression/functions/`](../../lib/src/markdown/compose/expression/functions)
+[`expression/functions/`](../../lib/src/markdown/compose/expression/functions/mod.rs)
 and share one registration model:
 
 - **Pure functions** — depend only on their arguments. Most

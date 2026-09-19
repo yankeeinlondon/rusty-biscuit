@@ -83,14 +83,19 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
 - `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
 - `--allow-ctx-override`: allow non-object `ctx` frontmatter. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error. This flag downgrades the error to a warning, and the runtime context is used instead.
-- `--shell`: report shell commands discovered in the compose tree and exit without executing them. The report includes body `::shell` directives and top-level frontmatter `$(...)` shell expressions, including commands discovered through markdown transclusions.
+- `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives and top-level frontmatter `$(...)` shell expressions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow-host` entry already grants each one. No command runs and no packet is sent.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
-- `--allow-host <HOST>`: allow remote URL reads from a host. Repeat for multiple hosts. The default remote policy is deny-all.
+- `--allow-host <HOST>`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
+    - a hostname or `*.wildcard` pattern allows remote URL reads from that host, and grants no ICMP;
+    - an exact IP literal allows remote URL reads from that exact host **and** grants `ping`/`ping_under` to that address (an IPv6 zone constrains the ICMP grant to that interface, spelled the way the host spells it — the interface name on macOS and Linux (`fe80::1%en0`), the numeric interface index on Windows (`fe80::1%12`));
+    - a strict CIDR such as `10.1.0.0/16` grants `ping`/`ping_under` to every address in the range of that family, and authorizes no HTTP at all.
+
+  An ICMP probe to an address no entry grants returns `null` with a compose warning and sends nothing.
 - `--remote-concurrency <N>`: maximum concurrent remote fetches. Defaults to `16`, or the value of the `DARKMATTER_REMOTE_CONCURRENCY` environment variable when the flag is omitted. An explicit flag overrides the env var, which overrides the default.
-- `--remote-ttl <SECONDS>`: override remote artifact freshness TTL. Without this, server cache headers are used when present.
-- `--remote-refresh`: force revalidation of cached remote artifacts.
-- `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network.
-- `--cache-root <DIR>`: persist fetched remote URL bodies at the given root so `--remote-ttl`, `--remote-refresh`, and `--remote-freshness` apply across CLI runs. Composed documents, `::file` children, `::code` and `::toc-linking` results, and document snapshots are never persisted; every run recomposes local content.
+- `--remote-ttl <SECONDS>`: set the freshness lifetime of transport-cached remote bodies. Without this, the server's `max-age` is used when present. It never makes a `no-store` response storable or a `no-cache` response fresh.
+- `--remote-refresh`: revalidate every transport-cached remote body with a conditional GET, even when fresh.
+- `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network. `strict` fails instead; `optimistic` serves any cached body without revalidation. A `no-cache` response is always revalidated and never served stale.
+- `--cache-root <DIR>`: the transport-artifact cache root. It persists raw remote URL response bodies only, under `<DIR>/.darkmatter/cache/v1/`, so `--remote-ttl`, `--remote-refresh`, and `--remote-freshness` apply across CLI runs. Semantic results (composed documents, `::file` children, `::code` and `::toc-linking` results, and document snapshots) are never persisted; every run recomposes local content. Nothing is created on disk until a storable remote response is written, and a cache root never authorizes a host. See [Caching](../topics/caching.md).
 
 ### Compose Warnings
 
@@ -187,13 +192,13 @@ md compose doc.md --allow-host example.com
 # Cache remote artifacts and serve stale content on revalidation failure
 md compose doc.md \
   --allow-host example.com \
-  --cache-root .darkmatter/cache/v1 \
+  --cache-root . \
   --remote-freshness fallback
 
 # Force revalidation of cached remote artifacts
 md compose doc.md \
   --allow-host example.com \
-  --cache-root .darkmatter/cache/v1 \
+  --cache-root . \
   --remote-refresh
 ```
 

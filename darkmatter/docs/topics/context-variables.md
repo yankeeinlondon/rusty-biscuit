@@ -2,6 +2,8 @@
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
+Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](./darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
+
 ## Overcoming `ctx` Conflicts
 
 - Document authors are strongly discouraged from using the `ctx` frontmatter variable because it collides with Darkmatter's runtime context namespace
@@ -62,14 +64,17 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 |-------|--------------|------------|
 | **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
 | **Git** | One `GitRepo::discover` plus branch, worktree, and index-stage reads | `branch`, `worktree`, `merge_conflicts` |
+| **GitHistory** | `get_recent_commits_by_count` (ten commits and their file changes); never demanded by ordinary Git facts | `recent_commits` |
 | **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `package_areas`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
 | **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_source_code_files`, `staged_files`, `untracked_files`, `dirty_packages`, `dirty_package_areas`, `staged_packages`, `staged_package_areas`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
 | **Documents** | `detect_docs_with_packages` | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
-| **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
+| **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version`, `hostname` |
 | **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
 | **Agent** | Reads `AGENT` and `MODEL` env vars | `agent`, `model` |
+| **Document** | Projects the retained root document; observes the hostname and Git repository name and draws one execution nonce | `self`, `last_updated`, `hash`, `id`, `sid` |
+| **Network** | Interface enumeration plus default-gateway detection | `tailnet`, `gateway`, `gateway_v6` |
 
 
 ## Information Provided
