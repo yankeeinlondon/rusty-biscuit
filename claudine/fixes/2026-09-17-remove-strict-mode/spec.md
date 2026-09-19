@@ -729,8 +729,15 @@ definitions remain subject to their conditions. This explicit source is an
 intentional exception to the scope limits of automatic discovery; do not impose additional source-location
 classifications. Relative imports retain the schema file's source origin.
 This is additive discovery, not replacement of root and nested `schemas/`
-locations. Reuse existing schema merge precedence where compatible with the
-confirmed non-relaxable restrictions. Invalid environment-value diagnostics
+locations. Schema precedence, highest first, is document `$schema`, matching
+`schema-trigger` definitions, always-on schema definitions, then the Darkmatter
+base. Conflicts resolve per frontmatter property: the winner supplies its whole
+definition, including type, constraints, presence requirements, nested shape,
+and description. A missing winning description does not inherit lower-tier
+prose. Do not synthesize unions or conflict errors for ordinary property overlap.
+Mandatory restrictions remain independently non-relaxable. Darkmatter owns
+consistent ordering for composition and editor consumers; deterministic
+same-tier tie-breaking is a technical design detail. Invalid environment-value diagnostics
 remain an implementation detail.
 
 DMLS must evaluate applicable definitions at startup and refresh the effective
@@ -746,6 +753,14 @@ syntax, observation semantics, time handling, refresh, and errors remain
 technical design decisions. Activation remains passive: it must not execute
 actions, shell expansion, lazy providers, or discovered binaries. The existing
 qualitative responsiveness requirement remains unchanged.
+Activation-expression clarification agreed 2026-09-18: activation uses ordinary
+Darkmatter expression grammar and document values, but only functions operating
+on supplied data; clock functions use the captured activation clock. Host and
+filesystem observations use declarative predicates with literal arguments.
+Unsupported calls are structured preparation errors even in inactive branches;
+eligible computation and errors retain ordinary short-circuit behavior. The
+shared Darkmatter function registry owns activation capability declarations;
+DMLS must not maintain a separate allowlist.
 The loader, environment read timing, and change-monitoring strategy are
 implementation choices; this specification does not require eager scanning of
 every subtree rather than discovery as documents become relevant.

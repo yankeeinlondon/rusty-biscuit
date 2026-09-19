@@ -687,11 +687,171 @@ and ordinary `ResolutionContext` dispatch can perform remote reads. The matcher
 must not receive those unrestricted contexts directly; snapshot-backed adapters
 must enforce the agreed observation boundary.
 
-Dynamic expression-derived observation requests and the allowed activation
-expression functions remain the next consequential ruling. D15 does not assume
-arbitrary read-side expressions can be precollected, nor authorize their
-execution during matching. Concrete snapshot/request types, observation errors,
-and refresh dependencies remain to be specified within this contract.
+D16 defines the allowed activation-expression boundary. D15 does not assume
+arbitrary read-side expressions can be precollected or authorize their execution
+during matching. Concrete snapshot/request types, observation errors, and refresh
+dependencies remain to be specified within this contract.
+
+## D16 — Keep activation expressions within supplied data
+
+**Human decision:** confirmed 2026-09-18, option **A**. Activation expressions
+use ordinary Darkmatter grammar, operators, and document values. Eligible
+functions operate entirely on supplied data; clock functions use D15's captured
+clock. Host and filesystem observations use declarative predicates with literal
+arguments.
+
+**Recommendation presented:** A for simplicity and statically identifiable
+requests. Alternative B allowed approved observation functions with
+document-derived pure arguments, offering computed targets at the cost of staged
+argument evaluation and dependency/observation scheduling; it was not selected.
+
+The shared runtime `FunctionBinding` registry owns explicit activation/snapshot
+capabilities and exposes their descriptor view. The existing parser/evaluator
+consumes that authority; neither a DMLS allowlist nor `EvaluationMode::Pure`
+defines eligibility. Unsupported calls produce structured preparation errors
+even in inactive branches. Eligible expression computation and errors retain
+ordinary short-circuit behavior. Clock functions use the supplied instant.
+
+This explicitly narrows the draft claim that any valid expression is eligible
+for activation, without changing general expression grammar or eligibility
+outside activation. Exact capability enum names, activation `ctx`/`env` catalogs,
+and clock predicate syntax remain open. The corresponding narrow R12
+clarification is authorized.
+
+## D17 — Reuse FileReference paths with an explicit-base escape hatch
+
+**Human decision:** confirmed 2026-09-18, option **A**. File predicates accept
+ordinary `FileReference` scalar strings rooted in the declaring schema's source
+context, with an optional explicit-base form such as:
+
+```yaml
+file_exists:
+  base: workspace
+  path: './.example/config.yaml'
+```
+
+**Recommendation presented:** A for reuse and ergonomics. Alternative B required
+an explicit base/path object for every predicate; it made anchors visible but
+added verbosity to ordinary source-relative cases.
+
+`biscuit-file` owns parsing/resolution and Darkmatter supplies captured context.
+Explicit-base paths must be explicit-relative to use exactly one anchor, without
+search fallback. Existing `&` repository-only and `@` magic semantics remain
+unchanged; `@` is not workspace shorthand. Imports retain source origins.
+External sources may have repository scopes cleared, so source/import context
+must stay distinct from consuming-root context. Context derives from captured
+observations, not ambient CWD recapture. Resolution failures are typed and
+distinct from missing files. D18 defines `workspace`; further selector names
+are not confirmed.
+
+## D18 — Anchor workspace predicates at the document's repository root
+
+**Human decision:** confirmed 2026-09-18, option **A**. `workspace` means the
+document's owning repository/worktree root. Outside a repository, use the nearest
+containing editor workspace folder or captured CLI request CWD.
+
+**Recommendation presented:** A for consistent marker results across invocation
+folders. Alternative B always used the opened editor folder/CLI CWD, avoiding
+repository anchoring but making the same document's results invocation-dependent.
+
+Use document-anchored Sniff observation, not the schema source's repository.
+Nested repositories and linked worktrees own their root; marker lookup may reach
+above an opened editor subdirectory. Preserve `Present`, `Absent`, and `Failed`:
+only confirmed absence allows a non-repository fallback, never observation error.
+Source/import origins and discovery applicability/sibling isolation do not change.
+Repository-root discovery is already required, not reopened here. The editor
+case outside all opened folders without a repository anchor remains unresolved;
+no fallback or new selector is implied.
+
+## D19 — Preserve automatic ordering and place explicit sources afterward
+
+**Superseded by D20.** This was confirmed initially, then explicitly replaced by
+the user's tier policy. The text below records the former decision only; it is
+not the effective assembly contract.
+
+**Human decision:** confirmed 2026-09-18, option **A**. Apply schema sources in
+this order:
+
+1. Darkmatter/caller baseline.
+2. Automatically discovered sources, nearest directory first, with filenames
+   ordered by UTF-8 bytes within each directory. A nearer file shadows a farther
+   file with the same filename.
+3. Explicit `SCHEMA_DIR` sources.
+4. The document's `$schema`.
+
+Standalone exports and matching triggers participate in one ordered source
+stream. Later property definitions override earlier definitions, while mandatory
+restrictions remain independently non-relaxable across every participating layer.
+
+**Recommendation presented:** option A, retaining existing automatic source
+ordering where compatible with the specification and assigning explicit sources
+a clear later position.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Preserve nearest-first automatic ordering **(confirmed)** | Limits behavioral change and preserves existing filename shadowing/merge semantics. | A farther differently named file can override a nearer file because later properties win. |
+| B: Reverse automatic order from root to nearest | Makes nearer property layers override farther layers by locality. | Changes existing precedence beyond the required explicit-source addition. |
+
+Filename shadowing and property precedence are distinct: same-filename farther
+sources are shadowed, but a farther source with a different filename remains in
+the stream and can override an earlier nearer property. This behavior is
+intentional under the confirmed compatibility choice.
+
+Tests must separately establish same-filename shadowing, UTF-8 ordering,
+different-filename override behavior, mixed standalone/trigger ordering,
+explicit-source precedence, document precedence, and restriction non-relaxation.
+The same effective assembly rules serve composition and editor validation.
+
+Deduplication when the same physical source appears through automatic discovery
+and explicit `SCHEMA_DIR` is not settled by D19; preserving its highest-priority
+occurrence is a possible treatment, not a confirmed decision. Exported root
+union assembly also remains unresolved and must not silently flatten or discard
+union alternatives.
+
+## D20 — Resolve each property by schema tier
+
+**Human decision:** explicitly replaces D19. Highest to lowest precedence is
+document `$schema`, matching `schema-trigger` definitions, always-on schema
+definitions, then the Darkmatter base. Always-on definitions retain canonical
+`kind: schema`; “schema-definition” describes their role, not a new kind.
+
+This user-directed choice replaces the recommendation to preserve D19's unified
+source stream. Its benefit is predictable semantic priority; an explicit source
+cannot lift an always-on definition above a matching trigger merely because of
+where it was selected.
+
+Conflicts resolve per frontmatter property. The higher-tier winner supplies the
+whole property definition: type, constraints, presence requirements, nested
+shape, and description. Do not synthesize a union or report a conflict error for
+ordinary property overlap. If the winner has no description, do not inherit
+unrelated lower-tier prose. Mandatory restrictions such as `no-shell-expansion`
+are accumulated independently and remain non-relaxable.
+
+Darkmatter owns one ordering operation used by CLI, runtime, and DMLS. The human
+delegated same-tier tie-breaking. The selected deterministic mechanism preserves
+existing order within each tier: automatic directories nearest first, filenames
+in UTF-8 byte order, explicit sources afterward; later property definitions win.
+Same-filename shadowing is confined to the same tier and cannot suppress a
+different-tier source. Consequently, a farther differently named automatic file
+can still override a nearer file within one tier. There is no global explicit
+priority across tiers.
+
+Within one tier and the same consuming document, deduplicate automatic/explicit
+contributions only when they identify the same definition with equivalent
+applicability and resolution context, retaining explicit precedence and dependency
+tracking for both discovery routes. Physical-file identity alone is insufficient.
+Keep distinct authored triggers even if they reference the same payload; they
+have separate conditions and contributions. Source origin for relative imports
+remains separate from applicability and priority.
+
+Prefer small effective stacks, commonly Darkmatter plus Claudine, with triggers
+for specialized schemas. Tests cover tier priority, whole-property/description
+replacement, deterministic same-tier ordering and alias handling, distinct
+trigger retention, and independent restriction inheritance.
+
+This rule concerns competing property definitions. Exported root-union support
+and assembly remain **unconfirmed**; neither a union restriction nor silent
+flattening/dropping of existing unions is authorized.
 
 ## Remaining decisions and design completion work
 
@@ -705,7 +865,7 @@ sequencing.
 | 3 | Lifecycle catalog details | Complete D6's event/scope matrix and nested use-site syntax/conflict rules within D3's capture timing, D7's `err` mapping, and D8's sequence-approval restriction. |
 | 4 | Provenance interface and transfer inventory | Specify D5's envelope operations and enumerate every executable transfer, including any required internal serialization boundary. |
 | 5 | Shared semantic bundle details | Complete the shared definition fields and portable origin representation needed by D9, alongside D6's still-open binding payload details. |
-| 6 | Generic activation and source precedence | Complete D11's parser shape and legacy-rule migration and D13's import/export/union contracts; define D14 predicate syntax/functions and dynamic requests under D15, detailed time/refresh/failures, plus source precedence/deduplication and origin versus applicability scope using D10's canonical trigger kind. |
+| 6 | Generic activation and source assembly | Complete D11 parser/legacy migration and D13 root-union/import contracts; define D14 predicate details within D15–D18, missing-editor-anchor behavior and time/refresh/failures; make D20 shared ordering interfaces concrete. |
 | 7 | Refresh, isolation, and recovery | Define current-generation dependency/failure states and shared suppression of dependent diagnostics, hover, and completion; cover missing dependencies and newly created sources. |
 | 8 | Typed error transport and ownership audit | Specify owned causes through lifecycle/recovery/proxy paths and complete the state/context/binding/evaluation/validation/error DRY audit, including reasons for retained duplication. |
 
