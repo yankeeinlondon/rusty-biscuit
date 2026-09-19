@@ -146,6 +146,13 @@ fn render_default_report() {
 // Values report
 // ------------------------------------------------------------------
 
+/// `claudine context --values` is a report about the *host*, not about a
+/// document.
+///
+/// No document is supplied, so the root-document identity variables
+/// (`ctx.self`, `ctx.last_updated`, `ctx.hash`) project their absent-document
+/// shape. Synthesizing a placeholder document to fill them would report values
+/// no composition will ever see.
 fn render_values_report() {
     render_values_report_with(ComposeContext::capture);
 }

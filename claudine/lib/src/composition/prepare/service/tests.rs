@@ -157,23 +157,27 @@ fn the_prepared_document_stores_the_context_it_composed_against() {
     );
 }
 
-/// `current.ctx.*` stays a live, event-time, lifecycle-only surface — and is
+/// `current.*` observes a fact when the reference is reached — and is
 /// explicitly *not* a fallback for the prepared `ctx.*`.
 ///
 /// The two answer different questions: `ctx.*` is what the document was
-/// composed against, `current.ctx.*` is what is true now. Letting one satisfy a
+/// composed against, `current.*` is what is true now. Letting one satisfy a
 /// lookup of the other would make a prepared document's body silently
 /// time-dependent, which is precisely the drift R5 stores the snapshot to
-/// prevent. So the two roots are disjoint at prepare time: `ctx.*` resolves
-/// from the stored snapshot, and `current.*` — which has no meaning before an
-/// event fires — resolves to nothing rather than borrowing `ctx`'s answer.
+/// prevent. So the two roots are disjoint: `ctx.*` resolves from the stored
+/// snapshot, and `current.*` resolves through the invocation's refresh
+/// capability.
+///
+/// This preparation supplies no invocation, so it holds no capability at all
+/// and every `current.<key>` fails closed — a literal empty, not the host's
+/// ambient answer and not `ctx`'s (decision D5).
 #[test]
 fn current_is_not_a_prepare_time_fallback_for_the_stored_context() {
     let dir = TempDir::new().unwrap();
     let source = source_at(
         dir.path(),
         "doc.md",
-        "---\na: 1\n---\nprepared=[{{ ctx.agent }}] current=[{{ current.ctx.agent }}]\n",
+        "---\na: 1\n---\nprepared=[{{ ctx.agent }}] current=[{{ current.agent }}]\n",
     );
     let mut layers = CallerInputLayers {
         file_ref_fallback_dir: Some(dir.path().to_path_buf()),
@@ -192,8 +196,8 @@ fn current_is_not_a_prepare_time_fallback_for_the_stored_context() {
     assert_eq!(
         prepared.prompt.trim(),
         "prepared=[codex] current=[]",
-        "`ctx.agent` comes from the stored snapshot; `current.ctx.agent` is \
-         event-time and must not be backfilled from it at prepare time"
+        "`ctx.agent` comes from the stored snapshot; `current.agent` has no \
+         supplied capability and must render empty rather than borrowing it"
     );
 }
 
@@ -794,5 +798,55 @@ fn a_deferred_read_still_coerces_declared_types() {
         prepared.effective_frontmatter.get("enabled"),
         Some(&serde_json::json!(true)),
         "a lifecycle condition reading `enabled` must see a real boolean"
+    );
+}
+
+/// A composed prompt body resolves `current.<key>` through the invocation's
+/// launch evidence, while `ctx.<key>` stays the stored snapshot.
+///
+/// This is the seam AC28 rides on: an author writes `{{ current.branch }}` in a
+/// prompt and gets the branch as it stands, without the compose path
+/// rediscovering a repository from wherever the process CWD drifted to.
+#[test]
+fn a_composed_prompt_resolves_current_through_the_invocation() {
+    use std::process::Command;
+
+    let dir = TempDir::new().unwrap();
+    for args in [
+        vec!["init", "--initial-branch=main"],
+        vec!["commit", "-q", "--allow-empty", "-m", "fixture"],
+    ] {
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Claudine Test",
+                "-c",
+                "user.email=claudine@example.invalid",
+            ])
+            .args(&args)
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    let source = source_at(
+        dir.path(),
+        "doc.md",
+        "---\na: 1\n---\nsnapshot=[{{ ctx.branch }}] now=[{{ current.branch }}]\n",
+    );
+    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let options = PrepareOptions {
+        invocation_context: Some(invocation),
+        file_ref_fallback_dir: Some(dir.path().to_path_buf()),
+        ..PrepareOptions::default()
+    };
+
+    let prepared = prepare(DocumentEntryReason::Direct, &source, options);
+
+    assert_eq!(
+        prepared.prompt.trim(),
+        "snapshot=[main] now=[main]",
+        "both roots answer from the invocation's launch repository"
     );
 }

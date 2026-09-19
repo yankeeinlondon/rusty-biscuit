@@ -592,9 +592,10 @@ pub(crate) fn prepare_and_run_active_document(
     // observe a second, separately constructed capture. The resolved target's
     // identity overrides are applied exactly once, here.
     //
-    // `current.ctx.*` stays live event-time state and is captured separately
-    // downstream. The active `SourceContext` (not this snapshot) remains
-    // authoritative for file resolution, transclusion, and `$schema`.
+    // `current.*` is a different contract: it observes a mutable fact when a
+    // reference is reached, through this invocation's refresh capability. The
+    // active `SourceContext` (not this snapshot) remains authoritative for file
+    // resolution, transclusion, and `$schema`.
     let document_epoch = invocation.begin_document_epoch();
     let prepared_context = {
         let requirements =

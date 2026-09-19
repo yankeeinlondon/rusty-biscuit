@@ -388,19 +388,18 @@ fn timing_to_value_omits_missing_fields() {
     assert!(value.get("step_ms").is_none());
 }
 
-#[test]
-fn current_to_value_has_ctx_and_env() {
-    let current = LifecycleCurrent {
-        ctx: json!({"agent": "claude"}),
-        env: json!({"HOME": "/tmp"}),
-    };
-    let value = current.to_value();
-    assert_eq!(value.get("ctx").unwrap().get("agent"), Some(&json!("claude")));
-    assert_eq!(value.get("env").unwrap().get("HOME"), Some(&json!("/tmp")));
+/// Build an [`EffectiveState`] over `fm` with a cheap (sniff-free) context and
+/// no refresh capability, so every `current.<key>` fails closed.
+fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
+    state_with_current(fm, darkmatter::markdown::compose::CurrentAuthority::default())
 }
 
-/// Build an [`EffectiveState`] over `fm` with a cheap (sniff-free) context.
-fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
+/// [`state`] with `authority` installed as the lazy roots' refresh capability —
+/// the same wiring `StackExecutionContext::build_state` performs per event.
+fn state_with_current(
+    fm: Value,
+    authority: darkmatter::markdown::compose::CurrentAuthority,
+) -> darkmatter::markdown::compose::EffectiveState {
     use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
     let fm: std::collections::HashMap<String, Value> = fm
         .as_object()
@@ -411,12 +410,58 @@ fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
     EffectiveStateBuilder::new()
         .with_frontmatter(fm)
         .with_context(ComposeContext::capture_for_content(std::path::Path::new("."), ""))
+        .with_current_authority(authority)
         .build()
         .unwrap()
 }
 
+/// A refresh capability that answers exactly the keys it was scripted with.
+///
+/// Stands in for an invocation's launch evidence so the laziness and
+/// fail-closed contracts are provable without a repository or a host probe.
+#[derive(Debug)]
+struct ScriptedRefresh {
+    answers: std::sync::Mutex<std::collections::HashMap<String, Value>>,
+}
+
+impl ScriptedRefresh {
+    fn new<const N: usize>(answers: [(&str, Value); N]) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            answers: std::sync::Mutex::new(
+                answers
+                    .into_iter()
+                    .map(|(key, value)| (key.to_string(), value))
+                    .collect(),
+            ),
+        })
+    }
+
+    fn set(&self, key: &str, value: Value) {
+        self.answers
+            .lock()
+            .expect("scripted answers mutex")
+            .insert(key.to_string(), value);
+    }
+}
+
+impl darkmatter::markdown::compose::CurrentProvider for ScriptedRefresh {
+    fn refresh(&self, key: &str) -> darkmatter::markdown::compose::CurrentRefresh {
+        use darkmatter::markdown::compose::CurrentRefresh;
+        match self.answers.lock().expect("scripted answers mutex").get(key) {
+            Some(value) => CurrentRefresh::Observed(value.clone()),
+            None => CurrentRefresh::Unsupported,
+        }
+    }
+}
+
+fn scripted_authority(
+    provider: &std::sync::Arc<ScriptedRefresh>,
+) -> darkmatter::markdown::compose::CurrentAuthority {
+    darkmatter::markdown::compose::CurrentAuthority::default().with_provider(provider.clone())
+}
+
 #[test]
-fn injected_globals_attaches_err_timing_current() {
+fn injected_globals_attaches_err_and_timing() {
     let info = LifecycleErrorInfo {
         kind: "ClaudineError",
         variant: "Io".to_string(),
@@ -428,19 +473,18 @@ fn injected_globals_attaches_err_timing_current() {
         total_ms: None,
         step_ms: None,
     };
-    let current = LifecycleCurrent {
-        ctx: json!({"agent": "codex"}),
-        env: json!({"DEBUG": "1"}),
-    };
-    let globals = lifecycle_injected_globals(Some(&info), Some(&timing), Some(&current));
+    let globals = lifecycle_injected_globals(Some(&info), Some(&timing));
     assert!(globals.contains_key("err"));
     assert!(globals.contains_key("timing"));
-    assert!(globals.contains_key("current"));
+    assert!(
+        !globals.contains_key("current"),
+        "`current` is a Darkmatter reserved root, never a Claudine global"
+    );
 }
 
 #[test]
 fn injected_globals_omits_unattached() {
-    let globals = lifecycle_injected_globals(None, None, None);
+    let globals = lifecycle_injected_globals(None, None);
     assert!(globals.is_empty());
 }
 
@@ -453,7 +497,7 @@ fn err_global_resolves_through_dm2_subtree() {
         msg: "disk full".to_string(),
         snapshot: None,
     };
-    let globals = lifecycle_injected_globals(Some(&info), None, None);
+    let globals = lifecycle_injected_globals(Some(&info), None);
     let state = state(json!({}));
     let resolved = SubtreeCompose::new(&json!("{{err.msg}}"), &state)
         .with_globals(globals)
@@ -470,7 +514,7 @@ fn timing_global_resolves_through_dm2_subtree() {
         total_ms: None,
         step_ms: None,
     };
-    let globals = lifecycle_injected_globals(None, Some(&timing), None);
+    let globals = lifecycle_injected_globals(None, Some(&timing));
     let state = state(json!({}));
     let resolved = SubtreeCompose::new(&json!("took {{timing.document_ms}}ms"), &state)
         .with_globals(globals)
@@ -490,7 +534,7 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
         msg: "disk full".to_string(),
         snapshot: None,
     };
-    let globals = lifecycle_injected_globals(Some(&info), None, None);
+    let globals = lifecycle_injected_globals(Some(&info), None);
     let state = state(json!({"err": "literal-value"}));
     let resolved = SubtreeCompose::new(&json!("{{doc.err}} / {{err.msg}}"), &state)
         .with_globals(globals)
@@ -499,35 +543,68 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
     assert_eq!(resolved, json!("literal-value / disk full"));
 }
 
+/// `current.<key>` observes the invocation's supplied evidence, and observes it
+/// again — not once — when a later event asks.
 #[test]
-#[serial_test::serial(env_lifecycle_current)]
-fn capture_env_reflects_live_process_environment() {
-    let key = "CLAUDINE_TEST_CAPTURE_ENV_LIVE";
-    // SAFETY: serialized via #[serial]; no other thread reads this var.
-    unsafe { std::env::set_var(key, "live-value") };
-    let env = LifecycleCurrent::capture_env();
-    unsafe { std::env::remove_var(key) };
-    assert_eq!(env.get(key), Some(&json!("live-value")));
+fn current_reads_the_supplied_refresh_capability_per_event() {
+    use darkmatter::markdown::compose::subtree::SubtreeCompose;
+
+    let provider = ScriptedRefresh::new([("branch", json!("main"))]);
+    let authority = scripted_authority(&provider);
+
+    let resolve = |authority: &darkmatter::markdown::compose::CurrentAuthority| {
+        let state = state_with_current(json!({}), authority.clone());
+        SubtreeCompose::new(&json!("on {{current.branch}}"), &state)
+            .with_globals(lifecycle_injected_globals(None, None))
+            .compose()
+            .unwrap()
+    };
+
+    assert_eq!(resolve(&authority), json!("on main"));
+
+    // The branch moves mid-run. The next event builds its own state, so it
+    // observes the fact as it now stands rather than replaying the first read.
+    provider.set("branch", json!("feat/x"));
+    assert_eq!(resolve(&authority), json!("on feat/x"));
 }
 
+/// Fail-closed (decision D5): a capability the invocation does not hold renders
+/// empty rather than falling back to an ambient probe of the running host.
 #[test]
-fn capture_env_only_leaves_ctx_empty() {
-    let current = LifecycleCurrent::capture_env_only();
-    assert_eq!(current.ctx, json!({}));
-    assert!(current.env.is_object(), "env is a JSON object snapshot");
-}
+fn an_unsupplied_current_capability_renders_empty_rather_than_probing() {
+    use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
-#[test]
-fn capture_at_event_populates_ctx_and_env() {
-    let base = tempfile::TempDir::new().unwrap();
-    let current = LifecycleCurrent::capture_at_event(base.path());
-    // `ctx.today` is always captured (date/time group, zero I/O).
-    assert!(
-        current.ctx.get("today").and_then(|v| v.as_str()).is_some(),
-        "ctx snapshot carries today: {:?}",
-        current.ctx
+    // Scripted with `branch` only, so `hostname` has no answer.
+    let provider = ScriptedRefresh::new([("branch", json!("main"))]);
+    let state = state_with_current(json!({}), scripted_authority(&provider));
+    let resolved = SubtreeCompose::new(&json!("host=[{{current.hostname}}]"), &state)
+        .with_globals(lifecycle_injected_globals(None, None))
+        .compose()
+        .unwrap();
+    assert_eq!(
+        resolved,
+        json!("host=[]"),
+        "an unsupplied capability is `null`, never this host's real name"
     );
-    assert!(current.env.is_object());
+}
+
+/// The removed nesting is an unknown path, not a silently empty one.
+#[test]
+fn the_removed_current_ctx_nesting_is_rejected() {
+    use darkmatter::markdown::compose::subtree::SubtreeCompose;
+
+    let provider = ScriptedRefresh::new([("branch", json!("main"))]);
+    let state = state_with_current(json!({}), scripted_authority(&provider));
+    let error = SubtreeCompose::new(&json!("{{current.ctx.branch}}"), &state)
+        .with_globals(lifecycle_injected_globals(None, None))
+        .strict()
+        .compose()
+        .expect_err("`current.ctx.*` was removed by the clean break (R33)");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("current.ctx"),
+        "the error names the rejected path: {rendered}"
+    );
 }
 
 #[test]
@@ -557,11 +634,14 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
     assert!(timing.total_ms.is_none());
 }
 
-/// Late-binding contract: a stack `when:` clause reacts to an environment
-/// value present in the `current.env` snapshot the production builders
-/// attach at **event time**, distinct from a value snapshotted at "prepare"
-/// time. Resolved through DM2's layered lookup over the injected `current`
-/// global, proving the binding is late.
+/// Late-binding contract: a stack `when:` clause reacts to the environment as
+/// it stands when the event evaluates.
+///
+/// Since the clean break (spec R31–R33) that surface is Darkmatter's reserved
+/// `current_env` root, which rereads the live process environment at reference
+/// time. Resolved here through DM2's layered lookup with the lifecycle globals
+/// attached, which also proves the injected `current` global no longer shadows
+/// a reserved root.
 #[test]
 #[serial_test::serial(env_lifecycle_current)]
 fn when_clause_reacts_to_env_changed_after_prepare() {
@@ -571,41 +651,26 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
     let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
     // SAFETY: serialized via #[serial]; no other thread reads this var.
 
-    // "Prepare time": the variable holds an old value. A `current.env`
-    // snapshot captured now would carry `old`.
+    // "Prepare time": the variable holds an old value.
     unsafe { std::env::set_var(key, "old") };
-    let prepare_snapshot = LifecycleCurrent::capture_env_only();
-
-    // A side effect / external change happens AFTER prepare.
-    unsafe { std::env::set_var(key, "x") };
-    // The production builders capture `current` at EVENT time, so they see
-    // the post-change value.
-    let event_snapshot = LifecycleCurrent::capture_env_only();
-    unsafe { std::env::remove_var(key) };
-
     let base = state(json!({}));
-    let expr = parse(&format!("current.env.{key} == 'x'")).expect("parses");
+    let globals = lifecycle_injected_globals(None, None);
+    let lookup = LayeredLookup::new(&base, &globals, None);
+    let expr = parse(&format!("current_env.{key} == 'x'")).expect("parses");
 
-    // Against the event-time snapshot, the guard fires (late binding).
-    let event_globals =
-        lifecycle_injected_globals(None, None, Some(&event_snapshot));
-    let event_lookup = LayeredLookup::new(&base, &event_globals, None);
-    let event_value = evaluate(&expr, &event_lookup).expect("evaluates");
     assert!(
-        is_truthy(&event_value),
+        !is_truthy(&evaluate(&expr, &lookup).expect("evaluates")),
+        "the guard does not fire while the variable still holds the old value"
+    );
+
+    // A side effect / external change happens AFTER prepare. The next
+    // evaluation is a new expression scope, so it rereads the live value.
+    unsafe { std::env::set_var(key, "x") };
+    assert!(
+        is_truthy(&evaluate(&expr, &lookup).expect("evaluates")),
         "when clause fires on the value present at event time"
     );
-
-    // Against the prepare-time snapshot, the same guard does NOT fire,
-    // proving the reaction is to the late-bound value, not the prepare one.
-    let prepare_globals =
-        lifecycle_injected_globals(None, None, Some(&prepare_snapshot));
-    let prepare_lookup = LayeredLookup::new(&base, &prepare_globals, None);
-    let prepare_value = evaluate(&expr, &prepare_lookup).expect("evaluates");
-    assert!(
-        !is_truthy(&prepare_value),
-        "the prepare-time snapshot still holds the old value"
-    );
+    unsafe { std::env::remove_var(key) };
 }
 
 // --- Phase 5: one selection, hygienic `err.msg`, one-level `err.cause` ------

@@ -51,7 +51,9 @@ use darkmatter::markdown::compose::expression::{
     Expr, ExpressionFinder, ResolutionContext, evaluate, is_truthy, scalar_string,
 };
 use darkmatter::markdown::compose::subtree::{InjectedGlobal, LayeredLookup, SubtreeCompose};
-use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{
+    ComposeContext, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
+};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -67,7 +69,7 @@ use super::actions::{
 };
 use crate::composition::coordinator::ActionLocation;
 use super::context::{
-    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
+    LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
 };
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
@@ -313,8 +315,8 @@ fn system_shell_command(
 /// Everything the executor needs to run one lifecycle event.
 ///
 /// Construct one per event with the active [`LifecycleSignal`], the composed
-/// frontmatter, the lifecycle globals (`err`/`timing`/`current`), and the
-/// side-effect / shell / emitter routes.
+/// frontmatter, the lifecycle globals (`err`/`timing`), the invocation's
+/// `current` refresh authority, and the side-effect / shell / emitter routes.
 pub struct StackExecutionContext<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
@@ -342,14 +344,23 @@ pub struct StackExecutionContext<'a> {
     pub err: Option<&'a LifecycleErrorInfo>,
     /// The `timing` global snapshot.
     pub timing: Option<&'a LifecycleTiming>,
-    /// The `current` global snapshot (lazy `ctx`/`env` capture).
-    pub current: Option<&'a LifecycleCurrent>,
+    /// The invocation's refresh authority for Darkmatter's lazy `current` /
+    /// `current_env` roots.
+    ///
+    /// `None` fails closed: every `current.<key>` renders `null` and records a
+    /// `PartialRuntimeCapture` diagnostic rather than probing the host. Only a
+    /// caller holding launch evidence supplies one.
+    ///
+    /// Owned rather than borrowed because the authority is a cheap handle to
+    /// shared invocation state, and every derived context clones it — sharing
+    /// the same provider and diagnostic sink.
+    pub current: Option<CurrentAuthority>,
     /// The `group` global: a sequence group's variables, in scope only while
     /// that group's tasks run.
     ///
-    /// Unlike `err`/`timing`/`current`, this is not event-derived — it is a
-    /// lexical scope the group scheduler enters and leaves, which is why it
-    /// arrives as a borrowed map rather than a snapshot type.
+    /// Unlike `err`/`timing`, this is not event-derived — it is a lexical
+    /// scope the group scheduler enters and leaves, which is why it arrives as
+    /// a borrowed map rather than a snapshot type.
     pub group: Option<&'a Map<String, Value>>,
     /// Base directory for read-side expression functions and file references.
     pub base_dir: Option<&'a Path>,
@@ -597,7 +608,7 @@ impl StackExecutionContext<'_> {
             runtime_state: self.runtime_state,
             err: self.err,
             timing: self.timing,
-            current: self.current,
+            current: self.current.clone(),
             group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
@@ -630,7 +641,7 @@ impl StackExecutionContext<'_> {
             runtime_state: self.runtime_state,
             err: Some(err),
             timing: self.timing,
-            current: self.current,
+            current: self.current.clone(),
             group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
@@ -696,9 +707,9 @@ impl StackExecutionContext<'_> {
             .map(|cell| cell.lock().expect(LIVE_POISONED).clone())
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`/`current`,
-    /// plus `group` inside a sequence group) handed to Darkmatter's subtree
-    /// compose and layered lookup.
+    /// Build the event-time injected-globals layer (`err`/`timing`, plus
+    /// `group` inside a sequence group) handed to Darkmatter's subtree compose
+    /// and layered lookup.
     /// Return a copy of this context that reuses `prepared` as its single
     /// early-binding snapshot.
     ///
@@ -716,7 +727,7 @@ impl StackExecutionContext<'_> {
             runtime_state: self.runtime_state,
             err: self.err,
             timing: self.timing,
-            current: self.current,
+            current: self.current.clone(),
             group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
@@ -733,10 +744,10 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`/`current`)
-    /// handed to Darkmatter's subtree compose and layered lookup.
+    /// Build the event-time injected-globals layer (`err`/`timing`) handed to
+    /// Darkmatter's subtree compose and layered lookup.
     fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
-        let mut globals = lifecycle_injected_globals(self.err, self.timing, self.current);
+        let mut globals = lifecycle_injected_globals(self.err, self.timing);
         if let Some(variables) = self.group {
             globals.insert(
                 "group".to_string(),
@@ -786,8 +797,10 @@ impl StackExecutionContext<'_> {
     ///
     /// `ctx.*`/`env.*` come from [`Self::early_binding_context`] — the single
     /// composition-start snapshot when available, otherwise a demand-driven
-    /// re-capture against `scan_hint`. Only `current.*`/`err`/`timing` are
-    /// event-time globals (injected separately via [`Self::injected_globals`]).
+    /// re-capture against `scan_hint`. `err`/`timing` are the event-time
+    /// globals (injected separately via [`Self::injected_globals`]);
+    /// `current.*`/`current_env.*` are the reserved roots this state's refresh
+    /// authority serves.
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
         let frontmatter: HashMap<String, Value> =
             fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -795,6 +808,10 @@ impl StackExecutionContext<'_> {
         EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter)
             .with_context(context)
+            // Every event builds its own state, so every event starts fresh
+            // evaluation scopes: a `current.<key>` read in a later event
+            // observes the fact as it stands then, not as `ctx` froze it.
+            .with_current_authority(self.current.clone().unwrap_or_default())
             // A deferred lifecycle subtree never defines `ctx`; downgrade any
             // pathological `ctx` shape to a warning rather than aborting.
             .with_allow_ctx_override(true)
@@ -874,7 +891,8 @@ impl StackExecutionContext<'_> {
     /// audio phases (`say`/`say_first` and `effect`, in their deterministic
     /// order). These strings are deferred lifecycle keys (raw `{{ … }}` through
     /// main compose), so each is interpolated **at event-time** against the live
-    /// document state plus the late-binding globals (`err`/`timing`/`current`).
+    /// document state plus the late-binding roots (`err`/`timing`/`current`/
+    /// `current_env`).
     ///
     /// Fails closed (C4): a resolution raise (malformed/unknown root) becomes an
     /// [`ActionFailure::Evaluation`] and an unknown resolved `effect` name an

@@ -1,6 +1,6 @@
 //! Lifecycle event execution for the harness loop: running one event's
 //! top-level communication + stack, terminal-event downgrade handling, and
-//! the shared stack-context / `timing`/`current` capture helpers.
+//! the shared stack-context and `timing` capture helpers.
 
 use super::*;
 
@@ -174,8 +174,7 @@ pub(super) fn run_failure_event_for_downgrade(
     err: &LifecycleErrorInfo,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    let (timing, current) =
-        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
+    let timing = capture_lifecycle_timing(loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         LifecycleSignal::Failure,
         materialized,
@@ -190,7 +189,6 @@ pub(super) fn run_failure_event_for_downgrade(
         effect_engine,
         Some(err),
         Some(&timing),
-        Some(&current),
     );
     guard.run_event_stack(LifecycleSignal::Failure, &ctx)
 }
@@ -218,8 +216,7 @@ pub(super) fn emit_lifecycle_top_level_already_recorded(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> Option<LifecycleErrorInfo> {
-    let (timing, current) =
-        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
+    let timing = capture_lifecycle_timing(loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
@@ -234,7 +231,6 @@ pub(super) fn emit_lifecycle_top_level_already_recorded(
         effect_engine,
         err,
         Some(&timing),
-        Some(&current),
     );
     ctx.emit_top_level_for_signal(guard.config())
 }
@@ -260,8 +256,7 @@ pub(super) fn run_lifecycle_event(
     if !guard.record_event_emission(signal) {
         return LifecycleEventOutcome::default();
     }
-    let (timing, current) =
-        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
+    let timing = capture_lifecycle_timing(loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
@@ -276,7 +271,6 @@ pub(super) fn run_lifecycle_event(
         effect_engine,
         err,
         Some(&timing),
-        Some(&current),
     );
     guard.run_event_stack(signal, &ctx)
 }
@@ -297,8 +291,7 @@ pub(super) fn run_lifecycle_stack_only(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    let (timing, current) =
-        capture_lifecycle_globals(source_path, repo_root, guard.context().launch_area, loop_start);
+    let timing = capture_lifecycle_timing(loop_start);
     let ctx = build_lifecycle_stack_context_for_materialized(
         signal,
         materialized,
@@ -313,17 +306,18 @@ pub(super) fn run_lifecycle_stack_only(
         effect_engine,
         err,
         Some(&timing),
-        Some(&current),
     );
     ctx.execute_stack_for_signal(guard.config())
 }
 
 /// Build a stack context from a materialized prompt and guard-derived routes.
 ///
-/// `timing` and `current` are the lifecycle stack-only globals. Callers own
-/// them — they are captured fresh per event and outlive this context — see the
-/// `run_lifecycle_event` / `emit_lifecycle_top_level_already_recorded` /
-/// `run_lifecycle_stack_only` helpers.
+/// `timing` is the lifecycle stack-only global; callers capture it fresh per
+/// event — see the `run_lifecycle_event` /
+/// `emit_lifecycle_top_level_already_recorded` / `run_lifecycle_stack_only`
+/// helpers. The lazy `current` / `current_env` roots are served by the
+/// invocation's refresh authority, taken from the materialization's document
+/// epoch.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
     signal: LifecycleSignal,
@@ -339,7 +333,6 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
     effect_engine: &'a EffectEngine,
     err: Option<&'a LifecycleErrorInfo>,
     timing: Option<&'a LifecycleTiming>,
-    current: Option<&'a LifecycleCurrent>,
 ) -> StackExecutionContext<'a> {
     static EMPTY_FRONTMATTER: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
         std::sync::OnceLock::new();
@@ -362,7 +355,10 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         runtime_state: Some(&materialized.runtime_state),
         err,
         timing,
-        current,
+        current: materialized
+            .document_epoch
+            .as_ref()
+            .map(claudine::invocation_context::DocumentEpoch::current_authority),
         group: None,
         base_dir,
         ctx_base_dir: launch_area,
@@ -401,27 +397,11 @@ pub(super) fn commit_run_output(materialized: &MaterializedHarnessPrompt, stdout
     );
 }
 
-/// Capture the lifecycle stack-only `timing`/`current` globals for an event.
+/// Capture the lifecycle stack-only `timing` global for an event.
 ///
-/// `current.env` is the live process environment and `current.ctx` is the full
-/// Darkmatter `ctx.*` namespace, both captured **now** so a side effect or
-/// external change since `prepare` is observable through `current.*` at event
-/// time. `timing` measures wall-clock elapsed against `loop_start`
-/// (`document_ms` and `total_ms`; the harness loop has no sequence-step clock,
-/// so `step_ms` stays `None`).
-pub(super) fn capture_lifecycle_globals(
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    launch_area: Option<&Path>,
-    loop_start: std::time::Instant,
-) -> (LifecycleTiming, LifecycleCurrent) {
-    let base_dir = source_path.parent().or(repo_root);
-    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
-    let current = match launch_area.or(base_dir) {
-        Some(dir) => LifecycleCurrent::capture_at_event(dir),
-        None => LifecycleCurrent::capture_env_only(),
-    };
-    let timing =
-        LifecycleTiming::from_instants(loop_start, Some(loop_start), std::time::Instant::now());
-    (timing, current)
+/// Measures wall-clock elapsed against `loop_start` (`document_ms` and
+/// `total_ms`; the harness loop has no sequence-step clock, so `step_ms` stays
+/// `None`).
+pub(super) fn capture_lifecycle_timing(loop_start: std::time::Instant) -> LifecycleTiming {
+    LifecycleTiming::from_instants(loop_start, Some(loop_start), std::time::Instant::now())
 }

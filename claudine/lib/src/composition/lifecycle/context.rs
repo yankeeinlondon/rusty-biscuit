@@ -1,5 +1,4 @@
-//! Lifecycle execution context: the stack-only globals `err`, `timing`,
-//! and `current`.
+//! Lifecycle execution context: the stack-only globals `err` and `timing`.
 //!
 //! These globals supplement the document state at event-time. They reach the
 //! evaluator as Darkmatter **injected globals** (see [`InjectedGlobal`]) layered
@@ -9,10 +8,11 @@
 //! event-time interpolation reuses the same parsing/interpolation core as main
 //! compose.
 //!
-//! `err`/`timing` are eager (already captured by the time the event fires);
-//! `current` is lazy — its JSON snapshot is materialized only when a lifecycle
-//! string references `current`, mirroring how `ctx` is captured lazily at
-//! compose time.
+//! Both are eager: they are already captured by the time the event fires. The
+//! late-binding *facts* — `current.<key>` and `current_env.<key>` — are not
+//! globals at all. They are Darkmatter reserved roots served by the request's
+//! `CurrentAuthority`, which the executor installs on the event's effective
+//! state; an injected global of either name is unreachable (spec R30–R33).
 //!
 //! ## `err`
 //!
@@ -38,17 +38,11 @@
 //! Carries observed durations. All fields are optional so the public shape
 //! never commits to a value the runtime may not have captured.
 //!
-//! ## `current`
-//!
-//! Carries lazily-captured snapshots of the runtime `ctx` and `env`
-//! namespaces at event execution time. Exposed as `current.ctx.<name>`
-//! and `current.env.<name>`.
-
 use std::collections::HashMap;
 use std::error::Error as StdError;
 
 use darkmatter::markdown::compose::subtree::InjectedGlobal;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::super::error::CompositionError;
 use crate::diagnostics::DiagnosticSnapshot;
@@ -440,95 +434,24 @@ impl LifecycleTiming {
     }
 }
 
-/// Snapshot of the lifecycle-stack-only `current` global.
-///
-/// Carries lazily-captured snapshots of the `ctx` and `env` namespaces at
-/// event execution time. Exposed as `current.ctx.<name>` and
-/// `current.env.<name>`.
-#[derive(Debug, Clone, Default)]
-pub struct LifecycleCurrent {
-    /// Captured `ctx.*` namespace (agent, model, repo, today, …). Defaults
-    /// to an empty object.
-    pub ctx: Value,
-
-    /// Captured `env.*` namespace (process environment snapshot). Defaults
-    /// to an empty object.
-    pub env: Value,
-}
-
-impl LifecycleCurrent {
-    /// Capture the process environment into a JSON object snapshot.
-    ///
-    /// Reads `std::env::vars()` **at call time**, so a side effect or external
-    /// change between `prepare` and a later lifecycle event is observable via
-    /// `current.env.<NAME>`. This is the late-binding behavior the spec
-    /// promises: unlike `doc`/`ctx`/`env` which are computed once at
-    /// composition start, `current.env` reflects the environment as it stands
-    /// when the event fires.
-    pub fn capture_env() -> Value {
-        let mut env = Map::new();
-        for (key, value) in std::env::vars() {
-            env.insert(key, Value::String(value));
-        }
-        Value::Object(env)
-    }
-
-    /// Build a `current` snapshot with the `env` namespace captured at event
-    /// time and an empty `ctx` namespace.
-    ///
-    /// Used at sites where the runtime `ctx.*` namespace is not readily
-    /// reconstructable but the late-bound environment snapshot must still be
-    /// exposed.
-    pub fn capture_env_only() -> Self {
-        Self {
-            ctx: Value::Object(Map::new()),
-            env: Self::capture_env(),
-        }
-    }
-
-    /// Build a `current` snapshot with both namespaces captured at event time.
-    ///
-    /// `env` is the live process environment (see [`Self::capture_env`]).
-    /// `ctx` is Darkmatter's full `ctx.*` namespace captured against
-    /// `base_dir`, keyed by the bare context name (e.g. `agent`, `model`,
-    /// `repo`, `today`) so `current.ctx.<name>` resolves. Agent/model derive
-    /// from the `AGENT`/`MODEL` environment variables, so they too reflect
-    /// event-time state.
-    pub fn capture_at_event(base_dir: &std::path::Path) -> Self {
-        let ctx = darkmatter::markdown::compose::ComposeContext::capture_for_dir(base_dir);
-        Self {
-            ctx: Value::Object(ctx.values().clone()),
-            env: Self::capture_env(),
-        }
-    }
-
-    /// Render the snapshot as a JSON object for evaluation lookups.
-    pub fn to_value(&self) -> Value {
-        let mut obj = serde_json::Map::new();
-        obj.insert("ctx".to_string(), self.ctx.clone());
-        obj.insert("env".to_string(), self.env.clone());
-        Value::Object(obj)
-    }
-}
-
 /// Build the event-time injected-globals layer handed to Darkmatter's subtree
 /// compose (DM2).
 ///
 /// The returned map layers the lifecycle stack-only globals over the current
-/// effective document state: `err`/`timing` are eager (their snapshots are
-/// already captured when the event fires); `current` is lazy — its JSON
-/// snapshot is materialized only when a lifecycle string references `current`,
-/// mirroring how `ctx` is captured lazily at compose time.
+/// effective document state. Both are eager: their snapshots are already
+/// captured when the event fires.
 ///
-/// An unattached global is simply absent from the map, so a bare
-/// `err`/`timing`/`current` reference falls through to the document state (a
-/// literal frontmatter property of that name stays reachable). `doc.err`
-/// reaches a literal `err` property because the `doc` root is never an injected
-/// global.
+/// An unattached global is simply absent from the map, so a bare `err`/`timing`
+/// reference falls through to the document state (a literal frontmatter
+/// property of that name stays reachable). `doc.err` reaches a literal `err`
+/// property because the `doc` root is never an injected global.
+///
+/// `current` and `current_env` are deliberately not here. They are Darkmatter
+/// reserved roots resolved by the event's effective state before the injected
+/// map is consulted, so a global of either name could never be reached.
 pub fn lifecycle_injected_globals(
     err: Option<&LifecycleErrorInfo>,
     timing: Option<&LifecycleTiming>,
-    current: Option<&LifecycleCurrent>,
 ) -> HashMap<String, InjectedGlobal> {
     let mut globals = HashMap::new();
     if let Some(err) = err {
@@ -538,15 +461,6 @@ pub fn lifecycle_injected_globals(
         globals.insert(
             "timing".to_string(),
             InjectedGlobal::eager(timing.to_value()),
-        );
-    }
-    if let Some(current) = current {
-        // Lazy: clone the captured snapshot into the closure so it materializes
-        // its JSON form only if a lifecycle string references `current`.
-        let owned = current.clone();
-        globals.insert(
-            "current".to_string(),
-            InjectedGlobal::lazy(move || owned.to_value()),
         );
     }
     globals

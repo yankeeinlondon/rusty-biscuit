@@ -203,6 +203,10 @@ pub(super) fn run_composition_body(
                     Some(launch_workspace.launch_cwd.as_path()),
                     Some(lifecycle_context),
                     request.prepared.input_layers.file_resolution_context.as_ref(),
+                    request
+                        .invocation_context
+                        .as_ref()
+                        .map(claudine::invocation_context::InvocationContext::current_authority),
                     frontmatter,
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_error_or_action(
@@ -261,6 +265,10 @@ pub(super) fn run_composition_body(
                 Some(launch_workspace.launch_cwd.as_path()),
                 Some(lifecycle_context),
                 request.prepared.input_layers.file_resolution_context.as_ref(),
+                request
+                    .invocation_context
+                    .as_ref()
+                    .map(claudine::invocation_context::InvocationContext::current_authority),
                 frontmatter,
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_error_or_action(

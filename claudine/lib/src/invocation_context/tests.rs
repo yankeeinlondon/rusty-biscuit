@@ -1045,3 +1045,198 @@ fn launch_extension_projects_missing_groups_without_reanchoring() {
     invocation.extend_launch_context(&mut context, &grown);
     assert_eq!(invocation.work_snapshot().launch_context_extensions, 1);
 }
+
+/// Commit `message` in `root` with a fixture identity.
+fn commit_all(root: &Path, message: &str) {
+    for args in [
+        vec!["add", "-A"],
+        vec!["commit", "-q", "--allow-empty", "-m", message],
+    ] {
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Claudine Test",
+                "-c",
+                "user.email=claudine@example.invalid",
+            ])
+            .args(&args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} in {}", root.display());
+    }
+}
+
+fn observed(refresh: CurrentRefresh) -> serde_json::Value {
+    match refresh {
+        CurrentRefresh::Observed(value) => value,
+        CurrentRefresh::Unsupported => {
+            panic!("the invocation should hold this capability")
+        }
+    }
+}
+
+/// `current.branch` observes the branch as it stands, not as launch froze it.
+///
+/// This is the whole point of the lazy root for Claudine: a wrapped agent that
+/// switches branches mid-run must be reported on the branch it is actually on
+/// when a lifecycle event asks.
+#[test]
+fn current_branch_observes_a_branch_switched_after_launch() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    commit_all(fixture.path(), "fixture");
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let provider = invocation.current_provider();
+
+    assert_eq!(observed(provider.refresh("branch")), serde_json::json!("main"));
+
+    let status = Command::new("git")
+        .args(["checkout", "-q", "-b", "feat/moved"])
+        .current_dir(fixture.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert_eq!(
+        observed(provider.refresh("branch")),
+        serde_json::json!("feat/moved"),
+        "the refresh reads the retained repository handle again, rather than \
+         replaying the launch observation"
+    );
+}
+
+/// Refreshing never re-enters repository discovery.
+///
+/// Decision D3 fixes the launch anchor, the repository root, and package
+/// topology for the whole request; only the facts layered over them refresh.
+/// A discovery here would be the ambient rediscovery the launch anchor exists
+/// to prevent, and it would silently follow a moved process CWD.
+#[test]
+fn refreshing_current_performs_no_repository_discovery() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    commit_all(fixture.path(), "fixture");
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let provider = invocation.current_provider();
+    let before = invocation.work_snapshot();
+
+    for key in ["branch", "dirty_files", "today", "area"] {
+        let _ = provider.refresh(key);
+    }
+
+    assert_eq!(
+        invocation.work_snapshot().git_root_discoveries,
+        before.git_root_discoveries,
+        "a refresh re-observes through the retained handle; it never discovers"
+    );
+}
+
+/// An **observed absence** and an **unheld capability** are different answers.
+///
+/// `Observed(Null)` says the invocation looked and there is nothing there —
+/// the same thing eager `ctx.branch` reports outside a repository.
+/// `Unsupported` says it cannot look at all, which Darkmatter turns into
+/// `null` plus a `PartialRuntimeCapture` diagnostic. Collapsing the two would
+/// make a genuine capability gap indistinguishable from a real empty value.
+#[test]
+fn an_observed_absence_is_not_the_same_answer_as_an_unheld_capability() {
+    let fixture = TempDir::new().unwrap();
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let provider = invocation.current_provider();
+
+    assert_eq!(
+        provider.refresh("not_a_context_variable"),
+        CurrentRefresh::Unsupported,
+        "an uncataloged name names no group and can never be observed"
+    );
+    assert_eq!(
+        provider.refresh("branch"),
+        CurrentRefresh::Observed(serde_json::Value::Null),
+        "a non-repository launch observed that there is no branch"
+    );
+}
+
+/// The five scope positions project the same way through supplied evidence as
+/// they are specified to (R24–R26): `""` for a miss, never a sentinel and
+/// never `null`.
+///
+/// The fifth position is the trap: a package area actually **named** `root` is
+/// an ordinary area, and must not be confused with the repository root whose
+/// area is the empty string.
+#[test]
+fn every_scope_position_projects_through_supplied_launch_evidence() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    fs::create_dir_all(fixture.path().join("area/pkg")).unwrap();
+    fs::create_dir_all(fixture.path().join("root/rooted")).unwrap();
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"area/pkg\", \"root/rooted\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("area/pkg/Cargo.toml"),
+        "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("root/rooted/Cargo.toml"),
+        "[package]\nname = \"rooted\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    commit_all(fixture.path(), "fixture");
+
+    let scope_at = |dir: &Path| {
+        let invocation = InvocationContext::capture_at(dir);
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+            "{{ ctx.area }} {{ ctx.current_package }} {{ ctx.current_package_area }}",
+        );
+        let context = invocation.capture_launch_context(&requirements);
+        let read = |key: &str| {
+            context
+                .values()
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_else(|| panic!("`ctx.{key}` must be a string, never null"))
+                .to_string()
+        };
+        (
+            read("area"),
+            read("current_package"),
+            read("current_package_area"),
+        )
+    };
+
+    let outside = TempDir::new().unwrap();
+
+    assert_eq!(
+        scope_at(&fixture.path().join("area/pkg")),
+        ("pkg".into(), "pkg".into(), "area".into()),
+        "inside a package: the area is the package itself"
+    );
+    assert_eq!(
+        scope_at(&fixture.path().join("area")),
+        ("area".into(), String::new(), "area".into()),
+        "inside an area but no package: no current package"
+    );
+    assert_eq!(
+        scope_at(fixture.path()),
+        (String::new(), String::new(), String::new()),
+        "at the repository root every scope value is the empty string"
+    );
+    assert_eq!(
+        scope_at(outside.path()),
+        (String::new(), String::new(), String::new()),
+        "outside a repository every scope value is the empty string"
+    );
+    assert_eq!(
+        scope_at(&fixture.path().join("root/rooted")),
+        ("rooted".into(), "rooted".into(), "root".into()),
+        "an area literally named `root` is an ordinary area, not the \
+         repository root"
+    );
+}

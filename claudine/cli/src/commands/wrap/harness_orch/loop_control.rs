@@ -6,7 +6,7 @@
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::LifecycleSignal;
-use claudine::composition::lifecycle_context::{LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming};
+use claudine::composition::lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
 use claudine::composition::lifecycle_control::{ControlDispatch, control_budget_for};
 use claudine::composition::lifecycle_executor::{
     LifecycleEventOutcome, StackControl, StackExecutionContext, SystemShellRunner,

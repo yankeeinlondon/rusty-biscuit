@@ -100,7 +100,7 @@ impl PreflightGraph {
 /// onto, so no shell string may depend on it (spec → *Shell approval with
 /// strict byte-parity*). The other three are the standard lifecycle
 /// late-binding globals.
-const SHELL_UNAVAILABLE_ROOTS: &[&str] = &["outputs", "err", "timing", "current"];
+const SHELL_UNAVAILABLE_ROOTS: &[&str] = &["outputs", "err", "timing", "current", "current_env"];
 
 /// Reject invoking a non-sequence document kind directly.
 ///

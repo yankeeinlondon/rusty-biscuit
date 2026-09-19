@@ -17,6 +17,8 @@ use sniff::request::{
     DetectionPlan, FilesystemRequest, GitMetadataRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
 };
 
+use darkmatter::markdown::compose::{CurrentProvider, CurrentRefresh};
+
 use crate::composition::{
     LaunchWorkspaceContext, prompt_magic_roots,
 };
@@ -517,6 +519,23 @@ pub struct InvocationContext {
     inner: Arc<InvocationInner>,
 }
 
+/// The [`CurrentProvider`] an invocation installs for the lazy `current` root.
+///
+/// Holds the whole invocation rather than a copy of its evidence: the launch
+/// repository handle, the launch anchor, and the host caches all live there,
+/// and a refresh has to reach the *handle* — copying the evidence would be the
+/// replay this provider exists to avoid.
+#[derive(Debug)]
+struct LaunchRefresh {
+    invocation: InvocationContext,
+}
+
+impl CurrentProvider for LaunchRefresh {
+    fn refresh(&self, key: &str) -> CurrentRefresh {
+        self.invocation.refresh_current(key)
+    }
+}
+
 /// Attribution token for one canonical document preparation epoch.
 ///
 /// The recorder belongs to the token, not to a before/after interval on the
@@ -530,6 +549,22 @@ pub struct DocumentEpoch {
 }
 
 impl DocumentEpoch {
+    /// This epoch's invocation refresh capability for the lazy `current` root.
+    ///
+    /// Refresh is invocation-scoped, not epoch-scoped: `current.<key>` observes
+    /// a fact now, and an epoch boundary does not change what "now" means.
+    #[must_use]
+    pub fn current_provider(&self) -> Arc<dyn CurrentProvider> {
+        self.invocation.current_provider()
+    }
+
+    /// [`Self::current_provider`] wrapped in the authority
+    /// `EffectiveStateBuilder::with_current_authority` takes.
+    #[must_use]
+    pub fn current_authority(&self) -> darkmatter::markdown::compose::CurrentAuthority {
+        self.invocation.current_authority()
+    }
+
     /// Stable request-local identity used to correlate diagnostic snapshots.
     pub fn id(&self) -> usize {
         self.id
@@ -1139,6 +1174,199 @@ impl InvocationContext {
         evidence
     }
 
+    /// This invocation's refresh capability for Darkmatter's lazy `current`
+    /// root.
+    ///
+    /// Install it on every `ComposeOptions` and every lifecycle
+    /// `EffectiveState` Claudine builds, so a `current.<key>` reference
+    /// observes the fact against the retained launch roots instead of taking
+    /// Darkmatter's ambient anchored refresh. A capability this invocation does
+    /// not hold answers [`CurrentRefresh::Unsupported`], which is `null` plus a
+    /// `PartialRuntimeCapture` diagnostic — never a host probe.
+    #[must_use]
+    pub fn current_provider(&self) -> Arc<dyn CurrentProvider> {
+        Arc::new(LaunchRefresh {
+            invocation: self.clone(),
+        })
+    }
+
+    /// [`Self::current_provider`] wrapped in the authority
+    /// `EffectiveStateBuilder::with_current_authority` takes.
+    #[must_use]
+    pub fn current_authority(&self) -> darkmatter::markdown::compose::CurrentAuthority {
+        darkmatter::markdown::compose::CurrentAuthority::default()
+            .with_provider(self.current_provider())
+    }
+
+    /// Observe one cataloged `ctx` key as it stands now.
+    ///
+    /// Repository topology, the repository root, and the launch directory are
+    /// invocation-owned and never rediscovered here; only the mutable facts
+    /// layered over them are re-observed, through the *retained* Git handle.
+    fn refresh_current(&self, key: &str) -> CurrentRefresh {
+        use darkmatter::markdown::compose::{ComposeContext, ContextGroup, ContextRequirements};
+
+        let Some(group) = ContextGroup::for_key(key) else {
+            return CurrentRefresh::Unsupported;
+        };
+        let Some(evidence) = self.refresh_evidence(group) else {
+            return CurrentRefresh::Unsupported;
+        };
+        let requirements = ContextRequirements::from_groups([group]);
+        let context =
+            ComposeContext::capture_with_evidence(&self.inner.launch_cwd, &requirements, &evidence);
+        match context.values().get(key) {
+            Some(value) => CurrentRefresh::Observed(value.clone()),
+            None => CurrentRefresh::Unsupported,
+        }
+    }
+
+    /// Re-observe one group's evidence against the retained launch roots.
+    ///
+    /// Deliberately bypasses the invocation's evidence caches: those exist so
+    /// the eager `ctx.*` snapshot is captured once, and reusing them here would
+    /// replay the launch observation rather than refresh it.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when this invocation holds no capability for `group`, which the
+    /// caller reports as [`CurrentRefresh::Unsupported`].
+    fn refresh_evidence(
+        &self,
+        group: darkmatter::markdown::compose::ContextGroup,
+    ) -> Option<darkmatter::markdown::compose::ContextCaptureEvidence> {
+        use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
+
+        // The live process environment, not the frozen launch snapshot: `agent`
+        // and `model` derive from `AGENT`/`MODEL`, and the whole point of the
+        // lazy mirror is that a wrapper stage which re-exported them since
+        // launch is observable. This matches `current_env.<KEY>`, which rereads
+        // the process environment for the same reason.
+        let evidence = ContextCaptureEvidence::new(std::env::vars().collect());
+        let repository = &self.inner.launch_repository;
+        let repository_root = self.launch_repository_root_spelling();
+        let base_dir = self.inner.launch_cwd.clone();
+
+        let evidence = match group {
+            // Fixed for the request; Darkmatter answers these from its own
+            // capture and never consults a provider for them.
+            ContextGroup::Invocation | ContextGroup::Document => {
+                evidence.with_invocation_cwd(Some(base_dir.clone()))
+            }
+            // Zero-evidence groups: the capture itself is the observation.
+            ContextGroup::DateTime | ContextGroup::Agent => evidence,
+            ContextGroup::Git => {
+                if repository.failure().is_some() {
+                    return None;
+                }
+                evidence.with_git(
+                    repository
+                        .observation
+                        .detect_git(&launch_git_request())
+                        .ok()?,
+                )
+            }
+            ContextGroup::FileChanges => {
+                if repository.failure().is_some() {
+                    return None;
+                }
+                evidence
+                    .with_git(repository.git_info.clone())
+                    .with_repository(repository_root.clone(), repository.repo_info().cloned())
+                    .with_file_changes(
+                        repository
+                            .observation
+                            .detect_file_changes()
+                            .ok()?
+                            .unwrap_or_default(),
+                    )
+            }
+            ContextGroup::GitHistory => {
+                if repository.failure().is_some() {
+                    return None;
+                }
+                let commits = match repository_root.as_deref() {
+                    Some(root) => Some(
+                        sniff::filesystem::git::get_recent_commits_by_count(root, 10)
+                            .ok()?
+                            .commits,
+                    ),
+                    None => None,
+                };
+                evidence.with_recent_commits(commits)
+            }
+            // Package topology is invocation-owned (D3): refreshing it would
+            // mean rediscovering the repository, which is exactly what the
+            // launch anchor forbids.
+            ContextGroup::Repo => {
+                if repository.failure().is_some() {
+                    return None;
+                }
+                evidence
+                    .with_git(repository.git_info.clone())
+                    .with_repository(repository_root.clone(), repository.repo_info().cloned())
+            }
+            ContextGroup::Languages | ContextGroup::Documents => {
+                if repository.failure().is_some() {
+                    return None;
+                }
+                let wants_languages = matches!(group, ContextGroup::Languages);
+                let filesystem = detect_source_filesystem(
+                    repository,
+                    &base_dir,
+                    wants_languages,
+                    !wants_languages,
+                )
+                .ok()?;
+                let evidence = evidence
+                    .with_git(repository.git_info.clone())
+                    .with_repository(repository_root.clone(), repository.repo_info().cloned());
+                match wants_languages {
+                    true => evidence.with_languages(filesystem.languages),
+                    false => evidence.with_documents_for_source(
+                        filesystem.docs,
+                        &base_dir,
+                        repository_root.as_deref(),
+                        repository.repo_info(),
+                    ),
+                }
+            }
+            // Host identity does not change within a run, so the invocation's
+            // one detection is also the current observation.
+            ContextGroup::Os => {
+                let mut captured = false;
+                evidence.with_os(Some(self.cached_os(&mut captured).as_ref().ok()?.clone()))
+            }
+            ContextGroup::Hardware => evidence.with_hardware(Some(
+                self.inner
+                    .hardware
+                    .get_or_init(|| {
+                        sniff::hardware::detect_hardware_with_request(&HardwareRequest::summary())
+                            .map_err(Arc::new)
+                    })
+                    .as_ref()
+                    .ok()?
+                    .clone(),
+            )),
+            ContextGroup::Gpu => evidence.with_gpus(
+                self.inner
+                    .gpus
+                    .get_or_init(sniff::hardware::detect_gpus)
+                    .clone(),
+            ),
+            ContextGroup::Network => evidence
+                .with_network_interfaces(
+                    sniff::network::detect_network_with_request(
+                        &sniff::request::NetworkRequest::interfaces_only(),
+                    )
+                    .ok()
+                    .map(|network| network.interfaces),
+                )
+                .with_gateways(sniff::network::detect_default_gateways().ok()),
+        };
+        Some(evidence)
+    }
+
     /// The invocation's OS observation, detected at most once.
     ///
     /// Deliberately the same request Darkmatter's ambient capture issues, so a
@@ -1216,9 +1444,7 @@ impl InvocationContext {
             return entry.clone();
         }
 
-        // Summary omits remotes by default, but ctx.repo needs their identity.
-        let git_request = GitRequest::summary().metadata(GitMetadataRequest::none().remotes(true));
-        let git_info = match observation.detect_git(&git_request) {
+        let git_info = match observation.detect_git(&launch_git_request()) {
             Ok(git_info) => git_info,
             Err(error) => {
                 let mut entry = RepositoryEntry::failed(observation, error);
@@ -1421,6 +1647,14 @@ fn topology_with_observation(
         observation,
     )
     .map(|filesystem| filesystem.repo)
+}
+
+/// The Git request every launch observation and every `current.*` Git refresh
+/// issues.
+///
+/// Summary omits remotes by default, but `ctx.repo` needs their identity.
+fn launch_git_request() -> GitRequest {
+    GitRequest::summary().metadata(GitMetadataRequest::none().remotes(true))
 }
 
 fn detect_source_filesystem(

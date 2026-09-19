@@ -218,7 +218,7 @@ fn event_time_rendering_matches_compose() {
     let compose_value = compose_subtree(
         &json!(template),
         &state,
-        lifecycle_injected_globals(Some(&err), None, None),
+        lifecycle_injected_globals(Some(&err), None),
         SubtreeStrictness::Lenient,
     )
     .unwrap();
@@ -465,4 +465,228 @@ fn lifecycle_expr_error_prose_arm_round_trips_its_text() {
     let error = LifecycleExprError::Prose("references undefined variable `x`".to_string());
     assert_eq!(error.to_string(), "references undefined variable `x`");
     assert!(std::error::Error::source(&error).is_none());
+}
+
+/// A refresh capability scripted with one answer, shared by the lazy-root
+/// tests below.
+#[derive(Debug)]
+struct OneKeyRefresh {
+    key: &'static str,
+    value: std::sync::Mutex<String>,
+}
+
+impl OneKeyRefresh {
+    fn new(key: &'static str, value: &str) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            key,
+            value: std::sync::Mutex::new(value.to_string()),
+        })
+    }
+
+    fn set(&self, value: &str) {
+        *self.value.lock().expect("scripted value mutex") = value.to_string();
+    }
+
+    fn authority(self: &std::sync::Arc<Self>) -> darkmatter::markdown::compose::CurrentAuthority {
+        darkmatter::markdown::compose::CurrentAuthority::default().with_provider(self.clone())
+    }
+}
+
+impl darkmatter::markdown::compose::CurrentProvider for OneKeyRefresh {
+    fn refresh(&self, key: &str) -> darkmatter::markdown::compose::CurrentRefresh {
+        use darkmatter::markdown::compose::CurrentRefresh;
+        if key == self.key {
+            return CurrentRefresh::Observed(Value::String(
+                self.value.lock().expect("scripted value mutex").clone(),
+            ));
+        }
+        CurrentRefresh::Unsupported
+    }
+}
+
+/// `current.*` resolves in **every** lifecycle event, not just the ones that
+/// happen to carry an error or a timing snapshot.
+///
+/// Each event builds its own effective state, so a regression that wired the
+/// refresh authority into one route would leave the rest silently empty —
+/// which renders as a blank operational message rather than a failure.
+#[test]
+fn current_resolves_in_every_lifecycle_event() {
+    let provider = OneKeyRefresh::new("branch", "main");
+    let authority = provider.authority();
+
+    for signal in LifecycleSignal::ALL {
+        let event_key = match signal {
+            LifecycleSignal::Initialize => "initialize",
+            LifecycleSignal::Start => "start",
+            LifecycleSignal::Success => "success",
+            LifecycleSignal::Blocked => "blocked",
+            LifecycleSignal::Failure => "failure",
+            LifecycleSignal::Finalize => "finalize",
+            LifecycleSignal::Loop => "loop",
+        };
+        let config = parse_lifecycle_config(
+            &json!({
+                event_key: {
+                    "stack": [{"action": {"action": "info", "message": "on {{ current.branch }}"}}]
+                }
+            }),
+            Path::new("t.md"),
+        )
+        .unwrap();
+        let fm = map(json!({}));
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = StackExecutionContext {
+            current: Some(authority.clone()),
+            ..ctx(
+                signal,
+                &fm,
+                None,
+                &engine,
+                &shell,
+                &recorder,
+                &harness,
+                Path::new("t.md"),
+            )
+        };
+        context.execute_event(&config);
+        assert_eq!(
+            recorder.events(),
+            vec![Emitted::Info("on main".to_string())],
+            "`current.branch` must resolve in the `{event_key}` event"
+        );
+    }
+}
+
+/// A later event observes the fact as it stands then.
+///
+/// The memo lives inside one expression evaluation (Q2), and every event
+/// builds a fresh state, so a branch that moved between `start` and `success`
+/// is reported by `success` rather than replayed from `start`.
+#[test]
+fn a_later_event_observes_a_fact_that_changed_since_the_earlier_one() {
+    let provider = OneKeyRefresh::new("branch", "main");
+    let authority = provider.authority();
+    let config = parse_lifecycle_config(
+        &json!({
+            "start": {"stack": [{"action": {"action": "info", "message": "{{ current.branch }}"}}]},
+            "success": {"stack": [{"action": {"action": "info", "message": "{{ current.branch }}"}}]}
+        }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+
+    let event = |signal| StackExecutionContext {
+        current: Some(authority.clone()),
+        ..ctx(
+            signal,
+            &fm,
+            None,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        )
+    };
+
+    event(LifecycleSignal::Start).execute_event(&config);
+    provider.set("feat/x");
+    event(LifecycleSignal::Success).execute_event(&config);
+
+    assert_eq!(
+        recorder.events(),
+        vec![
+            Emitted::Info("main".to_string()),
+            Emitted::Info("feat/x".to_string()),
+        ],
+        "each event observes the branch as it stood when that event fired"
+    );
+}
+
+/// Fail-closed at the dispatch boundary: an event whose invocation holds no
+/// capability emits an empty value rather than a host observation.
+#[test]
+fn an_event_without_a_refresh_capability_emits_empty_rather_than_probing() {
+    let config = parse_lifecycle_config(
+        &json!({"success": {"stack": [{"action": {"action": "info", "message": "host=[{{ current.hostname }}]"}}]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    context.execute_event(&config);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Info("host=[]".to_string())],
+        "no capability means `null`, never this host's real name"
+    );
+}
+
+/// `current_env.<KEY>` rereads the live process environment at the moment the
+/// event reaches it — the contract that replaced the removed `current.env.*`.
+#[test]
+#[serial_test::serial(env_lifecycle_current)]
+fn current_env_rereads_the_process_environment_at_event_time() {
+    let key = "CLAUDINE_TEST_EVENT_TIME_CURRENT_ENV";
+    let config = parse_lifecycle_config(
+        &json!({"success": {"stack": [{"action": {"action": "info", "message": format!("v={{{{ current_env.{key} }}}}")}}]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let event = || {
+        ctx(
+            LifecycleSignal::Success,
+            &fm,
+            None,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            Path::new("t.md"),
+        )
+        .execute_event(&config)
+    };
+
+    // SAFETY: serialized via #[serial]; no other thread reads this var.
+    unsafe { std::env::set_var(key, "before") };
+    event();
+    unsafe { std::env::set_var(key, "after") };
+    event();
+    unsafe { std::env::remove_var(key) };
+
+    assert_eq!(
+        recorder.events(),
+        vec![
+            Emitted::Info("v=before".to_string()),
+            Emitted::Info("v=after".to_string()),
+        ],
+        "a parent-process environment change between events is observable"
+    );
 }

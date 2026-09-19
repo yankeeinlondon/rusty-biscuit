@@ -123,9 +123,10 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
     "loop",
 ];
 
-/// The lifecycle late-binding global roots — values that exist only at
-/// event-time: `err` (active failure), `timing` (observed durations), and
-/// `current` (event-time `ctx`/`env` snapshots).
+/// The lifecycle late-binding roots — values that exist only at event-time:
+/// `err` (active failure), `timing` (observed durations), and the two
+/// Darkmatter reserved roots `current` (a `ctx` key observed when referenced)
+/// and `current_env` (the live process environment, reread when referenced).
 ///
 /// Shared authority for the pre-flight shell resolution (C3), which rejects
 /// any late-binding reference inside a `shell` command because shell commands

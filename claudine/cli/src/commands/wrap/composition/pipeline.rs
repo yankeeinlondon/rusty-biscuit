@@ -1695,14 +1695,14 @@ fn provider_run_handoff(
         .or(effective_repo_root);
     // Lifecycle stack-only globals for the `initialize` event (and its
     // `with_signal`/`with_error` derivations, which copy these references).
-    // `current.env`/`current.ctx` are captured now, so a side effect or
-    // external change since `prepare` is observable through `current.*`. The
-    // document-start instant anchors `timing.document_ms` at this event.
-    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
-    let lifecycle_current =
-        claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
-            launch_workspace.launch_cwd.as_path(),
-        );
+    // The document-start instant anchors `timing.document_ms` at this event.
+    // The refresh authority makes `current.*` observe the invocation's launch
+    // evidence when the reference is reached; without an invocation there is
+    // none and every read fails closed.
+    let lifecycle_current = request
+        .invocation_context
+        .as_ref()
+        .map(claudine::invocation_context::InvocationContext::current_authority);
     let lifecycle_timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document_start,
         None,
@@ -1718,7 +1718,7 @@ fn provider_run_handoff(
         runtime_state: None,
         err: None,
         timing: Some(&lifecycle_timing),
-        current: Some(&lifecycle_current),
+        current: lifecycle_current.clone(),
         group: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
@@ -1850,6 +1850,7 @@ fn provider_run_handoff(
                             .input_layers
                             .file_resolution_context
                             .as_ref(),
+                        lifecycle_current.clone(),
                         fm_map.unwrap_or(&empty_frontmatter),
                         document_start,
                         info,

@@ -1102,10 +1102,14 @@ mod shell {
         assert_eq!(root, "outputs");
     }
 
-    /// The lifecycle late-binding globals are rejected for the same reason.
+    /// The lifecycle late-binding roots are rejected for the same reason.
+    ///
+    /// `current` and `current_env` belong here even though Darkmatter owns
+    /// them: both observe a fact when the reference is reached, and a shell
+    /// command is resolved at preflight before any event fires (R33).
     #[test]
     fn lifecycle_late_binding_in_a_shell_command_is_rejected() {
-        for root_name in ["err", "timing", "current"] {
+        for root_name in ["err", "timing", "current", "current_env"] {
             let dir = TempDir::new().unwrap();
             let command = format!("echo {{{{ {root_name}.message }}}}");
             let source = write_source(

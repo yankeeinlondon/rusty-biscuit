@@ -9,28 +9,22 @@ use claudine::events::GlobalSettings;
 use claudine::messaging::RuntimeMessagingSettings;
 use std::sync::Mutex;
 
-/// The harness-loop wiring captures non-empty `timing`/`current` globals so
-/// terminal events expose `timing.document_ms`/`timing.total_ms` and a
-/// populated `current.env` — the regression this feature closes (previously
-/// every site hardcoded `timing: None, current: None`).
+/// The harness-loop wiring captures a non-empty `timing` global so terminal
+/// events expose `timing.document_ms`/`timing.total_ms` — the regression this
+/// feature closes (previously every site hardcoded `timing: None`).
 #[test]
-fn capture_lifecycle_globals_populates_timing_and_current() {
-    let loop_start = std::time::Instant::now();
-    let (timing, current) =
-        capture_lifecycle_globals(Path::new("prompt.md"), Some(Path::new(".")), None, loop_start);
+fn capture_lifecycle_timing_populates_document_and_total_ms() {
+    let timing = capture_lifecycle_timing(std::time::Instant::now());
 
     assert!(timing.document_ms.is_some(), "document_ms is populated");
     assert!(timing.total_ms.is_some(), "total_ms is populated");
-    assert!(
-        current.env.is_object() && !current.env.as_object().unwrap().is_empty(),
-        "current.env is a non-empty environment snapshot"
-    );
 }
 
 /// The injected globals the harness-loop builder attaches resolve
-/// `current.env.*` and `timing.document_ms` through Darkmatter's layered
-/// lookup (DM2) — proving the wiring reaches expression evaluation, not just
-/// the struct fields.
+/// `timing.document_ms` through Darkmatter's layered lookup (DM2), and the
+/// late-bound environment resolves through the reserved `current_env` root —
+/// proving the wiring reaches expression evaluation, not just the struct
+/// fields.
 #[test]
 #[serial_test::serial(env_loop_control_current)]
 fn attached_globals_resolve_through_lookup() {
@@ -44,26 +38,21 @@ fn attached_globals_resolve_through_lookup() {
     let key = "CLAUDINE_TEST_LOOP_CONTROL_LATE_BIND";
     // SAFETY: serialized via #[serial]; no other thread reads this var.
     unsafe { std::env::set_var(key, "ready") };
-    let (timing, current) =
-        capture_lifecycle_globals(
-            Path::new("prompt.md"),
-            Some(Path::new(".")),
-            None,
-            loop_start_now(),
-        );
-    unsafe { std::env::remove_var(key) };
+    let timing = capture_lifecycle_timing(loop_start_now());
 
     let state = EffectiveStateBuilder::new()
         .with_context(ComposeContext::capture_for_content(Path::new("."), ""))
         .build()
         .unwrap();
-    let globals = lifecycle_injected_globals(None, Some(&timing), Some(&current));
+    let globals = lifecycle_injected_globals(None, Some(&timing));
     let lookup = LayeredLookup::new(&state, &globals, None);
 
-    let when = parse(&format!("current.env.{key} == 'ready'")).expect("parses");
+    let when = parse(&format!("current_env.{key} == 'ready'")).expect("parses");
+    let fired = is_truthy(&evaluate(&when, &lookup).expect("evaluates"));
+    unsafe { std::env::remove_var(key) };
     assert!(
-        is_truthy(&evaluate(&when, &lookup).expect("evaluates")),
-        "the late-bound env value resolves through the attached current global"
+        fired,
+        "the late-bound env value resolves through the reserved current_env root"
     );
     assert!(
         lookup.get("timing.document_ms").is_some(),

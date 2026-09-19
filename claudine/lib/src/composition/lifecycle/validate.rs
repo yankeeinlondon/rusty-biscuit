@@ -372,9 +372,10 @@ fn visit_string_literals<F: FnMut(&str)>(expr: &Expr, visitor: &mut F) {
 ///
 /// The stack-expression half walks the parsed `Expr` trees on
 /// [`LifecycleConfig::stacks`]. Bare names in stack expressions resolve
-/// against the composed frontmatter plus the lifecycle globals
-/// (`err`, `timing`, `current`) and the runtime namespaces (`ctx`, `env`,
-/// `doc`); a bare name not in any of those is reported as undefined.
+/// against the composed frontmatter plus the late-binding roots
+/// (`err`, `timing`, `current`, `current_env`) and the runtime namespaces
+/// (`ctx`, `env`, `doc`); a bare name not in any of those is reported as
+/// undefined.
 ///
 /// Every bare variable reachable in the parsed expression tree is checked, not
 /// just spans that are exactly `{{ variable }}`: a missing operand buried in a
@@ -435,7 +436,7 @@ pub fn validate_no_undefined_lifecycle_variables(
     }
 
     // Stack expression surfaces: walk parsed Expr trees for bare undefined
-    // references. The lifecycle globals (err, timing, current) and runtime
+    // references. The lifecycle globals (err, timing, current, current_env) and runtime
     // namespaces (ctx, env, doc) are always considered defined here —
     // bare `err` misuse in no-error events is caught separately by
     // [`validate_no_err_in_no_error_events`].
@@ -457,7 +458,7 @@ pub fn validate_no_undefined_lifecycle_variables(
 ///
 /// Used for top-level communication fields. The runtime namespaces
 /// (`ctx`/`env`/`doc`) and the lifecycle late-binding globals
-/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`) are known roots — they
+/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`/`current_env`) are known roots — they
 /// resolve at event-time, not against frontmatter — so a bare `err`/`timing`/
 /// `current` is not flagged. Only genuinely-unknown roots (typos) are reported.
 ///
@@ -509,8 +510,9 @@ fn find_undefined_top_level_variable<'a>(
 }
 
 /// Like [`find_undefined_top_level_variable`] but for stack expression
-/// surfaces, where the lifecycle globals (`err`, `timing`, `current`) and
-/// the runtime namespaces (`ctx`, `env`, `doc`) are always defined.
+/// surfaces, where the late-binding roots (`err`, `timing`, `current`,
+/// `current_env`) and the runtime namespaces (`ctx`, `env`, `doc`) are always
+/// defined.
 ///
 /// Stack `when:` clauses are parsed in condition mode, so `||`/`&&` lower to
 /// `or(...)`/`and(...)` function calls rather than `Expr::Fallback`. Those two
@@ -559,7 +561,7 @@ fn find_undefined_stack_variable<'a>(
 
 /// Returns the first frontmatter-scoped bare variable in `expr` whose root key
 /// is undefined, applying the lifecycle-stack tolerance (`ctx`/`env`/`doc` and
-/// the late-binding globals `err`/`timing`/`current` are known roots; `||`
+/// the late-binding roots `err`/`timing`/`current`/`current_env` are known; `||`
 /// fallbacks are skipped and only a ternary's condition is descended).
 ///
 /// Exposed for the executor's event-time `when:` guard, which fails closed on a
@@ -574,7 +576,7 @@ pub(crate) fn first_undefined_stack_variable<'a>(
 
 /// Whether `path`'s root resolves outside top-level frontmatter — the runtime
 /// namespaces (`ctx.*` / `env.*` / `doc`) or a lifecycle late-binding global
-/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`).
+/// ([`LATE_BINDING_ROOTS`]: `err`/`timing`/`current`/`current_env`).
 ///
 /// Such a reference is never an undefined *frontmatter* variable, so the
 /// undefined scan skips it. A bare `err` *misuse* in a no-error event is caught
