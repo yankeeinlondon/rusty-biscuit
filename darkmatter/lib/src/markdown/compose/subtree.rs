@@ -26,6 +26,16 @@
 //! changes what happens on *failure* (typed error vs lenient empty), not how a
 //! successful resolution is typed or substituted.
 //!
+//! ## Expression Failures
+//!
+//! Full-document composition always treats a `{{ … }}` that cannot be parsed
+//! or evaluated as an authoring error, whatever `fail_fast` says. This module
+//! is the one public exception: an explicit [`SubtreeStrictness::Lenient`]
+//! call keeps its best-effort contract and degrades a malformed span instead
+//! of failing. That leniency covers expression failures only. It is not the
+//! same thing as the recoverable, non-expression stage failures (TOC linking,
+//! non-structural transclusion) that `fail_fast = false` downgrades.
+//!
 //! [`ResolutionContext`]: super::expression::ResolutionContext
 //! [`Evaluator`]: super::interpolation::Evaluator
 //! [`interpolate_value`]: super::interpolation::interpolate_value
@@ -39,7 +49,7 @@ use super::context::effective_state::EffectiveState;
 use super::expression::{
     EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, parse,
 };
-use super::interpolation::{Evaluator, interpolate_value};
+use super::interpolation::{Evaluator, ExpressionFailurePolicy, interpolate_value};
 use crate::markdown::types::MarkdownError;
 
 /// A caller-injected named global available to subtree compose (DM2).
@@ -116,13 +126,15 @@ impl std::fmt::Debug for InjectedGlobal {
 /// - **Strict** — Claudine uses strict mode for lifecycle communication/action
 ///   text so parse failures, fatal evaluation failures, and unresolved roots
 ///   become typed errors before any side effect is dispatched.
-/// - **Lenient** — Darkmatter's existing body and mixed-string use cases.
+/// - **Lenient** — best-effort interpolation of a data tree, where a broken
+///   span must not stop the caller. Document composition never uses it: its
+///   body and frontmatter stages fail on any malformed or unevaluatable
+///   expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubtreeStrictness {
     /// Lenient: malformed spans and unknown roots produce a degraded/empty
-    /// string (existing body/mixed-string behavior). Unknown functions remain
-    /// fatal (they can never resolve, so leaving the literal `{{ … }}` text
-    /// would leak downstream).
+    /// string. Unknown functions remain fatal (they can never resolve, so
+    /// leaving the literal `{{ … }}` text would leak downstream).
     #[default]
     Lenient,
 
@@ -143,6 +155,10 @@ pub enum SubtreeStrictness {
 /// same root name; resolution then falls back to the base [`EffectiveState`]
 /// (`ctx.*`, `env.*`, `doc.*`, frontmatter keys, read-side functions via the
 /// optional [`ResolutionContext`]).
+///
+/// The reserved roots are the one exception: `current` and `current_env` are
+/// resolved by the base state before the injected map is consulted, so an
+/// injected global of either name is unreachable (spec R30–R33).
 ///
 /// Lazy globals are memoized per `LayeredLookup` instance: the closure runs at
 /// most once and only when its name is referenced — never eagerly at
@@ -213,7 +229,9 @@ impl<'a> LayeredLookup<'a> {
 impl<'a> EvaluationLookup for LayeredLookup<'a> {
     fn get(&self, path: &str) -> Option<Value> {
         let root = path.split('.').next().unwrap_or(path);
-        if let Some(global) = self.globals.get(root) {
+        if !is_reserved_root(root)
+            && let Some(global) = self.globals.get(root)
+        {
             let value = self.resolve_global(root, global)?;
             if path == root {
                 return Some(value);
@@ -225,7 +243,7 @@ impl<'a> EvaluationLookup for LayeredLookup<'a> {
 
     fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
         let root = path.split('.').next().unwrap_or(path);
-        if self.globals.contains_key(root) {
+        if !is_reserved_root(root) && self.globals.contains_key(root) {
             return Ok(self.get(path));
         }
         self.state.get_checked(path)
@@ -263,11 +281,20 @@ impl<'a> EvaluationLookup for LayeredLookup<'a> {
         if self.globals.contains_key(root) {
             return true;
         }
-        if root == "ctx" || root == "env" || root == "doc" {
+        if root == "ctx" || root == "env" || root == "doc" || is_reserved_root(root) {
             return true;
         }
         self.state.data().contains_key(root)
     }
+
+    fn begin_expression_scope(&self) {
+        self.state.begin_expression_scope();
+    }
+}
+
+/// Whether `root` is a lazy reserved root no injected global may shadow.
+fn is_reserved_root(root: &str) -> bool {
+    crate::markdown::compose::context::CurrentScope::is_reserved_root(root)
 }
 
 /// Walks a dotted path (`.a.b` or `a.b`) through a JSON value.
@@ -476,10 +503,13 @@ fn compose_string(
     if matches!(strictness, SubtreeStrictness::Strict) {
         validate_strict_roots(s, lookup)?;
     }
-    let fail_fast = matches!(strictness, SubtreeStrictness::Strict);
+    let policy = match strictness {
+        SubtreeStrictness::Strict => ExpressionFailurePolicy::Strict,
+        SubtreeStrictness::Lenient => ExpressionFailurePolicy::Lenient,
+    };
     let evaluator = Evaluator::new(lookup);
     let (resolved, _count, _warnings) =
-        interpolate_value(s, &evaluator, fail_fast, "subtree-compose")?;
+        interpolate_value(s, &evaluator, policy, "subtree-compose")?;
     Ok(resolved)
 }
 
@@ -632,11 +662,11 @@ mod tests {
         let state = state_with(vec![("phase", json!(2))]);
         let mut globals = HashMap::new();
         globals.insert(
-            "current".to_string(),
-            InjectedGlobal::lazy(|| json!({"ctx": {"today": "2026-06-24"}})),
+            "snapshot".to_string(),
+            InjectedGlobal::lazy(|| json!({"today": "2026-06-24"})),
         );
         let result = compose_subtree(
-            &json!("today is {{current.ctx.today}}"),
+            &json!("today is {{snapshot.today}}"),
             &state,
             globals,
             SubtreeStrictness::Lenient,
@@ -720,13 +750,13 @@ mod tests {
         let count_for_closure = count.clone();
         let mut globals = HashMap::new();
         globals.insert(
-            "current".to_string(),
+            "snapshot".to_string(),
             InjectedGlobal::lazy(move || {
                 count_for_closure.fetch_add(1, Ordering::SeqCst);
                 json!({"phase": 1})
             }),
         );
-        // String does NOT reference `current`.
+        // String does NOT reference `snapshot`.
         let result = compose_subtree(
             &json!("no reference here"),
             &state,
@@ -745,15 +775,15 @@ mod tests {
         let count_for_closure = count.clone();
         let mut globals = HashMap::new();
         globals.insert(
-            "current".to_string(),
+            "snapshot".to_string(),
             InjectedGlobal::lazy(move || {
                 count_for_closure.fetch_add(1, Ordering::SeqCst);
                 json!({"phase": 7})
             }),
         );
-        // References `current` twice — the closure must run at most once.
+        // References `snapshot` twice — the closure must run at most once.
         let result = compose_subtree(
-            &json!("{{current.phase}} then {{current.phase}}"),
+            &json!("{{snapshot.phase}} then {{snapshot.phase}}"),
             &state,
             globals,
             SubtreeStrictness::Lenient,

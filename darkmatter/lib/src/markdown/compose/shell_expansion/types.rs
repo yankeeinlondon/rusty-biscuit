@@ -595,6 +595,22 @@ pub enum ShellExpansionError {
         origin: ShellCommandOrigin,
     },
 
+    /// Discovery cannot evaluate `dependency` the way the compose pass will:
+    /// shell probes answer `false` and `as_markdown` composes nothing there.
+    /// A command or nested content that depends on one could be approved in
+    /// one shape and executed in another.
+    #[error(
+        "dynamic command shape: '{command}' at {origin} depends on {dependency}, which a \
+         condition-blind pre-flight does not evaluate, so it cannot approve a command or \
+         nested content whose shape is not yet known."
+    )]
+    UnevaluatedDependencyShape {
+        ctx: Box<SourceContext>,
+        command: String,
+        dependency: String,
+        origin: ShellCommandOrigin,
+    },
+
     #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
         ctx: Box<SourceContext>,
@@ -643,6 +659,7 @@ impl ShellExpansionError {
             | Self::Denied { command, .. }
             | Self::NotPreApproved { command, .. }
             | Self::DynamicCommandShape { command, .. }
+            | Self::UnevaluatedDependencyShape { command, .. }
             | Self::Timeout { command, .. }
             | Self::ExecutionFailed { command, .. } => Some(command),
             Self::ParseDirective { .. }
@@ -793,6 +810,27 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .hint(
                     "Move the dynamic value into the frontmatter command and reference its output \
                      as content, use a stable command shape, or split into two compose runs.",
+                ),
+
+            ShellExpansionError::UnevaluatedDependencyShape {
+                ctx,
+                command,
+                dependency,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "dynamic command shape",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Depends on:</dim> {dependency}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint(
+                    "Pass `as_markdown` a string literal, keep shell probes out of commands and \
+                     nested content, or split into two compose runs.",
                 ),
 
             ShellExpansionError::Timeout {
@@ -1339,13 +1377,24 @@ pub(crate) struct PipelineRuntime {
     pub transclusion: crate::markdown::compose::transclusion::TransclusionRuntime,
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
-    dependencies: Vec<crate::markdown::compose::cache::types::DependencyRef>,
     pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
     /// The request's shared runtime context, grown as sources name groups.
     pub context_epoch: crate::markdown::compose::context::authority::SharedRequestContextEpoch,
     /// Every context group read by a source composed under this runtime — the
     /// context-group closure a cached result of this subtree depends on.
     context_groups: crate::markdown::compose::ContextRequirements,
+    /// The request root's source, the resolution base for `as_markdown`
+    /// content wherever in the graph it is called. `None` for runtimes built
+    /// outside the root compose entry point.
+    pub root_source: Option<crate::markdown::compose::nested::RootSource>,
+    /// Whether this runtime belongs to a transcluded or nested child. Root-only
+    /// stages key on this rather than stack depth, because an in-memory root
+    /// pushes no node and its first child is also at depth 1.
+    is_child: bool,
+    /// Set once the root's pre-approved command gate has passed. Shared with
+    /// children so frontmatter `as_markdown` content, which composes before
+    /// the root reaches its gate, triggers the gate first instead.
+    preflight_validated: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PipelineRuntime {
@@ -1357,22 +1406,23 @@ impl PipelineRuntime {
         max_depth: usize,
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
     ) -> Self {
-        let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
+        let cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
         let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
             &crate::markdown::compose::remote::RemoteReadConfig::default(),
             None,
         );
-        cache = cache.with_remote_fetch(remote_fetch.clone());
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
             ),
             shell: ShellExpansionRuntime::new(),
             cache,
-            dependencies: Vec::new(),
             remote_fetch,
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
+            root_source: None,
+            is_child: false,
+            preflight_validated: Default::default(),
         }
     }
 
@@ -1386,21 +1436,19 @@ impl PipelineRuntime {
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
         remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
     ) -> Self {
-        let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
-        // Share the run's fetch runtime with the cache so compose-manifest
-        // validation can revalidate RemoteUrl dependencies under the active
-        // RemoteReadConfig (e.g. --remote-refresh, expired TTL).
-        cache = cache.with_remote_fetch(remote_fetch.clone());
+        let cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
             ),
             shell: ShellExpansionRuntime::new(),
             cache,
-            dependencies: Vec::new(),
             remote_fetch,
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
+            root_source: None,
+            is_child: false,
+            preflight_validated: Default::default(),
         }
     }
 
@@ -1411,11 +1459,23 @@ impl PipelineRuntime {
             transclusion: self.transclusion.clone_for_child(),
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
-            dependencies: Vec::new(),
             remote_fetch: self.remote_fetch.clone(),
             context_epoch: std::sync::Arc::clone(&self.context_epoch),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
+            root_source: self.root_source.clone(),
+            is_child: true,
+            preflight_validated: std::sync::Arc::clone(&self.preflight_validated),
         }
+    }
+
+    /// Whether this runtime composes the request root rather than a child.
+    pub fn is_root(&self) -> bool {
+        !self.is_child
+    }
+
+    /// The request-wide "pre-approved gate passed" flag.
+    pub fn preflight_validated(&self) -> &std::sync::Arc<std::sync::atomic::AtomicBool> {
+        &self.preflight_validated
     }
 
     /// Merges a child runtime's stats and context-group closure back into this
@@ -1423,17 +1483,6 @@ impl PipelineRuntime {
     pub fn merge_child(&mut self, child: &Self) {
         self.transclusion.merge_child(&child.transclusion);
         self.record_context_groups(&child.context_groups);
-    }
-
-    pub fn record_dependency(
-        &mut self,
-        dependency: crate::markdown::compose::cache::types::DependencyRef,
-    ) {
-        self.dependencies.push(dependency);
-    }
-
-    pub fn dependencies(&self) -> &[crate::markdown::compose::cache::types::DependencyRef] {
-        &self.dependencies
     }
 
     pub fn record_context_groups(&mut self, groups: &crate::markdown::compose::ContextRequirements) {

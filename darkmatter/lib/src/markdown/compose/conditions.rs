@@ -11,9 +11,10 @@
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
 //! topic for the full grammar.
 
+use super::expression::absence::MissingRootObserver;
 use super::expression::{
     CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, doc_namespace, evaluate,
-    is_truthy,
+    evaluate_observed, is_truthy,
     parse_condition,
 };
 use super::interpolation::Evaluator;
@@ -139,6 +140,20 @@ pub fn evaluate_condition<L: EvaluationLookup>(
     line: usize,
     ctx: SourceContext,
 ) -> Result<bool, ConditionError> {
+    evaluate_condition_observed(expr, state, line, ctx, &mut ())
+}
+
+/// [`evaluate_condition`], reporting each evaluated read of an unknown root to
+/// `observer`. The whole condition is an ordinary position: a bare
+/// `when="x"` is a gate, not an absence check, so a misspelled gate is
+/// reported rather than silently disabling content.
+pub(crate) fn evaluate_condition_observed<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &str,
+    state: &L,
+    line: usize,
+    ctx: SourceContext,
+    observer: &mut O,
+) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
@@ -149,7 +164,7 @@ pub fn evaluate_condition<L: EvaluationLookup>(
         span: parse_error_span(expr, e.position),
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|error| ConditionError::Eval {
+    let value = evaluate_observed(&parsed, state, observer).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,

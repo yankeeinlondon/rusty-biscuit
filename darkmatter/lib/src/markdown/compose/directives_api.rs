@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn shipped_transclusion_fixture_targets_are_scanned_passively() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../features/2026-07-15-performance-followup/benchmarks/fixtures");
+            .join("../benchmarks/fixtures");
         let mut documents = 0usize;
         let mut targets = 0usize;
         for entry in std::fs::read_dir(&dir).expect("fixture directory readable") {

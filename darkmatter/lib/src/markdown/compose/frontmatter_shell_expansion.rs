@@ -26,11 +26,13 @@
 //! `"$( file_exists('x') ? 'a' : 'b' )"` — is a user error and is rejected with a
 //! diagnostic suggesting `{{ … }}` interpolation instead.
 
+use super::expression::absence::MissingRoot;
 use super::expression::{
-    ExpressionError, doc_namespace, evaluate, is_truthy, parse, parse_condition, scalar_string,
+    ExpressionError, doc_namespace, evaluate_observed, is_truthy, parse, parse_condition,
+    scalar_string,
 };
 use super::frontmatter_interpolation::FrontmatterSeedState;
-use super::interpolation::{Evaluator, ScanMode, interpolate_text};
+use super::interpolation::{Evaluator, ExpressionFailurePolicy, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
@@ -418,6 +420,10 @@ pub(crate) struct FrontmatterShellExpansionReport {
     pub approvals_used: usize,
     /// Warnings emitted.
     pub warnings: Vec<ComposeWarning>,
+    /// Unknown-root reads by a ternary's condition and selected branch, each
+    /// with its frontmatter key. The unselected branch is prepared but not
+    /// part of the result, so its reads are dropped.
+    pub missing_roots: Vec<(String, MissingRoot)>,
 }
 
 /// Parses the suffix tail that follows the closing `)` of a `$(...)` shell
@@ -1296,6 +1302,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             replacements: 0,
             approvals_used: 0,
             warnings: vec![],
+            missing_roots: Vec::new(),
         });
     }
 
@@ -1323,6 +1330,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     }
 
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
+    let mut missing_roots = Vec::new();
 
     for (index, candidate) in candidates.iter().enumerate() {
         let pending_item = match &candidate.ast {
@@ -1355,6 +1363,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                             .collect();
                         seed_state = Some(
                             FrontmatterSeedState::new(map, options.context().clone())
+                                .with_current_authority(resolution_context.current.clone())
                                 .with_resolution_context(Some(resolution_context.clone())),
                         );
                         seed_state.as_ref().unwrap()
@@ -1365,6 +1374,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                 // allowlisted, so prepare BOTH branches before evaluating
                 // the condition. An unselected branch with an un-approved
                 // command still fails the entire directive.
+                let mut then_missing = Vec::new();
                 let then_prepared = prepare_optional_branch(
                     then_branch,
                     candidate,
@@ -1374,7 +1384,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     ctx,
                     state,
                     BranchPosition::Then,
+                    &mut then_missing,
                 )?;
+                let mut else_missing = Vec::new();
                 let else_prepared = prepare_optional_branch(
                     else_branch,
                     candidate,
@@ -1384,15 +1396,25 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     ctx,
                     state,
                     BranchPosition::Else,
+                    &mut else_missing,
                 )?;
 
+                let mut condition_missing = Vec::new();
                 let pick_then = evaluate_ternary_condition(
                     condition_source,
                     state,
                     &candidate.key,
                     ctx,
+                    &mut condition_missing,
                 )?;
 
+                let branch_missing = if pick_then { then_missing } else { else_missing };
+                missing_roots.extend(
+                    condition_missing
+                        .into_iter()
+                        .chain(branch_missing)
+                        .map(|root| (candidate.key.clone(), root)),
+                );
                 let selected = if pick_then { then_prepared } else { else_prepared };
                 match selected {
                     PreparedBranch::Value(value) => Pending::Value(value),
@@ -1443,6 +1465,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         replacements: candidates.len(),
         approvals_used,
         warnings,
+        missing_roots,
     })
 }
 
@@ -1501,6 +1524,7 @@ pub(crate) fn directive_reachable_pipelines(
                         position,
                         &directive.key,
                         ctx,
+                        &mut Vec::new(),
                     )?;
                     let tokens = tokenize(&resolved, ctx).map_err(|error| {
                         remap_branch_parse_error(error, position, &directive.key, ctx)
@@ -1535,18 +1559,22 @@ pub(crate) fn directive_reachable_pipelines(
 /// and interpolation or evaluation failures as
 /// [`ShellExpansionError::ExpressionEvaluation`], both tagged with the
 /// frontmatter key.
+///
+/// The condition is a gate, like `when=`: a bare unknown root in it is
+/// recorded in `missing`, not treated as an absence check.
 fn evaluate_ternary_condition(
     condition_source: &str,
     state: &FrontmatterSeedState,
     key: &str,
     ctx: &SourceContext,
+    missing: &mut Vec<MissingRoot>,
 ) -> Result<bool, ShellExpansionError> {
-    let evaluator = Evaluator::new(state);
+    let evaluator = Evaluator::new(state).observing_missing_roots();
     let rewrite = interpolate_text(
         condition_source,
         &evaluator,
         ScanMode::Plain,
-        true,
+        ExpressionFailurePolicy::Strict,
         "frontmatter-shell-ternary-condition",
     )
     .map_err(|err| {
@@ -1557,6 +1585,7 @@ fn evaluate_ternary_condition(
             err,
         )
     })?;
+    missing.extend(evaluator.take_missing_roots());
 
     let expression_text = rewrite.output.trim().to_string();
     if expression_text.is_empty() {
@@ -1578,7 +1607,7 @@ fn evaluate_ternary_condition(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|error| {
+    let value = evaluate_observed(&parsed, state, missing).map_err(|error| {
         frontmatter_expression_error(
             key,
             ctx,
@@ -1660,6 +1689,7 @@ fn prepare_optional_branch(
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
     position: BranchPosition,
+    missing: &mut Vec<MissingRoot>,
 ) -> Result<PreparedBranch, ShellExpansionError> {
     match branch {
         Branch::Empty => Ok(PreparedBranch::Value(String::new())),
@@ -1669,6 +1699,7 @@ fn prepare_optional_branch(
             position,
             &candidate.key,
             ctx,
+            missing,
         )?)),
         Branch::Pipeline { original_text } => {
             // Anchor the static command-set to the ORIGINAL branch text. Any
@@ -1677,7 +1708,14 @@ fn prepare_optional_branch(
             let original_pipeline = parse_static_pipeline_shape(original_text, ctx)
                 .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
 
-            let resolved = interpolate_branch_text(original_text, state, position, &candidate.key, ctx)?;
+            let resolved = interpolate_branch_text(
+                original_text,
+                state,
+                position,
+                &candidate.key,
+                ctx,
+                missing,
+            )?;
             let tokens = tokenize(&resolved, ctx)
                 .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
             let pipeline = parse_pipeline(&tokens, ctx)
@@ -1721,13 +1759,14 @@ fn evaluate_value_branch(
     position: BranchPosition,
     key: &str,
     ctx: &SourceContext,
+    missing: &mut Vec<MissingRoot>,
 ) -> Result<String, ShellExpansionError> {
-    let evaluator = Evaluator::new(state);
+    let evaluator = Evaluator::new(state).observing_missing_roots();
     let rewrite = interpolate_text(
         source,
         &evaluator,
         ScanMode::Plain,
-        true,
+        ExpressionFailurePolicy::Strict,
         "frontmatter-shell-ternary-value",
     )
     .map_err(|err| {
@@ -1738,6 +1777,7 @@ fn evaluate_value_branch(
             err,
         )
     })?;
+    missing.extend(evaluator.take_missing_roots());
 
     let expression_text = rewrite.output.trim();
     let parsed = parse(expression_text).map_err(|err| {
@@ -1752,7 +1792,7 @@ fn evaluate_value_branch(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|error| {
+    let value = evaluate_observed(&parsed, state, missing).map_err(|error| {
         frontmatter_expression_error(
             key,
             ctx,
@@ -1779,13 +1819,14 @@ fn interpolate_branch_text(
     position: BranchPosition,
     key: &str,
     ctx: &SourceContext,
+    missing: &mut Vec<MissingRoot>,
 ) -> Result<String, ShellExpansionError> {
-    let evaluator = Evaluator::new(state);
+    let evaluator = Evaluator::new(state).observing_missing_roots();
     let rewrite = interpolate_text(
         original_text,
         &evaluator,
         ScanMode::Plain,
-        true,
+        ExpressionFailurePolicy::Strict,
         "frontmatter-shell-ternary-branch",
     )
     .map_err(|err| {
@@ -1796,6 +1837,7 @@ fn interpolate_branch_text(
             err,
         )
     })?;
+    missing.extend(evaluator.take_missing_roots());
     Ok(rewrite.output)
 }
 

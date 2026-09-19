@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::body_origin::TextEdit;
 use crate::markdown::compose::context::context_variable_descriptors;
 use crate::markdown::compose::directives_api::{
     BlockKind, BlockScanError, DirectiveKind, scan_darkmatter_blocks,
@@ -11,11 +12,12 @@ use crate::markdown::compose::directives_api::{
 use crate::markdown::compose::expression::{
     ComparisonOp, EvaluationLookup, Expr, parse, parse_condition, scalar_string,
 };
-use crate::markdown::compose::interpolation::Evaluator;
 use crate::markdown::compose::interpolation::rewrite::{interpolate_value, whole_value_span};
+use crate::markdown::compose::interpolation::{
+    Evaluator, ExpressionFailurePolicy, LocatedInterpolationError,
+};
 use crate::markdown::schemas::{EffectiveSchema, SchemaOriginKind, SimplifiedSchema};
 use crate::markdown::span::SourceSpan;
-use crate::markdown::types::MarkdownError;
 
 /// A normalized property path used by passive target and guard analysis.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -339,19 +341,24 @@ pub(crate) struct DirectiveTargetRewrite {
     pub output: String,
     pub replacements: usize,
     pub warnings: Vec<ComposeWarning>,
+    /// The edits that turned `source` into `output`, in source order.
+    pub edits: Vec<TextEdit>,
 }
 
 /// Evaluates whole-value `::file`, `::code`, and `::url` targets before the
 /// ordinary body interpolation pass consumes their typed values.
+///
+/// A target is part of a full document, so every expression failure is fatal
+/// and located at the target's span in `source`.
 pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     source: &str,
     evaluator: &Evaluator<L>,
-    fail_fast: bool,
     line_offset: usize,
-) -> Result<DirectiveTargetRewrite, MarkdownError> {
+) -> Result<DirectiveTargetRewrite, LocatedInterpolationError> {
     let mut output = source.to_string();
     let mut replacements = 0usize;
     let mut warnings = Vec::new();
+    let mut edits = Vec::new();
 
     for directive in scan_darkmatter_directives(source).into_iter().rev() {
         if !matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url)
@@ -370,9 +377,13 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
         let (value, count, target_warnings) = interpolate_value(
             raw,
             evaluator,
-            fail_fast,
+            ExpressionFailurePolicy::Strict,
             "interpolation",
-        )?;
+        )
+        .map_err(|error| LocatedInterpolationError {
+            error: Box::new(error),
+            span: Some(target.span.clone()),
+        })?;
         replacements += count;
         warnings.extend(target_warnings);
 
@@ -398,6 +409,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
         match &evaluation.target {
             EvaluatedDirectiveTarget::Concrete(value) => {
                 output.replace_range(evaluation.span.clone(), value);
+                edits.push(TextEdit { range: evaluation.span.clone(), replacement_len: value.len() });
             }
             EvaluatedDirectiveTarget::Absent { reason, root } => {
                 let expression_name = root.as_deref().unwrap_or(location.expression.trim());
@@ -412,18 +424,20 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
                     )
                     .at_line(directive.line + line_offset),
                 );
-                output.replace_range(
-                    directive.span.start..line_end_including_terminator(source, directive.span.end),
-                    "",
-                );
+                let line = directive.span.start..line_end_including_terminator(source, directive.span.end);
+                output.replace_range(line.clone(), "");
+                edits.push(TextEdit { range: line, replacement_len: 0 });
             }
         }
     }
+    // Directives were rewritten end to start.
+    edits.reverse();
 
     Ok(DirectiveTargetRewrite {
         output,
         replacements,
         warnings,
+        edits,
     })
 }
 
