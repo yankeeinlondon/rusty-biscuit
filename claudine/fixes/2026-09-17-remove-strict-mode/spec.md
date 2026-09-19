@@ -649,10 +649,11 @@ The verified migration inventory is:
 | `claudine.yaml`, `claudine-types.yaml`, `err.yaml`, `env.yaml` | `claudine/schemas` |
 | `darkmatter.yaml`, `expression-functions.yaml` | `darkmatter/schemas` |
 | `darkmatter-schema.md` | Keep as documentation and update its schema transclusion |
-| `schema-definition.yaml` | Empty placeholder; inspect references before deciding its disposition |
+| `schema-definition.yaml` | Populated intended schema-envelope draft; inspect references and its documentation/runtime role before deciding its disposition; do not delete as an empty placeholder |
 
-`err.yaml` references the empty `schema-definition.yaml` placeholder; it is
-not a functioning schema dependency. Preserve the existing
+`err.yaml` references `schema-definition.yaml`, which now contains an intended
+schema-envelope draft. Its role and compatibility with that reference require
+verification; the draft is not evidence of implemented grammar. Preserve the existing
 `claudine/schemas/review.yaml`. The five empty files and draft `action.yaml`
 under `claudine/docs/schemas` must not overwrite populated source schemas.
 Avoid broad path replacement: inspect references individually so unrelated
@@ -713,15 +714,19 @@ repository root, or at the opened tree root when the tree is not a repository.
 Monorepos also support `schemas/` at package-area and package roots. Automatically discovered definitions
 associated with one of these scopes may only activate for documents inside
 that scope: automatic package or package-area discovery must never affect
-sibling scopes. Discovering a directory does not mean merging every YAML file into the
-schema; conditional trigger definitions remain conditional, and direct
-always-on schema inputs remain an explicit Darkmatter consumer capability.
+sibling scopes. Scope clarification agreed 2026-09-18: recognized standalone
+schemas in these directories automatically augment the Darkmatter baseline
+within their discovery scope; `schema-trigger` definitions remain conditional.
+Discovery does not merge arbitrary YAML or automatically apply reusable helper
+definitions imported by schemas. The exact standalone-schema/helper envelope
+and classification remain technical design decisions. Explicit direct,
+always-on schema inputs remain a Darkmatter consumer capability.
 
 When `SCHEMA_DIR` is set and names a valid directory, DMLS must also search that
 directory. The directory may be anywhere, including another package's schema
-directory. Its definitions are available workspace-wide, subject to their
-trigger conditions. This explicit source is an intentional exception to the
-scope limits of automatic discovery; do not impose additional source-location
+directory. Its standalone schemas apply workspace-wide, while its trigger
+definitions remain subject to their conditions. This explicit source is an
+intentional exception to the scope limits of automatic discovery; do not impose additional source-location
 classifications. Relative imports retain the schema file's source origin.
 This is additive discovery, not replacement of root and nested `schemas/`
 locations. Reuse existing schema merge precedence where compatible with the
@@ -734,6 +739,13 @@ changes must be reflected, including a newly introduced `schemas/` directory
 at any supported root. Generic activation must support workspace marker facts:
 the presence of a Claudine configuration file at a workspace root is an
 illustrative use case, not a selected filename or hardcoded Claudine rule.
+Scope expansion agreed 2026-09-18: this fix includes predicates for document
+expressions; file presence, absence, and content; executable availability
+(found/absent); repository membership; OS; timezone; and local/UTC time. Exact
+syntax, observation semantics, time handling, refresh, and errors remain
+technical design decisions. Activation remains passive: it must not execute
+actions, shell expansion, lazy providers, or discovered binaries. The existing
+qualitative responsiveness requirement remains unchanged.
 The loader, environment read timing, and change-monitoring strategy are
 implementation choices; this specification does not require eager scanning of
 every subtree rather than discovery as documents become relevant.

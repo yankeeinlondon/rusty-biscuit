@@ -33,7 +33,8 @@ These are existing requirements, not decisions reopened by this design.
 
 Authoritative lifecycle schemas belong in `claudine/schemas`; generated runtime
 definitions and editor consumption must derive from that source. Generation
-integration, artifact layout, and descriptor representation remain open.
+integration and artifact layout are confirmed in D9. D6 fixes the descriptor
+envelope; its remaining payload details are still open.
 
 ## Current architecture and evidence quality
 
@@ -72,8 +73,8 @@ Direct source inspection following those unsuccessful graph queries established:
   guidance uses `schema-trigger`. D10 below resolves the canonical spelling and
   migration behavior.
 - `claudine-gen` already depends on Darkmatter and forbids a dependency on the
-  Claudine library or CLI. It is a candidate for generation, not yet a confirmed
-  choice. Darkmatter's current `include_str!` embedding is not code generation.
+  Claudine library or CLI. D9 selects it for generation. Darkmatter's current
+  `include_str!` embedding is not code generation.
 
 The investigation documents contain the detailed source references. No current
 impact result or completed migration inventory is claimed by this draft.
@@ -518,6 +519,180 @@ The human authorized the corresponding narrow compatibility clarification in
 this fix's specification. Activation condition syntax and source precedence
 remain separate pending decisions.
 
+## D11 — Use AND at the top level and OR within condition groups
+
+**Human decision:** confirmed 2026-09-18, option **A**. Adopt the desired
+documentation's Boolean trigger grammar: a top-level `match` list combines its
+entries with **AND**, while a group's conditions combine with **OR**. D10's
+canonical `kind: schema-trigger` remains unchanged.
+
+**Recommendation presented:** option A, adopting the explicitly requested
+target semantics while migrating existing rules deliberately.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Adopt documented top-level AND and grouped OR **(confirmed)** | Matches the requested authoring model. | Existing rules using implemented top-level OR require logic-preserving migration. |
+| B: Preserve the existing Boolean grammar | Avoids changing the current parser's list semantics. | Does not deliver the requested Boolean authoring model. |
+
+The existing implementation treats the top-level list as OR. Active rules must
+be migrated to preserve their intended logic, not silently interpreted as AND
+under the new grammar. Exact parser shape and legacy-form detection remain
+pending; this decision does not select aliases, versioning, or a compatibility
+mechanism.
+
+The user identified
+[authoring-schemas.md](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md),
+[schema-targeting.md](../../../../darkmatter/docs/topics/schemas/schema-targeting.md),
+and [schema-target.yaml](../../../../darkmatter/docs/schemas/schema-target.yaml)
+as target intent, not evidence of implemented support. Where those documents
+use `schema-target`, the separately confirmed `schema-trigger` name takes
+precedence. Their other proposals are not confirmed by D11. D12 separately
+settles automatic loading of standalone schemas; additional predicates and
+envelope details remain open.
+
+The Boolean grammar is a technical choice delegated by R12; no functional
+specification amendment is required for this selection. Verification must
+distinguish top-level AND from grouped OR and prove migrated rules retain their
+intended matching behavior. Predicate semantics and source precedence remain
+pending; D12 settles automatic application within discovery scope.
+
+## D12 — Apply discovered standalone schemas within their scope
+
+**Human decision:** confirmed 2026-09-18, option **A**. Recognized standalone
+schemas discovered in supported `schemas/` directories automatically augment
+the Darkmatter baseline within their discovery scope. `schema-trigger`
+definitions remain conditional on matching. This does not merge arbitrary YAML.
+
+**Recommendation presented:** option A, making directory placement declare
+applicability and reducing separate activation settings for always-on schemas.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Automatically apply discovered standalone schemas **(confirmed)** | Predictable directory-based applicability with fewer activation settings. | Discovery must distinguish applicable standalone schemas from reusable helper definitions. |
+| B: Require explicit selection for every always-on schema | Makes each always-on activation separately explicit. | Additional consumer configuration is required even after a schema is placed in its intended scope. |
+
+Automatically discovered repository/opened-root, package-area, and package
+schemas apply only within their associated scope; nested package definitions
+cannot affect siblings. A valid explicit `SCHEMA_DIR` supplies workspace-wide
+standalone schemas and conditional triggers, with relative imports retaining
+their source origin. These sources augment rather than replace the base schema
+and other applicable sources.
+
+Reusable imported definitions must not accidentally become always-on document
+schemas simply because they reside in a discovered directory. D13 supplies the
+standalone-schema versus helper envelope/classification. Consumers also retain
+the explicit direct-schema capability required by R12.
+
+The human authorized a narrow R12 clarification of automatic standalone-schema
+application. Verification must cover baseline participation, conditional
+triggers, nested sibling isolation, explicit-source workspace scope, and the
+exclusion of arbitrary YAML and reusable helpers from automatic application.
+Source precedence is not settled here; D13 resolves the export distinction.
+
+## D13 — Separate exported document schemas from reusable types
+
+**Human decision:** confirmed 2026-09-18, option **A**. A `kind: schema`
+envelope separates an optional exported `$schema` from reusable `types`.
+A types-only file is importable but is not automatically applied to documents.
+
+**Recommendation presented:** option A, making a file's applicability explicit
+in its representation rather than relying on a helper-directory convention.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Explicit exported `$schema` and reusable `types` **(confirmed)** | Co-locates imports and applicable schemas while making their different roles machine-checkable. | Existing helper files require explicit migration; whole-file callers must select an actual export. |
+| B: Keep helper libraries outside discovered directories | Avoids extending the envelope distinction. | Directory placement becomes an implicit applicability contract and makes reusable-source organization fragile. |
+
+Automatic discovery applies the exported document schema when present, within
+D12's scope. A file containing only reusable types contributes no automatically
+applied document schema. Whole-file schema references to a types-only file
+produce a structured no-export error instead of guessing a default type or
+merging every definition. Named type imports remain supported through explicit
+helper-file migration.
+
+D6's optional generic `bindings` section remains part of the schema envelope.
+Importing a reusable type library does not automatically activate its bindings
+or event scopes. Binding association syntax and scope-selection details remain
+open; D13 does not infer them from the presence of a named type.
+
+Verification must distinguish discovered exported schemas, discovered types-only
+libraries, valid named imports, and invalid whole-file references with no
+export. Importing a helper must not activate binding/event policy as a side
+effect. The user also authorized documentation updates to describe this
+distinction; that authorization does not implement the parser or migrate runtime
+schema data during this design checkpoint.
+
+Automatic assembly of exported unions remains unresolved. The existing
+`schemas/feature-review.yaml` union must not be silently flattened or discarded
+when implementing automatic application. The populated documentation draft
+`darkmatter/docs/schemas/schema-definition.yaml` describes intended envelope
+behavior, not implemented support; its detailed `bindings` grammar still awaits
+agreement.
+
+## D14 — Include the full desired activation predicate family
+
+**Human decision:** confirmed 2026-09-18, option **A**. This fix includes
+document expressions; file presence, absence, and content; executable
+availability (found/absent); repository membership; OS; timezone; and local/UTC
+time predicates.
+
+**Recommendation presented:** option **B**, limiting the initial family to
+document predicates and file presence/absence for the original scope and
+simplicity. The human selected the broader option A explicitly.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Full desired predicate family **(confirmed)** | Delivers the requested range of document, host, filesystem, and time activation conditions together. | Requires concrete passive observation, refresh, error, and cross-platform contracts for every family. |
+| B: Document predicates plus file presence/absence **(recommended, not selected)** | Smaller extension around the original workspace-marker requirement. | Leaves the other desired predicates outside this fix. |
+
+The expanded family does not authorize execution during validation. Activation
+must not execute actions, shell expansion, lazy providers, or discovered
+binaries. Availability checks observe whether an executable can be found; they
+do not run it. Predicate observations and their refresh rules must preserve the
+shared passive-validation boundary.
+
+The human authorized the corresponding narrow scope amendment to R12. Exact
+syntax, observation ownership and snapshots, time semantics, refresh/invalidation,
+and typed failure behavior remain technical decisions. Responsiveness remains
+qualitative, without numeric acceptance thresholds. Selecting the families does
+not implicitly approve details in draft authoring documents.
+
+## D15 — Observe requested activation facts before pure matching
+
+**Human decision:** confirmed 2026-09-18, option **A**. Capture requested host
+facts before matching into an immutable activation snapshot, with one clock
+instant for the activation pass. Darkmatter identifies observation requests;
+shared host integration gathers them using focused Sniff host/repository APIs.
+CLI and DMLS use the same observation and matching semantics.
+
+**Recommendation presented:** option A, making the observation boundary explicit
+and matching deterministic without a request/resume protocol inside evaluation.
+
+| Material alternative | Benefit | Cost |
+| --- | --- | --- |
+| A: Collect requested facts, then match a snapshot **(confirmed)** | Clear passive boundary, deterministic tests, and consistent clock/fact views within one pass. | Can observe requested facts in branches that matching later does not use. |
+| B: Request host facts on demand and resume matching with a cache | Avoids observing branches not reached by matching. | Adds suspended evaluation and request/cache coordination to the shared matching contract. |
+
+Capture only requested facts rather than a full ambient host snapshot. Absence
+and failed observation remain distinct outcomes. Matching performs no I/O and
+invokes no providers; tests can supply snapshots directly. All time predicates
+in one pass use the captured instant rather than consulting the clock again.
+This activation snapshot does not change Claudine lifecycle capture timing or
+D2's lazy-value cache lifetime.
+
+Existing APIs do not by themselves establish this boundary. The current
+`EvaluationMode::Pure` selects dispatch behavior, not actual purity:
+`date()`/`is_today` can consult the live clock. `CtxLookup` can capture lazily,
+and ordinary `ResolutionContext` dispatch can perform remote reads. The matcher
+must not receive those unrestricted contexts directly; snapshot-backed adapters
+must enforce the agreed observation boundary.
+
+Dynamic expression-derived observation requests and the allowed activation
+expression functions remain the next consequential ruling. D15 does not assume
+arbitrary read-side expressions can be precollected, nor authorize their
+execution during matching. Concrete snapshot/request types, observation errors,
+and refresh dependencies remain to be specified within this contract.
+
 ## Remaining decisions and design completion work
 
 The priority below reflects architectural dependencies, not implementation
@@ -530,7 +705,7 @@ sequencing.
 | 3 | Lifecycle catalog details | Complete D6's event/scope matrix and nested use-site syntax/conflict rules within D3's capture timing, D7's `err` mapping, and D8's sequence-approval restriction. |
 | 4 | Provenance interface and transfer inventory | Specify D5's envelope operations and enumerate every executable transfer, including any required internal serialization boundary. |
 | 5 | Shared semantic bundle details | Complete the shared definition fields and portable origin representation needed by D9, alongside D6's still-open binding payload details. |
-| 6 | Generic activation and source precedence | Specify workspace-fact syntax/anchors, explicit source precedence and deduplication, and origin versus applicability scope using D10's canonical trigger kind. |
+| 6 | Generic activation and source precedence | Complete D11's parser shape and legacy-rule migration and D13's import/export/union contracts; define D14 predicate syntax/functions and dynamic requests under D15, detailed time/refresh/failures, plus source precedence/deduplication and origin versus applicability scope using D10's canonical trigger kind. |
 | 7 | Refresh, isolation, and recovery | Define current-generation dependency/failure states and shared suppression of dependent diagnostics, hover, and completion; cover missing dependencies and newly created sources. |
 | 8 | Typed error transport and ownership audit | Specify owned causes through lifecycle/recovery/proxy paths and complete the state/context/binding/evaluation/validation/error DRY audit, including reasons for retained duplication. |
 
@@ -548,6 +723,10 @@ review of the completed design remains pending. The
 D5 selection/movement materializes inherited ancestor metadata, and D7 names
 the `loop` event distinctly from task `setup`. Concrete envelope operations,
 scope composition, and remaining checked-association contracts are still open.
-Open rulings,
+An independent schema-agent review of D11–D13, R12, and the corresponding
+documentation changes found no blockers in that checkpoint. The documentation
+marks the desired contract as not implemented. That review does not resolve
+union-export assembly or the pending binding grammar and is not approval of the
+unfinished overall design. Open rulings,
 unresolved graph evidence, and the incomplete migration inventory prevent a
 claim that this design is ready for implementation planning.
