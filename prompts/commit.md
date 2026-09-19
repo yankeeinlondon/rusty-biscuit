@@ -33,7 +33,7 @@ initialize:
 start:
     message: |-
         🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** 
-        {{ ctx.is_monorepo ? '\n    **packages impacted:** _' + as_csv(ctx.dirty_packages) + '_' : '' }}
+        {{ ctx.is_monorepo ? '\n  **packages impacted:** _' + as_csv(ctx.dirty_packages) + '_' : '' }}
 success:
     message: |-
         🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git** (_but not pushed_)
@@ -41,7 +41,7 @@ failure:
     message: |-
         💥  the staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}} branch failed to commit as requested! The error was:
 
-            {{err.msg}}
+        {{err.msg}}
 ---
 
 # Commit Staged Files
