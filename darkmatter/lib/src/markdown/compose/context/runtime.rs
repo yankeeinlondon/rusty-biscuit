@@ -56,6 +56,9 @@ struct ComposeContextInner {
     overrides: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>>,
     capture_diagnostics: Vec<super::ContextMergeDiagnostic>,
     capture_timings: Vec<(String, Duration)>,
+    /// Structured observations behind the captured `Repo` and `Network`
+    /// groups, read by parameterized expression functions.
+    observations: super::capture::CapturedObservations,
 }
 
 impl PartialEq for ComposeContext {
@@ -182,7 +185,7 @@ impl ComposeContext {
 
     /// Captures the runtime context using the given base directory.
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
-        let (values, capture_diagnostics, timings, environment) =
+        let (values, capture_diagnostics, timings, environment, observations) =
             super::capture::capture_runtime_context(base_dir);
         let requirements = super::capture::ContextRequirements::all();
         Self::from_values(
@@ -193,6 +196,7 @@ impl ComposeContext {
             base_dir.to_path_buf(),
             requirements,
         )
+        .with_observations(observations)
     }
 
     /// Demand-driven capture: scans `content` for `ctx.*` references and
@@ -206,7 +210,7 @@ impl ComposeContext {
     /// frontmatter values containing `ctx.*` references, use
     /// [`capture_for_document`](Self::capture_for_document) instead.
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
-        let (values, capture_diagnostics, timings, environment) =
+        let (values, capture_diagnostics, timings, environment, observations) =
             super::capture::capture_runtime_context_for_content(base_dir, content);
         let requirements = super::capture::ContextRequirements::for_content(content);
         Self::from_values(
@@ -217,6 +221,7 @@ impl ComposeContext {
             base_dir.to_path_buf(),
             requirements,
         )
+        .with_observations(observations)
     }
 
     /// Demand-driven capture that scans both frontmatter values and body
@@ -234,7 +239,7 @@ impl ComposeContext {
     ) -> Self {
         let requirements = super::capture::ContextRequirements::for_document(doc);
         let root = super::capture::RootDocument::from_markdown(doc);
-        let (values, capture_diagnostics, timings, environment) =
+        let (values, capture_diagnostics, timings, environment, observations) =
             super::capture::capture_runtime_context_for_seeded_requirements(
                 base_dir,
                 &requirements,
@@ -248,6 +253,7 @@ impl ComposeContext {
             base_dir.to_path_buf(),
             requirements,
         )
+        .with_observations(observations)
         .with_root(root)
     }
 
@@ -270,7 +276,7 @@ impl ComposeContext {
         evidence: &super::capture::ContextCaptureEvidence,
         root: Option<std::sync::Arc<super::capture::RootDocument>>,
     ) -> Self {
-        let (values, diagnostics, timings, environment) =
+        let (values, diagnostics, timings, environment, observations) =
             super::capture::capture_runtime_context_with_evidence(
                 base_dir,
                 requirements,
@@ -284,7 +290,8 @@ impl ComposeContext {
             environment,
             base_dir.to_path_buf(),
             requirements.clone(),
-        );
+        )
+        .with_observations(observations);
         match root {
             Some(root) => context.with_root(root),
             None => context,
@@ -313,6 +320,16 @@ impl ComposeContext {
         let requirements = super::capture::ContextRequirements::for_document(document);
         let root = super::capture::RootDocument::from_markdown(document);
         Self::capture_with_evidence_seeded(base_dir, &requirements, evidence, Some(root))
+    }
+
+    fn with_observations(mut self, observations: super::capture::CapturedObservations) -> Self {
+        std::sync::Arc::make_mut(&mut self.inner).observations = observations;
+        self
+    }
+
+    /// Structured observations behind the captured `Repo` and `Network` groups.
+    pub(crate) fn observations(&self) -> &super::capture::CapturedObservations {
+        &self.inner.observations
     }
 
     fn with_root(mut self, root: std::sync::Arc<super::capture::RootDocument>) -> Self {
@@ -373,6 +390,7 @@ impl ComposeContext {
                 overrides: std::sync::OnceLock::new(),
                 capture_diagnostics,
                 capture_timings,
+                observations: super::capture::CapturedObservations::default(),
             }),
         }
     }
@@ -465,6 +483,7 @@ impl ComposeContext {
             }
             inner.captured = inner.captured.clone().with(group);
         }
+        inner.observations.fill_from(&source.inner.observations, groups);
         for diagnostic in &source.inner.capture_diagnostics {
             if !inner.capture_diagnostics.contains(diagnostic) {
                 inner.capture_diagnostics.push(diagnostic.clone());
@@ -490,7 +509,7 @@ impl ComposeContext {
             root: self.inner.root.as_deref(),
             timestamp_ms: self.inner.values.get("timestamp_ms").and_then(serde_json::Value::as_i64),
         };
-        let (mut values, mut diagnostics, mut timings, environment) =
+        let (mut values, mut diagnostics, mut timings, environment, observations) =
             capture(&self.inner.anchor, &missing, seed);
         // The Agent group derives from the environment the snapshot already
         // carries, so compose-time overrides remain the effective identity.
@@ -506,6 +525,7 @@ impl ComposeContext {
         }
         let inner = std::sync::Arc::make_mut(&mut self.inner);
         inner.values.extend(values);
+        inner.observations.fill_from(&observations, &missing);
         inner.capture_diagnostics.append(&mut diagnostics);
         inner.capture_timings.append(&mut timings);
         for group in missing.iter() {
@@ -682,6 +702,7 @@ impl ComposeContext {
                 overrides: std::sync::OnceLock::new(),
                 capture_diagnostics: Vec::new(),
                 capture_timings: Vec::new(),
+                observations: super::capture::CapturedObservations::default(),
             }),
         }
     }
@@ -694,7 +715,7 @@ impl ComposeContext {
     ///
     /// Lets a test build two contexts that differ only in a single value — e.g.
     /// a volatile `timestamp` — to prove the reference-graph identity is
-    /// complete rather than reusing the persistent-cache `context_hash`.
+    /// complete rather than reusing the compose-cache `context_hash`.
     #[cfg(test)]
     pub(crate) fn fixed_for_testing_with(
         extra: impl IntoIterator<Item = (&'static str, serde_json::Value)>,

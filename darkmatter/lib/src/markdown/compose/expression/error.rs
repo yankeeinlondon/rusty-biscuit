@@ -323,6 +323,37 @@ pub enum ExpressionError {
         group: ContextGroup,
     },
 
+    /// A call that breaks a function's specified contract where the
+    /// specification requires a compose error: an argument outside the
+    /// documented domain (`recent_commits(0)`), a name outside a closed set, or
+    /// a required effect the host cannot perform. Unlike [`Other`](Self::Other)
+    /// and [`ArgType`](Self::ArgType), it is never demoted to a warning or
+    /// replaced by a fallback value on any surface.
+    #[error("{function}(): {message}")]
+    ContractViolation {
+        /// The function's canonical name.
+        function: String,
+        /// What the call violated.
+        message: String,
+    },
+
+    /// A function that reads a capture group's retained observations (such as
+    /// `package()` or `ipv4()`) ran in a request that never captured that
+    /// group. Like [`ContextNotCaptured`](Self::ContextNotCaptured), this is a
+    /// request contract violation, not a fact about the host.
+    #[error(
+        "{function}() reads the {group:?} context capture group, which this \
+         composition request did not capture; capture the document's \
+         `ContextRequirements` (e.g. `ComposeContext::capture_for_document`) or \
+         build options with `ComposeOptions::new()`"
+    )]
+    FunctionContextNotCaptured {
+        /// The function's canonical name.
+        function: String,
+        /// The capture group whose observations the function reads.
+        group: ContextGroup,
+    },
+
     /// A captured group whose projection omitted one of its own cataloged keys.
     /// A Darkmatter internal invariant failure; the caller is not at fault.
     #[error(
@@ -348,6 +379,24 @@ pub enum ExpressionError {
         key: String,
         /// The entropy source's failure.
         detail: String,
+    },
+
+    /// A path under a lazy reserved root that names no member of it. The root
+    /// cannot be shadowed and has no authored fallback, so the reference can
+    /// never resolve; it is surfaced instead of rendering empty. This is how the
+    /// removed `current.ctx.*` / `current.env.*` nesting fails after the clean
+    /// break (**R33**).
+    #[error(
+        "`{path}` is not a member of the reserved `{root}` root: `current` mirrors \
+         the `ctx` variables by name and `current_env` mirrors environment \
+         variable names, so there is no `current.ctx.*`, `current.env.*`, or \
+         `current_env.ctx.*` nesting"
+    )]
+    ReservedRootPathUnknown {
+        /// `current` or `current_env`.
+        root: &'static str,
+        /// The full unresolvable path, root included.
+        path: String,
     },
 
     /// Migration catch-all for the long tail of pure builtins not yet
@@ -378,7 +427,7 @@ impl ExpressionError {
     /// Whether this error halts lenient (non-`fail_fast`) composition.
     ///
     /// This is the checked-`match` replacement for the string-prefix
-    /// `is_fatal_eval_error` gate (design §5). Three classes of failure are
+    /// `is_fatal_eval_error` gate (design §5). These classes of failure are
     /// authoring-fatal even in lenient body interpolation:
     ///
     /// - [`UnknownFunction`] — an unknown symbol can never resolve, so it must be
@@ -400,9 +449,17 @@ impl ExpressionError {
     ///   frontmatter, body, and `$()` surfaces and forbids replacing it with an
     ///   empty value or an unevaluated `{{ … }}`.
     ///
-    /// - [`ContextNotCaptured`] and [`ContextProjectionInvariant`] — a known
-    ///   `ctx.*` variable with no captured value is a request or Darkmatter
-    ///   defect; rendering it as an empty string would hide it.
+    /// - [`ContractViolation`] — the function's specification makes the call a
+    ///   compose error in every position.
+    ///
+    /// - [`ContextNotCaptured`], [`FunctionContextNotCaptured`], and
+    ///   [`ContextProjectionInvariant`] — a known `ctx.*` variable or
+    ///   observation-reading function with no captured group is a request or
+    ///   Darkmatter defect; rendering it as an empty value would hide it.
+    ///
+    /// - [`ReservedRootPathUnknown`] — a lazy reserved root cannot be shadowed
+    ///   and has no authored fallback, so the reference can never resolve. Like
+    ///   an unknown function, it is surfaced rather than rendered empty.
     ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
@@ -413,8 +470,11 @@ impl ExpressionError {
     /// [`UnknownFunction`]: ExpressionError::UnknownFunction
     /// [`FileReference`]: ExpressionError::FileReference
     /// [`Provider`]: ExpressionError::Provider
+    /// [`ContractViolation`]: ExpressionError::ContractViolation
     /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
+    /// [`FunctionContextNotCaptured`]: ExpressionError::FunctionContextNotCaptured
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
+    /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -424,7 +484,10 @@ impl ExpressionError {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
             ExpressionError::Provider { .. } => true,
+            ExpressionError::ContractViolation { .. } => true,
+            ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::ContextNotCaptured { .. }
+            | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }
             | ExpressionError::ExecutionNonceUnavailable { .. } => true,
             // A present file reference that fails to resolve is fatal (see the
@@ -441,19 +504,21 @@ impl ExpressionError {
     }
 
     /// Whether this is a missing runtime context failure
-    /// ([`ContextNotCaptured`], [`ContextProjectionInvariant`], or
-    /// [`ExecutionNonceUnavailable`]).
+    /// ([`ContextNotCaptured`], [`FunctionContextNotCaptured`],
+    /// [`ContextProjectionInvariant`], or [`ExecutionNonceUnavailable`]).
     ///
     /// Such a failure means the request snapshot cannot answer a known
     /// `ctx.*` read, so no stage may tolerate it into partial output.
     ///
     /// [`ContextNotCaptured`]: ExpressionError::ContextNotCaptured
+    /// [`FunctionContextNotCaptured`]: ExpressionError::FunctionContextNotCaptured
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ExecutionNonceUnavailable`]: ExpressionError::ExecutionNonceUnavailable
     pub fn is_missing_runtime_context(&self) -> bool {
         matches!(
             self,
             ExpressionError::ContextNotCaptured { .. }
+                | ExpressionError::FunctionContextNotCaptured { .. }
                 | ExpressionError::ContextProjectionInvariant { .. }
                 | ExpressionError::ExecutionNonceUnavailable { .. }
         )
@@ -624,6 +689,22 @@ mod tests {
                 message: "boom".to_string(),
             };
             assert!(!err.is_authoring_fatal());
+        }
+
+        #[test]
+        fn contract_violation_is_authoring_fatal_and_renders_like_other() {
+            let violation = ExpressionError::ContractViolation {
+                function: "recent_commits".to_string(),
+                message: "count must be at least 1, got 0".to_string(),
+            };
+            let other = ExpressionError::Other {
+                function: "recent_commits".to_string(),
+                message: "count must be at least 1, got 0".to_string(),
+            };
+            assert!(violation.is_authoring_fatal());
+            assert!(!other.is_authoring_fatal());
+            assert!(!violation.is_missing_runtime_context());
+            assert_eq!(violation.to_string(), other.to_string());
         }
 
         #[test]

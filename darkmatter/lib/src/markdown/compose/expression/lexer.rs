@@ -871,13 +871,23 @@ impl<'a> Lexer<'a> {
             .map_err(|_| LexerError::new(format!("Invalid number: '{}'", value), start_pos))
     }
 
+    /// Whether the `-` at the cursor continues the identifier being scanned.
+    ///
+    /// Only meaningful mid-identifier: a `-` joins iff the character after it
+    /// continues an identifier, so `spec-name` is one name while `foo--bar`,
+    /// `a- b`, and a trailing `-` stay operators. `read_number` never calls
+    /// this, which is what keeps `4-2` a subtraction.
+    fn dash_continues_identifier(&self) -> bool {
+        self.current_char() == Some('-') && self.peek_char().is_some_and(is_identifier_char)
+    }
+
     /// Reads a variable (identifier with optional dot-separated path).
     fn read_variable(&mut self) -> Result<Token, LexerError> {
         let mut name = String::new();
 
         // Read first identifier
         while let Some(ch) = self.current_char() {
-            if is_identifier_char(ch) {
+            if is_identifier_char(ch) || self.dash_continues_identifier() {
                 name.push(ch);
                 self.advance();
             } else {
@@ -894,7 +904,7 @@ impl<'a> Lexer<'a> {
                     self.advance(); // consume the dot
 
                     while let Some(ch) = self.current_char() {
-                        if is_identifier_char(ch) {
+                        if is_identifier_char(ch) || self.dash_continues_identifier() {
                             name.push(ch);
                             self.advance();
                         } else {
@@ -947,6 +957,68 @@ pub fn lex_spanned(input: &str, mode: ParseMode) -> Result<Vec<Spanned<Token>>, 
         }
     }
     Ok(tokens)
+}
+
+/// The byte offset where the identifier partial ending at `prefix.len()` begins.
+///
+/// This is the cursor-side companion to [`Lexer`]'s identifier rule, for
+/// completion filtering over text that usually does not lex (it is still being
+/// typed). It agrees with the lexer about where an identifier starts: an inner
+/// `-` joins only between identifier characters of a name that began with a
+/// letter or `_`, and `.` joins only before a letter or `_`. So `spec-na` yields
+/// `spec-na`, `foo--bar` yields `bar`, `4-2` yields `2`, and `a -b` yields `b`.
+///
+/// Unlike the lexer, a trailing `-` or `.` directly after an identifier joins,
+/// because the user is mid-typing: `spec-` yields `spec-` and `ctx.` yields
+/// `ctx.`. `spec--` and `a -` yield an empty partial. Returns `prefix.len()`
+/// when no partial precedes the cursor.
+pub fn identifier_prefix_start(prefix: &str) -> usize {
+    enum Word {
+        None,
+        Identifier,
+        Number,
+    }
+
+    let run_start = prefix
+        .char_indices()
+        .rev()
+        .find(|&(_, ch)| !(is_identifier_char(ch) || ch == '.' || ch == '-'))
+        .map_or(0, |(index, ch)| index + ch.len_utf8());
+    let run: Vec<(usize, char)> = prefix[run_start..]
+        .char_indices()
+        .map(|(index, ch)| (run_start + index, ch))
+        .collect();
+
+    let mut word = Word::None;
+    let mut word_start = prefix.len();
+    for (index, &(pos, ch)) in run.iter().enumerate() {
+        let next = run.get(index + 1).map(|&(_, next)| next);
+        let continues = match word {
+            Word::Identifier => match ch {
+                '.' => next.is_none_or(is_identifier_start),
+                '-' => next.is_none_or(is_identifier_char),
+                _ => is_identifier_char(ch),
+            },
+            Word::Number => {
+                ch.is_ascii_digit() || (ch == '.' && next.is_some_and(|next| next.is_ascii_digit()))
+            }
+            Word::None => false,
+        };
+        if continues {
+            continue;
+        }
+        if is_identifier_start(ch) {
+            word = Word::Identifier;
+            word_start = pos;
+        } else if is_identifier_char(ch) {
+            word = Word::Number;
+            word_start = pos;
+        } else {
+            word = Word::None;
+            word_start = pos + ch.len_utf8();
+        }
+    }
+    word_start
 }
 
 /// Checks if a character can start an identifier.
@@ -1943,6 +2015,220 @@ And {{ another }}."#;
         fn propagates_lexer_error() {
             let err = lex_spanned("@bad", ParseMode::Interpolation).unwrap_err();
             assert!(err.message.contains("Unexpected character"));
+        }
+    }
+
+    /// Requirement 1 of the dasherized-identifiers spec: `-` continues an
+    /// identifier iff the scan is mid-identifier and the next character
+    /// continues one.
+    mod dash_continuation {
+        use super::*;
+        use Token::*;
+
+        fn tokens(input: &str) -> Vec<Token> {
+            lex_spanned(input, ParseMode::Interpolation)
+                .unwrap_or_else(|error| panic!("{input:?} should lex: {error:?}"))
+                .into_iter()
+                .map(|spanned| spanned.value)
+                .collect()
+        }
+
+        fn var(name: &str) -> Token {
+            Variable(name.to_string())
+        }
+
+        #[test]
+        fn kebab_names_lex_as_one_variable() {
+            for name in [
+                "spec-name",
+                "depends-on",
+                "argument-hint",
+                "l2-environments",
+                "phase-2",
+                "level-3",
+                "a-b-c",
+                "snake_and-kebab",
+            ] {
+                assert_eq!(tokens(name), vec![var(name), Eof], "for {name:?}");
+            }
+        }
+
+        #[test]
+        fn kebab_segment_inside_a_dotted_path_joins() {
+            assert_eq!(tokens("doc.spec-name"), vec![var("doc.spec-name"), Eof]);
+            assert_eq!(tokens("a-b.c-d.e"), vec![var("a-b.c-d.e"), Eof]);
+        }
+
+        #[test]
+        fn breaking_rows_now_lex_as_one_identifier() {
+            // `iteration-1`, `false-1`, and `true-value` were subtraction (or a
+            // parse error) before the change. Boolean reclassification applies
+            // only to the complete token, so the joined names stay Variables.
+            assert_eq!(tokens("iteration-1"), vec![var("iteration-1"), Eof]);
+            assert_eq!(tokens("false-1"), vec![var("false-1"), Eof]);
+            assert_eq!(tokens("true-value"), vec![var("true-value"), Eof]);
+            assert_eq!(tokens("true"), vec![BoolLiteral(true), Eof]);
+            assert_eq!(tokens("false"), vec![BoolLiteral(false), Eof]);
+        }
+
+        #[test]
+        fn spaced_or_half_spaced_dash_is_subtraction() {
+            for input in ["a - b", "a -b", "a- b"] {
+                assert_eq!(tokens(input), vec![var("a"), Minus, var("b"), Eof], "for {input:?}");
+            }
+            assert_eq!(
+                tokens("false - 1"),
+                vec![BoolLiteral(false), Minus, NumberLiteral(1.0), Eof]
+            );
+            assert_eq!(
+                tokens("iteration - 1"),
+                vec![var("iteration"), Minus, NumberLiteral(1.0), Eof]
+            );
+        }
+
+        #[test]
+        fn dash_after_a_non_identifier_operand_is_subtraction() {
+            assert_eq!(
+                tokens("4-2"),
+                vec![NumberLiteral(4.0), Minus, NumberLiteral(2.0), Eof]
+            );
+            assert_eq!(
+                tokens("f(x)-1"),
+                vec![var("f"), LParen, var("x"), RParen, Minus, NumberLiteral(1.0), Eof]
+            );
+            assert_eq!(
+                tokens("arr[0]-1"),
+                vec![var("arr"), LBracket, NumberLiteral(0.0), RBracket, Minus, NumberLiteral(1.0), Eof]
+            );
+            assert_eq!(
+                tokens("(a)-1"),
+                vec![LParen, var("a"), RParen, Minus, NumberLiteral(1.0), Eof]
+            );
+            assert_eq!(
+                tokens(r#""x"-1"#),
+                vec![StringLiteral("x".to_string()), Minus, NumberLiteral(1.0), Eof]
+            );
+        }
+
+        #[test]
+        fn unary_minus_is_unchanged() {
+            assert_eq!(tokens("-5"), vec![Minus, NumberLiteral(5.0), Eof]);
+            assert_eq!(tokens("a * -1"), vec![var("a"), Star, Minus, NumberLiteral(1.0), Eof]);
+        }
+
+        #[test]
+        fn double_dash_does_not_join() {
+            // The first `-` is followed by `-`, which cannot continue an
+            // identifier; the second follows an operator, not an identifier.
+            assert_eq!(
+                tokens("foo--bar"),
+                vec![var("foo"), Minus, Minus, var("bar"), Eof]
+            );
+        }
+
+        #[test]
+        fn trailing_dash_does_not_join() {
+            assert_eq!(tokens("spec-"), vec![var("spec"), Minus, Eof]);
+            assert_eq!(tokens("doc.spec-"), vec![var("doc.spec"), Minus, Eof]);
+            assert_eq!(tokens("spec- "), vec![var("spec"), Minus, Eof]);
+        }
+
+        #[test]
+        fn unicode_identifier_characters_join() {
+            assert_eq!(tokens("café-name"), vec![var("café-name"), Eof]);
+            assert_eq!(tokens("name-café"), vec![var("name-café"), Eof]);
+        }
+
+        #[test]
+        fn joined_span_covers_the_whole_dashed_name() {
+            let input = "  doc.spec-name - café-x ";
+            let spanned = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            assert_eq!(spanned[0].value, var("doc.spec-name"));
+            assert_eq!(&input[spanned[0].span.clone()], "doc.spec-name");
+            assert_eq!(spanned[1].value, Minus);
+            assert_eq!(spanned[2].value, var("café-x"));
+            assert_eq!(&input[spanned[2].span.clone()], "café-x");
+        }
+
+        #[test]
+        fn condition_mode_joins_the_same_way() {
+            let values: Vec<Token> = lex_spanned("depends-on && !is-draft", ParseMode::Condition)
+                .unwrap()
+                .into_iter()
+                .map(|spanned| spanned.value)
+                .collect();
+            assert_eq!(values, vec![var("depends-on"), AndAnd, Bang, var("is-draft"), Eof]);
+        }
+    }
+
+    mod identifier_prefix {
+        use super::*;
+
+        fn partial(prefix: &str) -> &str {
+            &prefix[identifier_prefix_start(prefix)..]
+        }
+
+        #[test]
+        fn plain_and_dotted_partials_are_unchanged() {
+            assert_eq!(partial("{{ tit"), "tit");
+            assert_eq!(partial("{{ ctx.to"), "ctx.to");
+            assert_eq!(partial("{{ ctx."), "ctx.");
+            assert_eq!(partial("as_csv(ctx.pa"), "ctx.pa");
+            assert_eq!(partial("len"), "len");
+            assert_eq!(partial("{{ 42"), "42");
+        }
+
+        #[test]
+        fn kebab_partials_join() {
+            assert_eq!(partial("{{ spec-na"), "spec-na");
+            assert_eq!(partial("{{ doc.spec-na"), "doc.spec-na");
+            assert_eq!(partial("{{ phase-2"), "phase-2");
+            assert_eq!(partial("{{ café-na"), "café-na");
+        }
+
+        #[test]
+        fn trailing_dash_joins_for_filtering_only_after_an_identifier() {
+            assert_eq!(partial("{{ spec-"), "spec-");
+            assert_eq!(partial("{{ spec--"), "");
+            assert_eq!(partial("{{ a -"), "");
+            assert_eq!(partial("{{ 4-"), "");
+        }
+
+        #[test]
+        fn non_joining_dashes_split_the_partial() {
+            assert_eq!(partial("{{ foo--bar"), "bar");
+            assert_eq!(partial("{{ a -b"), "b");
+            assert_eq!(partial("{{ a- b"), "b");
+            assert_eq!(partial("{{ a - b"), "b");
+            assert_eq!(partial("{{ 4-2"), "2");
+            assert_eq!(partial("{{ f(x)-y"), "y");
+        }
+
+        #[test]
+        fn empty_partial_sits_at_the_end() {
+            for prefix in ["", "{{ ", "{{ a ", "x(", "{{ a -"] {
+                assert_eq!(identifier_prefix_start(prefix), prefix.len(), "for {prefix:?}");
+            }
+        }
+
+        #[test]
+        fn multibyte_separator_does_not_split_a_char_boundary() {
+            // `—` (em dash) is three bytes and not an identifier character.
+            assert_eq!(partial("x—spec-na"), "spec-na");
+        }
+
+        #[test]
+        fn agrees_with_the_lexer_on_complete_names() {
+            for input in ["spec-name", "doc.spec-name", "a-b-c", "iteration-1", "café-name"] {
+                let first = lex_spanned(input, ParseMode::Interpolation).unwrap()[0].clone();
+                assert_eq!(first.span, 0..input.len(), "lexer for {input:?}");
+                assert_eq!(identifier_prefix_start(input), 0, "prefix for {input:?}");
+            }
+            for input in ["foo--bar", "a - b", "4-2"] {
+                let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+                let last = &tokens[tokens.len() - 2];
+                assert_eq!(identifier_prefix_start(input), last.span.start, "for {input:?}");
+            }
         }
     }
 

@@ -3,8 +3,11 @@
 //! A reserved root is a top-level name no frontmatter key or injected global
 //! may shadow. `current` and `current_env` are lazy mirrors of `ctx` and `env`
 //! (spec R30–R32): same keys and value types, observed when a reference is
-//! evaluated instead of at launch. Listing a root is metadata only; evaluator
-//! reservation of the two lazy roots lands in plan Phase 6.
+//! evaluated instead of at launch. The evaluator resolves them through the
+//! request's refresh authority
+//! ([`CurrentAuthority`](crate::markdown::compose::CurrentAuthority)); this
+//! catalog is the descriptor projection those roots publish, and enumerating it
+//! observes nothing.
 
 use crate::markdown::compose::context::{ContextVariableDescriptor, context_variable_descriptors};
 

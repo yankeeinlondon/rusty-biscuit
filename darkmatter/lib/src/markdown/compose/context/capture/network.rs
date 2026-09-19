@@ -23,7 +23,7 @@ pub(super) fn populate_network(cap: &ContextCapture, values: &mut Map<String, Va
         Value::Bool(
             network
                 .and_then(|network| network.addresses.as_ref())
-                .is_some_and(|addresses| sniff::network::contains_cgnat_address(addresses)),
+                .is_some_and(sniff::network::contains_cgnat_address),
         ),
     );
     let gateways = network.and_then(|network| network.gateways.as_ref());

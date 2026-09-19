@@ -17,8 +17,13 @@ use sniff::request::{NetworkRequest, OsRequest};
 use super::network::NetworkObservation;
 use super::{ContextGroup, ContextMergeDiagnostic};
 
+/// Work counters for the "no rediscovery" contracts: root discovery
+/// (`GitRepo::discover`) and the package-topology walk. Both count only the
+/// ambient constructor; an evidence-backed capture performs neither.
 #[cfg(test)]
-static GIT_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static GIT_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+pub(crate) static REPOSITORY_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 pub(super) static HISTORY_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
@@ -436,6 +441,8 @@ impl ContextCapture {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
                         let t = Instant::now();
+                        #[cfg(test)]
+                        REPOSITORY_DISCOVERY_COUNT.fetch_add(1, Ordering::Relaxed);
                         let result = rr
                             .as_ref()
                             .and_then(|root| sniff_repo::detect_repo_structure(root).ok().flatten());

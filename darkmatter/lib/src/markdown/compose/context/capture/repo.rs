@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn repo_root_has_no_trailing_slash() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let (values, _, _, _) = capture_runtime_context_for_groups(root, &[ContextGroup::Repo]);
+        let (values, _, _, _, _) = capture_runtime_context_for_groups(root, &[ContextGroup::Repo]);
         if let Some(Value::String(rr)) = values.get("repo_root") {
             assert!(
                 !rr.ends_with('/'),

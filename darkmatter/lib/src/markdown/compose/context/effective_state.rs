@@ -159,6 +159,9 @@ pub struct EffectiveState {
     /// Alternate values used only when a side-effect-free variable/member/index
     /// path is rendered into Markdown body text.
     presentation_values: HashMap<String, Value>,
+
+    /// The lazy `current` / `current_env` roots and their per-expression memo.
+    current: super::CurrentScope,
 }
 
 impl EffectiveState {
@@ -193,6 +196,7 @@ impl EffectiveState {
             ctx_diagnostics: Vec::new(),
             name_coercion_keys: Vec::new(),
             presentation_values: HashMap::new(),
+            current: super::CurrentScope::default(),
         }
     }
 
@@ -211,6 +215,13 @@ impl EffectiveState {
     ///
     /// Returns `None` if the key doesn't exist or the path is invalid.
     pub fn get(&self, path: &str) -> Option<Value> {
+        // Reserved lazy roots — intercepted before every other surface, so no
+        // frontmatter key, external-state key, or authored `ctx` entry can
+        // shadow `current` / `current_env`.
+        if let Some(resolved) = self.current.resolve(path, &self.context) {
+            return resolved.ok().flatten();
+        }
+
         // Reserved `doc` namespace — intercepted before normal key lookup and
         // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
         // collapses into `ctx.*`.
@@ -245,6 +256,9 @@ impl EffectiveState {
         &self,
         path: &str,
     ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
+        if let Some(resolved) = self.current.resolve(path, &self.context) {
+            return resolved;
+        }
         if super::super::expression::doc_namespace::is_doc_namespace(path) {
             return Ok(self.get(path));
         }
@@ -430,6 +444,19 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
         });
         NAMES.as_slice()
     }
+
+    /// Known: a reserved namespace, a key of the merged state (frontmatter,
+    /// `--set`, caller files, inherited parent state — even when its value is
+    /// `null` or empty), or a bare runtime-context name (`when="repo"`).
+    fn is_known_variable_root(&self, root: &str) -> bool {
+        super::super::expression::absence::is_reserved_root(root)
+            || self.data.contains_key(root)
+            || super::super::expression::EvaluationLookup::is_valid_context_variable(self, root)
+    }
+
+    fn begin_expression_scope(&self) {
+        self.current.begin_expression_scope();
+    }
 }
 
 /// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so any surface that
@@ -497,6 +524,14 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn context_variable_names(&self) -> &[&'static str] {
         self.state.context_variable_names()
     }
+
+    fn is_known_variable_root(&self, root: &str) -> bool {
+        super::super::expression::EvaluationLookup::is_known_variable_root(self.state, root)
+    }
+
+    fn begin_expression_scope(&self) {
+        self.state.begin_expression_scope();
+    }
 }
 
 /// Builder for creating effective state with specific merge strategies.
@@ -510,6 +545,7 @@ pub struct EffectiveStateBuilder {
     allow_ctx_override: bool,
     name_coercion_keys: Vec<String>,
     presentation_values: HashMap<String, Value>,
+    current: super::CurrentAuthority,
 }
 
 impl EffectiveStateBuilder {
@@ -524,6 +560,7 @@ impl EffectiveStateBuilder {
             allow_ctx_override: false,
             name_coercion_keys: Vec::new(),
             presentation_values: HashMap::new(),
+            current: super::CurrentAuthority::default(),
         }
     }
 
@@ -585,6 +622,18 @@ impl EffectiveStateBuilder {
     #[must_use]
     pub(crate) fn with_presentation_values(mut self, values: HashMap<String, Value>) -> Self {
         self.presentation_values = values;
+        self
+    }
+
+    /// Sets the request's refresh authority for the lazy `current` /
+    /// `current_env` roots.
+    ///
+    /// The default authority holds no capability, so every `current.<key>` read
+    /// fails closed with a `PartialRuntimeCapture` diagnostic. The compose
+    /// pipeline passes `ComposeOptions`' authority here.
+    #[must_use]
+    pub fn with_current_authority(mut self, authority: super::CurrentAuthority) -> Self {
+        self.current = authority;
         self
     }
 
@@ -663,6 +712,7 @@ impl EffectiveStateBuilder {
             ctx_diagnostics,
             name_coercion_keys: self.name_coercion_keys,
             presentation_values: self.presentation_values,
+            current: super::CurrentScope::new(self.current),
         })
     }
 }

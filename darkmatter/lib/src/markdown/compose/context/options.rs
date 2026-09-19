@@ -1,7 +1,7 @@
 //! Compose pipeline configuration (`ComposeOptions`), its source context
 //! (`ComposeSource`), and the internal `TransclusionOptions` view.
 
-use super::super::cache::{CacheAccessMode, CacheFreshnessMode, FileStore};
+use super::super::cache::{CacheAccessMode, FileStore};
 use super::super::pipeline::operations::{ComposeOperation, ComposeOperationSet};
 use super::super::preflight::PreflightGraphNode;
 use super::super::remote::{RemoteFreshnessMode, RemoteReadConfig};
@@ -91,8 +91,10 @@ pub struct ComposeOptions {
 
     // ── Error handling ─────────────────────────────────────────────
     /// When `true`, the pipeline returns an error on the first failure.
-    /// When `false` (default), failures are recorded as warnings and
-    /// the pipeline continues with remaining operations.
+    /// When `false` (default), recoverable failures in stages such as TOC
+    /// linking and non-structural transclusion are recorded as warnings and
+    /// the pipeline continues. An expression that cannot be parsed or
+    /// evaluated is never recoverable: it fails the document either way.
     pub(crate) fail_fast: bool,
 
     // ── Context override ──────────────────────────────────────────
@@ -247,22 +249,20 @@ pub struct ComposeOptions {
     pub(crate) indent_size: usize,
 
     // ── Caching ───────────────────────────────────────────────────
-    /// Controls whether and how caching is used during compose.
+    /// Controls the run-local, in-memory compose cache (never persisted).
     /// Default: `ReadWrite` (full caching with single-flight dedup).
     pub(crate) cache_access_mode: CacheAccessMode,
 
-    /// Controls staleness tolerance for persistent cache entries.
-    /// Default: `Strict` (only accept entries whose closure hash matches).
-    pub(crate) cache_freshness_mode: CacheFreshnessMode,
-
-    /// Root directory for persistent cache storage.
-    /// When `None`, persistent caching is disabled. Set to a path
-    /// (typically `<workspace>/.darkmatter/cache/v1/`) to enable.
+    /// Root of the remote transport cache, at
+    /// `<cache_root>/.darkmatter/cache/v1[/<namespace>]/`. Raw remote URL
+    /// response bodies are the only artifact written here; no semantic result
+    /// (composed document, `::file` child, operation result, snapshot) ever is.
+    /// When `None`, nothing is persisted.
     pub(crate) cache_root: Option<PathBuf>,
 
-    /// Namespace for cache isolation (e.g., branch name, profile).
-    /// When set, cache entries are stored under this namespace to
-    /// prevent cross-contamination between different contexts.
+    /// Namespace (e.g., branch name, profile) appended to the remote
+    /// transport-cache root, isolating one context's fetched bodies from
+    /// another's.
     pub(crate) cache_namespace: Option<String>,
 
     // ── Performance ─────────────────────────────────────────────────
@@ -325,8 +325,7 @@ pub struct ComposeOptions {
     /// TTL, freshness mode, and refresh behavior.
     ///
     /// Defaults to deny-all. Wired into eager prefetch, read-side expression
-    /// resolution (`frontmatter(url)`, …), and the persistent remote-artifact
-    /// cache.
+    /// resolution (`frontmatter(url)`, …), and the remote transport cache.
     pub(crate) remote_read_config: RemoteReadConfig,
 
     // ── Schema validation ──────────────────────────────────────────
@@ -359,6 +358,48 @@ pub struct ComposeOptions {
     /// the terminal pass, which owns the missing-capture verdict. Default:
     /// `false`.
     pub(crate) defer_missing_runtime_context: bool,
+
+    /// When `true`, a body or mixed-text frontmatter expression that cannot be
+    /// parsed or evaluated warns and keeps its span instead of failing the
+    /// document. Used only by the shell-command discovery pass, which composes
+    /// without page blocks and so evaluates content a false `::block` removes;
+    /// the terminal pass owns the verdict and is always strict. Default:
+    /// `false`.
+    pub(crate) defer_expression_failures: bool,
+
+    /// When `true`, `has_alias`, `has_builtin_function`, `has_user_function`,
+    /// and the shell half of `can_execute` answer `false` without launching the
+    /// login shell. Set only by the shell-command discovery pass, which R8
+    /// forbids from running a profile; the terminal pass probes. Default:
+    /// `false`.
+    pub(crate) suppress_shell_probes: bool,
+
+    /// What `as_markdown` does on this request's expression surfaces. The
+    /// pipeline installs [`NestedComposeSlot::Active`] per document; the
+    /// shell-command discovery pass sets [`NestedComposeSlot::Discover`] so
+    /// preflight never composes nested content. Default: `Unavailable`.
+    ///
+    /// [`NestedComposeSlot::Active`]: crate::markdown::compose::nested::NestedComposeSlot::Active
+    /// [`NestedComposeSlot::Discover`]: crate::markdown::compose::nested::NestedComposeSlot::Discover
+    pub(crate) nested_compose: crate::markdown::compose::nested::NestedComposeSlot,
+
+    /// The request's ICMP effect authority behind `ping` and `ping_under`
+    /// (R6). It owns the request's denial-warning sink, its transport, and —
+    /// during shell-command discovery — the planned-probe sink that lets
+    /// preflight report an ICMP effect without sending a packet. The grants
+    /// themselves are derived from `remote_read_config.allowed_hosts` each time
+    /// the authority is projected, so `--allow-host` stays the single entry
+    /// point. Default: no grants, which denies every target.
+    pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
+
+    /// The request's refresh authority behind the lazy `current` root (R30).
+    /// It owns the invocation's capability to observe one mutable fact now and
+    /// the sink its fail-closed `PartialRuntimeCapture` diagnostics land in.
+    /// [`ComposeOptions::new`] installs an anchored ambient refresh; a caller
+    /// holding its own launch evidence installs one with
+    /// [`with_current_provider`](Self::with_current_provider). Default: no
+    /// capability, so every `current.<key>` read fails closed.
+    pub(crate) current: crate::markdown::compose::context::CurrentAuthority,
 
     /// The runtime schema phase the compose-time verdict is judged at, when the
     /// caller is preparing a launch rather than validating an authored
@@ -480,7 +521,6 @@ impl std::fmt::Debug for ComposeOptions {
             .field("fixed_width", &self.fixed_width)
             .field("indent_size", &self.indent_size)
             .field("cache_access_mode", &self.cache_access_mode)
-            .field("cache_freshness_mode", &self.cache_freshness_mode)
             .field("cache_root", &self.cache_root)
             .field("cache_namespace", &self.cache_namespace)
             .field("perf_enabled", &self.perf_enabled)
@@ -527,14 +567,43 @@ impl ComposeOptions {
     /// [`ExpressionError::ContextNotCaptured`](crate::markdown::compose::expression::ExpressionError::ContextNotCaptured).
     ///
     /// When the document is already available, prefer
-    /// [`new_with_context`](Self::new_with_context) with
-    /// [`ComposeContext::capture_for_document`] — it captures exactly the
-    /// groups the document names, which also folds them into the compose cache
-    /// key. [`ComposeContext::capture`] remains available for callers that
+    /// [`for_document`](Self::for_document) — it captures exactly the groups
+    /// the document names, which also folds them into the compose cache key,
+    /// and fixes the request's repository observation at creation.
+    /// [`ComposeContext::capture`] remains available for callers that
     /// genuinely want the full snapshot.
     pub fn new() -> Self {
         Self::new_with_context(ComposeContext::capture_minimal())
             .with_context_authority(super::authority::ContextAuthority::DarkmatterOwned)
+    }
+
+    /// Creates the Darkmatter-owned request for `document`, anchored at
+    /// `anchor` — the request boundary of decision D3.
+    ///
+    /// One call captures the runtime context the document names
+    /// ([`ComposeContext::capture_for_document`]), lets Darkmatter grow that
+    /// context for transcluded sources
+    /// ([`DarkmatterOwned`](super::authority::ContextAuthority::DarkmatterOwned)),
+    /// and fixes the request's repository observation: the eager `Repo`
+    /// capture when the document names one, otherwise one discovery at
+    /// `anchor`. Every later phase run with these options — reference
+    /// validation, pre-flight, compose, every transcluded child, every
+    /// `current.repo*` read — answers from that observation, so a repository
+    /// change after this call is invisible to the request. `md compose`
+    /// builds its request here.
+    ///
+    /// The discovery replaces, rather than adds to, the one the root pipeline
+    /// entry would otherwise make for the file-resolution snapshot, which
+    /// projects the request's observation instead.
+    ///
+    /// A caller holding its own launch evidence keeps
+    /// [`new_with_context`](Self::new_with_context) and
+    /// [`with_current_provider`](Self::with_current_provider) instead.
+    pub fn for_document(anchor: &Path, document: &crate::markdown::Markdown) -> Self {
+        let options = Self::new_with_context(ComposeContext::capture_for_document(anchor, document))
+            .with_context_authority(super::authority::ContextAuthority::DarkmatterOwned);
+        options.establish_repository_observation();
+        options
     }
 
     /// Installs a source's request-epoch context, keeping the authority.
@@ -603,31 +672,92 @@ impl ComposeOptions {
         std::borrow::Cow::Owned(extended)
     }
 
+    /// Fixes the request's repository observation (decision D3).
+    ///
+    /// Only a [`DarkmatterOwned`] request without an embedder-supplied
+    /// refresh provider observes the repository itself; see
+    /// [`CurrentAuthority::establish_ambient_repository`].
+    /// [`for_document`](Self::for_document) calls this at request creation.
+    /// The root pipeline entry calls it again as the fallback for a request
+    /// built through [`new`](Self::new) or
+    /// [`new_with_context`](Self::new_with_context), where it is a no-op once
+    /// established. A child pipeline never calls it: a descendant must find
+    /// the observation already fixed, never establish it late.
+    ///
+    /// [`CurrentAuthority::establish_ambient_repository`]: crate::markdown::compose::context::CurrentAuthority::establish_ambient_repository
+    /// [`DarkmatterOwned`]: super::authority::ContextAuthority::DarkmatterOwned
+    pub(crate) fn establish_repository_observation(&self) {
+        if self.current.has_provider()
+            || !matches!(self.context_authority, super::authority::ContextAuthority::DarkmatterOwned)
+        {
+            return;
+        }
+        self.current.establish_ambient_repository(&self.context);
+    }
+
+    /// The request's one repository observation, when it holds one: the
+    /// ambient observation established for `current.*`, else the eager
+    /// `Repo` capture of the context.
+    fn request_repository(&self) -> Option<&std::sync::Arc<super::repository_scope::RepositoryObservation>> {
+        self.current
+            .ambient_repository()
+            .and_then(|repository| repository.observation())
+            .or_else(|| self.context.observations().repository())
+    }
+
     /// Capture file-resolution evidence once for an ambient compatibility request.
+    ///
+    /// A source inside the request's repository observation projects that
+    /// observation's scope catalog rather than discovering the repository a
+    /// second time (decision D3); only a source outside it, or a request that
+    /// holds no observation, captures at the source directory.
     pub(crate) fn ensure_file_resolution_context(&mut self) {
         if self.file_resolution_context.is_some() {
             return;
         }
-        let ambient = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let base_dir = match &self.source {
+        let ambient = || std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let (base_dir, inside_request_repository) = match &self.source {
             ComposeSource::File(path) => {
                 let absolute = if path.is_absolute() {
                     path.clone()
                 } else {
-                    ambient.join(path)
+                    ambient().join(path)
                 };
-                absolute.parent().map(Path::to_path_buf).unwrap_or(ambient)
+                let base_dir = absolute.parent().map(Path::to_path_buf).unwrap_or_else(ambient);
+                let inside = self
+                    .request_repository()
+                    .is_some_and(|repository| repository.contains(&base_dir));
+                (base_dir, inside)
             }
-            _ => ambient,
+            // A document with no on-disk location resolves from the request's
+            // retained anchor — the directory the observation was made at —
+            // not from the process CWD at compose time (decision D2).
+            _ => match self.context.anchor() {
+                anchor if anchor.as_os_str().is_empty() => (ambient(), false),
+                anchor => (anchor.to_path_buf(), true),
+            },
         };
-        self.file_resolution_context = Some(super::capture::capture_file_resolution_context(&base_dir));
+        self.file_resolution_context = Some(match self.request_repository() {
+            Some(repository) if inside_request_repository => {
+                let mut context = biscuit_file::FileResolutionContext::new(&base_dir);
+                if let Some(catalog) = repository.scope_catalog() {
+                    context = context.with_repository_scope_catalog(catalog);
+                }
+                context
+            }
+            _ => super::capture::capture_file_resolution_context(&base_dir),
+        });
     }
 
     /// Creates new compose options using a pre-captured context.
     ///
     /// Use this when you have already captured a `ComposeContext` (e.g.,
     /// via `ComposeContext::capture_for_content`) and want to avoid
-    /// the cost of a redundant capture.
+    /// the cost of a redundant capture. The context authority starts as
+    /// caller-supplied; a request Darkmatter should own for a document it
+    /// has in hand is [`for_document`](Self::for_document), which also fixes
+    /// the repository observation at creation rather than at the root
+    /// pipeline entry.
     pub fn new_with_context(context: ComposeContext) -> Self {
         Self {
             enabled_operations: ComposeOperation::all(),
@@ -661,7 +791,6 @@ impl ComposeOptions {
             fixed_width: None,
             indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
             cache_access_mode: CacheAccessMode::default(),
-            cache_freshness_mode: CacheFreshnessMode::default(),
             cache_root: None,
             cache_namespace: None,
             perf_enabled: false,
@@ -679,6 +808,11 @@ impl ComposeOptions {
             defer_shell_pending_schema_problems: false,
             defer_schema_verdict: false,
             defer_missing_runtime_context: false,
+            defer_expression_failures: false,
+            suppress_shell_probes: false,
+            nested_compose: Default::default(),
+            icmp: Default::default(),
+            current: Default::default(),
             schema_phase: None,
             preflight_graph: None,
             remote_fetch: None,
@@ -803,39 +937,66 @@ impl ComposeOptions {
         self
     }
 
-    /// Sets the cache access mode.
+    /// Sets the run-local cache access mode. It governs in-memory reuse within
+    /// one compose run only; nothing it selects is written to disk.
     #[must_use]
     pub fn with_cache_access_mode(mut self, mode: CacheAccessMode) -> Self {
         self.cache_access_mode = mode;
         self
     }
 
-    /// Sets the cache freshness mode for persistent cache.
-    #[must_use]
-    pub fn with_cache_freshness_mode(mut self, mode: CacheFreshnessMode) -> Self {
-        self.cache_freshness_mode = mode;
-        self
-    }
-
-    /// Sets the persistent cache root directory, enabling persistent caching.
+    /// Sets the root of the remote transport cache.
+    ///
+    /// Raw remote URL response bodies (transport artifacts) are the only
+    /// class it can persist. Semantic results — composed documents, `::file`
+    /// children, `::code` / `::toc-linking` results, and document snapshots —
+    /// are never persisted until a `ContentPolicy` exists.
+    ///
+    /// ## Notes
+    ///
+    /// - Setting a root touches nothing on disk; directories appear only when
+    ///   a storable remote response is written.
+    /// - `Cache-Control` outranks [`RemoteReadConfig`] freshness settings: a
+    ///   `no-store` response is never written and a `no-cache` one is
+    ///   revalidated before every reuse.
+    /// - A cache root never authorizes a host; the host policy is checked
+    ///   before any cache read.
     #[must_use]
     pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.cache_root = Some(root.into());
         self
     }
 
-    /// Sets the cache namespace for isolation.
+    /// Sets the namespace appended to the remote transport-cache root.
     #[must_use]
     pub fn with_cache_namespace(mut self, namespace: impl Into<String>) -> Self {
         self.cache_namespace = Some(namespace.into());
         self
     }
 
-    /// Sets fail-fast mode.
+    /// Sets fail-fast mode for recoverable stages.
+    ///
+    /// With `false` (the default), failures in recoverable stages such as TOC
+    /// linking and non-structural transclusion become warnings. It does not
+    /// cover expressions: a body or frontmatter `{{ … }}` that cannot be parsed
+    /// or evaluated fails composition whatever this is set to.
     #[must_use]
     pub fn with_fail_fast(mut self, fail_fast: bool) -> Self {
         self.fail_fast = fail_fast;
         self
+    }
+
+    /// The expression-failure policy for this request's body and frontmatter
+    /// interpolation: strict, except in the shell-command discovery pass.
+    pub(crate) fn expression_failure_policy(
+        &self,
+    ) -> crate::markdown::compose::interpolation::ExpressionFailurePolicy {
+        use crate::markdown::compose::interpolation::ExpressionFailurePolicy;
+        if self.defer_expression_failures {
+            ExpressionFailurePolicy::Lenient
+        } else {
+            ExpressionFailurePolicy::Strict
+        }
     }
 
     /// Allow non-object ctx frontmatter (downgrade error to warning).
@@ -1158,9 +1319,17 @@ impl ComposeOptions {
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
         context.ctx_values = self.context_values_for_resolution();
+        context.observations = self.context.observations().clone();
+        if !self.suppress_shell_probes {
+            context.shell_probe =
+                crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
+        }
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.icmp = self.icmp_authority();
+        context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
+        context.nested_compose = self.nested_compose.clone();
         context
     }
 
@@ -1173,6 +1342,7 @@ impl ComposeOptions {
     pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
         let mut context = self.local_expression_resolution_context();
         context.remote_fetch = self.remote_reads_enabled().then(|| self.remote_fetch_runtime());
+        context.nested_compose = self.nested_compose.clone();
         context
     }
 
@@ -1206,8 +1376,15 @@ impl ComposeOptions {
         context.magic_paths = self.magic_paths.clone();
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.ctx_values = self.context_values_for_resolution();
+        context.observations = self.context.observations().clone();
+        if !self.suppress_shell_probes {
+            context.shell_probe =
+                crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
+        }
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.icmp = self.icmp_authority();
+        context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context
     }
@@ -1323,7 +1500,54 @@ impl ComposeOptions {
     /// [`with_remote_read_config`]: Self::with_remote_read_config
     /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
     pub(crate) fn remote_reads_enabled(&self) -> bool {
-        self.allow_remote_transclusion || !self.remote_read_config.allowed_hosts.is_empty()
+        self.allow_remote_transclusion || self.remote_read_config.http_hosts().next().is_some()
+    }
+
+    /// The request's ICMP authority with its grants derived from the
+    /// `--allow-host` allowlist.
+    ///
+    /// Sharing one entry point with HTTP is deliberate (R6), but the two
+    /// policies stay disjoint: a CIDR entry grants ICMP and nothing else, and a
+    /// hostname or wildcard grants HTTP and nothing else.
+    pub(crate) fn icmp_authority(&self) -> crate::markdown::compose::icmp::IcmpAuthority {
+        self.icmp.with_grants(&self.remote_read_config.allowed_hosts)
+    }
+
+    /// Installs the invocation's refresh capability for the lazy `current` root.
+    ///
+    /// A caller holding its own launch evidence — Claudine's invocation
+    /// authority, or a test's scripted provider — passes one here so
+    /// `current.<key>` observes that evidence instead of the host. Without one,
+    /// a caller-supplied request fails closed and a Darkmatter-owned request
+    /// refreshes at the context's retained anchor.
+    #[must_use]
+    pub fn with_current_provider(
+        mut self,
+        provider: std::sync::Arc<dyn crate::markdown::compose::context::CurrentProvider>,
+    ) -> Self {
+        self.current = self.current.with_provider(provider);
+        self
+    }
+
+    /// The request's effective refresh authority for the lazy `current` root.
+    ///
+    /// An explicitly installed provider always wins. Otherwise a
+    /// [`DarkmatterOwned`] request — the one authority that already permits
+    /// host discovery at the retained anchor — gets the anchored ambient
+    /// refresh, and a caller-supplied or caller-extended request gets nothing,
+    /// so its unsupplied capabilities fail closed (decision D5).
+    ///
+    /// [`DarkmatterOwned`]: super::authority::ContextAuthority::DarkmatterOwned
+    pub(crate) fn current_authority(&self) -> crate::markdown::compose::context::CurrentAuthority {
+        if self.current.has_provider() {
+            return self.current.clone();
+        }
+        match self.context_authority {
+            super::authority::ContextAuthority::DarkmatterOwned => {
+                self.current.with_ambient_refresh(&self.context)
+            }
+            _ => self.current.clone(),
+        }
     }
 
     /// Adds a single allowed host for remote URL reads.
@@ -1557,7 +1781,7 @@ impl ComposeOptions {
     /// Callers that run pre-flight collection before composing (the CLI's
     /// approval lifecycle) should call this once so both stages fetch each
     /// remote URL exactly once instead of twice. The runtime is built with the
-    /// same persistent store resolution `compose_with` uses, honoring
+    /// same transport-cache resolution `compose_with` uses, honoring
     /// `cache_root` / `cache_namespace`.
     #[must_use]
     pub fn with_shared_remote_fetch(mut self) -> Self {
@@ -1566,24 +1790,24 @@ impl ComposeOptions {
     }
 
     /// Returns the shared remote-fetch runtime when one is attached, otherwise
-    /// builds a fresh one with the persistent store resolved from `cache_root`.
+    /// builds a fresh one with the transport cache resolved from `cache_root`.
     pub(crate) fn remote_fetch_runtime(&self) -> RemoteFetchRuntime {
         self.remote_fetch
             .clone()
             .unwrap_or_else(|| self.build_remote_fetch_runtime())
     }
 
-    /// Builds a remote-fetch runtime with the persistent store resolved from
+    /// Builds a remote-fetch runtime with the transport cache resolved from
     /// `cache_root` / `cache_namespace` (absent → network-only, no cross-run
-    /// cache).
+    /// cache). Performs no filesystem I/O: the store creates its directories
+    /// on the first remote body it writes.
     fn build_remote_fetch_runtime(&self) -> RemoteFetchRuntime {
-        let remote_store = self
-            .cache_root
-            .as_ref()
-            .map(|root| {
-                FileStore::resolve_cache_root(Some(root), self.cache_namespace.as_deref())
-            })
-            .and_then(|root| FileStore::new(root).map(Arc::new).ok());
+        let remote_store = self.cache_root.as_ref().map(|root| {
+            Arc::new(FileStore::at(FileStore::resolve_cache_root(
+                root,
+                self.cache_namespace.as_deref(),
+            )))
+        });
         RemoteFetchRuntime::with_store(&self.remote_read_config, remote_store)
     }
 
@@ -1731,14 +1955,12 @@ const OPTIONS_IDENTITY_DOMAIN: &str = "dm.compose-options.v2";
 ///
 /// Distinct from [`OPTIONS_IDENTITY_DOMAIN`] (the graph identity) so the two
 /// products of the single classification never collide, and distinct from the
-/// historical `options_hash` string-join encoding this replaced: a persistent
-/// cache entry keyed under the old encoding hashes to a different value and is
-/// therefore unreachable under this domain. Bump the version to deliberately
-/// invalidate persisted compose entries.
+/// historical `options_hash` string-join encoding this replaced. Compose-cache
+/// keys are run-local, so bumping the version invalidates nothing on disk.
 const CACHE_OPTIONS_DOMAIN: &str = "dm.compose-cache-options.v1";
 
 /// Versioned domain marker for the reference-graph's complete runtime-context
-/// encoding. Kept distinct from the persistent-cache `context_hash` product so
+/// encoding. Kept distinct from the compose-cache `context_hash` product so
 /// the two encodings can evolve independently.
 const GRAPH_CONTEXT_DOMAIN: &str = "dm.compose-graph-context.v1";
 
@@ -1756,7 +1978,7 @@ const PATH_ENCODING_LOSSY_FALLBACK: u8 = 3;
 /// Complete fingerprint of the captured runtime context for the reference-graph
 /// identity.
 ///
-/// Unlike the persistent-cache `context_hash` — which deliberately drops
+/// Unlike the compose-cache `context_hash` — which deliberately drops
 /// volatile per-second fields (`now`, `timestamp`, ...) and system-state fields
 /// (`memory_used`, `memory_avail`) so a stable document is not re-cached every
 /// second — the graph identity must be complete and fail-closed: graph
@@ -1910,9 +2132,9 @@ struct ComposeOptionsClassification {
     /// Typed, length-delimited fingerprint over the output-affecting field
     /// subset — the compose-cache identity input. Built by the same
     /// [`GraphIdentityEncoder`] under the distinct [`CACHE_OPTIONS_DOMAIN`]
-    /// marker, so it carries no `Debug`-based encoding and a persistent entry
-    /// written under the historical string-join `options_hash` cannot be read
-    /// back under this encoding (the domain and value both differ).
+    /// marker, so it carries no `Debug`-based encoding and never equals a value
+    /// of the historical string-join `options_hash` (the domain and value both
+    /// differ).
     cache_value_fingerprint: u64,
     /// Weak instance handle for the shell approval handler (stateful; not
     /// value-representable).
@@ -2057,7 +2279,6 @@ impl ComposeOptions {
             fixed_width,
             indent_size,
             cache_access_mode,
-            cache_freshness_mode,
             cache_root,
             cache_namespace,
             perf_enabled,
@@ -2073,6 +2294,11 @@ impl ComposeOptions {
             defer_shell_pending_schema_problems,
             defer_schema_verdict,
             defer_missing_runtime_context,
+            defer_expression_failures,
+            suppress_shell_probes,
+            nested_compose,
+            icmp,
+            current,
             schema_phase,
             exclude_keys,
             name_coercion_keys,
@@ -2287,13 +2513,6 @@ impl ComposeOptions {
             CacheAccessMode::ReadWrite => 2,
             CacheAccessMode::Refresh => 3,
         });
-        enc.field("cache_freshness_mode");
-        enc.tag(match cache_freshness_mode {
-            CacheFreshnessMode::Strict => 0,
-            CacheFreshnessMode::Fallback => 1,
-            CacheFreshnessMode::Optimistic => 2,
-            CacheFreshnessMode::Forced => 3,
-        });
         enc.field("cache_root");
         match cache_root {
             Some(p) => {
@@ -2316,7 +2535,7 @@ impl ComposeOptions {
 
         // Runtime context: complete encoding of every captured value and env
         // entry — including the volatile per-second and system-state fields the
-        // persistent-cache `context_hash` drops. Graph construction interpolates
+        // compose-cache `context_hash` drops. Graph construction interpolates
         // `{{ ctx.* }}` into link/transclusion targets and evaluates `when=`
         // conditions against these values, so the graph identity must be
         // complete and fail closed rather than reuse the cache product.
@@ -2395,6 +2614,26 @@ impl ComposeOptions {
         enc.bool(*defer_schema_verdict);
         enc.field("defer_missing_runtime_context");
         enc.bool(*defer_missing_runtime_context);
+        enc.field("defer_expression_failures");
+        enc.bool(*defer_expression_failures);
+        enc.field("suppress_shell_probes");
+        enc.bool(*suppress_shell_probes);
+        // An installed `Active` handle is per-document pipeline state, never
+        // caller configuration; only the discovery mode changes what
+        // evaluation produces.
+        enc.field("nested_compose_discovery");
+        enc.bool(nested_compose.is_discovery());
+        // The grants are already encoded through `remote_read_config`; what is
+        // left is whether this surface sends at all and through whose
+        // transport.
+        enc.field("icmp_discovery");
+        enc.bool(icmp.is_discovery());
+        enc.field("icmp_injected_transport");
+        enc.bool(icmp.has_injected_transport());
+        // The lazy roots are evaluated per expression and never cached, so only
+        // whether a refresh capability exists can change a composed result.
+        enc.field("current_provider");
+        enc.bool(current.has_provider());
         enc.field("schema_phase");
         enc.tag(schema_phase_tag(*schema_phase));
 
@@ -2437,8 +2676,7 @@ impl ComposeOptions {
         //    distinct [`CACHE_OPTIONS_DOMAIN`]. This drops the historical
         //    `Debug`/string-join encoding entirely (no `{:?}`, no `,`/NUL joins)
         //    so element and field boundaries are unambiguous, and the domain
-        //    marker makes any persistent entry keyed under the old encoding
-        //    unreadable here (its `options_hash` dimension no longer matches).
+        //    marker keeps its values disjoint from the old encoding's.
         //    Same field subset as the historical hash → cache-reuse semantics
         //    are preserved (equal options still share a key); only the encoding
         //    and value changed.
@@ -2581,23 +2819,9 @@ impl ComposeOptions {
     /// so there is no parallel field list. `options_hash` delegates here.
     /// Encoded by the typed, length-delimited [`GraphIdentityEncoder`] under
     /// [`CACHE_OPTIONS_DOMAIN`]; it carries no `Debug` encoding and is not
-    /// value-compatible with the historical string-join hash (a persistent
-    /// entry keyed under that encoding is unreachable here by design).
+    /// value-compatible with the historical string-join hash.
     pub(crate) fn compose_cache_fingerprint(&self) -> u64 {
         self.classify_options().cache_value_fingerprint
-    }
-
-    /// Whether this options value may participate in persistent-cache reads and
-    /// writes.
-    ///
-    /// Persistent reuse must prove equivalence purely from values. An attached
-    /// shell approval handler is process-local and not value-representable, yet
-    /// can change which commands execute and therefore the composed output — so
-    /// a key carrying one is limited to run-local reuse. The output-neutral
-    /// shared handles (preflight graph, remote-fetch runtime) do not gate
-    /// persistence.
-    pub(crate) fn persistent_cache_eligible(&self) -> bool {
-        self.shell_approval_handler.is_none()
     }
 }
 
@@ -3149,7 +3373,7 @@ mod tests {
     }
 
     /// The same guarantee for the compose-cache product: a collision there
-    /// selects an unrelated persistent entry. Only the path fields the cache
+    /// reuses an unrelated run-local entry. Only the path fields the cache
     /// fingerprint actually covers are asserted.
     #[cfg(unix)]
     #[test]
@@ -3293,7 +3517,7 @@ mod tests {
         use super::super::super::cache::hashing::context_hash;
 
         // Two contexts identical except for `timestamp` — a field the
-        // persistent-cache `context_hash` deliberately drops. Graph
+        // compose-cache `context_hash` deliberately drops. Graph
         // construction interpolates `{{ ctx.timestamp }}` into link and
         // transclusion targets, so distinct timestamps can yield distinct
         // references and must not share a graph identity.
@@ -3493,20 +3717,6 @@ mod tests {
         assert_ne!(
             default.compose_cache_fingerprint(),
             custom.compose_cache_fingerprint(),
-        );
-    }
-
-    #[test]
-    fn persistent_cache_eligibility_reflects_stateful_handler() {
-        assert!(ComposeOptions::new().persistent_cache_eligible());
-        let handler: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
-        let opts = ComposeOptions::new().with_shell_approval_handler(handler);
-        assert!(!opts.persistent_cache_eligible());
-        // Output-neutral shared handles do not gate persistence.
-        assert!(
-            ComposeOptions::new()
-                .with_shared_remote_fetch()
-                .persistent_cache_eligible()
         );
     }
 }

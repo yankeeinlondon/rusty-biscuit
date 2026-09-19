@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use crate::markdown::compose::expression::ExpressionFinder;
 
-use super::{agent, changes, datetime, docs, git, host, invocation, languages, repo};
+use super::{
+    agent, changes, datetime, docs, document, git, host, invocation, languages, network, repo,
+};
 
 /// Independently captured runtime-context domains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -13,6 +15,10 @@ pub enum ContextGroup {
     DateTime,
     /// Branch, worktree, and merge-conflict values.
     Git,
+    /// Recent-commit history. Separate from [`Git`](Self::Git) because it
+    /// walks commits and their file changes, which ordinary Git facts such as
+    /// `ctx.branch` must never pay for.
+    GitHistory,
     /// Repository and package-topology values.
     Repo,
     /// Working-tree and package change values.
@@ -29,14 +35,19 @@ pub enum ContextGroup {
     Gpu,
     /// Agent and model values derived from the captured environment.
     Agent,
+    /// Root-document identity projected from the request's retained root.
+    Document,
+    /// Tailnet membership and default-gateway values.
+    Network,
 }
 
 impl ContextGroup {
-    pub(crate) fn all() -> [Self; 11] {
+    pub(crate) fn all() -> [Self; 14] {
         [
             Self::Invocation,
             Self::DateTime,
             Self::Git,
+            Self::GitHistory,
             Self::Repo,
             Self::FileChanges,
             Self::Languages,
@@ -45,32 +56,22 @@ impl ContextGroup {
             Self::Hardware,
             Self::Gpu,
             Self::Agent,
+            Self::Document,
+            Self::Network,
         ]
     }
 
-    /// Stable identifier persisted in compose-cache manifests.
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Invocation => "invocation",
-            Self::DateTime => "datetime",
-            Self::Git => "git",
-            Self::Repo => "repo",
-            Self::FileChanges => "file_changes",
-            Self::Languages => "languages",
-            Self::Documents => "documents",
-            Self::Os => "os",
-            Self::Hardware => "hardware",
-            Self::Gpu => "gpu",
-            Self::Agent => "agent",
-        }
-    }
-
-    /// The group persisted as [`name`](Self::name).
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
-        Self::all().into_iter().find(|group| group.name() == name)
-    }
-
-    pub(crate) fn for_key(key: &str) -> Option<Self> {
+    /// The group that projects the `ctx.<key>` variable `key` names.
+    ///
+    /// Public because an embedder's [`CurrentProvider`] is handed a bare key
+    /// and has to decide which observation answers it.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when no cataloged group projects `key`.
+    ///
+    /// [`CurrentProvider`]: crate::markdown::compose::CurrentProvider
+    pub fn for_key(key: &str) -> Option<Self> {
         group_for_key(key)
     }
 
@@ -82,6 +83,7 @@ impl ContextGroup {
             Self::Invocation => (invocation::KEYS, &[]),
             Self::DateTime => (datetime::KEYS, datetime::ALIASES),
             Self::Git => (git::KEYS, &[]),
+            Self::GitHistory => (git::HISTORY_KEYS, &[]),
             Self::Repo => (repo::KEYS, &[]),
             Self::FileChanges => (changes::KEYS, &[]),
             Self::Languages => (languages::KEYS, &[]),
@@ -90,6 +92,8 @@ impl ContextGroup {
             Self::Hardware => (host::HARDWARE_KEYS, &[]),
             Self::Gpu => (host::GPU_KEYS, &[]),
             Self::Agent => (agent::KEYS, &[]),
+            Self::Document => (document::KEYS, &[]),
+            Self::Network => (network::KEYS, &[]),
         };
         keys.iter().chain(aliases).copied()
     }
@@ -150,7 +154,14 @@ impl ContextRequirements {
         self.groups.iter().copied()
     }
 
-    pub(crate) fn from_groups(groups: impl IntoIterator<Item = ContextGroup>) -> Self {
+    /// A requirement set holding exactly `groups`.
+    ///
+    /// Unlike [`for_content`](Self::for_content) this adds nothing implicitly,
+    /// which is what a single-group refresh needs: an embedder's
+    /// [`CurrentProvider`] observes one group and must not pay for a second.
+    ///
+    /// [`CurrentProvider`]: crate::markdown::compose::CurrentProvider
+    pub fn from_groups(groups: impl IntoIterator<Item = ContextGroup>) -> Self {
         Self {
             groups: groups.into_iter().collect(),
         }
@@ -163,15 +174,25 @@ fn group_for_key(key: &str) -> Option<ContextGroup> {
         .find(|group| group.projected_keys().any(|owned| owned == key))
 }
 
-/// Finds the runtime-context domains referenced by `ctx.KEY` expressions.
+/// Functions that read a group's retained observations instead of a `ctx.*`
+/// value, so a call demands the group's capture.
+///
+/// `recent_commits(count)` is absent: it performs its own Git I/O at call time
+/// from the request's file-resolution repository root. The shell probes are
+/// absent too: they launch the login shell named by the request environment.
+const FUNCTION_GROUPS: &[(&str, ContextGroup)] = &[
+    ("package", ContextGroup::Repo),
+    ("package_area", ContextGroup::Repo),
+    ("ipv4", ContextGroup::Network),
+    ("ipv6", ContextGroup::Network),
+    ("has_agentic_cli", ContextGroup::Agent),
+];
+
+/// Finds the runtime-context domains referenced by `ctx.KEY` expressions and
+/// by calls to the [`FUNCTION_GROUPS`] functions.
 pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
     let mut groups = HashSet::new();
-    let literal_spans: Vec<_> = ExpressionFinder::new(content)
-        .scan()
-        .literals
-        .into_iter()
-        .map(|literal| literal.start..literal.end)
-        .collect();
+    let literal_spans = scan_literal_spans(content);
     let mut pos = 0;
 
     while let Some(offset) = content[pos..].find("ctx.") {
@@ -184,6 +205,7 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
         // (`{{{ ... }}}`), whose content is inert on every scanning surface.
         let key_start = pos + offset;
         if !literal_spans.iter().any(|span| span.start <= key_start && key_end <= span.end)
+            && is_root_position(content, key_start)
             && let Some(group) = ContextGroup::for_key(&content[start..key_end])
         {
             groups.insert(group);
@@ -191,7 +213,65 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
         pos = key_end;
     }
 
+    scan_function_groups(content, &literal_spans, &mut groups);
     groups
+}
+
+/// The inert `{{{ … }}}` literal spans of `content`, whose contents no
+/// scanning surface treats as a reference.
+pub(crate) fn scan_literal_spans(content: &str) -> Vec<std::ops::Range<usize>> {
+    ExpressionFinder::new(content)
+        .scan()
+        .literals
+        .into_iter()
+        .map(|literal| literal.start..literal.end)
+        .collect()
+}
+
+/// Whether the `ctx` at `start` is a root and not a trailing path segment.
+///
+/// `current.ctx.x` and `a.ctx.os` name no eager requirement: only a reference
+/// whose *root* is `ctx` demands a capture (decision D4).
+fn is_root_position(content: &str, start: usize) -> bool {
+    let Some(previous) = content[..start].chars().next_back() else {
+        return true;
+    };
+    !(previous.is_alphanumeric() || previous == '_' || previous == '.')
+}
+
+/// Adds the group of every `name(` call to a [`FUNCTION_GROUPS`] function.
+///
+/// A name preceded by an identifier character or `.` is part of a longer
+/// identifier or a property path, not a call.
+fn scan_function_groups(
+    content: &str,
+    literal_spans: &[std::ops::Range<usize>],
+    groups: &mut HashSet<ContextGroup>,
+) {
+    let bytes = content.as_bytes();
+    let is_ident = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    let mut pos = 0;
+    while pos < bytes.len() {
+        if !is_ident(bytes[pos]) {
+            pos += 1;
+            continue;
+        }
+        let start = pos;
+        while pos < bytes.len() && is_ident(bytes[pos]) {
+            pos += 1;
+        }
+        if start > 0 && (is_ident(bytes[start - 1]) || bytes[start - 1] == b'.') {
+            continue;
+        }
+        let Some((_, group)) = FUNCTION_GROUPS.iter().find(|(name, _)| *name == &content[start..pos])
+        else {
+            continue;
+        };
+        let called = content[pos..].trim_start().starts_with('(');
+        if called && !literal_spans.iter().any(|span| span.start <= start && pos <= span.end) {
+            groups.insert(*group);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -200,23 +280,42 @@ mod tests {
 
     use super::*;
 
-    /// Persisted compose-cache manifests store group names.
+    /// `all()` must list every variant exactly once; the exhaustive match makes
+    /// a new variant a compile error here until it is added to `all()`.
     #[test]
-    fn every_group_name_is_unique_and_round_trips() {
-        let names: HashSet<_> = ContextGroup::all().into_iter().map(ContextGroup::name).collect();
-        assert_eq!(names.len(), ContextGroup::all().len());
-        for group in ContextGroup::all() {
-            assert_eq!(ContextGroup::from_name(group.name()), Some(group));
+    fn all_lists_every_variant_once() {
+        let all = ContextGroup::all();
+        let unique: HashSet<_> = all.into_iter().collect();
+        assert_eq!(unique.len(), all.len());
+        for group in all {
+            match group {
+                ContextGroup::Invocation
+                | ContextGroup::DateTime
+                | ContextGroup::Git
+                | ContextGroup::GitHistory
+                | ContextGroup::Repo
+                | ContextGroup::FileChanges
+                | ContextGroup::Languages
+                | ContextGroup::Documents
+                | ContextGroup::Os
+                | ContextGroup::Hardware
+                | ContextGroup::Gpu
+                | ContextGroup::Agent
+                | ContextGroup::Document
+                | ContextGroup::Network => {}
+            }
         }
-        assert_eq!(ContextGroup::from_name("Repo"), None);
+        for group in [ContextGroup::GitHistory, ContextGroup::Document, ContextGroup::Network] {
+            assert!(all.contains(&group), "{group:?} missing from all()");
+        }
     }
 
     #[test]
     fn every_owned_key_has_exactly_one_group() {
         let domains = [
-            invocation::KEYS, datetime::KEYS, git::KEYS, repo::KEYS, changes::KEYS,
-            languages::KEYS, docs::KEYS, host::OS_KEYS, host::HARDWARE_KEYS, host::GPU_KEYS,
-            agent::KEYS,
+            invocation::KEYS, datetime::KEYS, git::KEYS, git::HISTORY_KEYS, repo::KEYS,
+            changes::KEYS, languages::KEYS, docs::KEYS, host::OS_KEYS, host::HARDWARE_KEYS,
+            host::GPU_KEYS, agent::KEYS, document::KEYS, network::KEYS,
         ];
         let mut seen = HashSet::new();
         for keys in domains {
@@ -224,6 +323,83 @@ mod tests {
                 assert!(seen.insert(*key), "key `{key}` has multiple owners");
                 assert!(group_for_key(key).is_some());
             }
+        }
+        let mut projected = HashSet::new();
+        for group in ContextGroup::all() {
+            for key in group.projected_keys() {
+                assert!(projected.insert(key), "`{key}` is projected by more than one group");
+            }
+        }
+    }
+
+    #[test]
+    fn new_groups_own_their_spec_keys() {
+        for (keys, group) in [
+            (&["self", "last_updated", "hash", "id", "sid"][..], ContextGroup::Document),
+            (&["recent_commits"][..], ContextGroup::GitHistory),
+            (&["tailnet", "gateway", "gateway_v6"][..], ContextGroup::Network),
+            (&["hostname"][..], ContextGroup::Os),
+        ] {
+            for key in keys {
+                assert_eq!(group_for_key(key), Some(group), "owner of `{key}`");
+            }
+        }
+    }
+
+    /// AC31: ordinary Git facts never demand the recent-history walk, and a
+    /// recent-history reference demands only that group beyond date/time.
+    #[test]
+    fn recent_history_demand_is_separate_from_ordinary_git_facts() {
+        for key in git::KEYS {
+            let requirements = ContextRequirements::for_content(&format!("{{{{ ctx.{key} }}}}"));
+            assert!(requirements.contains(ContextGroup::Git), "`{key}`");
+            assert!(!requirements.contains(ContextGroup::GitHistory), "`{key}` demanded history");
+        }
+
+        let requirements = ContextRequirements::for_content("{{ ctx.recent_commits }}");
+        assert_eq!(
+            requirements,
+            ContextRequirements::from_groups([ContextGroup::DateTime, ContextGroup::GitHistory]),
+        );
+    }
+
+    /// Parameterized lookups read retained observations, so a call demands its
+    /// group; a longer identifier, a property path, a bare name, or an inert
+    /// literal does not.
+    #[test]
+    fn observation_function_calls_demand_their_group() {
+        for (content, group) in [
+            ("{{ package(\"a/b\") }}", Some(ContextGroup::Repo)),
+            ("{{ package_area (x) }}", Some(ContextGroup::Repo)),
+            ("{{ ipv4() }}", Some(ContextGroup::Network)),
+            ("{{ len(ipv6(\"fd00::/8\")) }}", Some(ContextGroup::Network)),
+            ("{{ my_package(\"a\") }}", None),
+            ("{{ x.package(\"a\") }}", None),
+            ("{{ packages }} the package (npm)", Some(ContextGroup::Repo)),
+            ("{{{ ipv4() }}}", None),
+            ("{{ has_agentic_cli(\"kimi\") }}", Some(ContextGroup::Agent)),
+            ("{{ can_execute(\"ls\") }}", None),
+            ("{{ recent_commits(3) }}", None),
+            ("ipv4", None),
+        ] {
+            let expected = ContextRequirements::from_groups(
+                [ContextGroup::DateTime].into_iter().chain(group),
+            );
+            assert_eq!(ContextRequirements::for_content(content), expected, "{content}");
+        }
+    }
+
+    #[test]
+    fn document_and_network_keys_demand_only_their_group() {
+        for (content, group) in [
+            ("{{ ctx.self }} {{ ctx.id }}", ContextGroup::Document),
+            ("{{ ctx.gateway_v6 }}", ContextGroup::Network),
+        ] {
+            assert_eq!(
+                ContextRequirements::for_content(content),
+                ContextRequirements::from_groups([ContextGroup::DateTime, group]),
+                "{content}",
+            );
         }
     }
 
@@ -239,18 +415,7 @@ mod tests {
     fn every_generated_descriptor_maps_to_one_group_or_explicit_alias() {
         use crate::markdown::compose::context::catalog::context_variable_descriptors;
 
-        use crate::markdown::compose::context::catalog::PENDING_CAPTURE_KEYS;
-
         for descriptor in context_variable_descriptors() {
-            if PENDING_CAPTURE_KEYS.contains(&descriptor.name) {
-                assert_eq!(
-                    group_for_key(descriptor.name),
-                    None,
-                    "`{}` has a capture group now; remove it from PENDING_CAPTURE_KEYS",
-                    descriptor.name,
-                );
-                continue;
-            }
             assert!(
                 group_for_key(descriptor.name).is_some(),
                 "descriptor `{}` has no capture group",
@@ -312,7 +477,8 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
             "{{ ctx.cwd }} {{ ctx.utc }} {{ ctx.branch }} {{ ctx.repo_root }} \
              {{ ctx.dirty_files }} {{ ctx.programming_languages_in_repo }} \
              {{ ctx.docs_readme }} {{ ctx.os }} {{ ctx.cpu_cores }} \
-             {{ ctx.gpu }} {{ ctx.agent }}",
+             {{ ctx.gpu }} {{ ctx.agent }} {{ ctx.recent_commits }} {{ ctx.hash }} \
+             {{ ctx.tailnet }}",
         );
 
         for group in ContextGroup::all() {
@@ -334,7 +500,7 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
             assert!(
                 ["cwd", "now", "branch", "repo_root", "dirty_files",
                     "programming_languages_in_repo", "docs_readme", "os", "cpu_cores",
-                    "gpu", "agent"]
+                    "gpu", "agent", "recent_commits", "self", "tailnet"]
                     .into_iter()
                     .any(|key| group_for_key(key) == Some(group)),
                 "capture group {group:?} has no key registry entry",

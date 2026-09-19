@@ -234,28 +234,6 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("model", "Agent", ""),
 ];
 
-/// Cataloged `ctx.*` keys whose capture lands in plan Phase 5 of
-/// `features/2026-09-09-more-context`.
-///
-/// Phase 4 owns the descriptor contract; Phase 5 owns capture groups and
-/// projections. Until then these keys have no owning group and no captured
-/// value, and the capture-parity tests (unit and `tests/ambient_ctx_capture.rs`)
-/// assert exactly that, so implementing a key's capture fails a test until the
-/// key leaves this list. Transitional: Phase 5 deletes it.
-#[doc(hidden)]
-pub const PENDING_CAPTURE_KEYS: &[&str] = &[
-    "self",
-    "last_updated",
-    "hash",
-    "id",
-    "sid",
-    "recent_commits",
-    "hostname",
-    "tailnet",
-    "gateway",
-    "gateway_v6",
-];
-
 /// All context variable descriptors, projected from the base schema in YAML
 /// declaration order. Private: external consumers use
 /// [`context_variable_descriptors`]; in-crate consumers may read this static
@@ -384,25 +362,16 @@ mod tests {
 
     /// Catalog descriptors and captured runtime keys must be in exact
     /// correspondence: every descriptor has a runtime key and no runtime key
-    /// lacks a descriptor. [`PENDING_CAPTURE_KEYS`] are the only exception,
-    /// and each must still be uncaptured. Phase 5 migrated capture to arrays and dropped the
-    /// ten `_list` twins, so the Phase 3–5 transitional tolerance is gone.
+    /// lacks a descriptor.
     #[test]
     fn every_descriptor_has_a_captured_runtime_key() {
         let descriptor_names: HashSet<&str> = context_variable_descriptors()
             .iter()
             .map(|d| d.name)
-            .filter(|name| !PENDING_CAPTURE_KEYS.contains(name))
             .collect();
 
         let ctx = ComposeContext::capture_for_dir(&std::env::temp_dir());
         let runtime_names: HashSet<String> = ctx.values().keys().cloned().collect();
-        for pending in PENDING_CAPTURE_KEYS {
-            assert!(
-                !runtime_names.contains(*pending),
-                "`{pending}` is captured now; remove it from PENDING_CAPTURE_KEYS"
-            );
-        }
 
         let missing: Vec<&&str> = descriptor_names
             .iter()
@@ -695,9 +664,6 @@ mod capture_shape_tests {
         let ctx = ComposeContext::capture_for_dir(repo.path());
         let mut failures = Vec::new();
         for d in context_variable_descriptors() {
-            if super::PENDING_CAPTURE_KEYS.contains(&d.name) {
-                continue;
-            }
             let ty = &d.display_type;
             let value = ctx.values().get(d.name).unwrap_or(&Value::Null);
             // Optional variables (generated without `required`) may capture null.

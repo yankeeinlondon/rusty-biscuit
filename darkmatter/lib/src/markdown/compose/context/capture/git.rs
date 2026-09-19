@@ -45,7 +45,7 @@ pub(super) fn populate_git_history(cap: &ContextCapture, values: &mut Map<String
 /// Commits that touched no files render nothing, exactly as
 /// `sniff repo recent-commits --plain` omits them, so the result can be shorter
 /// than `commits`.
-pub(super) fn render_recent_commits(commits: &[sniff::filesystem::git::CommitDesc]) -> Vec<String> {
+pub(crate) fn render_recent_commits(commits: &[sniff::filesystem::git::CommitDesc]) -> Vec<String> {
     let today = chrono::Local::now().date_naive();
     commits
         .iter()

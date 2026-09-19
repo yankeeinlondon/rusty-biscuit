@@ -143,10 +143,44 @@ fn populate_document_with_nonce(
 }
 
 fn draw_nonce() -> Result<[u8; 16], String> {
+    #[cfg(test)]
+    if let Some(detail) = test_seam::forced_failure() {
+        return Err(detail);
+    }
     let mut nonce = [0u8; 16];
     getrandom::fill(&mut nonce)
         .map(|()| nonce)
         .map_err(|error| format!("the operating system could not supply entropy: {error}"))
+}
+
+/// Crate-internal seam for AC4: every nonce drawn on the current thread while
+/// the closure runs fails with the given detail, so a compose can observe an
+/// entropy failure. It is thread-local because a `cargo test` process runs
+/// tests in parallel threads and the capture runs on the composing thread.
+/// Test-only, so production keeps D1's rule of no nonce override.
+#[cfg(test)]
+pub(crate) mod test_seam {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static FORCED_FAILURE: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn forced_failure() -> Option<String> {
+        FORCED_FAILURE.with(|forced| forced.borrow().clone())
+    }
+
+    pub(crate) fn with_forced_nonce_failure<R>(detail: &str, run: impl FnOnce() -> R) -> R {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                FORCED_FAILURE.with(|forced| *forced.borrow_mut() = None);
+            }
+        }
+        FORCED_FAILURE.with(|forced| *forced.borrow_mut() = Some(detail.to_string()));
+        let _reset = Reset;
+        run()
+    }
 }
 
 fn format_modified(modified: SystemTime) -> Value {
