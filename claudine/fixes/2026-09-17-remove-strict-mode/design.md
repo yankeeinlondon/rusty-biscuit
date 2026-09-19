@@ -543,7 +543,7 @@ mechanism.
 The user identified
 [authoring-schemas.md](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md),
 [schema-targeting.md](../../../../darkmatter/docs/topics/schemas/schema-targeting.md),
-and [schema-target.yaml](../../../../darkmatter/docs/schemas/schema-target.yaml)
+and [schema-target.yaml](../../../../darkmatter/docs/schema-drafts/schema-target.yaml)
 as target intent, not evidence of implemented support. Where those documents
 use `schema-target`, the separately confirmed `schema-trigger` name takes
 precedence. Their other proposals are not confirmed by D11. D12 separately

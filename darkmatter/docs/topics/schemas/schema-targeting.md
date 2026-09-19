@@ -59,7 +59,7 @@ In the example:
 
 
 The draft schema for a `schema-trigger` is defined in `SimplifiedSchema` grammar
-in [schema-target.yaml](../../schemas/schema-target.yaml). Its filename also
+in [schema-target.yaml](../../schema-drafts/schema-target.yaml). Its filename also
 retains the earlier terminology; its unfinished predicate grammar is not an
 implemented contract.
 

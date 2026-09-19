@@ -1,0 +1,14 @@
+# Intended authoring contract; the current parser does not yet implement the
+# separate exported $schema and helper types payloads (design decisions D12–D13).
+kind: schema
+name: "schema-definition"
+description: |-
+    Provides the schema for a **Schema Definition** file
+$schema:
+    kind: const(schema) -> the kind for exported schemas and types-only libraries
+    name: string -> a short, unique name (no whitespace, prefer dasherized) for the schema being defined
+    description: string -> describe the schema you are defining
+    $schema: schema -> optional exported document schema; omission makes a types-only library non-applying
+    types: schema -> reusable named helpers; these names are not automatically document properties
+# A whole-file schema reference requires an exported $schema. Named imports
+# can use a types-only library. Discovery alone does not activate its bindings.

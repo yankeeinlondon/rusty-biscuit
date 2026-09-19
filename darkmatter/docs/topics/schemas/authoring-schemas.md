@@ -135,7 +135,7 @@ In the example above:
 
 In a moment of "recursive truth" the external schema definition is defined as a schema:
 
-::code @darkmatter/docs/schemas/schema-definition.yaml
+::code @darkmatter/docs/schema-drafts/schema-definition.yaml
 
 A `kind: schema` document has two distinct payloads:
 

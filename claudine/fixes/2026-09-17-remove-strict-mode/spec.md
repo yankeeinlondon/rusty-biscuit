@@ -649,10 +649,12 @@ The verified migration inventory is:
 | `claudine.yaml`, `claudine-types.yaml`, `err.yaml`, `env.yaml` | `claudine/schemas` |
 | `darkmatter.yaml`, `expression-functions.yaml` | `darkmatter/schemas` |
 | `darkmatter-schema.md` | Keep as documentation and update its schema transclusion |
-| `schema-definition.yaml` | Populated intended schema-envelope draft; inspect references and its documentation/runtime role before deciding its disposition; do not delete as an empty placeholder |
+| `schema-definition.yaml` | Empty placeholder kept only for `err.yaml`'s reference; its intended envelope draft lives in `darkmatter/docs/schema-drafts/`. Inspect references and its documentation/runtime role before deciding its disposition |
 
-`err.yaml` references `schema-definition.yaml`, which now contains an intended
-schema-envelope draft. Its role and compatibility with that reference require
+`err.yaml` references `schema-definition.yaml`, whose intended schema-envelope
+draft is held in `darkmatter/docs/schema-drafts/schema-definition.yaml` — outside
+the validated corpus, because its `const(...)` grammar is not implemented. Its role
+and compatibility with that reference require
 verification; the draft is not evidence of implemented grammar. Preserve the existing
 `claudine/schemas/review.yaml`. The five empty files and draft `action.yaml`
 under `claudine/docs/schemas` must not overwrite populated source schemas.
