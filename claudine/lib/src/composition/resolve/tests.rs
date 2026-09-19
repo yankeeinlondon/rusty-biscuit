@@ -454,7 +454,7 @@ fn is_markdown_path_variants() {
 /// YAML keys from the frontmatter may leak into the body.
 #[test]
 fn cross_platform_prompt_composes_cleanly() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
     let workspace_root = manifest_dir
         .parent()
         .expect("claudine/lib parent")

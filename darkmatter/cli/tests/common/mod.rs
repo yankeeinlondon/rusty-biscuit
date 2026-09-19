@@ -186,7 +186,7 @@ pub mod baseline {
 
     /// Returns the directory holding the baseline JSON fixtures.
     pub fn dir() -> PathBuf {
-        let features_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        let features_dir = biscuit_test_harness::manifest_dir!()
             .join("..")
             .join("features");
         let active = features_dir
@@ -396,7 +396,7 @@ pub mod layout {
     }
 
     pub fn style_prop_fixture() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        biscuit_test_harness::manifest_dir!()
             .join("..")
             .join("example-docs")
             .join("rendering")
@@ -404,7 +404,6 @@ pub mod layout {
     }
 }
 
-// Only the `level2_*` targets (gated on `terminal-tests`) use this module, and it
-// depends on the optional `biscuit-test-harness` crate.
+// Only the `level2_*` targets (gated on `terminal-tests`) use this module.
 #[cfg(feature = "terminal-tests")]
 pub mod level2;

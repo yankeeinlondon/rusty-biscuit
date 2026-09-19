@@ -37,12 +37,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / ".github" / "ci" / "policy.json"
 
+#: The one build the fixed plan's single executing cell consumes. A literal,
+#: not a digest: this stub computes no key, it stands in for one.
+FIXED_BUILD_KEY = "a1b2c3d4e5f60718"
+
 GLOBAL_PATHS_ALL_GATES = ()
 GLOBAL_PATHS_BY_GATE = {"lint": (), "check": (), "test": ()}
 JUST_PATHS = ()
 GLOBAL_PREFIXES_ALL_GATES = ()
 JUST_PREFIXES = ()
+ORCHESTRATION_PATHS = ()
+ORCHESTRATION_PREFIXES = ()
 LOCKFILE_PATH = "Cargo.lock"
+EVENT_NAMES = ("pull_request", "push", "schedule", "workflow_dispatch")
 
 
 def preflight_reason() -> str:
@@ -63,12 +70,14 @@ def fixed_plan(base: str, head: str) -> dict:
         "check_args": "-p alpha",
         "l2_backends": [],
         "runner_tools": [],
+        "archive_includes": [],
+        "sidecars": [],
         "companion_suites": [],
         "l1_include_slow": False,
         "native": {},
     }
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "base": base,
         "head": head,
         "change_class": "package",
@@ -123,6 +132,39 @@ def fixed_plan(base: str, head: str) -> dict:
                 "target_kinds": ["lib", "test"],
                 "compile_coverage_from": "L1",
                 "selection_reason": "no evidence for this environment",
+                "build": FIXED_BUILD_KEY,
+            }
+        ],
+        "builds": [
+            {
+                "key": FIXED_BUILD_KEY,
+                "package": "alpha",
+                "producer": "macos-latest",
+                "artifact": f"build-alpha-macos-latest-{FIXED_BUILD_KEY}",
+                "compatible_environments": ["macos-latest"],
+                "compatibility_reason": (
+                    "aarch64-apple-darwin archive produced on macos-latest"
+                ),
+                "consumers": [{"environment": "macos-latest", "gate": "L1"}],
+                "identity": {
+                    "source_commit": head,
+                    "lockfile": "aaaabbbbccccdddd",
+                    "rust": "1.97.1",
+                    "nextest": "latest",
+                    "host": "aarch64-apple-darwin",
+                    "target": "aarch64-apple-darwin",
+                    "profile": "test",
+                    "rustflags": "",
+                    "cargo_config": [],
+                    "linker": "cc",
+                    "archive_format": "tar.zst",
+                    "package": "alpha",
+                    "target_kinds": ["lib", "test"],
+                    "features": "",
+                    "native": [],
+                    "archive_includes": [],
+                    "sidecars": [],
+                },
             }
         ],
         "accepted_evidence": [],
@@ -151,6 +193,7 @@ def empty_plan(base: str, head: str) -> dict:
         packages=[],
         source_packages=[],
         cells=[],
+        builds=[],
         job_estimate=0,
         preflight_os=["ubuntu-latest"],
         preflight_reason="no build/test packages affected; preflight runs on the scope host only",
@@ -160,6 +203,8 @@ def empty_plan(base: str, head: str) -> dict:
 
 def projection(plan: dict) -> dict:
     packages = [entry["package"] for entry in plan["packages"]]
+    owners = build_owners(plan)
+    slices = build_slices(owners)
     return {
         "packages": packages,
         "areas": plan["areas"],
@@ -180,9 +225,75 @@ def projection(plan: dict) -> dict:
         "preflight_reason": plan["preflight_reason"],
         "matrix": plan["packages"],
         "policy": [],
+        "build_owners": owners,
+        "build_slices": slices,
+        "build_artifacts": [entry["artifact"] for entry in slices],
+        "build_runners": {entry["artifact"]: entry["runner"] for entry in slices},
         "job_estimate": plan["job_estimate"],
         "flags": plan["flags"],
     }
+
+
+def build_owners(plan: dict) -> list:
+    """The owner projection, grouped exactly as the real one is."""
+    owners: dict = {}
+    for record in plan.get("builds", []):
+        owner = owners.setdefault(
+            record["producer"],
+            {
+                "environment": record["producer"],
+                "runner": record["producer"],
+                "packages": [],
+                "builds": [],
+            },
+        )
+        owner["builds"].append(record)
+    for owner in owners.values():
+        owner["packages"] = sorted({entry["package"] for entry in owner["builds"]})
+    return [owners[name] for name in sorted(owners)]
+
+
+def build_slices(owners: list) -> list:
+    """The owner matrix flattened one entry per record, as `ci.yml` expands it."""
+    slices = [
+        {
+            "artifact": entry["artifact"],
+            "key": entry["key"],
+            "package": entry["package"],
+            "producer": owner["environment"],
+            "runner": owner["runner"],
+            "consumers": entry.get("consumers", []),
+            "compatible_environments": entry.get("compatible_environments", []),
+            "native": [],
+        }
+        for owner in owners
+        for entry in owner["builds"]
+    ]
+    slices.sort(key=lambda entry: entry["artifact"])
+    return slices
+
+
+def prune_builds(plan: dict) -> None:
+    """Drop the demand evidence removed, in place.
+
+    The real overlay derives no key either: it only removes a reference the
+    carried plan already computed.
+    """
+    demanded: dict = {}
+    for cell in plan["cells"]:
+        if cell["execution"] == "execute" and "build" in cell:
+            demanded.setdefault(cell["build"], []).append(
+                {"environment": cell["environment"], "gate": cell["gate"]}
+            )
+        else:
+            cell.pop("build", None)
+    plan["builds"] = [
+        {**record, "consumers": sorted(
+            demanded[record["key"]], key=lambda item: (item["environment"], item["gate"])
+        )}
+        for record in plan.get("builds", [])
+        if demanded.get(record["key"])
+    ]
 
 
 def apply(plan: dict, accepted: list, rejections: list) -> dict:
@@ -198,6 +309,7 @@ def apply(plan: dict, accepted: list, rejections: list) -> dict:
                     state="reused",
                     evidence=entry,
                 )
+    prune_builds(applied)
     applied["accepted_evidence"] = accepted
     applied["evidence_rejections"] = rejections
     return applied
@@ -252,6 +364,8 @@ def main() -> None:
                 print(text)
                 return
             plan.update(base=base, head=head, preflight_reason=preflight_reason())
+            for record in plan.get("builds", []):
+                record["identity"]["source_commit"] = head
         else:
             plan = fixed_plan(base, head)
         if "--all" in flags:
@@ -261,6 +375,10 @@ def main() -> None:
                 "diff_available": False,
                 "reason": "explicit full-scope request; no diff was consulted",
             }
+        if "--event" in values:
+            # Like the real planner: the event the plan is for rides in it, so
+            # CI's scope-verify can refuse a receipt planned for another.
+            plan["event"] = values["--event"]
     if "--plan-out" in values:
         with open(values["--plan-out"], "w", encoding="utf-8") as handle:
             handle.write(json.dumps(plan, sort_keys=True, separators=(",", ":")))

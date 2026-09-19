@@ -28,6 +28,12 @@
 - `scripts/ci/affected_scope.py` emits **one** canonical resolved plan with a
   `{package, environment, gate}` cell per unit of work. Every consumer reads
   that document; nothing recalculates scope.
+- **Environments are scheduled by event** (`events` in
+  `.github/ci/environments.json`, decided 2026-09-18): a pull request proves
+  Linux and macOS, a push to `main` adds Windows, the nightly schedule adds
+  WSL2, and `lint`/`check` run on Linux only. Windows and WSL2 failures are
+  found after merge and fixed forward. The `ci:all-os` label opts a pull
+  request back into every environment.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,
@@ -155,6 +161,15 @@ Update alongside code changes:
       review cycle closes
         - an agent never makes that move and never runs `just complete`; an
           agent's terminal state is "implementation complete, ready for review"
+- **reference a feature/fix by its `{date}-{name}` directory alone**, never by a
+  path that carries a lifecycle directory
+    - write `2026-09-13-cicd-redundancies`, not
+      `fixes/_completed/2026-09-13-cicd-redundancies/spec.md`
+    - the lifecycle directory records where a spec is in its life, not what it
+      is; closing a spec moves it, and every reference that spelled out the old
+      location goes stale in the same commit
+    - this applies to `related:`/`depends-on:` frontmatter and to prose
+      cross-references alike
 
 <!-- gitnexus:start -->
 

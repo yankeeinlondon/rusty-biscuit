@@ -2,8 +2,11 @@
 """Reuse PR CI only for the same tested tree and the same integration base.
 
 The receipt's artifact name is the versioned identity; no archive download is
-needed. It records the actual checkout, not Actions' run-level head SHA (which
-identifies the PR head rather than the synthetic merge that checkout tests).
+needed. It records the tree of the actual checkout, which `ci.yml` pins to the
+PR head (`TESTED_REVISION`: the revision the plan names and `ci-build` binds
+every archive to), never GitHub's synthetic merge. A merge commit on `main`
+matches only when its tree equals that head's tree, so a PR that was behind
+`main` gets normal CI after the merge: the merged tree was never tested.
 Only a completed, successful run of this repository's ci.yml can supply it.
 """
 from __future__ import annotations
@@ -30,14 +33,12 @@ def git_revision(ref: str) -> str:
     ).stdout.strip()
 
 
-def record_receipt(event: dict[str, Any], sha: str) -> str:
-    """Refuse evidence if checkout stops testing the event's synthetic merge."""
+def record_receipt(event: dict[str, Any]) -> str:
+    """Refuse evidence if checkout stops testing the event's PR head."""
     pr = event["pull_request"]
     base, head = pr["base"]["sha"], pr["head"]["sha"]
-    if (git_revision("HEAD") != sha
-            or git_revision("HEAD^1") != base
-            or git_revision("HEAD^2") != head):
-        raise ValueError("PR checkout does not match its merge, base, and head")
+    if git_revision("HEAD") != head:
+        raise ValueError("PR checkout does not match the pull request head")
     return receipt_name(git_revision("HEAD^{tree}"), base, head)
 
 
@@ -113,7 +114,7 @@ def main() -> None:
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     sha = os.environ["GITHUB_SHA"]
     if args.mode == "record":
-        name = record_receipt(event, sha)
+        name = record_receipt(event)
         Path("ci-validation.txt").write_text(name + "\n", encoding="utf-8")
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"receipt={name}\n")

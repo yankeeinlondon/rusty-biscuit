@@ -22,6 +22,280 @@ underline := '\033[4m'
 _storage_preflight:
     @repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [[ -n "$repo_root" && -f "$repo_root/scripts/storage-preflight.sh" ]]; then bash "$repo_root/scripts/storage-preflight.sh"; fi
 
+# Build the compiler-work counter and print the bindings ONE measured command
+# needs, for `fixes/2026-09-12-single-os-compile/plan.md`'s Phase 1 baselines.
+#
+# The three cross-platform traps this recipe exists to hold in one place:
+# Windows needs the `.exe` suffix and a native path (`pwd -W`) because Cargo
+# hands `RUSTC_WRAPPER` to the OS loader, not to git-bash; the counter
+# directory has to be emptied before the measured command so a retried step
+# does not accumulate two runs' events; and the bindings must reach the caller
+# as STEP outputs, never `$GITHUB_ENV`, because a job-wide `RUSTC_WRAPPER`
+# would wrap the runner-tool builds too and mix wrapped and unwrapped units in
+# one `target/`.
+#
+# `$GITHUB_OUTPUT` is written when present and the values are always echoed, so
+# the recipe is usable on a developer host for the same measurement.
+_ci_build_counter label:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # The counter's own build is instrumentation cost, not the cell's work, so
+    # it is timed and reported as its own stage rather than folded into setup.
+    counter_started="$(date +%s)"
+    # `build-tools`, not the default feature set: the counter needs
+    # biscuit-hash and biscuit-terminal, and nothing here should compile
+    # sniff's duckdb and gix closure to time a build.
+    cargo build --quiet --manifest-path scripts/Cargo.toml \
+        --no-default-features --features build-tools --bin ci-build
+    counter_seconds=$(( $(date +%s) - counter_started ))
+
+    suffix=""
+    root="$PWD"
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
+        suffix=".exe"
+        root="$(pwd -W)"
+    fi
+    wrapper="${root}/target/debug/ci-build${suffix}"
+    [[ -x "${wrapper}" ]] || { echo "ci-build not built at ${wrapper}" >&2; exit 1; }
+
+    counter_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ci-build-events"
+    "${wrapper}" reset --counter-dir "${counter_dir}" >/dev/null
+
+    echo -e "  {{ dim }}measuring compiler work for {{ label }} (counter built in ${counter_seconds}s){{ reset }}"
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        {
+            echo "wrapper=${wrapper}"
+            echo "wrap=1"
+            echo "counter_dir=${counter_dir}"
+            echo "setup_seconds=${counter_seconds}"
+        } >>"${GITHUB_OUTPUT}"
+    fi
+
+# Render the recorded compiler work and write the measurement document for one
+# `{package, environment, gate}` cell.
+#
+# The document is its OWN artifact, never a new field inside `status.json`. The
+# rollup reads statuses to decide cell outcomes, and a baseline measurement must
+# not be able to change — or even appear to change — what a cell concluded. It
+# is keyed the same way every other store is, `{package, environment, gate}`,
+# so it joins the existing evidence without inventing a second identity.
+#
+# Stage seconds are whatever the caller measured; the recipe records only what
+# it was given. `queued_seconds` is deliberately NOT computed here. Two reasons:
+# parsing an ISO run-start timestamp needs GNU `date -d` on Linux and BSD
+# `date -jf` on macOS, and the run's own start is a property of the RUN, which
+# the GitHub API reports exactly. The document carries the job's start epoch
+# plus the run id and attempt, and the baseline reader joins them once, in
+# Python, on one host.
+#
+# Never fails the cell: an instrumentation fault must not turn a green gate red.
+# A missing or unreadable counter reports itself and leaves `compiler_work`
+# null rather than embedding a half-measurement.
+_ci_build_report wrapper counter_dir out package environment gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    compiler_work="null"
+    if [[ -x "{{ wrapper }}" ]]; then
+        "{{ wrapper }}" report --counter-dir "{{ counter_dir }}" || true
+        raw="$("{{ wrapper }}" report --counter-dir "{{ counter_dir }}" --json 2>/dev/null || true)"
+        if [[ -n "${raw}" ]]; then
+            compiler_work="$(printf '%s' "${raw}" | jq -c . 2>/dev/null || echo null)"
+        fi
+    else
+        echo "ci-build is not available at '{{ wrapper }}'; no compiler work reported" >&2
+    fi
+
+    timings="{}"
+    if [[ -n "${BISCUIT_CI_STAGE_SECONDS:-}" ]]; then
+        timings="$(printf '%s' "${BISCUIT_CI_STAGE_SECONDS}" | jq -c . 2>/dev/null || echo '{}')"
+    fi
+
+    mkdir -p "$(dirname "{{ out }}")"
+    jq -n \
+        --arg package "{{ package }}" \
+        --arg environment "{{ environment }}" \
+        --arg gate "{{ gate }}" \
+        --arg run_id "${GITHUB_RUN_ID:-}" \
+        --arg run_attempt "${GITHUB_RUN_ATTEMPT:-}" \
+        --arg job_started_epoch "${BISCUIT_CI_JOB_STARTED_EPOCH:-}" \
+        --arg runner_os "${RUNNER_OS:-}" \
+        --arg runner_image "${ImageOS:-}" \
+        --argjson timings "${timings}" \
+        --argjson compiler_work "${compiler_work}" \
+        '{schema_version: 1, package: $package, environment: $environment, gate: $gate,
+          run_id: $run_id, run_attempt: $run_attempt, job_started_epoch: $job_started_epoch,
+          runner_os: $runner_os, runner_image: $runner_image,
+          timings: $timings, compiler_work: $compiler_work}' \
+        >"{{ out }}"
+
+# Spell a path the way the HOST's own programs understand it.
+#
+# Under Git Bash — which is what `shell: bash` and every `#!/usr/bin/env bash`
+# recipe get on a Windows runner — `$PWD` is `/d/a/repo`, an MSYS spelling no
+# native program can open. Every consumer of an archive-mode path is a native
+# program: `cargo-nextest`'s `--workspace-remap`, insta's workspace root, the
+# JUnit staging root, and the verifier itself. `cygpath -m` answers the
+# drive-qualified forward-slash spelling, which is the one form both MSYS and
+# Win32 accept and which carries no `\\?\` verbatim prefix (the spelling that
+# broke nextest's own argument grammar in Phase 3). On every other OS, and
+# wherever `cygpath` is absent, the path is already native and is echoed back.
+_native_path path:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -m -- '{{ path }}'
+    else
+        printf '%s\n' '{{ path }}'
+    fi
+
+# Refuse an `--archive-file` that names nothing, and say why it might.
+#
+# A tier recipe pastes its `*args` raw into `forwarded=({{ args }})`, so bash
+# both word-splits the list AND processes backslash escapes: a native Windows
+# spelling (`C:\Users\ken\…`) arrives as `C:Usersken…` and nextest reports a
+# missing file for a path nobody typed. Every archive-mode caller therefore
+# hands the tier recipes what `_native_path` answers. This recipe is itself
+# backslash-safe — its one argument is interpolated inside single quotes — so it
+# can name the mangled value back to the reader.
+_archive_file_check file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -f '{{ file }}' ]]; then
+        exit 0
+    fi
+    echo -e "❌ {{ red }}--archive-file names no readable file{{ reset }}" >&2
+    echo "   '{{ file }}'" >&2
+    echo "   Nothing here may compile a replacement: a consumer runs what a producer built." >&2
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
+        echo "   On Windows a backslash spelling does not survive a recipe's argument list." >&2
+        echo -e "   Pass what {{ bold }}just _native_path <path>{{ reset }} answers." >&2
+    fi
+    exit 1
+
+# Which build record one `{environment, gate}` cell consumes.
+#
+# `builds` is the package's own slice of the resolved plan's build records, as
+# `affected_scope.py` projected it. One recipe rather than four copies of the
+# same `jq`, because the L1, L2, browser, and WSL2 legs must agree exactly about
+# which record a cell belongs to.
+#
+# A cell reaching here without a record is a DISAGREEMENT between the plan and
+# the workflow, and it refuses. Every executing L1, L2, or browser cell
+# references exactly one build; a job runs only for a cell the plan left
+# executing. Answering "compile in place" instead would be the build fallback
+# the specification exists to remove — and on a toolchain-free consumer it would
+# surface minutes later as a missing compiler rather than here as a plan that
+# does not describe this run.
+_ci_build_consumer builds environment gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    record="$(jq -c --arg env '{{ environment }}' --arg gate '{{ gate }}' \
+        '[.[] | select(any(.consumers[]; .environment == $env and .gate == $gate))] | first // empty' \
+        <<<'{{ builds }}')"
+
+    if [[ -z "${record}" ]]; then
+        echo -e "❌ {{ red }}{{ environment }}/{{ gate }} is executing and the plan names no build for it{{ reset }}" >&2
+        echo "   Every executing L1/L2/browser cell references exactly one build record." >&2
+        echo "   This consumer will not compile a replacement; fix the plan." >&2
+        exit 1
+    fi
+
+    artifact="$(jq -r '.artifact' <<<"${record}")"
+    key="$(jq -r '.key' <<<"${record}")"
+    producer="$(jq -r '.producer' <<<"${record}")"
+    echo -e "  {{ dim }}{{ environment }}/{{ gate }} runs build ${key} produced on ${producer}{{ reset }}"
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        {
+            echo "archive=1"
+            echo "artifact=${artifact}"
+            echo "key=${key}"
+            echo "producer=${producer}"
+        } >>"${GITHUB_OUTPUT}"
+    fi
+
+# Verify a downloaded build and print the bindings its consumer needs.
+#
+# Strict by construction: the verifier is the one the producer shipped beside
+# the archive, it is run BEFORE anything is extracted, and a rejection exits
+# non-zero so the tier never starts. It compiles nothing — `--nextest` names the
+# standalone `cargo-nextest` binary precisely so listing the archive's inventory
+# cannot reach Cargo.
+#
+# Emits `archive_file`, `sidecar_dir`, `workspace`, `key`, and `digest` as step
+# outputs. The sidecar directory is the producer's answer to every compile-time
+# tool a consumer used to build for itself: the messenger desktop stubs,
+# darkmatter's `md` fixture, and the L2 harness broker all arrive here, verified.
+# `workspace` is this checkout in the host's own spelling — the value the tier
+# recipe remaps the archive onto — computed once here rather than three times in
+# three gate steps that must agree.
+#
+# It also emits this consumer's pre-execution stage costs: `download_seconds`
+# (from `BISCUIT_CI_TRANSFER_STARTED_EPOCH`, set by the step that began the
+# artifact download), `verify_seconds` for this recipe's own window, and
+# `extract_ms` — the verifier's full extraction of the archive, which is the
+# stage the reporting contract requires to be visible apart from test time.
+# Seconds where a portable `date +%s` is the only clock every consumer shares
+# (macOS and Git Bash have no `%3N`), milliseconds where the tool itself
+# measured.
+_ci_build_verify dir artifact environment plan="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    started="$(date +%s)"
+    suffix=""
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
+        suffix=".exe"
+    fi
+    # `$RUNNER_TEMP` is a Windows path even inside Git Bash, so what arrives
+    # here is `D:\a\_temp/build`; every path derived from it is handed to a
+    # native program or exported to a later step.
+    dir="$(just _native_path '{{ dir }}')"
+    workspace="$(just _native_path "$PWD")"
+    tool="${dir}/tools/ci-build${suffix}"
+    manifest="${dir}/{{ artifact }}.manifest.json"
+    if [[ ! -f "${tool}" ]]; then
+        echo -e "❌ {{ red }}the build artifact carries no verifier at ${tool}{{ reset }}" >&2
+        exit 1
+    fi
+    # An artifact download does not preserve the executable bit.
+    chmod +x "${tool}" 2>/dev/null || true
+
+    verdict="${dir}/{{ artifact }}.verdict.json"
+    verify_args=(verify --manifest "${manifest}" --environment '{{ environment }}'
+        --workspace "${workspace}" --nextest "cargo-nextest nextest"
+        --verdict-out "${verdict}")
+    if [[ -n '{{ plan }}' ]]; then
+        verify_args+=(--plan '{{ plan }}')
+    fi
+    "${tool}" "${verify_args[@]}"
+
+    archive_file="${dir}/$(jq -r '.archive.file' "${manifest}")"
+    sidecar_dir="${dir}/{{ artifact }}-sidecars"
+    if [[ -d "${sidecar_dir}" ]]; then
+        chmod +x "${sidecar_dir}"/* 2>/dev/null || true
+    fi
+    download_seconds=""
+    if [[ -n "${BISCUIT_CI_TRANSFER_STARTED_EPOCH:-}" ]]; then
+        download_seconds="$(( started - BISCUIT_CI_TRANSFER_STARTED_EPOCH ))"
+    fi
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        {
+            echo "archive_file=${archive_file}"
+            echo "sidecar_dir=${sidecar_dir}"
+            echo "workspace=${workspace}"
+            echo "key=$(jq -r '.key' "${manifest}")"
+            echo "digest=$(jq -r '.digest' "${manifest}")"
+            echo "download_seconds=${download_seconds:-0}"
+            echo "verify_seconds=$(( $(date +%s) - started ))"
+            # An unreadable verdict reports no extraction rather than failing a
+            # verification that already succeeded.
+            echo "extract_ms=$(jq -r '.timings.extract_ms // 0' "${verdict}" 2>/dev/null || echo 0)"
+        } >>"${GITHUB_OUTPUT}"
+    fi
+
 # Worker budget: keep two slots for other host work, except on small CI
 # runners where reserving them would discard half or more of the capacity.
 # This limits test processes, not CPU affinity or Cargo build jobs.
@@ -704,7 +978,16 @@ _test_l2_all specs *args="":
 # Exit codes: 0 proved (or nothing required), 1 a required backend is unproven,
 # 2 bad configuration or unreadable evidence.
 _backend_proof command:
-    @cargo run -q -p test-toolkit --features backend-proof --bin backend-proof -- {{ command }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `BISCUIT_BACKEND_PROOF_BIN` is the archive-mode path: the checker is a
+    # `backend-proof` build sidecar the producer compiled and the consumer
+    # verified. A consumer with no Cargo cannot build one, and building it here
+    # is exactly what archive mode exists to avoid.
+    if [[ -n "${BISCUIT_BACKEND_PROOF_BIN:-}" ]]; then
+        exec "${BISCUIT_BACKEND_PROOF_BIN}" {{ command }}
+    fi
+    cargo run -q -p test-toolkit --features backend-proof --bin backend-proof -- {{ command }}
 
 # Print the nextest filter expression a tier selects with.
 #
@@ -876,9 +1159,13 @@ _test pkg *args="": _storage_preflight
 
     forwarded=({{ args }})
     archive_mode=0
+    archive_file=""
+    want_archive=0
     for arg in ${forwarded[@]+"${forwarded[@]}"}; do
+        if (( want_archive )); then archive_file="${arg}"; want_archive=0; continue; fi
         case "${arg}" in
-            --archive-file|--archive-file=*) archive_mode=1 ;;
+            --archive-file) archive_mode=1; want_archive=1 ;;
+            --archive-file=*) archive_mode=1; archive_file="${arg#--archive-file=}" ;;
         esac
     done
 
@@ -892,6 +1179,9 @@ _test pkg *args="": _storage_preflight
         echo "   consume an archive — it recompiles, which is the whole thing an archive avoids." >&2
         echo -e "   Set {{ bold }}BISCUIT_NEXTEST_BIN{{ reset }} (the WSL leg uses \"cargo-nextest nextest\")." >&2
         exit 1
+    fi
+    if (( archive_mode == 1 )); then
+        just _archive_file_check "${archive_file}"
     fi
 
     just _stage_junit_reset
@@ -1014,6 +1304,8 @@ _expected_manifest tier specs *args="":
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
 
+    # No `_archive_file_check` here: this runs at STAGING time, after the tier
+    # has already read the archive. It only needs to know that it did.
     forwarded=({{ args }})
     archive_mode=0
     for arg in ${forwarded[@]+"${forwarded[@]}"}; do
@@ -1541,6 +1833,41 @@ _test_l2 pkg *args="": _storage_preflight
     test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
     export NEXTEST_TEST_THREADS="$test_threads"
 
+    # Archive mode, exactly as `_test` spells it: `--archive-file` is mutually
+    # exclusive with `-p` and with every Cargo build flag, so the package
+    # selection moves into the filterset and the build flags are dropped (they
+    # were baked in at archive time).
+    forwarded=({{ args }})
+    archive_mode=0
+    archive_file=""
+    want_archive=0
+    for arg in ${forwarded[@]+"${forwarded[@]}"}; do
+        if (( want_archive )); then archive_file="${arg}"; want_archive=0; continue; fi
+        case "${arg}" in
+            --archive-file) archive_mode=1; want_archive=1 ;;
+            --archive-file=*) archive_mode=1; archive_file="${arg#--archive-file=}" ;;
+        esac
+    done
+
+    filter="$(just _tier_filter L2)"
+    selection=(-p '{{ pkg }}')
+    run_args=(${forwarded[@]+"${forwarded[@]}"})
+    if (( archive_mode == 1 )); then
+        if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+            echo -e "❌ {{ red }}--archive-file requires cargo-nextest{{ reset }}" >&2
+            echo "   '${nextest_bin[*]} --version' failed, and there is no fallback that can" >&2
+            echo "   consume an archive — every alternative recompiles." >&2
+            exit 1
+        fi
+        just _archive_file_check "${archive_file}"
+        selection=()
+        filter="package({{ pkg }}) & (${filter})"
+        run_args=()
+        while IFS= read -r kept_arg; do
+            run_args+=("${kept_arg}")
+        done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
+    fi
+
     # Every nextest invocation below is bracketed so its JUnit report is staged
     # before the next one can overwrite it — including a failing invocation.
     run_l2() {
@@ -1594,32 +1921,38 @@ _test_l2 pkg *args="": _storage_preflight
         echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
         echo
         exit_code=0
-        run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass -j "${l2_threads}" {{ args }} || exit_code=$?
+        run_l2 "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass -j "${l2_threads}" ${run_args[@]+"${run_args[@]}"} || exit_code=$?
         finish "${exit_code}"
     fi
 
-    # Build the broker once (no-op if already up to date) and resolve
-    # its absolute path through cargo metadata.
-    cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
-    # Read cargo metadata via a tempfile to avoid the `bash -c`
-    # subprocess hang documented in `_sanity` above. The portable
-    # `mktemp` template form works on macOS BSD, Linux GNU, and
-    # Windows git-bash; `-t` has incompatible semantics across them.
-    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-meta.XXXXXX")"
-    cargo metadata --no-deps --format-version 1 > "${meta_file}"
-    target_dir="$(jq -r '.target_directory' "${meta_file}")"
-    rm -f "${meta_file}"
     # Append `.exe` on Windows so the broker resolves under git-bash;
     # `MSYSTEM` is set by MSYS2 / git-bash. macOS and Linux ignore it.
     bin_suffix=""
     if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
         bin_suffix=".exe"
     fi
-    broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
-    if [[ ! -x "${broker}" ]]; then
-        echo -e "{{ yellow }}warning: ${broker} not executable; falling back to per-test spawning{{ reset }}"
+    # `BISCUIT_HARNESS_BROKER_BIN` is the archive-mode path: the broker is a
+    # `harness-broker` build sidecar the producer compiled and the consumer
+    # verified, because a consumer with no Cargo cannot build one. When it is
+    # unset, this is a local run and the broker is built here as before —
+    # except in archive mode, where building it is exactly what must not happen.
+    broker="${BISCUIT_HARNESS_BROKER_BIN:-}"
+    if [[ -z "${broker}" ]] && (( archive_mode == 0 )); then
+        cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
+        # Read cargo metadata via a tempfile to avoid the `bash -c`
+        # subprocess hang documented in `_sanity` above. The portable
+        # `mktemp` template form works on macOS BSD, Linux GNU, and
+        # Windows git-bash; `-t` has incompatible semantics across them.
+        meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-meta.XXXXXX")"
+        cargo metadata --no-deps --format-version 1 > "${meta_file}"
+        target_dir="$(jq -r '.target_directory' "${meta_file}")"
+        rm -f "${meta_file}"
+        broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
+    fi
+    if [[ -z "${broker}" || ! -x "${broker}" ]]; then
+        echo -e "{{ yellow }}warning: ${broker:-no broker} not executable; falling back to per-test spawning{{ reset }}"
         exit_code=0
-        run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass {{ args }} || exit_code=$?
+        run_l2 "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
         finish "${exit_code}"
     fi
 
@@ -1661,7 +1994,7 @@ _test_l2 pkg *args="": _storage_preflight
     fi
 
     exit_code=0
-    run_l2 "${nextest_bin[@]}" run -p {{ pkg }} -E "$(just _tier_filter L2)" --no-tests=pass -j 1 {{ args }} || exit_code=$?
+    run_l2 "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass -j 1 ${run_args[@]+"${run_args[@]}"} || exit_code=$?
     finish "${exit_code}"
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
@@ -1718,6 +2051,9 @@ _test_l3 pkg *args="": _storage_preflight
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
+#
+# Accepts the same archive-mode inputs as `_test` and `_test_l2`; see `_test`'s
+# comment for why `-p` and the Cargo build flags have to move.
 _test_browser pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1732,7 +2068,39 @@ _test_browser pkg *args="": _storage_preflight
     just _stage_junit_reset
     exit_code=0
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
-    "${nextest_bin[@]}" run -p {{ pkg }} -j 1 -E "$(just _tier_filter browser)" --no-tests=pass {{ args }} || exit_code=$?
+
+    forwarded=({{ args }})
+    archive_mode=0
+    archive_file=""
+    want_archive=0
+    for arg in ${forwarded[@]+"${forwarded[@]}"}; do
+        if (( want_archive )); then archive_file="${arg}"; want_archive=0; continue; fi
+        case "${arg}" in
+            --archive-file) archive_mode=1; want_archive=1 ;;
+            --archive-file=*) archive_mode=1; archive_file="${arg#--archive-file=}" ;;
+        esac
+    done
+
+    filter="$(just _tier_filter browser)"
+    selection=(-p '{{ pkg }}')
+    run_args=(${forwarded[@]+"${forwarded[@]}"})
+    if (( archive_mode == 1 )); then
+        if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+            echo -e "❌ {{ red }}--archive-file requires cargo-nextest{{ reset }}" >&2
+            echo "   '${nextest_bin[*]} --version' failed, and there is no fallback that can" >&2
+            echo "   consume an archive — every alternative recompiles." >&2
+            exit 1
+        fi
+        just _archive_file_check "${archive_file}"
+        selection=()
+        filter="package({{ pkg }}) & (${filter})"
+        run_args=()
+        while IFS= read -r kept_arg; do
+            run_args+=("${kept_arg}")
+        done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
+    fi
+
+    "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -j 1 -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
     just _stage_junit browser "{{ pkg }}" "${exit_code}" "${SECONDS}"
     exit "${exit_code}"
 

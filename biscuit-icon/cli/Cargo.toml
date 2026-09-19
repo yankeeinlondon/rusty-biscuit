@@ -45,5 +45,9 @@ required-features = ["terminal-tests"]
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm"]
+# The L2 tier spawns one shared terminal pane through the harness broker.
+# It is a compile-time binary of another package, so the producer builds it
+# as a sidecar; an archive consumer has no Cargo to build one with.
+sidecars = ["backend-proof", "harness-broker"]
 features = ["image", "terminal-tests"]
 local-features = ["image"]

@@ -7,6 +7,6 @@
 # rustfmt is pinned here so read-only `cargo fmt --check` uses the same
 # formatter everywhere.
 [toolchain]
-channel = "1.97.1"
+channel = "1.98.1"
 profile = "minimal"
 components = ["clippy", "rustfmt"]

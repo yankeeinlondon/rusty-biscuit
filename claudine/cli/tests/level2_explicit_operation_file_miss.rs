@@ -104,9 +104,12 @@ fn run_in_pty(
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        let frame = harness.capture().expect("capture tmux pane");
+        // The sentinel is checked BEFORE the pane is captured. Captured first,
+        // the frame can predate the report the sentinel guarantees, and the
+        // pre-push hook on 2026-09-18 returned exactly that: a pane holding
+        // only the echoed command line, painted a moment before `touch` ran.
         if done.exists() {
-            return frame.plain;
+            return harness.capture().expect("capture tmux pane").plain;
         }
         std::thread::sleep(Duration::from_millis(50));
     }

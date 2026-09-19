@@ -147,17 +147,20 @@ class ValidationTests(unittest.TestCase):
 
 
 class ReceiptTests(unittest.TestCase):
-    def test_receipt_records_checkout_tree_instead_of_pr_head(self) -> None:
-        with patch("reuse_validation.git_revision", side_effect=[MERGE, BASE, HEAD, TREE]):
-            self.assertEqual(record_receipt({"pull_request": PR}, MERGE), RECEIPT)
+    def test_receipt_records_the_tree_of_the_pr_head_checkout(self) -> None:
+        with patch("reuse_validation.git_revision", side_effect=[HEAD, TREE]):
+            self.assertEqual(record_receipt({"pull_request": PR}), RECEIPT)
 
-    def test_receipt_rejects_overridden_checkout_or_wrong_merge_parents(self) -> None:
-        for revisions in ([HEAD], [MERGE, HEAD], [MERGE, BASE, BASE]):
-            with self.subTest(revisions=revisions), patch(
-                "reuse_validation.git_revision", side_effect=revisions
+    def test_receipt_rejects_a_checkout_that_is_not_the_pr_head(self) -> None:
+        # GitHub's synthetic merge is what `pull_request` checks out by default;
+        # `ci.yml` overrides that with the head, and a receipt from any other
+        # revision would name a tree this run did not test.
+        for checkout in (MERGE, BASE):
+            with self.subTest(checkout=checkout), patch(
+                "reuse_validation.git_revision", return_value=checkout
             ):
                 with self.assertRaises(ValueError):
-                    record_receipt({"pull_request": PR}, MERGE)
+                    record_receipt({"pull_request": PR})
 
     def test_check_writes_reuse_output_and_original_run_link(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

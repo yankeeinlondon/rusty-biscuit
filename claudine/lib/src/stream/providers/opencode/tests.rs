@@ -315,7 +315,7 @@ fn opencode_tool_use_emits_paired_tool_call_and_result() {
 
 #[test]
 fn assistant_text_in_part_text_shape_emits_output_text() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("tests/fixtures/providers/opencode-assistant-text.ndjson");
     let raw = std::fs::read_to_string(&path).expect("fixture exists");
     let (events, mut parser) = new_parser();

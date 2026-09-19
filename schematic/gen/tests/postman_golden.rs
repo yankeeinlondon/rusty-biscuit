@@ -22,7 +22,7 @@
 //! through the vendored Postman v2.1.0 schema validator, so a fixture
 //! that drifts away from a valid collection cannot quietly stay green.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use jsonschema::Validator;
@@ -65,7 +65,7 @@ fn validate_postman_json(value: &Value) -> Result<(), Vec<String>> {
 // --- Fixture helpers -------------------------------------------------------
 
 fn golden_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("tests")
         .join("fixtures")
         .join("postman")

@@ -862,7 +862,7 @@ fn variant_names() -> Vec<String> {
 }
 
 fn generate_inventory() -> Inventory {
-    let cli_manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cli_manifest = biscuit_test_harness::manifest_dir!();
     let area = cli_manifest
         .parent()
         .expect("cli crate has a parent package area");
@@ -927,7 +927,7 @@ fn generate_inventory() -> Inventory {
 }
 
 fn inventory_file_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("cli crate has a parent package area")
         .join("docs/providers/dispatch-inventory.json")

@@ -400,7 +400,7 @@ fn captured_fixtures_have_no_two_consecutive_blank_lines_per_provider() {
         (Provider::OpenCode, "opencode.ndjson", Some("gpt-4o")),
     ];
     for (provider, fname, model) in fixtures {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let path = biscuit_test_harness::manifest_dir!()
             .join("..")
             .join("lib")
             .join("tests/fixtures/providers")
@@ -448,7 +448,7 @@ fn captured_fixtures_have_no_two_consecutive_blank_lines_per_provider() {
 #[test]
 #[serial_test::serial]
 fn opencode_acceptance_replay_satisfies_phase4_contract() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("lib")
         .join("tests/fixtures/providers/opencode.ndjson");

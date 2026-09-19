@@ -1,0 +1,37 @@
+[package]
+name = "archive-portability"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "archive_portability"
+path = "src/lib.rs"
+
+# A non-test executable. Nextest archives `bin` targets beside the test
+# binaries; a consumer that cannot find this one has an incomplete archive.
+[[bin]]
+name = "archive-portability-tool"
+path = "src/main.rs"
+
+# An example target. Nextest never archives one, so a package that declares it
+# as an archive include is asking the PRODUCER to build it.
+[[example]]
+name = "probe"
+path = "examples/probe.rs"
+
+[dependencies]
+archive-portability-dylib = { path = "../dylib" }
+
+[[test]]
+name = "l1"
+path = "tests/l1.rs"
+
+[[test]]
+name = "level2_marker"
+path = "tests/level2_marker.rs"
+
+[[test]]
+name = "browser_marker"
+path = "tests/browser_marker.rs"

@@ -18,5 +18,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 assert_cmd = "2"
 predicates = "3"

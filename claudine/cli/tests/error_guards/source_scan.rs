@@ -228,7 +228,7 @@ pub struct ScanResult {
 
 /// The `claudine/` package-area root.
 pub fn area_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/cli always has a parent")
         .to_path_buf()

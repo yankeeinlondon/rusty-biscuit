@@ -17,7 +17,7 @@ use darkmatter::markdown::{Markdown, compose::ComposeSource, schemas::Darkmatter
 use serde_json::Value;
 
 fn fixtures_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/validate")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/validate")
 }
 
 fn list_cases() -> Vec<std::path::PathBuf> {

@@ -197,8 +197,15 @@ pub struct StageReport {
     pub status: StageStatus,
 }
 
+/// The checked-in extension source, found relative to this crate's
+/// **run-time** manifest directory.
+///
+/// `tests/cli.rs` stages from here, and nextest's `--workspace-remap`
+/// repoints the variable at the consumer's checkout when the test binary
+/// runs from an archive built elsewhere.
 pub fn checked_in_extension_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let crate_dir = biscuit_test_harness::manifest_dir!();
+    crate_dir
         .parent()
         .expect("CLI package has a dmls parent")
         .join("zed-dmls")

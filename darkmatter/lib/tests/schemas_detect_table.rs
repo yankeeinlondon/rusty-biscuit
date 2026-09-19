@@ -18,7 +18,7 @@ use darkmatter::markdown::{
 };
 
 fn fixtures_root() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detect")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/detect")
 }
 
 fn list_cases() -> Vec<std::path::PathBuf> {

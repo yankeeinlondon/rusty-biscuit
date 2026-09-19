@@ -53,6 +53,10 @@ serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
 syntect = "5.2"
+# Unconditional for every test target, not just the `terminal-tests` ones: the
+# ungated targets resolve fixtures through `manifest_dir!()`, which the optional
+# `[dependencies]` entry above cannot supply without the feature.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 
 [[test]]
 name = "level2_code_block_styling"
@@ -105,4 +109,8 @@ tiers = ["L1", "L2"]
 features = ["terminal-tests"]
 local-features = []
 l2-backends = ["tmux", "wezterm"]
+# The L2 tier spawns one shared terminal pane through the harness broker.
+# It is a compile-time binary of another package, so the producer builds it
+# as a sidecar; an archive consumer has no Cargo to build one with.
+sidecars = ["backend-proof", "harness-broker"]
 l1-include-slow = true

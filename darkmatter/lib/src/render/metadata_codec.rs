@@ -55,7 +55,7 @@ pub(crate) fn base64_decode(input: &str) -> Option<Vec<u8>> {
         return None;
     }
     let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    for chunk in input.as_bytes().chunks_exact(4) {
+    for chunk in input.as_bytes().as_chunks::<4>().0 {
         let v0 = base64_value(chunk[0])?;
         let v1 = base64_value(chunk[1])?;
         let v2 = if chunk[2] == b'=' { None } else { Some(base64_value(chunk[2])?) };

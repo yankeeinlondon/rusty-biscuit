@@ -72,8 +72,8 @@ const LOAD_BEARING_PLAN_KEYS: &[&str] = &[
 ];
 
 fn repo_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR is `<repo>/claudine/cli`.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    // The manifest directory is `<repo>/claudine/cli`.
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/cli")
@@ -81,7 +81,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shipped_implement_route")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/shipped_implement_route")
 }
 
 fn hashes_file() -> PathBuf {

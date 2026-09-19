@@ -43,14 +43,31 @@ version moved, because a version-1 receipt lacks them: it now misses as
 `scope-schema` and CI calculates scope itself, which the receipt contract
 permits, rather than hitting and then having to re-run selection to finish.
 
-Version 3 adds the required `change_inventory`: the changed paths, normalized
-and bucketed once by the calculator so every reader — the plan renderer, the
-local pre-push report, `ci-reporting` — states the same thing about what
-changed. It is computed from the paths alone and is deliberately allowed to
-disagree with `change_class`, which is derived from the gating packages a
-change selects. A version-2 scope receipt therefore misses once as
-`scope-schema` and is never upgraded in place; validation receipts are
-untouched, so `RECEIPT_SCHEMA_VERSION` does not move.
+Version 3 adds build records (`fixes/2026-09-12-single-os-compile/spec.md`):
+the plan-level `builds` list and the per-cell `build` reference that names one
+of them. A build record is plumbing keyed by `{package, producer environment,
+build}` — never a result cell, never baseline-eligible — and it exists so an
+executing test cell can say which immutable compile it consumes instead of
+compiling its own. A version-2 receipt carries no build records at all, so it
+misses as `scope-schema` and CI resolves the plan itself rather than being
+partially upgraded into a document whose builds nothing derived.
+
+Version 4 exists because two changes each called themselves version 3 on
+separate branches: the build records above, and the `change_inventory` below.
+The merged document requires both, so "3" named two incompatible shapes — a
+document from either branch passed the version check and then failed on a
+missing field, which reads as a corrupt document rather than a version skew.
+4 names the union, and either older shape now misses as
+`unknown-schema-version`, which is what it is.
+
+`change_inventory` is the changed paths, normalized and bucketed once by the
+calculator so every reader — the plan renderer, the local pre-push report,
+`ci-reporting` — states the same thing about what changed. It is computed from
+the paths alone and is deliberately allowed to disagree with `change_class`,
+which is derived from the gating packages a change selects. A version-2 or
+version-3 scope receipt therefore misses once as `scope-schema` and is never
+upgraded in place; validation receipts are untouched, so
+`RECEIPT_SCHEMA_VERSION` does not move.
 """
 
 from __future__ import annotations
@@ -65,7 +82,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 3
+RESOLVED_PLAN_SCHEMA_VERSION = 4
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -85,10 +102,20 @@ UNRECORDED_MEASUREMENT = "not recorded (v1 receipt)"
 
 ENVIRONMENTS = ("ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu")
 
+#: The GitHub events a plan can be resolved for, as `github.event_name` spells
+#: them. `affected_scope.EVENT_NAMES` is this tuple.
+EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
+
 #: A cell's gate. `check` and `lint` are compile-time gates; the rest are test
 #: tiers. One flat vocabulary because a cell key is `{package, environment,
 #: gate/tier}` and the two kinds are never both present for one key.
 GATES = ("lint", "check", "L1", "L2", "browser")
+
+#: The gates whose execution consumes a Nextest archive, and therefore the only
+#: gates a cell may reference a build from. `check` and `lint` are deliberately
+#: separate configurations (spec section 6): Clippy is another compiler driver,
+#: and check-only target kinds may emit no executable at all.
+BUILD_GATES = ("L1", "L2", "browser")
 
 #: Cargo target kinds a check or test gate may be asked to cover. Replaces the
 #: blanket `--all-targets` contract (spec section 1.6).
@@ -152,7 +179,34 @@ SCOPE_REJECTIONS = (
     "scope-head-mismatch",
     "scope-tree-mismatch",
     "scope-base-mismatch",
+    "scope-event-mismatch",
     "scope-malformed",
+)
+
+#: Why a consumer refused its build inputs. Mirrored by `ci-build`'s own
+#: `REJECTIONS` constant, which `contract.json` is asserted against.
+#:
+#: Kept apart from both [`REJECTIONS`] and [`SCOPE_REJECTIONS`]: those refuse a
+#: cell's outcome and a whole scope document respectively. These refuse the
+#: *inputs* to a cell that has not run yet, and every one is an infrastructure
+#: verdict a workflow reports — never a test result, and never something a
+#: consumer may repair by compiling a replacement.
+BUILD_REJECTIONS = (
+    "build-manifest-missing",
+    "build-manifest-malformed",
+    "build-manifest-schema",
+    "build-digest-mismatch",
+    "build-key-mismatch",
+    "build-source-mismatch",
+    "build-environment-incompatible",
+    "build-runtime-incompatible",
+    "build-archive-missing",
+    "build-archive-corrupt",
+    "build-sidecar-missing",
+    "build-sidecar-corrupt",
+    "build-asset-missing",
+    "build-inventory-incomplete",
+    "build-inventory-unexpected",
 )
 
 #: Cap on `failed_tests` carried in a receipt cell. A failing L1 suite can name
@@ -162,6 +216,11 @@ FAILURE_DETAIL_LIMIT = 20
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _IDENTITY = re.compile(r"[0-9a-f]{8,64}")
+
+#: A planned build key: sixteen lowercase hex digits of XXH64, as `ci-build
+#: key` writes it. Narrower than [`_IDENTITY`] on purpose — a SHA-256 here
+#: would mean something computed the key outside the one hashing boundary.
+_BUILD_KEY = re.compile(r"[0-9a-f]{16}")
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +257,11 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     #: lets CI act on a receipt without consulting the checkout's table.
     "environments": True,
     "cells": True,
+    #: The run-scoped build records the executing test cells consume, one per
+    #: distinct planned build key. Empty when nothing executes: evidence-
+    #: satisfied and governed cells create no consumer demand, so an all-reused
+    #: plan schedules no owner at all.
+    "builds": True,
     "accepted_evidence": True,
     #: Why each rejected receipt cell was refused, one coded reason per entry.
     #: Optional because a plan resolved with no evidence at all has nothing to
@@ -209,6 +273,15 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     "preflight_os": True,
     "preflight_reason": True,
     "flags": True,
+    #: The GitHub event the plan was resolved for, and the environments that
+    #: event does not schedule (`{name, events}`) or that an earlier run of
+    #: another event already validated for this tree (`{name, event}`). All
+    #: three are optional and absent rather than empty, so a plan resolved
+    #: without an event is byte-identical to one from before they existed
+    #: (fixes/2026-09-18-ci-cadence).
+    "event": False,
+    "deferred_environments": False,
+    "proven_environments": False,
 }
 
 #: `paths` and `counts` are present exactly when `diff_available` is true, and
@@ -240,10 +313,24 @@ PACKAGE_FIELDS: dict[str, bool] = {
     "l2_backends": True,
     "runner_tools": True,
     "companion_suites": True,
+    #: Build outputs the producer must add to this package's archive, relative
+    #: to the profile output directory. Declared by the package because the
+    #: package is what breaks when one is missing.
+    "archive_includes": True,
+    #: Named build sidecars from `.github/ci/sidecars.json` — another package's
+    #: binaries, compiled by the producer and shipped beside the archive
+    #: because a consumer with no Cargo cannot build one.
+    "sidecars": True,
     #: The package's `l1-include-slow` policy, forwarded to the test job
     #: through the legacy matrix; it is projected, never re-read.
     "l1_include_slow": True,
     "native": True,
+    #: The package's `requires-toolchain` policy: its L1 drives `cargo`/`rustc`
+    #: itself, so the consumer provisions the pinned toolchain where the
+    #: environment has `cargo_toolchain`. Projected into the matrix, never
+    #: re-read from the checkout. Optional (absent reads as false) so a plan
+    #: written before the field existed still projects.
+    "requires_toolchain": False,
     #: The governance of a `gates = false` package: exclusion class, owner,
     #: reason, expiry. Present exactly when `gates` is empty, because the
     #: rollup's policy document is projected from the plan and reads it there.
@@ -288,6 +375,67 @@ CELL_FIELDS: dict[str, bool] = {
     #: only on a cell a companion attaches to, which is the same cell R7 makes
     #: non-reusable.
     "companions": False,
+    #: The planned build key this cell executes. Present exactly on an
+    #: executing [`BUILD_GATES`] cell: a reused, governed, or prohibited cell
+    #: consumes no build, and lint and check compile their own configurations.
+    "build": False,
+}
+
+#: One immutable compile configuration, its native owner, and every result cell
+#: that executes its outputs. Identity is `{package, producer, key}`; area is
+#: never part of it, and `key` is the digest of [`BUILD_IDENTITY_FIELDS`].
+BUILD_FIELDS: dict[str, bool] = {
+    "key": True,
+    "package": True,
+    #: The native environment that compiles this record. Exactly one — a build
+    #: key with two owners is what plan validation exists to refuse.
+    "producer": True,
+    #: `build-<package>-<producer>-<key>`. Package-keyed like every other
+    #: store; `build` is an internal artifact tier, never a result-cell gate.
+    "artifact": True,
+    #: The execution environments the producer's contract permits, whether or
+    #: not this run consumes them all.
+    "compatible_environments": True,
+    #: Why a consumer outside the producer's own environment is allowed. Human
+    #: prose for `ci-plan`; the machine rule is the environment table's.
+    "compatibility_reason": True,
+    #: The `{environment, gate}` cells that execute these outputs, sorted. A
+    #: record with none is removed rather than left unconsumed.
+    "consumers": True,
+    #: Every plan-known input the key was computed from, unhashed. Stored so a
+    #: reader can see *why* two cells share or split a key without recomputing
+    #: the digest, and so the producer's realized manifest has something to
+    #: check itself against.
+    "identity": True,
+}
+
+BUILD_CONSUMER_FIELDS: dict[str, bool] = {"environment": True, "gate": True}
+
+#: The compile-affecting inputs the planner knows. Discovered inputs — the
+#: actual linker and native-library versions, the archive checksums — belong to
+#: the producer's realized manifest, not here.
+BUILD_IDENTITY_FIELDS: dict[str, bool] = {
+    #: The plan's head. One revision is the identity of both the source tree
+    #: and, with `lockfile` below, the resolved dependency graph.
+    "source_commit": True,
+    "lockfile": True,
+    "rust": True,
+    "nextest": True,
+    "host": True,
+    "target": True,
+    "profile": True,
+    "rustflags": True,
+    "cargo_config": True,
+    "linker": True,
+    "archive_format": True,
+    "package": True,
+    "target_kinds": True,
+    #: The package's isolated feature arguments, verbatim. Two packages with
+    #: different feature graphs split keys even in one owner's target tree.
+    "features": True,
+    "native": True,
+    "archive_includes": True,
+    "sidecars": True,
 }
 
 RECEIPT_FIELDS: dict[str, bool] = {
@@ -315,7 +463,16 @@ RECEIPT_CELL_FIELDS: dict[str, bool] = {
     "report": True,
     "failed_tests": False,
     "failure_detail_truncated": False,
+    #: `{key, digest}` of the build record this cell's tests actually ran from,
+    #: when the run consumed a verified archive. Optional because a cell that
+    #: compiled in place has no archive to name, and because every receipt
+    #: written before archives existed must stay readable.
+    "build": False,
 }
+
+#: What a receipt cell's `build` names: the PLANNED key and the producer's
+#: REALIZED digest, read from the manifest the consumer verified.
+RECEIPT_BUILD_FIELDS: dict[str, bool] = {"key": True, "digest": True}
 
 HOST_FIELDS: dict[str, bool] = {"os": True, "kernel": True, "report_dir": True}
 
@@ -349,6 +506,16 @@ SCOPE_PROJECTION_FIELDS = (
     "preflight_reason",
     "matrix",
     "policy",
+    #: The deterministic native build-owner matrix, one entry per producer
+    #: environment that owns at least one record. Derived from the final plan,
+    #: never re-planned.
+    "build_owners",
+    #: The same owners flattened one entry per planned record, plus the matrix
+    #: vector and `runs-on` lookup `ci.yml`'s owner job expands. Present even
+    #: when empty: an all-reused plan schedules no owner and must say so.
+    "build_slices",
+    "build_artifacts",
+    "build_runners",
     "job_estimate",
     "flags",
 )
@@ -365,6 +532,9 @@ def contract() -> dict[str, Any]:
             "area": AREA_FIELDS,
             "package": PACKAGE_FIELDS,
             "cell": CELL_FIELDS,
+            "build": BUILD_FIELDS,
+            "build_consumer": BUILD_CONSUMER_FIELDS,
+            "build_identity": BUILD_IDENTITY_FIELDS,
             "change_inventory": CHANGE_INVENTORY_FIELDS,
         },
         "receipt": {
@@ -372,6 +542,7 @@ def contract() -> dict[str, Any]:
             "legacy_schema_version": LEGACY_RECEIPT_SCHEMA_VERSION,
             "document": RECEIPT_FIELDS,
             "cell": RECEIPT_CELL_FIELDS,
+            "cell_build": RECEIPT_BUILD_FIELDS,
             "host": HOST_FIELDS,
             "counts": list(COUNT_FIELDS),
             "failure_detail_limit": FAILURE_DETAIL_LIMIT,
@@ -386,6 +557,7 @@ def contract() -> dict[str, Any]:
         "vocabulary": {
             "environments": list(ENVIRONMENTS),
             "gates": list(GATES),
+            "build_gates": list(BUILD_GATES),
             "target_kinds": list(TARGET_KINDS),
             "executions": list(EXECUTIONS),
             "origins": list(ORIGINS),
@@ -395,6 +567,7 @@ def contract() -> dict[str, Any]:
             "completions": list(COMPLETIONS),
             "outcomes": list(OUTCOMES),
             "rejections": list(REJECTIONS),
+            "build_rejections": list(BUILD_REJECTIONS),
         },
     }
 
@@ -563,16 +736,22 @@ def validate_resolved_plan(document: Any) -> list[str]:
     Problems in document order. Each begins with a code from [`REJECTIONS`] so
     a caller can classify without parsing prose.
     """
+    # Version before shape, deliberately. A document from an older schema
+    # usually differs in BOTH, and the field check would then report the field
+    # it lacks — sending the reader after a corrupt document when the answer is
+    # that this tool moved on. Guarded on presence because the field check
+    # below is what proves the key exists at all.
+    if isinstance(document, dict) and "schema_version" in document:
+        if document["schema_version"] != RESOLVED_PLAN_SCHEMA_VERSION:
+            return [
+                f"unknown-schema-version: resolved plan is version "
+                f"{document['schema_version']!r}, this tool writes "
+                f"{RESOLVED_PLAN_SCHEMA_VERSION}"
+            ]
+
     problems = _keys("resolved plan", document, RESOLVED_PLAN_FIELDS)
     if problems:
         return problems
-
-    if document["schema_version"] != RESOLVED_PLAN_SCHEMA_VERSION:
-        return [
-            f"unknown-schema-version: resolved plan is version "
-            f"{document['schema_version']!r}, this tool writes "
-            f"{RESOLVED_PLAN_SCHEMA_VERSION}"
-        ]
 
     for field in ("base", "head"):
         problems += _sha(f"resolved plan {field}", document[field])
@@ -696,12 +875,258 @@ def validate_resolved_plan(document: Any) -> list[str]:
                 )
         problems += _cell_consistency(label, entry)
 
+    problems += _build_records(document, packages)
+
     if "evidence_rejections" in document:
         problems += _str_list(
             "resolved plan evidence_rejections", document["evidence_rejections"]
         )
     if not isinstance(document["job_estimate"], int) or document["job_estimate"] < 0:
         problems.append("malformed-receipt: resolved plan job_estimate must be a non-negative integer")
+    if "event" in document:
+        problems += _member("resolved plan event", document["event"], EVENTS, "malformed-receipt")
+    scheduled = {
+        environment.get("name")
+        for environment in document["environments"]
+        if isinstance(environment, dict)
+    }
+    for field, key in (("deferred_environments", "events"), ("proven_environments", "event")):
+        if field not in document:
+            continue
+        entries = document[field]
+        if not isinstance(entries, list) or not entries:
+            problems.append(f"malformed-receipt: resolved plan {field} must be a non-empty list")
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"name", key}:
+                problems.append(
+                    f"malformed-receipt: resolved plan {field} entries carry exactly "
+                    f"'name' and '{key}'"
+                )
+                continue
+            problems += _member(f"resolved plan {field} name", entry["name"], ENVIRONMENTS, "unknown-environment")
+            if entry["name"] in scheduled:
+                problems.append(
+                    f"malformed-receipt: resolved plan {field} names {entry['name']!r}, "
+                    "which the plan also schedules"
+                )
+            if key == "events":
+                problems += _str_list(f"resolved plan {field} events", entry["events"], EVENTS)
+            else:
+                problems += _member(f"resolved plan {field} event", entry["event"], EVENTS, "malformed-receipt")
+    return problems
+
+
+def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[str]:
+    """Every reason the plan's build ownership is invalid, or an empty list.
+
+    The invariants are the specification's Design Decision 1, machine-checked
+    before any workflow acts on the plan: one compatible owner per executing
+    test cell, no build key with two owners, no dangling reference, no
+    unconsumed build, and nothing at all attached to lint or check.
+    """
+    builds = document.get("builds")
+    if not isinstance(builds, list):
+        return ["malformed-receipt: resolved plan builds must be a list"]
+
+    problems: list[str] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    environment_names = {
+        environment.get("name")
+        for environment in document.get("environments", [])
+        if isinstance(environment, dict)
+    }
+
+    for entry in builds:
+        problems += _keys("build record", entry, BUILD_FIELDS)
+        if not isinstance(entry, dict) or "key" not in entry:
+            continue
+        key = entry["key"]
+        label = f"build {entry.get('package')}/{entry.get('producer')}/{key}"
+        if not isinstance(key, str) or not _BUILD_KEY.fullmatch(key):
+            problems.append(
+                f"malformed-receipt: {label} key is not a 16-digit hex build key; the "
+                "key is computed only through `ci-build key`"
+            )
+        if key in by_key:
+            problems.append(
+                f"malformed-receipt: build key {key} has two owners, "
+                f"{by_key[key].get('producer')!r} and {entry.get('producer')!r}; one "
+                "key is compiled exactly once"
+            )
+            continue
+        by_key[key] = entry
+
+        if entry.get("package") not in packages:
+            problems.append(
+                f"unknown-package: {label} names a package the plan does not select"
+            )
+        problems += _str_list(
+            f"{label} compatible_environments",
+            entry.get("compatible_environments"),
+            ENVIRONMENTS,
+        )
+        compatible = entry.get("compatible_environments")
+        if isinstance(compatible, list):
+            if compatible != sorted(set(compatible)):
+                problems.append(
+                    f"malformed-receipt: {label} compatible_environments must be sorted "
+                    "and free of duplicates"
+                )
+            if entry.get("producer") not in compatible:
+                problems.append(
+                    f"malformed-receipt: {label} producer is not among its own "
+                    "compatible_environments"
+                )
+        if entry.get("producer") not in environment_names:
+            problems.append(
+                f"unknown-environment: {label} names producer "
+                f"{entry.get('producer')!r}, which is not in the plan's environment table"
+            )
+        expected_artifact = (
+            f"build-{entry.get('package')}-{entry.get('producer')}-{key}"
+        )
+        if entry.get("artifact") != expected_artifact:
+            problems.append(
+                f"malformed-receipt: {label} artifact is {entry.get('artifact')!r}, "
+                f"expected {expected_artifact!r}"
+            )
+        if not isinstance(entry.get("compatibility_reason"), str) or not entry[
+            "compatibility_reason"
+        ]:
+            problems.append(f"malformed-receipt: {label} has no compatibility reason")
+        problems += _build_consumers(label, entry, compatible)
+        problems += _build_identity(label, entry)
+
+    problems += _build_references(document, by_key)
+    return problems
+
+
+def _build_consumers(
+    label: str, entry: dict[str, Any], compatible: Any
+) -> list[str]:
+    consumers = entry.get("consumers")
+    if not isinstance(consumers, list) or not consumers:
+        return [
+            f"malformed-receipt: {label} has no consumer; a build nothing executes is "
+            "removed rather than scheduled"
+        ]
+    problems: list[str] = []
+    seen = []
+    for consumer in consumers:
+        problems += _keys(f"{label} consumer", consumer, BUILD_CONSUMER_FIELDS)
+        if not isinstance(consumer, dict):
+            continue
+        problems += _member(
+            f"{label} consumer gate", consumer.get("gate"), BUILD_GATES, "unknown-gate"
+        )
+        problems += _member(
+            f"{label} consumer environment",
+            consumer.get("environment"),
+            ENVIRONMENTS,
+            "unknown-environment",
+        )
+        if isinstance(compatible, list) and consumer.get("environment") not in compatible:
+            problems.append(
+                f"malformed-receipt: {label} is consumed in "
+                f"{consumer.get('environment')!r}, which its producer's contract does "
+                "not declare compatible"
+            )
+        seen.append((consumer.get("environment"), consumer.get("gate")))
+    if seen != sorted(set(seen), key=lambda pair: (str(pair[0]), str(pair[1]))):
+        problems.append(
+            f"malformed-receipt: {label} consumers must be sorted by "
+            "{environment, gate} and free of duplicates"
+        )
+    return problems
+
+
+def _build_identity(label: str, entry: dict[str, Any]) -> list[str]:
+    identity = entry.get("identity")
+    problems = _keys(f"{label} identity", identity, BUILD_IDENTITY_FIELDS)
+    if problems or not isinstance(identity, dict):
+        return problems
+    if identity.get("package") != entry.get("package"):
+        problems.append(
+            f"malformed-receipt: {label} identity names package "
+            f"{identity.get('package')!r}"
+        )
+    problems += _str_list(f"{label} identity target_kinds", identity.get("target_kinds"), TARGET_KINDS)
+    for field in ("cargo_config", "native", "archive_includes", "sidecars"):
+        problems += _str_list(f"{label} identity {field}", identity.get(field))
+        value = identity.get(field)
+        if isinstance(value, list) and value != sorted(value):
+            problems.append(f"malformed-receipt: {label} identity {field} must be sorted")
+    for field in ("source_commit", "lockfile", "rust", "nextest", "host", "target", "profile", "linker", "archive_format"):
+        if not isinstance(identity.get(field), str) or not identity[field]:
+            problems.append(
+                f"malformed-receipt: {label} identity {field} must be a non-empty string"
+            )
+    if not isinstance(identity.get("rustflags"), str) or not isinstance(
+        identity.get("features"), str
+    ):
+        problems.append(
+            f"malformed-receipt: {label} identity rustflags and features must be "
+            "strings; an absent value is the empty string"
+        )
+    return problems
+
+
+def _build_references(
+    document: dict[str, Any], by_key: dict[str, dict[str, Any]]
+) -> list[str]:
+    """The cell side of build ownership: every reference and every demand."""
+    problems: list[str] = []
+    demanded: dict[str, list[tuple[str, str]]] = {key: [] for key in by_key}
+    for entry in document.get("cells", []):
+        if not isinstance(entry, dict):
+            continue
+        label = f"cell {entry.get('package')}/{entry.get('environment')}/{entry.get('gate')}"
+        reference = entry.get("build")
+        executes_a_tier = (
+            entry.get("execution") == "execute" and entry.get("gate") in BUILD_GATES
+        )
+        if reference is None:
+            if executes_a_tier:
+                problems.append(
+                    f"malformed-receipt: {label} will execute but references no build; "
+                    "a test execution without one would compile its own"
+                )
+            continue
+        if not executes_a_tier:
+            problems.append(
+                f"malformed-receipt: {label} references build {reference!r}, but only an "
+                "executing L1, L2, or browser cell consumes one"
+            )
+            continue
+        record = by_key.get(reference)
+        if record is None:
+            problems.append(
+                f"malformed-receipt: {label} references build {reference!r}, which the "
+                "plan does not carry"
+            )
+            continue
+        if record.get("package") != entry.get("package"):
+            problems.append(
+                f"malformed-receipt: {label} references build {reference!r}, which "
+                f"compiles {record.get('package')!r}"
+            )
+        demanded[reference].append((entry.get("environment"), entry.get("gate")))
+
+    for key, record in by_key.items():
+        consumers = record.get("consumers")
+        if not isinstance(consumers, list):
+            continue
+        listed = sorted(
+            (consumer.get("environment"), consumer.get("gate"))
+            for consumer in consumers
+            if isinstance(consumer, dict)
+        )
+        if listed != sorted(demanded[key]):
+            problems.append(
+                f"malformed-receipt: build {record.get('package')}/{key} lists consumers "
+                f"{listed} but the cells referencing it are {sorted(demanded[key])}"
+            )
     return problems
 
 
@@ -822,6 +1247,15 @@ def validate_receipt(document: Any) -> list[str]:
         if not isinstance(entry.get("duration_s"), (int, float)) or entry["duration_s"] < 0:
             problems.append(f"malformed-receipt: {label} duration_s must be a non-negative number")
         problems += _str_list(f"{label} backends", entry.get("backends"))
+        build = entry.get("build")
+        if build is not None:
+            problems += _keys(f"{label} build", build, RECEIPT_BUILD_FIELDS)
+            if isinstance(build, dict):
+                for field in ("key", "digest"):
+                    if not _IDENTITY.fullmatch(str(build.get(field))):
+                        problems.append(
+                            f"malformed-receipt: {label} build {field} is not a digest"
+                        )
         failed = entry.get("failed_tests", [])
         problems += _str_list(f"{label} failed_tests", failed)
         if isinstance(failed, list) and len(failed) > FAILURE_DETAIL_LIMIT:

@@ -29,7 +29,7 @@ use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 /// The real claudine package area (parent of this crate's manifest dir) — the
 /// source of the committed `_schema.yaml` sidecar the fixtures validate against.
 fn real_area() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf()

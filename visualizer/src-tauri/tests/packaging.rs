@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 use serde_json::Value;
 
 fn manifest_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
 }
 
 fn tauri_config() -> Value {

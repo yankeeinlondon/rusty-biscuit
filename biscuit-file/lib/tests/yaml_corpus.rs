@@ -14,6 +14,7 @@
 //! - the output is reconstructable from the original bytes plus the accepted
 //!   spans alone, so nothing outside an accepted edit can change.
 
+use biscuit_test_harness::manifest_dir;
 use biscuit_file::{EditSetOutcome, analyze_yaml};
 use serde::Deserialize;
 
@@ -64,10 +65,7 @@ struct RepairedCase {
 }
 
 fn corpus() -> Corpus {
-    // `concat!` with `CARGO_MANIFEST_DIR` resolves at compile time and uses
-    // the platform's own separator handling in `Path`, so this works
-    // unchanged on Windows.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = manifest_dir!()
         .join("tests")
         .join("corpus")
         .join("yaml_corpus.json");

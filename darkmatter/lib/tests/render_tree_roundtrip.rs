@@ -25,12 +25,12 @@ use renderable::tree::{
 
 /// Reads a fixture from `tests/fixtures/render_tree/`.
 fn fixture(name: &str) -> String {
-    let path = format!(
-        "{}/tests/fixtures/render_tree/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("failed to read fixture {path}: {err}"))
+    let path = biscuit_test_harness::manifest_dir!()
+        .join("tests/fixtures/render_tree")
+        .join(name);
+    std::fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!("failed to read fixture {}: {err}", path.display())
+    })
 }
 
 /// Folds a fixture from a virtual source named after the fixture file.

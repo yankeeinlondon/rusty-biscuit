@@ -88,6 +88,17 @@
 # may relocate the reserved directory, but it must remain exclusive to
 # unwrapped local-CI runs.
 #
+# That one reserved directory is also this recipe's answer to CI's producer:
+# every tier it runs is a child of this process and shares that target tree, so
+# the compile CI performs once in `ci-build produce` happens here once too,
+# without serializing an archive. Nothing would consume one — there is no second
+# machine and no second path. What the run still owes a reader is the planned
+# BUILD KEY of the cells it is about to run, printed below, because that key is
+# the only thing by which a local result and a CI result can be said to have
+# compiled the same program. The separated case — another host, another
+# checkout — is `just cross-check`, which uses the same `ci-build` producer,
+# manifest, verifier, and archive-mode tier recipes CI uses.
+#
 # Usage:
 #   just ci-local                       affected packages vs origin/main
 #   just ci-local --lint-only           clippy gates only
@@ -402,15 +413,14 @@ ci-local *args="":
 
 
     # The host's environment names which of a plan's cells are this run's; a
-    # fed plan needs it for every tier, `--l2` for the backend proof.
+    # fed plan needs it for every tier, `--l2` for the backend proof, and the
+    # build-key report below reads it whenever the host can answer. Detection is
+    # best-effort for that report and required for the other two, so a host
+    # without sniff keeps working and only loses the report.
     local_environment=""
-    if (( run_l2 == 1 )) || [[ -n "${plan_in}" ]]; then
-        if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
-            echo "ci-local: --l2 and --plan-in require sniff and jq; run 'just init'." >&2
-            exit 2
-        fi
-        os_json="$(sniff os --json)"
-        case "$(jq -r '.os_type' <<<"${os_json}")" in
+    if command -v sniff > /dev/null 2>&1 && command -v jq > /dev/null 2>&1 \
+        && os_json="$(sniff os --json 2>/dev/null)"; then
+        case "$(jq -r '.os_type // ""' <<<"${os_json}" 2>/dev/null)" in
             MacOS) local_environment="macos-latest" ;;
             Windows) local_environment="windows-latest" ;;
             Linux)
@@ -420,18 +430,53 @@ ci-local *args="":
                     local_environment="ubuntu-latest"
                 fi
                 ;;
-            *) echo "ci-local: unsupported host reported by sniff." >&2; exit 2 ;;
         esac
+    fi
+    if (( run_l2 == 1 )) || [[ -n "${plan_in}" ]]; then
+        if ! command -v sniff > /dev/null 2>&1 || ! command -v jq > /dev/null 2>&1; then
+            echo "ci-local: --l2 and --plan-in require sniff and jq; run 'just init'." >&2
+            exit 2
+        fi
+        if [[ -z "${local_environment}" ]]; then
+            echo "ci-local: unsupported host reported by sniff." >&2
+            exit 2
+        fi
+    fi
+
+    # Every tier below runs in this process tree against one target directory,
+    # so the cells sharing a planned build key are exactly the cells sharing
+    # that tree. Nothing is archived — there is no second machine to hand one
+    # to — but the key is reported, so a local result and a CI result can be
+    # compared by what actually decides whether they compiled the same program.
+    # Grouped by key rather than by package, so a package that somehow resolved
+    # two keys for this environment shows as the two lines it is.
+    if [[ -n "${local_environment}" ]] \
+        && [[ -s "${plan_file}" ]] \
+        && [[ "$(jq -r '(.builds // []) | length' "${plan_file}")" != "0" ]]; then
+        echo
+        echo "Build keys for ${local_environment} (one local target tree, no archive serialized)"
+        echo "  target: ${CARGO_TARGET_DIR}"
+        jq -r --arg e "${local_environment}" '
+            [.cells[] | select(.environment == $e and (.build // "") != "")]
+            | group_by([.package, .build])[]
+            | "  \(.[0].package)  \(.[0].build)  \([.[] | .gate] | unique | join(", "))"
+        ' "${plan_file}"
+        echo "------------------------------------------------"
     fi
 
     # Validate scheduling before treating package results as reusable evidence.
     selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
     # `test_resolved_plan.py` carries the sniff area-drift contract (AC15),
-    # which only runs where sniff is installed — a developer host, not a
-    # hosted runner. `test_runner_loss.py` derives every producer's composite
-    # job label from the shipped workflows, so a rename that would silently
-    # kill runner-loss attribution fails here rather than on a dead runner.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py; do
+    # which runs wherever sniff is installed: a developer host, and `ci.yml`'s
+    # `area-drift` job, which builds it. `test_runner_loss.py` derives every
+    # producer's composite job label from the shipped workflows, so a rename
+    # that would silently kill runner-loss attribution fails here rather than
+    # on a dead runner.
+    # `test_build_key.py` defends the single hashing boundary: a planner that
+    # fell back to a second digest would still emit a plan, and every
+    # downstream comparison against a producer's manifest would stop meaning
+    # anything. It is ~0.1s wherever `scripts/target` already holds `ci-build`.
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else

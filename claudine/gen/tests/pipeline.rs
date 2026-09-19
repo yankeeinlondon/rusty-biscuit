@@ -28,9 +28,13 @@ const ARTIFACT_REL: &str = "unchained-ai/artifacts/models-catalog.json";
 
 /// The real claudine package-area root.
 fn real_area() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("gen crate lives under the claudine package area")
+    static AREA: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    AREA.get_or_init(|| {
+        biscuit_test_harness::manifest_dir!()
+            .parent()
+            .expect("gen crate lives under the claudine package area")
+            .to_path_buf()
+    })
 }
 
 struct Fixture {

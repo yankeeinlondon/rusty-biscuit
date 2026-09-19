@@ -2008,7 +2008,7 @@ mod tests {
         /// equivalence claim.
         #[test]
         fn relevel_output_matches_the_oracle_across_shipped_fixtures() {
-            let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            let dir = biscuit_test_harness::manifest_dir!()
                 .join("../features/2026-07-15-performance-followup/benchmarks/fixtures");
 
             let mut checked = 0;

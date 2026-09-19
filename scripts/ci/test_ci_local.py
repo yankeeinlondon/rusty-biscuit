@@ -10,13 +10,23 @@ import subprocess
 import tempfile
 import sys
 import unittest
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
+import tool_guard  # noqa: E402
+from tool_guard import require_tools, requires_tools  # noqa: E402
 from affected_scope import change_inventory, legacy_scope_document  # noqa: E402
+from workflow_reading import (  # noqa: E402
+    WorkflowLayoutError,
+    job_names,
+    job_run_steps,
+    step_run_lines,
+    step_script,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +35,16 @@ DEVOPS = ROOT / "just" / "devops.just"
 CONSTRAINTS = ROOT / "scripts" / "ci" / "constraints.py"
 PRE_PUSH = ROOT / ".githooks" / "pre-push"
 JUST = shutil.which("just")
+
+#: The only job that runs this suite. `preflight` does not, so the tools below
+#: are declared required in exactly one place and a developer host without them
+#: still skips. It installs `just`; `jq` and a Bash >= 4.4 are in the
+#: ubuntu-latest runner image.
+CI_TOOLING = (
+    "`ci.yml`'s `ci-tooling` job, the only one that runs this suite, which "
+    "installs just and sets BISCUIT_REQUIRE_JUST, BISCUIT_REQUIRE_JQ, and "
+    "BISCUIT_REQUIRE_BASH"
+)
 
 
 def relocate_home(environment: dict[str, str], home: Path) -> None:
@@ -73,7 +93,7 @@ class PrePushEvidenceContractTests(unittest.TestCase):
         self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class CiLocalTests(unittest.TestCase):
     def run_recipe(
         self, threads: str | None = None, cores: int = 16, reports: dict | None = None
@@ -102,6 +122,8 @@ class CiLocalTests(unittest.TestCase):
                         "tiers": ["L1", "L2"],
                         "test_args": "--features terminal-tests,daemon-tests",
                         "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+                        "archive_includes": [],
+                        "sidecars": [],
                         "l2_environments": ["macos-latest"],
                         "l2_backends": ["tmux"],
                     }
@@ -124,6 +146,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
+                "test_build_key.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -251,7 +274,7 @@ class CiLocalTests(unittest.TestCase):
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class ThreadPolicyTests(unittest.TestCase):
     def run_policy(self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False) -> str:
         with tempfile.TemporaryDirectory(prefix="test-thread-policy-") as temporary:
@@ -315,7 +338,7 @@ class ThreadPolicyTests(unittest.TestCase):
         self.assertEqual("4", self.run_policy(4, {"CI": "true"}, sniff_fails=True))
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class L1ThreadForwardingTests(unittest.TestCase):
     def test_canonical_l1_forwards_default_and_preserves_explicit_override(self) -> None:
         lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -394,7 +417,7 @@ class L1ThreadForwardingTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class PlanSurfaceTests(unittest.TestCase):
     """AC17: the reviewable plan shown before a push or other trigger."""
 
@@ -440,6 +463,9 @@ class PlanSurfaceTests(unittest.TestCase):
             "cells": [],
             "accepted_evidence": [],
             "policy_gaps": [],
+            # No cell means no consumer, and an unconsumed build record is
+            # removed rather than left in the plan.
+            "builds": [],
             "prohibited_cells": [],
             "job_estimate": 0,
             "preflight_os": [],
@@ -523,7 +549,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 ),
             },
         ]
-        return {
+        return plan_fixtures.attach_builds({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -548,6 +574,8 @@ class PlanSurfaceTests(unittest.TestCase):
                     "check_args": "-p alpha",
                     "l2_backends": ["tmux"],
                     "runner_tools": [],
+                    "archive_includes": [],
+                    "sidecars": [],
                     "companion_suites": [],
                     "l1_include_slow": False,
                     "native": {},
@@ -559,12 +587,13 @@ class PlanSurfaceTests(unittest.TestCase):
             "cells": cells,
             "accepted_evidence": [],
             "policy_gaps": [],
+            "builds": [],
             "prohibited_cells": [] if prohibited_is_covered else ["alpha/wsl2-ubuntu/L1"],
             "job_estimate": len(cells),
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
             "flags": {},
-        }
+        })
 
     def run_plan_with_output(self) -> tuple[str, dict]:
         """The rendered plan and the canonical JSON `--plan-out` wrote."""
@@ -802,7 +831,7 @@ class PlanSurfaceTests(unittest.TestCase):
 PLANNER = ROOT / "scripts" / "ci" / "affected_scope.py"
 
 
-@unittest.skipUnless(JUST and shutil.which("jq"), "requires just and jq")
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class PlanFedRunTests(unittest.TestCase):
     """The hook's path (ruling D2, audit W14): gates run FROM a resolved plan.
 
@@ -845,6 +874,8 @@ class PlanFedRunTests(unittest.TestCase):
                 "check_args": f"-p {name}",
                 "l2_backends": [],
                 "runner_tools": [],
+                "archive_includes": [],
+                "sidecars": [],
                 "companion_suites": [],
                 "l1_include_slow": False,
                 "native": {},
@@ -888,7 +919,7 @@ class PlanFedRunTests(unittest.TestCase):
             cell("beta", "ubuntu-latest", "lint"),
             cell("beta", "macos-latest", "L1"),
         ]
-        return {
+        return plan_fixtures.attach_builds({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -922,13 +953,14 @@ class PlanFedRunTests(unittest.TestCase):
             ],
             "cells": cells,
             "accepted_evidence": [cells[1]["evidence"]],
+            "builds": [],
             "policy_gaps": [],
             "prohibited_cells": [],
             "job_estimate": 4,
             "preflight_os": ["ubuntu-latest"],
             "preflight_reason": "package-local change",
             "flags": {},
-        }
+        })
 
     def run_fed(self, alpha_reused_outcome: str = "pass", through_env: bool = False) -> dict:
         """Run `just ci-local --l2` from the fed plan; the gate and planner calls."""
@@ -957,6 +989,7 @@ class PlanFedRunTests(unittest.TestCase):
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
+                "test_build_key.py",
             ):
                 (scripts / suite).write_text("", encoding="utf-8")
             stubs = {
@@ -1048,6 +1081,31 @@ class PlanFedRunTests(unittest.TestCase):
         self.assertIn("rerun  alpha/L1", run["stdout"])
         self.assertEqual(1, len(run["planner"]), run["planner"])
 
+    def test_the_cells_that_run_here_report_the_build_key_they_were_planned_for(self) -> None:
+        """Task 6.2: one local target tree, and the key that says what it holds.
+
+        A same-process run serializes no archive, so the planned build key is
+        the only thing by which this run and a CI run can be said to have
+        compiled the same program. It is reported for the cells that run on
+        THIS environment, and for no others.
+        """
+        run = self.run_fed("pass")
+        beta_key = plan_fixtures._key("beta", "macos-latest")
+        alpha_linux_key = plan_fixtures._key("alpha", "ubuntu-latest")
+        self.assertIn(
+            "Build keys for macos-latest (one local target tree, no archive serialized)",
+            run["stdout"],
+        )
+        self.assertIn(f"  beta  {beta_key}  L1", run["stdout"])
+        self.assertNotIn(
+            alpha_linux_key,
+            run["stdout"],
+            "a cell planned for another environment is not this run's build",
+        )
+        # alpha's macOS L1 is reused, so the planner gave it no build record at
+        # all; a reported key here would be an invented one.
+        self.assertNotIn("  alpha  ", run["stdout"].split("Build keys for")[1])
+
     def test_the_environment_form_feeds_the_same_plan_and_writes_it_back_unchanged(self) -> None:
         # The hook hands the plan over as BISCUIT_CI_PLAN_IN; `--plan-out` must
         # then be that plan byte-for-byte, evidence rejections included, so
@@ -1066,92 +1124,6 @@ class PlanFedRunTests(unittest.TestCase):
 WORKFLOW = Path(os.environ.get("CI_WORKFLOW_UNDER_TEST") or ROOT / ".github" / "workflows" / "ci.yml")
 SCOPE_STEP = "Calculate package and area scope"
 NULL_OID = "0" * 40
-
-
-def workflow_step_script(workflow: Path, step_name: str) -> str:
-    """The `run: |` body of one named step, dedented into a standalone script.
-
-    The stdlib has no YAML parser, so this leans on the workflow's fixed
-    layout: a step opens at six spaces, its keys sit at eight, and a block
-    scalar's lines at ten. Reaching the next step before `run: |` fails
-    loudly rather than borrowing a neighbor's script.
-    """
-    lines = workflow.read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"      - name: {step_name}")
-    run_index = None
-    for index in range(start + 1, len(lines)):
-        if lines[index].startswith("      - "):
-            break
-        if lines[index] == "        run: |":
-            run_index = index
-            break
-    if run_index is None:
-        raise AssertionError(f"step {step_name!r} has no `run: |` block")
-    indent = 10
-    body: list[str] = []
-    for line in lines[run_index + 1 :]:
-        if line.strip() and len(line) - len(line.lstrip()) < indent:
-            break
-        body.append(line[indent:])
-    return "\n".join(body) + "\n"
-
-
-class JobStep:
-    """One `run:` step of a job: its name, script, and whether a failure is fatal."""
-
-    def __init__(self, name: str, script: str, continue_on_error: bool) -> None:
-        self.name = name
-        self.script = script
-        self.continue_on_error = continue_on_error
-
-
-def workflow_job_run_steps(workflow: Path, job: str) -> list[JobStep]:
-    """Every `run:` step of one job, in order, as standalone scripts.
-
-    `uses:` steps have no script and are skipped. Same fixed-layout reading as
-    `workflow_step_script`: a job opens at two spaces, its steps at six, a
-    step's keys at eight, and a block scalar's lines at ten. Running the whole
-    job rather than one step is what lets a test see a toolchain step that
-    precedes the scope decision — a single extracted step cannot.
-    """
-    lines = workflow.read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"  {job}:") + 1
-    end = next(
-        (index for index in range(start, len(lines)) if lines[index][:2] == "  " and lines[index][2:3] not in (" ", "")),
-        len(lines),
-    )
-    steps: list[JobStep] = []
-    index = start
-    while index < end:
-        if not lines[index].startswith("      - "):
-            index += 1
-            continue
-        step_end = next(
-            (candidate for candidate in range(index + 1, end) if lines[candidate].startswith("      - ")),
-            end,
-        )
-        # Six spaces off every line: the `- ` key lands at two, the rest of
-        # the keys at two, and a block scalar's lines at four.
-        step = ["  " + lines[index][len("      - "):]] + [line[6:] for line in lines[index + 1 : step_end]]
-        name = next((line[len("  name: "):] for line in step if line.startswith("  name: ")), "")
-        continue_on_error = "  continue-on-error: true" in step
-        script: str | None = None
-        for position, line in enumerate(step):
-            if line == "  run: |":
-                body = []
-                for following in step[position + 1 :]:
-                    if following.strip() and len(following) - len(following.lstrip()) < 4:
-                        break
-                    body.append(following[4:])
-                script = "\n".join(body) + "\n"
-                break
-            if line.startswith("  run: "):
-                script = line[len("  run: "):] + "\n"
-                break
-        if script is not None:
-            steps.append(JobStep(name, script, continue_on_error))
-        index = step_end
-    return steps
 
 
 BASH_OVERRIDE = "BISCUIT_TEST_BASH"
@@ -1306,19 +1278,21 @@ class WorkflowScopeStepTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if STEP_BASH is None or not shutil.which("jq"):
-            message = (
-                f"requires {STEP_BASH_REQUIREMENT}; set {BASH_OVERRIDE} to point at one "
-                f"(tried: {', '.join(bash_candidates(os.environ))})"
-            )
-            # A developer host may lack a modern Bash, and skipping there is
-            # honest. The hosted `ci-tooling` job is the only place these
-            # contracts are guaranteed to execute, so a skip there would be a
-            # green cell that verified nothing.
-            if os.environ.get("CI"):
-                raise AssertionError(message)
-            raise unittest.SkipTest(message)
-        steps = workflow_job_run_steps(WORKFLOW, "scope")
+        # A developer host may lack a modern Bash, and skipping there is
+        # honest. The hosted `ci-tooling` job is the only place these contracts
+        # are guaranteed to execute, so a skip there would be a green cell that
+        # verified nothing — which is what BISCUIT_REQUIRE_BASH rules out.
+        require_tools(
+            "bash",
+            "jq",
+            enforced_by=CI_TOOLING,
+            detail=(
+                f"This class needs {STEP_BASH_REQUIREMENT}; set {BASH_OVERRIDE} to "
+                f"point at one (tried: {', '.join(bash_candidates(os.environ))})."
+            ),
+            locate=lambda tool: STEP_BASH if tool == "bash" else shutil.which(tool),
+        )
+        steps = job_run_steps(WORKFLOW, "scope")
         names = [step.name for step in steps]
         if SCOPE_STEP not in names:
             raise AssertionError(f"the scope job has no {SCOPE_STEP!r} run step")
@@ -1409,6 +1383,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
             )
             rustup.chmod(0o755)
             if scope_receipt is not None:
+                self.receipt_event = event
                 fixture_git(root, "notes", "--ref", SCOPE_REF, "add", "-f", "-m",
                             scope_receipt(root, base, head), head)
             for receipt in ([{}] if validation_receipt else []) + list(evidence or []):
@@ -1498,11 +1473,17 @@ class WorkflowScopeStepTests(unittest.TestCase):
             raise AssertionError(f"{name} {' '.join(args)} failed: {result.stderr}")
         return result.stdout
 
+    #: The event the receipt under construction is planned for: `run_step`
+    #: sets it to the event it is about to run, as the hook plans for the
+    #: event the push will trigger. A receipt for another event must miss.
+    receipt_event: str | None = None
+
     def planned_documents(self, root: Path, base: str, head: str) -> tuple[dict, dict]:
         """The real planner's plan and projection for the fixture's `base..head`."""
+        event_args = ["--event", self.receipt_event] if self.receipt_event else []
         projection = json.loads(self.tool(
             root, "affected_scope.py", "--plan-out", "receipt-plan.json",
-            "--base", base, "--head", head, "--", "README.md", SOURCE_FILE,
+            "--base", base, "--head", head, *event_args, "--", "README.md", SOURCE_FILE,
         ))
         plan = json.loads((root / "receipt-plan.json").read_text(encoding="utf-8"))
         (root / "tool-calls.log").unlink(missing_ok=True)
@@ -1660,8 +1641,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual(1, len(run.planner_calls), run.planner_calls)
         self.assertIn("--apply-to", run.planner_calls[0])
         self.assertEqual("consulted: macos-latest; matched: macos-latest", run.summary_row("validation environments"))
-        # The check cell rides on the same L1 pass (`check_evidence`).
-        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # No check rides on the macOS pass: check is a single-environment gate
+        # hosted on Linux (fixes/2026-09-18-ci-cadence, decision 3).
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("none", run.summary_row("cells retained (evidence incomplete or rejected)"))
 
     # -- the summary's evidence provenance (2026-09-10 spec R9, AC15) --------
@@ -1700,8 +1682,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual({("macos-latest", "pass")}, reused)
         self.assertEqual("consulted: macos-latest, ubuntu-latest; matched: macos-latest",
                          run.summary_row("validation environments"))
-        # The check cell rides on the same L1 pass (`check_evidence`).
-        self.assertEqual("2: biscuit-hash/macos-latest/check, biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
+        # No check rides on the macOS pass: check is a single-environment gate
+        # hosted on Linux (fixes/2026-09-18-ci-cadence, decision 3).
+        self.assertEqual("1: biscuit-hash/macos-latest/L1", run.summary_row("reused passing cells"))
         self.assertEqual("1 rejection(s): failed-cell (1)", run.summary_row("cells retained (evidence incomplete or rejected)"))
         self.assertEqual([], run.rustup_calls)
 
@@ -1725,6 +1708,30 @@ class WorkflowScopeStepTests(unittest.TestCase):
                 self.assertTrue(run.scope_source().startswith(f"CI fallback ({code}:"), run.scope_source())
                 self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
                 self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+
+    def test_a_receipt_planned_for_another_event_falls_back(self) -> None:
+        # A plan schedules the environments of the event it was planned for,
+        # so a push-event receipt (Windows planned, say) cannot stand in for a
+        # pull request, and one planned with no event at all cannot either.
+        def push_receipt(root: Path, base: str, head: str) -> str:
+            self.receipt_event = "push"
+            return self.local_scope_receipt(root, base, head)
+
+        def eventless_receipt(root: Path, base: str, head: str) -> str:
+            self.receipt_event = None
+            return self.local_scope_receipt(root, base, head)
+
+        for label, receipt in (("push", push_receipt), ("none", eventless_receipt)):
+            with self.subTest(label):
+                run = self.run_step("pull_request", scope_receipt=receipt)
+                self.assertTrue(
+                    run.scope_source().startswith("CI fallback (scope-event-mismatch:"),
+                    run.scope_source(),
+                )
+                self.assertNotEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+                self.assertEqual("pull_request", run.plan["event"])
+                self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+                self.assertIn("--event pull_request", run.planner_calls[0])
 
     def test_a_receipt_of_another_schema_version_falls_back(self) -> None:
         def future(root: Path, base: str, head: str) -> str:
@@ -1798,8 +1805,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
     EVIDENCE_PLAN_FIELDS = (
         "accepted_evidence", "evidence_rejections", "prohibited_cells", "job_estimate",
         "change_class", "preflight_os", "preflight_reason",
+        # A cell satisfied by evidence stops demanding its build, and a record
+        # whose last consumer is satisfied is removed. The overlay derives no
+        # key — it only drops demand the carried plan already computed.
+        "builds",
     )
-    EVIDENCE_CELL_FIELDS = ("execution", "origin", "state", "evidence", "prohibition")
+    EVIDENCE_CELL_FIELDS = (
+        "execution", "origin", "state", "evidence", "prohibition", "build",
+    )
 
     @classmethod
     def without_evidence(cls, plan: dict) -> str:
@@ -1833,6 +1846,25 @@ class WorkflowScopeStepTests(unittest.TestCase):
         carried = json.loads(receipts["text"])["plan"]
         self.assertEqual(self.without_evidence(carried), self.without_evidence(run.plan))
         self.assertEqual([carried["cells"][0]["package"]], [cell["package"] for cell in run.plan["cells"][:1]])
+
+        # The reused macOS L1 cell was biscuit-hash's only consumer of the macOS
+        # build, so the overlay removes that record while every other producer's
+        # survives. No key is recomputed: the overlay reads no checkout.
+        def macos_builds(plan: dict) -> list[str]:
+            return [
+                record["key"]
+                for record in plan["builds"]
+                if record["package"] == "biscuit-hash" and record["producer"] == "macos-latest"
+            ]
+
+        self.assertEqual(1, len(macos_builds(carried)), carried["builds"])
+        self.assertEqual([], macos_builds(run.plan), run.plan["builds"])
+        self.assertTrue(run.plan["builds"], "unrelated producers must keep their records")
+        self.assertTrue(
+            {record["key"] for record in run.plan["builds"]}
+            <= {record["key"] for record in carried["builds"]},
+            "the overlay may only remove records, never mint one",
+        )
 
     def test_the_projection_on_an_evidence_hit_is_derived_from_the_written_plan(self) -> None:
         run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
@@ -1937,10 +1969,13 @@ class WorkflowGateStepTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.script = workflow_step_script(WORKFLOW, GATE_STEP)
+        cls.script = step_script(WORKFLOW, GATE_STEP)
+        require_tools(
+            "bash",
+            enforced_by=CI_TOOLING,
+            locate=lambda tool: STEP_BASH or shutil.which(tool),
+        )
         cls.bash = STEP_BASH or shutil.which("bash")
-        if cls.bash is None:
-            raise unittest.SkipTest("requires a Bash")
 
     def fold(self, results: dict[str, str], script: str | None = None) -> subprocess.CompletedProcess:
         env_block = "".join(f"{job}:{result}\n" for job, result in results.items())
@@ -2072,11 +2107,119 @@ class StepBashResolverTests(unittest.TestCase):
         self.assertLess(first_p1, first_p2)
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "requires Bash and jq")
+ABSENT: Callable[[str], object] = lambda tool: None
+PRESENT: Callable[[str], object] = lambda tool: f"/fake/bin/{tool}"
+
+
+class ToolGuardTests(unittest.TestCase):
+    """`tool_guard`, in all three directions a host-tool guard can go.
+
+    Presence and environment are injected rather than reached for: a test that
+    mutated PATH or `os.environ` to prove a guard would leak that mutation into
+    every other class in this file.
+    """
+
+    def test_a_present_tool_runs_the_contract(self) -> None:
+        tool_guard.require_tools(
+            "just", "jq", enforced_by=CI_TOOLING, locate=PRESENT, environment={}
+        )
+
+    def test_an_absent_undeclared_tool_skips_and_names_where_it_is_enforced(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment={}
+            )
+        message = str(raised.exception)
+        self.assertIn("jq is absent", message)
+        self.assertIn("ci-tooling", message)
+        self.assertIn("BISCUIT_REQUIRE_JQ", message)
+
+    def test_an_absent_tool_the_job_declared_fails_instead_of_skipping(self) -> None:
+        with self.assertRaises(AssertionError) as raised:
+            tool_guard.require_tools(
+                "jq",
+                enforced_by=CI_TOOLING,
+                locate=ABSENT,
+                environment={"BISCUIT_REQUIRE_JQ": "1"},
+            )
+        message = str(raised.exception)
+        self.assertIn("BISCUIT_REQUIRE_JQ declared jq provisioned", message)
+        self.assertIn("ci-tooling", message)
+
+    def test_only_the_absent_tool_decides_and_only_its_own_variable(self) -> None:
+        # `just` present, `jq` absent, and only `just` declared: the declaration
+        # that matters is the missing tool's, so this still skips.
+        with self.assertRaises(unittest.SkipTest):
+            tool_guard.require_tools(
+                "just",
+                "jq",
+                enforced_by=CI_TOOLING,
+                locate=lambda tool: None if tool == "jq" else "/fake/bin/just",
+                environment={"BISCUIT_REQUIRE_JUST": "1"},
+            )
+
+    def test_a_multi_tool_guard_names_every_missing_tool(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "just", "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment={}
+            )
+        self.assertIn("just, jq are absent", str(raised.exception))
+
+    def test_the_detail_reaches_the_message(self) -> None:
+        with self.assertRaises(unittest.SkipTest) as raised:
+            tool_guard.require_tools(
+                "jq",
+                enforced_by=CI_TOOLING,
+                detail="Set BISCUIT_TEST_BASH to point at one.",
+                locate=ABSENT,
+                environment={},
+            )
+        self.assertTrue(str(raised.exception).endswith("Set BISCUIT_TEST_BASH to point at one."))
+
+    def test_a_guard_cannot_be_written_without_naming_its_enforcing_job(self) -> None:
+        # The defect this module replaces, made unrepresentable: `enforced_by`
+        # is keyword-only with no default.
+        with self.assertRaises(TypeError):
+            tool_guard.require_tools("jq")  # type: ignore[call-arg]
+
+    def test_the_declaring_variable_is_derived_from_the_tool_name(self) -> None:
+        self.assertEqual("BISCUIT_REQUIRE_SNIFF", tool_guard.declaring_variable("sniff"))
+        self.assertEqual(
+            "BISCUIT_REQUIRE_CARGO_NEXTEST", tool_guard.declaring_variable("cargo-nextest")
+        )
+
+    def test_the_class_decorator_skips_fails_and_runs_the_same_three_ways(self) -> None:
+        for variables, expected in (
+            ({}, unittest.SkipTest),
+            ({"BISCUIT_REQUIRE_JQ": "1"}, AssertionError),
+        ):
+            with self.subTest(environment=variables):
+                @tool_guard.requires_tools(
+                    "jq", enforced_by=CI_TOOLING, locate=ABSENT, environment=variables
+                )
+                class Guarded(unittest.TestCase):
+                    pass
+
+                with self.assertRaises(expected):
+                    Guarded.setUpClass()
+
+        ran: list[str] = []
+
+        @tool_guard.requires_tools("jq", enforced_by=CI_TOOLING, locate=PRESENT, environment={})
+        class Present(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls) -> None:
+                ran.append(cls.__name__)
+
+        Present.setUpClass()
+        self.assertEqual(["Present"], ran)
+
+
+@requires_tools("bash", "jq", enforced_by=CI_TOOLING)
 class NativeProvisioningTests(unittest.TestCase):
     def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
         step = next(
-            step for step in workflow_job_run_steps(ROOT / ".github/workflows" / workflow, job)
+            step for step in job_run_steps(ROOT / ".github/workflows" / workflow, job)
             if step.name == "Install native prerequisites"
         )
         with tempfile.TemporaryDirectory(prefix="ci-native-") as temporary:
@@ -2116,13 +2259,45 @@ class NativeProvisioningTests(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertEqual([], self.provision("_package-ci.yml", job, "ubuntu-latest", {}, []))
 
-    def test_archive_setup_installs_only_the_packages_own_closure(self) -> None:
-        self.assertEqual(
-            ["_ensure-native-libs", "own-dev"],
-            self.provision("_wsl-ci.yml", "archive", "ubuntu-latest",
-                           {"ubuntu-latest": ["own-dev"]}, ["consumer-dev"]),
+    def provision_owner(self, native: list) -> list[str]:
+        """The build owner's provisioning step, which takes a flat list.
+
+        The owner leg is given the prerequisites of the ONE record it compiles,
+        already resolved for its producer's runner label by the planner — not a
+        runner-keyed map to index into.
+        """
+        step = next(
+            step
+            for step in job_run_steps(ROOT / ".github/workflows/ci.yml", "build")
+            if step.name == "Install native prerequisites"
         )
-        self.assertEqual([], self.provision("_wsl-ci.yml", "archive", "ubuntu-latest", {}, []))
+        with tempfile.TemporaryDirectory(prefix="ci-native-owner-") as temporary:
+            output = Path(temporary) / "arguments"
+            environment = os.environ.copy()
+            environment.update(NATIVE=json.dumps(native), NATIVE_OUTPUT=str(output))
+            result = subprocess.run(
+                [
+                    shutil.which("bash"),
+                    "-c",
+                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + step.script,
+                ],
+                cwd=temporary,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            return output.read_text().splitlines() if output.exists() else []
+
+    def test_the_build_owner_installs_only_its_own_records_closure(self) -> None:
+        # The WSL2 archive producer that used to own this step is gone: the
+        # guest consumes the run's Linux build, and that build's owner installs
+        # exactly what the record it compiles needs.
+        self.assertEqual(
+            ["_ensure-native-libs", "own-dev"], self.provision_owner(["own-dev"])
+        )
+        self.assertEqual([], self.provision_owner([]))
 
     def test_native_names_are_passed_as_literal_arguments(self) -> None:
         self.assertEqual(
@@ -2130,6 +2305,107 @@ class NativeProvisioningTests(unittest.TestCase):
             self.provision("_package-ci.yml", "check", "ubuntu-latest",
                            {"ubuntu-latest": ["literal*name", "name with spaces"]}, []),
         )
+
+
+MUTANTS = Path(__file__).resolve().parent / "fixtures" / "workflow_mutants"
+
+#: Mutants that really are a different workflow, so a reader that reads them
+#: differently is right rather than broken. Measured with `yaml.safe_load`
+#: during Spike 1; `comment-in-block` and `trailing-blank` add a line to a
+#: literal block scalar, `folded-scalar` rejoins one, and `alias-run` replaces
+#: a step's script.
+CHANGED_MUTANTS = frozenset({"folded-scalar", "comment-in-block", "trailing-blank", "alias-run"})
+
+#: `{mutant: {probe: "raises" | "differs"}}`, every probe not named here
+#: reading exactly what it reads on `base.yml`. A `differs` is only admissible
+#: for a `CHANGED_MUTANTS` entry -- see the non-vacuity test below.
+MUTANT_VERDICTS = {
+    "reindent-job": {"job_run_steps(ci-gate)": "raises", "step_run_lines(gate)": "raises"},
+    "folded-scalar": {"job_run_steps(preflight)": "raises", "step_script(toolchain)": "raises"},
+    "anchor": {},
+    "flow-mapping": {},
+    "key-reorder": {"step_script(toolchain)": "raises"},
+    "comment-in-block": {"job_run_steps(preflight)": "differs", "step_script(toolchain)": "differs"},
+    "quoted-job-name": {
+        "job_names": "raises",
+        "job_run_steps(preflight)": "raises",
+        "job_run_steps(ci-gate)": "raises",
+    },
+    "trailing-blank": {"job_run_steps(preflight)": "differs", "step_script(toolchain)": "differs"},
+    "flow-step": {"job_run_steps(preflight)": "raises"},
+    "alias-run": {"job_run_steps(preflight)": "raises"},
+}
+
+PROBES = {
+    "job_names": lambda path: job_names(path),
+    "job_run_steps(preflight)": lambda path: [
+        (step.name, step.script, step.continue_on_error) for step in job_run_steps(path, "preflight")
+    ],
+    "job_run_steps(ci-gate)": lambda path: [
+        (step.name, step.script, step.continue_on_error) for step in job_run_steps(path, "ci-gate")
+    ],
+    "step_script(toolchain)": lambda path: step_script(path, "Verify toolchain and required tooling"),
+    "step_run_lines(gate)": lambda path: step_run_lines(path, "Fold the blocking jobs' results"),
+}
+
+
+class WorkflowReadingCorpusTests(unittest.TestCase):
+    """`workflow_reading` against YAML it does not implement.
+
+    The reader is an indentation heuristic, which is what keeps `scripts/ci`
+    free of a PyYAML dependency the stock macOS and `build-linux` interpreters
+    do not have. The trade is only sound while every layout it cannot handle
+    makes it REFUSE: a reader that silently returns a shorter step list lets
+    `WorkflowScopeStepTests` execute a shorter job and still pass, and that
+    suite is the only thing that runs `ci.yml`'s scope step for real.
+
+    Each fixture in `fixtures/workflow_mutants/` is one YAML edit to
+    `base.yml`, itself cut verbatim from `ci.yml`. Spike 1 measured each
+    against a `yaml.safe_load` implementation of the same API and found no
+    case where the heuristic reads a mutant differently without refusing.
+    That is the property these tests hold onto.
+    """
+
+    def read(self, mutant: str, probe: str):
+        return PROBES[probe](MUTANTS / f"{mutant}.yml")
+
+    def test_every_mutant_is_either_read_the_same_or_refused(self) -> None:
+        for mutant, verdicts in MUTANT_VERDICTS.items():
+            for probe in PROBES:
+                with self.subTest(mutant=mutant, probe=probe):
+                    expected = verdicts.get(probe, "same")
+                    if expected == "raises":
+                        with self.assertRaises(WorkflowLayoutError):
+                            self.read(mutant, probe)
+                        continue
+                    read = self.read(mutant, probe)
+                    base = PROBES[probe](MUTANTS / "base.yml")
+                    if expected == "same":
+                        self.assertEqual(base, read)
+                    else:
+                        self.assertNotEqual(base, read)
+
+    def test_only_a_semantically_changed_mutant_may_be_read_differently(self) -> None:
+        # The load-bearing half: a silent `differs` on a mutant that did not
+        # change the workflow is the failure mode the heuristic is allowed to
+        # have none of.
+        for mutant, verdicts in MUTANT_VERDICTS.items():
+            for probe, verdict in verdicts.items():
+                if verdict == "differs":
+                    self.assertIn(mutant, CHANGED_MUTANTS, f"{mutant}/{probe}")
+
+    def test_the_corpus_on_disk_is_the_corpus_under_test(self) -> None:
+        # Non-vacuity: a mutant added to the fixtures without a verdict, or a
+        # verdict for a mutant nobody cut, would otherwise pass unnoticed.
+        on_disk = {path.stem for path in MUTANTS.glob("*.yml")} - {"base"}
+        self.assertEqual(set(MUTANT_VERDICTS), on_disk)
+
+    def test_the_base_itself_reads_cleanly(self) -> None:
+        base = MUTANTS / "base.yml"
+        self.assertEqual(["preflight", "ci-gate"], job_names(base))
+        for probe in PROBES:
+            with self.subTest(probe=probe):
+                self.assertTrue(PROBES[probe](base))
 
 
 # ---------------------------------------------------------------------------
@@ -2140,7 +2416,7 @@ class NativeProvisioningTests(unittest.TestCase):
 def workflow_job_block(workflow: Path, job: str) -> list[str]:
     """One job's raw lines, from its `  <id>:` header to the next job's.
 
-    Same fixed-layout reading as `workflow_job_run_steps`, but the whole block
+    Same fixed-layout reading as `job_run_steps`, but the whole block
     rather than only its `run:` steps: the guards these fixtures assert on are
     job keys (`if:`, `name:`, `strategy:`), not step scripts.
     """
@@ -2180,7 +2456,7 @@ class PreflightPrerequisiteTests(unittest.TestCase):
     def test_preflight_runs_no_test_suite(self) -> None:
         offenders = [
             step.name
-            for step in workflow_job_run_steps(WORKFLOW, "preflight")
+            for step in job_run_steps(WORKFLOW, "preflight")
             # `cargo nextest run`, not `cargo nextest`: the retained tooling
             # check runs `cargo nextest --version`, which is a prerequisite
             # probe rather than a suite.
@@ -2199,7 +2475,7 @@ class PreflightPrerequisiteTests(unittest.TestCase):
         # suites must be REMOVED, not the whole job emptied. Slimming preflight
         # by deleting its toolchain and canonical-recipe checks would satisfy
         # AC1 while deleting the bootstrap gate the fan-out depends on.
-        names = {step.name for step in workflow_job_run_steps(WORKFLOW, "preflight")}
+        names = {step.name for step in job_run_steps(WORKFLOW, "preflight")}
         for required in (
             "Verify toolchain and required tooling",
             "Cargo metadata without build acceleration",

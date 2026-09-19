@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 mod common;
 
 fn repository_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .join("../..")
         .canonicalize()
         .unwrap()

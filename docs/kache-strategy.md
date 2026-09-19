@@ -28,7 +28,10 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   (systemd user timer, falling back to cron where no systemd user instance exists —
   build-linux, whose `~/.config` is a read-only CIFS mount). Target hygiene matters
   with or without a cache.
-- **CI: kache removed.** `Swatinem/rust-cache@v2` remains on every native leg. The measured legs
+- **CI: kache removed.** `Swatinem/rust-cache@v2` remains on the legs that still
+  compile — the native build owner, `check`, and `lint`. A test tier consumes a
+  verified archive and restores no cache at all
+  (`fixes/2026-09-12-single-os-compile`). The measured legs
   returned 0–6% hit rates (0.4–2.3% weighted by compile cost, ~2–15s saved) because
   `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
   branch-scoped, so a store shared by all same-platform area jobs could never accumulate.

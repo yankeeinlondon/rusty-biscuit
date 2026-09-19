@@ -40,7 +40,7 @@ const EXPECTED_CALL_SITES: &[&str] = &[
 ];
 
 fn cli_src_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+    biscuit_test_harness::manifest_dir!().join("src")
 }
 
 fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {

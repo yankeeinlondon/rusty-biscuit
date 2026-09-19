@@ -252,7 +252,7 @@ fn missing_discriminator_falls_through_to_provider_extension() {
 
 #[test]
 fn streamed_markdown_list_emits_contiguous_items() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("tests/fixtures/providers/gemini-markdown-list.ndjson");
     let raw = std::fs::read_to_string(&path).expect("fixture exists");
     let (events, mut parser) = new_parser();

@@ -15,12 +15,13 @@ use darkmatter::style::{
     BespokeStyleOverrides, PageStyleOverrides, StyleFrontmatter, apply_bespoke_style,
     apply_page_style, from_frontmatter, into_strict,
 };
+use biscuit_test_harness::manifest_dir;
 use renderable::layout::{Alignment, Length, TargetValue};
 
-/// Locate the fixture relative to `CARGO_MANIFEST_DIR` so the test is
-/// independent of where it's invoked from.
+/// Locate the fixture relative to the run-time manifest directory so the
+/// test is independent of where it's invoked from.
 fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    manifest_dir!()
         .join("..")
         .join("example-docs")
         .join("rendering")
