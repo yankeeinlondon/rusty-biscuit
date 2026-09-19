@@ -327,7 +327,7 @@ fn nested_span_error_renders_property_literal_rewrite_and_escape_hint() {
 fn single_pass_inventory_matches_the_authored_claudine_schema() {
     use std::collections::BTreeSet;
 
-    let schema_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../darkmatter/docs/schemas");
+    let schema_dir = biscuit_test_harness::manifest_dir!().join("../../darkmatter/docs/schemas");
     let load = |name: &str| -> serde_json::Value {
         let text = std::fs::read_to_string(schema_dir.join(name)).expect("schema readable");
         biscuit_file::serde_yaml_ng::from_str(&text).expect("schema is YAML")

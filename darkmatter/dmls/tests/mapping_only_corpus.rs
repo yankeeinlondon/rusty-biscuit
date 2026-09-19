@@ -27,7 +27,7 @@ use lsp_types::{InitializeParams, Uri};
 use serde_json::Value;
 
 fn manifest_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
 }
 
 /// Every corpus document as `(stable name, absolute path)`, sorted by name.

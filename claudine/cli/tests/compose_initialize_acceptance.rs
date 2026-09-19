@@ -577,7 +577,7 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
 /// under `prompts/`, with fixture-owned spec/plan data at the reported
 /// `fixes/2026-09-14-cicd-improvements/` location and no log file.
 fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str) {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = biscuit_test_harness::manifest_dir!();
     let repository = manifest.ancestors().nth(2).expect("repository root");
     write(
         &accept.path("prompts/implement.md"),
