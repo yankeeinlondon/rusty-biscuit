@@ -3532,6 +3532,101 @@ fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
     assert_eq!(cells[0].origin, Origin::Unproduced);
 }
 
+#[test]
+fn a_check_the_plan_reused_through_its_l1_receipt_expects_no_producer_status() {
+    // PR #84: the pushing host's L1 satisfied both areas' macOS check cells
+    // (`affected_scope.check_evidence`), so CI scheduled no macOS job and no
+    // status was uploaded. `status_cells` read that silence as MISSING and
+    // blocked the area, while the same reuse on a JUnit-backed tier passed.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["target_kinds"] = serde_json::json!(["example", "bench"]);
+    cell["compile_coverage_from"] = serde_json::json!("check");
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let cells = status_cells(
+        &[],
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    );
+
+    assert_eq!(cells.len(), 1);
+    let cell = &cells[0];
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.origin, Origin::Local);
+    assert!(cell.scheduled);
+    assert_eq!(cell.counts, None, "an L1 test count is not a check measurement");
+    assert_eq!(cell.target_kinds, vec!["example".to_owned(), "bench".to_owned()]);
+    let evidence = cell.evidence.clone().expect("the L1 receipt is still named");
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+    assert_eq!(
+        evidence.measurements,
+        "compile-only; covered by the passing L1 on macos-latest"
+    );
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.starts_with("reused local evidence from")),
+        "{:?}",
+        cell.reasons
+    );
+}
+
+#[test]
+fn a_status_uploaded_for_a_reused_check_is_the_result_reported() {
+    // Mirrors the JUnit-tier rule: work the plan reused but a job executed
+    // anyway is reported from the executed result, not the receipt.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let statuses = vec![ProducerStatus {
+        package: "claudine".to_owned(),
+        job: "check".to_owned(),
+        result: "failure".to_owned(),
+        environment: Some("macos-latest".to_owned()),
+        detail: Some("bench target failed to compile".to_owned()),
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: Some(4.0),
+        dependents: Vec::new(),
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.origin, Origin::Ci);
+    assert_eq!(cell.evidence, None);
+    assert_eq!(cell.duration_s, Some(4.0));
+}
+
 // --- AC11: area scope, and a summary that applies no policy --------------
 
 #[test]

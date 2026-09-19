@@ -14,10 +14,11 @@ use super::discovery::{
     DeltaKind, PathHistoryOptions, PathHistoryResult, get_commit_by_sha_fallible,
     get_commit_files_fallible, get_commits_for_branch_fallible, get_commits_for_path_fallible,
 };
+use super::commit_links::{CommitLink, link_commits};
 use super::merge_conflicts::merge_conflicts_between;
 use super::open;
 use super::status::detect_merge_conflicts_fallible;
-use super::types::{BranchInfo, CommitInfo, GitHostingProvider};
+use super::types::{BranchInfo, CommitInfo};
 use crate::Result;
 
 /// Working-directory root of the repository containing `path`.
@@ -273,17 +274,56 @@ pub fn remote_url(path: &Path, name: &str) -> Result<Option<String>> {
     Ok(remote_url_from_config(&repo, name))
 }
 
-/// Browser URL for viewing `sha` on the repository's `origin` provider.
+/// Remote containment and browser link for each of `shas`, in input order.
+///
+/// Containment is decided from locally recorded remote-tracking refs only (no
+/// fetch or provider request), walking remotes in preferred-remote order
+/// under a bounded commit-visit budget; see [`CommitLink`] for the meaning of
+/// each field.
+///
+/// ## Returns
+///
+/// One [`CommitLink`] per input. A SHA that is not a full hexadecimal object
+/// id, or any SHA when `path` is not inside a repository, yields
+/// [`CommitLink::default`] (undetermined, no URL).
+///
+/// ## Errors
+///
+/// Trust/ownership, permission, I/O, corruption, and ref-store failures
+/// surface as [`SniffError::Git`].
+pub fn commit_links_at(path: &Path, shas: &[&str]) -> Result<Vec<CommitLink>> {
+    let Some(repo) = open::trusted_discover(path)? else {
+        return Ok(vec![CommitLink::default(); shas.len()]);
+    };
+    let parsed: Vec<Option<gix::ObjectId>> = shas
+        .iter()
+        .map(|sha| gix::ObjectId::from_hex(sha.as_bytes()).ok())
+        .collect();
+    let targets: Vec<gix::ObjectId> = parsed.iter().flatten().copied().collect();
+    let mut links = link_commits(&repo, &targets)?.into_iter();
+    Ok(parsed
+        .into_iter()
+        .map(|id| match id {
+            Some(_) => links.next().unwrap_or_default(),
+            None => CommitLink::default(),
+        })
+        .collect())
+}
+
+/// Browser URL for viewing `sha` on the preferred remote that contains it.
+///
+/// A thin wrapper over [`commit_links_at`]: the URL is `None` when no local
+/// remote-tracking ref contains the commit, when containment is undetermined,
+/// or when the containing remote's provider has no browser URL.
 ///
 /// ## Errors
 ///
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn commit_browser_url(path: &Path, sha: &str) -> Result<Option<String>> {
-    let Some(repo) = open::trusted_discover(path)? else {
-        return Ok(None);
-    };
-    Ok(remote_url_from_config(&repo, "origin").and_then(|url| browser_url_from_url(&url, sha)))
+    Ok(commit_links_at(path, &[sha])?
+        .pop()
+        .and_then(|link| link.commit_url))
 }
 
 /// Read `remote.<name>.url` straight from config so the exact stored string is
@@ -292,27 +332,4 @@ fn remote_url_from_config(repo: &gix::Repository, name: &str) -> Option<String> 
     repo.config_snapshot()
         .string(format!("remote.{name}.url").as_str())
         .map(|v| v.to_string())
-}
-
-/// Compose the `origin`-provider browser URL for `sha`, or `None` when `url`
-/// has no recognized provider.
-fn browser_url_from_url(url: &str, sha: &str) -> Option<String> {
-    let provider = GitHostingProvider::from_url(url);
-    let base = provider.browser_base_url()?;
-
-    let owner_repo = if url.contains('@') && url.contains(':') {
-        url.split(':')
-            .next_back()
-            .map(|s| s.trim_end_matches(".git").to_string())
-    } else if url.contains("://") {
-        let segment = url.split('/').skip(3).collect::<Vec<_>>().join("/");
-        Some(segment.trim_end_matches(".git").to_string())
-    } else {
-        None
-    }?;
-
-    Some(format!(
-        "{base}/{owner_repo}/{}/{sha}",
-        provider.commit_path_segment()
-    ))
 }

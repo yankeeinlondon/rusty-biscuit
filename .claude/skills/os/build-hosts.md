@@ -71,6 +71,16 @@ directly; use your own worktree for ad hoc sessions.
 - Child-process stderr is not shown by a remote test failure. A probe that
   must be read back can append to `W:\ci-verification\probe.txt` and be read
   with `ssh "$BUILD_WIN" "Get-Content W:\ci-verification\probe.txt"`.
+- The `wsl` leg can print `FAIL` in the summary after a run whose own
+  `cross-check-exit:` marker is `0` and whose every test passed. Read the
+  marker, not the summary, before calling the leg red. Observed 2026-09-15:
+  the archive run writes its JUnit report to `<clone>/target/nextest/ci/
+  test-results.xml`, which is neither path `publish_wsl_receipt` looks in, so
+  the receipt step reports "produced no JUnit report"; the same fresh `target`
+  makes the restoring `mv target.hold target` nest the warm cache at
+  `target/target.hold` instead of restoring it, so the next WSL run also
+  rebuilds from cold. Both are `scripts/cross-check.sh` bookkeeping, not the
+  package under test.
 
 ## Storage rules on the Windows host
 
@@ -102,6 +112,17 @@ once filled the system drive to zero bytes and froze the host.
   On 2026-09-16 `W:` reported 0 GB free, and SSH to `$BUILD_WSL` failed at
   key exchange with `Connection reset by peer`. The guest's VHDX lives on
   `W:`, so treat a WSL reset as the same storage problem, not a network one.
+- The standing cross-check clone `W:\ci-verification\rusty-biscuit` does not
+  inherit that `target-dir` pin: it builds into its own `target\`, which the
+  daily `RustyBiscuit-CargoSweep` (scoped to `W:/rusty-biscuit-target`) never
+  touches. On 2026-09-17 that `target\` plus an orphan
+  `W:\ci-verification\rb-pr66` (62 GB, 2026-08-30) and the 131 GB WSL VHDX
+  left `W:` at 8 KB free while the sweep log reported success with
+  `free_gib=0`. A full `W:` fails `--os windows` at the patch upload (`scp
+  ... Failure`, `No space left on device`). The same day the WSL guest (its
+  VHDX lives on `W:`) reset every SSH connection
+  (`kex_exchange_identification: Connection reset`), so suspect a full `W:`
+  first when both legs fail together. Freeing `W:` is the owner's call.
 
 A stale lock on a standing clone does not block Linux evidence. Build a
 private clone that only *reads* the standing one: `git clone --shared

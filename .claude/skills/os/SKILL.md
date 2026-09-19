@@ -115,6 +115,10 @@ push mode.
 - **Red in the WSL guest at provisioning with a 403:** anonymous GitHub API
   rate limit from a shell-script installer; fixed once, recorded in
   [wsl.md](wsl.md) so it is not re-diagnosed.
+- **Red in the WSL guest with "lost communication with the server", killed at
+  ~45 minutes, no log:** the runner agent died during provisioning. Open and
+  instrumented, not fixed; read "Lost runner during provisioning" in
+  [wsl.md](wsl.md) before deciding it is noise.
 - **Slow on one leg only, or a timing delta under 15%:** read the runner
   sizes and per-leg profile in [ci-runners.md](ci-runners.md) before calling
   it a regression. macOS has the fewest cores, Windows the slowest build,

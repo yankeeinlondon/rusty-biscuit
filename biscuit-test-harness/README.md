@@ -274,7 +274,8 @@ Terminal.app is GUI-automated via `osascript` and is the most fragile
 backend. Several issues bite anyone editing `apple_terminal.rs`:
 
 1. **Window identity (title-independent registry).** Spawned windows get a
-   custom title (`biscuit-test-terminal-<pid>`), but it is not load-bearing:
+   custom title (`biscuit-test-terminal-<owner pid>-<pid>-<n>`), but it is not
+   load-bearing:
    an interactive shell prompt can overwrite the window title, and identity
    must survive that. Every owned spawn records its window id in
    `${TMPDIR}/biscuit-test-terminal-registry.jsonl`; the reaper closes

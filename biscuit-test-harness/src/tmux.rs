@@ -243,7 +243,7 @@ impl TmuxHarness {
         cmd.args(["send-keys", "-t", &session, key_name]);
         let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
         if !out.status.success() {
-            return Err(io::Error::other("tmux send-keys (key-name) failed"));
+            return Err(send_failure("send-keys (key-name)", &session, &out));
         }
         Ok(())
     }
@@ -430,7 +430,7 @@ impl TerminalHarness for TmuxHarness {
         cmd.args(["send-keys", "-t", &session, "-l", s]);
         let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
         if !out.status.success() {
-            return Err(io::Error::other("tmux send-keys failed"));
+            return Err(send_failure("send-keys", &session, &out));
         }
         Ok(())
     }
@@ -452,13 +452,43 @@ impl TerminalHarness for TmuxHarness {
 }
 
 /// Generates a unique tmux session name so concurrent test runs don't
-/// collide. Mixes process id and a monotonic counter to keep cleanup
-/// under control if the harness is dropped without `kill_session`.
+/// collide: `biscuit_test_<owner>_<spawner>_<n>`.
+///
+/// The owner (see [`super::owner_process_id`]) is what the reaper checks for
+/// liveness and is the first segment so [`tmux_pid_from_session`] finds it.
+/// The spawning process id and a per-process counter make the name unique:
+/// under `_test_l2` every test process shares the recipe's pid as owner, and
+/// a test that spawns its own session would otherwise collide with the
+/// broker's shared session on `<owner>_0`.
 fn unique_session_name() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("biscuit_test_{}_{n}", std::process::id())
+    format!(
+        "{SESSION_PREFIX}{}_{}_{n}",
+        super::owner_process_id(),
+        std::process::id()
+    )
+}
+
+/// The error for a `send-keys` that tmux rejected: its own diagnostic plus
+/// the sessions the server holds now, which is what tells a session that was
+/// killed under the harness apart from a server that is gone.
+fn send_failure(what: &str, session: &str, out: &std::process::Output) -> io::Error {
+    let mut listing = Command::new("tmux");
+    listing.arg("ls");
+    let sessions = match run_with_timeout(&mut listing, QUERY_TIMEOUT) {
+        Ok(listed) if listed.status.success() => String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .collect::<Vec<_>>()
+            .join(", "),
+        Ok(listed) => String::from_utf8_lossy(&listed.stderr).trim().to_owned(),
+        Err(e) => format!("tmux ls: {e}"),
+    };
+    io::Error::other(format!(
+        "tmux {what} failed for session {session}: {}; sessions now: {sessions}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    ))
 }
 
 fn tmux_pid_from_session(name: &str) -> Option<u32> {
@@ -512,6 +542,18 @@ mod tests {
         assert!(
             !args.iter().any(|a| a.ends_with(" -l")),
             "no argument may be a pre-joined `<shell> -l` command string: {args:?}"
+        );
+    }
+
+    #[test]
+    fn session_names_carry_the_owner_first_and_never_repeat() {
+        let first = unique_session_name();
+        let second = unique_session_name();
+        assert_ne!(first, second);
+        assert_eq!(tmux_pid_from_session(&first), Some(crate::owner_process_id()));
+        assert!(
+            first.contains(&format!("_{}_", std::process::id())),
+            "the spawning process keeps the name unique across processes: {first}"
         );
     }
 

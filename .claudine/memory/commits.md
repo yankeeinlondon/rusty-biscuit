@@ -222,6 +222,29 @@ belong here.
   of the dated-fix case above — same `planning(<area>): schedule <name>`
   shape; see `c36f72fd0c` adding `features/2026-09-09-more-context/spec.md`,
   `0b80ca7c9` adding `features/2026-09-15-dasherized-identifiers/spec.md`),
+  **new plan.md / implementation-log.md / spike-*.md added to an
+  active `features/YYYY-MM-DD-<name>/` directory whose `spec.md` is
+  already tracked at HEAD** is `planning(<area>): record execution plan
+  for <name> feature` (the features/ analog of the dated-fix
+  record-execution-plan case above); when a single commit lands the
+  expanded spec, the plan, AND a spike report together (e.g.
+  `d97996487` `planning(sniff): record decisions and execution plan for
+  recent-commits feature` for sniff/features/2026-09-15-recent-commits
+  with modified `spec.md`, new `plan.md`, and new `spike-linking-cost.md`
+  referenced from spec.md Decision 9), the spec/plan/spike
+  cross-references must resolve within that one commit — splitting
+  them lands a spec that cites a non-existent plan or spike file. The
+  spec's modification belongs with the new artifacts because the
+  decisions that distill the spec's expanded content are what the plan
+  derives from and the spike is what one of those decisions cites; a
+  separate `docs(sniff): expand spec` commit splits a single planning
+  cycle into two log entries with no boundary between them.
+  Pre-flight `git ls-tree HEAD <dir>` confirms spec is already tracked.
+  See `95216cfd8` for the larger multi-artifact example
+  (`darkmatter/features/2026-09-09-more-context` landed spec.md +
+  decisions.md + plan.md + implementation-log.md in one commit,
+  `planning(darkmatter): record Phase 1-3 execution of more-context
+  feature`).
   AND review-cycle doc edits
   inside a fix/feature directory (`log.md` entry, `review-N.md` flipping
   `implemented: true`, new `review-(N+1).md`, `spec.md` bumping
@@ -282,6 +305,21 @@ belong here.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- A terminal review (`review-N.md` with `ready: true`, `implemented: false`,
+  and no `next:` field) marks the end of a feature/fix, and the close can
+  bundle the FINAL cycle with the directory move into
+  `<area>/<features|fixes>/_completed/` in one atomic commit rather than
+  splitting them. Subject shape: `planning(<area>): close <name> cycle N and
+  move to completed` for the single-cycle terminal variant (e.g.
+  `8ce2121af`), or `close <name> cycles N-M and move to completed` when
+  the implementer's batched work closed several cycles before the final
+  review landed (e.g. `9bb5bd8ac` closing cycles 1-3 with three review
+  files added at once, the terminal review-3 carrying no `next:`, and
+  the spec's `review_iterations` bumped once to the final count). The
+  move and the cycle closure share the same rename-and-bump commit
+  because splitting the renames from the review files leaves a populated
+  `_completed/<name>/` directory without the cycle history until each
+  cycle-close catches up.
 - Multi-spec consolidation is one atomic `planning(<area>):` commit, not
   N+M separate commits: marking N existing specs `status: superseded`
   (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
@@ -294,6 +332,18 @@ belong here.
   relationship between old and new IS the consolidation — commit both
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
+- `planning(<area>): close <fix> as invalidated` is distinct from
+  `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
+  (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
+  <date>` to the frontmatter and prepends a viability-review section
+  that names the upstream work that pre-empted the fix and the
+  contracts the proposed boundary would have violated. The original
+  investigation is retained as historical evidence; requirements and
+  success criteria are explicitly marked superseded by the review. Do
+  not confuse with supersession (consolidation entry above): invalidation
+  has no successor spec and no `superseded_by:` pointer — the proposed
+  work is simply no longer needed. Example: `planning(sniff): close
+  2026-07-22-inefficient-calling fix as invalidated` (`1881b7919`).
 
 - An in-design.md supersede (a decision `D{N}` confirmed and then explicitly
   replaced by `D{N+1}` within the same human review checkpoint, e.g. when
@@ -370,8 +420,17 @@ belong here.
   explicitly: one invocation with all paths positional, or
   `--pathspec-from-file`, never a per-path loop.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
-  <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
-  and the paths reappear staged for a single recommit.
+    <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
+    and the paths reappear staged for a single recommit.
+- Multi-agent batch + `update-ref` chain loss. When agents A and B commit in
+    parallel (B on top of A) and you `update-ref` from B back to A's parent to
+    recover from a bad B, A is severed from HEAD too — A is still reachable
+    from the reflog and from B, but `git log` no longer does. Capture A's SHA
+    before the `update-ref`, fix B's commit (now first), then `git
+    cherry-pick <A-sha>` to restore A on top of the corrected B. Verify the
+    final chain with `git verify-commit` on every recovered commit; the
+    cherry-picked A re-signs with the current author/key, so its hash differs
+    from the original.
 - Active-file race: a path the developer is editing drifts between `add`,
   `status`, and `commit`; re-dispatching never catches a stable snapshot.
   Detect via mtime / repeated `MM`, then commit it directly from the
@@ -594,3 +653,32 @@ belong here.
   do not flag it as a sibling-fix path; leave it alone and report
   the presence of unrelated working-tree changes in the summary so
   the operator knows it pre-dated the operation.
+- A single-file-to-module-directory split (D old file + N A new sub-module
+  files, where the new directory's `mod.rs` re-exports the sub-modules)
+  must ship atomically in one commit. Splitting it lands broken code at
+  every intermediate state: a D without any A's removes the module outright,
+  a partial set of A's leaves callers importing old paths the D removed,
+  and the surviving sub-modules cannot be reached because the `mod.rs`
+  re-export hasn't landed. This is a stronger coupling than the
+  staged-`R` rename case (lines 126-131) — the rename is a single D+A pair
+  with both endpoints in one index fact, while the module split is a D+N
+  where the N re-exports cohere only when all arrive together. The git
+  index makes this look safe to split (each `A` is independently staged),
+  but every intermediate commit fails to compile. Group the D, the
+  `mod.rs`, and every sub-module `A` into a single `--only` pathspec
+  alongside the call-site `M` updates that consume the new module path,
+  even when the sub-modules individually look independent.
+- CLI test files (`cli/tests/cli.rs`, `cli/tests/snapshots.rs`, etc.) that
+  cover both focused subcommands AND aggregate output force the aggregate's
+  library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
+  in the same commit as the CLI tests, even when the aggregate driver is
+  technically library code. The coupling is through the test's imports:
+  the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
+  shape whose struct is owned by the library file, and the test will fail
+  to compile (or test a stale shape) if the library file is committed
+  separately. Splitting "library feat" and "CLI refactor" along the
+  conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
+  coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
+  the CLI test file reveals which library symbols the tests reference,
+  and any of those symbols' defining file belongs with the CLI commit
+  rather than the library one.

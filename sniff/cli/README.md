@@ -174,15 +174,16 @@ sniff repo has-merge-conflict        # Check for merge conflicts
 **Recent Commits and Changes:**
 
 ```bash
-sniff repo recent-commits             # Commits from last 3 days (default)
+sniff repo recent-commits             # The last 10 commits (default)
 sniff repo recent-commits 1w          # Commits from last week
 sniff repo recent-commits today       # Today's commits
-sniff repo recent-commits 10          # The last 10 commits
+sniff repo recent-commits 25 -v       # The last 25 commits with descriptions
 sniff repo source-code-changes 1w     # Source code changes in last week
 sniff repo documentation-changes 1w   # Documentation changes in last week
-# Filter by scope:
+# Filter:
 sniff repo recent-commits --package sniff
 sniff repo recent-commits --package-area sniff
+sniff repo recent-commits --operation fix --author ada
 ```
 
 **Justfile Detection:**
@@ -504,9 +505,9 @@ table summarises the contract; see the per-subcommand docs under
 | `repo is-current-package-area-dirty` | `{ dirty: bool }` (exit 0 when true, 1 when false) |
 | `repo package-area-has-source-code-changes` | `{ has_source_code_changes: bool }` (exit 0/1 mirror) |
 | `repo has-merge-conflict` | `{ has_merge_conflict: bool }` (exit 0/1 mirror) |
-| `repo recent-commits <period>` | Full `CommitDescSet` (no `filter` field) |
-| `repo source-code-changes <period>` | Filtered `CommitDescSet` with `"filter": "source_code"` |
-| `repo documentation-changes <period>` | Filtered `CommitDescSet` with `"filter": "documentation"` |
+| `repo recent-commits [period]` | `[{ hash, datetime, author, operation, scope, heading, description, bullet_points, files, file_types, remote, ... }]` (bare array; see [schema](../docs/topics/repo/recent-commits-schema.md)) |
+| `repo source-code-changes [period]` | The same array, pruned to source-code files and commits that have them |
+| `repo documentation-changes [period]` | The same array, pruned to documentation files and commits that have them |
 | `repo hash <ref>` | `{ commit: {...}, files: [...] }` |
 | `repo root` | `{ root: "<abs-path>" }` |
 | `repo remote <url-or-name>` | `RemoteReport` JSON |
@@ -516,7 +517,7 @@ table summarises the contract; see the per-subcommand docs under
 
 `--perf --json` injects a top-level `performance` field into any
 object-shaped output (everything above except the array shapes); for
-array outputs (`packages`, `package-areas`, `pr`, file lists) the
+array outputs (`packages`, `package-areas`, `pr`, file lists, commit families) the
 array is wrapped in `{ data: [...], performance: {...} }`.
 
 ## Architecture

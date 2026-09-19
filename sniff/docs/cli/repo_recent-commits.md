@@ -1,71 +1,50 @@
 ---
 blast_radius:
-  - sniff/cli/src/args.rs
-  - sniff/cli/src/commands.rs
+  - sniff/cli/src/args/recent_commits.rs
   - sniff/cli/src/output/recent_commits.rs
-  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/git/recent_commits/options.rs
+  - sniff/lib/src/filesystem/git/recent_commits/collect.rs
+  - sniff/lib/src/filesystem/git/recent_commits/payload.rs
+  - sniff/lib/src/filesystem/git/recent_commits/render.rs
+  - sniff/lib/src/filesystem/git/commit_links.rs
 ---
 
 # The `sniff repo recent-commits` Subcommand
 
-Shows commits within a time period, one block per commit. Each block displays a one-line header (short hash, conventional-commit prefix, local time with relative-day label, and commit summary) followed by an optional **Description** sub-block (bullet points parsed from the commit message) and a **Files Impacted** sub-block listing every file the commit changed along with how it changed (`added`, `modified`, `deleted`, `renamed`, `copied`).
+Shows recent commits, one block per commit. Each block has a one-line header (short hash, conventional-commit prefix, local time with a relative-day label, and the commit's heading) followed by the files the commit changed and how it changed them (`added`, `modified`, `deleted`, `moved`). Flags select which commits appear, filter them, and choose how much of each commit to show.
+
+The command is a thin layer over the `sniff` library: selection, filtering, remote linking, and every byte of the report come from `RecentCommits` (see the [Recent Commits topic](../topics/repo/recent-commits.md)). [`source-code-changes`](./repo_source-code-changes.md) and [`documentation-changes`](./repo_documentation-changes.md) share the same arguments and differ only in which files they list.
 
 ## Default Behavior
 
-When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown passed through a terminal renderer:
+When no period is specified, the command shows the **last 10 commits** reachable from `HEAD`, at normal verbosity:
 
 ```
 - [f89f844] refactor(sniff) at 1:01pm Today: improve Option chaining and narrow cfg guards
-
-    **Description:**
-
-    - Use and_then() instead of map().flatten() for more idiomatic Option chaining
-    - Remove unnecessary as i32 cast on header.rtm_addrs (already the correct type)
-    - Narrow parse_bsd_default_route_interface cfg from multi-platform to test-only
-
-    **Files Impacted:**
-
-    - modified: sniff/lib/src/filesystem/mod.rs
-    - modified: sniff/lib/src/network/mod.rs
+  Files Impacted:
+  - modified: sniff/lib/src/filesystem/mod.rs
+  - modified: sniff/lib/src/network/mod.rs
 
 - [c8df5b9] test(sniff) at 12:32pm Today: apply cargo fmt to benchmarks and tests
+  Files Impacted:
+  - modified: sniff/lib/tests/bench_ids_sync.rs
+  - added: sniff/lib/tests/uv_with_install_plan.rs
 
-    **Description:**
-
-    - Reformat import ordering and line wrapping in benchmark cases
-    - Add uv_with_install_plan integration test for UvWithInstall auto-append flow
-    - Standardize assertion formatting across test files
-
-    **Files Impacted:**
-
-    - modified: sniff/lib/tests/bench_ids_sync.rs
-    - added: sniff/lib/tests/uv_with_install_plan.rs
-    - modified: sniff/lib/tests/windows_app_paths_orphan.rs
+- [14bf472] at 8:27pm Yesterday: Merge branch 'main' into feat/better-sniff
+  Files Impacted:
+  - moved: sniff/docs/new-name.md (from sniff/docs/old-name.md)
 ```
 
 Notes:
 
-- The header uses the viewer's local timezone so `Today`/`Yesterday` labels match what the reader expects.
-- Commits older than yesterday are labelled with an absolute date (`2026-04-01 at 9:30am`).
-- File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
-- The **Description** sub-block is omitted entirely when the commit body has no bullet points.
+- Times and the `Today`/`Yesterday` labels use the host's local UTC offset. Commits older than yesterday show an absolute date (`9:30am 2026-04-01`).
+- The short hash links to the commit's page on the remote host only when a locally recorded remote-tracking ref contains the commit and the provider has a browser URL. Nothing is fetched to decide this.
+- File paths link to `file://` URIs, except deleted files. Terminals without OSC8 support show links in `[text](url)` form.
+- Non-conventional commits (such as merges) have no operation or scope in their header.
+- A commit that changed no files (such as a no-change merge) shows `Files Impacted: none`.
+- Long lines wrap at word boundaries to the terminal width.
 
-### Styled terminal output
-
-When rendered to a terminal (anything other than `--plain` or `--json`), the header line uses the following visual treatment so the most important parts of each commit pop without forcing the reader to look up the hash or rewrite the sentence in their head:
-
-| Part of the header | Style |
-|--------------------|-------|
-| `[hash]` — short commit SHA | **bold** (brackets stay unstyled) |
-| Conventional-commit action (e.g. `refactor`) | blue |
-| Scope inside the parens (e.g. `sniff`) | blue **and** dim |
-| The parens `(` / `)` around the scope | blue (not dim) |
-| The literal word `at` before the time | *italic* |
-| Time + relative day label (e.g. `1:01pm Today`) | **bold** |
-| `**Description:**` / `**Files Impacted:**` labels | **bold** |
-| File paths | OSC8 hyperlink to the `file://` URI |
-
-`--plain` keeps the same semantic markdown but strips every ANSI escape so the output is usable in logs, pipes, and PR bodies.
+The styling (bold hash, blue operation, dimmed scope, italic `at`, bold time and labels) is defined by the library. See [Styling](../topics/repo/recent-commits.md#styling) in the topic doc.
 
 ## Period Argument
 
@@ -77,14 +56,16 @@ The optional `PERIOD` argument accepts several formats:
 
 | Format | Example | Meaning |
 |--------|---------|---------|
-| Duration | `3d`, `1w`, `2mo`, `6h` | Relative duration from now |
-| Named | `today` | Since midnight UTC today |
-| Named | `yesterday` | Midnight-to-midnight UTC yesterday |
-| Date | `2026-04-01` | All commits on that date (YYYY-MM-DD) |
-| Hash | `a1b2c3d` | All commits from that hash to HEAD |
-| Count | `10`, `25` | The last N commits reachable from HEAD (bare positive integer) |
+| Count | `10`, `25` | The newest N matching commits (bare positive integer; default `10`) |
+| Duration | `3d`, `1w`, `2mo`, `6h` | Commits within that duration before now |
+| Named | `today` | Since local midnight |
+| Named | `yesterday` | Local midnight-to-midnight yesterday, that day only |
+| Date | `2026-04-01` | That single local calendar day (YYYY-MM-DD) |
+| Hash | `a1b2c3d` | From the starting tip back to and including that commit (at least 7 hex characters) |
 
-Detection is ordered: `today`/`yesterday` → ISO date → bare number (count) → duration → hash. An all-digit argument is always treated as a count, so a SHA that happens to be entirely numeric must be disambiguated by supplying more of the hash (e.g. include a non-digit hex char) or by lengthening the input past the numeric portion.
+Detection is ordered: `today`/`yesterday` → ISO date → bare number (count) → duration → hash. An all-digit argument is always treated as a count, so a SHA that happens to be entirely numeric must be disambiguated by supplying more of the hash (so that it includes a non-digit hex character). A zero count, or a value matching no format, is an error.
+
+Calendar periods use the host's local UTC offset, so a commit selected as "today" is also labeled `Today`. Durations, counts, and hashes do not depend on the offset.
 
 ### Duration Units
 
@@ -100,52 +81,95 @@ Detection is ordered: `today`/`yesterday` → ISO date → bare number (count) �
 
 | Argument | Description |
 |----------|-------------|
-| `[PERIOD]` | Time period (default: `3d`) |
-| `--action <feat\|chore\|refactor\|test\|style\|fix>` | Filter to one or more conventional commit actions |
-| `--package <PKG>` | Scope to commits touching a specific package |
-| `--package-area <AREA>` | Scope to commits touching a specific package area |
-| `--no-error` | Exit 0 with no output when no results found |
-| `--on-error <MESSAGE>` | Message to display when no results found |
+| `[PERIOD]` | Which commits (default: the last 10) |
+| `--operation <OPERATION>` | Keep conventional commits with this operation (any word); repeat to match any of several |
+| `--scope <SCOPE>` | Keep conventional commits with this scope (case-insensitive) |
+| `--author <NAME\|EMAIL>` | Keep commits whose author name or email contains this text (case-insensitive) |
+| `--branch <BRANCH>` | Walk history from this branch instead of `HEAD` (local first, then remote-tracking) |
+| `--package <PKG>` | Keep commits touching this monorepo package |
+| `--package-area <AREA>` | Keep commits touching this monorepo package area |
+| `--source-code` | Keep commits that change source code |
+| `--web` | Keep commits that change web assets (HTML, CSS, fonts) |
+| `--images` | Keep commits that change images |
+| `--documentation` | Keep commits that change documentation |
+| `--configuration` | Keep commits that change configuration |
+| `--cicd` | Keep commits that change CI/CD definitions |
+| `--show-author` | Show each commit's author in its header line |
+| `-v`, `--verbose` | Include each commit's description and bullet points |
+| `-c`, `--compact` | Show only each commit's header line |
 
-## Conventional Commit Action Filtering
+The global `--json`, `--plain`, `--perf`, `--debug`, and `-b/--base <DIR>` flags also apply.
 
-Use `--action` to keep only commits whose summary matches one of these conventional commit actions:
+> **Removed:** `--action` is replaced by `--operation`. `--no-error` and `--on-error` no longer exist on this command because an empty result is a success (see [Empty Results](#empty-results)).
 
-- `feat`
-- `chore`
-- `refactor`
-- `test`
-- `style`
-- `fix`
+## Filtering
 
-The flag may be repeated. When more than one `--action` is provided, the matches are logically OR'd together.
+Every filter is applied while history is walked. Filters of different kinds combine with AND, so `--operation fix --package sniff` keeps only `fix` commits that touched the `sniff` package. With a count period, the walk continues until that many commits _match_ (or history ends), so `sniff repo recent-commits 5 --operation fix` shows the last five fixes, not the fixes among the last five commits.
 
-Non-conventional commits are excluded when `--action` filtering is active.
+### Operation and Scope
 
-## Package Scoping
+`--operation` accepts any [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) operation word, not a fixed list, and matches it case-insensitively. Shell completion suggests common words such as `feat` and `fix`, but `--operation planning` works too. Repeated `--operation` values are OR'd together. Non-conventional commits are excluded when any operation filter is set.
 
-In monorepos, `--package` and `--package-area` filter commits to only those that touched files within the specified scope:
+`--scope` keeps conventional commits whose scope equals the given value, ignoring case.
+
+### Author
+
+`--author` is a case-insensitive substring match against the author's name **or** email, so `--author ada` and `--author example.com` both work. It only filters. To display authors, use `--show-author`, which adds `by {name}` before `at` in each header.
+
+### Branch
+
+`--branch` sets where the history walk starts; it is not a filter on which branch a commit belongs to. A local branch of that name wins; otherwise a remote-tracking branch (`origin/feature`, or `feature` on a configured remote) is used. An unknown branch is an error, and nothing is fetched.
+
+```bash
+sniff repo recent-commits --branch feature      # the last 10 commits on feature's tip
+sniff repo recent-commits 1w --branch origin/main
+```
+
+### Package Scoping
+
+In monorepos, `--package` and `--package-area` keep commits that changed at least one file owned by the given package or by a package in the given area:
 
 ```bash
 sniff repo recent-commits 1w --package sniff-cli
 sniff repo recent-commits --package-area homelab
 ```
 
-Filtering works by matching each commit's changed files against the package or area path. Commits with no matching files are excluded entirely.
+- Ownership comes from the repository's package catalog (the same one `sniff repo packages` uses), and a file belongs only to its deepest owning package.
+- A file inside a package area but outside every package (for example `sniff/README.md`) belongs to no package, so it matches neither filter.
+- Unknown package or area names are errors that list the valid names. Using either flag outside a monorepo is also an error.
+
+### File Categories
+
+The file-category flags keep commits that changed at least one file of that category. Listing several requires **every** listed category (`--source-code --documentation` keeps commits that changed both). Every file belongs to exactly one category; see [File Categories](../topics/repo/recent-commits.md#file-categories) for the precedence. For example, `.html` and CSS files are web assets, and workflow files under `.github/workflows/` are CI/CD, not configuration.
+
+These flags select commits and leave each commit's full file list intact. To show only one category's files, use [`source-code-changes`](./repo_source-code-changes.md) or [`documentation-changes`](./repo_documentation-changes.md).
+
+## Verbosity
+
+| Flag | Output |
+|------|--------|
+| `-c`, `--compact` | Header lines only, with no blank lines between commits |
+| _(none)_ | Header plus `Files Impacted:` list |
+| `-v`, `--verbose` | Header, description, `Details:` bullet points, then `Files Impacted:` |
+
+`-v` and `-c` together at the subcommand level are a usage error. The subcommand's `-v` shares its identity with the global `-v`, so the position does not matter: `sniff -v repo recent-commits` also selects the verbose report, and repeating `-v` does not change anything further. When `-v` comes before the subcommand and `-c` after it, compact wins.
 
 ## Examples
 
 ```bash
-sniff repo recent-commits                    # Last 3 days (default)
+sniff repo recent-commits                    # The last 10 commits (default)
+sniff repo recent-commits 25                 # The last 25 commits
 sniff repo recent-commits 1w                 # Last week
-sniff repo recent-commits today              # Since midnight
+sniff repo recent-commits today              # Since local midnight
 sniff repo recent-commits yesterday          # Yesterday only
-sniff repo recent-commits 2026-04-01         # Specific date
-sniff repo recent-commits a1b2c3d            # From hash to HEAD
-sniff repo recent-commits 10                 # The last 10 commits
-sniff repo recent-commits --action fix       # Only conventional fix commits
-sniff repo recent-commits --action feat --action refactor
+sniff repo recent-commits 2026-04-01         # That local day only
+sniff repo recent-commits a1b2c3d            # From HEAD back to a1b2c3d
+sniff repo recent-commits --operation fix    # The last 10 conventional fix commits
+sniff repo recent-commits --operation feat --operation refactor
 sniff repo recent-commits 2w --package sniff # Last 2 weeks, sniff package only
+sniff repo recent-commits --author ada --show-author
+sniff repo recent-commits --cicd -c          # Recent CI/CD changes, headers only
+sniff repo recent-commits -v 3               # The last 3 commits with full commentary
 ```
 
 ## JSON Output (`--json`)
@@ -154,90 +178,82 @@ sniff repo recent-commits 2w --package sniff # Last 2 weeks, sniff package only
 sniff --json repo recent-commits 1w
 ```
 
-Returns a `CommitDescSet` object:
+Returns a **bare array** of commit objects, newest first:
 
 ```json
-{
-  "commits": [
-    {
-      "hash": "34b6d18a...",
-      "datetime": "2026-04-09T14:32:00+00:00",
-      "packages": ["sniff", "sniff-cli"],
-      "package_areas": ["sniff"],
-      "files": [
-        { "path": "sniff/lib/src/filesystem/git/recent_commits.rs", "kind": "modified" },
-        { "path": "sniff/cli/src/output/recent_commits.rs",        "kind": "modified" }
-      ],
-      "description": "refactor(sniff): use let-chains and simplify parse_commit_message",
-      "bullet_points": [
-        "Replaced nested if/match blocks with let-chains",
-        "Simplified scope extraction logic"
-      ]
-    }
-  ],
-  "period_label": "last 1w",
-  "repo_root": "/absolute/path/to/repo"
-}
+[
+  {
+    "author": { "email": "ada@example.com", "name": "Ada Lovelace" },
+    "bullet_points": ["Replace nested if/match blocks with let-chains"],
+    "datetime": "2026-09-16T14:32:00+00:00",
+    "description": "",
+    "file_types": {
+      "cicd": false,
+      "configuration": false,
+      "documentation": false,
+      "images": false,
+      "source_code": true,
+      "web_assets": false
+    },
+    "files": [
+      {
+        "added": 12,
+        "kind": "modified",
+        "path": "sniff/lib/src/filesystem/git/recent_commits/collect.rs",
+        "removed": 4
+      }
+    ],
+    "hash": "34b6d18a0c1e5f4b2d9a7e6c3b8f1a0d2e4c6b8a",
+    "heading": "use let-chains in commit collection",
+    "operation": "refactor",
+    "package_areas": ["sniff"],
+    "packages": ["sniff"],
+    "remote": false,
+    "scope": "sniff"
+  }
+]
 ```
 
-### `commits` items
+The complete field reference, including which keys are omitted and when `remote` is `null`, is in the [Recent Commits Schema](../topics/repo/recent-commits-schema.md). In brief:
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `hash` | string | Full commit SHA |
-| `datetime` | string | ISO 8601 timestamp |
-| `packages` | array\|null | Package names touched by this commit |
-| `package_areas` | array\|null | Package area names touched by this commit |
-| `files` | array | Per-file change records (see below) |
-| `description` | string | Commit summary line |
-| `bullet_points` | array | Parsed bullet points from commit body |
+- `datetime` is always UTC (`+00:00`).
+- `packages` and `package_areas` are present (possibly empty) only in a monorepo.
+- `remote` is `true`, `false`, or `null` (undetermined), and `commit_url` appears only when a containing remote has a browser URL.
+- `--verbose`, `--compact`, and `--show-author` never change the JSON.
 
-### `files` items
+With `--perf`, the array is wrapped so stdout stays valid JSON: `{ "data": [ ... ], "performance": { ... } }`.
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `path` | string | Repo-relative path of the changed file |
-| `kind` | string | One of `added`, `modified`, `deleted`, `renamed`, `copied` |
-
-### Top-level fields
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `period_label` | string | Human-readable period description |
-| `repo_root` | string | Absolute path to the repository root |
-| `packages` | array\|null | Full package list (present when package filtering is active) |
+> **Breaking change:** the previous `CommitDescSet` object (`commits`, `period_label`, `repo_root`) is gone, the file kinds `renamed` and `copied` are now `moved` (with `original_path`), and commits gained `author`, `heading`, `operation`, `scope`, `file_types`, `remote`, and `commit_url`.
 
 ## Plain Output (`--plain`)
 
-Adding `--plain` strips all ANSI escape codes and OSC8 hyperlinks from the text output. File paths are rendered as plain text instead of clickable links.
+`--plain` prints the same report as bare text: no escape codes, no hyperlinks, and no Markdown markers. Labels print as `Files Impacted:` and `Details:`, and file paths are plain text.
 
-## No-Result Behavior
+> **Behavior change:** earlier releases kept Markdown bold markers such as `**Description:**` in plain output. Plain output now strips all markup.
 
-When no commits match the period (or after filtering), the default is to exit with code 1. This can be customized:
+## Empty Results
 
-```bash
-# Silent success when nothing matches
-sniff repo recent-commits --no-error
+A valid query that matches no commits is a success:
 
-# Custom message when nothing matches
-sniff repo recent-commits --on-error "No commits in this period"
+| Mode | stdout | stderr | Exit |
+|------|--------|--------|------|
+| `--json` | `[]` | nothing | `0` |
+| terminal or `--plain` | nothing | `No commits matched.` | `0` |
 
-# Combined: message to stdout, exit 0
-sniff repo recent-commits --no-error --on-error "All quiet"
-```
+Because stdout stays empty, `$(sniff repo recent-commits --operation release)` is an empty string when nothing matches.
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | One or more commits found |
-| `1` | No commits found (default behavior) |
-| `0` | No commits found with `--no-error` |
+| `0` | Success, including a query that matched no commits |
+| non-zero | An invalid period, unknown branch, unreachable hash, unknown package or area, package filter outside a monorepo, not a Git repository, or unreadable history. The error is printed to stderr and stdout stays empty. |
 
 ## Related Commands
 
 | Command | Purpose |
 |---------|---------|
-| [`sniff repo source-code-changes`](./repo_source-code-changes.md) | Source code files changed in a period, grouped by file |
-| [`sniff repo documentation-changes`](./repo_documentation-changes.md) | Documentation files changed in a period, grouped by file |
+| [`sniff repo source-code-changes`](./repo_source-code-changes.md) | The same commits, listing only their source-code files |
+| [`sniff repo documentation-changes`](./repo_documentation-changes.md) | The same commits, listing only their documentation files |
 | [`sniff repo hash`](./repo_hash.md) | Inspect a single commit by SHA |
+| [`sniff repo`](./repo.md) | The `sniff repo --json` aggregate embeds this command's default JSON |
