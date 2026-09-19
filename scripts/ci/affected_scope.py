@@ -3154,6 +3154,38 @@ def schedule_environments(
     return scheduled, deferred, proven
 
 
+def producing_environments(
+    table: list[dict[str, Any]], scheduled: list[dict[str, Any]]
+) -> list[tuple[dict[str, Any], list[str]]]:
+    """The unscheduled environments a scheduled guest's archive is compiled on.
+
+    An archive-only environment runs what its producer built, so scheduling
+    the guest without its producer would plan cells no owner job could feed.
+    A producer the event does not schedule bears no cell of its own — its
+    lint, check, and test cells were the pull request's — but keeps its build
+    records and its preflight runner (fixes/2026-09-19-nightly-scope). Before
+    that fix `ubuntu-latest` had to stay on the `schedule` event for the
+    WSL2 leg's archives alone, which put 161 Linux cells into every nightly.
+
+    ## Returns
+
+    ``(environment, guests)`` pairs in the table's order: the producer's
+    record and the sorted names of the scheduled guests it produces for.
+    """
+    scheduled_names = {environment["name"] for environment in scheduled}
+    producing: list[tuple[dict[str, Any], list[str]]] = []
+    for environment in table:
+        if environment["name"] in scheduled_names:
+            continue
+        executes = environment.get("build", {}).get("executes", [])
+        guests = sorted(
+            name for name in executes if name in scheduled_names and name != environment["name"]
+        )
+        if guests:
+            producing.append((environment, guests))
+    return producing
+
+
 def calculate_scope(
     files: list[str],
     root: Path,
@@ -3200,9 +3232,24 @@ def calculate_scope(
     `proven_environments` and planned nowhere. See `schedule_environments`.
     """
     packages = workspace_packages(metadata)
-    environments, deferred_environments, proven_environments = schedule_environments(
-        environments, event, all_environments, proven_event
+    table = environments
+    cell_environments, deferred_environments, proven_environments = schedule_environments(
+        table, event, all_environments, proven_event
     )
+    # Producers by demand: a scheduled archive-only guest keeps its producer
+    # in the plan's table for builds and preflight, cell-less. Such a producer
+    # is neither deferred nor proven for this run — it is listed once, in
+    # `producing_environments`, with the guests it compiles for.
+    producing = producing_environments(table, cell_environments)
+    producing_names = {environment["name"] for environment, _ in producing}
+    deferred_environments = [
+        entry for entry in deferred_environments if entry["name"] not in producing_names
+    ]
+    proven_environments = [
+        entry for entry in proven_environments if entry["name"] not in producing_names
+    ]
+    planned_names = {environment["name"] for environment in cell_environments} | producing_names
+    environments = [environment for environment in table if environment["name"] in planned_names]
 
     full_gates = set(GATES) if force_all else set()
     full_scope = bool(full_gates)
@@ -3280,7 +3327,7 @@ def calculate_scope(
             record,
             area,
             target_kinds,
-            environments,
+            cell_environments,
             accepted,
             whole_environments,
             prohibitions,
@@ -3398,6 +3445,10 @@ def calculate_scope(
         plan["deferred_environments"] = deferred_environments
     if proven_environments:
         plan["proven_environments"] = proven_environments
+    if producing:
+        plan["producing_environments"] = [
+            {"name": environment["name"], "for": guests} for environment, guests in producing
+        ]
     return plan
 
 
@@ -3734,15 +3785,23 @@ def classify_preflight(
         # `windows-latest`.
         runner_of = {environment["name"]: environment["runner"] for environment in environments}
         os_set = {SCOPE_HOST_OS}
-        os_set.update(
-            runner_of.get(cell["environment"], cell["environment"])
-            for cell in cells
-            if cell["execution"] == "execute"
-        )
+        for cell in cells:
+            if cell["execution"] != "execute":
+                continue
+            os_set.add(runner_of.get(cell["environment"], cell["environment"]))
+            # The producer that compiles the cell's archive preflights too,
+            # even when it bears no cell of its own (a nightly's Linux owner
+            # for the WSL2 guest): the owner job runs on that runner.
+            if cell["gate"] in schema.BUILD_GATES:
+                try:
+                    producer = producer_of(environments, cell["environment"])
+                except RuntimeError:
+                    continue
+                os_set.add(runner_of.get(producer, producer))
         reason = (
             f"package-local change across {len(gating)} package(s); "
             "preflight covers the scope host plus the runner OS hosting each "
-            "package's required environments"
+            "package's required environments and the producers compiling for them"
         )
         return "package", sorted(os_set), reason
 

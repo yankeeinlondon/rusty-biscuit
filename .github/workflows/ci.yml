@@ -30,12 +30,13 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The nightly full-workspace run. Which environments it plans is the
-  # environment table's decision, not this file's: `wsl2-ubuntu` names only
-  # `schedule` and `workflow_dispatch` in its `events`, `windows-latest` names
-  # `push` as well, and neither runs on a pull request
-  # (fixes/2026-09-18-ci-cadence). macOS is deliberately absent from the
-  # schedule: the development Mac proves it on every push through the hook.
+  # The nightly WSL2 run. Which environments it plans is the environment
+  # table's decision, not this file's: `wsl2-ubuntu` alone names `schedule`
+  # in its `events` (fixes/2026-09-18-ci-cadence, narrowed by
+  # fixes/2026-09-19-nightly-scope). Its Linux producer joins the plan for
+  # its archives only, cell-less; Windows is proven by every push to `main`;
+  # macOS by the development Mac through the hook. The scope is what changed
+  # since the last successful nightly, so an unchanged workspace plans nothing.
   schedule:
     - cron: "0 8 * * *"
   # `measure-compiler-work` is the Phase 1 baseline switch of
@@ -171,12 +172,15 @@ jobs:
           # A reused PR validation proves the environments the pull request
           # event schedules; this push plans only the rest.
           PROVEN_BY_PULL_REQUEST: ${{ needs.validation.outputs.reuse }}
+          # For `nightly-base`: the newest successful nightly is read from
+          # the Actions API.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           scope_args=()
-          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
-            # A manual or nightly full run has no diff range. Its plan records
-            # the all-zero "no such object" ID as the base, the same identity a
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            # A manual full run has no diff range. Its plan records the
+            # all-zero "no such object" ID as the base, the same identity a
             # branch-creating push carries in `github.event.before`, and the
             # tested head; no receipt is verified against that pair.
             base="0000000000000000000000000000000000000000"
@@ -186,6 +190,16 @@ jobs:
             if [[ "$EVENT_NAME" == "pull_request" ]]; then
               base="$PR_BASE"
               head="$PR_HEAD"
+            elif [[ "$EVENT_NAME" == "schedule" ]]; then
+              # The nightly plans what changed since the last successful
+              # nightly on main (fixes/2026-09-19-nightly-scope). The first
+              # nightly, or one with no successful ancestor, has no base and
+              # plans the full workspace like a manual run.
+              base="$(python3 scripts/ci/reuse_validation.py nightly-base)"
+              head="$PUSH_HEAD"
+              if [[ -z "$base" ]]; then
+                base="0000000000000000000000000000000000000000"
+              fi
             else
               base="$PUSH_BASE"
               head="$PUSH_HEAD"

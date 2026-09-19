@@ -16,6 +16,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -107,10 +108,60 @@ def check_validation(
         return "", "Validation evidence could not be verified; running normal CI."
 
 
+def git_is_ancestor(sha: str) -> bool:
+    return subprocess.run(
+        ["git", "merge-base", "--is-ancestor", sha, "HEAD"],
+        capture_output=True, text=True, timeout=15,
+    ).returncode == 0
+
+
+def nightly_base(
+    repo: str,
+    api: Callable[[str], Any] = github_api,
+    is_ancestor: Callable[[str], bool] = git_is_ancestor,
+) -> tuple[str, str]:
+    """The head of the newest successful nightly that this head descends from.
+
+    The nightly plans what changed since the last nightly that proved the
+    workspace (fixes/2026-09-19-nightly-scope), so the base is the newest
+    completed, successful `schedule` run of `ci.yml` on `main` whose head is
+    an ancestor of the current one. A failed nightly is never a base: the
+    packages it failed are still in the diff from the last success. No such
+    run — the first nightly, or a history rewrite — yields `""`, and the
+    caller plans the full workspace.
+    """
+    runs = api(
+        f"repos/{repo}/actions/workflows/ci.yml/runs"
+        "?event=schedule&branch=main&status=success&per_page=20"
+    )["workflow_runs"]
+    candidates = [
+        run for run in runs
+        if run.get("event") == "schedule"
+        and run.get("path") == ".github/workflows/ci.yml"
+        and run.get("status") == "completed"
+        and run.get("conclusion") == "success"
+        and run["repository"]["full_name"] == repo
+    ]
+    for run in sorted(candidates, key=lambda item: int(item["id"]), reverse=True):
+        sha = str(run.get("head_sha", ""))
+        if re.fullmatch(r"[0-9a-f]{40}", sha) and is_ancestor(sha):
+            return sha, f"Planning what changed since the last successful nightly, run {int(run['id'])} at {sha[:9]}."
+    return "", "No successful nightly on main is an ancestor of this head; planning the full workspace."
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("record", "check"))
+    parser.add_argument("mode", choices=("record", "check", "nightly-base"))
     args = parser.parse_args()
+    if args.mode == "nightly-base":
+        try:
+            sha, reason = nightly_base(os.environ["GITHUB_REPOSITORY"])
+        except Exception:
+            # An API or Git failure plans the full workspace, never nothing.
+            sha, reason = "", "The last nightly could not be determined; planning the full workspace."
+        print(sha)
+        print(reason, file=sys.stderr)
+        return
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     sha = os.environ["GITHUB_SHA"]
     if args.mode == "record":
