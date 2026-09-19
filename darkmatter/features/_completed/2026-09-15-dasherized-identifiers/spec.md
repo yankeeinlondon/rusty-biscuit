@@ -1,12 +1,14 @@
 ---
 created: 2026-09-15
-status: draft
 clarified: true
 needs_rulings: false
 clarified_by: opencode/zai-coding-plan/glm-5.3
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-15
+implemented: true
+implemented_by: claude/opus
+review_iterations: 6
 ---
 
 # Dasherized Identifiers
