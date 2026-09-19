@@ -31,6 +31,7 @@ pub use constraints::{
     ConstraintEligibility, ExecutableCondition, ExecutableConstraint, IneligibleReason,
 };
 pub use coverage::{CategoryCoverage, CoverageState, CoverageSummary, InterfaceCoverageSummary};
+pub(crate) use identity::refresh_due_overflow;
 
 /// How complete a document must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

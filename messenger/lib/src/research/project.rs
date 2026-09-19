@@ -21,8 +21,9 @@ use super::canonical::record_fingerprint;
 use super::model::{
     AdapterId, Classification, Date, Direction, InterfaceRole, Overrides, PlatformId, Roster, State,
 };
+use super::diagnostics::{Diagnostic, Rule};
 use super::publish::{InputEntry, SchemaEntry};
-use super::validate::{ConstraintEligibility, InterfaceCoverageSummary, ValidatedDocument};
+use super::validate::{ConstraintEligibility, InterfaceCoverageSummary, ValidatedDocument, refresh_due_overflow};
 
 /// The catalog format tag.
 pub const CATALOG_FORMAT: &str = "messenger-research-catalog/1";
@@ -173,34 +174,53 @@ impl Catalog {
 }
 
 /// Projects validated accepted research into the catalog.
-pub fn project(inputs: CatalogInputs<'_>) -> Catalog {
-    let mut platforms: Vec<CatalogPlatform> = inputs
-        .documents
-        .iter()
-        .map(|accepted| project_platform(accepted, &inputs))
-        .collect();
+///
+/// ## Errors
+///
+/// An SR-ROSTER diagnostic per document whose `refresh_due` would fall after
+/// 9999-12-31. Fleet validation reports the same finding, so a clean fleet
+/// never reaches it.
+pub fn project(inputs: CatalogInputs<'_>) -> Result<Catalog, Vec<Diagnostic>> {
+    let mut platforms = Vec::new();
+    let mut overflows = Vec::new();
+    for accepted in inputs.documents {
+        match project_platform(accepted, &inputs) {
+            Ok(platform) => platforms.push(platform),
+            Err(diagnostic) => overflows.push(diagnostic),
+        }
+    }
+    if !overflows.is_empty() {
+        return Err(overflows);
+    }
     platforms.sort_by(|a, b| a.platform_id.as_str().cmp(b.platform_id.as_str()));
     let mut implementation = inputs.assessments.to_vec();
     implementation.sort_by(|a, b| a.id.cmp(&b.id));
     let mut catalog_inputs = inputs.inputs.to_vec();
     catalog_inputs.sort();
-    Catalog {
+    Ok(Catalog {
         generated: GENERATED_NOTICE,
         format: CATALOG_FORMAT,
         schema: inputs.schema.clone(),
         inputs: catalog_inputs,
         platforms,
         implementation,
-    }
+    })
 }
 
-fn project_platform(accepted: &AcceptedDocument, inputs: &CatalogInputs<'_>) -> CatalogPlatform {
+fn project_platform(accepted: &AcceptedDocument, inputs: &CatalogInputs<'_>) -> Result<CatalogPlatform, Diagnostic> {
     let validated = &accepted.validated;
     let document = validated.document();
     let roster_platform = inputs.roster.platform(document.platform_id);
     let interval = roster_platform
         .and_then(|platform| platform.refresh_interval_days)
         .unwrap_or(inputs.roster.refresh_interval_days);
+    let refresh_due = document.last_updated.checked_plus_days(interval).ok_or_else(|| Diagnostic {
+        path: validated.path().clone(),
+        pointer: "/last_updated".to_string(),
+        rule: Rule::Roster,
+        subject: Some(document.platform_id.to_string()),
+        message: refresh_due_overflow(interval),
+    })?;
 
     let mut interfaces: Vec<CatalogInterface> = document
         .interfaces
@@ -286,7 +306,7 @@ fn project_platform(accepted: &AcceptedDocument, inputs: &CatalogInputs<'_>) -> 
         .unwrap_or_default();
     overrides.sort_by(|a, b| a.id.cmp(&b.id));
 
-    CatalogPlatform {
+    Ok(CatalogPlatform {
         platform_id: document.platform_id,
         name: roster_platform.map_or_else(|| document.platform_id.to_string(), |platform| platform.name.clone()),
         document: DocumentProvenance {
@@ -296,7 +316,7 @@ fn project_platform(accepted: &AcceptedDocument, inputs: &CatalogInputs<'_>) -> 
         },
         created: document.created.clone(),
         last_updated: document.last_updated.clone(),
-        refresh_due: document.last_updated.plus_days(interval),
+        refresh_due,
         interfaces,
         coverage,
         facts,
@@ -305,7 +325,7 @@ fn project_platform(accepted: &AcceptedDocument, inputs: &CatalogInputs<'_>) -> 
         sources: records("sources"),
         changes: records("changes"),
         overrides,
-    }
+    })
 }
 
 fn constraint_key(entry: &ConstraintEligibility) -> (String, String, String) {
@@ -339,17 +359,36 @@ pub(crate) fn sorted(value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::research::model::MAX_REFRESH_INTERVAL_DAYS;
 
     #[test]
-    fn plus_days_crosses_months_years_and_leap_days() {
+    fn checked_plus_days_crosses_months_years_and_leap_days() {
         let date = |text: &str| Date::parse(text).expect("date");
-        assert_eq!(date("2026-09-17").plus_days(30), date("2026-10-17"));
-        assert_eq!(date("2026-12-31").plus_days(1), date("2027-01-01"));
-        assert_eq!(date("2028-02-28").plus_days(1), date("2028-02-29"));
-        assert_eq!(date("2027-02-28").plus_days(1), date("2027-03-01"));
-        assert_eq!(date("2026-01-01").plus_days(0), date("2026-01-01"));
+        let plus = |text: &str, days: u32| date(text).checked_plus_days(days).expect("in range");
+        assert_eq!(plus("2026-09-17", 30), date("2026-10-17"));
+        assert_eq!(plus("2026-12-31", 1), date("2027-01-01"));
+        assert_eq!(plus("2028-02-28", 1), date("2028-02-29"));
+        assert_eq!(plus("2027-02-28", 1), date("2027-03-01"));
+        assert_eq!(plus("2026-01-01", 0), date("2026-01-01"));
         assert_eq!(Date::from_unix_days(0), date("1970-01-01"));
         assert_eq!(Date::from_unix_days(20_713), date("2026-09-17"));
+    }
+
+    #[test]
+    fn checked_plus_days_stops_at_the_last_four_digit_year() {
+        let date = |text: &str| Date::parse(text).expect("date");
+        assert_eq!(date("9999-12-30").checked_plus_days(1), Some(date("9999-12-31")));
+        assert_eq!(date("9999-12-31").checked_plus_days(0), Some(date("9999-12-31")));
+        assert_eq!(date("9999-12-31").checked_plus_days(1), None);
+        assert_eq!(date("9999-12-01").checked_plus_days(31), None);
+        assert_eq!(date("0001-01-01").checked_plus_days(u32::MAX), None);
+    }
+
+    #[test]
+    fn the_largest_interval_fits_every_last_updated_through_9989_12_23() {
+        let date = |text: &str| Date::parse(text).expect("date");
+        assert_eq!(date("9989-12-23").checked_plus_days(MAX_REFRESH_INTERVAL_DAYS), Some(date("9999-12-31")));
+        assert_eq!(date("9989-12-24").checked_plus_days(MAX_REFRESH_INTERVAL_DAYS), None);
     }
 
     #[test]

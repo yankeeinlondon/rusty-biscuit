@@ -14,8 +14,11 @@ use darkmatter::markdown::schemas::DarkmatterSchemas;
 use messenger::research::assess::{AssessmentState, evaluate};
 use messenger::research::canonical::{record_fingerprint, schema_fingerprint, text_fingerprint};
 use messenger::research::model::{
-    Date, ImplementationStatus, Mappings, PlatformDocument, PlatformId, Roster, Stage, StaleReason, Unit,
+    Date, ImplementationStatus, MAX_REFRESH_INTERVAL_DAYS, Mappings, PlatformDocument, PlatformId, Roster, Stage,
+    StaleReason, Unit,
 };
+use messenger::research::project::{AcceptedDocument, CatalogInputs, project};
+use messenger::research::publish::SchemaEntry;
 use messenger::research::validate::{ConstraintEligibility, CoverageState, IneligibleReason};
 use messenger::research::{
     Context, Diagnostic, Loaded, Loader, ResearchError, Rule, Scope, ValidatedDocument, Workspace,
@@ -441,6 +444,64 @@ fn accepted_scope_requires_the_whole_fleet_and_every_roster_interface() {
     let accepted = validate_document(&pilot, &Context { roster: Some(&roster), scope: Scope::Accepted });
     assert!(accepted.diagnostics.iter().all(|d| d.rule == Rule::Gap), "{}", show(&accepted.diagnostics));
     assert!(!accepted.diagnostics.is_empty(), "the pilot rests on open gaps");
+}
+
+/// The schema's `max(3660)` holds for a roster built in code too: the typed
+/// pass accepts the ceiling and rejects the first value past it, for the
+/// default and for a platform override.
+#[test]
+fn refresh_intervals_past_the_ceiling_are_roster_findings() {
+    let loaded = repo_loader().load_roster(&fixture("contract/roster-refresh-interval-max.yaml")).expect("roster");
+    assert!(validate_roster(&loaded, Scope::Fragment).is_empty(), "{}", show(&validate_roster(&loaded, Scope::Fragment)));
+    let pointers = |edit: &dyn Fn(&mut Roster)| {
+        let mut variant = loaded.clone();
+        edit(variant.record.as_mut().expect("typed roster"));
+        let diagnostics = validate_roster(&variant, Scope::Fragment);
+        assert!(diagnostics.iter().all(|d| d.rule == Rule::Roster), "{}", show(&diagnostics));
+        diagnostics.into_iter().map(|d| d.pointer).collect::<Vec<_>>()
+    };
+    assert_eq!(pointers(&|roster| roster.refresh_interval_days = MAX_REFRESH_INTERVAL_DAYS + 1), ["/refresh_interval_days"]);
+    assert_eq!(pointers(&|roster| roster.refresh_interval_days = 0), ["/refresh_interval_days"]);
+    assert_eq!(
+        pointers(&|roster| roster.platforms[0].refresh_interval_days = Some(MAX_REFRESH_INTERVAL_DAYS + 1)),
+        ["/platforms/0/refresh_interval_days"]
+    );
+}
+
+/// A `last_updated` late enough that adding the interval passes 9999-12-31
+/// is an SR-ROSTER finding, and the catalog projection refuses it rather
+/// than writing a five-digit year into `refresh_due`.
+#[test]
+fn a_refresh_date_past_9999_is_a_finding_not_a_catalog_date() {
+    let workspace = TempWorkspace::new();
+    let mut roster = shipped_roster();
+    roster.refresh_interval_days = MAX_REFRESH_INTERVAL_DAYS;
+    let schema = SchemaEntry { version: 1, xxh64: schema_hash(workspace.root()) };
+    let catalog = |accepted: &[AcceptedDocument]| {
+        project(CatalogInputs { roster: &roster, documents: accepted, overrides: None, assessments: &[], schema: &schema, inputs: &[] })
+    };
+    let accept = |path: &Path, context: &Context<'_>| {
+        let loaded = workspace.loader.load_document(path).expect("load");
+        let result = validate_document(&loaded, context);
+        assert!(result.diagnostics.is_empty(), "{}", show(&result.diagnostics));
+        AcceptedDocument::new(result.validated.expect("validated"), &fs::read_to_string(path).expect("read")).expect("hash")
+    };
+
+    let last = workspace.document("last.md", "contract/minimal-valid.md", &[("last_updated: *id001", "last_updated: 9989-12-23")]);
+    let projected = catalog(&[accept(&last, &fragment(&roster))]).expect("representable refresh date");
+    assert_eq!(projected.platform(PlatformId::Discord).expect("discord").refresh_due.as_str(), "9999-12-31");
+
+    let over = workspace.document("over.md", "contract/minimal-valid.md", &[("last_updated: *id001", "last_updated: 9989-12-24")]);
+    let result = validate_document(&workspace.loader.load_document(&over).expect("load"), &fragment(&roster));
+    let found: Vec<(Rule, &str)> = result.diagnostics.iter().map(|d| (d.rule, d.pointer.as_str())).collect();
+    assert_eq!(found, [(Rule::Roster, "/last_updated")], "{}", show(&result.diagnostics));
+
+    // Without a roster the document validates, so only the projection itself
+    // stands between it and the catalog.
+    let unchecked = accept(&over, &Context { roster: None, scope: Scope::Fragment });
+    let refused = catalog(&[unchecked]).expect_err("refresh_due past 9999-12-31");
+    let found: Vec<(Rule, &str)> = refused.iter().map(|d| (d.rule, d.pointer.as_str())).collect();
+    assert_eq!(found, [(Rule::Roster, "/last_updated")], "{}", show(&refused));
 }
 
 /// Stale but structurally valid research stays inspectable: an old

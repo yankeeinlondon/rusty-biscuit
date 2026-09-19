@@ -11,7 +11,7 @@ overrides:
   field: value
   effective_value: '1900'
   target_hash: xxh64:e411ea8353eb4024
-  schema_hash: xxh64:dcdb3d338874ed6d
+  schema_hash: xxh64:d766403489d161d9
   evidence:
   - src.fx.docs
   reason: r

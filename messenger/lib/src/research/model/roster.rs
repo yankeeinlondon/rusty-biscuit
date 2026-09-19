@@ -8,10 +8,20 @@ use serde::{Deserialize, Serialize};
 use super::common::{AdapterId, Date, PlatformId, string_enum};
 use super::document::{InterfaceRole, Relationship};
 
+/// The largest accepted `refresh_interval_days`: ten 366-day years.
+///
+/// A decade is already far beyond any useful research cadence; the ceiling
+/// keeps `last_updated` plus the interval a four-digit-year date for every
+/// `last_updated` through 9989-12-23. A later date that would still pass
+/// 9999-12-31 is an SR-ROSTER finding on the document. The schemas repeat
+/// this value as `max(3660)`.
+pub const MAX_REFRESH_INTERVAL_DAYS: u32 = 3660;
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Roster {
     pub roster_version: u32,
+    /// Default days between refreshes, `1..=`[`MAX_REFRESH_INTERVAL_DAYS`].
     pub refresh_interval_days: u32,
     /// Configurable per-platform cap; the schema ceiling is 10.
     pub curated_source_cap: u32,
@@ -83,6 +93,7 @@ pub struct RosterPlatform {
     pub file: String,
     pub website: String,
     pub api_url: Option<String>,
+    /// Overrides the roster default; same range.
     pub refresh_interval_days: Option<u32>,
     pub interfaces: Vec<RosterInterface>,
     pub curated_sources: Vec<CuratedSource>,

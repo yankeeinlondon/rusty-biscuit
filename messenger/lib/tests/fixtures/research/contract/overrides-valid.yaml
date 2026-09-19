@@ -11,7 +11,7 @@ overrides:
   field: unit
   effective_value: unicode_scalars
   target_hash: xxh64:e411ea8353eb4024
-  schema_hash: xxh64:dcdb3d338874ed6d
+  schema_hash: xxh64:d766403489d161d9
   evidence:
   - src.fx.sdk
   reason: SDK evidence resolves the unit.

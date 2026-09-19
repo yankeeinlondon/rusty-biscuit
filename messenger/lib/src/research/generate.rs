@@ -300,7 +300,8 @@ impl Fleet {
     ///
     /// ## Errors
     ///
-    /// [`GenerateError::Refused`] for an unclean fleet, and
+    /// [`GenerateError::Refused`] for an unclean fleet or a document whose
+    /// `refresh_due` cannot be represented (see [`project`]), and
     /// [`GenerateError::SummaryRegions`] when the authored summary does not
     /// hold exactly one well-formed generated region.
     pub fn snapshot(&self, validation: &FleetValidation) -> Result<(Snapshot, Catalog), GenerateError> {
@@ -328,7 +329,8 @@ impl Fleet {
             assessments: &validation.assessments,
             schema: &self.schema,
             inputs: &inputs,
-        });
+        })
+        .map_err(|diagnostics| GenerateError::Refused { diagnostics, missing: Vec::new() })?;
         let catalog_bytes = catalog.to_bytes();
         let view = CatalogView::parse(&catalog_bytes).expect("a projected catalog parses as a view");
         let region = summary_region(&view);

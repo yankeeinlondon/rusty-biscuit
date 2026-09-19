@@ -246,11 +246,14 @@ pub fn select(loader: &Loader, today: &Date, request: &Request) -> Result<Vec<Se
         let document: Option<&PlatformDocument> = loaded.record.as_ref();
         let mut current = None;
         if let Some(document) = document {
-            let refresh_due = document.last_updated.plus_days(interval);
-            if today >= &refresh_due {
-                due.push(Reason::Expired { refresh_due: refresh_due.clone() });
+            // An unrepresentable refresh date is an SR-ROSTER finding, so the
+            // platform is already due as `SchemaInvalid` and never `Current`.
+            if let Some(refresh_due) = document.last_updated.checked_plus_days(interval) {
+                if today >= &refresh_due {
+                    due.push(Reason::Expired { refresh_due: refresh_due.clone() });
+                }
+                current = Some((document.last_updated.clone(), refresh_due));
             }
-            current = Some((document.last_updated.clone(), refresh_due));
             for (interface, observed) in &request.observed_versions {
                 let belongs = platform.interface(interface).is_some();
                 let known = document

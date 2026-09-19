@@ -687,9 +687,11 @@ mod typed {
     #[test]
     fn positive_roster_overrides_and_mappings_fixtures_are_clean() {
         let contract = fixtures_dir().join("contract");
-        let roster = loader().load_roster(&contract.join("roster-cap-10.yaml")).expect("roster");
-        let diagnostics = validate_roster(&roster, Scope::Fragment);
-        assert!(diagnostics.is_empty(), "roster-cap-10: {}", show(&diagnostics));
+        for name in ["roster-cap-10.yaml", "roster-refresh-interval-max.yaml"] {
+            let roster = loader().load_roster(&contract.join(name)).expect("roster");
+            let diagnostics = validate_roster(&roster, Scope::Fragment);
+            assert!(diagnostics.is_empty(), "{name}: {}", show(&diagnostics));
+        }
 
         let companions = companions();
         let documents: Vec<&ValidatedDocument> = companions.iter().collect();

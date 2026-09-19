@@ -503,6 +503,27 @@ fn an_accepted_document_that_no_longer_validates_is_due() {
     assert!(matches!(due.as_slice(), [Reason::SchemaInvalid { findings }] if *findings > 0), "{due:?}");
 }
 
+/// A published document whose refresh date moves past 9999-12-31 when the
+/// roster interval grows is due as invalid, never `Expired` or `Current`
+/// with a five-digit-year date.
+#[test]
+fn a_refresh_date_past_9999_makes_the_document_invalid_not_expired() {
+    let repo = Repo::new();
+    let discord = document(PlatformId::Discord);
+    repo.write(&discord, &edit(&fleet_text(PlatformId::Discord), "last_updated: 2026-09-10", "last_updated: 9989-12-24"));
+    generate(&repo.loader, &BTreeMap::new(), &day("2026-09-17"), Options::default()).expect("a 30-day interval fits");
+
+    let roster = repo.read(ROSTER).expect("roster");
+    repo.write(ROSTER, &edit(&roster, "refresh_interval_days: 30", "refresh_interval_days: 3660"));
+    let selection = repo.select("2026-09-18", &Request::default()).remove(&PlatformId::Discord).expect("discord");
+    assert!(
+        matches!(selection.due.as_slice(), [Reason::SchemaInvalid { findings: 1 }, Reason::NoReviewRecord]),
+        "{:?}",
+        selection.due
+    );
+    assert_eq!(selection.skip, None);
+}
+
 // ---- prepared inputs -------------------------------------------------------------
 
 #[test]

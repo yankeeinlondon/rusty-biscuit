@@ -6,7 +6,9 @@ Platform research is becoming typed, reviewed metadata (feature
 
 - **Roster** `messenger/docs/platforms.yaml`: five platforms, seven sending
   interfaces whose `adapters` are exactly `ProviderKind::as_str()`, research-only
-  companions (`adapters: []`), curated sources (cap 10 per platform), and
+  companions (`adapters: []`), curated sources (cap 10 per platform),
+  `refresh_interval_days` (default and per-platform override, 1 to
+  `MAX_REFRESH_INTERVAL_DAYS` = 3660 in both schemas and SR-ROSTER), and
   explicit exclusions (email, desktop, APNs, FCM).
 - **Schema v1 (frozen)** `docs/research/platforms/_schema.yaml`, with every named
   type in `_types.yaml` (shared by the roster, overrides, and
@@ -42,7 +44,11 @@ Platform research is becoming typed, reviewed metadata (feature
   snapshot selected; writers refuse with `RecoveryRequired` until `recover`.
 - `research::project` builds the catalog (serialization-only DTOs; sorted by
   spelled IDs; no clock, no host paths; `refresh_due` recorded as a date so
-  staleness is judged by readers). `research::report` reads the published
+  staleness is judged by readers). `Date` is fixed-width `YYYY-MM-DD`, so date
+  arithmetic is `Date::checked_plus_days` (`None` past 9999-12-31): a
+  `last_updated` whose refresh date overflows is an SR-ROSTER finding,
+  `project` returns that diagnostic instead of a catalog, and selection
+  reports the platform `schema_invalid`, never `expired` or current. `research::report` reads the published
   catalog through `CatalogView` (reason codes only, so no executable type can be
   deserialized) and stays available when today's validation fails.
   `research::delta` is the mechanical fact-level comparison with the six fixed

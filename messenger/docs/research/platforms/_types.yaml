@@ -211,7 +211,7 @@ $schema:
     # The curated list is capped at 10 per platform, shared across its
     # interfaces. The cap covers only the reconciliation starting list, never
     # discovery or evidence citations.
-    RosterPlatform: "{ platform_id: PlatformId(required)@this, name: string(required), status: enum(active,paused; required), file: string(pattern('^[a-z]+[.]md$'); required), website: url(scheme(https); required), api_url: url(scheme(https)), refresh_interval_days: number(integer; min(1)), interfaces: RosterInterface[](min(1); required)@this, curated_sources: CuratedSource[](max(10); required)@this, notes: string }"
+    RosterPlatform: "{ platform_id: PlatformId(required)@this, name: string(required), status: enum(active,paused; required), file: string(pattern('^[a-z]+[.]md$'); required), website: url(scheme(https); required), api_url: url(scheme(https)), refresh_interval_days: number(integer; min(1); max(3660)), interfaces: RosterInterface[](min(1); required)@this, curated_sources: CuratedSource[](max(10); required)@this, notes: string }"
     RosterExclusion: "{ subject: string(required), kind: enum(platform,provider,interface; required), status: enum(excluded,paused; required), reason: string(required), existing_research: string }"
 
     # ---- overrides (docs/research/platforms/_overrides.yaml) ---------------

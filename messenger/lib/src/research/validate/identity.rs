@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{Context, Index, Scope, fact_ids, interface_scoped, knowledge_blocks, push};
 use crate::research::diagnostics::{Findings, Rule};
 use crate::research::model::{
-    AdapterId, CuratedReview, InterfaceRole, PlatformDocument, PlatformId, Roster, State, Versioning,
+    AdapterId, CuratedReview, InterfaceRole, MAX_REFRESH_INTERVAL_DAYS, PlatformDocument, PlatformId, Roster, State,
+    Versioning,
 };
 
 pub(super) fn check(d: &PlatformDocument, index: &Index<'_>, context: &Context<'_>, findings: &mut Findings) {
@@ -32,6 +33,10 @@ fn roster_coverage(d: &PlatformDocument, context: &Context<'_>, findings: &mut F
         );
         return;
     };
+    let interval = platform.refresh_interval_days.unwrap_or(roster.refresh_interval_days);
+    if d.last_updated.checked_plus_days(interval).is_none() {
+        push(findings, Rule::Roster, "/last_updated", d.platform_id.as_str(), refresh_due_overflow(interval));
+    }
     for (position, interface) in d.interfaces.iter().enumerate() {
         let pointer = format!("/interfaces/{position}");
         let Some(expected) = platform.interface(&interface.interface_id) else {
@@ -116,15 +121,37 @@ fn interfaces(d: &PlatformDocument, findings: &mut Findings) {
     }
 }
 
+/// The SR-ROSTER message for a document whose refresh date would fall past
+/// the last representable `YYYY-MM-DD` date. The catalog projection reports
+/// the same condition with this message.
+pub(crate) fn refresh_due_overflow(interval: u32) -> String {
+    format!("last_updated plus the {interval}-day refresh interval falls after 9999-12-31")
+}
+
+fn refresh_interval(findings: &mut Findings, pointer: String, subject: Option<&str>, days: u32) {
+    if !(1..=MAX_REFRESH_INTERVAL_DAYS).contains(&days) {
+        findings.push(
+            Rule::Roster,
+            pointer,
+            subject,
+            format!("refresh interval of {days} days is outside 1..={MAX_REFRESH_INTERVAL_DAYS}"),
+        );
+    }
+}
+
 /// Roster file rules (SR-ROSTER, SR-CURATED).
 pub(super) fn check_roster(roster: &Roster, scope: Scope, findings: &mut Findings) {
     let mut adapters: BTreeMap<AdapterId, usize> = BTreeMap::new();
     let mut platforms: BTreeMap<PlatformId, usize> = BTreeMap::new();
     let mut interface_ids: BTreeSet<&str> = BTreeSet::new();
+    refresh_interval(findings, "/refresh_interval_days".to_string(), None, roster.refresh_interval_days);
     for (p, platform) in roster.platforms.iter().enumerate() {
         let base = format!("/platforms/{p}");
         let id = platform.platform_id.as_str();
         *platforms.entry(platform.platform_id).or_default() += 1;
+        if let Some(days) = platform.refresh_interval_days {
+            refresh_interval(findings, format!("{base}/refresh_interval_days"), Some(id), days);
+        }
         if platform.file != format!("{id}.md") {
             push(findings, Rule::Roster, format!("{base}/file"), id, format!("document file must be {id}.md"));
         }

@@ -6,13 +6,16 @@
 #
 # Rules beyond this shape (exactly five active platforms, the seven adapters
 # each mapped once, companions with no adapters, a curated list no longer than
-# `curated_source_cap`) are owned by the Rust validator; see
+# `curated_source_cap`, a refresh date no later than 9999-12-31) are owned by
+# the Rust validator; see
 # research/platforms/_rules.md. Named types live in
 # research/platforms/_types.yaml.
 $schema:
     roster_version: literal(1; required)
-    # Default refresh interval; a platform may set its own.
-    refresh_interval_days: number(integer; min(1); required)
+    # Default refresh interval; a platform may set its own. The ceiling of
+    # ten 366-day years keeps `last_updated` plus the interval a four-digit
+    # year (MAX_REFRESH_INTERVAL_DAYS in the Rust model).
+    refresh_interval_days: number(integer; min(1); max(3660); required)
     # Configurable per-platform curated-source cap. The schema ceiling of 10
     # is the initial cap; raising it is a reviewed schema change.
     curated_source_cap: number(integer; min(1); max(10); required)

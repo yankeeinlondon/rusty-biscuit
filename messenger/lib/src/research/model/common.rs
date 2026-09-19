@@ -55,8 +55,8 @@ impl Date {
     /// `2024-02-29` parses, `2026-02-29` and `2026-04-31` do not.
     ///
     /// Serde, the CLI `--today`, and run identifiers all parse here;
-    /// [`Date::from_unix_days`] and [`Date::plus_days`] construct valid dates
-    /// arithmetically through year 9999.
+    /// [`Date::from_unix_days`] and [`Date::checked_plus_days`] construct
+    /// valid dates arithmetically through year 9999.
     pub fn parse(text: &str) -> Option<Self> {
         let bytes = text.as_bytes();
         let digits = |range: std::ops::Range<usize>| {
@@ -86,15 +86,16 @@ impl Date {
         Date(format!("{year:04}-{month:02}-{day:02}"))
     }
 
-    /// The date `days` later, on the proleptic Gregorian calendar.
+    /// The date `days` later, on the proleptic Gregorian calendar, or `None`
+    /// when it falls after 9999-12-31 and so has no `YYYY-MM-DD` form.
     ///
     /// ## Panics
     ///
     /// Never for a parsed date; the fields were checked by [`Date::parse`].
-    pub fn plus_days(&self, days: u32) -> Date {
+    pub fn checked_plus_days(&self, days: u32) -> Option<Date> {
         let field = |range: std::ops::Range<usize>| self.0[range].parse::<i64>().expect("parsed date");
         let (year, month, day) = civil_from_days(days_from_civil(field(0..4), field(5..7), field(8..10)) + i64::from(days));
-        Date(format!("{year:04}-{month:02}-{day:02}"))
+        (year <= 9999).then(|| Date(format!("{year:04}-{month:02}-{day:02}")))
     }
 
     /// Whole days from `self` to `later` (negative when `later` is earlier).
