@@ -61,26 +61,26 @@ initialize:
             - stderr: |-
                 Couldn't determine what _type_ of implementation to route; the following files were passed in or identified:
                     
-                {{ spec ? '- a specification file was identified: ' + spec : '' }}
-                {{ plan ? '- a plan file was identified: ' + plan : '' }}
-                {{ review ? '- a review file was identified: ' + review : ''}}
-                {{ !spec && !plan && !review ? '- no spec, plan, or review file was identified!' : ''}}
+                {{ (spec || false) ? '- a specification file was identified: ' + spec : '' }}
+                {{ (plan || false) ? '- a plan file was identified: ' + plan : '' }}
+                {{ (review || false) ? '- a review file was identified: ' + review : ''}}
+                {{ !(spec || false) && !(plan || false) && !(review || false) ? '- no spec, plan, or review file was identified!' : ''}}
             - error: |- 
                 Unable to _route_ the implementation to an appropriate prompt:
 
-                > You called the {{ link(^prompt/implement.md) }} prompt which is a _router_ prompt that looks at what has been passed into it via _parameters_ as well as files or metadata that either exists or doesn't.
+                > You called the {{ link('prompts/implement.md') }} prompt which is a _router_ prompt that looks at what has been passed into it via _parameters_ as well as files or metadata that either exists or doesn't.
                 >
                 > The parameters this router would expect:
                 > 
-                > - **spec:** {{ spec ? '✔' : '<red>⤫</red>' }}
-                > - **plan:** {{ plan ? '✔' : '<red>⤫</red>' }}
-                > - **review:** {{ review ? '✔' : "<red>⤫</red>"}}
+                > - **spec:** {{ (spec || false) ? '✔' : '<red>⤫</red>' }}
+                > - **plan:** {{ (plan || false) ? '✔' : '<red>⤫</red>' }}
+                > - **review:** {{ (review || false) ? '✔' : "<red>⤫</red>"}}
                 >
                 > {{
-                    spec 
-                        ? 'Because you passed in a _specification file_, that means this prompt must distinguish between the _initial implementation_ of this spec (based on a _plan_ file) versus an implementation of some review findings in the review/fix cycle.\n\nThe spec file\'s `implemented` Frontmatter property determines which of these two phases the router sees the specification file in. Currently this is set as `' + frontmatter(spec, "implemented") || false + '`.\n\nIf the frontmatter indicates we're in the review/fix cycle then this router will try to identify the _last_ review which was completed and implement the findings found in it. If you're getting this error and are in the review/fix cycle that likely means you haven't actually run any reviews yet!'
-                        : review
-                            ? 'Because you passed in a review file the router assumes that unlike when a "spec" is passed in, that the original "change document" was a review that was run. Obviously the review file you passed us is a valid file path (or you wouldn't have gotten this error) and typically what we'll do at this point is to proxy to the `_implement/implement-review.md` prompt but for some reason that did not happen.'
+                    (spec || false)
+                        ? 'Because you passed in a _specification file_, that means this prompt must distinguish between the _initial implementation_ of this spec (based on a _plan_ file) versus an implementation of some review findings in the review/fix cycle.\n\nThe spec file\'s `implemented` Frontmatter property determines which of these two phases the router sees the specification file in. Currently this is set as `' + (frontmatter(spec, "implemented") || false) + '`.\n\nIf the frontmatter indicates we\'re in the review/fix cycle then this router will try to identify the _last_ review which was completed and implement the findings found in it. If you\'re getting this error and are in the review/fix cycle that likely means you haven\'t actually run any reviews yet!'
+                        : (review || false)
+                            ? 'Because you passed in a review file the router assumes that unlike when a "spec" is passed in, that the original "change document" was a review that was run. Obviously the review file you passed us is a valid file path (or you wouldn\'t have gotten this error) and typically what we\'ll do at this point is to proxy to the `_implement/implement-review.md` prompt but for some reason that did not happen.'
                             : 'Because you passed in a plan file, the router must decide what this plan is **for**. It does this by seeing if there is a specification file next to the review and if it sees that then it will proxy it to the prompt for handling spec based reviews. Alternatively, if it finds a review file that this plan clearly relates to then it will proxy to a review originated prompt.'
                 }}
 ---

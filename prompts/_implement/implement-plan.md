@@ -242,7 +242,7 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 
 **IMPORTANT:** 
 
-::block when="has_skill(ctx.area)"
+::block when="ctx.area && has_skill(ctx.area)"
 - use the '{{area}}' skill during the implementation
 ::block when="phase == total_phases"
 - do NOT move the spec directory into the `_completed` folder when the final phase is complete (that is done as a separate step which you are not responsible for)
