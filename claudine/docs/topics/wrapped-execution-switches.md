@@ -17,6 +17,12 @@ The wrapper sanitizes the parent environment and injects the following variables
 | `PACKAGE_AREA` | Monorepo package area, when resolvable |
 | `PACKAGE` | Monorepo package name, when resolvable |
 
+### Home and Provider Overlay Variables
+
+The wrapper never sets `HOME`, `USERPROFILE`, `HOMEDRIVE`, or `HOMEPATH`. The provider and everything it starts see the values the user launched Claudine with.
+
+When a launch needs a provider overlay (`--repo`, Codex/Gemini `--mcp`, or Codex repository prompts), the wrapper also sets that provider's own selector, such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `GEMINI_CLI_HOME`, plus any state pin the provider needs (`CODEX_SQLITE_HOME`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`). See [Repo Isolation](./repo-isolation.md).
+
 ### PID Distinction
 
 - **`CLAUDINE_PID`** — Claudine's own process ID, available to the provider environment before spawn.

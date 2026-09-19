@@ -173,7 +173,7 @@ The wrap layer uses `apply_system_prompt_via_spec` in `claudine/cli/src/commands
 - `EnvVarFile { env_var }` — writes content to a scoped temp file, then sets the env var to the file path
 - `ConfigKeyInline { flag, key }` — pushes `flag` then `key="<escaped_content>"` (used by Codex append)
 - `ConfigKeyFile { flag, key }` — writes content to a scoped temp file, then pushes `flag` then `key=<path>` (used by Codex replace)
-- `ShadowHomeFile { relative_path }` — legacy HOME-redirect path, retained for providers that require it
+- `ShadowHomeFile { relative_path }` — retained only so research records using `shadow_home_file` still generate; no provider selects it, and delivery warns instead of writing a file (Claudine never redirects `HOME`)
 - `Custom(tag)` / `Unsupported` — warning, no-op
 
 ## Scoped Temporary Files

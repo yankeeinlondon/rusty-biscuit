@@ -6,10 +6,13 @@
 //! diagnostics range the parent mapping (a real visible range, not zero-width);
 //! unknown-key diagnostics range the offending key; type/constraint/file
 //! diagnostics range the value; `relatedInformation` points at the schema
-//! origin. Deferred `$(...)` / `{{ … }}` values are never diagnosed (their
-//! passivity is explained on hover, not as a per-value squiggle).
+//! origin. Deferred `$(...)` / `{{ … }}` values are never diagnosed as schema
+//! or malformed-expression problems (their passivity is explained on hover,
+//! not as a per-value squiggle); a nested span on a single-pass lifecycle
+//! surface is the one exception (see `nested_span`).
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::schemas::format::is_pending_expression_value;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
@@ -22,6 +25,7 @@ use lsp_types::{
 };
 
 use crate::diagnostics::codes::{code, source};
+use crate::diagnostics::nested_span;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
 };
@@ -74,6 +78,12 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
             }
         }
         SchemaOutcome::Ready(None) => {}
+    }
+
+    // A stale last-good tree does not describe the current buffer, so its
+    // ranges and rewrites would land on the wrong bytes.
+    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale) {
+        crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
     }
 
     suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
@@ -217,16 +227,19 @@ fn schema_problem_diagnostics(
     report: &ValidationReport,
     out: &mut Vec<Diagnostic>,
 ) {
-    // Expression-typed scalar values are owned by the expression pass:
-    // `dm.expression.malformed` replaces the generic format-constraint problem,
-    // and a native boolean/number is coerced at compose time, so its type
-    // mismatch is not a real editor error. Both are suppressed here; every
-    // unrelated problem (including a genuine mapping/sequence type mismatch,
-    // which is not a scalar and never enters this set) is retained.
+    // Exactly projected Expression-typed scalar values are owned by the
+    // expression pass: `dm.expression.malformed` replaces the generic
+    // format-constraint problem, and a native boolean/number is coerced at
+    // compose time, so its type mismatch is not a real editor error. Both are
+    // suppressed here. Block, tagged, and multi-line values get no dedicated
+    // malformed diagnostic, so they keep the generic schema problem, as does
+    // every unrelated problem (including a genuine mapping/sequence type
+    // mismatch, which is not a scalar and never enters this set).
     let expression_values =
         crate::providers::frontmatter::expression_values(ctx, ast);
     let expression_pointers: std::collections::HashSet<&str> = expression_values
         .iter()
+        .filter(|value| value.is_exact())
         .map(|value| value.entry.pointer.as_str())
         .collect();
 
@@ -290,14 +303,13 @@ fn schema_problem_diagnostics(
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
 }
 
-/// The instance paths the effective schema rejects outright.
+/// The instance paths at which schema validation reported a problem.
 ///
-/// A union-typed property is validated as a whole, so a problem recorded at its
-/// path proves that **every** effective arm rejected the authored value. Both
-/// specialized passes below (semantic meta-types and expressions) gate on this
-/// before replacing the generic problem with their own dedicated code: an arm
-/// that validly accepts the value leaves the path absent, and a specialized
-/// diagnostic there would be a false positive on a valid document.
+/// The invariant both specialized passes below (semantic meta-types and
+/// expressions) rely on: **never report a dedicated diagnostic for a value the
+/// schema validation accepted.** A path absent here was accepted — for a union
+/// property, by at least one arm — so a specialized diagnostic there would be
+/// a false positive on a valid document.
 ///
 /// ## Notes
 ///
@@ -467,12 +479,18 @@ fn nested_property_value_span(
     parent: &crate::overlay::FmEntry,
     property: &str,
 ) -> Option<std::ops::Range<usize>> {
+    // Sequence interiors are excluded so the chosen property is the one the
+    // mapping-only arena reported before sequence descent.
     ast.entries()
         .iter()
+        .enumerate()
+        .filter(|(index, _)| !ast.is_in_sequence(*index))
+        .map(|(_, entry)| entry)
         .filter(|entry| {
             entry.key == property
-                && entry.key_span.start >= parent.value_span.start
-                && entry.key_span.end <= parent.value_span.end
+                && entry.key_span.as_ref().is_some_and(|key| {
+                    key.start >= parent.value_span.start && key.end <= parent.value_span.end
+                })
         })
         .max_by_key(|entry| entry.depth)
         .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
@@ -599,14 +617,15 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 }
 
 /// Expression-typed frontmatter value diagnostics: `dm.expression.malformed`
-/// for a value the expression grammar rejects, and
-/// `dm.expression.unknown_identifier` for a bare root that names nothing DMLS
-/// can resolve. Both carry source `darkmatter.frontmatter`; ranges are projected
-/// through the shared YAML-scalar mapper so YAML quotes are excluded.
+/// (`ERROR`) for a value the expression grammar rejects,
+/// `dm.expression.unknown_identifier` (`WARNING`) for a bare root that names
+/// nothing DMLS can resolve, and `dm.expression.nested_span_in_literal` for a
+/// lifecycle predicate. All carry source `darkmatter.frontmatter`; ranges go
+/// through the scalar projection, exact (YAML quotes excluded) for untagged
+/// single-line plain or quoted values and otherwise the whole scalar.
 ///
-/// `expression_values` includes any property with *any* Expression union arm, so
-/// a value the Expression arm rejects but a sibling Enum/String arm accepts must
-/// not be flagged malformed. [`union_rejected_paths`] is the shared arbiter.
+/// Severity follows the ladder in `codes.rs`: the schema declares the value
+/// *is* an expression, so a parse failure will never evaluate.
 fn expression_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
@@ -614,15 +633,32 @@ fn expression_diagnostics(
     out: &mut Vec<Diagnostic>,
 ) {
     let union_rejected = union_rejected_paths(report);
+    let stale = ctx.overlay.is_some_and(|overlay| overlay.stale);
 
     for value in crate::providers::frontmatter::expression_values(ctx, ast) {
         let expression = value.expression();
+        let path = ast.path_at(value.index);
+        if is_pending_expression_value(expression) {
+            // Schema validation defers a pending `{{ … }}` / `$(…)` value, so
+            // it is not yet a final expression to parse or resolve. Only a
+            // pending value can hold a nested span, which a predicate never
+            // re-interpolates.
+            if !stale && nested_span::lifecycle::is_predicate(&path) {
+                nested_span::predicate_diagnostic(ctx, &value, out);
+            }
+            continue;
+        }
         match crate::overlay::expressions::parse_condition(expression) {
             Err(error) => {
+                // Without an exact projection the message and range would
+                // describe authored bytes the parser never saw (a `|-`
+                // indicator, a tag); the schema problem stays instead.
+                if !value.is_exact() {
+                    continue;
+                }
                 if !union_rejected.contains(value.entry.pointer.as_str()) {
-                    // A non-Expression arm validly accepts this value, so the
-                    // union validates — a malformed-expression warning would be a
-                    // false positive.
+                    // Validation accepted this value (a sibling union arm), so
+                    // reporting it malformed would outrank the schema.
                     continue;
                 }
                 let at = error.position.min(expression.len());
@@ -633,7 +669,7 @@ fn expression_diagnostics(
                 if let Some(range) = ctx.source_map.byte_range_to_lsp(span) {
                     out.push(diagnostic(
                         range,
-                        DiagnosticSeverity::WARNING,
+                        DiagnosticSeverity::ERROR,
                         source::FRONTMATTER,
                         code::EXPRESSION_MALFORMED,
                         format!("malformed expression: {}", error.message),
@@ -644,13 +680,18 @@ fn expression_diagnostics(
                 let Some(name) = crate::overlay::expressions::root_identifier(&parsed) else {
                     continue;
                 };
+                if nested_span::lifecycle::is_beneath_event(&path)
+                    && nested_span::lifecycle::LATE_BINDING_ROOTS.contains(&name.as_str())
+                {
+                    continue;
+                }
                 if !expression_root_is_unknown(ctx, ast, &name) {
                     continue;
                 }
                 if let Some(range) = ctx.source_map.byte_range_to_lsp(value.expression_span()) {
                     out.push(diagnostic(
                         range,
-                        DiagnosticSeverity::INFORMATION,
+                        DiagnosticSeverity::WARNING,
                         source::FRONTMATTER,
                         code::EXPRESSION_UNKNOWN_IDENTIFIER,
                         format!(
@@ -715,7 +756,11 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
         let Some(entry) = ast.entry_by_dotted(&warning.path) else {
             continue;
         };
-        let Some(range) = ctx.source_map.byte_range_to_lsp(entry.key_span.clone()) else {
+        let Some(range) = entry
+            .key_span
+            .clone()
+            .and_then(|key| ctx.source_map.byte_range_to_lsp(key))
+        else {
             continue;
         };
         let (code_value, message) = match &warning.kind {
@@ -1046,6 +1091,9 @@ fn zero_range() -> Range {
 }
 
 #[cfg(test)]
+mod severity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1096,6 +1144,87 @@ mod tests {
             Some(NumberOrString::String(code)) => Some(code.as_str()),
             _ => None,
         }
+    }
+
+    /// The source text a diagnostic's range covers (single-line ranges only).
+    fn ranged_text<'t>(text: &'t str, diagnostic: &Diagnostic) -> &'t str {
+        let line = text.lines().nth(diagnostic.range.start.line as usize).unwrap();
+        assert_eq!(diagnostic.range.start.line, diagnostic.range.end.line);
+        &line[diagnostic.range.start.character as usize..diagnostic.range.end.character as usize]
+    }
+
+    #[test]
+    fn malformed_expression_producer_is_gated_to_exactly_projected_styles() {
+        // Exact styles: the dedicated diagnostic, ranged on the authored
+        // expression text (quotes excluded), replacing the generic problem.
+        for (line, expected) in [
+            ("when: 1 +", "1 +"),
+            ("when: '1 +'", "1 +"),
+            ("when: \"1 +\"", "1 +"),
+        ] {
+            let text = expression_doc(line);
+            diagnostics_for(&text, |diagnostics| {
+                let malformed: Vec<&Diagnostic> = diagnostics
+                    .iter()
+                    .filter(|d| code_of(d) == Some(code::EXPRESSION_MALFORMED))
+                    .collect();
+                assert_eq!(malformed.len(), 1, "{line}: {diagnostics:#?}");
+                assert_eq!(ranged_text(&text, malformed[0]), expected, "{line}");
+                assert_eq!(malformed[0].severity, Some(DiagnosticSeverity::ERROR), "{line}");
+                assert!(
+                    diagnostics.iter().all(|d| d.source.as_deref() != Some(source::SCHEMA)),
+                    "{line}: {diagnostics:#?}"
+                );
+            });
+        }
+        // No exact map: no dedicated diagnostic with a fabricated range or
+        // message; the generic schema problem remains.
+        for value in [
+            "when: |\n  1 +",
+            "when: |-\n  1 +",
+            "when: |+\n  1 +\n",
+            "when: |2-\n   1 +",
+            "when: >\n  1 +",
+            "when: >-\n  1 +",
+            "when: !!str 1 +",
+            "when: \"1\n  +\"",
+        ] {
+            let text = expression_doc(value);
+            diagnostics_for(&text, |diagnostics| {
+                assert!(
+                    diagnostics.iter().all(|d| code_of(d) != Some(code::EXPRESSION_MALFORMED)),
+                    "{value:?}: {diagnostics:#?}"
+                );
+                assert!(
+                    diagnostics.iter().any(|d| d.source.as_deref() == Some(source::SCHEMA)),
+                    "{value:?} keeps the schema problem: {diagnostics:#?}"
+                );
+            });
+        }
+        // An alias is not a scalar entry: no expression diagnostic at the alias.
+        let text = "---\n$schema:\n  when: expression\n  other: string\nother: &bad '1 +'\nwhen: *bad\n---\n\nbody\n";
+        diagnostics_for(text, |diagnostics| {
+            assert!(
+                diagnostics.iter().all(|d| code_of(d) != Some(code::EXPRESSION_MALFORMED)),
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn array_item_schema_problem_ranges_the_failing_item() {
+        // Sequence descent (spec D6): the problem path `/tags/1` is an authored
+        // item entry, so the range is that element, not the whole sequence.
+        let text = "---\n$schema:\n  tags: number[]\ntags:\n  - 1\n  - oops\n  - 3\n---\n\nbody\n";
+        diagnostics_for(text, |diagnostics| {
+            let problems: Vec<&Diagnostic> = diagnostics
+                .iter()
+                .filter(|d| d.source.as_deref() == Some(source::SCHEMA))
+                .collect();
+            assert_eq!(problems.len(), 1, "{diagnostics:#?}");
+            assert_eq!(ranged_text(text, problems[0]), "oops", "{problems:#?}");
+            assert_eq!(problems[0].range.start.line, 5);
+        });
     }
 
     #[test]
@@ -1185,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_expression_root_is_informational_frontmatter_diagnostic() {
+    fn unknown_expression_root_is_a_warning_frontmatter_diagnostic() {
         let text = expression_doc("when: mystery");
         diagnostics_for(&text, |diagnostics| {
             let unknown: Vec<&Diagnostic> = diagnostics
@@ -1194,7 +1323,7 @@ mod tests {
                 .collect();
             assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
             assert_eq!(unknown[0].source.as_deref(), Some(source::FRONTMATTER));
-            assert_eq!(unknown[0].severity, Some(DiagnosticSeverity::INFORMATION));
+            assert_eq!(unknown[0].severity, Some(DiagnosticSeverity::WARNING));
         });
     }
 

@@ -441,6 +441,7 @@ mod session_compatibility_key {
             structured_output: "true:false".to_string(),
             system_prompt: "none".to_string(),
             mcp_servers: vec!["fs".to_string(), "git".to_string()],
+            overlay: "none".to_string(),
             extra: std::collections::BTreeMap::new(),
         }
     }
@@ -468,6 +469,9 @@ mod session_compatibility_key {
             ("structured-output mode", |k| k.structured_output = "false:false".to_string()),
             ("system prompt", |k| k.system_prompt = "digest-2".to_string()),
             ("MCP server set", |k| k.mcp_servers = vec!["fs".to_string()]),
+            ("provider overlay", |k| {
+                k.overlay = "reasons=repo_resources;root=/home/u/.claudine/.codex".to_string()
+            }),
         ];
         for (facet, mutate) in cases {
             let base = base_key();

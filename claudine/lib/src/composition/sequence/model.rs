@@ -13,6 +13,8 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
+use super::super::authored_order::AuthoredOrder;
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -265,6 +267,13 @@ pub struct SequencePlan {
     /// The generated invocation correlation token, copied into every step's
     /// state and the root overlay.
     pub sequence_id: String,
+    /// Authored mapping order for the document that declared the step list,
+    /// positioned at that list — so step `i` is `authored.at(i)`.
+    ///
+    /// Default (no order source) whenever the steps did not come from an
+    /// authored YAML list: a data file read through an offset or operator, a
+    /// `{{ … }}` expression, or `$( … )` output. Those keep canonical order.
+    pub authored: AuthoredOrder,
 }
 
 // ---------------------------------------------------------------------------

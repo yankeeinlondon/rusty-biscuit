@@ -133,6 +133,8 @@ pub(crate) fn coerce_to_catalog_shape(
         | Coercion::UnmappedNativeEventRecords
         | Coercion::PromptArgRecord
         | Coercion::CapPolicyRecords
+        | Coercion::OverlaySelectorRecord
+        | Coercion::OverlayCapabilitiesRecord
         | Coercion::AxesRecord => Ok(raw.clone()),
     }
 }

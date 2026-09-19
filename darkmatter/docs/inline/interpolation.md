@@ -2,7 +2,7 @@
 
 The Darkmatter compose pipeline provides interpolation of frontmatter, context, and environment values into a document.
 
-Interpolation happens in two stages during the compose pipeline (see the [pipeline overview](./darkmatter-compose-pipeline.md)):
+Interpolation happens in two stages during the compose pipeline (see the [pipeline overview](../darkmatter-compose-pipeline.md)):
 
 1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, the `doc` / `doc.*` namespace, `ctx.*`, and `env.*`. This stage itself runs in **two passes** that bracket frontmatter shell expansion (pass 1 pre-shell, pass 2 post-shell). See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
 2. **Body Interpolation** — resolves `{{ }}` expressions in the document body using the effective state (frontmatter + external state + context).
@@ -135,15 +135,57 @@ Nested expression: {{{ {{ x }} }}} becomes {{ {{ x }} }} with x unevaluated.
 A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to the string `{{ x }}` and survives both frontmatter interpolation passes, including the pass that brackets frontmatter shell expansion.
 
 
+## Escaping an Opener with a Backslash
+
+A document that discusses another template language (Handlebars, Liquid, Jinja, Mustache) can opt a span out of scanning without switching to `{{{ … }}}`:
+
+```md
+Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
+```
+
+- `\{{` and `\{\{` are both inert. `\{{` is an explicit scanner rule; `\{\{` never forms a `{{` opener in the first place.
+- The scanner counts the run of backslashes directly before `{{`. An **odd** run escapes the opener. An **even** run escapes itself, so `\\{{ x }}` still interpolates `x`.
+- Compose **preserves every backslash**. The Markdown renderer resolves the escape under CommonMark's backslash-before-punctuation rule, so `\{{` displays as `{{`.
+- Parity is counted on the text the scanner receives, after its owning format has decoded it. Inside a double-quoted YAML scalar, write `"\\{{ x }}"` so the decoded value holds one backslash.
+
+## Braces Inside String Literals
+
+A quoted string literal inside an expression is text. The lexer copies it verbatim, so `{{ "in {{ area }}" }}` does not contain a nested expression at parse time. Whether those braces are ever interpolated depends on the surface:
+
+- **Rescanning surfaces** — the document body and mixed frontmatter strings (`"Hello {{ name }}"`) — run a fixpoint loop that rescans the text each pass produced, up to a fixed depth. The literal's braces land in the output and resolve on the next pass.
+- **Single-pass surfaces** — a scalar whose trimmed content is **exactly one** `{{ … }}` span — take the whole-value path, which parses and evaluates once and keeps the typed result. Nothing rescans the result, so a literal's braces survive as raw text. Claudine's lifecycle values (communication fields, stack operands, `proxy … with` values, and `when`/`while`/`until` predicates) are single-pass, and Claudine refuses a nested span there before any provider starts. An ordinary whole-value frontmatter key keeps the raw braces too (`r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`), although a body reference such as `{{ r }}` then resolves them on its own rescan.
+
+Write the value with `+` instead. It resolves identically on both kinds of surface:
+
+```yaml
+# Never resolves on a single-pass surface
+say: '{{ area ? "Review in {{ area }} completed" : "Review completed" }}'
+
+# Resolves everywhere
+say: '{{ area ? "Review in " + area + " completed" : "Review completed" }}'
+```
+
+`lint_expression` (in `compose::expression::lint`) finds the defect in authored source and offers the complete `+` rewrite. The rewrite does the following:
+
+- keeps each literal piece byte-for-byte in its original quote character;
+- parenthesizes any lifted span that is not atomic, so a ternary or `+` expression keeps its meaning;
+- anchors a span with `"" + …` wherever `+` could otherwise add two numbers instead of concatenating;
+- is accepted only when it re-parses to the intended tree.
+
+Array- and object-valued spans receive a suggestion like any scalar: both rendering paths stringify aggregates as compact JSON, so the rewrite composes the same text. The suggestion is withheld only when no equivalent rewrite exists. That covers a nested span that does not parse, a literal used as an object key, a `{{{ … }}}` literal sharing the string, and a doubly nested literal.
+
+Callers decide whether a surface is single-pass; the lint only describes syntax. A `{{{ … }}}` inside a quoted literal is not a nested span.
+
+
 ## Implementation
 
-The current implementation uses a source-first scanner approach (single-pass rewrite):
+The current implementation uses a source-first scanner approach, rescanned to a fixed point (see [Braces Inside String Literals](#braces-inside-string-literals) for the whole-value exception):
 
-- A scanner finds `{{{ ... }}}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
+- A scanner finds `{{ ... }}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
-- Literal conversion (`{{{ ... }}}` → `{{{ ... }}}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
+- Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
 
 See the source modules:
 

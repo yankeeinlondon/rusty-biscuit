@@ -23,6 +23,14 @@
   Playa dependency; test-only worker-lock ownership comes from `test-toolkit`.
   `biscuit-speaks/playa` carries the same native feature edge for TTS.
 
+## Budget Ledger Process Identity
+
+- `claudine-cli` depends on `sysinfo` (`0.38`, the version `sniff` already
+  brings into the graph). Budget-ledger crash recovery uses it to read a
+  recorded worker's process start time, and signals the PID only when that
+  start time still matches, because PIDs are reused. On Windows it also
+  terminates a verified survivor. See [Shared execution budgets](cli/budget.md).
+
 ## Executable Lookup
 
 - `which` is pinned to major version `8` across both `claudine` (library) and

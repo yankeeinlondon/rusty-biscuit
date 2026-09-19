@@ -7,6 +7,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 
+use claudine::invocation_context::EnvBaseline;
 use color_eyre::eyre::{Result, bail};
 
 pub(crate) fn validate_include_names(include: &[String]) -> Result<HashSet<String>> {
@@ -33,7 +34,13 @@ fn is_valid_env_name(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Filter one launch environment snapshot into the child's inherited half.
+///
+/// The snapshot is supplied rather than read from the process because a wrapper
+/// stage may have mutated its own environment after launch; the child must
+/// inherit what Claudine was started with, not what Claudine has since become.
 pub(crate) fn sanitize_process_env(
+    baseline: &EnvBaseline,
     include_set: &HashSet<String>,
     auto_include: &HashSet<String>,
 ) -> (
@@ -47,7 +54,7 @@ pub(crate) fn sanitize_process_env(
     let mut included = BTreeSet::new();
     let mut present_keys = HashSet::new();
 
-    for (key, value) in std::env::vars_os() {
+    for (key, value) in baseline.iter() {
         let key_display = key.to_string_lossy().to_string();
         present_keys.insert(key_display.clone());
 
@@ -60,7 +67,7 @@ pub(crate) fn sanitize_process_env(
             }
         }
 
-        kept.insert(key, value);
+        kept.insert(key.to_os_string(), value.to_os_string());
     }
 
     // Only warn about missing keys for explicit --include, not auto-included.

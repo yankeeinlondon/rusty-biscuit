@@ -156,10 +156,14 @@ impl TaskExecution<'_> {
                     break;
                 }
             };
+            let member_stack = StackExecutionContext {
+                source_path: &task.diagnostic.source_path,
+                ..scope_stack.with_signal(scope_stack.signal)
+            };
             let member = TaskExecution {
                 task,
                 state: &member_state,
-                stack: scope_stack,
+                stack: &member_stack,
                 overlay: Some(scope_overlay),
                 live: stream.as_ref(),
                 ..*self
@@ -276,7 +280,11 @@ impl TaskExecution<'_> {
                         // The stack's cells must be the member's too: a lifecycle
                         // `set` inside the task accumulates through the stack,
                         // not through `TaskExecution::runtime`.
-                        let member_stack = scope_stack
+                        let task_stack = StackExecutionContext {
+                            source_path: &task.diagnostic.source_path,
+                            ..scope_stack.with_signal(scope_stack.signal)
+                        };
+                        let member_stack = task_stack
                             .with_private_cells(&buffers[index], live_cells.get(index));
                         let member = TaskExecution {
                             task,

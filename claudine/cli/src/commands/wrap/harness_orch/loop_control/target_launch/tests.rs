@@ -82,6 +82,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
+        kilo_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last-message.txt"),
         // The provider-shaped keys the fixture invocation wrote, none of which
         // existed beforehand — so a rebuild that stops writing one clears it.
@@ -90,11 +91,19 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
             (std::ffi::OsString::from("MODEL"), None),
             (std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"), None),
             (
-                std::ffi::OsString::from("HOME"),
-                Some(std::ffi::OsString::from("/home/real")),
+                std::ffi::OsString::from("CODEX_HOME"),
+                Some(std::ffi::OsString::from("/home/real/codex")),
             ),
         ]),
-        codex_sqlite_home: None,
+        overlay: Some(launch_plan::OverlayRebuildInputs {
+            repo_resources: false,
+            mcp_requested: false,
+            home: claudine::invocation_context::HomeBaseline::from_parts(
+                None,
+                Default::default(),
+            ),
+            env: claudine::invocation_context::EnvBaseline::default(),
+        }),
         workspace_cwd: PathBuf::from("/repo"),
         write_grant_env: HashMap::new(),
         invocation: launch_plan::RecordedLaunch {
@@ -111,6 +120,7 @@ fn plan_inputs() -> launch_plan::LaunchPlanInputs {
             args: vec![RECORDED_ARGV.to_string()],
             env_overlay: vec![("YOLO".into(), "false".into())],
             structured_codex: false,
+            overlay: None,
         },
         replay_supported: true,
     }
@@ -442,13 +452,13 @@ fn rebuild_omits_model_when_target_pins_none() {
 
 /// Review-9 finding 2 — the same rule for provider-specific base values. A
 /// retry that leaves OpenCode must not hand the new provider OpenCode's inline
-/// config, and one that leaves a shadow-HOME provider must get its real home
-/// back rather than the previous provider's shadow.
+/// config, and one that leaves an overlay provider must get the user's own
+/// selector value back rather than the previous provider's overlay.
 #[test]
 fn a_provider_switch_clears_the_opening_providers_environment() {
     let base = [
         ("OPENCODE_CONFIG_CONTENT", "{\"opening\":true}"),
-        ("HOME", "/shadow/opencode"),
+        ("CODEX_HOME", "/home/real/.claudine/.codex"),
         ("PATH", "/usr/bin"),
     ];
     let rebuilt = rebuild_launch_identity(
@@ -469,10 +479,10 @@ fn a_provider_switch_clears_the_opening_providers_environment() {
         "OpenCode's inline config must not reach a Gemini retry; got {env:?}",
     );
     assert_eq!(
-        env.get(std::ffi::OsStr::new("HOME")).map(|v| v.as_os_str()),
-        Some(std::ffi::OsStr::new("/home/real")),
-        "a shadow HOME the rebuild does not re-materialize must fall back to the \
-         real one; got {env:?}",
+        env.get(std::ffi::OsStr::new("CODEX_HOME")).map(|v| v.as_os_str()),
+        Some(std::ffi::OsStr::new("/home/real/codex")),
+        "an overlay selector the rebuild does not re-apply must fall back to the \
+         user's ambient value; got {env:?}",
     );
 }
 

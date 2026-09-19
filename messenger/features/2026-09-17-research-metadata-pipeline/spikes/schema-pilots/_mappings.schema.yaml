@@ -1,0 +1,10 @@
+# PILOT (schema_version 0) -- reviewed implementation mappings.
+#
+# Kept apart from the platform documents: research owns external facts, Rust
+# adapters own implemented behavior, and mappings are reviewed separately.
+$schema:
+    schema_version: literal(0; required)
+    inspected_revision: string(required)
+    fingerprint_algorithm: enum(sha256-file,sha256-canonical-json-record; required)[](required)
+    assessments: "Assessment[](required)@./_mappings.types.yaml"
+    "<pattern::^(prompt|hash)$>": any

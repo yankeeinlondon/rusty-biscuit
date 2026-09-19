@@ -27,6 +27,7 @@ use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
 use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
 use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use crate::provider::overlay::{OverlayCapabilities, OverlayCapability, OverlayResourceClass, OverlaySelectorShape, OverlaySelectorSpec};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
@@ -341,6 +342,18 @@ pub(in crate::provider) static KILO_INFO: ProviderInfo = ProviderInfo {
             remediation: "Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.",
         },
     ],
+    overlay_selector: Some(&OverlaySelectorSpec {
+        env_var: "KILO_CONFIG_DIR",
+        shape: OverlaySelectorShape::ProviderDir,
+        relocates: &[OverlayResourceClass::Config],
+        additive: true,
+        source_root: None,
+    }),
+    overlay_capabilities: OverlayCapabilities {
+        repo_resources: OverlayCapability::Unsupported,
+        repo_prompt: OverlayCapability::Unsupported,
+        mcp: OverlayCapability::ComposableInjection,
+    },
 };
 
 /// Event-mapping table (also referenced directly by behavior modules).

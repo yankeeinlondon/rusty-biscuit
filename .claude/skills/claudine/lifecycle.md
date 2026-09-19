@@ -29,7 +29,7 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 
 | Property | Emitted when |
 |----------|-------------|
-| `initialize` | Prompt file has been identified and frontmatter has parsed, before schema validation and shell pre-flight |
+| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and the schema verdict for live staged documents |
 | `start` | Pre-flight checks have passed; immediately before provider invocation |
 | `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
 | `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
@@ -38,6 +38,33 @@ Seven frontmatter properties control lifecycle behavior. Each accepts an object 
 | `loop` | Post-`finalize` gate that evaluates the loop's `while`/`until` condition and can run additional lifecycle concerns |
 
 Legacy prompts that only configure `start`, `success`, `blocked`, and `failure` continue to work unchanged.
+
+Live staged preparation runs initialization before reading body dependencies.
+An `ensure_file` action can create a file that the stabilized body then includes;
+existing contents are preserved. Every adopted proxy target follows the same
+ordering, and an abandoned source body is never discovered. **Initialization
+is shell-free:** shell actions are rejected even behind false conditions, and
+bootstrap frontmatter `$(...)` expansion is forbidden. `-y`, whitelists, cached
+approvals, and interactive approval cannot grant an exception. Move shell work
+to `start` or a later event. After initialization, the fresh body and remaining
+lifecycle commands receive a full, condition-blind audit before launch.
+
+Early `blocked`, `failure`, and `finalize` handlers also cannot execute shell
+commands, including handlers reached through another catch's evaluation error.
+Non-shell catches retain their ordinary routing; `no_error` cannot suppress a
+shell prohibition. The runtime keeps lifecycle shells disabled until `start`,
+which follows successful preflight, and resets that boundary on proxy adoption.
+
+A bootstrap-gate failure precedes target lifecycle ownership. Once installed,
+the target's lifecycle handles failures; a missing include after initialization
+routes through `blocked`/`finalize` exactly once and prevents launch. Retry and
+resume reread and audit without initializing again; later loop iterations use
+the already-audited structural plan. Dry runs fire no lifecycle events or
+dynamic proxy handoffs. Sequence static preflight still requires all includes
+to exist before the sequence starts, even when a task's initialization or an
+earlier task would create them. See
+[Composition — Documents That Declare `initialize`](composition.md#documents-that-declare-initialize).
+
 
 ### The completion verdict decides which terminal event fires
 
@@ -91,6 +118,21 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 ### The `shell` exception
 
 `shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+
+Lifecycle YAML accepts only `set: {property: value}`; the positional
+`set(key, value)` spelling belongs to the separate capability and loop-control
+API. Mapping-based lifecycle `set` evaluates every value against one pre-write snapshot. Its
+destination keys are declared bindings: an absent destination reads as null,
+while an existing value is retained for evaluation. A whole-value expression
+preserves null; null embedded in text renders empty. Unrelated undeclared roots
+still fail strict evaluation. In a loop, initialization and its catch handlers
+use the full bootstrap frontmatter, and initialization writes persist in the
+runtime state for subsequent iterations.
+The mapping keeps its authored key order whether it was written in YAML
+frontmatter or in a YAML, JSON, or JSON5 task or group document. Order never
+changes what a mapping evaluates to, but the first invalid key or failing value
+in that order is the one diagnosed, and a `set` side effect's prior-value
+result serializes in it.
 
 ## Notification Fields
 
@@ -196,6 +238,18 @@ A stack item's `action:` value may be a single positional map (`action: { succes
 #### Typed argument values
 
 A value whose trimmed content is exactly one `{{ expr }}` span resolves to the expression's **typed** value, matching Darkmatter's whole-value frontmatter rule — so `set_frontmatter: ["s.md", "ready", "{{ true }}"]` writes boolean `true`, `"{{ 3 }}"` writes number `3`, and `"3"` writes the string `"3"`. A bare token is always literal text, never a variable: `set_frontmatter: ["s.md", "status", "done"]` writes the literal string `done`.
+
+#### Braces inside a quoted literal are inert
+
+A lifecycle value is evaluated **once**. Communication fields, stack action operands, `proxy … with` values, and the `when`/`while`/`until` predicates all take Darkmatter's whole-value path, which does not rescan its result. A `{{ … }}` written *inside a quoted string literal* within such an expression is therefore plain text, not a nested interpolation. Because it could never resolve, preparation refuses it ([`LifecycleNestedSpanInLiteral`](#lifecyclenestedspaninliteral)). Build the string with `+` instead:
+
+```yaml
+success:
+  say: |-
+    {{ ctx.area ? "Review in " + ctx.area + " completed" : "Review completed" }}
+```
+
+The document body and mixed frontmatter strings rescan their output, so the same construction resolves there. The rule applies only to the single-pass lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
 
 #### Object-valued arguments
 
@@ -383,12 +437,12 @@ The safety properties that hold regardless:
 
 - the target **reparses and revalidates** every structural value the overlay installs — a malformed control-plane overlay fails as the target's own parse error, pre-launch;
 - an invalid overlay fails the target's schema **before any provider launches**;
-- a shell command installed by an overlay is discovered and approved by the *target's* pre-flight, subject to normal target-side policy — approved bytes equal executed bytes; and
+- an overlay cannot enable initialization shells or bootstrap shell expansion; commands in later events are discovered and approved by the *target's* preflight — approved bytes equal executed bytes; and
 - status output may report that a handoff carries an overlay, and tracing may record property names and counts, but neither prints overlay values.
 
 ### Shell Actions
 
-The `shell` action runs an approved shell command. Commands are collected during pre-flight shell approval alongside `::shell` directives and `$(...)` frontmatter expressions.
+The `shell` action runs an approved shell command from `start` or a later event. It is forbidden in `initialize` and cannot run in early catch handlers before preflight reaches `start`. Commands for permitted events are collected during preflight alongside body `::shell` directives and post-initialization frontmatter expressions. Approval never overrides the initialization prohibition.
 
 ```yaml
 start:
@@ -821,9 +875,41 @@ start:
   unknown_field: "value"  # ERROR: unknown field
 ```
 
-### `LifecycleInterpolationLeak`
+### `LifecycleNestedSpanInLiteral`
 
-Because lifecycle strings are interpolated at event-time (see [When Lifecycle Properties Interpolate](#when-lifecycle-properties-interpolate)), their authored `{{{ … }}}` spans are **not** prepare-time leaks — they are deferred by design. This guard (`reject_surviving_spans`) runs **after** the event-time resolution, immediately before dispatch: a side-effect string that still contains a `{{{ … }}}` span at that point (e.g. a frontmatter value that is itself raw template text) is a typed error and the side effect is not sent. For non-lifecycle surfaces the unchanged prepare-time guard `validate_no_interpolation_leaks` still runs.
+A single-pass lifecycle value nests a `{{ … }}` span inside a quoted string literal (see [Braces inside a quoted literal are inert](#braces-inside-a-quoted-literal-are-inert)). `validate_no_nested_spans_in_literals` checks every communication field, `loop.while`/`loop.until`, every `stack[i].when` predicate (in the condition dialect), and every whole-value action operand and `proxy … with` value. The walk follows `LifecycleSignal` order and reports the first defect. It runs in shared preparation right after the lifecycle parses, so direct and inline compose, `--dry-run`, a proxy target, a `retry`/`resume` re-entry, and a loop seed are all refused before any provider starts. A loop's lifecycle is fixed when its seed is prepared, so lifecycle edits made during the loop never run. `sequence` also pre-scans every statically resolved `prompt:` document right after building its preflight graph, before shell approval, so a defect in a later step stops the run before step one starts. A step reference that preflight cannot resolve is checked when that step prepares.
+
+The error names the property, the offending literal, and the nested span. It also prints a mechanical `+` rewrite (Darkmatter's `lint_expression` suggestion, shown without its `{{ }}` wrapper or YAML quoting) and points to `{{{ … }}}` for intentional braces. The rewrite is omitted when it cannot be proven equivalent, for example when the nested span does not itself parse.
+
+Before (the 2026-09-13 incident):
+
+```yaml
+success:
+  say: |-
+    {{
+    ctx.area
+        ? "The review of the draft specification file in {{ctx.area}} has completed"
+        : "The review of the draft specification file in the {{ctx.repo_name}} repo has completed"
+    }}
+```
+
+After:
+
+```yaml
+success:
+  say: |-
+    {{
+    ctx.area
+        ? "The review of the draft specification file in " + ctx.area + " has completed"
+        : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
+    }}
+```
+
+A positional action body such as `message: "review {{iteration}} passed"` is not affected. That string is not an expression literal; Claudine interpolates it as template text.
+
+### `LifecycleEvaluationError`: surviving span
+
+Some template text only appears at event time, typically a frontmatter value that itself holds `{{ … }}` (for example, one a `set_frontmatter` stored). Static validation cannot see it. As a backstop, `reject_surviving_spans` runs after event-time resolution and before dispatch: a top-level communication field whose resolved text still contains a span fails the event, and the side effect is not sent. The error carries the lifecycle property (`in success.say`) and the typed `SurvivingSpan` reason, which selects a hint to concatenate with `+` (or use `{{{ … }}}` for intentional braces) instead of the missing-path hint that ordinary evaluation errors get. A stack action operand that resolves to template text is re-expanded when its message renders. An unknown root in that text then fails as an ordinary expression error.
 
 ### `LifecycleUndefinedVariable`
 

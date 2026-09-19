@@ -8,12 +8,12 @@ $schema:
             min-keys: 1
 
     lifecycle-stack-item:
-        when: "string -> Darkmatter condition expression evaluated when the event fires."
+        when: "expression -> Darkmatter condition expression evaluated when the event fires."
         action:
             - "string(required) -> Bare zero-argument lifecycle action verb."
             - "lifecycle-action(required)@this -> Positional or key/value lifecycle action."
             - "lifecycle-action[](required)@this -> Ordered positional and key/value lifecycle actions."
-        no_error: "boolean -> Suppresses dispatch failures for a single scalar action; array actions declare this per action."
+        no_error: "boolean -> Suppresses dispatch failures for a single scalar action; array actions declare this per action. Cannot suppress expression errors or the prohibition on shells before preflight."
 
     lifecycle-event:
         # messaging
@@ -28,7 +28,7 @@ $schema:
         success: "string -> Success status line written to stderr."
         notify: "string -> Desktop notification title."
         # conditional stack with flow control
-        stack: "lifecycle-stack-item[]@this -> Ordered conditional lifecycle actions."
+        stack: "lifecycle-stack-item[]@this -> Ordered conditional lifecycle actions. Initialization cannot contain shell actions."
 
     loop-action:
         op: "enum(increment, decrement, set, append, prepend, merge; required) -> Frontmatter mutation operation."
@@ -36,8 +36,8 @@ $schema:
         value: "any -> Value used by set, append, prepend, and merge."
 
     loop-event:
-        while: "string -> Boolean expression evaluated before each iteration; mutually exclusive with until."
-        until: "string -> Boolean expression evaluated before each iteration; mutually exclusive with while."
+        while: "expression -> Boolean expression evaluated before each iteration; mutually exclusive with until."
+        until: "expression -> Boolean expression evaluated before each iteration; mutually exclusive with while."
         action:
             - "string -> Frontmatter mutation in op(...) form; mutually exclusive with actions."
             - "loop-action@this -> Structured frontmatter mutation; mutually exclusive with actions."

@@ -79,7 +79,7 @@ from returning.
 
 ## What We Capture
 
-`ProviderInfo` carries **42 serialized fields** plus four non-serialized behavior
+`ProviderInfo` carries **45 serialized fields** plus four non-serialized behavior
 trait objects. The serialized set is the authoritative live surface — inspect it
 with `claudine providers --describe --format json`, or read the committed
 `docs/providers/catalog.json`. It is pinned on both sides by
@@ -105,7 +105,8 @@ The fields group into three families:
   `model_catalog_source`, `expected_offerings`, `offering_sources`, `resume`,
   `model_cli_flag`, `non_interactive_conflicting_flags`, `billing_models`,
   `allowed_env_keys`, `display_policy`, `suppress_structured_stderr_on_success`,
-  `supports_interactive_inline_closure`, `model_required_in_non_tty`.
+  `supports_interactive_inline_closure`, `model_required_in_non_tty`,
+  `overlay_selector`, `overlay_capabilities`.
 
 Several fields that were sketched as "future work" in earlier drafts have since
 landed (Phases D/F/G): `billing_models`, `model_cli_flag`, `resume`
@@ -132,6 +133,48 @@ in render code).
   `expected_offerings` (see `design/model-catalog-boundary.md`).
 - **Dispatch inventory** (`docs/providers/dispatch-inventory.json`) — the
   mechanical census that seeds the drift guard (below).
+
+## Provider Overlay
+
+A provider overlay redirects one provider's config root without touching the
+user's home (see [Repo Isolation](./repo-isolation.md)). Whether a provider can
+have one, and how, is generated metadata from two facts keys. **Every new
+provider must fill both.** Record what you observed, never what a variable's
+name suggests; the evidence for the shipped providers is in
+`fixes/2026-09-12-shadow-home/audit.md`.
+
+`overlay_selector` is the provider-owned redirection surface, or `null` when the
+only lever is `HOME` itself (Antigravity):
+
+| Key | Meaning |
+|-----|---------|
+| `env_var` | The provider's own variable, e.g. `CODEX_HOME`. |
+| `shape` | `provider_dir` when the value *is* the config directory; `parent_of_provider_dir` with a `child` segment when the provider appends its own directory (Gemini: `child: .gemini`); `inline` for config content carried in the variable. |
+| `relocates` | Resource classes the selector moves: `config`, `auth`, `sessions`, `cache`, `state`. |
+| `additive` | `true` when the directory is layered over the user's config instead of replacing it (OpenCode, Kilo). |
+| `source_root` | Home-relative default config root the overlay is built from, e.g. `~/.pi/agent`. `null` when there is no single root (Goose collapses three per-OS trees). This is not `agent_offset`. |
+
+`overlay_capabilities` gives one verdict per activation reason
+(`repo_resources`, `repo_prompt`, `mcp`):
+
+| Verdict | Meaning |
+|---------|---------|
+| `native_root` | A filesystem overlay selected through `overlay_selector`. |
+| `composable_injection` | Satisfied with no overlay at all, e.g. OpenCode's inline MCP config. |
+| `unsupported` | Refused before spawn with `provider.overlay_unsupported`, if the reason is ever raised. |
+
+Reasons are raised only when the launch needs a config root. A provider with no
+runtime MCP injector never raises `mcp`, so its `unsupported` verdict there is
+inert and `--mcp` keeps its `claudine mcp export` guidance.
+
+Invariants in `lib/src/provider/tests.rs` reject inconsistent records:
+`additive_selectors_cannot_claim_repo_resource_isolation`,
+`repo_resource_isolation_requires_a_single_source_root`,
+`selector_shapes_and_source_roots_are_well_formed`,
+`source_roots_are_independent_of_the_agent_offset`, and
+`overlay_capability_matrix_matches_the_audit`, which pins the whole matrix.
+Provider-specific side effects, such as Codex's `CODEX_SQLITE_HOME` pin, belong
+in `WrapperProfile::overlay_strategy`, not in facts.
 
 ## Ensuring a Single Source of Truth
 
@@ -184,7 +227,7 @@ mechanism.)
   every run, so the number is derived rather than frozen in prose. Every
   remaining site is tagged `keep`; the ws0-prep / ws3-profile / render
   migrations completed in Phases C/D/G. The remainder are genuinely behavioral:
-  Codex/OpenCode wire and stderr-bridge quirks, shadow-HOME mechanics, and
+  Codex/OpenCode wire and stderr-bridge quirks, and
   Claude's canonical role as the native home for linked skills/commands/agents.
 
 ### WrapperProfile as a behavior shim

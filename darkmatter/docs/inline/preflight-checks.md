@@ -124,6 +124,8 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 
 **Darkmatter's role is discovery.** It walks the document graph condition-blind — following transclusions, resolving interpolation, parsing `::shell`/`::shell-block` directives, and scanning frontmatter for `$(...)` expressions. `Markdown::compose_preflight(options)` returns a `ComposePreflightReport` whose `approval_set()` is every command that could run under any state, without checking policy files or making approval decisions. (`collect_shell_commands` remains as the lower-level entry point that returns the raw entries.)
 
+**Before the body exists.** An orchestrator that must run a step before the body's includes exist (Claudine's `initialize`) reads the frontmatter first with `ComposeOptions::only_frontmatter_surface()`. That projection never walks the body graph; its approval set is `collect_frontmatter_shell_commands`, the document's frontmatter `$(...)` commands alone. The full condition-blind discovery above runs after the step, on the settled document.
+
 **Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
 
 **During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` and trusts it completely, bypassing its own approval flow.

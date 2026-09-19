@@ -18,7 +18,7 @@ sfx-native-windows = []
 sfx-native-linux = []
 
 [dependencies]
-messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram", "desktop"] }
+messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram", "desktop", "research"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive"] }
@@ -35,6 +35,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 serial_test = "3"
 insta = "1.47"

@@ -70,7 +70,7 @@ failure message prints the up-to-date block to paste back.
 > Only a value embedded in _surrounding text_ is stringified. A frontmatter
 > value whose entire content is `"{{ ctx.foo }}"` still resolves to a real
 > array — see the
-> [whole-value exception](../inline/fm-interpolation.md#whole-value-exception-strict).
+> [whole-value exception](../inline/fm-interpolation.md#whole-values-keep-their-type).
 >
 > **Migration.** A bare `{{ ctx.foo }}` previously rendered newline-joined. A
 > document that relied on that output moves to

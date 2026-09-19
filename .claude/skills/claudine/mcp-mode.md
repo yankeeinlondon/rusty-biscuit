@@ -6,6 +6,15 @@ For this reason, rather than an opt-out philosophy, Claudine espouses an "opt-in
 
 When the wrapped provider cannot accept runtime MCP injection, Claudine stops and directs the user to `claudine mcp export <provider> --apply` instead of silently proceeding.
 
+## Runtime Injection
+
+The session's servers reach the provider in one of two ways, and neither changes the user's home:
+
+- **Codex and Gemini** get a provider overlay in a launch root of their own under `~/.claudine/overlays/<provider>/`: a mirror of the user's provider config with the session's MCP servers written into it. Only the provider is pointed at it, through `CODEX_HOME` or `GEMINI_CLI_HOME` (whose value is the launch root; Gemini appends `.gemini`). Concurrent sessions with different server sets never share a root, and the root is removed when the launch ends. `HOME`, `USERPROFILE`, and the other home variables are passed through unchanged, so `git`, `gh`, and `gpg` started inside the session keep the user's identity. Codex SQLite state stays at its pre-overlay location through `CODEX_SQLITE_HOME`.
+- **OpenCode and Kilo** receive the servers inline, through `OPENCODE_CONFIG_CONTENT` and `KILO_CONFIG_CONTENT` respectively, merged into any config the variable already carries. No overlay directory is created.
+
+A provider that has never run (no `~/.codex` yet) gets an empty overlay with just the injected servers. If the overlay cannot be built, the launch stops before spawning with `provider.overlay_failed`; there is no fallback that launches without the requested servers. See [Repo Isolation](./repo-isolation.md) for the overlay contract.
+
 ## Opting In
 
 When a user has passed in a non-interactive prompt to an Agent for processing or to kick off a new interactive session, the process is the same:

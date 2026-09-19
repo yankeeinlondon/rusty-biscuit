@@ -32,10 +32,13 @@ pub enum SystemPromptDelivery {
         /// The environment variable name.
         env_var: &'static str,
     },
-    /// Place a file under a shadow `HOME` overlay (e.g. Gemini's
-    /// `~/.gemini/AGENTS.md`).
+    /// Place a file under a relocated `HOME` (e.g. Gemini's
+    /// `~/.gemini/AGENTS.md`). Kept so research records naming
+    /// `shadow_home_file` still generate; no provider selects it, and the
+    /// wrapper warns rather than delivering, because Claudine never moves
+    /// `HOME`.
     ShadowHomeFile {
-        /// Path within the shadow home, relative to its root.
+        /// Path relative to the relocated home's root.
         relative_path: &'static str,
     },
     /// Provider config-override flag plus key, with the prompt content

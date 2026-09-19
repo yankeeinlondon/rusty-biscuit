@@ -179,6 +179,28 @@ pub const CODES: &[CodeSpec] = &[
         // `session_end.extra.subagent_outcomes` regardless.
         detail: &["provider", "incomplete_count"],
     },
+    CodeSpec {
+        code: "provider.overlay_unsupported",
+        category: Category::Provider,
+        // Nothing generic resolves it: the provider has no verified mechanism
+        // for the requested reason, so a retry would refuse identically. Only
+        // dropping the mode (`--repo`, `--mcp`) changes the outcome, and that
+        // is the caller's decision, not a handler's.
+        disposition: Disposition::Unrecoverable,
+        origin: Origin::Caller,
+        severity_override: None,
+        // `selector` is a variable *name*. Its value is never projected —
+        // shadow-home spec Invariant 8.
+        detail: &["provider", "reason", "selector", "next_action"],
+    },
+    CodeSpec {
+        code: "provider.overlay_failed",
+        category: Category::Provider,
+        disposition: Disposition::Correctable,
+        origin: Origin::Environment,
+        severity_override: None,
+        detail: &["provider", "reason", "stage", "message"],
+    },
     // --- composition — author's prompt document (Darkmatter) ---
     CodeSpec {
         code: "composition.invalid_file_reference",
@@ -663,8 +685,11 @@ mod tests {
         // plus the additive `provider.incomplete_subagents`
         // (silent-success-and-startup-stall §4) → 45, plus the completion
         // verdict's `composition.body_unchanged` and
-        // `composition.completion_schema` (inline-flow-and-validations §D5) → 47.
+        // `composition.completion_schema` (inline-flow-and-validations §D5) → 47,
+        // plus the pre-spawn provider-overlay pair
+        // `provider.overlay_unsupported` / `provider.overlay_failed`
+        // (shadow-home fix → Fail closed before spawn) → 49.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 47);
+        assert_eq!(CODES.len(), 49);
     }
 }

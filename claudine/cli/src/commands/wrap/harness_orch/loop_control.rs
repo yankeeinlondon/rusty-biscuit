@@ -31,8 +31,8 @@ use tracing::info_span;
 
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
-    execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt,
-    preflight_harness_document, session_compat_key, HarnessPromptMode,
+    bootstrap_harness_prompt, execute_harness_attempt, harness_prompt_mode_label,
+    materialize_harness_prompt, preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
 
 type HarnessLoopResult = (
@@ -102,7 +102,7 @@ struct HarnessLoopCtx<'a, 'guard> {
     // An already-committed proxy handoff whose target this run adopts for its
     // staged bootstrap. `Some` when the command coordinator re-prepares a
     // proxied target: the hop was already committed against `handoff_ledger`, so
-    // the loop runs the target's R4 staging (narrow gate → `initialize` →
+    // the loop runs the target's R4 staging (shell-free bootstrap → `initialize` →
     // stabilized reread → audit) without re-committing. `None` for a
     // directly-invoked document.
     adopted_handoff: Option<Box<claudine::composition::ProxyHandoff>>,
@@ -557,6 +557,9 @@ fn prepare_attempt_phase(
             .harness_context
             .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
     }
+    if let Some(step) = initialize_adopted_target_phase(&mut prompt, &mut lifecycle, &mut control)? {
+        return Ok(PhaseResult::Transition(Box::new(step)));
+    }
     preflight_fresh_document_phase(
         &mut prompt,
         &mut lifecycle,
@@ -820,20 +823,17 @@ fn observe_reentry_lifecycle_context(
 ///
 /// ## Errors
 ///
-/// A failure here is deliberately *not* routed through the document's own
-/// `blocked`/`finalize`: its lifecycle config is not installed until the gate
-/// passes, and the source's was discarded by the clean handoff, so there is no
-/// legitimate catch surface to fire. It surfaces as its own typed diagnostic.
+/// A bootstrap validation failure precedes installation of the document's
+/// lifecycle config and surfaces directly as a typed diagnostic. Once the gate
+/// passes, initialization runs under the installed config and retains its
+/// ordinary lifecycle error routing.
 fn run_initialize_stages(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &mut MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    // Stage 1 — the bootstrap read is `materialized`, already composed against
-    // the caller's input layers by the shared assembly point. Its lifecycle
-    // came from canonical preparation, so its shell commands are C3-resolved:
-    // the bytes the gate approves are the bytes the executor runs.
+    // Canonical preparation rejects shell actions in initialization.
     let bootstrap_lifecycle = match materialized.lifecycle.clone() {
         Some(config) => config,
         None => {
@@ -845,16 +845,6 @@ fn run_initialize_stages(
         }
     };
 
-    // Stage 2 — the narrow safety gate. Every `initialize` shell command the
-    // evaluator could select is approved before the evaluator runs. Later
-    // events are deliberately out of scope: their commands may not survive the
-    // stabilized reread.
-    claudine::composition::resolve_lifecycle_shell_approvals(
-        &bootstrap_lifecycle,
-        &prompt.prompt_state.source_path,
-        &[LifecycleSignal::Initialize],
-        prompt.harness_context.shell_options(),
-    )?;
     lifecycle.guard.set_config(bootstrap_lifecycle);
 
     // Stage 3 — `initialize`, through the normal evaluator.
@@ -901,30 +891,69 @@ fn run_initialize_stages(
     Ok(None)
 }
 
+/// Stages 1-3 for a newly adopted target that authors `initialize`, against its
+/// bootstrap read.
+///
+/// The target's `initialize` may create a file its body includes, so the read
+/// feeding the gate and `initialize` composes the frontmatter and lifecycle
+/// surface only. The full pre-flight audit and the full read that follow in
+/// [`prepare_attempt_phase`] then see the document `initialize` left behind,
+/// and [`bootstrap_adopted_document_phase`] finishes the boot from stage 4. A
+/// target without `initialize` owes nothing here: its full boot keeps the
+/// eager read.
+///
+/// ## Errors
+///
+/// A bootstrap-read or gate failure surfaces as its own typed diagnostic, as
+/// in [`run_initialize_stages`]: the target's lifecycle is not installed yet.
+fn initialize_adopted_target_phase(
+    prompt: &mut AttemptPromptPreparation<'_>,
+    lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
+    control: &mut AttemptRetryProxyControl<'_>,
+) -> Result<Option<LoopStep>> {
+    if !control.coordinator.owes_full_bootstrap() || prompt.initial_materialized.is_some() {
+        return Ok(None);
+    }
+    let bootstrap = bootstrap_harness_prompt(
+        prompt.prompt_state,
+        prompt.child_cwd,
+        prompt.harness_context.shell_options(),
+    )
+?;
+    let Some(mut materialized) = bootstrap else {
+        return Ok(None);
+    };
+    if let Some(step) = run_initialize_stages(prompt, lifecycle, control, &mut materialized)? {
+        return Ok(Some(step));
+    }
+    control.coordinator.mark_target_initialized();
+    Ok(None)
+}
+
 /// Run a document's staged canonical boot.
 ///
-/// A newly adopted proxy target runs all five stages. A directly-invoked
-/// document that declares its own `initialize` enters at stage 4: the setup
-/// pipeline already ran the equivalent of stages 1-3 for it, and re-running
-/// them here would emit `initialize` twice.
+/// A newly adopted proxy target runs all five stages; one that authors
+/// `initialize` already ran stages 1-3 against its bootstrap read
+/// ([`initialize_adopted_target_phase`]) and enters at stage 4. A
+/// directly-invoked document enters at stage 4 as well: the setup pipeline
+/// already ran the equivalent of stages 1-3 for it, and re-running them here
+/// would emit `initialize` twice.
 ///
 /// The staging exists because of an ordering conflict: `initialize` may mutate
 /// the document, and the full audit has to read the document it will actually
 /// execute. Auditing everything first and then letting `initialize` rewrite the
-/// file underneath the audit is the drift; running `initialize` first with
-/// nothing approved is a hole. So the boot splits:
+/// file underneath the audit would invalidate it. Initialization is shell-free:
+///
 ///
 /// 1. the **bootstrap read** — the document as adopted, composed with the
 ///    caller's input layers, giving the lifecycle surface `initialize` needs;
-/// 2. the **narrow safety gate** — approve only the shell commands
-///    `initialize` could select, against that same read;
+/// 2. reject shell actions and bootstrap frontmatter shell expansion;
 /// 3. `initialize` itself, through the normal evaluator, consuming
 ///    `skip`/`error`/`proxy` atomically;
 /// 4. the **stabilized reread** — a fresh read, so an initialize-time file or
 ///    frontmatter mutation is visible, with the caller's layers reapplied
 ///    through the same assembly point;
-/// 5. the **full audit** over every lifecycle surface, which reuses the gate's
-///    approvals from the invocation-wide cache rather than prompting twice.
+/// 5. the **full audit** over the remaining lifecycle and body shell surfaces.
 ///
 /// `initialize` fires exactly once across all five stages: only step 3 emits
 /// it, and the reread re-points the guard's config without touching its
@@ -1027,7 +1056,7 @@ fn bootstrap_adopted_document_phase(
     // its lifecycle context is the prepared snapshot R5 pins; replacing either
     // from here would substitute a second capture for the one the run was
     // planned against. Its prompt was likewise already reported.
-    if stage == BootstrapStage::Full {
+    if stage != BootstrapStage::StabilizeOnly {
         let launch_area = lifecycle
             .guard
             .context()
@@ -1828,6 +1857,7 @@ fn execute_attempt_phase(
         &rebuilt.mcp_tags,
         &launch,
         rebuilt.write_posture.as_deref(),
+        rebuilt.overlay.as_ref(),
     );
     // A resume carries the key of the session-producing attempt forward with the
     // live session. If the canonical refresh changed a launch property the
@@ -1881,6 +1911,36 @@ fn execute_attempt_phase(
         None
     };
 
+    // A budgeted run debits the invocation before spawn and bounds the
+    // attempt by the remaining shared allowance. Capped after the session key
+    // above, so a resume is not refused over the shrinking deadline.
+    let mut launch = launch;
+    match crate::budget::admit_launch(attempt) {
+        Ok(Some(remaining)) => {
+            let timeout = &mut launch.timeout_config.timeout;
+            *timeout = Some(timeout.map_or(remaining, |configured| configured.min(remaining)));
+        }
+        Ok(None) => {}
+        Err(refusal) => {
+            let e = color_eyre::Report::from(refusal);
+            let err_info = LifecycleErrorInfo::from_error_or_action("budget_admission", e.as_ref());
+            rollback_inline_document(inline.as_mut(), term);
+            return Err(match emit_failure_finalize_with_err(
+                lifecycle_guard,
+                &materialized,
+                &prompt_state.source_path,
+                repo_root,
+                term,
+                effect_engine,
+                &err_info,
+                loop_start,
+            ) {
+                Some(ce) => ce.into(),
+                None => e,
+            });
+        }
+    }
+
     let mut child_spawned = false;
     let attempt_result = execute_harness_attempt(
         attempt,
@@ -1909,6 +1969,7 @@ fn execute_attempt_phase(
         // Cloned per attempt: a retry starts with an empty partial-line buffer.
         state.run.task_frame_writer.clone(),
     );
+    crate::budget::settle_launch();
 
     // Mark launched as soon as spawn succeeded — before propagating
     // any post-spawn error — so the guard correctly classifies

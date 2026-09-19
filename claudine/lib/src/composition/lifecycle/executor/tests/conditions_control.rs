@@ -312,6 +312,8 @@ fn err_global_visible_in_failure_stack_when() {
         variant: "Io".to_string(),
         msg: "disk full".to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     };
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);

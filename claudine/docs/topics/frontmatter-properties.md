@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-8a899d665f5da917
-last_updated: 2026-09-05
+hash: ef46db3751d8e999-c8cf561420e0e67a
+last_updated: 2026-09-17
 ---
 # Frontmatter Properties Reference
 
@@ -26,6 +26,11 @@ Claudine reads and acts on a number of YAML frontmatter properties across its co
 ## Lifecycle Notifications
 
 Each lifecycle property is a top-level frontmatter key whose value is a sub-object with notification fields.
+
+> **Shell-free initialization.** `initialize` cannot contain shell actions.
+> Bootstrap frontmatter `$(...)` expansion and shell execution in early catch
+> handlers are forbidden regardless of approval. Use `start` or a later event
+> for shell actions after successful preflight. See [lifecycle.md](lifecycle.md).
 
 > **Event-time interpolation.** The seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`) are deferred from compose-time resolution: their `{{ … }}` spans survive raw in `effective_frontmatter` and interpolate **when the event fires**, against the live document state plus the runtime globals (`err`, `timing`, `current`). This is what lets `failure.message: "{{err.code}}"` report the real error. Resolution fails closed before any side effect dispatches. The single exception is shell commands (the positional `shell: "…"` action and the key/value `command:` parameter), resolved against early-binding surfaces (`doc.*`/`ctx.*`/`env.*`/read-side functions) at pre-flight so the approved command is byte-identical to the executed one — a late-binding reference there is rejected at prepare time. See [lifecycle.md — When Lifecycle Properties Interpolate](lifecycle.md#when-lifecycle-properties-interpolate).
 

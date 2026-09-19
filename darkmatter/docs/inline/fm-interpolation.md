@@ -73,6 +73,8 @@ Each top-level key is classified as one of:
 - **Templated value**: the value tree contains at least one interpolation expression somewhere
 
 Only seed values participate in lookup for the frontmatter interpolation pass.
+A templated key joins them once it has resolved — see
+[Chained References](#chained-references).
 
 ### What Counts As Templated
 
@@ -183,7 +185,7 @@ JSON (`["a","b","c"]`, and `[]` when empty); `as_json` is the explicit spelling
 of that default, and the other list-formatting functions (`as_csv`,
 `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json5`, …)
 render the other shapes. A value that is _exactly_ one span is unaffected — see
-the [whole-value exception](#whole-value-exception-strict), which keeps the
+the [whole-value exception](#whole-values-keep-their-type), which keeps the
 array typed rather than stringifying it. DateTime variables have `_utc`
 counterparts.
 

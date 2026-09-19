@@ -26,6 +26,10 @@ const STUB_SENTINEL: &str = "fixture-probe";
 /// `CLAUDINE_PROBE_CAPTURE`. Bracketed values distinguish "empty" from the
 /// shell's own rendering of an unset variable.
 ///
+/// The provider selector lines are generated from
+/// [`common::provider_selector_vars`], so the probe records every name that
+/// scrub covers, including one a provider gains later.
+///
 /// `FIXTURE_PROBE_CONTROL` deliberately carries no `CLAUDINE_` prefix: it is
 /// the live control proving the parent's environment reaches the child at all,
 /// and the builder scrubs the whole `CLAUDINE_*` namespace at build time.
@@ -34,47 +38,62 @@ const STUB_SENTINEL: &str = "fixture-probe";
 fn write_probe_stub(bin_dir: &Path) {
     #[cfg(windows)]
     {
+        let selectors: String = common::provider_selector_vars()
+            .iter()
+            .map(|key| {
+                let key = key.to_string_lossy();
+                format!(">>\"%CLAUDINE_PROBE_CAPTURE%\" echo {key}=[%{key}%]\r\n")
+            })
+            .collect();
+        let head = concat!(
+            "@echo off\r\n",
+            ">\"%CLAUDINE_PROBE_CAPTURE%\" echo PATH=%PATH%\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOME=%HOME%\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CWD=%CD%\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo XDG_CONFIG_HOME=[%XDG_CONFIG_HOME%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOMEDRIVE=[%HOMEDRIVE%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOMEPATH=[%HOMEPATH%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_STEP_TIMEOUT=[%CLAUDINE_STEP_TIMEOUT%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_RENDEZVOUS_REPORT=[%CLAUDINE_RENDEZVOUS_REPORT%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_DIR=[%GIT_DIR%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_WORK_TREE=[%GIT_WORK_TREE%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo TERM_WIDTH=[%TERM_WIDTH%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COLUMNS=[%COLUMNS%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo FORCE_COLOR=[%FORCE_COLOR%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDE_MODEL=[%CLAUDE_MODEL%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo YOLO=[%YOLO%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo INTERACTIVE=[%INTERACTIVE%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT_CWD=[%AGENT_CWD%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
+        );
+        let tail = concat!(
+            ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo STUB=fixture-probe\r\n",
+            "exit /b 0\r\n",
+        );
         common::write(
             &bin_dir.join(format!("{PROVIDER}.cmd")),
-            concat!(
-                "@echo off\r\n",
-                ">\"%CLAUDINE_PROBE_CAPTURE%\" echo PATH=%PATH%\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOME=%HOME%\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CWD=%CD%\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo XDG_CONFIG_HOME=[%XDG_CONFIG_HOME%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOMEDRIVE=[%HOMEDRIVE%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOMEPATH=[%HOMEPATH%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_STEP_TIMEOUT=[%CLAUDINE_STEP_TIMEOUT%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_RENDEZVOUS_REPORT=[%CLAUDINE_RENDEZVOUS_REPORT%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_DIR=[%GIT_DIR%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_WORK_TREE=[%GIT_WORK_TREE%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo TERM_WIDTH=[%TERM_WIDTH%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COLUMNS=[%COLUMNS%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo FORCE_COLOR=[%FORCE_COLOR%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDE_MODEL=[%CLAUDE_MODEL%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo YOLO=[%YOLO%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo INTERACTIVE=[%INTERACTIVE%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT_CWD=[%AGENT_CWD%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
-                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo STUB=fixture-probe\r\n",
-                "exit /b 0\r\n",
-            ),
+            &[head, &selectors, tail].concat(),
         );
     }
     #[cfg(not(windows))]
     {
-        common::write_executable(
-            &bin_dir.join(PROVIDER),
-            r#"#!/bin/sh
+        let selectors: String = common::provider_selector_vars()
+            .iter()
+            .map(|key| {
+                let key = key.to_string_lossy();
+                format!("  printf '{key}=[%s]\\n' \"${key}\"\n")
+            })
+            .collect();
+        let head = r#"#!/bin/sh
 {
   printf 'PATH=%s\n' "$PATH"
   printf 'HOME=%s\n' "$HOME"
@@ -103,11 +122,12 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'SYSTEMROOT=[%s]\n' "$SystemRoot"
   printf 'PLAYA_DRY_RUN=[%s]\n' "$PLAYA_DRY_RUN"
   printf 'PLAYA_SPOOL_DIR=[%s]\n' "$PLAYA_SPOOL_DIR"
-  printf 'STUB=fixture-probe\n'
+"#;
+        let tail = r#"  printf 'STUB=fixture-probe\n'
 } > "$CLAUDINE_PROBE_CAPTURE"
 exit 0
-"#,
-        );
+"#;
+        common::write_executable(&bin_dir.join(PROVIDER), &[head, &selectors, tail].concat());
     }
 }
 
@@ -574,6 +594,62 @@ fn both_command_surfaces_hand_the_child_the_same_environment() {
         fixture.home(),
         "the raw command surface must point HOME at the fixture home",
     );
+}
+
+/// Provider overlay and state selectors stay out of **both** surfaces, against
+/// a parent that exported every one.
+///
+/// A wrapped agent session exports `CODEX_HOME`, `CODEX_SQLITE_HOME`, and their
+/// siblings. Inherited, they became the overlay's source root and SQLite pin and
+/// failed five `level1_provider_overlay_home` contracts
+/// (`fixes/2026-09-12-shadow-home/review-1.md` → finding 1). Surface equality
+/// alone would pass two identically leaky surfaces, so each value is asserted
+/// absent on each surface.
+#[test]
+fn both_command_surfaces_drop_every_inherited_provider_selector() {
+    let (fixture, assert_cmd_capture) = probe_fixture("fixture-provider-selectors");
+    let std_capture = fixture.workspace_path().join("probe-capture-std.txt");
+    let intent_capture = fixture.workspace_path().join("probe-capture-intent.txt");
+    let selectors: Vec<String> = common::provider_selector_vars()
+        .iter()
+        .map(|key| key.to_string_lossy().into_owned())
+        .collect();
+    for expected in ["CODEX_HOME", "GEMINI_CLI_HOME", "CLAUDE_CONFIG_DIR", "CODEX_SQLITE_HOME"] {
+        assert!(
+            selectors.iter().any(|key| key == expected),
+            "{expected} is missing from the scrubbed selectors: {selectors:?}"
+        );
+    }
+    unsafe {
+        std::env::set_var("FIXTURE_PROBE_CONTROL", "sentinel-control");
+        for key in &selectors {
+            std::env::set_var(key, "/sentinel-ambient-selector");
+        }
+    }
+
+    let through_assert_cmd = run_probe(fixture.command(), &assert_cmd_capture);
+    let through_std = run_probe_std(fixture.command_std(), &std_capture);
+
+    assert_eq!(
+        through_assert_cmd, through_std,
+        "the assert_cmd and raw command surfaces handed the child different selectors"
+    );
+    for (surface, recorded) in [("assert_cmd", &through_assert_cmd), ("raw", &through_std)] {
+        assert_parent_environment_reached_the_child(recorded);
+        for key in &selectors {
+            assert_eq!(
+                recorded[key], "[]",
+                "the {surface} surface let an inherited {key} through"
+            );
+        }
+    }
+
+    // Ambient-restoration tests set the selector after `build()`; that is
+    // intent, not inheritance, and must still arrive.
+    let mut intent = fixture.command();
+    intent.env("CODEX_SQLITE_HOME", "/fixture-intent");
+    let with_intent = run_probe(intent, &intent_capture);
+    assert_eq!(with_intent["CODEX_SQLITE_HOME"], "[/fixture-intent]");
 }
 
 /// Reporting stays off on **both** surfaces, even against a parent that turned

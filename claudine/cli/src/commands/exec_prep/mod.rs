@@ -9,13 +9,15 @@
 //! `features/2026-07-02-provider-metadata/design/pipeline-dry.md`
 //! (workstream 0).
 
+use claudine::invocation_context::{EnvBaseline, HomeBaseline};
 use claudine::provider::{Provider, provider_info};
+use claudine::provider_overlay::{OverlayCapability, OverlayReason};
 use color_eyre::eyre::Result;
 
 use super::wrap::env::EnvPlan;
 use super::wrap::policy::StructuredCodexOutput;
 use super::wrap::profile::{ModelSource, WrapperProfile, no_model_error, resolve_model_source};
-use super::wrap::repo_home;
+use super::wrap::provider_overlay;
 
 /// Failure from [`resolve_model_and_validate`], split so each pipeline
 /// keeps its own presentation.
@@ -87,11 +89,9 @@ pub(crate) fn resolve_model_and_validate(
     };
 
     match &source {
-        // Every source is delivered explicitly, a value read from the
-        // provider's own configuration included. Claudine resolves the model in
-        // its own environment but launches the child in a rewritten one (repo
-        // isolation replaces `HOME`; MCP modes redirect provider config), so a
-        // provider asked to rediscover its default can silently run a different
+        // Every source is delivered explicitly, including a value read from the
+        // provider's own configuration. Provider overlays and MCP modes can
+        // redirect provider config, so rediscovery could select a different
         // model — or none — than the one Claudine reports.
         Some(resolved) => {
             let mut env_overrides = Vec::new();
@@ -122,36 +122,48 @@ pub(crate) fn resolve_model_and_validate(
     Ok(source.filter(|_| must_find_model))
 }
 
-/// Guarantee `env_plan.shadow_home_path` before provider-config
-/// injection when the session needs a shadow HOME.
+/// Guarantee a materialized provider overlay before provider-config injection
+/// writes into it.
 ///
-/// `env::build_child_env_with_launch` already attempts the shadow-home
-/// build whenever its `force_shadow_home` flag is set, and a successful
-/// build always records `shadow_home_path` — so this stage is a no-op
-/// on the happy path. It is reachable only when that builder degraded
-/// to a warning (`failed to create shadow HOME`, HOME=/dev/null). Here
-/// the retry's failure is a hard error rather than another warning:
-/// the caller is about to inject provider config that must land in the
-/// shadow HOME, not the user's real one.
-pub(crate) fn ensure_shadow_home(
+/// `env::build_child_env_with_launch` builds the overlay whenever the caller's
+/// reason set asks for one, and a build failure already stopped the launch, so
+/// on the direct path this is a no-op. It does work only when the launch was
+/// planned without an `Mcp` reason — a composition session whose MCP servers
+/// were resolved after the child environment was built. A failure here is a
+/// typed pre-spawn error, like the builder's.
+///
+/// Also a no-op for a provider whose MCP delivery needs no Claudine-provided
+/// config root: its overlay plan has no `Mcp` reason to satisfy.
+pub(crate) fn ensure_provider_overlay(
     provider: Provider,
-    needs_shadow_home: bool,
+    needs_overlay: bool,
     env_plan: &mut EnvPlan,
+    home_baseline: &HomeBaseline,
+    env_baseline: &EnvBaseline,
 ) -> Result<()> {
-    if !needs_shadow_home || env_plan.shadow_home_path.is_some() {
+    if !needs_overlay
+        || env_plan.overlay_visible_root().is_some()
+        || provider.overlay_capability(OverlayReason::Mcp) != OverlayCapability::NativeRoot
+    {
         return Ok(());
     }
-    let (shadow_env, shadow_path, _) = repo_home::build_repo_home_env(
+    let repo_resources = env_plan
+        .overlay
+        .as_ref()
+        .is_some_and(|plan| plan.reasons().contains(OverlayReason::RepoResources));
+    let reasons =
+        provider_overlay::overlay_reasons(provider, repo_resources, true, &env_plan.child_cwd);
+    let (plan, _) = provider_overlay::build_overlay(
         provider,
+        reasons,
         env_plan.child_cwd.as_path(),
         false,
-        false,
         Some(env_plan.child_cwd.as_path()),
+        home_baseline,
+        env_baseline,
     )?;
-    for (key, value) in shadow_env {
-        env_plan.env.insert(key, value);
-    }
-    env_plan.shadow_home_path = shadow_path;
+    provider_overlay::apply_overlay_env(&mut env_plan.env, &plan);
+    env_plan.overlay = Some(plan);
     Ok(())
 }
 
@@ -439,25 +451,33 @@ mod tests {
         assert!(env.is_empty());
     }
 
+    /// Off the gate, or for Claude, which delivers MCP without a
+    /// Claudine-provided config root and must not plan an overlay it would refuse.
     #[test]
-    fn ensure_shadow_home_is_a_no_op_off_the_gate() {
-        let mut plan = EnvPlan::default();
-        ensure_shadow_home(Provider::Codex, false, &mut plan).unwrap();
-        assert!(plan.shadow_home_path.is_none());
-        assert!(plan.env.is_empty());
+    fn ensure_provider_overlay_is_a_no_op_off_the_gate_or_without_a_root_requiring_injector() {
+        let no_home = HomeBaseline::from_parts(None, Default::default());
+        for (provider, needs_overlay) in [(Provider::Codex, false), (Provider::Claude, true)] {
+            let mut plan = EnvPlan::default();
+            ensure_provider_overlay(provider, needs_overlay, &mut plan, &no_home, &EnvBaseline::default())
+                .unwrap();
+            assert!(plan.overlay.is_none() && plan.env.is_empty(), "{provider}");
+        }
     }
 
     #[test]
-    fn ensure_shadow_home_keeps_existing_path() {
-        let mut plan = EnvPlan {
-            shadow_home_path: Some(std::path::PathBuf::from("/tmp/shadow")),
-            ..EnvPlan::default()
-        };
-        ensure_shadow_home(Provider::Codex, true, &mut plan).unwrap();
-        assert_eq!(
-            plan.shadow_home_path.as_deref(),
-            Some(std::path::Path::new("/tmp/shadow"))
-        );
+    fn ensure_provider_overlay_keeps_an_existing_overlay() {
+        use claudine::provider_overlay::{OverlayPlanner, OverlayReasons};
+        let scratch = tempfile::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        let home_baseline = HomeBaseline::from_parts(Some(home.clone()), Default::default());
+        let env = EnvBaseline::default();
+        let existing = OverlayPlanner::new(&home_baseline, &env)
+            .plan(Provider::Codex, OverlayReasons::single(OverlayReason::Mcp))
+            .unwrap();
+        let mut plan = EnvPlan { overlay: Some(existing.clone()), ..EnvPlan::default() };
+        ensure_provider_overlay(Provider::Codex, true, &mut plan, &home_baseline, &env).unwrap();
+        assert_eq!(plan.overlay, Some(existing));
         assert!(plan.env.is_empty());
+        assert!(!home.exists(), "an existing overlay is not rebuilt");
     }
 }

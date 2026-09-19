@@ -1,0 +1,8 @@
+---
+$schema: ../../_mappings.schema.yaml
+schema_version: 0
+inspected_revision: d57faf7e8
+fingerprint_algorithm: [sha256-file]
+assessments:
+  - { id: map.a, adapter: discord, platform_doc: discord.md, facts: [c.a], status: implemented, summary: x, code_refs: [], test_refs: [], assessed_revision: d57faf7e8, fingerprints: [], review: { status: proposed, proposed_by: x }, requires_messenger_update: false }
+---

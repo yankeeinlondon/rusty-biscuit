@@ -34,7 +34,10 @@ use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
 
-pub use frontmatter::{FmEntry, FmValueKind, FrontmatterAst, YamlParseError};
+pub use frontmatter::{
+    FmEntry, FmEntryRole, FmPathSegment, FmScalarStyle, FmValueKind, FrontmatterAst,
+    YamlParseError, format_dotted,
+};
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
 };

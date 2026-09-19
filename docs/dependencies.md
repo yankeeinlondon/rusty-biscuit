@@ -2,6 +2,11 @@
 
 ## Recent Dependency Notes
 
+- `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
+  metadata pipeline Phase 5). The crate was already in the graph through
+  `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
+  recovery uses it to check a recorded worker's process start time before
+  signaling that PID. See [`claudine/docs/dependencies.md`](claudine/docs/dependencies.md).
 - `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
   carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
   the 2026-09-13 cicd-redundancies fix; both are deleted, `"scripts"` is in the
@@ -84,6 +89,23 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
+- `messenger/lib` depends on `darkmatter`, `biscuit-file` (only
+  `file-reference`), `biscuit-hash`, and `serde_path_to_error` only through its
+  opt-in `research` feature (`messenger::research`: typed loading and semantic
+  validation of the provider research contract). Darkmatter is also a
+  development dependency with `effects-instrumentation`, so
+  `tests/research_corpus.rs` can assert that research validation builds no
+  effect engine and attempts no network access. Ordinary send builds
+  (no-default, default, and `desktop` features) depend on none of them.
+  `research` also enables the library's existing optional `sniff` dependency
+  (already used by `desktop`), whose Git work-tree discovery lets `prepare`
+  refuse a research root below the Git top level; no crate was added.
+- `messenger/cli` enables `messenger`'s `research` feature unconditionally for
+  the `messenger research` maintenance commands, so the `messenger` binary
+  carries those four crates; the library's send-only builds are unchanged. Its
+  `tests/research_cli.rs` uses the workspace `biscuit-test-harness` as a
+  development dependency for `bin_exe!`, so the binary resolves on the WSL2
+  nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
@@ -1048,6 +1070,12 @@ This is a Rust workspace with the following modules:
     _Fast JSON serialization/deserialization using serde._
 
     _Tags: json, serialization_
+
+- [serde_path_to_error](https://github.com/dtolnay/path-to-error) _v0.1_ [📄](https://docs.rs/serde_path_to_error)
+
+    _Reports the JSON path of a Serde deserialization failure. Used by `messenger`'s `research` feature to point strict-scalar findings at the offending field._
+
+    _Tags: serde, diagnostics_
 
 - [serde_yaml](https://github.com/dtolnay/serde-yaml) _v0.9_
 

@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-09-08
-hash: 7738d51f4cfa73e2-458492b37eaacaef
+last_updated: 2026-09-17
+hash: 7738d51f4cfa73e2-a4d63f95f040887d
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -315,7 +315,7 @@ Emits the execution line to stderr with `ComposeDisplay::Compose`, showing provi
 
 Builds child process environment via `env::build_child_env()`:
 
-- Constructs `EnvPlan` with env vars, shadow HOME, sensitive var stripping
+- Constructs `EnvPlan` with env vars, the provider overlay plan and its selector patch, sensitive var stripping (home variables pass through unchanged)
 - Sets `OPERATION` env if specified
 - Applies request-level env overrides
 - Sets `AGENT_CWD` on every Claudine-spawned child to the absolute directory
@@ -336,7 +336,7 @@ collision is an accepted residual risk.
 | Input                  | Impact                                                    |
 |------------------------|-----------------------------------------------------------|
 | `--operation` / `--op` | Sets `OPERATION` env var for the child process            |
-| `--repo`               | Uses shadow HOME for repo-scoped resources                |
+| `--repo`               | Builds a provider overlay for repo-scoped resources       |
 | `--include`            | Preserves named env vars that would otherwise be stripped |
 
 ##### 6e. MCP Session Setup
@@ -346,7 +346,7 @@ When `--mcp` or `--mcp-use` is active:
 1. Loads MCP catalog from `~/.claudine/mcp/catalog.json`
 2. Extracts `#tags` from the prompt and strips them
 3. Computes session set (resolves tags, handles ambiguous/missing)
-4. Injects provider-specific MCP servers (Codex/Gemini use shadow HOME; OpenCode uses `OPENCODE_CONFIG_CONTENT`)
+4. Injects provider-specific MCP servers (Codex/Gemini write into a provider overlay selected by `CODEX_HOME`/`GEMINI_CLI_HOME`; OpenCode and Kilo use `OPENCODE_CONFIG_CONTENT` and `KILO_CONFIG_CONTENT`)
 
 **Affected by:**
 
@@ -768,7 +768,7 @@ Model selection follows a single chain independent of TTY mode:
 
 ### Providers That Require a Model in Non-Interactive Mode
 
-A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant; a configured default is exported as `MODEL` and reported in the preflight preamble without pushing a flag, because OpenCode reads it itself. Only when neither names a model does Claudine fail before launch:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant. A discovered default is delivered exactly like an explicit `--model` — pushed on argv and exported as `MODEL` — and reported in the preflight preamble: Claudine reads the file in its own environment but launches the child in a rewritten one, so a provider left to rediscover its default can run a model Claudine did not report. Only when neither names a model does Claudine fail before launch:
 
 ```
 No model specified! OpenCode requires a model in non-interactive mode.
@@ -928,11 +928,23 @@ The following interfaces have been removed and replaced by the two canonical com
 
 ## Architecture
 
-All three commands follow the same six-stage pipeline:
+The shared eager preparation path has the following outline:
 
 ```text
 Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 ```
+
+Live `compose` and `inline-compose` documents with an authored `initialize`
+key instead bootstrap a shell-free frontmatter/lifecycle surface, reject
+initialization shell actions regardless of approvals, run initialization once,
+and reread before body discovery,
+full shell audit, and the schema verdict. Newly adopted proxy targets also
+enter staged initialization. The stabilized body may include files just
+created by initialization. Dry runs do not initialize; sequence static preflight
+still requires all includes before any task starts. See the current
+[pipeline map](../pipeline.md#b4-staged-initialization-and-shell-preflight) and
+[composition contract](composition.md#documents-that-declare-initialize).
+
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
 - **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))

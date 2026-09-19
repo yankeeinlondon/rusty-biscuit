@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-10a14b29d87ac832
-last_updated: 2026-09-08
+hash: ef46db3751d8e999-3da0d4d645e5c669
+last_updated: 2026-09-16
 ---
 # Claudine CLI Reference
 
@@ -487,7 +487,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
 | `--sandbox` | Enable provider-specific sandboxing |
-| `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
+| `--repo` | Use only repo-scoped skills, commands, and agents via a provider overlay (`HOME` is unchanged; Antigravity, Goose, OpenCode, and Kilo refuse) |
 | `-p, --prompt-file <FILE>` | Source initial prompt from a Markdown file (composed with Darkmatter) |
 | `--frontmatter-prompt <FILE>` | Inline composition: use frontmatter prompt as input |
 | `--compose <FILE>` | Chained composition: compose full document and use as prompt |
@@ -513,7 +513,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 - Reports removed env variable names to stderr (names only, sorted/unique).
 - Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
-- Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
+- Non-interactive Codex, Gemini, OpenCode, and Kilo runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
 - Writes a synthetic JSONL summary event per session for reporting completeness.
 
 ---
@@ -736,6 +736,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 |----------|-------------|
 | `RUST_LOG` | Diagnostic tracing level (also set via the `--debug <LEVEL>` flag) |
 | `CLAUDINE_OPENCODE_STALL_TIMEOUT` | OpenCode stalled-generation backstop default (duration string; `0s` disables). Overridden by `--stall-timeout` / frontmatter `stall_timeout`; built-in `10m` |
+| `CLAUDINE_OVERLAY_DIR` | Absolute directory replacing `~/.claudine/overlays` as the parent of per-launch provider overlay roots; a relative value refuses the launch. Moves storage only, never a provider source root or a home variable |
 | `HOME` | Used for path resolution |
 | `PATH` | Must include `claudine` binary |
 | `AGENT` | Injected by wrapper: provider name |

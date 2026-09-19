@@ -9,6 +9,7 @@
 
 pub mod codes;
 pub mod frontmatter;
+pub(crate) mod nested_span;
 mod publisher;
 mod scheduler;
 

@@ -12,7 +12,9 @@
 //! [`EXCLUDED_SERIALIZED_FIELDS`] with a justification — the
 //! registry-covers-all-fields guard enforces exactly-one-of.
 
-use claudine_catalog_types::{AcpServerMode, ModelCatalogSource, PlatformKind, ResumeSupport};
+use claudine_catalog_types::{
+    AcpServerMode, ModelCatalogSource, OverlayReason, PlatformKind, ResumeSupport,
+};
 use serde_json::{Value, json};
 use strum::VariantNames;
 
@@ -208,6 +210,11 @@ pub enum Coercion {
     CapPolicyRecords,
     /// Facts `platform_kind` enum member → `PlatformKind` expression.
     PlatformKindMember,
+    /// Facts overlay-selector record (or null) →
+    /// `Option<&'static OverlaySelectorSpec>` expression.
+    OverlaySelectorRecord,
+    /// Facts overlay-capability record → `OverlayCapabilities` expression.
+    OverlayCapabilitiesRecord,
 }
 
 impl Coercion {
@@ -252,6 +259,8 @@ impl Coercion {
             Coercion::BillingModelList => "billing_model_list",
             Coercion::CapPolicyRecords => "cap_policy_records",
             Coercion::PlatformKindMember => "platform_kind_member",
+            Coercion::OverlaySelectorRecord => "overlay_selector_record",
+            Coercion::OverlayCapabilitiesRecord => "overlay_capabilities_record",
         }
     }
 }
@@ -297,7 +306,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 11 research + 22 facts = 43 fields).
+/// order (10 roster + 11 research + 24 facts = 45 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -341,7 +350,7 @@ pub const REGISTRY: &[RegistryEntry] = &[
         DeclaredSource::Roster { key: "repo_dir" },
         &[SchemaExpectation::String],
         Coercion::StringLiteral,
-        "Agent offset directory used for shadow-HOME isolation",
+        "Agent offset directory; names the provider overlay storage under ~/.claudine",
     ),
     entry(
         "cli_aliases",
@@ -620,7 +629,7 @@ pub const REGISTRY: &[RegistryEntry] = &[
         },
         &[SchemaExpectation::StringArray],
         Coercion::StringSlice,
-        "Root-level repo-home files preserved during shadow-HOME isolation",
+        "Home-root files placed inside a default-rooted provider overlay",
     ),
     entry(
         "resume",
@@ -758,6 +767,36 @@ pub const REGISTRY: &[RegistryEntry] = &[
         Coercion::UnmappedNativeEventRecords,
         "Provider-native hook events with no 16-event mapping (configure in the provider); \
          graduation candidate: hooks topic `hooks[]` records with claudine_event == unknown",
+    ),
+    RegistryEntry {
+        field: "overlay_selector",
+        source: DeclaredSource::Facts {
+            key: "overlay_selector",
+        },
+        expected: &[SchemaExpectation::Record {
+            required_fields: &["env_var", "shape", "relocates", "additive", "source_root"],
+        }],
+        coercion: Coercion::OverlaySelectorRecord,
+        // Null for a provider with no provider-scoped redirection surface
+        // at all (Antigravity): its only lever is `HOME`, which this
+        // catalog exists to stop pulling.
+        optional: true,
+        description: "Provider-owned env var Claudine points at an overlay, with the path \
+                      shape its value takes and the pre-overlay source root",
+    },
+    entry(
+        "overlay_capabilities",
+        DeclaredSource::Facts {
+            key: "overlay_capabilities",
+        },
+        // Keyed by the OverlayReason vocabulary: adding a reason makes the
+        // facts key mandatory rather than silently defaulting.
+        &[SchemaExpectation::Record {
+            required_fields: OverlayReason::VARIANTS,
+        }],
+        Coercion::OverlayCapabilitiesRecord,
+        "Per-activation-reason overlay capability verdicts (native_root / \
+         composable_injection / unsupported)",
     ),
 ];
 

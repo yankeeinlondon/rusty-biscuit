@@ -124,6 +124,8 @@ pub(super) fn dispatch_terminal_control(
                     term,
                 );
             }
+            // Backoff is charged to a budgeted run and never outlives it.
+            let delay = crate::budget::cap_wait(delay);
             if !delay.is_zero() {
                 std::thread::sleep(delay);
             }

@@ -40,7 +40,7 @@ pub struct PreFlightResult {
 ///
 /// 1. Template `::shell` directives (via Darkmatter's document graph walker)
 /// 2. Lifecycle stack shell commands (from every reachable `action: shell`
-///    across all seven lifecycle events)
+///    across the six shell-capable lifecycle events)
 ///
 /// ## Errors
 ///
@@ -52,12 +52,14 @@ pub struct PreFlightResult {
 ///
 /// ## Arguments
 ///
-/// * `markdown` — composed Markdown for template `::shell` discovery.
+/// * `markdown` — Markdown source for condition-blind template `::shell`
+///   discovery, which can dereference body includes. For staged live entry,
+///   pass the stabilized reread after initialization.
 /// * `compose_options` — Darkmatter compose options for the template walker.
 /// * `approval_options` — shell approval policy, handler, and cache.
 /// * `lifecycle` — parsed lifecycle configuration; when present, every
 ///   reachable `action: shell` command (and `on_error` command) across all
-///   seven lifecycle events is collected and audited alongside the other
+///   six shell-capable lifecycle events is collected and audited alongside the other
 ///   sources. `lifecycle_source_path` names the composition source file for
 ///   diagnostics.
 /// * `lifecycle_source_path` — source path for lifecycle-stack shell
@@ -158,16 +160,8 @@ fn approve_commands(
 
 /// Audit only the shell commands reachable from `signals`.
 ///
-/// The narrow bootstrap gate uses this with `[LifecycleSignal::Initialize]`: a
-/// freshly adopted document runs its `initialize` *before* the full audit can
-/// run, because `initialize` may mutate the very document the full audit would
-/// have to read. "Initialize before full pre-flight" must never mean "execute
-/// unapproved shell", so the commands that event could select are approved
-/// first, on their own.
-///
-/// Approvals land in `approval_options.approval_cache`, keyed on the normalized
-/// command string, so the post-stabilization audit over
-/// [`LifecycleSignal::ALL`] reuses them instead of prompting a second time.
+/// Initialization is shell-free. Audit later events only after initialization
+/// and the stabilized reread; cached approvals remain invocation-scoped.
 ///
 /// `lifecycle` must be the C3-resolved config from canonical preparation — the
 /// approved bytes are the executed bytes only when the `{{ }}` spans have
@@ -191,7 +185,7 @@ pub fn resolve_lifecycle_shell_approvals(
 }
 
 /// Deduplicate `all_commands` and run each survivor through shell policy.
-fn approve_discovered_commands(
+pub(super) fn approve_discovered_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {

@@ -1,0 +1,2 @@
+$schema:
+    facts: "Fact[](min(1); required)@./p5_types.yaml"

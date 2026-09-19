@@ -822,3 +822,20 @@ fn side_effect_dispatch_failure_keeps_the_action_failure_aliases() {
     assert!(info.snapshot.is_none());
     assert!(!info.msg.is_empty());
 }
+
+#[test]
+fn programmatic_initialize_shell_is_rejected_even_with_no_error() {
+    let mut config = parse_lifecycle_config(&json!({
+        "start": {"stack": [{"action": {"action": "shell", "command": "echo forbidden", "no_error": true}}]}
+    }), Path::new("test.md")).unwrap();
+    config.stacks.initialize = config.stacks.start.take();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(LifecycleSignal::Initialize, &fm, None, &engine, &shell, &recorder, &harness, Path::new("test.md"));
+    let outcome = context.execute_event(&config);
+    assert!(outcome.evaluation_error.is_some(), "{outcome:?}");
+    assert!(shell.commands.lock().unwrap().is_empty());
+}

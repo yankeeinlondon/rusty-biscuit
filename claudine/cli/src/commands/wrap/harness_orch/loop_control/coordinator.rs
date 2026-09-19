@@ -43,6 +43,9 @@ use super::super::HarnessPromptState;
 pub(super) enum BootstrapStage {
     /// Narrow initialize-shell gate → `initialize` → stabilized reread → audit.
     Full,
+    /// Stabilized reread → audit → launch rebuild, for an adopted target that
+    /// authors `initialize` and has already run it against its bootstrap read.
+    TargetInitialized,
     /// Stabilized reread → audit, for a document whose `initialize` already ran.
     StabilizeOnly,
 }
@@ -98,6 +101,20 @@ impl ActiveDocumentCoordinator {
     /// Consume the pending stage, returning which one was owed.
     pub(super) fn take_bootstrap_pending(&mut self) -> Option<BootstrapStage> {
         self.bootstrap_pending.take()
+    }
+
+    /// Whether a newly adopted target still owes the whole boot, `initialize`
+    /// included.
+    pub(super) fn owes_full_bootstrap(&self) -> bool {
+        self.bootstrap_pending == Some(BootstrapStage::Full)
+    }
+
+    /// Record that an adopted target ran its gate and `initialize` against its
+    /// bootstrap read, leaving the stabilized tail of the boot owed.
+    pub(super) fn mark_target_initialized(&mut self) {
+        if self.owes_full_bootstrap() {
+            self.bootstrap_pending = Some(BootstrapStage::TargetInitialized);
+        }
     }
 
     /// Arm the tail of the staged boot for a directly-invoked document.
@@ -192,7 +209,7 @@ impl ActiveDocumentCoordinator {
     /// terminal-route commit the harness itself made). This performs the same
     /// CLI-side repointing as [`adopt`](Self::adopt) — discarding the source's
     /// execution state, resetting the guard, and arming the bootstrap so the
-    /// staged boot runs the target's own narrow gate, `initialize`, stabilized
+    /// staged boot runs the target's own shell-free bootstrap, `initialize`, stabilized
     /// reread, and full audit — but it does **not** re-resolve or re-approve the
     /// hop: doing so would re-count it and, because the target is already in the
     /// chain, reject it as a cycle. Hop/cycle accounting stays where it was made,

@@ -203,7 +203,7 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: [phase, advanced]}\nstart:\n  info: 'phase={{ doc.phase }}'\n---\nBody for {{state}} in {{ doc.phase }}.\n",
+        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: {phase: advanced}}\nstart:\n  info: 'phase={{ doc.phase }}'\n---\nBody for {{state}} in {{ doc.phase }}.\n",
     )
     .unwrap();
 
@@ -242,7 +242,7 @@ fn the_reserved_overlay_outranks_a_runtime_mutation() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: [state, hijacked]}\nstart:\n  info: 'state={{ state.name }}'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  stack:\n    - action: {set: {state: hijacked}}\nstart:\n  info: 'state={{ state.name }}'\n---\nBody {{state}}.\n",
     )
     .unwrap();
 

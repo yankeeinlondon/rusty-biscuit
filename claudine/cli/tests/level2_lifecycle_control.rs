@@ -388,8 +388,16 @@ fn event_lines(staged: &Staged) -> Vec<String> {
         .collect()
 }
 
-/// The environment prefix every row's staged invocation carries: color off,
-/// `HOME` and `PATH` pinned to the row's own workspace, and `MODEL` emptied.
+/// The environment prefix every row's staged invocation carries: every provider
+/// selector removed, color off, `HOME` and `PATH` pinned to the row's own
+/// workspace, and `MODEL` emptied.
+///
+/// The pane shell inherits the tmux server's environment, and overlay planning
+/// treats an inherited `CODEX_HOME`, `GEMINI_CLI_HOME`, or profile-owned
+/// selector as the user's explicit provider source root. The prefix therefore
+/// removes [`common::provider_selector_vars`] — the list `CliProcessFixture`
+/// scrubs — through `env -u`, which is an executable rather than shell syntax,
+/// so it behaves the same under whichever login shell the pane runs.
 ///
 /// `MODEL` is pinned for the same reason `HOME` and `PATH` are — the host must
 /// not decide the outcome. Model resolution consults the generic `MODEL`
@@ -399,11 +407,16 @@ fn event_lines(staged: &Staged) -> Vec<String> {
 /// asserts on the resolved model. The resolver skips empty values, so `MODEL=''`
 /// restores frontmatter precedence without needing `env -u`.
 ///
-/// A row that wants an ambient `MODEL` appends its own assignment after this
-/// prefix, where it wins.
+/// A row that wants an ambient `MODEL` or selector appends its own assignment
+/// after this prefix, where it wins: `env` applies every `-u` before any
+/// assignment.
 fn staged_env_prefix(staged: &Staged, path: &str) -> String {
+    let unset_selectors: String = common::provider_selector_vars()
+        .iter()
+        .map(|name| format!("-u {} ", name.to_string_lossy()))
+        .collect();
     format!(
-        "NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
+        "env {unset_selectors}NO_COLOR='1' MODEL='' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
     )
 }
@@ -4928,9 +4941,9 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
         root.join("_implement/implement-plan.md"),
     )
     .expect("copy the drift-guarded implement-plan fixture");
-    // The target transcludes these two shipped snippets from its parent
+    // The target transcludes these shipped snippets from its parent
     // directory; they are prose only, so the shipped bytes serve as-is.
-    for snippet in ["_no_formatting.md", "_os.md"] {
+    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md"] {
         fs::copy(
             repo_root.join("prompts").join(snippet),
             root.join(snippet),
@@ -5041,9 +5054,9 @@ exit 0
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/cli");
-    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`
-    // and `../_os.md`, so it lives one directory down and the two snippets sit
-    // beside that directory, inside the workspace.
+    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`,
+    // `../_os.md`, and `../_set_spec_schema.md`, so it lives one directory down
+    // and the snippets sit beside that directory, inside the workspace.
     fs::create_dir_all(root.join("_implement")).unwrap();
     let md_file = root.join("_implement/implement-plan.md");
     fs::copy(
@@ -5051,7 +5064,7 @@ exit 0
         &md_file,
     )
     .expect("copy the shipped implement-plan prompt");
-    for snippet in ["_no_formatting.md", "_os.md"] {
+    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md"] {
         fs::copy(
             repo_root.join("prompts").join(snippet),
             root.join(snippet),
@@ -5360,17 +5373,9 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     pane
 }
 
-/// The narrow safety gate: a proxy target's `initialize` shell command is
-/// approved **before** the evaluator dispatches it.
-///
-/// The target's `initialize` runs before the target's full pre-flight audit
-/// can — the audit has to read the document `initialize` may rewrite. That
-/// ordering must never mean "execute unapproved shell": the gate approves
-/// every command `initialize` could select first, on its own.
-///
-/// `rm` is builtin-blacklisted, so a gate that ran would refuse it. Before the
-/// staged boot the proxy route audited no lifecycle surface at all, so this
-/// command reached `SystemShellRunner` and deleted the sentinel.
+/// A proxy target's initialization shell action is prohibited before dispatch,
+/// regardless of approval. The sentinel and provider marker prove the target
+/// cannot execute the command or proceed to launch.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
@@ -5395,8 +5400,8 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
     );
     assert!(
         sentinel.exists(),
-        "the blacklisted `initialize` shell command must be refused by the narrow \
-         gate before dispatch — it deleted the sentinel instead; pane:\n{pane}"
+        "the forbidden `initialize` shell command must be refused \
+         before dispatch — it deleted the sentinel instead; pane:\n{pane}"
     );
     assert!(
         !lines.iter().any(|l| l == "provider-ran"),
@@ -5411,7 +5416,7 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
 }
 
 /// The full post-stabilization audit covers a proxy target's later lifecycle
-/// surfaces too — not only the ones the narrow gate scoped.
+/// surfaces after shell-free initialization.
 ///
 /// The gate deliberately skips `success`, so if the audit that follows the
 /// stabilized reread did not run, this blacklisted `success` command would
@@ -6762,22 +6767,8 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
 
 // ── AC25: overlay-installed control-plane shell configuration ────────────────
 //
-// The AC17 row above proves byte equality for a shell action the *target*
-// authored, with the overlay supplying only an interpolated value. AC25 is the
-// stronger claim: `with:` may install the lifecycle stack itself — the overlay
-// is the *origin* of the shell configuration — and that reach still buys no
-// exemption from the target's own policy. Both rows below therefore stage a
-// target that authors no `initialize` at all, so the audited command can only
-// have come from the router's overlay.
-
-/// **Acceptance criterion 25, denial.** A router that installs the target's
-/// entire `initialize` shell stack through `proxy.with:` does not get to run an
-/// un-approvable command: the target's narrow initialize gate refuses it, the
-/// operator sees the denial, and no provider process starts.
-///
-/// `rm` is builtin-blacklisted, so a gate that ran at all refuses it. The
-/// sentinel is the physical evidence — if the overlay could bypass target-side
-/// policy the command would delete it before anything else could object.
+/// An overlay cannot install an initialization shell. The initialization
+/// prohibition is applied to the target's effective configuration before launch.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy() {
@@ -6800,17 +6791,17 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
 
     assert!(
         sentinel.exists(),
-        "a blacklisted command installed by `proxy.with:` must be refused by the \
-         target's own shell policy — it deleted the sentinel instead; pane:\n{pane}"
+        "an initialization shell installed by `proxy.with:` must be refused by the \
+         target's lifecycle contract — it deleted the sentinel instead; pane:\n{pane}"
     );
     assert!(
-        prose.contains("blacklisted"),
+        prose.contains("is not valid in"),
         "the operator must see the target-side denial diagnostic; flattened \
          pane:\n{prose}"
     );
     assert!(
-        prose.contains("rm sentinel.txt"),
-        "the denial must name the overlay-installed command; flattened \
+        prose.contains("Initialization is shell-free"),
+        "the denial must explain the shell-free initialization rule; flattened \
          pane:\n{prose}"
     );
     assert!(
@@ -6825,56 +6816,21 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
     );
 }
 
-/// **Acceptance criterion 25, approval.** The same overlay-installed
-/// `initialize` stack, this time carrying a command the target's policy does
-/// approve, runs — and the bytes the shell executed are exactly the bytes the
-/// audit approved.
-///
-/// The pairing with the denial row above is the point: approval is a policy
-/// *decision* about overlay-installed configuration, not a path that skips the
-/// gate. The whitelist lives in the target's own policy root, so what changed
-/// between the two rows is the target's verdict, not the overlay's reach.
+/// Whitelisting does not authorize an overlay-installed initialization shell.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_overlay_installed_initialize_shell_runs_the_approved_bytes() {
+fn level2_lifecycle_overlay_initialization_shell_cannot_be_whitelisted() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    let source_doc = "---\ntitle: overlay-installed approval router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: \
-         {initialize: {stack: [{action: {shell: \"logbytes 'overlay installed bytes'\"}}]}}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: overlay-installed approval target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'ac25-approved']}\n---\ntarget body\n";
-    let staged = stage_proxy_pair(source_doc, target_doc, true);
-
+    let source_doc = "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: '@target.md', with: {initialize: {stack: [{action: {shell: \"logbytes forbidden\"}}]}}}\n---\nRouter\n";
+    let staged = stage_proxy_pair(source_doc, "---\ntitle: target\n---\nTarget\n", true);
     let executed_log = staged.workspace.path().join("executed.log");
     write_bytes_recorder(&staged.bin_dir, &executed_log);
-    fs::write(
-        staged.workspace.path().join(".darkmatter-shell-whitelist"),
-        "prefix logbytes\n",
-    )
-    .unwrap();
-
-    let pane = run_in_tmux_for(&staged, "ac25-approved");
-    let lines = event_lines(&staged);
+    fs::write(staged.workspace.path().join(".darkmatter-shell-whitelist"), "prefix logbytes\n").unwrap();
+    let pane = run_in_tmux_until_exit(&staged);
     let prose = flattened(&pane);
-
-    assert_eq!(
-        fs::read_to_string(&executed_log).unwrap_or_default(),
-        "overlay installed bytes",
-        "the approved bytes must be the executed bytes for a shell action the \
-         overlay installed, embedded spaces and all; pane:\n{pane}"
-    );
-    assert!(
-        !prose.contains("blacklisted"),
-        "an approved overlay-installed command must not render a denial; \
-         flattened pane:\n{prose}"
-    );
-    assert!(
-        lines.iter().any(|l| l == "provider-ran"),
-        "the run must reach the provider once the gate approves; got {lines:?}; \
-         pane:\n{pane}"
-    );
+    assert!(prose.contains("Initialization is shell-free"), "{pane}");
+    assert!(!executed_log.exists(), "the whitelisted shell executed: {pane}");
+    assert!(!event_lines(&staged).iter().any(|line| line == "provider-ran"), "{pane}");
 }
 
 // ── AC26: overlay retention across retry, resume, and loop refresh ───────────
@@ -7422,12 +7378,9 @@ const MCP_PROBE_SERVER: &str = "proxyprobeserver";
 fn seed_mcp_catalog(workspace: &Path) {
     let mcp_dir = workspace.join(".claudine").join("mcp");
     fs::create_dir_all(&mcp_dir).unwrap();
-    // Runtime MCP injection for Codex and Gemini runs through a shadow HOME,
-    // and the shadow-home builder mirrors the *original* provider config
-    // directory — it refuses to run when that directory is missing. `HOME` is
-    // the arm's temporary workspace, so both must be materialized here.
-    fs::create_dir_all(workspace.join(".gemini")).unwrap();
-    fs::create_dir_all(workspace.join(".codex")).unwrap();
+    // No `.codex`/`.gemini` root is seeded: runtime injection writes into a
+    // per-launch provider overlay, and a missing default source root is an
+    // empty overlay rather than a refusal.
     fs::write(
         mcp_dir.join("catalog.json"),
         format!(
@@ -7508,7 +7461,8 @@ mcp target body #proxyprobeserver
 /// prompt tags, and matches the same target invoked directly.
 ///
 /// This is the provider-switch case: the router authors `codex` (whose injector
-/// writes a shadow-home TOML and contributes no argv), the target authors
+/// writes `config.toml` into the `CODEX_HOME` provider overlay and contributes
+/// no argv), the target authors
 /// `gemini` (whose injector contributes `--allowed-mcp-server-names`). No
 /// provider flag is passed, so the injector actually used can only have been
 /// chosen from the target's own frontmatter.
@@ -7567,6 +7521,186 @@ fn level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run() {
          directly; pane:\n{}",
         arms.routed_pane
     );
+}
+
+/// A fake provider that records, for every provider selector, the value its
+/// launch received (`<unset>` when absent), plus the MCP server set Gemini's
+/// injector passed in argv (`none` for a provider whose injector adds no argv).
+fn write_selector_recording_provider(bin_dir: &Path, slug: &str, events_log: &Path) {
+    let names = common::provider_selector_vars()
+        .iter()
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\ncat > /dev/null 2>&1\n\
+             for name in {names}; do\n  \
+             eval \"value=\\${{$name-<unset>}}\"\n  \
+             printf 'child %s=%s\\n' \"$name\" \"$value\" >> {log}\n\
+             done\n\
+             allowed=none\nprev=\n\
+             for a in \"$@\"; do\n  \
+             if [ \"$prev\" = '--allowed-mcp-server-names' ]; then allowed=\"$a\"; fi\n  \
+             prev=\"$a\"\ndone\n\
+             printf 'mcp-allowed=%s\\n' \"$allowed\" >> {log}\n\
+             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            log = events_log.display(),
+        ),
+    );
+}
+
+/// An MCP-injecting target for the Codex arm of the selector-isolation row.
+const MCP_CODEX_TARGET: &str = r#"---
+title: mcp codex target
+agent: codex
+success:
+  stack:
+    - action: {append_line: ["events.log", "sig=success"]}
+---
+mcp codex target body #proxyprobeserver
+"#;
+
+/// Run `claudine compose --mcp <doc>` in a tmux session created with `ambient`
+/// in its own environment, after recording what the pane shell itself sees.
+///
+/// The session variables go through `tmux new-session -e`, so they reach the
+/// pane whether this call starts the tmux server or attaches to one that has
+/// been running since before the row existed. `premise_log` receives one
+/// `pane NAME=value` line per ambient variable, read by the pane shell before
+/// the staged prefix applies; a row asserts it to prove the ambient values
+/// were really present.
+fn run_mcp_compose_in_session_env(
+    staged: &Staged,
+    ambient: &[(String, String)],
+    premise_log: &Path,
+) -> String {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+
+    let session = format!("biscuit_l2_lcctl_selectors_{}_{seq}", std::process::id());
+    let session_env: Vec<(&str, &str)> = ambient
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    biscuit_test_harness::tmux::spawn_shell_session_with_env(&session, 200, 60, &session_env)
+        .expect("failed to spawn tmux session");
+
+    let mut harness = TmuxHarness::attach(&session);
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let premise_probe: String = ambient
+        .iter()
+        .map(|(key, _)| {
+            format!(
+                "printf 'pane {key}=%s\\n' \"${key}\" >> {log} ; ",
+                log = premise_log.display()
+            )
+        })
+        .collect();
+    let claudine = common::claudine_bin();
+    let sentinel = format!("L2_CTL_SELECTORS_{seq}");
+    let cmd = format!(
+        "{premise_probe}cd {ws} && {env_prefix}{claudine} compose --mcp {md} ; echo {sentinel}",
+        env_prefix = staged_env_prefix_augmented(staged),
+        ws = staged.workspace.path().display(),
+        md = staged.md_file.display(),
+    );
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send compose command");
+
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut pane = String::new();
+    while Instant::now() < deadline {
+        pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+        if pane.lines().any(|l| l.trim() == sentinel) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    kill_session_by_name(&session);
+    pane
+}
+
+/// **Level 2 private-root contract.** A staged invocation never observes or
+/// uses a provider selector inherited from the tmux environment.
+///
+/// Every selector `CliProcessFixture` scrubs is set in the session environment
+/// to a root that does not exist. Overlay planning treats an inherited
+/// selector as an explicit source root and refuses a missing one with
+/// `provider.overlay_failed`, so an unscrubbed `GEMINI_CLI_HOME` or
+/// `CODEX_HOME` stops the MCP launch before the provider runs. Each arm then
+/// requires the provider to have run, MCP to have been injected, and no
+/// selector the provider received to equal its ambient value.
+#[test]
+#[serial(level2_lifecycle_control)]
+fn level2_lifecycle_staged_invocation_ignores_inherited_provider_selectors() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    for (slug, target_doc) in [("gemini", MCP_PROBE_TARGET), ("codex", MCP_CODEX_TARGET)] {
+        let mut staged = stage_proxy_pair(target_doc, target_doc, true);
+        staged.md_file = staged.workspace.path().join("target.md");
+        seed_mcp_catalog(staged.workspace.path());
+        write_selector_recording_provider(&staged.bin_dir, slug, &staged.events_log);
+
+        let ambient_root = staged.workspace.path().join("ambient-missing");
+        let ambient: Vec<(String, String)> = common::provider_selector_vars()
+            .iter()
+            .map(|name| {
+                let name = name.to_string_lossy().into_owned();
+                let value = ambient_root.join(&name).display().to_string();
+                (name, value)
+            })
+            .collect();
+        let premise_log = staged.workspace.path().join("premise.log");
+
+        let pane = run_mcp_compose_in_session_env(&staged, &ambient, &premise_log);
+        let lines = event_lines(&staged);
+
+        let premise = fs::read_to_string(&premise_log).unwrap_or_default();
+        for key in ["CODEX_HOME", "GEMINI_CLI_HOME"] {
+            let (_, value) = ambient
+                .iter()
+                .find(|(name, _)| name == key)
+                .unwrap_or_else(|| panic!("fixture check: `{key}` is a provider selector"));
+            assert!(
+                premise.lines().any(|line| line == format!("pane {key}={value}")),
+                "fixture check ({slug}): the pane shell must see the ambient \
+                 `{key}` before the staged prefix; premise log:\n{premise}"
+            );
+        }
+
+        for expected in [
+            "provider-ran".to_string(),
+            "sig=success".to_string(),
+            format!(
+                "mcp-allowed={}",
+                if slug == "gemini" { MCP_PROBE_SERVER } else { "none" }
+            ),
+        ] {
+            assert!(
+                lines.contains(&expected),
+                "({slug}) an inherited provider selector must not become the \
+                 overlay source root; missing `{expected}` in {lines:?}; \
+                 pane:\n{pane}"
+            );
+        }
+        for (name, value) in &ambient {
+            let received = lines
+                .iter()
+                .find_map(|line| line.strip_prefix(&format!("child {name}=")))
+                .unwrap_or_else(|| {
+                    panic!("({slug}) the provider must record `{name}`; got {lines:?}; pane:\n{pane}")
+                });
+            assert_ne!(
+                received, value,
+                "({slug}) the provider must not receive the inherited `{name}`; \
+                 pane:\n{pane}"
+            );
+        }
+    }
 }
 
 // ── Acceptance criterion 28 — three-route typed-diagnostic matrix ───────────
@@ -7997,7 +8131,7 @@ fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() 
 
 // ── Review 7, finding 1: `initialize` precedes the schema verdict ───────────
 //
-// R4 orders a fresh document's stages: narrow initialize-shell gate → its own
+// R4 orders a fresh document's stages: shell-free bootstrap → its own
 // `initialize` → schema validation → full pre-flight. The rows below pin the
 // consequence an operator can see. A target that only satisfies its `$schema`
 // *because* its `initialize` supplies the value must run — on every route. And

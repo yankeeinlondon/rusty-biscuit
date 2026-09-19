@@ -14,6 +14,7 @@
 use std::path::Path;
 
 pub mod agent_message;
+pub mod authored_order;
 pub mod closure;
 pub mod completion;
 pub mod coordinator;
@@ -45,6 +46,7 @@ pub mod sequence;
 mod types;
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use authored_order::AuthoredOrder;
 pub use closure::{
     BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,
     reconcile_inline_artifact, reconcile_inline_artifact_with_evidence, restore_inline_baseline,
@@ -65,7 +67,8 @@ pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, She
 pub use error::{
     ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
-    LoopExpressionCause, MarkdownLoadCause, MissingProperty, SequenceExpressionCause,
+    LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
+    SequenceExpressionCause,
     SequenceLoadCause, SequenceMissingPropertiesStep, SequenceSelectionFailure, SequenceShellCause,
     ShellApprovalFailure, TextFormat,
 };
@@ -104,7 +107,8 @@ pub use lifecycle_executor::{
 };
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
-    LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_with_lifecycle, execute_loop,
+    LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_from_bootstrap,
+    build_loop_seed_with_lifecycle, execute_loop,
     execute_loop_with_config, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
@@ -118,8 +122,9 @@ pub use preflight::{
     resolve_shell_approvals,
 };
 pub use prepare::{
-    DocumentEntryReason, DocumentPreparation, LoopOwnership, PreparationStages, PrepareOptions,
-    PromptSource, SchemaStage, SourceBasis, bind_agent_workspace, preflight_document_shell,
+    BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
+    LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
+    bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell, prepare_bootstrap,
     prepare_direct, prepare_document, prepare_inline,
 };
 #[cfg(test)]

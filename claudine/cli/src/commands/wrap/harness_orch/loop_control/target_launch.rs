@@ -111,7 +111,7 @@
 //!
 //! Argv and MCP injection come from [`super::super::super::launch_plan`], a
 //! re-entrant builder the invocation feeds once with the results of every side
-//! effect it performed (temp files, shadow HOME, ambiguity resolutions). A
+//! effect it performed (temp files, the provider overlay plan, ambiguity resolutions). A
 //! rebuild whose facets match the invocation's gets that recorded plan back
 //! verbatim, so an unchanged document is byte-identical to the invocation by
 //! construction; a rebuild that moved a facet replays the producers around the
@@ -265,6 +265,10 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// The effective inline write-grant posture, `None` for a run that writes
     /// no document. Part of the permission facet the session key compares.
     pub(crate) write_posture: Option<String>,
+    /// The provider overlay this attempt launches under — the plan whose
+    /// selector [`Self::launch_env`] applies. Folded into the session key's
+    /// overlay facet.
+    pub(crate) overlay: Option<claudine::provider_overlay::OverlayPlan>,
     /// Stdout noise prefixes for the rebuilt profile in the rebuilt session
     /// mode (empty when interactive, matching the invocation's own gate).
     pub(crate) stdout_noise: &'static [&'static str],
@@ -480,6 +484,7 @@ pub(crate) fn rebuild_launch_identity(
         system_prompt_artifacts: plan.system_prompt_artifacts,
         warnings: plan.warnings,
         write_posture: plan.write_posture,
+        overlay: plan.overlay,
     })
 }
 
@@ -631,9 +636,9 @@ fn launch_env_overrides(
 ///
 /// `cli_model` is the explicit `--model`, which stays authoritative over any
 /// target frontmatter `model:`. The model is re-resolved against the target's
-/// own [`EffectiveSelectionHints`] with the same catalog validation a direct
-/// invocation performs, so a target that pins its own valid `model:` resolves
-/// it, and an invalid one falls back exactly as it would directly.
+/// own [`EffectiveSelectionHints`] with the same catalog semantics as a direct
+/// invocation: the catalog may order list hints and warn on an unrecognized
+/// value during initial preparation, but it never demotes the document model.
 pub(super) fn rebuild_target_launch(
     intent: &LaunchRebuildIntent,
     cli_model: Option<&str>,

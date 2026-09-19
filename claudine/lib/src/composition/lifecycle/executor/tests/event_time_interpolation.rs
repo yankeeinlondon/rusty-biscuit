@@ -34,6 +34,8 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         variant: "Io".to_string(),
         msg: msg.to_string(),
         snapshot: None,
+        property: None,
+        reason: crate::composition::LifecycleEvaluationReason::Expression,
     }
 }
 
@@ -393,12 +395,107 @@ fn post_dm2_surviving_span_fails_before_dispatch() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    assert!(
-        outcome.evaluation_error.is_some(),
-        "surviving span is an evaluation-layer failure"
-    );
+    let info = outcome
+        .evaluation_error
+        .expect("surviving span is an evaluation-layer failure");
     assert!(outcome.action_error.is_none());
     assert!(recorder.events().is_empty(), "no side effect dispatched");
+    assert_eq!(info.property.as_deref(), Some("success.stack[0].action[0]"));
+}
+
+/// The backstop names the top-level property and carries a typed reason, and
+/// the rendered error selects the concatenate/`{{{ … }}}` hint from that reason
+/// rather than the missing-path hint (spec D4).
+#[test]
+fn surviving_span_in_top_level_field_renders_property_reason_and_specific_hint() {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let config = parse_lifecycle_config(
+        &json!({"success": {"message": "{{ tmpl }}"}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({"tmpl": "done in {{ctx.repo_name}}"}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let info = context
+        .execute_event(&config)
+        .evaluation_error
+        .expect("a surviving span fails the event");
+    assert!(recorder.events().is_empty(), "no side effect dispatched");
+    assert_eq!(info.property.as_deref(), Some("success.message"));
+    assert_eq!(
+        info.reason,
+        crate::composition::LifecycleEvaluationReason::SurvivingSpan {
+            span: "{{ctx.repo_name}}".to_string()
+        }
+    );
+
+    let err = CompositionError::lifecycle_evaluation("success", "t.md", &info);
+    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(200)));
+    assert!(rendered.contains("success.message"), "{rendered}");
+    assert!(rendered.contains("still contains `{{ctx.repo_name}}`"), "{rendered}");
+    assert!(rendered.contains("concatenate with `+`"), "{rendered}");
+    assert!(rendered.contains("{{{ … }}}"), "{rendered}");
+    assert!(!rendered.contains("resolve the missing"), "{rendered}");
+    assert!(!rendered.contains("an interpolated string"), "{rendered}");
+}
+
+/// A genuine expression raise keeps the missing-path hint and gains the
+/// `when` property it raised in.
+#[test]
+fn expression_raise_keeps_the_missing_path_hint() {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let config = parse_lifecycle_config(
+        &json!({"success": {"stack": [
+            {"when": "false", "action": "stop"},
+            {"when": "missing_key == 1", "action": "stop"}
+        ]}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let info = context
+        .execute_event(&config)
+        .evaluation_error
+        .expect("an undefined guard root raises");
+    assert_eq!(info.property.as_deref(), Some("success.stack[1].when"));
+    assert_eq!(info.reason, crate::composition::LifecycleEvaluationReason::Expression);
+
+    let err = CompositionError::lifecycle_evaluation("success", "t.md", &info);
+    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(200)));
+    assert!(rendered.contains("success.stack[1].when"), "{rendered}");
+    assert!(rendered.contains("resolve the missing"), "{rendered}");
+    assert!(!rendered.contains("concatenate with"), "{rendered}");
 }
 
 

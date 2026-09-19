@@ -138,12 +138,10 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     assert_eq!(
         commands,
         [
-            "git add ..",
-            "just commit",
-            "gitnexus analyze --force",
-            "git add ..",
-            "git commit -m \"\"",
-            "gitnexus analyze --force",
+            format!("git add {}", prepared.source_repo_root.as_ref().unwrap().display()),
+            "just commit".to_string(),
+            "git add ..".to_string(),
+            "git commit -m \"\"".to_string(),
         ],
         "preflight is condition-blind, so both branches must resolve without an unknown-root error",
     );

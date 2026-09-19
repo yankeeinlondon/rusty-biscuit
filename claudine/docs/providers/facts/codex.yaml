@@ -319,3 +319,22 @@ unmapped_native_events: []
 # from lib/src/stream/providers/codex.rs::ERROR_KEYWORDS). Sequence order IS
 # the cascade order (first substring hit wins). The repeated api_remote bucket
 # is the "late ApiRemote" second pass after Interrupted.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# `CODEX_HOME` names the Codex directory itself (`$CODEX_HOME/config.toml`),
+# not a parent. Live SQLite state is relocated out of the overlay separately
+# by `CODEX_SQLITE_HOME`, which resolves from the pre-overlay environment.
+overlay_selector:
+  env_var: CODEX_HOME
+  shape: provider_dir
+  relocates:
+  - config
+  - auth
+  - sessions
+  - cache
+  - state
+  additive: false
+  source_root: "~/.codex"
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: native_root
+  mcp: native_root

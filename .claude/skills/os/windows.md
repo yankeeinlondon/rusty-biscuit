@@ -33,6 +33,10 @@ helper that resolves it is named so it is not re-derived.
    Bash), so a fixture that relocates the home for a Python tool such as
    `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
    shell `$HOME` literal is a Unix-only spelling.
+   Claudine's provider overlay still resolves through the known folder, so a
+   Windows launch test names its roots instead: the provider selector (e.g.
+   `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
+   storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`
@@ -170,6 +174,16 @@ Compare against that, never against `to_string_lossy()`.
   reader or host scanner during `MoveFileExW(REPLACE_EXISTING)`. Retry those
   two errors for a short bounded interval while preserving atomic replacement;
   never delete the destination first.
+- **`std::fs::rename` and `tempfile::persist` differ against open readers.**
+  Rust std opens files with `FILE_SHARE_DELETE`, and `std::fs::rename` over a
+  destination held by such a handle succeeds (the holder keeps the old bytes).
+  `tempfile::NamedTempFile::persist` over the same holder fails with error 5.
+  A holder opened *without* delete sharing (CRT `_wopen`, editors, scanners)
+  blocks both with error 5; error 32 was not observed. Renaming a directory
+  that contains an open file also fails with error 5. Prefer `std::fs::rename`
+  plus the bounded retry above for replace-in-place. Measured on
+  build-win-native (NTFS), 2026-09-17; see
+  `messenger/features/2026-09-17-research-metadata-pipeline/spikes/publication/findings.md`.
 - **A PowerShell function's output stream is not its return value.** Every
   native command inside a function writes its stdout into that function's
   output, so `$code = Invoke-Thing` binds an *array* whose first element is

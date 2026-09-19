@@ -70,7 +70,8 @@ directly; use your own worktree for ad hoc sessions.
   git clean -fdq; git checkout --detach <sha>` over SSH.
 - Positional filter args are nextest test-name substrings. A binary name
   matches nothing ("0 tests run"). `-E 'test(...)'` breaks the recipe's
-  unquoted argument line; pass several name substrings instead.
+  unquoted argument line (a `|` in it is run as a shell pipe); pass several
+  name substrings instead, which nextest ORs.
 - Child-process stderr is not shown by a remote test failure. A probe that
   must be read back can append to `W:\ci-verification\probe.txt` and be read
   with `ssh "$BUILD_WIN" "Get-Content W:\ci-verification\probe.txt"`.
@@ -105,6 +106,21 @@ once filled the system drive to zero bytes and froze the host.
   Windows side and inside the WSL guest.
 - Check free space first: `ssh "$BUILD_WIN" "Get-PSDrive C, W"`; inside
   WSL, `ssh "$BUILD_WSL" 'df -h ~'`.
+- The standing clone's own target under `W:\ci-verification` is **also**
+  outside the scheduled sweep: `RustyBiscuit-CargoSweep` is rooted at the
+  `C:` checkout. On 2026-09-16 it held 161 GB, `W:` had 143 MB free, and
+  `cross-check --os windows` died compiling with `os error 112` (not enough
+  space). Running the scheduled task reclaimed nothing. `cross-check` has no
+  sweep of its own, so report it rather than deleting the shared target.
+  `W:` was freed by 2026-09-15. Later on 2026-09-16 a run failed *before*
+  compiling: the patch upload reported `scp: write remote
+  "W:/ci-verification/cross-check-….patch": Failure`, then git reported
+  `unable to write file …` and `Could not reset index file`. That pattern
+  points to write failures on `W:`, not to a patch bug. Check
+  `Get-PSDrive W` before debugging the patch.
+  On 2026-09-16 `W:` reported 0 GB free, and SSH to `$BUILD_WSL` failed at
+  key exchange with `Connection reset by peer`. The guest's VHDX lives on
+  `W:`, so treat a WSL reset as the same storage problem, not a network one.
 - The standing cross-check clone `W:\ci-verification\rusty-biscuit` does not
   inherit that `target-dir` pin: it builds into its own `target\`, which the
   daily `RustyBiscuit-CargoSweep` (scoped to `W:/rusty-biscuit-target`) never
@@ -116,6 +132,18 @@ once filled the system drive to zero bytes and froze the host.
   VHDX lives on `W:`) reset every SSH connection
   (`kex_exchange_identification: Connection reset`), so suspect a full `W:`
   first when both legs fail together. Freeing `W:` is the owner's call.
+
+A stale lock on a standing clone does not block Linux evidence. Build a
+private clone that only *reads* the standing one: `git clone --shared
+--no-checkout ~/ci-verification/rusty-biscuit ~/scratch/<name>`. If the base
+commit is missing there, send the gap as a `git bundle` (`<remote tip>..<base>`)
+instead of fetching into the standing clone. Apply a
+`git diff --cached --binary <base>` built with a temporary `GIT_INDEX_FILE`, so
+untracked files come along and the local index is untouched. Run the recipes
+through `bash -lc`, which is what puts `just` and `cargo-nextest` on `PATH`.
+Delete `~/scratch/<name>` afterward; its `target/` is not swept.
+  Measure over SSH with `-EncodedCommand` (UTF-16LE base64): a `$` in an
+  inline PowerShell argument does not survive the remote shell.
 
 ## Compiler cache on the hosts
 

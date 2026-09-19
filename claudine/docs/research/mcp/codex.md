@@ -1,7 +1,7 @@
 ---
 $schema: ./_schema.yaml
 created: 2026-07-02
-last_updated: 2026-07-03
+last_updated: 2026-09-15
 agent: open_code
 model: minimax/MiniMax-M3
 docs: https://developers.openai.com/codex/mcp/
@@ -406,10 +406,13 @@ sync_behavior:
 runtime_injection:
   supported: true
   mechanism: |
-    Set `CODEX_HOME` to a temporary directory containing a generated
-    `.codex/config.toml` with the desired `[mcp_servers]` tables, then
-    launch `codex` normally. This is how Claudine's wrapper performs
-    one-run injection without editing the user's persistent config.
+    Set `CODEX_HOME` to a generated directory containing a `config.toml`
+    with the desired `[mcp_servers]` tables, then launch `codex`
+    normally. `CODEX_HOME` names the Codex directory itself — the config
+    file is `$CODEX_HOME/config.toml`, not `$CODEX_HOME/.codex/config.toml`
+    (see the `config_files` user records above). This is how Claudine's
+    wrapper performs one-run injection without editing the user's
+    persistent config.
   limitations: |
     There is no native one-run MCP flag. A shadow `CODEX_HOME` does not
     inherit saved auth, OAuth tokens, history, sessions, or other
@@ -873,21 +876,28 @@ Codex has no official one-run MCP flag, but injection is straightforward by
 redirecting `CODEX_HOME`:
 
 1. Create a temporary directory.
-2. Write `.codex/config.toml` inside it with the desired `[mcp_servers]`
-   tables.
+2. Write `config.toml` directly inside it with the desired `[mcp_servers]`
+   tables. `CODEX_HOME` names the Codex directory itself, not a parent.
 3. Launch `codex` with `CODEX_HOME` pointing at the temporary directory.
 
-This is the mechanism Claudine uses for wrapper-level runtime injection. It
-does not mutate the user's persistent `$CODEX_HOME/config.toml`.
+Claudine's wrapper-level runtime injection uses this selector. It does not
+mutate the user's persistent `$CODEX_HOME/config.toml`, and it never changes
+`HOME`.
+
+Claudine's directory is a provider overlay under `~/.claudine/.codex`, not an
+empty temporary directory. It mirrors the user's Codex directory, so saved
+authentication carries over, and it pins `CODEX_SQLITE_HOME` to the pre-overlay
+location so SQLite state is never mirrored. The limitations below apply to a
+bare temporary `CODEX_HOME`.
 
 Limitations:
 
-- The shadow home does not inherit saved authentication, OAuth tokens,
+- A bare temporary `CODEX_HOME` does not inherit saved authentication, OAuth tokens,
   history, sessions, or other non-config state, so the caller must
   re-supply anything needed.
 - If the working directory is a trusted project, project-scoped
   `.codex/config.toml` may still load.
-- For one-run scripted execution, pair the shadow home with
+- For one-run scripted execution, pair the temporary `CODEX_HOME` with
   `--ignore-user-config` to bypass `$CODEX_HOME/config.toml` cleanly and
   with `--strict-config` to surface unknown keys as errors.
 - OAuth flows cannot complete in non-interactive `codex exec`; pre-authenticated

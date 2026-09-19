@@ -235,7 +235,7 @@ pub(crate) fn emit_preflight_preamble(
         if repo_requested {
             log::message(&crate::output::repo_flag_info_message(
                 term,
-                env_plan.shadow_home_path.as_deref(),
+                env_plan.overlay.as_ref(),
             ));
         }
         for warning in &env_plan.warnings {
@@ -463,6 +463,7 @@ fn passthrough_launch_intent(
     // recorded — see [`launch_plan::LaunchPlanInputs::recorded_only`].
     harness_base_args: &[String],
     codex_last_message: Option<PathBuf>,
+    overlay: Option<claudine::provider_overlay::OverlayPlan>,
 ) -> harness_orch::LaunchRebuildIntent {
     harness_orch::LaunchRebuildIntent {
         explicit_provider: Some(provider),
@@ -490,6 +491,7 @@ fn passthrough_launch_intent(
             },
             harness_base_args.to_vec(),
             codex_last_message,
+            overlay,
         ),
         env_lookup: claudine::composition::ambient_env_lookup,
     }
@@ -603,6 +605,7 @@ pub(crate) fn run_execution_stage(
                     args,
                     &harness_base_args,
                     structured_codex_output.map(|output| output.last_message_path.clone()),
+                    env_plan.overlay.clone(),
                 ),
                 &env_plan.env,
                 &mut prompt_state,

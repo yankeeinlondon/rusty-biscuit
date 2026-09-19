@@ -271,7 +271,9 @@ impl Markdown {
             // command is found unapproved. Root-only (depth 1) because the
             // collector already walks every child; gated on a shell-executing
             // operation being enabled so the collection's own internal inline
-            // compose (which disables shell execution) cannot recurse.
+            // compose (which disables shell execution) cannot recurse. A
+            // frontmatter-surface compose checks its frontmatter commands only,
+            // so it never dereferences the body graph.
             if options.pre_approved_commands.is_some()
                 && runtime.transclusion.depth() <= 1
                 && (options.is_enabled(ComposeOperation::FrontmatterShellExpansion)

@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
+use super::super::authored_order::AuthoredOrder;
 use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
 use super::model::{
@@ -107,6 +108,9 @@ pub fn normalize_plan(
         steps,
         document_fail_fast,
         sequence_id,
+        // The caller owns provenance: only it knows which document declared the
+        // list and whether that document recorded authored key order at all.
+        authored: AuthoredOrder::default(),
     })
 }
 

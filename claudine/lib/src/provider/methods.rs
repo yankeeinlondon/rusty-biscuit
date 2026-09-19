@@ -13,6 +13,7 @@ use std::fmt;
 
 use super::event_mapping::EventSupportLevel;
 use super::identity::{PROVIDERS_DISPLAY_ORDER, Provider};
+use super::overlay::{OverlayCapability, OverlayReason, OverlaySelectorSpec};
 use super::registry::provider_info;
 use crate::events::AgenticEvent;
 
@@ -211,6 +212,22 @@ impl Provider {
     /// Returns the agent offset directory name for this provider.
     pub fn agent_offset(&self) -> &'static str {
         provider_info(*self).agent_offset
+    }
+
+    /// Returns the provider-owned selector Claudine points at an overlay,
+    /// or `None` when the provider exposes no provider-scoped redirection
+    /// surface.
+    pub fn overlay_selector(&self) -> Option<&'static OverlaySelectorSpec> {
+        provider_info(*self).overlay_selector
+    }
+
+    /// Returns this provider's verdict for one overlay activation reason.
+    ///
+    /// The planner reads this instead of matching on the provider, so a new
+    /// provider's overlay posture arrives entirely through generated
+    /// metadata.
+    pub fn overlay_capability(&self, reason: OverlayReason) -> OverlayCapability {
+        provider_info(*self).overlay_capabilities.for_reason(reason)
     }
 }
 

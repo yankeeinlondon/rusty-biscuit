@@ -48,7 +48,7 @@
 //! ### The inheritance contract
 //!
 //! A child inherits the parent's whole environment by default, so the builder
-//! also *removes* four families the developer's shell routinely exports:
+//! also *removes* five families the developer's shell routinely exports:
 //!
 //! - the whole `CLAUDINE_*` namespace, by prefix — an exported
 //!   `CLAUDINE_STEP_TIMEOUT` otherwise re-parameterizes the timeout tests;
@@ -64,7 +64,11 @@
 //!   `claudine wrap` exports all of them into the provider it launches, so a
 //!   suite run from inside a Claudine-wrapped agent session inherits that
 //!   session's own provider, model, and permission mode. See
-//!   [`UNPREFIXED_APPLICATION_VARS`].
+//!   [`UNPREFIXED_APPLICATION_VARS`];
+//! - the provider overlay selectors (`CODEX_HOME`, `GEMINI_CLI_HOME`, …, read
+//!   from provider metadata) and the profile-owned state selectors such as
+//!   `CODEX_SQLITE_HOME`, which a wrapped session exports and the wrapper
+//!   treats as the user's explicit roots. See [`provider_selector_vars`].
 //!
 //! Removal is per key at build time and scrubs only what was *inherited*: a
 //! call site that sets any of these on the returned command still wins, and a
@@ -629,7 +633,7 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
 /// out-vote the `NO_COLOR=1` the builder sets.
 /// [`UNPREFIXED_APPLICATION_VARS`] and the provider model variables go because
 /// they are the same hazard as `CLAUDINE_*` without the namespace that lets a
-/// prefix rule catch them.
+/// prefix rule catch them. [`provider_selector_vars`] carries its own reason.
 fn inherited_scrub_keys() -> Vec<OsString> {
     let mut keys: Vec<OsString> = std::env::vars_os()
         .map(|(key, _)| key)
@@ -642,6 +646,7 @@ fn inherited_scrub_keys() -> Vec<OsString> {
     keys.extend(["TERM_WIDTH", "COLUMNS", "FORCE_COLOR"].map(OsString::from));
     keys.extend(UNPREFIXED_APPLICATION_VARS.iter().copied().map(OsString::from));
     keys.extend(provider_model_vars());
+    keys.extend(provider_selector_vars());
     keys
 }
 
@@ -691,6 +696,44 @@ fn provider_model_vars() -> Vec<OsString> {
         .map(OsString::from)
         .collect()
 }
+
+/// Every provider overlay selector plus the profile-owned state selectors,
+/// removed so a test's overlay intent starts from "no ambient root".
+///
+/// An ambient selector is intent the wrapper must preserve: a parent exporting
+/// `CODEX_SQLITE_HOME` re-pins where the Codex overlay keeps SQLite state, and
+/// `CODEX_HOME` becomes the overlay's source root. A suite launched from a
+/// wrapped agent session carries both, which failed five
+/// `level1_provider_overlay_home` contracts
+/// (`fixes/2026-09-12-shadow-home/review-1.md` → finding 1). A test whose
+/// subject is ambient restoration sets the value after `build()`.
+///
+/// The selector names come from [`claudine::provider::ProviderInfo::overlay_selector`],
+/// so a provider that gains one is scrubbed without this fixture being told.
+/// [`PROFILE_OWNED_SELECTOR_VARS`] are the names that metadata does not carry.
+pub fn provider_selector_vars() -> Vec<OsString> {
+    claudine::provider::all_providers()
+        .filter_map(|info| info.overlay_selector)
+        .map(|spec| spec.env_var)
+        .chain(PROFILE_OWNED_SELECTOR_VARS.iter().copied())
+        .map(OsString::from)
+        .collect()
+}
+
+/// Selectors a wrapper profile reads or pins that are not provider metadata.
+///
+/// - `CODEX_SQLITE_HOME` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` are the external
+///   state the Codex and Claude profiles pin outside the overlay
+///   (`OverlayPlan::pin_external_state`); an ambient value is the pin.
+/// - `OPENCODE_CONFIG_CONTENT` is merged into, not replaced, by MCP and
+///   permission injection, so an ambient object reaches every OpenCode child.
+/// - `KILO_CONFIG_CONTENT` is Kilo's inline MCP selector in the overlay audit.
+const PROFILE_OWNED_SELECTOR_VARS: &[&str] = &[
+    "CODEX_SQLITE_HOME",
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+    "OPENCODE_CONFIG_CONTENT",
+    "KILO_CONFIG_CONTENT",
+];
 
 /// One ordered operation on the child's environment block.
 ///

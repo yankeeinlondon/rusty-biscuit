@@ -45,6 +45,11 @@ Each research file writes its structured findings into **Markdown frontmatter**.
 - What CLI flags control YOLO/auto-approve, reasoning, and model selection?
 - Which structured error discriminators, messages, and numeric codes are safe
   inputs to the existing case-insensitive substring classifier?
+- Which provider-owned variable relocates its config root, and does its value
+  name the config directory or a parent of it? Is the directory additive over
+  the user's config? What is the default root on each OS? Observe this; a
+  variable named `*_HOME` proves nothing. Without such a selector, `--repo`
+  is refused for the provider rather than implemented by moving `HOME`.
 
 If the provider has a structured stream parser, author and validate its
 `agent-errors` research document before wiring the parser. Do not add an
@@ -163,7 +168,9 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `model_catalog_source` | `ModelCatalogSource` | `None` or `ShellCommand { program, args }` |
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission axes CLI flags can override |
-| `repo_home_root_files` | `&'static [&'static str]` | Root files preserved during shadow-HOME isolation |
+| `repo_home_root_files` | `&'static [&'static str]` | Home-root files a default-rooted provider overlay places inside its config root |
+| `overlay_selector` | `Option<&'static OverlaySelectorSpec>` | Provider-owned config-root selector: `env_var`, `shape`, `relocates`, `additive`, `source_root`; `None` when only `HOME` would work |
+| `overlay_capabilities` | `OverlayCapabilities` | `native_root` / `composable_injection` / `unsupported` for `repo_resources`, `repo_prompt`, `mcp` |
 | `unmapped_native_events` | `&'static [UnmappedNativeEvent]` | Native hook events with no 16-event mapping |
 
 ### Linking Facade
@@ -221,6 +228,13 @@ After generating the provider catalog file, you must wire the new provider into 
 
 - [ ] **`claudine/cli/src/commands/wrap/profile/{file}.rs`** (if defaults are insufficient)
   - Create wrapper profile with per-provider overrides
+  - Override `overlay_strategy` when a `native_root` overlay needs side effects
+    beyond the mirror, such as a materialized directory or a state pin that
+    keeps live state or credentials at the pre-overlay location (Codex pins
+    `CODEX_SQLITE_HOME`, Claude pins `CLAUDE_SECURESTORAGE_CONFIG_DIR`)
+- [ ] **`claudine/lib/src/provider_overlay/plan.rs`** (if the provider gets `native_root` for `repo_resources`)
+  - Add its agent offset to `repo_isolated_resources`, and add the row to
+    `docs/topics/repo-isolation.md` and both table tests
 
 ### MCP Crate (if applicable)
 
@@ -293,6 +307,9 @@ cargo test -p claudine -p claudine-cli -p sniff-lib
 | `config_paths_have_primary_user_entry` | Every provider declares at least one config path |
 | `no_unauthorized_match_provider_in_lib` | No new `match Provider` blocks outside allowed files |
 | `sniff_ai_cli_maps_all_providers` | Every provider maps to an `AiCli` variant |
+| `overlay_capability_matrix_matches_the_audit` | Overlay verdicts match the recorded evidence (add the new provider's row) |
+| `additive_selectors_cannot_claim_repo_resource_isolation` | An additive config dir is never `native_root` for `repo_resources` |
+| `repo_resource_isolation_requires_a_single_source_root` | `native_root` for `repo_resources` has a `source_root` |
 
 ### Manual Verification
 

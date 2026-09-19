@@ -2243,6 +2243,7 @@ dependencies = [
  "signal-hook 0.4.4",
  "sniff",
  "syn 2.0.117",
+ "sysinfo",
  "tempfile",
  "test-toolkit",
  "thiserror 2.0.18",
@@ -7950,7 +7951,10 @@ name = "messenger"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "biscuit-file",
+ "biscuit-hash",
  "bytes",
+ "darkmatter",
  "futures",
  "jsonwebtoken",
  "notify-rust",
@@ -7962,6 +7966,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serial_test",
  "sniff",
  "tempfile",
@@ -7982,6 +7987,7 @@ name = "messenger-cli"
 version = "0.1.0"
 dependencies = [
  "biscuit-terminal",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "color-eyre",

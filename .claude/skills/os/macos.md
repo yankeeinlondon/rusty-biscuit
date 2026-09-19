@@ -28,13 +28,26 @@ conditions that masquerade as repository defects.
 - **Real Linux runs:** Docker Desktop provides a `linux/arm64` kernel. `open
   -a Docker`, poll `docker info` (about 20 s), then run the package tests in a
   container. PTY-backed L2 tests pass there too. Mount the source as a copy
-  (`rsync -a --exclude=target/ --exclude=.git`) because a worktree's `.git`
-  is a file pointing outside the container. Two traps: keep
+  (`rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`) because a worktree's `.git`
+  is a file pointing outside the container. Excluding `.gitnexus/` is required: its
+  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Two traps: keep
   `CARGO_TARGET_DIR` on a host mount (`-v /tmp/x-target:/t -e
   CARGO_TARGET_DIR=/t`), since the VM overlay is small and fills; and a
   whole-package `cargo nextest run` OOM-kills the linker in the default VM,
   so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and targeted `--lib` /
   `--test <name>` runs. podman's VM does not start on this host.
+  On 2026-09-17, bind mounts under `/tmp` failed ("error while creating mount
+  source path '/private/tmp/…': mkdir /private: read-only file system"): the
+  host's Docker file sharing does not cover `/private/tmp`. Put both the
+  source copy and the target dir under `$HOME` (for example
+  `~/.cache/rb-linux/{src,target}`). `rust:1` needs
+  `apt-get install libdbus-1-dev pkg-config` for `messenger --features desktop`,
+  plus `libasound2-dev` for anything that reaches Playa's `native-playback`
+  (all of `claudine-cli`).
+  Run the container command with `bash -c`, not `bash -lc`: the login shell
+  resets `PATH` and drops `/usr/local/cargo/bin`, so every `cargo` call fails
+  with "command not found" while a trailing pipe can still exit 0. `rust:1`
+  has no `cargo-nextest`; `cargo test --test <name>` avoids a slow install.
 - **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
   and the msvc prohibition are in [windows.md](windows.md).
 - **Behavioral Windows and WSL2 evidence:** the build hosts

@@ -110,7 +110,7 @@ A **task** is the atomic executable unit. It declares exactly one executable fie
 
 - `prompt: <file-ref>` — compose and execute the referenced Markdown document (if that document is configured for `inline-compose` that is executed; otherwise a normal `compose`)
 - `shell: <string | string[]>` — run one or more shell commands (every command participates in sequence preflight approval; each command gets a `30s` default timeout, overridable per task via `timeout:`)
-- `side_effect: <action>` — run one of Darkmatter's safe side effects, written as a single action in the standard lifecycle action grammar (e.g. `side_effect: { set: ["ready", "{{ true }}"] }`; the retired `verb(args)` short form does not return here)
+- `side_effect: <action>` — run one of Darkmatter's safe side effects, written as a single action in the standard lifecycle action grammar (e.g. `side_effect: { set: { ready: "{{ true }}" } }`; the retired `verb(args)` short form does not return here)
 - `group: <group-ref | inline group>` — execute a group (see [Groups](#groups))
 - `task: <file-ref>` — reference to an externalized `kind: task` file
 
@@ -411,10 +411,16 @@ Corollaries:
 - `state`, `previous`, and `next` remain *authored* views (plus generated fields); runtime mutation flows through ordinary frontmatter keys, never through the step objects
 - `outputs` lives in the runtime layer and is appended by the executor only
 
-**The `set` side effect (drafted — needs Darkmatter implementation).** `set` is the canonical state-mutation mechanism referenced throughout this spec. It is a new Darkmatter side effect, usable anywhere the lifecycle action grammar applies (lifecycle stacks, task `setup:`/`teardown:`):
+**The `set` side effect.** `set` is the canonical state-mutation mechanism referenced throughout this spec. Claudine exposes it anywhere the lifecycle action grammar applies (lifecycle stacks, task `setup:`/`teardown:`):
 
-- positional form `set: [key, value]`; key/value form `{action: set, key: …, value: …}`
-- standard action-grammar evaluation applies: values are literal text, `{{ … }}` injects, and a whole-value `{{ expr }}` span carries its typed value (`set: ["ready", "{{ true }}"]` writes boolean `true`)
+- the only lifecycle YAML form is a literal mapping,
+  `set: {property: value}`; the underlying Darkmatter capability and loop API
+  remains positional as `set(key, value)`
+- values are literal text, `{{ … }}` injects, and a whole-value `{{ expr }}`
+  span carries its typed value (`set: {ready: "{{ true }}"}` writes boolean
+  `true`)
+- every value reads the same pre-write snapshot and the mapping commits as one
+  all-or-nothing runtime-state update
 - it writes to the **runtime mutation layer** (in-memory), never to a file on disk — that is what distinguishes it from the existing `set_frontmatter` side effect, which targets a file
 - keys are top-level only in v1 (no dotted-path nesting); reserved keys are rejected with a typed error
 - outside a sequence, `set` still works: it mutates the live document state visible to subsequent lifecycle actions and loop iterations within the same run
@@ -567,7 +573,8 @@ setup: # a lifecycle hook for groups which is executed directly before the prima
           - message: "the file exists"
           - shell: scream 'i'm gonna do it'
     - action:
-          - set: ["title", "About to do the thing"]
+          - set:
+                title: "About to do the thing"
 teardown: 
     - when: "ctx.dirty_files"
       action:
@@ -581,7 +588,9 @@ In this example we see that a task can both _setup_ the environment before we ru
 
 > Note: the task's final STDOUT is always pushed onto the `outputs` array (see [The `outputs` Array](#the-outputs-array)); there is no per-task opt-out.
 
-> Note: the `set` action used above is the new state-mutation side effect defined in [Execution Architecture](#execution-architecture); it does not exist in Darkmatter yet and is part of this feature's scope.
+> Note: the `set` action used above is the lifecycle mapping syntax defined in
+> [Execution Architecture](#execution-architecture). Darkmatter's lower-level
+> `set(key, value)` capability remains a separate positional API.
 
 The example above defines the task in its own `kind: task` file, but tasks can also be defined inline in a group:
 
@@ -597,7 +606,8 @@ tasks:
                 - message: "the file exists"
                 - shell: scream 'i'm gonna do it'
     - side_effect:
-          set: ["ready", "{{ true }}"]
+          set:
+              ready: "{{ true }}"
     - shell: git commit
       teardown:
           - action:
