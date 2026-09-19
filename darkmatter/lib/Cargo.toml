@@ -24,6 +24,11 @@ default = []
 # and attempts no network access. Off by default; production builds carry no
 # counter state and expose none of the instrumentation API.
 effects-instrumentation = []
+# Test-only instrumentation. Exposes the thread-local work counters that
+# complexity regressions in downstream crates (DMLS) read across the crate
+# boundary, where `cfg(test)` does not reach. Off by default; without it the
+# counters and their accessors are not compiled.
+work-counters = []
 terminal-tests = ["dep:image"]
 browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
 
@@ -134,10 +139,15 @@ futures-util = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-# `setsid` for the alias-lookup child in
-# `markdown/compose/shell_expansion/alias.rs`. Only the raw syscall is needed,
+# `setsid` and process-group cleanup for login-shell queries in
+# `markdown/compose/shell_expansion/launcher.rs`. Only the raw syscall is needed,
 # so `libc` rather than a wrapper crate; already compiled transitively.
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Kill-on-close Job Object that contains a login-shell probe's process tree
+# (`markdown/compose/shell_expansion/launcher.rs`).
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_JobObjects"] }
 
 [dev-dependencies]
 image = "0.25"

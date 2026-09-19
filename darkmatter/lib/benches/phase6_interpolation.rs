@@ -40,7 +40,7 @@ use std::path::PathBuf;
 /// Loads a committed manifest fixture by stem.
 fn fixture(stem: &str) -> Markdown {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
+        .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("fixture {} readable: {e}", path.display()));
@@ -59,7 +59,7 @@ fn compose_stage(md: &Markdown, op: ComposeOperation) {
 /// Reads a fixture file's raw text.
 fn fixture_text(stem: &str) -> String {
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
+        .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("fixture readable: {e}"))
 }
