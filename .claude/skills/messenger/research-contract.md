@@ -102,7 +102,10 @@ Platform research is becoming typed, reviewed metadata (feature
   `runs/prepare.lock` (an OS `File::try_lock`, released on process exit, so no
   stale lock) across selection and creation; a concurrent second one gets
   `RefreshError::PrepareBusy` (CLI exit `3`, like the publication lock).
-  It is separate from Claudine's `runs/fleet.lock`.
+  It is separate from Claudine's `runs/fleet.lock`. `select::blocking_runs`
+  is the one rule for both: `resume` calls it (excluding the resumed run)
+  under the same lock and refuses with `RefreshError::OtherRunBlocks { path }`
+  (CLI exit `1`), because a `failed` run is not open and a newer run may exist.
 - **Integrity rules** (in `check`, beyond validation): same platform, same
   `created`, every chronology ID kept, removed IDs listed in `changes`,
   `last_updated` moves only with a successful check, and a curated source's
@@ -161,6 +164,21 @@ Platform research is becoming typed, reviewed metadata (feature
   - `sequence --dry-run` still runs the `shell:` steps. `check-run` then marks
     the run `failed` because it has no outputs. Rehearse only in a throwaway
     Git repository holding a copy of `messenger/docs`, never on a real run.
+  - Run the printed commands from the repository root. Prepared inputs name
+    only repository-relative `/` paths, and the checks are `check-run RUN_ID
+    --through STAGE --root .`, so no host path reaches an agent or a shell.
+    Claudine hands a `shell:` string verbatim to `sh -c` (Unix) or `cmd /D /C`
+    (Windows, raw tail) with no argument-vector form, no per-step working
+    directory, and `{{ }}` template expansion first, so a spliced path could
+    never be quoted safely. A step runs in the launch directory, or in its Git
+    root after an agent step; Claudine starts agents in that Git root. Both
+    are the repository root when launched from there, as `just
+    research-refresh` does. So `prepare` and `prepare --resume` refuse a root
+    that is inside a Git work tree but not its top level
+    (`RefreshError::NotRepositoryTopLevel`, exit 2, nothing written). A root
+    outside any Git repository stays allowed. The check treats a root holding
+    its own `.git` as the top level, then compares canonical paths, so
+    `/private/var`, `\\?\`, and case spellings are not refused.
 
 ## Gotchas
 

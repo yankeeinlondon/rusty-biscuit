@@ -393,6 +393,102 @@ fn selection_names_every_due_reason_and_skips_current_or_open_platforms() {
     assert!(prepared.runs.is_empty(), "an open run blocks a second run for the platform");
 }
 
+/// The run directories under `runs/<platform>/`.
+fn run_dirs(repo: &Repo, platform: PlatformId) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(repo.path(&format!("messenger/.research-state/runs/{platform}"))) else { return Vec::new() };
+    let mut names: Vec<String> = entries.flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    names
+}
+
+/// Review-1 regression: selection once dropped unreadable run records, so a
+/// truncated `run.json` for an active run let `prepare` start a second run
+/// with a fresh budget.
+#[test]
+fn an_unreadable_run_record_blocks_its_platform_and_names_its_path() {
+    let on = day("2026-09-18");
+    let forced = Request { forced: [PlatformId::Discord].into(), ..Request::default() };
+    for (name, corrupt) in [("truncated", "{\n  \"format\": \"messenger-research-run/1\",\n  \"run_"), ("invalid JSON", "not json at all\n")] {
+        let repo = Repo::published();
+        let open = repo.prepare(PlatformId::Discord, &on);
+        repo.write(&format!("{}/run.json", open.run_dir), corrupt);
+
+        let selection = repo.select("2026-09-18", &forced).remove(&PlatformId::Discord).expect("discord");
+        let Some(Skip::UnreadableRun { path, error }) = &selection.skip else { panic!("{name}: {selection:?}") };
+        assert_eq!(path, &open.run_dir, "{name}: the repository-relative run directory");
+        assert!(error.contains(&format!("{}/run.json", open.run_dir)), "{name}: {error}");
+        assert!(selection.due.is_empty(), "{name}: a blocked platform is never due");
+
+        let prepared = prepare::prepare(&repo.loader, &[PlatformId::Discord], LIMITS, &on, &forced).expect(name);
+        assert!(prepared.runs.is_empty(), "{name}: {:?}", prepared.runs);
+        assert!(matches!(prepared.selections[0].skip, Some(Skip::UnreadableRun { .. })), "{name}");
+        assert_eq!(run_dirs(&repo, PlatformId::Discord), vec![open.run_id.to_string()], "{name}: no second run or ledger");
+        // The block is per platform: another platform still prepares.
+        assert_eq!(repo.prepare(PlatformId::Slack, &on).platform_id, PlatformId::Slack, "{name}");
+    }
+
+    // A run directory whose record never landed, or that holds another
+    // platform's record, blocks the platform whose directory it sits in.
+    let repo = Repo::published();
+    let open = repo.prepare(PlatformId::Discord, &on);
+    let stray = format!("messenger/.research-state/runs/telegram/{}", open.run_id);
+    repo.write(&format!("{stray}/run.json"), &repo.read(&format!("{}/run.json", open.run_dir)).expect("record"));
+    fs::create_dir_all(repo.path("messenger/.research-state/runs/signal/2026-09-18-00000000")).expect("mkdir");
+    let selections = repo.select("2026-09-18", &Request { force_all: true, ..Request::default() });
+    assert!(matches!(&selections[&PlatformId::Telegram].skip, Some(Skip::UnreadableRun { path, .. }) if *path == stray));
+    assert!(matches!(&selections[&PlatformId::Signal].skip, Some(Skip::UnreadableRun { .. })));
+    assert!(matches!(&selections[&PlatformId::Discord].skip, Some(Skip::OpenRun { .. })));
+}
+
+/// Review-1 regression: selection and run creation were not atomic, so two
+/// preparations could each see no open run and each create one.
+#[test]
+fn concurrent_preparations_leave_exactly_one_open_run() {
+    let repo = Repo::published();
+    let barrier = std::sync::Barrier::new(2);
+    let outcomes: Vec<Result<prepare::Prepared, RefreshError>> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    let loader = Loader::new(Workspace::new(repo.root()).expect("absolute"));
+                    let request = Request { forced: [PlatformId::Discord].into(), ..Request::default() };
+                    barrier.wait();
+                    prepare::prepare(&loader, &[PlatformId::Discord], LIMITS, &day("2026-09-18"), &request)
+                })
+            })
+            .collect();
+        workers.into_iter().map(|worker| worker.join().expect("worker")).collect()
+    });
+    assert_eq!(run_dirs(&repo, PlatformId::Discord).len(), 1, "{outcomes:?}");
+    let created = outcomes.iter().filter(|outcome| matches!(outcome, Ok(prepared) if prepared.runs.len() == 1)).count();
+    assert_eq!(created, 1, "{outcomes:?}");
+    // The other either ran first into the lock or ran after and saw the open run.
+    assert!(outcomes.iter().all(|outcome| match outcome {
+        Ok(prepared) => prepared.runs.len() == 1 || matches!(prepared.selections[0].skip, Some(Skip::OpenRun { .. })),
+        Err(error) => matches!(error, RefreshError::PrepareBusy { .. }),
+    }));
+}
+
+#[test]
+fn a_held_prepare_lock_refuses_preparation_and_a_released_one_never_lingers() {
+    let repo = Repo::published();
+    let path = repo.state().prepare_lock();
+    fs::create_dir_all(path.parent().expect("runs dir")).expect("mkdir");
+    let holder = fs::File::create(&path).expect("lock file");
+    holder.try_lock().expect("hold the lock");
+    let request = Request { forced: [PlatformId::Discord].into(), ..Request::default() };
+    let refused = prepare::prepare(&repo.loader, &[PlatformId::Discord], LIMITS, &day("2026-09-18"), &request).expect_err("busy");
+    assert!(
+        matches!(&refused, RefreshError::PrepareBusy { path } if path == "messenger/.research-state/runs/prepare.lock"),
+        "{refused}"
+    );
+    assert!(run_dirs(&repo, PlatformId::Discord).is_empty());
+    // A holder that exits (or crashes) releases the OS lock; the file stays.
+    drop(holder);
+    assert!(path.exists());
+    repo.prepare(PlatformId::Discord, &day("2026-09-18"));
+}
+
 #[test]
 fn an_accepted_document_that_no_longer_validates_is_due() {
     let repo = Repo::published();
@@ -740,7 +836,7 @@ fn automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_r
     // A rejected run never reaches the CHANGELOG and cannot be promoted.
     let changelog = repo.read(CHANGELOG).expect("changelog");
     assert_eq!(changelog.matches("\n## ").count(), 1, "{changelog}");
-    let rejected = repo.state().list().into_iter().filter_map(|(_, r)| r.ok()).filter(|r| r.status == RunStatus::Rejected).count();
+    let rejected = repo.state().list().into_iter().filter_map(|(_, _, r)| r.ok()).filter(|r| r.status == RunStatus::Rejected).count();
     assert_eq!(rejected, 4);
 }
 
@@ -860,6 +956,40 @@ fn recovery_is_bounded_and_never_adds_budget() {
     }
     assert!(!check_run(&repo.loader, id, Stage::Validation, &on).expect("check").passed);
     assert!(matches!(prepare::resume(&repo.loader, id), Err(RefreshError::RecoveryLimit { .. })));
+}
+
+/// Review-1 regression: a failed run is not open, so a new run could be
+/// prepared for its platform and the failed run then resumed, leaving two
+/// open runs.
+#[test]
+fn resuming_is_refused_while_another_run_for_the_platform_is_open_or_unreadable() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+    let failed = repo.prepare(PlatformId::Discord, &on);
+    assert!(!check_run(&repo.loader, failed.run_id.as_str(), Stage::Validation, &on).expect("check").passed);
+    assert_eq!(repo.run(&failed).status, RunStatus::Failed);
+    let newer = repo.prepare(PlatformId::Discord, &on);
+
+    let refused = prepare::resume(&repo.loader, failed.run_id.as_str()).expect_err("another run is open");
+    assert!(matches!(&refused, RefreshError::OtherRunBlocks { path, .. } if *path == newer.run_dir), "{refused}");
+    assert!(refused.to_string().contains(newer.run_id.as_str()), "{refused}");
+    let failed_record = repo.run(&failed);
+    assert_eq!((failed_record.status, failed_record.recovery_attempts), (RunStatus::Failed, 0), "nothing was reopened");
+    let open = repo.state().list().into_iter().filter_map(|(_, _, r)| r.ok()).filter(|r| r.status.is_open()).count();
+    assert_eq!(open, 1);
+
+    // An unreadable record might be the open run, so it refuses too.
+    let record = repo.read(&format!("{}/run.json", newer.run_dir)).expect("record");
+    repo.write(&format!("{}/run.json", newer.run_dir), "not json at all\n");
+    let refused = prepare::resume(&repo.loader, failed.run_id.as_str()).expect_err("unreadable record");
+    assert!(matches!(&refused, RefreshError::OtherRunBlocks { path, .. } if *path == newer.run_dir), "{refused}");
+    repo.write(&format!("{}/run.json", newer.run_dir), &record);
+
+    // Once the other run is no longer open, the failed run resumes.
+    assert!(!check_run(&repo.loader, newer.run_id.as_str(), Stage::Validation, &on).expect("check").passed);
+    reject(&repo, newer.run_id.as_str(), "Maintainer", "superseded", &on).expect("reject");
+    prepare::resume(&repo.loader, failed.run_id.as_str()).expect("resume");
+    assert_eq!(repo.run(&failed).status, RunStatus::Active);
 }
 
 #[test]

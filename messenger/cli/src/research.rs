@@ -39,7 +39,8 @@ EXIT STATUS
   0  success
   1  validation findings, drift, a refused generation, or a refused
      lifecycle step (wrong run status, not eligible for promotion)
-  2  invalid arguments, including missing run limits
+  2  invalid arguments, including missing run limits, or a research root
+     below its Git top level (prepare)
   3  cannot run: no published snapshot, recovery required, lock held,
      a published artifact failed verification, or an input is unreadable";
 

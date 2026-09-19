@@ -72,7 +72,7 @@ fcm = ["dep:reqwest"]
 # Typed loading and semantic validation of the provider research contract
 # (`messenger::research`). Maintenance consumers only; see
 # `features/2026-09-17-research-metadata-pipeline/architecture.md`.
-research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error"]
+research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error", "dep:sniff"]
 
 # Helper-stub binaries used by the desktop helper integration tests.
 # They are tiny (only `std`) and only built when the `desktop` feature is

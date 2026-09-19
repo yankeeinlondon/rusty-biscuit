@@ -78,9 +78,14 @@ written. Each run gets its own directory under
 `messenger/.research-state/runs/<platform>/<run_id>/` with separately prepared
 inputs per pass (discovery never sees previous research or curated sources)
 and a Claudine sequence document. `prepare` prints the `claudine budget init`
-and `claudine sequence --yolo --budget-ledger …` commands to run; one shared
-fleet lock keeps platforms one at a time. A resumption reuses the same ledger,
-so it never adds budget.
+and `claudine sequence --yolo --budget-ledger …` commands to run from the
+repository root: the prepared inputs and the sequence's checks name only
+repository-relative paths. For the same reason `prepare` (and `--resume`)
+refuses, with exit `2` and nothing written, a root inside a Git work tree that
+is not its top level; a root outside any Git repository is allowed. One
+shared fleet lock keeps platforms one at a time. A resumption reuses the same ledger,
+so it never adds budget, and it is refused (exit `1`) while another run for
+the platform is open or has an unreadable record.
 
 `check-run` runs inside the sequence as a `shell:` step. It judges each pass
 by what it wrote, never by an exit code: discovery suggestions with their
@@ -111,7 +116,8 @@ awaiting-review, or interrupted runs, a run whose ledger lock is held, or
 anything under `docs/`.
 
 Exit status: `0` success, `1` findings, drift, a refused generation, or a
-refused lifecycle step (wrong run status, not eligible for promotion), `2`
+refused lifecycle step (wrong run status, not eligible for promotion, another
+open run for the platform), `2`
 invalid arguments (including missing run limits), `3` the command could not run (no published snapshot,
 recovery required, lock held, verification failure, unreadable input).
 `--json` prints exactly one JSON document on stdout with no escape sequences;

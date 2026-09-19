@@ -148,11 +148,12 @@ fn list(items: Vec<String>, term: &Terminal) -> String {
 /// back to the caller as exit 3.
 fn refusal(error: RefreshError, json: bool) -> Result<i32, String> {
     let code = match &error {
-        RefreshError::Config(_) | RefreshError::Input(_) => EXIT_USAGE,
+        RefreshError::Config(_) | RefreshError::Input(_) | RefreshError::NotRepositoryTopLevel { .. } => EXIT_USAGE,
         RefreshError::WrongStatus { .. }
         | RefreshError::NotEligible { .. }
         | RefreshError::RecoveryLimit { .. }
         | RefreshError::Ledger { .. }
+        | RefreshError::OtherRunBlocks { .. }
         | RefreshError::NotInRoster { .. } => EXIT_FINDINGS,
         RefreshError::Generate(inner) if matches!(**inner, GenerateError::Refused { .. }) => EXIT_FINDINGS,
         _ => return Err(error.to_string()),

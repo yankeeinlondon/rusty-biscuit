@@ -76,6 +76,9 @@
   `tests/research_corpus.rs` can assert that research validation builds no
   effect engine and attempts no network access. Ordinary send builds
   (no-default, default, and `desktop` features) depend on none of them.
+  `research` also enables the library's existing optional `sniff` dependency
+  (already used by `desktop`), whose Git work-tree discovery lets `prepare`
+  refuse a research root below the Git top level; no crate was added.
 - `messenger/cli` enables `messenger`'s `research` feature unconditionally for
   the `messenger research` maintenance commands, so the `messenger` binary
   carries those four crates; the library's send-only builds are unchanged. Its

@@ -15,14 +15,16 @@ use serde::Serialize;
 
 use super::RefreshError;
 use super::config::RunLimits;
-use super::select::{self, Reason, Request, Selection};
+use super::select::{self, Reason, Request, Selection, Skip};
 use super::state::{
-    BaselineRef, MAX_RECOVERY_ATTEMPTS, RUN_FORMAT, RunId, RunRecord, RunStatus, Stage, StageResult, StageStatus, StateArea, io_err,
+    BaselineRef, MAX_RECOVERY_ATTEMPTS, RUN_FORMAT, RunId, RunRecord, RunStatus, Stage, StageResult, StageStatus, StateArea, StateError,
+    io_err,
 };
 use crate::research::canonical::text_fingerprint;
 use crate::research::load::Loader;
 use crate::research::model::{Date, PlatformId, Roster, RosterPlatform};
 use crate::research::paths::document_path;
+use crate::research::publish::fsutil::{LockError, PublicationLock};
 
 /// A run ready for Claudine.
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +53,9 @@ pub struct Prepared {
 ///
 /// ## Errors
 ///
+/// [`RefreshError::NotRepositoryTopLevel`] before anything is written when
+/// the root is a subdirectory of a Git work tree,
+/// [`RefreshError::PrepareBusy`] while another preparation runs, or
 /// [`RefreshError`] when selection or writing fails; runs prepared before a
 /// failure remain and are listed by `runs`.
 pub fn prepare(
@@ -60,6 +65,8 @@ pub fn prepare(
     today: &Date,
     request: &Request,
 ) -> Result<Prepared, RefreshError> {
+    require_top_level(loader.workspace().repo_root())?;
+    let _lock = lock(&StateArea::new(loader.workspace()))?;
     let mut selections = select::select(loader, today, request)?;
     if !platforms.is_empty() {
         for platform in platforms {
@@ -113,23 +120,31 @@ fn create_run(
         decision: None,
     };
     let dir = state.create(&record)?;
-    write_inputs(loader, &dir, platform, roster.curated_source_cap, previous.as_deref())?;
+    write_inputs(loader, &dir, &run_dir(&record), platform, roster.curated_source_cap, previous.as_deref())?;
     let stages = Stage::ALL.to_vec();
-    write_sequence(loader, &dir, &record, &stages)?;
+    write_sequence(&dir, &record, &stages)?;
     Ok(prepared(&record, stages, true))
 }
 
 /// Re-prepares a failed, interrupted, or exhausted run from its first
 /// incomplete stage (rerunning reconciliation when validation failed). The
 /// same ledger keeps charging; a resumption never adds budget, and at most
-/// [`MAX_RECOVERY_ATTEMPTS`] are allowed.
+/// [`MAX_RECOVERY_ATTEMPTS`] are allowed. A platform keeps at most one open
+/// run: a resumption is refused while another run for it is open or
+/// unreadable.
 ///
 /// ## Errors
 ///
 /// [`RefreshError::WrongStatus`], [`RefreshError::RecoveryLimit`],
-/// [`RefreshError::Ledger`] for an exhausted ledger without a recorded grant.
+/// [`RefreshError::Ledger`] for an exhausted ledger without a recorded grant,
+/// [`RefreshError::OtherRunBlocks`] when the platform has another open run or
+/// an unreadable run record, [`RefreshError::PrepareBusy`] while another
+/// preparation runs, [`RefreshError::NotRepositoryTopLevel`] as for
+/// [`prepare`].
 pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError> {
+    require_top_level(loader.workspace().repo_root())?;
     let state = StateArea::new(loader.workspace());
+    let _lock = lock(&state)?;
     let mut record = state.load(run_id)?;
     let ledger = state.ledger(&record)?;
     super::state::apply_ledger(&mut record, ledger.as_ref());
@@ -143,6 +158,16 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
     }
     if record.recovery_attempts >= MAX_RECOVERY_ATTEMPTS {
         return Err(RefreshError::RecoveryLimit { run_id: record.run_id.to_string() });
+    }
+    // A failed run is not open, so a new run may have been prepared for the
+    // platform since; reopening this one would make two open runs.
+    if let Some((path, skip)) = select::blocking_runs(&state, Some(&record.run_id)).remove(&record.platform_id) {
+        let blocker = match skip {
+            Skip::OpenRun { run_id, status } => format!("{} already has run {run_id}, which is {status}", record.platform_id),
+            Skip::UnreadableRun { error, .. } => format!("{} has an unreadable run record: {error}", record.platform_id),
+            Skip::Current { .. } => unreachable!("blocking_runs yields only open or unreadable runs"),
+        };
+        return Err(RefreshError::OtherRunBlocks { run_id: record.run_id.to_string(), path, blocker });
     }
     if let Some(ledger) = &ledger {
         let guidance = match ledger.state.as_str() {
@@ -170,16 +195,60 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
     record.stop_reason = None;
     state.save(&record)?;
     let dir = state.run_dir(record.platform_id, &record.run_id);
-    write_sequence(loader, &dir, &record, &stages)?;
+    write_sequence(&dir, &record, &stages)?;
     Ok(prepared(&record, stages, false))
+}
+
+/// Refuses a `root` inside a Git work tree that is not its top level. A
+/// prepared run names repository-relative paths, and Claudine resolves them
+/// from the Git top level of the launch directory (where it starts agents),
+/// so the two must be the same directory. A root outside any Git repository
+/// is allowed: Claudine then stays in the launch directory.
+fn require_top_level(root: &Path) -> Result<(), RefreshError> {
+    let discovered = sniff::filesystem::git::api::repo_root(root)
+        .map_err(|error| StateError::Io { context: "discover the Git work tree".to_string(), source: std::io::Error::other(error) })?;
+    let Some(top_level) = discovered else { return Ok(()) };
+    // Discovery from a directory holding its own `.git` stops there, so that
+    // entry settles it whatever spelling (case, symlink, `\\?\`) either path
+    // uses; otherwise compare canonical spellings.
+    let same = root.join(".git").exists()
+        || matches!((fs::canonicalize(root), fs::canonicalize(&top_level)), (Ok(a), Ok(b)) if a == b);
+    if same {
+        return Ok(());
+    }
+    Err(RefreshError::NotRepositoryTopLevel {
+        root: root.display().to_string(),
+        top_level: top_level.display().to_string(),
+    })
+}
+
+/// Selection reads the state area and run creation writes it; without one
+/// lock across both, two concurrent preparations could each find a platform
+/// without an open run and each create one with a fresh budget. The loser is
+/// refused rather than queued. This is an OS lock, not the file's existence:
+/// it is released when the holder exits, even by crashing, so the file left
+/// behind never blocks a later preparation.
+fn lock(state: &StateArea) -> Result<PublicationLock, RefreshError> {
+    let path = format!("{}/{}", super::state::RUNS, super::state::PREPARE_LOCK);
+    PublicationLock::try_acquire(&state.prepare_lock()).map_err(|error| match error {
+        LockError::Held => RefreshError::PrepareBusy { path },
+        LockError::Io(source) => StateError::Io { context: format!("lock {path}"), source }.into(),
+    })
 }
 
 fn pending(stage: Stage) -> StageResult {
     StageResult { stage, status: StageStatus::Pending, findings: Vec::new() }
 }
 
+/// The repository-relative run directory with `/` separators. Every path a
+/// prepared run names is spelled from it rather than from the absolute state
+/// directory, so no host path reaches an agent's inputs.
+fn run_dir(record: &RunRecord) -> String {
+    format!("{}/{}/{}", super::state::RUNS, record.platform_id, record.run_id)
+}
+
 fn prepared(record: &RunRecord, stages: Vec<Stage>, init: bool) -> PreparedRun {
-    let run_dir = format!("{}/{}/{}", super::state::RUNS, record.platform_id, record.run_id);
+    let run_dir = run_dir(record);
     let ledger = format!("{run_dir}/budget.json");
     let mut commands = Vec::new();
     if init {
@@ -221,14 +290,27 @@ fn write(path: &Path, text: &str) -> Result<(), RefreshError> {
     Ok(())
 }
 
+/// Paths in the prompts are relative to the repository root, where Claudine
+/// starts each agent.
+const PATHS_NOTE: &str = "Paths are relative to the repository root.";
+
 /// Writes the per-pass input directories and the candidate's schema copies.
-fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32, previous: Option<&str>) -> Result<(), RefreshError> {
+/// `dir` is the run directory on disk and `run` its repository-relative
+/// spelling, the only one the prompts use.
+fn write_inputs(
+    loader: &Loader,
+    dir: &Path,
+    run: &str,
+    platform: &RosterPlatform,
+    cap: u32,
+    previous: Option<&str>,
+) -> Result<(), RefreshError> {
     let id = platform.platform_id;
-    let outputs = mkdir(&dir.join("outputs"))?;
+    mkdir(&dir.join("outputs"))?;
     let candidate_dir = mkdir(&dir.join("candidate"))?;
     copy_contract(loader, &candidate_dir, &["_schema.yaml", "_types.yaml"])?;
-    let candidate = candidate_dir.join(format!("{id}.md"));
-    let show = |path: &Path| path.display().to_string();
+    let show = |relative: &str| format!("{run}/{relative}");
+    let candidate = show(&format!("candidate/{id}.md"));
 
     let discovery = mkdir(&dir.join("inputs").join("discovery"))?;
     copy_contract(loader, &discovery, CONTRACT_FILES)?;
@@ -237,7 +319,7 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
         &discovery.join("prompt.md"),
         &format!(
             "# Pass 1: independent discovery for {name}\n\n\
-             Follow Pass 1 in `{fleet}`. Your inputs are this directory only: `{ident}` (the platform and its \
+             {PATHS_NOTE} Follow Pass 1 in `{fleet}`. Your inputs are this directory only: `{ident}` (the platform and its \
              interfaces), the instructions, and the schema (`{schema}`). You receive no previous research and no \
              curated sources; do not look for them.\n\n\
              Write:\n\n\
@@ -245,11 +327,11 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
              - `{suggested}` as JSON: `{{\"suggestions\": [{{\"url\": \"…\", \"questions\": [\"…\"], \"contribution\": \"…\"}}]}}`. \
              Every suggestion names the research questions it answered and what it contributed that other sources did not.\n",
             name = platform.name,
-            fleet = show(&discovery.join("_fleet.md")),
-            ident = show(&discovery.join("identification.md")),
-            schema = show(&discovery.join("_schema.yaml")),
-            report = show(&outputs.join("discovery.md")),
-            suggested = show(&outputs.join("suggested-sources.json")),
+            fleet = show("inputs/discovery/_fleet.md"),
+            ident = show("inputs/discovery/identification.md"),
+            schema = show("inputs/discovery/_schema.yaml"),
+            report = show("outputs/discovery.md"),
+            suggested = show("outputs/suggested-sources.json"),
         ),
     )?;
 
@@ -259,7 +341,7 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
     let previous_line = match previous {
         Some(text) => {
             write(&reconcile.join("previous.md"), text)?;
-            format!("the previous document `{}`", show(&reconcile.join("previous.md")))
+            format!("the previous document `{}`", show("inputs/reconcile/previous.md"))
         }
         None => "no previous document (initial research)".to_string(),
     };
@@ -267,7 +349,7 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
         &reconcile.join("prompt.md"),
         &format!(
             "# Pass 2: curated reconciliation for {name}\n\n\
-             Follow Pass 2 in `{fleet}`. Inputs: the discovery report `{report}` and suggestions `{suggested}`, the \
+             {PATHS_NOTE} Follow Pass 2 in `{fleet}`. Inputs: the discovery report `{report}` and suggestions `{suggested}`, the \
              curated sources `{curated}`, and {previous_line}.\n\n\
              Write:\n\n\
              - the candidate document to `{candidate}`, keeping `$schema: ./_schema.yaml`, `created`, stable IDs, and every \
@@ -276,12 +358,11 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
              Record one attempt per curated source; an inaccessible source has `\"outcome\": \"inaccessible\"` and a \
              `\"failure\"` instead of a finding. Never refresh the `retrieved` date of a source you did not successfully check.\n",
             name = platform.name,
-            fleet = show(&reconcile.join("_fleet.md")),
-            report = show(&outputs.join("discovery.md")),
-            suggested = show(&outputs.join("suggested-sources.json")),
-            curated = show(&reconcile.join("curated-sources.md")),
-            candidate = show(&candidate),
-            checks = show(&dir.join("source-checks.json")),
+            fleet = show("inputs/reconcile/_fleet.md"),
+            report = show("outputs/discovery.md"),
+            suggested = show("outputs/suggested-sources.json"),
+            curated = show("inputs/reconcile/curated-sources.md"),
+            checks = show("source-checks.json"),
         ),
     )?;
 
@@ -291,24 +372,24 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
         &sources.join("prompt.md"),
         &format!(
             "# Pass 3: source-list maintenance for {name}\n\n\
-             Follow Pass 3 in `{fleet}`. Inputs: the suggestions `{suggested}`, the curated sources `{curated}`, and the \
+             {PATHS_NOTE} Follow Pass 3 in `{fleet}`. Inputs: the suggestions `{suggested}`, the curated sources `{curated}`, and the \
              source checks `{checks}`. The cap is {cap} sources shared across the platform's interfaces.\n\n\
              Write `{proposal}` as JSON: `{{\"retain\": [{{\"url\": \"…\", \"interfaces\": [\"…\"], \"contribution\": \"…\"}}], \
              \"add\": [{{\"url\": \"…\", \"interfaces\": [\"…\"], \"contribution\": \"…\", \"replaces\": \"…\", \"coverage_gained\": \"…\", \
              \"coverage_lost\": \"…\"}}], \"remove\": [{{\"url\": \"…\", \"reason\": \"…\"}}]}}`. List every curated source under \
              `retain` or `remove`. `replaces` and the coverage fields are required only at capacity. Never edit the roster.\n",
             name = platform.name,
-            fleet = show(&sources.join("_fleet.md")),
-            suggested = show(&outputs.join("suggested-sources.json")),
-            curated = show(&reconcile.join("curated-sources.md")),
-            checks = show(&dir.join("source-checks.json")),
-            proposal = show(&outputs.join("source-proposal.json")),
+            fleet = show("inputs/sources/_fleet.md"),
+            suggested = show("outputs/suggested-sources.json"),
+            curated = show("inputs/reconcile/curated-sources.md"),
+            checks = show("source-checks.json"),
+            proposal = show("outputs/source-proposal.json"),
         ),
     )?;
 
     let review = mkdir(&dir.join("inputs").join("review"))?;
     let baseline_line = if previous.is_some() {
-        format!("the previous document `{}`", show(&reconcile.join("previous.md")))
+        format!("the previous document `{}`", show("inputs/reconcile/previous.md"))
     } else {
         "no accepted baseline (initial research: review every fact)".to_string()
     };
@@ -316,7 +397,7 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
         &review.join("prompt.md"),
         &format!(
             "# Independent evidence review for {name}\n\n\
-             You did not write this research. Check each changed claim in the candidate `{candidate}` against its cited \
+             {PATHS_NOTE} You did not write this research. Check each changed claim in the candidate `{candidate}` against its cited \
              evidence, using the mechanical comparison `{delta}` and {baseline_line}. Review changed evidence even at an \
              unchanged URL, and meaningful prose changes even when typed values match. A new API release alone never \
              validates a changed fact. Leave anything you cannot confirm `unresolved`; never invent certainty. Your \
@@ -327,9 +408,8 @@ fn write_inputs(loader: &Loader, dir: &Path, platform: &RosterPlatform, cap: u32
              changed fact, source, and gap in the comparison, and the prose when it changed. Store concise findings and \
              links only: no transcripts, thread copies, credentials, or message content.\n",
             name = platform.name,
-            candidate = show(&candidate),
-            delta = show(&dir.join("delta.json")),
-            output = show(&outputs.join("evidence-review.json")),
+            delta = show("delta.json"),
+            output = show("outputs/evidence-review.json"),
         ),
     )?;
     Ok(())
@@ -362,20 +442,14 @@ fn curated(platform: &RosterPlatform, cap: u32) -> String {
     out
 }
 
-/// A YAML single-quoted scalar: no escapes, so Windows paths stay literal.
-fn yaml_single(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "''"))
-}
-
 /// The sequence document for `stages`. Validation and the review check are
 /// `shell:` steps so their time is charged to the run's ledger.
-fn write_sequence(loader: &Loader, dir: &Path, record: &RunRecord, stages: &[Stage]) -> Result<(), RefreshError> {
-    // Forward slashes: Windows accepts them, and a backslash inside the
-    // quoted argument could otherwise be read as an escape by the tokenizer.
-    let root = loader.workspace().repo_root().display().to_string().replace('\\', "/");
-    let check = |through: Stage| {
-        yaml_single(&format!("messenger research check-run {} --through {through} --root \"{root}\"", record.run_id))
-    };
+fn write_sequence(dir: &Path, record: &RunRecord, stages: &[Stage]) -> Result<(), RefreshError> {
+    // Claudine hands a `shell:` string verbatim to `sh -c` or `cmd /D /C` and
+    // has no argument-vector form, so the command carries no path: `--root .`
+    // is the step's working directory, the repository root the printed
+    // commands run from. Run IDs and stage names need no quoting on any shell.
+    let check = |through: Stage| format!("messenger research check-run {} --through {through} --root .", record.run_id);
     let mut out = String::from("---\nsequence:\n");
     for stage in stages {
         let (name, step) = match stage {

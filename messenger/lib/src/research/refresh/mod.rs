@@ -63,12 +63,22 @@ pub enum RefreshError {
     RecoveryLimit { run_id: String },
     #[error("run {run_id}'s budget ledger is {state}: {guidance}")]
     Ledger { run_id: String, state: String, guidance: &'static str },
+    #[error("run {run_id} cannot resume: {blocker} ({path}); reject it or resolve that run first")]
+    OtherRunBlocks { run_id: String, path: String, blocker: String },
     #[error("another `messenger research prepare` holds {path}; run it again once that one finishes")]
     PrepareBusy { path: String },
     #[error("{platform} is not an active roster platform")]
     NotInRoster { platform: String },
     #[error("the roster does not load cleanly; run `messenger research validate`")]
     InvalidRoster,
+    /// Claudine starts agents, and later `shell:` checks, in the Git top level
+    /// of the launch directory, so a run prepared under a subdirectory of a
+    /// work tree would resolve its repository-relative paths elsewhere.
+    #[error(
+        "the research root {root} is inside the Git work tree {top_level} but is not its top level; \
+         prepare from the top level, or use a root outside any Git repository"
+    )]
+    NotRepositoryTopLevel { root: String, top_level: String },
 }
 
 impl From<GenerateError> for RefreshError {

@@ -6,7 +6,9 @@
 //! no review or renewal record says what it was researched under, or an
 //! observed provider/SDK/bridge version differs from the accepted findings.
 //! Otherwise it is skipped with an auditable reason. A platform with an open
-//! run is never selected again until that run is decided or resumed.
+//! run is never selected again until that run is decided or resumed, and a
+//! platform with an unreadable run record is never selected until the record
+//! is repaired or removed.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -66,6 +68,10 @@ pub enum Skip {
     Current { last_updated: Date, refresh_due: Date },
     /// A run is still open; resume, promote, or reject it first.
     OpenRun { run_id: RunId, status: RunStatus },
+    /// A run directory's record cannot be read, so whether the platform has
+    /// an open run is unknown. Repair or remove the run directory at `path`
+    /// (repository-relative) before the platform is selected again.
+    UnreadableRun { path: String, error: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -162,6 +168,34 @@ pub fn renewals(state: &StateArea) -> Vec<RenewalRecord> {
     out
 }
 
+/// What keeps each platform from getting another open run, with the
+/// repository-relative run directory responsible: an open run, or an
+/// unreadable run record (which might be the open run, so it blocks too and
+/// takes precedence). `except` leaves one run out, for resuming it.
+pub fn blocking_runs(state: &StateArea, except: Option<&RunId>) -> BTreeMap<PlatformId, (String, Skip)> {
+    let mut blocked: BTreeMap<PlatformId, (String, Skip)> = BTreeMap::new();
+    for (platform, path, record) in state.list() {
+        let mut record = match record {
+            Ok(record) if except == Some(&record.run_id) => continue,
+            Ok(record) => record,
+            Err(error) => {
+                let error = error.to_string();
+                blocked.insert(platform, (path.clone(), Skip::UnreadableRun { path, error }));
+                continue;
+            }
+        };
+        // Judge the run's resting state, not its last saved status. An
+        // unreadable ledger leaves the saved status, and an `active` run
+        // stays open.
+        let ledger = state.ledger(&record).ok().flatten();
+        super::state::apply_ledger(&mut record, ledger.as_ref());
+        if record.status.is_open() && !matches!(blocked.get(&platform), Some((_, Skip::UnreadableRun { .. }))) {
+            blocked.insert(platform, (path, Skip::OpenRun { run_id: record.run_id, status: record.status }));
+        }
+    }
+    blocked
+}
+
 /// Decides every active roster platform in roster order.
 ///
 /// ## Errors
@@ -176,19 +210,7 @@ pub fn select(loader: &Loader, today: &Date, request: &Request) -> Result<Vec<Se
     let verified = published(workspace)?;
     let contract = current_contract(workspace)?;
     let under = researched_under(&state, verified.as_ref());
-    let open: BTreeMap<PlatformId, (RunId, RunStatus)> = state
-        .list()
-        .into_iter()
-        .filter_map(|(_, record)| record.ok())
-        .map(|mut record| {
-            // Judge the run's resting state, not its last saved status.
-            let ledger = state.ledger(&record).ok().flatten();
-            super::state::apply_ledger(&mut record, ledger.as_ref());
-            record
-        })
-        .filter(|record| record.status.is_open())
-        .map(|record| (record.platform_id, (record.run_id, record.status)))
-        .collect();
+    let mut blocked = blocking_runs(&state, None);
     for platform in &request.forced {
         if roster.active_platforms().all(|p| p.platform_id != *platform) {
             return Err(RefreshError::NotInRoster { platform: platform.to_string() });
@@ -198,8 +220,8 @@ pub fn select(loader: &Loader, today: &Date, request: &Request) -> Result<Vec<Se
     let mut selections = Vec::new();
     for platform in roster.active_platforms() {
         let id = platform.platform_id;
-        if let Some((run_id, status)) = open.get(&id) {
-            selections.push(Selection { platform_id: id, due: Vec::new(), skip: Some(Skip::OpenRun { run_id: run_id.clone(), status: *status }) });
+        if let Some((_, skip)) = blocked.remove(&id) {
+            selections.push(Selection { platform_id: id, due: Vec::new(), skip: Some(skip) });
             continue;
         }
         let mut due = Vec::new();

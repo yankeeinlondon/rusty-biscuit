@@ -72,7 +72,7 @@ pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> CleanupPlan
         protected: Vec::new(),
         younger: 0,
     };
-    for (path, record) in state.list() {
+    for (_, path, record) in state.list() {
         let record = match record {
             Ok(record) => record,
             Err(error) => {

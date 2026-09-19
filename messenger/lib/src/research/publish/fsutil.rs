@@ -115,18 +115,19 @@ pub(crate) fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
 
 /// Exclusive, process-scoped lock (`File::try_lock`: `flock` on Unix,
 /// `LockFileEx` on Windows). The OS releases it when the process dies, so a
-/// crashed publisher never leaves a stale lock.
-pub(super) struct PublicationLock {
+/// crashed holder never leaves a stale lock; the file left behind is inert.
+/// Publication and run preparation each hold their own lock file.
+pub(crate) struct PublicationLock {
     _file: File,
 }
 
-pub(super) enum LockError {
+pub(crate) enum LockError {
     Held,
     Io(io::Error),
 }
 
 impl PublicationLock {
-    pub(super) fn try_acquire(path: &Path) -> Result<Self, LockError> {
+    pub(crate) fn try_acquire(path: &Path) -> Result<Self, LockError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(LockError::Io)?;
         }

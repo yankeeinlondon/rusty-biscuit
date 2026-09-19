@@ -40,27 +40,37 @@ const STATE: &str = "messenger/.research-state";
 /// The shipped contract plus the accepted-fleet fixture, published.
 struct Fleet {
     dir: TempDir,
+    root: PathBuf,
 }
 
 impl Fleet {
     fn published() -> Self {
-        let dir = tempfile::tempdir().expect("tempdir");
-        for path in SHIPPED {
-            let target = dir.path().join(path);
-            fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
-            fs::copy(repo_root().join(path), target).expect("copy");
-        }
-        let fleet = Self { dir };
-        for platform in PlatformId::ALL {
-            fleet.write(&format!("messenger/docs/research/platforms/{platform}.md"), &fixture(*platform, None));
-        }
+        let fleet = Self::unpublished_at(None);
         let loader = Loader::new(Workspace::new(fleet.root()).expect("absolute"));
         generate(&loader, &BTreeMap::new(), &Date::parse("2026-09-17").expect("date"), Options::default()).expect("publish");
         fleet
     }
 
+    /// The fleet at its fixed paths with no snapshot, rooted at `name` inside
+    /// the temporary directory when given, so the repository root can carry
+    /// characters a shell would interpret.
+    fn unpublished_at(name: Option<&str>) -> Self {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = name.map_or_else(|| dir.path().to_path_buf(), |name| dir.path().join(name));
+        for path in SHIPPED {
+            let target = root.join(path);
+            fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
+            fs::copy(repo_root().join(path), target).expect("copy");
+        }
+        let fleet = Self { dir, root };
+        for platform in PlatformId::ALL {
+            fleet.write(&format!("messenger/docs/research/platforms/{platform}.md"), &fixture(*platform, None));
+        }
+        fleet
+    }
+
     fn root(&self) -> &Path {
-        self.dir.path()
+        &self.root
     }
 
     fn path(&self, relative: &str) -> PathBuf {
@@ -401,4 +411,208 @@ fn prepare_is_refused_while_another_process_holds_the_prepare_lock() {
     drop(holder);
     assert_eq!(code(&fleet.research("2026-09-18", &args)), 0, "a released lock never wedges the platform");
     assert_eq!(run_dirs(&fleet, PlatformId::Discord), 1);
+}
+
+/// Review-1 regression: resuming a failed run after a newer run was prepared
+/// for the platform once reopened it, leaving two open runs.
+#[test]
+fn resume_is_refused_while_another_run_for_the_platform_is_open() {
+    let fleet = Fleet::published();
+    let prepare = ["prepare", "discord", "--force", "--max-seconds", "600", "--max-invocations", "8", "--json"];
+    let failed = json_out(&fleet.research("2026-09-18", &prepare))["runs"][0]["run_id"].as_str().expect("run id").to_string();
+    assert_eq!(json_out(&fleet.research("2026-09-18", &["check-run", &failed, "--json"]))["status"], "failed");
+    let newer = json_out(&fleet.research("2026-09-18", &prepare));
+    let newer_id = newer["runs"][0]["run_id"].as_str().expect("run id").to_string();
+    let newer_dir = newer["runs"][0]["run_dir"].as_str().expect("run dir").to_string();
+
+    let refused = fleet.research("2026-09-18", &["prepare", "--resume", &failed, "--json"]);
+    assert_eq!(code(&refused), 1, "a refused lifecycle step");
+    let message = json_out(&refused)["refused"].as_str().expect("refusal").to_string();
+    assert!(message.contains(&newer_dir) && message.contains(&newer_id), "{message}");
+    let runs = json_out(&fleet.research("2026-09-18", &["runs", "--platform", "discord", "--json"]));
+    let statuses: Vec<&str> = runs["runs"].as_array().expect("runs").iter().map(|row| row["status"].as_str().expect("status")).collect();
+    assert_eq!(statuses.iter().filter(|status| **status == "active").count(), 1, "{runs}");
+    assert!(statuses.contains(&"failed"), "{runs}");
+
+    // Once the other run fails its check and is rejected, the failed run resumes.
+    assert_eq!(code(&fleet.research("2026-09-18", &["check-run", &newer_id])), 1);
+    assert_eq!(code(&fleet.research("2026-09-18", &["reject", &newer_id, "--by", "maintainer", "--reason", "superseded"])), 0);
+    let resumed = fleet.research("2026-09-18", &["prepare", "--resume", &failed, "--json"]);
+    assert_eq!(code(&resumed), 0, "{}", stdout(&resumed));
+}
+
+/// Repository roots holding characters that `sh`, `cmd`, or Claudine's
+/// command tokenizer would interpret if a root were ever spliced into a
+/// `shell:` step. Windows forbids `"` in file names, so it is tested only
+/// elsewhere; a newline is tested where the file system allows it.
+const HOSTILE_ROOTS: &[&str] = &[
+    "with space",
+    "single'quote",
+    #[cfg(not(windows))]
+    "double\"quote",
+    "dollar$HOME",
+    "back`id`tick",
+    "percent %PATH%",
+    "non-ASCII résumé 研究",
+    #[cfg(not(windows))]
+    "line\nbreak",
+    #[cfg(not(windows))]
+    "all of it \"'$(id)`id`%PATH% é",
+    #[cfg(windows)]
+    "all of it '$(id)`id`%PATH% é",
+];
+
+/// Runs a sequence `shell:` step the way Claudine does (`sh -c` on Unix,
+/// `cmd /D /C` with the command as its raw tail on Windows) from `cwd`, with
+/// this build's `messenger` first on `PATH`.
+fn run_shell_step(command: &str, cwd: &Path) -> Output {
+    let bin = biscuit_test_harness::bin_exe!("messenger");
+    let mut dirs = vec![bin.parent().expect("binary directory").to_path_buf()];
+    dirs.extend(std::env::var_os("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default());
+    #[cfg(windows)]
+    let mut shell = {
+        use std::os::windows::process::CommandExt;
+        let mut shell = Command::new("cmd");
+        shell.args(["/D", "/C"]).raw_arg(command);
+        shell
+    };
+    #[cfg(not(windows))]
+    let mut shell = {
+        let mut shell = Command::new("sh");
+        shell.arg("-c").arg(command);
+        shell
+    };
+    shell.current_dir(cwd).env("PATH", std::env::join_paths(dirs).expect("PATH")).env("NO_COLOR", "1").output().expect("run shell step")
+}
+
+#[test]
+fn prepared_runs_name_no_host_path_and_their_checks_resolve_any_root() {
+    for name in HOSTILE_ROOTS {
+        let fleet = Fleet::unpublished_at(Some(name));
+        let host = fleet.dir.path();
+        let canonical = fs::canonicalize(host).expect("canonical temporary directory");
+        let host_spellings: Vec<String> = [host.to_path_buf(), canonical]
+            .iter()
+            .flat_map(|path| {
+                let text = path.to_string_lossy().into_owned();
+                [text.replace('\\', "/"), text]
+            })
+            .chain(std::iter::once((*name).to_string()))
+            .collect();
+        let leaks = |label: &str, text: &str| {
+            for spelling in &host_spellings {
+                assert!(!text.contains(spelling.as_str()), "{name:?}: {label} names the host path {spelling:?}:\n{text}");
+            }
+        };
+
+        let prepared = fleet.research("2026-09-18", &["prepare", "discord", "--max-seconds", "600", "--max-invocations", "8", "--json"]);
+        assert_eq!(code(&prepared), 0, "{name:?}: {}", String::from_utf8_lossy(&prepared.stderr));
+        leaks("prepare output", &stdout(&prepared));
+        let prepared = json_out(&prepared);
+        let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
+        let run_dir = fleet.path(prepared["runs"][0]["run_dir"].as_str().expect("run dir"));
+
+        let mut files = vec![run_dir.clone()];
+        let mut inputs = 0;
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(fs::read_dir(&path).expect("dir").flatten().map(|entry| entry.path()));
+            } else {
+                inputs += 1;
+                leaks(&path.display().to_string(), &String::from_utf8_lossy(&fs::read(&path).expect("read")));
+            }
+        }
+        assert!(inputs > 10, "{name:?}: every pass's inputs were scanned ({inputs} files)");
+
+        // The checks carry no path, so no shell or tokenizer can split or
+        // expand one: only the run ID, the stage, and `--root .`.
+        let sequence = fs::read_to_string(run_dir.join("run.md")).expect("run.md");
+        let steps: Vec<&str> = sequence.lines().filter_map(|line| line.trim().strip_prefix("shell: ")).collect();
+        assert_eq!(
+            steps,
+            [
+                format!("messenger research check-run {run_id} --through validation --root ."),
+                format!("messenger research check-run {run_id} --through review --root ."),
+            ],
+            "{name:?}"
+        );
+
+        // From anywhere but the root the step finds no run and changes nothing.
+        let record = fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json"));
+        let before = fs::read(&record).expect("run record");
+        let elsewhere = run_shell_step(steps[0], host);
+        assert_ne!(code(&elsewhere), 0, "{name:?}: {}", String::from_utf8_lossy(&elsewhere.stderr));
+        assert_eq!(fs::read(&record).expect("run record"), before, "{name:?}: a step run outside the root touched the run");
+
+        // From the root it judges this fixture's run: no outputs yet, so the
+        // validation stage fails and the run is marked failed.
+        let judged = run_shell_step(steps[0], fleet.root());
+        assert_eq!(code(&judged), 1, "{name:?}: {}{}", stdout(&judged), String::from_utf8_lossy(&judged.stderr));
+        let record: Value = serde_json::from_slice(&fs::read(&record).expect("run record")).expect("json");
+        assert_eq!(record["status"], "failed", "{name:?}: {record}");
+    }
+}
+
+/// Makes `dir` a Git work tree's top level, ignoring host Git configuration.
+fn git_init(dir: &Path) {
+    let status = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", dir.join("no-global-gitconfig"))
+        .status()
+        .expect("run git init");
+    assert!(status.success(), "git init {}", dir.display());
+}
+
+const PREPARE: &[&str] = &["prepare", "discord", "--max-seconds", "600", "--max-invocations", "8", "--json"];
+
+#[test]
+fn prepare_refuses_a_root_below_the_git_top_level_and_accepts_the_top_level_or_no_repository() {
+    // No repository anywhere above the root: allowed.
+    let outside = Fleet::unpublished_at(Some("research"));
+    let allowed = outside.research("2026-09-18", PREPARE);
+    assert_eq!(code(&allowed), 0, "{}", String::from_utf8_lossy(&allowed.stderr));
+
+    // A subdirectory of a work tree: refused as a usage error, nothing written.
+    let below = Fleet::unpublished_at(Some("nested"));
+    git_init(below.dir.path());
+    let refused = below.research("2026-09-18", PREPARE);
+    assert_eq!(code(&refused), 2, "{}{}", stdout(&refused), String::from_utf8_lossy(&refused.stderr));
+    let refused = json_out(&refused);
+    assert!(refused["refused"].as_str().expect("refusal").contains("is not its top level"), "{refused}");
+    assert!(!below.path(STATE).exists(), "a refused preparation writes nothing");
+
+    // The top level itself: allowed, whether the root is spelled as created
+    // or canonically (macOS `/private/var`, Windows `\\?\`).
+    let top = Fleet::unpublished_at(None);
+    git_init(top.root());
+    let allowed = top.research("2026-09-18", PREPARE);
+    assert_eq!(code(&allowed), 0, "{}", String::from_utf8_lossy(&allowed.stderr));
+    let canonical = fs::canonicalize(top.root()).expect("canonical root");
+    let allowed = Command::new(biscuit_test_harness::bin_exe!("messenger"))
+        .arg("research")
+        .arg("--root")
+        .arg(&canonical)
+        .args(["--today", "2026-09-18", "prepare", "slack", "--max-seconds", "600", "--max-invocations", "8", "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run messenger");
+    assert_eq!(code(&allowed), 0, "{}", String::from_utf8_lossy(&allowed.stderr));
+}
+
+#[test]
+fn resume_refuses_a_root_that_became_a_subdirectory_of_a_git_work_tree() {
+    let fleet = Fleet::unpublished_at(Some("nested"));
+    let prepared = json_out(&fleet.research("2026-09-18", PREPARE));
+    let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
+    assert_eq!(code(&fleet.research("2026-09-18", &["check-run", &run_id, "--through", "validation"])), 1, "the run fails");
+    let record = fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json"));
+    let before = fs::read(&record).expect("run record");
+
+    git_init(fleet.dir.path());
+    let refused = fleet.research("2026-09-18", &["prepare", "--resume", &run_id, "--json"]);
+    assert_eq!(code(&refused), 2, "{}{}", stdout(&refused), String::from_utf8_lossy(&refused.stderr));
+    assert!(json_out(&refused)["refused"].as_str().expect("refusal").contains("is not its top level"));
+    assert_eq!(fs::read(&record).expect("run record"), before, "a refused resumption changes nothing");
 }
