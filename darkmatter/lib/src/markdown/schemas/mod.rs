@@ -59,6 +59,7 @@ pub mod discriminant;
 pub mod errors;
 pub mod example;
 pub mod format;
+mod frontmatter_shape;
 mod phase;
 mod reference;
 pub mod resolve;
@@ -98,6 +99,10 @@ pub use detect::{
 };
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
+pub use frontmatter_shape::{
+    FrontmatterExpressionValue, effective_property_shape, expression_atom,
+    frontmatter_expression_values, nested_property_shape, property_def_at_path,
+};
 pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
@@ -108,8 +113,8 @@ pub use simplified::{
     SchemaSourcePath, SchemaSourcePathSegment,
     SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
-    SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_scalar,
-    decode_partial_scalar_at, decode_scalar_at, is_union_arm_path, lint_suggestions,
+    SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
+    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, is_union_arm_path, lint_suggestions,
     locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
@@ -117,6 +122,8 @@ pub use simplified::{
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };
+#[cfg(feature = "work-counters")]
+pub use simplified::alias_search_work;
 pub use triggers::{
     LoadedTrigger, MatchArms, MatchExpr, PathGlobs, ShadowedFile, TriggerEnvelope,
     TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerTrace, TriggerTraceEntry,
@@ -728,6 +735,47 @@ impl DarkmatterSchemas {
     }
 }
 
+fn schema_declares_property(root: &Value, schema: &Value, name: &str, depth: usize) -> bool {
+    // Bounds a `$ref` cycle; real schemas nest a handful of levels.
+    const MAX_DEPTH: usize = 32;
+    let Some(object) = schema.as_object() else {
+        return false;
+    };
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    if object
+        .get("properties")
+        .and_then(Value::as_object)
+        .is_some_and(|properties| properties.contains_key(name))
+    {
+        return true;
+    }
+    if object
+        .get("patternProperties")
+        .and_then(Value::as_object)
+        .is_some_and(|patterns| {
+            patterns
+                .keys()
+                .any(|pattern| regex::Regex::new(pattern).is_ok_and(|re| re.is_match(name)))
+        })
+    {
+        return true;
+    }
+    let arms = ["allOf", "anyOf", "oneOf"]
+        .into_iter()
+        .filter_map(|key| object.get(key).and_then(Value::as_array))
+        .flatten()
+        .chain(["if", "then", "else"].into_iter().filter_map(|key| object.get(key)));
+    let referenced = object
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|reference| reference.strip_prefix('#'))
+        .and_then(|pointer| root.pointer(pointer));
+    arms.chain(referenced)
+        .any(|arm| schema_declares_property(root, arm, name, depth + 1))
+}
+
 /// The fully-resolved schema for a document.
 #[derive(Clone)]
 pub struct EffectiveSchema {
@@ -775,6 +823,15 @@ pub struct EffectiveSchema {
 }
 
 impl EffectiveSchema {
+    /// Whether this schema declares the top-level frontmatter property `name`:
+    /// a `properties` key, a matching `patternProperties` pattern, or either
+    /// of those in any root-union, `allOf`, or `if`/`then`/`else` arm
+    /// (baseline and trigger layers are already merged in). Declaring is not
+    /// requiring; an optional property is declared.
+    pub(crate) fn declares_top_level_property(&self, name: &str) -> bool {
+        schema_declares_property(&self.json_schema, &self.json_schema, name, 0)
+    }
+
     /// The files this schema depends on (imports + examples + the referenced
     /// schema files themselves), as resolved absolute/canonical paths, sorted and
     /// deduplicated. Empty when the document has an inline `$schema` mapping with

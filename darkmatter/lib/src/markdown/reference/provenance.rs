@@ -502,7 +502,7 @@ mod tests {
         // A prebuilt graph whose links interpolate `{{ ctx.timestamp }}` must
         // not be reused when only the timestamp changed: distinct timestamps
         // resolve to distinct link targets. `timestamp` is dropped by the
-        // persistent-cache `context_hash`, so this reuse was previously
+        // compose-cache `context_hash`, so this reuse was previously
         // (wrongly) accepted.
         let built = ComposeOptions::new_with_context(
             ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("1000"))]),

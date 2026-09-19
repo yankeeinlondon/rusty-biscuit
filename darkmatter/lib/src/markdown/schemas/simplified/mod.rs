@@ -34,6 +34,7 @@ pub use source::{
     parse_property_definition_with_source, parse_schema_declaration_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
+pub(crate) use source::locate_frontmatter_value;
 pub use standalone::{
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
 };
@@ -41,8 +42,11 @@ pub use types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TypeExpr,
 };
+#[cfg(feature = "work-counters")]
+pub use yaml_scalar::alias_search_work;
 pub use yaml_scalar::{
-    DecodedScalar, decode_partial_scalar_at, decode_scalar, decode_scalar_at,
+    DecodedScalar, decode_alias_definition, decode_partial_scalar_at, decode_scalar,
+    decode_scalar_at, decode_scalar_node,
 };
 
 use indexmap::IndexMap;

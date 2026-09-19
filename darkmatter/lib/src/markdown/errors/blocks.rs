@@ -25,7 +25,7 @@ use crate::markdown::compose::expression::{
 };
 use crate::markdown::highlighting::highlight_yaml_lines;
 use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
-use crate::markdown::types::SourceRef;
+use crate::markdown::types::{AuthoredSpan, SourceRef};
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
@@ -270,10 +270,12 @@ pub(crate) fn caller_file_classification_changed_block(property: &str) -> Status
 /// word "interpolation"), so the author sees the real problem — an invalid file
 /// path, an unknown function — rather than the layer that surfaced it. The scope
 /// (`key`, `expression`) names where the failing expression lives, and `source`
-/// supplies the on-disk locus: an OSC8 link to the prompt file plus a focused
-/// `$schema`/key excerpt when the failure maps to a real frontmatter region
-/// ([`SourceRef::OnDisk`]), or the resolved text plus origin key for the
-/// late-binding path ([`SourceRef::Effective`]).
+/// supplies the on-disk locus: an OSC8 link to the prompt file
+/// ([`SourceRef::OnDisk`]), plus the authored line and column when the
+/// expression is located ([`SourceRef::OnDiskSpan`]), then a focused
+/// `$schema`/key excerpt for a frontmatter key or a numbered excerpt around a
+/// body line — or the resolved text plus origin key for the late-binding path
+/// ([`SourceRef::Effective`]).
 ///
 /// [`MarkdownError::Interpolation`]: crate::markdown::MarkdownError::Interpolation
 pub(crate) fn interpolation_block(
@@ -307,18 +309,8 @@ pub(crate) fn interpolation_block(
             // the on-disk path, or the resolved text + origin key for late
             // binding (DM2 event-time resolution has no stable file region).
             match source {
-                SourceRef::OnDisk(ctx) => {
-                    if ctx.display != std::path::Path::new("unknown") {
-                        body.push(Prose::new("Defined in:"));
-                        body.push(ctx.linked_path_prose());
-                    }
-                    // A body expression has no frontmatter region to excerpt.
-                    if key.is_some() {
-                        let excerpt = ctx.focused_yaml_excerpt(&involved_keys(key, expression));
-                        if !excerpt.content().is_empty() {
-                            body.push(excerpt);
-                        }
-                    }
+                SourceRef::OnDisk(_) | SourceRef::OnDiskSpan { .. } => {
+                    push_on_disk_locus(&mut body, key, expression, source);
                 }
                 SourceRef::Effective {
                     rendered,
@@ -369,11 +361,18 @@ pub(crate) fn interpolation_block(
                 Prose::escape_text(expression),
                 Prose::escape_text(&cause.to_string())
             ))];
-            if let SourceRef::OnDisk(ctx) = source
-                && ctx.display != std::path::Path::new("unknown")
-            {
-                body.push(Prose::new("Defined in:"));
-                body.push(ctx.linked_path_prose());
+            match source {
+                SourceRef::OnDisk(ctx) if ctx.display != std::path::Path::new("unknown") => {
+                    body.push(Prose::new("Defined in:"));
+                    body.push(ctx.linked_path_prose());
+                }
+                SourceRef::OnDiskSpan { context, span } => {
+                    push_authored_position(&mut body, context, span);
+                    if key.is_none() {
+                        body.push(context.excerpt_prose(span.line(), 2, "markdown"));
+                    }
+                }
+                _ => {}
             }
             let (headline, hint) = match cause {
                 ExpressionError::ContextNotCaptured { .. } => (
@@ -392,17 +391,70 @@ pub(crate) fn interpolation_block(
                 .hint(hint)
         }
         other => {
-            let body = format!(
+            let mut body = vec![Prose::new(format!(
                 "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
                 Prose::escape_text(expression),
                 Prose::escape_text(&other.to_string())
-            );
+            ))];
+            push_on_disk_locus(&mut body, key, expression, source);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("MarkdownError", "interpolation failed"))
                 .body(body)
                 .hint("Review the expression and the values it references.")
         }
     }
+}
+
+/// Appends the on-disk locus of a failing expression: the linked file, the
+/// authored line and column when known ([`SourceRef::OnDiskSpan`]), and an
+/// excerpt — of the receiving frontmatter key for a keyed error, else of the
+/// authored body line. A late-binding [`SourceRef::Effective`] source has no
+/// locus and adds nothing.
+fn push_on_disk_locus(
+    body: &mut Vec<Prose>,
+    key: Option<&str>,
+    expression: &str,
+    source: &SourceRef,
+) {
+    match source {
+        SourceRef::OnDisk(ctx) => {
+            if ctx.display != std::path::Path::new("unknown") {
+                body.push(Prose::new("Defined in:"));
+                body.push(ctx.linked_path_prose());
+            }
+            // A body expression has no frontmatter region to excerpt.
+            if key.is_some() {
+                let excerpt = ctx.focused_yaml_excerpt(&involved_keys(key, expression));
+                if !excerpt.content().is_empty() {
+                    body.push(excerpt);
+                }
+            }
+        }
+        SourceRef::OnDiskSpan { context, span } => {
+            push_authored_position(body, context, span);
+            if key.is_some() {
+                let excerpt = context.focused_yaml_excerpt(&involved_keys(key, expression));
+                if !excerpt.content().is_empty() {
+                    body.push(excerpt);
+                }
+            } else {
+                body.push(context.excerpt_prose(span.line(), 2, "markdown"));
+            }
+        }
+        SourceRef::Effective { .. } => {}
+    }
+}
+
+/// Appends the linked file and the authored line and column of a located
+/// expression.
+fn push_authored_position(body: &mut Vec<Prose>, context: &SourceContext, span: &AuthoredSpan) {
+    body.push(Prose::new("Defined in:"));
+    body.push(context.linked_path_prose());
+    body.push(Prose::new(format!(
+        "Expression at line: {}, column: {}",
+        span.line(),
+        span.column()
+    )));
 }
 
 /// The frontmatter keys the focused excerpt should surface for an interpolation
@@ -671,6 +723,11 @@ mod tests {
 
     use super::*;
 
+    fn span_of(text: &str, needle: &str) -> std::ops::Range<usize> {
+        let start = text.find(needle).expect("needle present");
+        start..start + needle.len()
+    }
+
     fn render_block(block: &StatusBlock) -> String {
         strip_escape_codes(block.render_optimistic(Some(80)))
     }
@@ -761,6 +818,63 @@ mod tests {
     /// headline, names the receiving key, links the prompt file (OSC8 when the
     /// terminal supports it), and shows a focused excerpt containing `$schema`
     /// plus the involved keys and NOT unrelated keys.
+    /// A parse or arity failure is an authoring error in a full document, so
+    /// it names its authored body line like every other located cause.
+    #[test]
+    fn interpolation_block_generic_cause_renders_the_authored_body_line() {
+        let doc = "---\ntitle: Hello\n---\n{{ title }} {{ > invalid }}\n";
+        let context = SourceContext::new(PathBuf::from("/repo/doc.md"), PathBuf::from("doc.md"), doc);
+        let span = AuthoredSpan::locate(doc, span_of(doc, "{{ > invalid }}")).unwrap();
+        let block = interpolation_block(
+            None,
+            "> invalid",
+            &SourceRef::OnDiskSpan { context, span },
+            &ExpressionError::Parse("Expected expression".to_string()),
+        );
+
+        let out = strip_escape_codes(block.render_optimistic(Some(80)));
+        assert!(out.contains("interpolation failed"), "{out}");
+        assert!(out.contains("doc.md"), "must name the file: {out}");
+        assert!(out.contains("Expression at line: 4, column: 13"), "must name the position: {out}");
+        assert!(out.contains("> 4 │ {{ title }} {{ > invalid }}"), "must mark the line: {out}");
+    }
+
+    /// A mixed-text frontmatter failure links the file, names the authored
+    /// position, and excerpts its key.
+    #[test]
+    fn interpolation_block_generic_cause_renders_the_frontmatter_key() {
+        let doc = "---\ntitle: Hello\nnote: \"x {{ min(1) }}\"\n---\nbody\n";
+        let context = SourceContext::new(PathBuf::from("/repo/doc.md"), PathBuf::from("doc.md"), doc);
+        let span = AuthoredSpan::locate(doc, span_of(doc, "{{ min(1) }}")).unwrap();
+        let block = interpolation_block(
+            Some("note"),
+            "min(1)",
+            &SourceRef::OnDiskSpan { context, span },
+            &ExpressionError::Parse("arity".to_string()),
+        );
+
+        let out = strip_escape_codes(block.render_optimistic(Some(80)));
+        assert!(out.contains("Defined in:") && out.contains("doc.md"), "{out}");
+        assert!(out.contains("Expression at line: 3, column: 10"), "{out}");
+        assert!(out.contains("note:"), "excerpt missing the receiving key: {out}");
+        assert!(!out.contains("title:"), "leaked an unrelated key: {out}");
+    }
+
+    /// Without an on-disk source the generic block keeps its text-only shape.
+    #[test]
+    fn interpolation_block_generic_cause_without_a_file_has_no_locus() {
+        let block = interpolation_block(
+            None,
+            "> invalid",
+            &SourceRef::Effective { rendered: "> invalid".to_string(), origin_key: None },
+            &ExpressionError::Parse("Expected expression".to_string()),
+        );
+
+        let out = strip_escape_codes(block.render_optimistic(Some(80)));
+        assert!(out.contains("> invalid"), "{out}");
+        assert!(!out.contains("Defined in:"), "{out}");
+    }
+
     #[test]
     fn interpolation_block_on_disk_renders_link_and_focused_excerpt() {
         use crate::markdown::compose::expression::FileReferenceDiagnostic;

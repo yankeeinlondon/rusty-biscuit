@@ -55,8 +55,9 @@ impl ReferenceAnalysisRuntime {
 
 /// Construct a run-local [`RunLocalCache`] from graph options.
 ///
-/// `cache_root` attaches no persistent backing: like the compose pipeline,
-/// graph construction persists no local artifact (R18).
+/// Memory-only: `cache_root` reaches only the remote transport cache, so
+/// graph construction, like the compose pipeline, persists no semantic-result
+/// artifact (R18).
 fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
     RunLocalCache::new(options.compose.cache_access_mode)
 }
@@ -339,6 +340,9 @@ fn build_node(
         })
     };
 
+    // Validation evaluates the same `when=` conditions compose will, against
+    // the request's one repository observation: fixed at request creation, or
+    // by the root pipeline entry `prepare_content` already ran above.
     let when_options = options.compose.clone();
     let when_lookup = ResolvingLookup::new(
         &effective_state,
@@ -1604,7 +1608,7 @@ mod tests {
     /// context's request would report on links the request never contained.
     ///
     /// `timestamp` is the volatile value here specifically because the
-    /// persistent-cache `context_hash` drops it — this is the case the
+    /// compose-cache `context_hash` drops it — this is the case the
     /// complete graph-context fingerprint exists to catch.
     #[test]
     fn prebuilt_graph_rejects_reuse_across_volatile_interpolated_link_target() {

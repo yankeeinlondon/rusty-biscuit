@@ -288,6 +288,21 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
         .map(|located| public_node(&located, source_offset))
 }
 
+/// [`locate_schema_value`] for a document's frontmatter, which also follows a
+/// literal (`|`) or folded (`>`) block scalar and a multi-line quoted or plain
+/// scalar over its continuation lines instead of giving up.
+///
+/// Schema documents keep [`locate_schema_value`]'s closed v1 grammar, which
+/// rejects those presentations.
+pub(crate) fn locate_frontmatter_value(
+    yaml_source: &str,
+    source_offset: usize,
+) -> Option<SchemaValueNode> {
+    locate_yaml_value_with(yaml_source, true)
+        .ok()
+        .map(|located| public_node(&located, source_offset))
+}
+
 fn public_node(located: &LocatedValue, offset: usize) -> SchemaValueNode {
     let kind = match &located.kind {
         LocatedKind::Scalar(_) => SchemaValueKind::Scalar,
@@ -340,6 +355,13 @@ struct SourceLine {
 }
 
 fn locate_yaml_value(source: &str) -> Result<LocatedValue, SchemaError> {
+    locate_yaml_value_with(source, false)
+}
+
+fn locate_yaml_value_with(
+    source: &str,
+    multi_line_scalars: bool,
+) -> Result<LocatedValue, SchemaError> {
     let lines = source_lines(source);
     if lines.is_empty() {
         return Err(projection_error());
@@ -348,6 +370,7 @@ fn locate_yaml_value(source: &str) -> Result<LocatedValue, SchemaError> {
         source,
         lines,
         next: 0,
+        multi_line_scalars,
     };
     let indent = parser.lines[0].indent;
     parser.node(indent)
@@ -402,6 +425,10 @@ struct BlockLocator<'a> {
     source: &'a str,
     lines: Vec<SourceLine>,
     next: usize,
+    /// Whether [`BlockLocator::inline_value`] follows block and multi-line
+    /// scalars and [`BlockLocator::value`] looks past a tag; off for the
+    /// closed v1 schema grammar.
+    multi_line_scalars: bool,
 }
 
 impl BlockLocator<'_> {
@@ -494,7 +521,7 @@ impl BlockLocator<'_> {
                     }
                     items.push(located_mapping(pairs)?);
                 } else {
-                    items.push(locate_inline(self.source, item_start..line.end)?);
+                    items.push(self.inline_value(item_start..line.end, indent)?);
                 }
             } else {
                 let child_indent = self
@@ -566,23 +593,31 @@ impl BlockLocator<'_> {
         indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
         if value_range.start < value_range.end {
-            if let Some(after_anchor) = anchor_value_start(self.source, &value_range) {
-                let remainder = trim_range(self.source, after_anchor..value_range.end);
+            if let Some(after_properties) =
+                node_properties_end(self.source, &value_range, self.multi_line_scalars)
+            {
+                let remainder = trim_range(self.source, after_properties..value_range.end);
                 let mut value = if remainder.start < remainder.end {
-                    locate_inline(self.source, remainder)?
+                    self.inline_value(remainder, indent)?
                 } else {
                     let child_indent = self
                         .lines
                         .get(self.next)
                         .filter(|line| line.indent > indent)
-                        .map(|line| line.indent)
-                        .ok_or_else(projection_error)?;
-                    self.node(child_indent)?
+                        .map(|line| line.indent);
+                    match child_indent {
+                        Some(child_indent) => self.node(child_indent)?,
+                        // A tagged empty value (`key: !!str`) has no node to descend into.
+                        None if self.multi_line_scalars => {
+                            locate_inline(self.source, value_range.clone())?
+                        }
+                        None => return Err(projection_error()),
+                    }
                 };
                 value.span.start = value_range.start;
                 Ok(value)
             } else {
-                locate_inline(self.source, value_range)
+                self.inline_value(value_range, indent)
             }
         } else {
             let child_indent = self
@@ -596,6 +631,45 @@ impl BlockLocator<'_> {
     }
 }
 
+impl BlockLocator<'_> {
+    /// Locates a value that starts inside a line. With
+    /// [`multi_line_scalars`](Self::multi_line_scalars) on, a block scalar or
+    /// a multi-line quoted or plain scalar is followed onto its continuation
+    /// lines, which are then consumed. `parent_indent` is the column of the
+    /// holding mapping key or sequence entry.
+    fn inline_value(
+        &mut self,
+        range: Range<usize>,
+        parent_indent: usize,
+    ) -> Result<LocatedValue, SchemaError> {
+        let raw = &self.source[range.clone()];
+        let continues = self
+            .lines
+            .get(self.next)
+            .is_some_and(|line| line.indent > parent_indent);
+        let multi_line = is_block_scalar_header(raw)
+            || raw.starts_with(['\'', '"'])
+            || (continues && !raw.starts_with(['[', '{']));
+        if !(self.multi_line_scalars && multi_line) {
+            return locate_inline(self.source, range);
+        }
+        let (scalar, end) =
+            yaml_scalar::decode_scalar_node(self.source, range.start, parent_indent)
+                .ok_or_else(projection_error)?;
+        while self
+            .lines
+            .get(self.next)
+            .is_some_and(|line| line.content_start < end)
+        {
+            self.next += 1;
+        }
+        Ok(LocatedValue {
+            span: range.start..end,
+            kind: LocatedKind::Scalar(scalar),
+        })
+    }
+}
+
 fn explicit_indicator_content(source: &str, indicator: char) -> Option<usize> {
     let rest = source.strip_prefix(indicator)?;
     if rest.is_empty() {
@@ -605,14 +679,30 @@ fn explicit_indicator_content(source: &str, indicator: char) -> Option<usize> {
     (spaces > 0).then_some(indicator.len_utf8() + spaces)
 }
 
-fn anchor_value_start(source: &str, range: &Range<usize>) -> Option<usize> {
-    let raw = &source[range.clone()];
-    let rest = raw.strip_prefix('&')?;
-    let name_len = rest
-        .bytes()
-        .take_while(|byte| !byte.is_ascii_whitespace())
-        .count();
-    (name_len > 0).then_some(range.start + 1 + name_len)
+/// Where the node properties opening `range` end: an anchor and, with `tags`
+/// set, a tag, in either order. `None` when the value has none.
+fn node_properties_end(source: &str, range: &Range<usize>, tags: bool) -> Option<usize> {
+    let mut end = None;
+    let mut pos = range.start;
+    let (mut tag, mut anchor) = (false, false);
+    loop {
+        let rest = &source[pos..range.end];
+        let token = rest
+            .bytes()
+            .take_while(|byte| !byte.is_ascii_whitespace())
+            .count();
+        match rest.as_bytes().first() {
+            Some(b'&') if !anchor && token > 1 => anchor = true,
+            Some(b'!') if tags && !tag => tag = true,
+            _ => return end,
+        }
+        end = Some(pos + token);
+        pos += token;
+        pos += source[pos..range.end]
+            .bytes()
+            .take_while(u8::is_ascii_whitespace)
+            .count();
+    }
 }
 
 fn located_mapping(pairs: Vec<LocatedPair>) -> Result<LocatedValue, SchemaError> {

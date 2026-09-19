@@ -81,7 +81,7 @@ pub use toc::{
     CodeBlockInfo, HeadingRecord, InternalLinkInfo, MarkdownToc, MarkdownTocNode,
     extract_headings, generate_heading_slug,
 };
-pub use types::{FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
+pub use types::{AuthoredSpan, FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
 #[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
@@ -258,6 +258,28 @@ impl Markdown {
                 frontmatter,
             ),
         }
+    }
+
+    /// A [`SourceContext`](biscuit_terminal::errors::SourceContext) over the
+    /// text this document was loaded from, for a file-backed document.
+    ///
+    /// Unlike [`Self::full_source_context_for_errors`], whose text is rebuilt
+    /// from the current (possibly already rewritten) body, this is the on-disk
+    /// frame: a line number into its `content` is a line of the file. `None`
+    /// when the source is not a local file or no loaded text was retained.
+    pub(crate) fn loaded_source_context_for_errors(
+        &self,
+    ) -> Option<biscuit_terminal::errors::SourceContext> {
+        let Some(ComposeSource::File(path)) = &self.source else {
+            return None;
+        };
+        let loaded = self.loaded.as_ref()?;
+        let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+        Some(biscuit_terminal::errors::SourceContext::new(
+            absolute,
+            path.clone(),
+            loaded.text.clone(),
+        ))
     }
 
     /// Number of source lines occupied by the frontmatter block, including

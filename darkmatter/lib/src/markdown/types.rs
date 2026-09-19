@@ -24,16 +24,33 @@ pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 
 /// Where an interpolation error's failing expression physically lives.
 ///
-/// `OnDisk` carries a real [`SourceContext`] for a frontmatter region that maps
-/// to a file, so the renderer can show a focused, line-numbered excerpt.
-/// `Effective` is the late-binding fallback — DM2 event-time resolution and body
-/// text have no stable on-disk locus to slice, so the resolved/expression text is
-/// carried instead. Modeling both keeps the excerpt renderer total: it never
-/// fabricates line numbers for a region that does not exist on disk.
+/// `OnDisk` carries a real [`SourceContext`] for a file, so the renderer can
+/// link it and, for a frontmatter key, show a focused excerpt. `OnDiskSpan`
+/// adds the expression's authored [`AuthoredSpan`]. `Effective` is the
+/// late-binding fallback — DM2 event-time resolution and in-memory text have
+/// no stable on-disk locus to slice, so the resolved/expression text is
+/// carried instead. Modeling these separately keeps the excerpt renderer
+/// total: it never fabricates a position for a region that does not exist on
+/// disk.
 #[derive(Debug, Clone)]
 pub enum SourceRef {
-    /// Compose-time: the error maps to a real frontmatter region in a file.
+    /// Compose-time: the error maps to a file, but the expression's authored
+    /// position could not be proven (for example, a rescan found it in a
+    /// replacement value).
     OnDisk(SourceContext),
+    /// Compose-time: an expression at a proven authored position in a file —
+    /// in the body, or inside a frontmatter value.
+    ///
+    /// `context.content` is the document text as loaded, not the partially
+    /// composed body, and `span` indexes that text (frontmatter included), so
+    /// an excerpt at `span` shows what is on disk. Never built for an
+    /// expression that a replacement value introduced.
+    OnDiskSpan {
+        /// The source file, with its loaded text as `content`.
+        context: SourceContext,
+        /// Where the `{{ … }}` sits in `context.content`.
+        span: AuthoredSpan,
+    },
     /// Late-binding or body text: no stable on-disk locus; carry the text.
     Effective {
         /// The resolved value or raw expression to display in lieu of a slice.
@@ -41,6 +58,51 @@ pub enum SourceRef {
         /// The frontmatter key the expression originated from, when known.
         origin_key: Option<String>,
     },
+}
+
+/// The authored position of a failing `{{ … }}` in a document's loaded text.
+///
+/// `range` covers the whole construct, braces included, exactly as authored:
+/// inside a quoted frontmatter value it spans the escaped source bytes, not
+/// the decoded string. `line` and `column` are one-based and describe
+/// `range.start`; the column counts characters, not bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredSpan {
+    range: Range<usize>,
+    line: usize,
+    column: usize,
+}
+
+impl AuthoredSpan {
+    /// Locates `range` in `text`, or `None` when it is empty, out of bounds, or
+    /// splits a character.
+    pub(crate) fn locate(text: &str, range: Range<usize>) -> Option<Self> {
+        if range.is_empty() || text.get(range.clone()).is_none() {
+            return None;
+        }
+        let before = &text[..range.start];
+        let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+        Some(Self {
+            line: before.matches('\n').count() + 1,
+            column: before[line_start..].chars().count() + 1,
+            range,
+        })
+    }
+
+    /// Byte range of the `{{ … }}` construct in the loaded document text.
+    pub fn range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+
+    /// One-based line of the construct's first byte.
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    /// One-based character column of the construct's first byte.
+    pub fn column(&self) -> usize {
+        self.column
+    }
 }
 
 /// Errors that can occur when working with Markdown documents.
@@ -108,7 +170,8 @@ pub enum MarkdownError {
     ///
     /// The typed evaluation `cause` is preserved verbatim; this wrapper adds only
     /// *scope* — which frontmatter key (`None` for body text), the expression
-    /// span, and where it lives ([`SourceRef`]). The rendered block derives its
+    /// text, and where it lives ([`SourceRef`], including its authored span
+    /// when one is provable). The rendered block derives its
     /// headline and hint from `cause`, never from the mechanism word
     /// "interpolation", so the author sees the root cause (e.g. an invalid file
     /// path) rather than the layer that surfaced it.
@@ -116,7 +179,7 @@ pub enum MarkdownError {
     Interpolation {
         /// The frontmatter key whose whole value failed, or `None` for body text.
         key: Option<String>,
-        /// The `{{ … }}` span text that failed.
+        /// The trimmed expression text inside the `{{ … }}` that failed.
         expression: String,
         /// Where the failing expression physically lives. Boxed to keep
         /// `MarkdownError` small (the `SourceContext` it can carry is large),
@@ -315,7 +378,7 @@ impl MarkdownError {
     /// keeps the late-binding presentation rather than linking a non-file.
     ///
     /// Errors that are not `Interpolation`, or whose `source` is already
-    /// `OnDisk`, pass through unchanged.
+    /// `OnDisk`/`OnDiskSpan`, pass through unchanged.
     pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
         match self {
             MarkdownError::Interpolation {
@@ -339,6 +402,29 @@ impl MarkdownError {
                     cause,
                 }
             }
+            other => other,
+        }
+    }
+
+    /// Anchors a [`MarkdownError::Interpolation`] to its proven authored `span`
+    /// in `context` ([`SourceRef::OnDiskSpan`]).
+    ///
+    /// Only a still-unanchored ([`SourceRef::Effective`]) interpolation error
+    /// changes; an already anchored error, and every other variant, pass
+    /// through unchanged.
+    pub(crate) fn with_authored_span(self, context: SourceContext, span: AuthoredSpan) -> Self {
+        match self {
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                source,
+                cause,
+            } if matches!(*source, SourceRef::Effective { .. }) => MarkdownError::Interpolation {
+                key,
+                expression,
+                source: Box::new(SourceRef::OnDiskSpan { context, span }),
+                cause,
+            },
             other => other,
         }
     }
