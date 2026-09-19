@@ -985,31 +985,25 @@ async fn transport_failure_is_fatal_on_all_three_surfaces() {
     assert_fatal_on_every_surface(&fixture, "pr(123)", &["500"], false).await;
 }
 
-/// A generic (non-provider) expression failure keeps its lenient body
-/// behavior: the provider fatality rule must not widen `ExpressionError::Other`.
+/// A generic (non-provider) expression failure is fatal in a document body
+/// too (dasherized-identifiers R2), with its own cause rather than a provider
+/// one.
 ///
-/// `min(1)` is an arity failure — it still downgrades to a warning with the
-/// unevaluated text left behind, proving the parity work classified provider
-/// failures distinctly rather than making every error fatal.
+/// The provider-versus-generic classification is still observable under the
+/// lenient helper policy, which `fatality_characterization` pins: `min(1)`
+/// warns there while a provider failure aborts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial(provider_transport)]
-async fn generic_expression_failures_still_warn_on_the_body_surface() {
+async fn generic_expression_failures_are_fatal_on_the_body_surface() {
     let fixture = Fixture::start().await;
 
-    let (composed, report) = fixture
+    let error = fixture
         .compose_reported("Outcome: {{ min(1) }}\n")
-        .expect("a generic arity failure stays a body-surface warning");
+        .expect_err("a generic arity failure fails the document body");
 
-    assert!(
-        composed.content().contains("{{ min(1) }}"),
-        "the lenient body behavior changed for a non-provider failure: {}",
-        composed.content()
-    );
-    assert!(
-        report.warnings.iter().any(|warning| warning.message.contains("min(1)")),
-        "the generic failure left no warning behind: {:?}",
-        report.warnings
-    );
+    let message = error.to_string();
+    assert!(message.contains("min"), "{message}");
+    assert!(!message.contains("provider"), "a generic failure is not a provider failure: {message}");
 }
 
 // ---------------------------------------------------------------------------

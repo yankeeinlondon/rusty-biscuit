@@ -362,11 +362,11 @@ mod schema_validation_integration {
 
     /// Different baseline schemas must not share cache entries for the same
     /// transcluded child. Compose the same parent+child under baseline A,
-    /// A again, then B against one cache root: no run reads or writes a
-    /// persisted composed child (R18, `fixes/2026-09-16-content-policy-no-cache`),
-    /// so baseline B can never reuse baseline A's output. Key sensitivity to
-    /// `baseline_schema` for the retained persistent path is covered by
-    /// `cache::hashing` `options_hash_sensitive_to_baseline_schema`.
+    /// A again, then B against one cache root: no run persists a composed child
+    /// (R18, `fixes/2026-09-16-content-policy-no-cache`), so the root is never
+    /// created and baseline B can never reuse baseline A's output. Run-local key
+    /// sensitivity to `baseline_schema` is covered by `cache::hashing`
+    /// `options_hash_sensitive_to_baseline_schema`.
     #[test]
     fn baseline_cache_does_not_reuse_across_distinct_baselines() {
         use crate::markdown::compose::CacheAccessMode;
@@ -425,13 +425,13 @@ mod schema_validation_integration {
         let (_, report1) = md1
             .compose_with(mk_options("alpha"))
             .expect("run 1 (baseline alpha, cold cache) should succeed");
-        let stats1 = report1
-            .cache_stats
-            .expect("expected cache stats with cache enabled");
-        assert_eq!(
-            (stats1.persistent_hits, stats1.persistent_writes),
-            (0, 0),
-            "run 1 must not touch the persistent store, got {stats1:?}"
+        assert!(
+            report1.cache_stats.is_some(),
+            "expected cache stats with cache enabled"
+        );
+        assert!(
+            !cache_root.exists(),
+            "run 1 must not write anything under the cache root"
         );
 
         // ── Run 2: same baseline A → still nothing persisted to reuse ──
@@ -439,13 +439,13 @@ mod schema_validation_integration {
         let (_, report2) = md2
             .compose_with(mk_options("alpha"))
             .expect("run 2 (baseline alpha, warm cache) should succeed");
-        let stats2 = report2
-            .cache_stats
-            .expect("expected cache stats with cache enabled");
-        assert_eq!(
-            (stats2.persistent_hits, stats2.persistent_writes),
-            (0, 0),
-            "run 2 must not replay or write a persisted child, got {stats2:?}",
+        assert!(
+            report2.cache_stats.is_some(),
+            "expected cache stats with cache enabled"
+        );
+        assert!(
+            !cache_root.exists(),
+            "run 2 must not write anything under the cache root"
         );
 
         // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
@@ -453,13 +453,13 @@ mod schema_validation_integration {
         let (_, report3) = md3
             .compose_with(mk_options("beta"))
             .expect("run 3 (baseline beta) should succeed");
-        let stats3 = report3
-            .cache_stats
-            .expect("expected cache stats with cache enabled");
-        assert_eq!(
-            (stats3.persistent_hits, stats3.persistent_writes),
-            (0, 0),
-            "run 3 must NOT reuse the baseline-A entry, got {stats3:?}",
+        assert!(
+            report3.cache_stats.is_some(),
+            "expected cache stats with cache enabled"
+        );
+        assert!(
+            !cache_root.exists(),
+            "run 3 must not write anything under the cache root"
         );
     }
 
@@ -471,7 +471,7 @@ mod schema_validation_integration {
     ///
     /// The anchor nevertheless remains part of `ComposeOptions` identity
     /// (`options_hash`). With no composed output persisted (R18), run 2 cannot
-    /// reuse run 1's entry either way.
+    /// reuse run 1's entry either way, and the cache root is never created.
     #[test]
     fn distinct_file_ref_fallback_dirs_do_not_share_a_cache_entry_and_never_resolve_via_fallback() {
         use crate::markdown::compose::CacheAccessMode;
@@ -512,13 +512,8 @@ mod schema_validation_integration {
             "the launch-area fallback must not resolve a document-authored reference: {}",
             composed1.content(),
         );
-        let stats1 = report1
-            .cache_stats
-            .expect("expected cache stats with cache enabled");
-        assert_eq!(
-            stats1.persistent_hits, 0,
-            "run 1 should have a cold persistent cache, got {stats1:?}"
-        );
+        assert!(report1.cache_stats.is_some(), "expected cache stats with cache enabled");
+        assert!(!cache_root.exists(), "run 1 must not write anything under the cache root");
 
         // ── Run 2: different launch area → distinct options_hash → must not
         // reuse run 1's entry. Same (false) resolution outcome. ────
@@ -531,14 +526,8 @@ mod schema_validation_integration {
             "the launch-area fallback is inert for resolution: {}",
             composed2.content(),
         );
-        let stats2 = report2
-            .cache_stats
-            .expect("expected cache stats with cache enabled");
-        assert_eq!(
-            stats2.persistent_hits, 0,
-            "run 2 must NOT reuse run 1's entry — options_hash still includes \
-             file_ref_fallback_dir. got {stats2:?}",
-        );
+        assert!(report2.cache_stats.is_some(), "expected cache stats with cache enabled");
+        assert!(!cache_root.exists(), "run 2 must not write anything under the cache root");
     }
 
     fn compose_from_launch(

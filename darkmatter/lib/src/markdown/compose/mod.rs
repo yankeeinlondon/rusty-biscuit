@@ -69,17 +69,20 @@
 //! - Large in-file test suites move to a sibling `tests` module when production
 //!   code around them changes.
 
+pub(crate) mod body_origin;
 pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
+pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 pub(crate) mod pipeline;
 mod schema_validation;
 pub mod subtree;
+mod unknown_identifiers;
 mod util;
 
 #[cfg(test)]
@@ -94,6 +97,7 @@ pub(crate) mod inline;
 pub mod interpolation;
 pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
+pub(crate) mod nested;
 pub mod page_blocks;
 pub mod preflight;
 pub(crate) mod remote_fetch;
@@ -105,10 +109,11 @@ pub mod toc_linking;
 pub mod transclusion;
 
 pub use biscuit_file::PathPosition;
-pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+pub use cache::{CacheAccessMode, CacheStats};
 pub use context::{
     ContextAuthority, ContextCaptureEvidence, ContextExtension, ContextGroup,
-    ContextMergeDiagnostic, ContextRequirements,
+    ContextMergeDiagnostic, ContextRequirements, CurrentAuthority, CurrentProvider, CurrentRefresh,
+    DeferredCapabilities,
 };
 pub use file_links::FileLinksError;
 pub use remote::{
@@ -121,6 +126,7 @@ pub use frontmatter_shell_expansion::{
     FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
     FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
 };
+pub use icmp::PlannedIcmpProbe;
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;

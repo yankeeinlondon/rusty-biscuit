@@ -1095,8 +1095,9 @@ fn test_interpolation_chained_fallback() {
 }
 
 #[test]
-fn test_interpolation_parse_error_preserves_original() {
-    // Malformed expression should be left as-is (not fail_fast)
+fn test_interpolation_parse_error_is_fatal_without_fail_fast() {
+    // A malformed body expression fails the document; `fail_fast` does not
+    // demote it to a warning beside the verbatim span.
     let content = "---\nname: Alice\n---\nHello {{ @invalid }}!";
     let md: Markdown = content.into();
 
@@ -1104,11 +1105,8 @@ fn test_interpolation_parse_error_preserves_original() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
-    let (composed, report) = md.compose_with(options).unwrap();
-
-    // Invalid expression left unchanged
-    assert_eq!(composed.content(), "Hello {{ @invalid }}!");
-    assert_eq!(report.interpolations_applied, 0);
+    let err = md.compose_with(options).unwrap_err();
+    assert!(matches!(err, MarkdownError::Interpolation { .. }), "{err:?}");
 }
 
 #[test]
@@ -1125,8 +1123,8 @@ fn test_interpolation_parse_error_fail_fast_returns_error() {
 }
 
 #[test]
-fn test_interpolation_bare_pipe_produces_parse_error() {
-    // Bare `|` in interpolation should produce a clear lexer error
+fn test_interpolation_bare_pipe_is_fatal_without_fail_fast() {
+    // Bare `|` in interpolation is a lexer error, fatal whatever `fail_fast` says
     let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
     let md: Markdown = content.into();
 
@@ -1134,11 +1132,8 @@ fn test_interpolation_bare_pipe_produces_parse_error() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
-    let (composed, report) = md.compose_with(options).unwrap();
-
-    // Invalid expression left unchanged
-    assert_eq!(composed.content(), "Hello {{ name | \"default\" }}!");
-    assert_eq!(report.interpolations_applied, 0);
+    let err = md.compose_with(options).unwrap_err();
+    assert!(matches!(err, MarkdownError::Interpolation { .. }), "{err:?}");
 }
 
 #[test]
