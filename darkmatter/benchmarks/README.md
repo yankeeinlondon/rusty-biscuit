@@ -1,9 +1,14 @@
 # Benchmark Evidence Home (Architecture Decision A)
 
-This directory is the feature-local evidence home for the performance
-follow-up. It separates **immutable fixture identity** (this directory's
-`manifest.yaml` + `fixtures/`) from **per-run measurement facts** (`raw/`), so a
-fixture can never silently change under a checkpoint's baseline.
+This directory is the area-owned evidence home for the performance
+follow-up (`features/_completed/2026-07-15-performance-followup/`). It moved
+here from that feature's `benchmarks/` directory on 2026-09-17 because live
+tests and benches (`lib/tests/benchmark_fixtures.rs`, `lib/src/perf_harness.rs`,
+`lib/benches/*`, `cli/tests/compose_transclusion.rs`) read these fixtures, and a
+feature-lifecycle move must never invalidate a live dependency. It separates
+**immutable fixture identity** (this directory's `manifest.yaml` + `fixtures/`)
+from **per-run measurement facts** (`raw/`), so a fixture can never silently
+change under a checkpoint's baseline.
 
 ```
 benchmarks/
@@ -89,7 +94,7 @@ Criterion runner only; CLI and PTY evidence must not be forced through it.
    interactive OSC-request and repeated-construction latency evidence. Not
    routed through `just bench`.
 
-Each runner writes a dated run record linked from `../results.md` and consumes
+Each runner writes a dated run record linked from `../features/_completed/2026-07-15-performance-followup/results.md` and consumes
 this shared manifest wherever it uses file fixtures.
 
 ## Run-record contract (`raw/<checkpoint>/<run-id>/`)
@@ -184,5 +189,5 @@ baseline). Where that is impossible (the baseline is a whole private function),
 drift, and record the host load average per run. A delta smaller than the
 measured bracket drift is not a result.
 
-`../results.md` links each disposition to its run record. Interactive (PTY) and
+`../features/_completed/2026-07-15-performance-followup/results.md` links each disposition to its run record. Interactive (PTY) and
 piped (redirected CLI) measurements are reported separately.

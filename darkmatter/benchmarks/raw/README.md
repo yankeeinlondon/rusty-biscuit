@@ -13,7 +13,7 @@ raw/<checkpoint>/<run-id>/
 Each run record documents baseline/candidate commits, exact commands, release
 profile, host facts, environment, TTY mode, warm-up, sample count,
 statistic/dispersion, predeclared thresholds (declared before the baseline is
-captured), and retained raw result files. `../../results.md` links each
+captured), and retained raw result files. `../../features/_completed/2026-07-15-performance-followup/results.md` links each
 disposition to its run record. See `../README.md` for the full contract.
 
 `<run-id>` is `run-<UTC timestamp>`. Interactive (PTY) and piped (redirected
