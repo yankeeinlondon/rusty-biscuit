@@ -591,7 +591,7 @@ fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str
         &accept.path("prompts/_implement/implement-plan.md"),
         &format!("{target}{target_suffix}"),
     );
-    for snippet in ["_no_formatting.md", "_os.md"] {
+    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md"] {
         write(
             &accept.path(&format!("prompts/{snippet}")),
             &fs::read_to_string(repository.join("prompts").join(snippet)).unwrap(),

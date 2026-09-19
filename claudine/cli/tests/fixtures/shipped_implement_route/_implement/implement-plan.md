@@ -7,6 +7,7 @@ $schema:
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
+    is_last: boolean -> a boolean flag based on 
 description: |-
     Provide either a `plan` or `spec` filepath as a parameter and this
     prompt will detect the number of phases in the plan and then implement
@@ -127,10 +128,12 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
+::block when="is_last"
 Now we need to update the specification file's frontmatter ({{spec}}):
 
 - set `implemented` to `true`
 - set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
+::end-block
 
 ::block when="file_exists(log) && (!markdown_body_empty(log) || !is_empty(frontmatter(log)))"
 - the log file already has content from earlier work; keep it and append to it
@@ -182,6 +185,9 @@ You are done when:
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
     - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
+
+### Plan and Log Frontmatter
+
 - You must set the following Frontmatter properties to both the plan file ({{plan}}) and the implementation log ({{log}}):
     - `source_files_during_phase_{{phase}}` should be set to all source code files which were created or updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
@@ -190,20 +196,46 @@ You are done when:
     ::block when="phase == total_phases"
         - set `source_code` Frontmatter to every source code file that was updated or created during the various phases of the plan
         - set `documentation` Frontmatter to every documentation file that was updated or created during the various phases of the plan
-        - set `completed_phase` to "{{phase}}"
+        - set `completed_phase` to `{{phase}}`
         - set `implemented` to `true`
     ::end-block
     ::block when="ctx.is_monorepo"
     - set `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
+        ::block when="phase > 1"
+        - this is _not_ the first phase so be sure to _add_ the packages which were touched in this phase
+        - the end goal when the plan is _fully_ implemented is to have this property represent the packages touched throughout all phases of the implementation
+        ::end-block
     ::end-block
-- If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement before proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
+
+::block when="spec"
+### Spec Frontmatter
+
+The following Frontmatter properties must be set on the spec file ({{spec}}):
+
+::block when="!frontmatter(spec, '$schema')"
+::file ../_set_spec_schema.md 
+::end-block
+- If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
     - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
-    - when `human_review` is set to `true` you must also set `human_review_items` as a list of things which the human is expected to weigh in on and why this decision is critical to be made before the next phase is implemented
+    - when `human_review` is set to `true` you must also set `human_review_items`:
+        - a list of things which the human is expected to weigh in on
+        - each item should use the YAML `|-` operator so that the text description is more easily read by a human
+        - don't use jargon and don't assume the human knows this repo or the details of this plan
+        - each list item should describe:
+            - why this decision is critical to be made _before_ the next phase is implemented
+            - bullet point out various options/solutions to choose from
+            - each option/solution should have a clear description and relative pros and cons
+            - you must recommend one of these options and explain why you're recommending it
+        - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
+::block when="_loop_is_last"
+- set the `implemented` frontmatter to `true`
+::end-block
+::end-block
 
 **IMPORTANT:** 
 
-::block when="ctx.area"
+::block when="ctx.area && has_skill(ctx.area)"
 - use the '{{area}}' skill during the implementation
 ::block when="phase == total_phases"
 - do NOT move the spec directory into the `_completed` folder when the final phase is complete (that is done as a separate step which you are not responsible for)
