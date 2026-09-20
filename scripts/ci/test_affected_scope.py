@@ -3813,6 +3813,30 @@ class ToolingPathOwnershipTests(unittest.TestCase):
         for path in (".github/ci/ci-baseline.toml", ".github/ci/environments.json"):
             self.assert_selects(path, ["repo-deps"])
 
+    def test_a_cross_language_schema_document_selects_both_readers(self) -> None:
+        # Both documents exist so a Rust reader can assert against the Python
+        # contract without running Python; a change that ran only the Python
+        # suite would leave the agreement they encode unverified on the side
+        # that consumes them.
+        for path in (
+            ".github/ci/schemas/contract.json",
+            ".github/ci/schemas/archive_guard_cases.json",
+        ):
+            self.assert_selects(path, ["repo-deps", "test-toolkit"])
+
+    def test_schemas_documentation_selects_repo_deps_alone(self) -> None:
+        # The two cross-language documents are named one by one rather than by
+        # a `schemas/` prefix. This is the other half of that rule: the
+        # directory's own README is not an input the Rust suite reads, so it
+        # keeps the `.github/ci/` selection every other policy document gets.
+        self.assert_selects(".github/ci/schemas/README.md", ["repo-deps"])
+
+    def test_an_unrelated_future_schema_selects_repo_deps_alone(self) -> None:
+        # Pins the boundary against widening: a schema added later is owned by
+        # the planner alone until someone makes a Rust reader read it and adds
+        # it to the explicit path table.
+        self.assert_selects(".github/ci/schemas/unrelated-future-schema.json", ["repo-deps"])
+
     def test_a_workflow_change_selects_test_toolkit_alone(self) -> None:
         # R13: global-path escalation no longer selects any package, so
         # `ci.yml` is NOT a full-workspace trigger. It selects the package that

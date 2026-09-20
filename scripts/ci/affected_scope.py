@@ -295,6 +295,16 @@ SUITE_OWNER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tools/test-audit/", ("test-toolkit",)),
 )
 SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
+    # Cross-language by construction: `test_schema.py` and
+    # `tools/test-toolkit/tests/ci_workflow_contracts.rs` read the same bytes,
+    # which is the only reason these two documents are shipped at all. A change
+    # that selected the Python half alone would let the two readers disagree
+    # unobserved. Named one by one, not by a `schemas/` prefix: that directory
+    # also holds documentation and is where an unrelated future schema would
+    # land, and neither is an input the Rust suite reads. Those keep the
+    # `.github/ci/` prefix's `repo-deps` selection.
+    ".github/ci/schemas/archive_guard_cases.json": ("repo-deps", "test-toolkit"),
+    ".github/ci/schemas/contract.json": ("repo-deps", "test-toolkit"),
     "pnpm-lock.yaml": ("test-toolkit",),
     "pnpm-workspace.yaml": ("test-toolkit",),
     "scripts/Cargo.toml": ("repo-deps",),
