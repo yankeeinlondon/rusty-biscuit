@@ -13,7 +13,7 @@ related_specs:
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/_completed/2026-05-23-compose-schema/spec.md`](../../features/_completed/2026-05-23-compose-schema/spec.md).
+This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/_completed/2026-05-23-compose-schema/spec.md`](../../../features/_completed/2026-05-23-compose-schema/spec.md).
 
 ## What You Get
 
@@ -507,7 +507,7 @@ String-typed properties, remote URLs, absent/`null` optionals, and values still
 holding `$(...)` or unresolved `{{ ... }}` are not materialized. Markdown
 presentation uses the portable sidecar while expressions and lifecycle state retain
 the native identity.
-See [Schema Validation — Eager-`file` value normalization](../inline/schema-validation.md#eager-file-value-normalization)
+See [Schema Validation — Eager-`file` value normalization](../../inline/schema-validation.md#eager-file-value-normalization)
 for the full contract.
 
 Caller-originated eager-file overrides retain a resolved absolute native path in
@@ -1015,7 +1015,7 @@ frontmatter schema as its baseline unless told otherwise. Use
 `--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose
 behavior with no default baseline, or `--baseline-schema <path>` to replace the
 default with a custom SimplifiedSchema YAML baseline. See
-[`docs/schemas/darkmatter-schema.md`](../schemas/darkmatter-schema.md) for the
+[`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md) for the
 base schema contract.
 
 ### JSON Schema Baseline Restrictions
@@ -1573,15 +1573,15 @@ unless the same baseline is supplied explicitly.
 
 ## See Also
 
-- [Schemas specification](../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
-- [Compose schema specification](../../features/_completed/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
-- [Inline object spec](../../features/_completed/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
-- [Schema-plus spec](../../features/_completed/2026-07-08-schema-plus/spec.md) — composition primitives: `example(...)`, `Name@file` imports, pattern keys, `min-keys` / `max-keys`, `yaml` / `json`.
-- [Suggest-constraint spec](../../features/_completed/2026-07-09-suggest-constraint/spec.md) — the `suggest(...)` advisory-completion constraint.
-- [Literal / expression spec](../../features/2026-07-12-literal-expression/spec.md) — the `literal(value)` and `expression` types and the DMLS unlocks they enable.
-- [`json-schema-primitives.md`](./json-schema-primitives.md) — JSON Schema primitives reused under the hood.
-- [`magic-paths.md`](./magic-paths.md) — `FileReference` resolution rules.
-- [`frontmatter-recursion.md`](./frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.
+- [Schemas specification](../../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
+- [Compose schema specification](../../../features/_completed/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
+- [Inline object spec](../../../features/_completed/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
+- [Schema-plus spec](../../../features/_completed/2026-07-08-schema-plus/spec.md) — composition primitives: `example(...)`, `Name@file` imports, pattern keys, `min-keys` / `max-keys`, `yaml` / `json`.
+- [Suggest-constraint spec](../../../features/_completed/2026-07-09-suggest-constraint/spec.md) — the `suggest(...)` advisory-completion constraint.
+- [Literal / expression spec](../../../features/_completed/2026-07-12-literal-expression/spec.md) — the `literal(value)` and `expression` types and the DMLS unlocks they enable.
+- [`json-schema-primitives.md`](../json-schema-primitives.md) — JSON Schema primitives reused under the hood.
+- [`magic-paths.md`](../magic-paths.md) — `FileReference` resolution rules.
+- [`frontmatter-recursion.md`](../frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.
 
 ## Implementation-Bound Reference
 
