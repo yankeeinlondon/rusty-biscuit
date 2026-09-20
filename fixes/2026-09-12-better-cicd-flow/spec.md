@@ -116,6 +116,11 @@ An area containing only reused cells or accepted gaps needs no test runner.
 Its results remain visible in the scope summary and reporting artifacts without
 creating an otherwise empty execution workflow.
 
+Within an executing test cell, the shared OS-aware worker budget is the
+default: use all logical cores on GitHub runners with four or fewer. A narrower
+limit must be tied to a measured shared-resource constraint, not applied to an
+entire package merely because individual tests spawn child processes.
+
 ### 3. Every producer is truthful and self-validating
 
 A failed test, lint, compile, setup, staging, or required upload step fails its
@@ -255,6 +260,8 @@ identities or outcomes.
    execution, failure, missing evidence, and accepted-gap cases.
 10. The compact CI schema, planner, evidence, workflow-contract, runner-loss,
     rollup, and actionlint checks pass.
+11. Executing L1 cells inherit the OS-aware worker budget unless a documented,
+    resource-specific exception requires a narrower limit.
 
 ## Open Questions
 

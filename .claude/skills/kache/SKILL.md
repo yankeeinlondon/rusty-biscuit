@@ -17,7 +17,9 @@ Before recommending adoption, removal, or a storage-mode override:
    cross-worktree, or edit-compile loops.
 4. Judge value by compile-cost-weighted hit rate, time saved, disk consumed, and workflow fit.
    `doctor` proves wiring and integrity, not usefulness.
-5. Make the recommendation for the measured host. Do not generalize an NTFS result to APFS,
+5. Separate hits, misses, passthroughs, and duplicates. A duplicate avoids storing another physical
+   blob only after compilation; it is not a cache hit and saves no compiler work.
+6. Make the recommendation for the measured host. Do not generalize an NTFS result to APFS,
    btrfs, XFS-reflink, ReFS, or even Linux ext4.
 
 Read [platforms.md](platforms.md) for restore semantics and
@@ -110,6 +112,7 @@ Details and the reasoning in [when-not-to-use.md](when-not-to-use.md).
 - [Installation, per OS](installation.md) — mise, brew, apt, AUR, winget, scoop, choco, cargo
 - [Platform & filesystem variance](platforms.md) — reflink vs hardlink, per-OS paths and daemons
 - [Configuration best practices](configuration.md) — store sizing, gc policy, keying speed
+- [Release-specific behavior](versions.md) — observed defaults, diagnostics, and defects by version
 - [Remote object storage](remote-cache.md) — S3/MinIO/Ceph/R2, warm vs sync, CI
 - [When not to use kache](when-not-to-use.md) — honest limits and the incremental tradeoff
 - [Online resources](resources.md) — where to look when this skill is not enough
@@ -120,6 +123,13 @@ Details and the reasoning in [when-not-to-use.md](when-not-to-use.md).
   faults (daemon unreachable, stale locks, wrapper not wired, store paths). `stats` is what reveals
   whether kache is actually *earning its keep* — a green doctor with a 13% hit rate is a failing
   cache. Judge by hit rate, weighted-by-compile-cost, and time saved, not by health checks.
+- **Treat key proliferation as a distinct failure mode.** Many recent, zero-hit entries for one
+  crate usually mean compiler, profile, feature-unification, generated-input, or dependency-graph
+  churn. More store capacity cannot make incompatible keys reusable.
+- **Verify the effective Cargo home before believing a missing-wrapper diagnosis.** `HOME` and
+  `CARGO_HOME` select the Cargo config that declares `rustc-wrapper`; agent sandboxes and tools can
+  shadow either one. Compare the effective paths with the intended host paths before repairing or
+  reinitializing kache.
 - **Measure disk context.** Compare store size, representative target size, configured cap, and
   volume free space. Reject a cap that exceeds realistic headroom even when hit rates are good.
 - **Never assume the restore mode.** Reflink support depends on the filesystem *as mounted*, not
