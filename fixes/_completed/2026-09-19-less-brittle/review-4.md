@@ -8,10 +8,13 @@ human_review: false
 reviewed_by: codex/gpt-5.6-sol
 created: "2026-09-20T09:51:54-07:00"
 spec: 2026-09-19-less-brittle/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: fixes/2026-09-19-less-brittle/implementation-log.md
 description: "A **fix** review of `2026-09-19-less-brittle/spec.md`"
 fix: 2026-09-19-less-brittle/review-4.md
 previous: 2026-09-19-less-brittle/review-3.md
+next: 2026-09-19-less-brittle/review-5.md
 ---
 
 # Review 4

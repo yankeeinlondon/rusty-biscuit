@@ -5,6 +5,8 @@ deferred_perf_measurement: false
 implementation_1: "2026-09-20T00:09:56-07:00"
 implementation_2: "2026-09-20T04:56:08-07:00"
 implementation_3: "2026-09-20T09:32:13-07:00"
+implementation_4: "2026-09-20T11:06:02-07:00"
+implementation_5: "2026-09-20T11:53:00-07:00"
 ---
 
 # Implementation Log — `2026-09-19-less-brittle`
@@ -1578,3 +1580,251 @@ The files changed in this iteration:
           individually and never looks at the object's key set; a non-object
           `archive_guard` falls through `Value::get` and is reported as a missing
           `reason`, which names the wrong defect
+- the mechanism chosen for the cross-language table, and why
+        - a new hand-authored fixture, `.github/ci/schemas/archive_guard_cases.json`,
+          read by `scripts/ci/test_schema.py::ArchiveGuardSharedCorpusTests` through
+          `validate_resolved_plan` and by
+          `ci_workflow_contracts.rs::the_guards_reader_agrees_with_the_shared_scope_corpus`
+          through `GuardPlan::from_plan_json`
+        - `contract.json` was considered first and rejected for the corpus: it is
+          *generated* by `python3 scripts/ci/schema.py` and asserted byte-stable, so a
+          hand-written accept/reject table there would have to be authored inside the
+          validator module it is meant to test
+        - `contract.json` **is** used for the other half: `PLAN_SCOPE_FIELDS` is asserted
+          against `resolved_plan.archive_guard`'s key set by
+          `the_guard_scope_field_set_matches_the_frozen_contract`, beside the existing
+          `the_plan_schema_version_matches_the_frozen_contract`. So the field *names* ride
+          the generated contract and the *behavior* rides the written corpus
+        - the corpus needs no Python subprocess on the Rust side — it is a JSON document,
+          not an invocation — so it adds no new `python_interpreter()` skip and no new
+          Windows App-Execution-Alias exposure
+        - the table was proved to be a real synchronization point rather than a passive
+          fixture: with the new key check disabled, the Rust half fails on the
+          `unknown-field` case with `the reader accepted GuardPlan { ... }`
+- what changed in the reader
+        - the key-set check runs after the schema version and before any scope is
+          interpreted, matching `_archive_guard`'s `_keys`-then-interpret order
+        - a non-object `archive_guard` is now its own diagnostic; previously it fell
+          through `Value::get` and was reported as a missing `reason`, which named the
+          wrong defect. Python already answered `must be an object` here
+        - unknown keys are sorted before they are named, so the message is deterministic
+          regardless of any serde_json map ordering
+- `PLAN_SCHEMA_VERSION` was **not** bumped, and should not be: the closed key set is
+  unchanged, no plan field was added or removed, and every shipped plan fixture still
+  validates on both sides. The Rust reader is only being brought up to a contract the
+  Python validator already enforced
+- one CI-scope decision was needed for the table to be genuinely two-sided
+        - `.github/ci/schemas/**` previously selected `repo-deps` alone, so a
+          corpus-only edit would have run the Python half in CI and not the Rust half —
+          exactly the silent divergence this finding is about
+        - added `(".github/ci/schemas/", ("repo-deps", "test-toolkit"))` ahead of the
+          broader `.github/ci/` entry in `SUITE_OWNER_PREFIXES`, which is the mechanism
+          already in place for `.github/workflows/**` selecting `test-toolkit`, and whose
+          comment already contemplates a path naming two owners
+        - the gap was pre-existing for `contract.json` too; the new entry closes both
+- work completed for 'unknown guard fields' at 11:25:02-0700
+        - files changed
+                - `tools/test-toolkit/src/archive_guard.rs` — the public
+                  `PLAN_SCOPE_FIELDS` constant, the `backticked` diagnostic helper, the
+                  non-object and unknown-key checks in `from_plan_json` ahead of any
+                  scope interpretation, the updated `## Errors` doc enumerating both new
+                  rules, and three wording fixtures
+                  (`a_plan_carrying_an_unknown_guard_field_is_an_error`,
+                  `unknown_guard_fields_are_named_in_a_stable_order`,
+                  `a_guard_scope_that_is_not_an_object_is_an_error`)
+                - `tools/test-toolkit/tests/ci_workflow_contracts.rs` — the two new
+                  cross-language tests, `the_guard_scope_field_set_matches_the_frozen_contract`
+                  and `the_guards_reader_agrees_with_the_shared_scope_corpus`
+                - `.github/ci/schemas/archive_guard_cases.json` — new; the shared
+                  accept/reject corpus, 26 cases (4 valid, 22 invalid)
+                - `scripts/ci/test_schema.py` — `ArchiveGuardSharedCorpusTests`, the
+                  Python half of the corpus; no existing guard test was removed
+                - `scripts/ci/affected_scope.py` — the narrower
+                  `.github/ci/schemas/` entry in `SUITE_OWNER_PREFIXES`
+                - `scripts/ci/test_affected_scope.py` —
+                  `test_a_cross_language_schema_document_selects_both_readers`
+                - `.github/ci/schemas/README.md` — the corpus documented beside
+                  `contract.json`, and the guard bullet now names the closed field set
+                  among what the Rust reader re-enforces
+                - `.github/ci/README.md` — the suite-owner table's new `schemas/` row
+        - verification, all green on macOS 27.0.0
+                - `just test test-toolkit` — 312 tests run, 312 passed, 2 skipped
+                - `just test repo-deps` — 420 tests run, 420 passed (19 slow), 1 skipped
+                - the CI Python suites `just ci-local` runs, plus the two evidence
+                  suites: `test_schema.py` 134 OK, `test_affected_scope.py` 296 OK,
+                  `test_resolved_plan.py` 81 OK, `test_ci_local.py` 95 OK,
+                  `test_constraints.py` 39 OK, `test_publish_gaps.py` 19 OK,
+                  `test_runner_loss.py` 44 OK, `test_build_key.py` 12 OK,
+                  `test_evidence_reuse.py` 76 OK, `test_local_evidence.py` 20 OK
+                - `cd tools/test-toolkit && just archive-path-guard` — 2 tests run,
+                  2 passed, 0 skipped; full-tree scan of 3475 files
+                - `just _lint test-toolkit` — clean, zero warnings
+                - `just test-githooks` — 67 passed, 0 failed; all five
+                  `.githooks/tests/fixtures/plan-*.json` re-validated against
+                  `validate_resolved_plan` and carry only known guard fields
+                - `actionlint` not run: no `.github/workflows/*.yml` file was touched
+        - OS risk judged low. The change is JSON key-set validation over an in-memory
+          `serde_json::Value`; it spawns no process, touches no path spelling, and the
+          new Rust test reads a repository file through the existing `read()` helper,
+          which already normalizes CRLF for Windows checkouts. The corpus's
+          `windows-spelled-path`, `absolute-path`, and `drive-prefixed-path` cases are
+          data, not filesystem access, and assert identically on every host
+
+### Orchestrator verification
+
+- the orchestrator re-ran the finding's verification independently rather than
+  accepting the subagent's report at face value
+        - `just test test-toolkit` — **312 tests run, 312 passed, 2 skipped**
+          (review 4 measured 307; the five new tests are the shared-corpus reader,
+          the frozen-contract field-set check, and three diagnostic-wording fixtures)
+        - `just test repo-deps` — **420 tests run, 420 passed (14 slow), 1 skipped**
+        - `cd tools/test-toolkit && just archive-path-guard` — **2 passed, 0 skipped**
+        - `just _lint test-toolkit` — zero warnings
+        - `just test-githooks` — **67 passed, 0 failed**
+- the shared corpus was **mutation-tested** to prove it is a synchronization point
+  rather than a passive fixture that would pass whatever either side did
+        - the reader's closed-set filter was temporarily neutered to accept every key
+        - `the_guards_reader_agrees_with_the_shared_scope_corpus` then failed on the
+          `unknown-field` case with `the reader accepted GuardPlan { ... }`, naming the
+          rule the case exists to hold
+        - the filter was restored and the three contract tests re-confirmed green
+        - this is the property review 4 asked for: a future shape addition made in one
+          language fails the other language's suite instead of drifting silently
+- six commits (`306cd71aa`..`5efb9a417`, authored 11:09 by Ken Snyder) landed on the
+  branch while this iteration ran; they carry the iteration 1–3 work. This iteration's
+  changes sit uncommitted on top of them and were verified against that tree
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 22 minutes. During
+this implementation all 1 review findings were evaluated to see if they could be fixed
+as a part of this implementation cycle: 1 were fixed, 0 were deferred.
+
+No finding was deferred. The single medium-priority finding was fully implemented,
+including the cross-language table-driven fixture the review recommended rather than
+the two manually synchronized test lists it warned against.
+
+The files changed in this iteration:
+
+- guard implementation
+        - `tools/test-toolkit/src/archive_guard.rs` — `PLAN_SCOPE_FIELDS`, the closed
+          key-set check in `GuardPlan::from_plan_json` placed after the schema-version
+          check and before scope interpretation (Python's `_keys`-then-interpret
+          order), a distinct diagnostic for a non-object `archive_guard`, and the
+          `## Errors` doc pass both rules required
+- cross-language contract
+        - `.github/ci/schemas/archive_guard_cases.json` *(new)* — 26 `archive_guard`
+          cases (4 valid, 22 invalid), each carrying the scope fragment, the verdict,
+          and the rule it exercises; read by both languages
+- tests
+        - `tools/test-toolkit/tests/ci_workflow_contracts.rs` — the shared-corpus
+          reader, `the_guard_scope_field_set_matches_the_frozen_contract`, and the
+          Rust half of the agreement assertion
+        - `scripts/ci/test_schema.py` — `ArchiveGuardSharedCorpusTests`, the Python
+          half, reading the same corpus file
+        - `scripts/ci/test_affected_scope.py` — coverage for the new schema-directory
+          selection rule
+- selection
+        - `scripts/ci/affected_scope.py` — `.github/ci/schemas/` now selects both
+          `repo-deps` and `test-toolkit`, so a corpus-only edit cannot run one half of
+          the contract in CI and not the other; this is the same two-owner mechanism
+          `.github/workflows/**` already uses, and it closed a pre-existing gap for
+          `contract.json` as well
+- documentation
+        - `.github/ci/schemas/README.md` — the corpus document and its role
+        - `.github/ci/README.md` — the schema-directory selection rule
+
+`PLAN_SCHEMA_VERSION` was deliberately **not** bumped: the closed key set is unchanged
+and no plan field moved. The Rust reader is catching up to a contract the Python
+validator already enforced, which is a consumer fix, not a schema generation.
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-09-20T11:53:00-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-unifi/fixes/2026-09-19-less-brittle/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- review metadata
+        - reviewer: `codex/gpt-5.6-sol`
+        - findings: 1, at `medium` priority
+        - spec under review: `2026-09-19-less-brittle/spec.md`
+        - review 4's single finding is recorded as implemented; no blocked finding
+          needed reevaluation in this iteration
+- package areas in scope
+        - `scripts/ci` (`repo-deps`) — the canonical planner `affected_scope.py` and
+          its selection tests
+        - `.github/ci` — the selection-rule documentation that must match the planner
+
+### Finding 1 — The schema-directory ownership rule schedules unrelated files
+
+- starting the work on 'schema-directory ownership' at 11:54:00-0700
+        - confirmed the report: `SUITE_OWNER_PREFIXES` carried
+          `(".github/ci/schemas/", ("repo-deps", "test-toolkit"))`, so the directory's
+          own `README.md` and any schema added later selected `test-toolkit`, whose
+          Rust suite reads neither
+        - moved the two genuine cross-language documents —
+          `.github/ci/schemas/contract.json` and
+          `.github/ci/schemas/archive_guard_cases.json` — into `SUITE_OWNER_PATHS`
+          with owners `("repo-deps", "test-toolkit")`, and removed the prefix entry.
+          `suite_owner_paths()` consults the exact-path table first, so the two
+          documents keep both owners while everything else under `.github/ci/schemas/`
+          falls through to the surviving `.github/ci/` prefix and selects `repo-deps`
+          alone
+        - rewrote the comment that justified the prefix: the WHY (both readers consume
+          the same bytes) now sits on the path entries, together with the reason the
+          set is named one by one rather than taken as a directory
+        - verified rather than assumed the claim at `affected_scope.py:382` that
+          `_package-ci.yml` and `_area-ci.yml` "already select `test-toolkit` through
+          `SUITE_OWNER_PREFIXES`": the `.github/workflows/` prefix is untouched, so the
+          statement still holds and needed no edit
+        - `tools/test-toolkit/tests/ci_workflow_contracts.rs::tooling_inputs_select_their_registered_suite_owner`
+          parses the `SUITE_OWNER_PREFIXES` literal for the three remaining prefixes;
+          the block's delimiters are unchanged, so it still reads and passes
+        - tests: kept `test_a_cross_language_schema_document_selects_both_readers` and
+          added two negative fixtures pinning the boundary —
+          `test_schemas_documentation_selects_repo_deps_alone` for
+          `.github/ci/schemas/README.md`, and
+          `test_an_unrelated_future_schema_selects_repo_deps_alone` for
+          `.github/ci/schemas/unrelated-future-schema.json`; both assert `["repo-deps"]`
+        - documentation drift fixed in the same change: the selection table in
+          `.github/ci/README.md` now names the two documents instead of
+          `.github/ci/schemas/**`, and the paragraph beneath it states that the rest of
+          the directory keeps `repo-deps` only; `.claude/skills/rust-devops/ci-cd.md`
+          gained the same two-path exception, which its owner list had not recorded at
+          all. `.github/ci/schemas/README.md` makes no directory-wide selection claim,
+          so it needed no edit
+        - verification: `python3 scripts/ci/test_affected_scope.py` **298 passed**
+          (296 before the two new fixtures); `python3 scripts/ci/test_schema.py`
+          **134 passed**; `just test test-toolkit` **312 run, 312 passed, 2 skipped**;
+          `just test repo-deps` **420 run, 420 passed (25 slow), 1 skipped** on a warm
+          tree in a single run — no archive-fixture timeout occurred, so no rerun was
+          needed; `just _lint repo-deps` and `just _lint test-toolkit` both clean;
+          `git diff --check` clean
+- work completed for 'schema-directory ownership' at 11:56:08-0700
+
+### Successful Completion
+
+The implementation of review cycle 5 has completed successfully in 5 minutes
+(2026-09-20T11:53:00-07:00 to 2026-09-20T11:58:00-07:00). During this
+implementation all 1 review findings were evaluated to see if they could be
+fixed as a part of this implementation cycle: 1 was fixed, 0 were deferred.
+
+The files changed in this cycle were:
+
+- `scripts/ci/affected_scope.py` — the `.github/ci/schemas/` entry removed from
+  `SUITE_OWNER_PREFIXES`; `contract.json` and `archive_guard_cases.json` added
+  to `SUITE_OWNER_PATHS` with owners `("repo-deps", "test-toolkit")`
+- `scripts/ci/test_affected_scope.py` — two negative fixtures added pinning the
+  boundary, with the existing positive case retained
+- `.github/ci/README.md` — the selection table and its explanatory paragraph
+- `.claude/skills/rust-devops/ci-cd.md` — the owner list's two-path exception
+- `fixes/2026-09-19-less-brittle/implementation-log.md` — this log
+
+No performance measurement was required by this review, so
+`deferred_perf_measurement` remains `false`.
+
+Cross-OS risk was considered and judged absent: the change replaces a prefix
+comparison with exact-key lookups in the same already-normalized,
+repository-relative, forward-slash path space produced by `normalized_path`,
+so no new platform-dependent path behavior enters the planner. No
+`just cross-check` run was warranted.

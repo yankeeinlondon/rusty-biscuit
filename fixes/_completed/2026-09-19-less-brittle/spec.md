@@ -30,7 +30,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-19
-review_iterations: 4
+review_iterations: 6
+completed: true
 ---
 
 # Schedule the archive-path guard reliably without rejecting safe fallbacks
