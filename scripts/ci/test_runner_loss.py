@@ -22,6 +22,7 @@ from runner_loss import (
     synthesize_build_status,
     synthesize_status,
 )
+from pending_contracts import pending
 from workflow_reading import job_blocks
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
@@ -702,6 +703,100 @@ class BuildOwnerAttributionTests(unittest.TestCase):
         ci = (WORKFLOWS / "ci.yml").read_text()
         self.assertIn("build: ${{ fromJSON(needs.scope.outputs.build_producers) }}", ci)
         self.assertIn("PRODUCER: ${{ matrix.build }}", ci)
+
+
+class DirectExecutionAttributionOracleTests(unittest.TestCase):
+    """Pending contracts for the row-driven labels (Phase 5 implements).
+
+    Ruling R1 keeps `runner` in the row, so a row-expanding matrix job renders
+    a FOUR-token gate segment — `test (homelab-server, L1, ubuntu-latest,
+    ubuntu-latest)` — built from every value in the row, ordered `package,
+    gate, environment, runner`. The parser must accept both that form and the
+    three-token `test (ubuntu-latest)` form the workflows carry today, so a
+    later reversal of R1 is a label-format change, never a silent attribution
+    loss.
+    """
+
+    ROW_LABEL_ORACLE = "the row-driven job label is not implemented"
+
+    @pending(
+        "attribution",
+        "parse_job_name reads the parenthetical as one environment token, so "
+        "a four-token row label resolves to no cell; Phase 5's row-driven "
+        "matrices emit it and Phase 5 teaches the parser to read it",
+        oracle="the row-driven job label is not implemented",
+    )
+    def test_a_four_token_native_row_label_resolves_to_exactly_one_cell(self):
+        cell = parse_job_name(
+            "area-ci (homelab) / homelab-server / test "
+            "(homelab-server, L1, ubuntu-latest, ubuntu-latest)"
+        )
+        self.assertIsNotNone(
+            cell,
+            "the four-token row label must parse; the row-driven job label is "
+            "not implemented until Phase 5 emits it",
+        )
+        self.assertEqual(
+            {"package": "homelab-server", "job": "L1", "environment": "ubuntu-latest"},
+            cell,
+            "the row's keys are package, gate, environment, runner (R1's "
+            "order); the cell drops only the duplicated runner token",
+        )
+        self.assertEqual(
+            "status-homelab-server-L1-ubuntu-latest",
+            status_directory(cell),
+            "the row label resolves to the one status the dead producer owes",
+        )
+
+    @pending(
+        "attribution",
+        "parse_job_name reads the parenthetical as one environment token, so "
+        "a four-token WSL2 row label resolves to no cell",
+        oracle="the row-driven job label is not implemented",
+    )
+    def test_a_four_token_wsl2_row_label_resolves_to_exactly_one_cell(self):
+        cell = parse_job_name(
+            "area-ci (playa) / playa-cli / wsl2 / test "
+            "(playa-cli, L1, wsl2-ubuntu, windows-latest)"
+        )
+        self.assertIsNotNone(
+            cell,
+            "the four-token WSL2 row label must parse; the row-driven job label "
+            "is not implemented until Phase 5 emits it",
+        )
+        self.assertEqual(
+            {"package": "playa-cli", "job": "L1", "environment": "wsl2-ubuntu"},
+            cell,
+            "wsl2-ubuntu is an execution environment hosted by a Windows "
+            "runner; the environment token is the row's third, never the "
+            "runner's fourth",
+        )
+        self.assertEqual(
+            "status-playa-cli-L1-wsl2-ubuntu",
+            status_directory(cell),
+        )
+
+    @pending(
+        "attribution",
+        "the shipped workflows declare no row-set inputs, so no row-driven "
+        "label can be derived from them",
+        oracle="the row-driven job label is not implemented",
+    )
+    def test_the_shipped_workflows_declare_the_row_set_inputs(self):
+        source = (WORKFLOWS / "_package-ci.yml").read_text(encoding="utf-8")
+        declared = [
+            name
+            for name in ("test-rows", "check-rows", "lint-rows", "wsl-rows")
+            if f"{name}:" in source
+        ]
+        self.assertEqual(
+            ["check-rows", "lint-rows", "test-rows", "wsl-rows"],
+            sorted(declared),
+            "the execution workflow must declare the four row-set inputs the "
+            "area call passes; the row-driven job label is not implemented "
+            "until they exist, and JobNameCorpusTests derives its labels from "
+            "them",
+        )
 
 
 if __name__ == "__main__":

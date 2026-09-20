@@ -20,6 +20,7 @@ import affected_scope
 import companion_suites
 import schema
 from tool_guard import require_tools
+from pending_contracts import pending
 from affected_scope import (
     EXCLUSION_CLASSES,
     calculate_scope,
@@ -3520,6 +3521,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_affected_scope.py": "repo-deps",
         "test_build_key.py": "repo-deps",
         "test_ci_local.py": "repo-deps",
+        "test_completion.py": "repo-deps",
         "test_constraints.py": "repo-deps",
         "test_cross_check.py": "repo-deps",
         "test_evidence_reuse.py": "repo-deps",
@@ -5333,6 +5335,287 @@ class ArchiveInventoryClosureTests(unittest.TestCase):
             any(record["companion_suites"] for record in self.plan["packages"]),
             "no package declares a companion suite",
         )
+
+
+#: The Phase 1 plan corpus this feature's oracles compare against
+#: (`spikes/plans/README.md` records how each file was produced).
+CORPUS_PLANS = (
+    ROOT
+    / "features"
+    / "2026-09-19-direct-cell-execution"
+    / "spikes"
+    / "plans"
+)
+
+#: Oracle for every fixture that reaches for the area-local row adapter.
+ROW_ADAPTER_ORACLE = "the plan carries no row adapter"
+
+
+def row_sets_of(plan: dict) -> dict:
+    """The plan's row sets, refusing the pre-adapter world by name.
+
+    Shape-tolerant in the style of `test_resolved_plan.py`'s readers: the
+    message is the pending oracle, so "not implemented" stays distinguishable
+    from "fixture broken".
+    """
+    adapter = getattr(affected_scope, "row_sets", None)
+    if adapter is None:
+        raise AssertionError(
+            f"{ROW_ADAPTER_ORACLE}: `affected_scope.row_sets` is not defined, "
+            "so a workflow cannot be driven from the plan's cells and must "
+            "keep reading environment lists"
+        )
+    return adapter(plan)
+
+
+class DirectExecutionOracleTests(ApplyFixture):
+    """Pending contracts for what the row adapter may and may not change.
+
+    Phase 3 of `features/2026-09-19-direct-cell-execution` adds the adapter
+    BESIDE today's projection. These oracles pin its two boundaries: it reads
+    nothing but the plan (a carried scope receipt has no checkout), and it
+    changes no selection output — check and lint selection, the dependent
+    seam, event deferral, and build-owner derivation stay byte-identical for
+    the corpus. Plus the R7 capacity guard: over-budget row sets fail planning
+    with a named error, never a truncation.
+    """
+
+    def forbidden_read(*args: object, **kwargs: object) -> None:
+        raise RuntimeError(
+            "row_sets performed file I/O; the resolved plan is its only input "
+            "and a carried scope receipt has no checkout to read"
+        )
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so a carried-receipt plan "
+        "cannot be shown to schedule without a checkout",
+        oracle=ROW_ADAPTER_ORACLE,
+    )
+    def test_the_row_adapter_reads_nothing_but_the_plan(self) -> None:
+        import pathlib
+
+        # Planned before the I/O ban: the planner legitimately reads the
+        # workspace. What follows is the carried-receipt apply path — the
+        # operation CI performs on a matching scope receipt — and the adapter,
+        # neither of which may touch the checkout.
+        planned = self.plan()
+        rows = None
+        with unittest.mock.patch("builtins.open", self.forbidden_read), \
+             unittest.mock.patch.object(
+                 pathlib.Path, "read_text", self.forbidden_read
+             ), unittest.mock.patch.object(
+                 pathlib.Path, "read_bytes", self.forbidden_read
+             ):
+            applied = apply_accepted_cells(planned, self.accepted[:1], [])
+            rows = row_sets_of(applied)
+        self.assertTrue(rows, "the adapter answered with an empty document")
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so its agreement with the "
+        "legacy projection cannot be shown",
+        oracle=ROW_ADAPTER_ORACLE,
+    )
+    def test_selection_outputs_are_unchanged_when_rows_land(self) -> None:
+        plan = self.plan()
+        rows = row_sets_of(plan)
+        document = legacy_scope_document(plan)
+        record = next(
+            entry
+            for entry in document["matrix"]
+            if entry["package"] == "alpha-core"
+        )
+        executing = {
+            (cell["environment"], cell["gate"])
+            for cell in plan["cells"]
+            if cell["package"] == "alpha-core" and cell["execution"] == "execute"
+        }
+        # The projection and the rows describe ONE plan: every environment
+        # list the workflow receives today is the same executing-cell set the
+        # rows dispatch, so the adapter is a second rendering rather than a
+        # second selection.
+        self.assertEqual(
+            sorted(
+                environment
+                for environment, gate in executing
+                if gate == "L1" and environment != "wsl2-ubuntu"
+            ),
+            record["native_environments"],
+        )
+        self.assertEqual(
+            sorted(
+                environment
+                for environment, gate in executing
+                if gate == "check"
+            ),
+            record["check_os"],
+        )
+        self.assertEqual(
+            sorted(
+                environment
+                for environment, gate in executing
+                if gate == "L2"
+            ),
+            record["l2_environments"],
+        )
+        dispatched = {
+            (row["package"], row["environment"], row["gate"])
+            for area in rows.values()
+            for name in ("test", "check", "lint", "wsl")
+            for row in area[name]
+        }
+        self.assertEqual(
+            sorted(executing),
+            sorted(
+                (environment, gate)
+                for _package, environment, gate in dispatched
+                if _package == "alpha-core"
+            ),
+        )
+        # The dependent seam is untouched by row emission: the check cell —
+        # not the row — is what compiles the unchanged dependents.
+        seam = next(
+            entry
+            for entry in plan["packages"]
+            if entry["package"] == "alpha-core"
+        ).get("dependent_seam")
+        self.assertIsNone(seam, "this workspace has no seam; the fixture below has")
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so the real-workspace PR "
+        "shape cannot be compared against the Phase 1 corpus",
+        oracle=ROW_ADAPTER_ORACLE,
+    )
+    def test_the_real_pr_shape_selects_what_the_phase_1_corpus_recorded(self) -> None:
+        if not (CORPUS_PLANS / "pr.json").is_file():
+            self.skipTest("the Phase 1 plan corpus is not present")
+        corpus = json.loads((CORPUS_PLANS / "pr.json").read_text(encoding="utf-8"))
+        metadata = load_metadata(ROOT)
+        packages = workspace_packages(metadata)
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        policy = package_ci_policy(
+            packages,
+            runner_labels={environment["runner"] for environment in environments},
+            root=ROOT,
+            today=TODAY,
+        )
+        plan = calculate_scope(
+            ["biscuit-hash/lib/src/lib.rs"],
+            ROOT,
+            metadata,
+            environments,
+            policy,
+        )
+        rows = row_sets_of(plan)
+        self.assertTrue(rows)
+
+        def cells_of(document: dict) -> list[tuple]:
+            return [
+                (
+                    cell["package"],
+                    cell["environment"],
+                    cell["gate"],
+                    cell["execution"],
+                    cell["state"],
+                )
+                for cell in document["cells"]
+            ]
+
+        # Selection is byte-identical to the corpus the Phase 1 baseline
+        # froze: same cells, same packages, same deferred environments. The
+        # volatile facets (head, build keys, job estimate) are deliberately
+        # not compared.
+        self.assertEqual(cells_of(corpus), cells_of(plan))
+        self.assertEqual(
+            [entry["package"] for entry in corpus["packages"]],
+            [entry["package"] for entry in plan["packages"]],
+        )
+        self.assertEqual(
+            sorted(entry["name"] for entry in corpus["deferred_environments"]),
+            sorted(entry["name"] for entry in plan["deferred_environments"]),
+        )
+
+    @pending(
+        "capacity-guard",
+        "no output budget guard exists: an over-limit row set cannot fail "
+        "planning because nothing computes one",
+        oracle="no output budget guard",
+    )
+    def test_an_over_limit_row_set_fails_planning_with_a_named_error(self) -> None:
+        guard = getattr(affected_scope, "enforce_output_budgets", None)
+        if guard is None:
+            raise AssertionError(
+                "no output budget guard: `enforce_output_budgets` is not "
+                "defined, so the planner cannot refuse before dispatch"
+            )
+        row = {
+            "package": "pkg",
+            "gate": "L1",
+            "environment": "ubuntu-latest",
+            "runner": "ubuntu-latest",
+        }
+        rows = {
+            "huge": {
+                "test": [
+                    {**row, "package": f"pkg-{index}"}
+                    for index in range(MATRIX_LIMIT + 1)
+                ],
+                "check": [],
+                "lint": [],
+                "wsl": [],
+            }
+        }
+        with self.assertRaises(RuntimeError) as raised:
+            guard(rows)
+        self.assertIn(
+            str(MATRIX_LIMIT),
+            str(raised.exception),
+            "the refusal names the ceiling it enforced",
+        )
+        # Never a truncation: the input document is refused whole, so the
+        # caller's copy still carries every row it tried to schedule.
+        self.assertEqual(MATRIX_LIMIT + 1, len(rows["huge"]["test"]))
+
+    @pending(
+        "capacity-guard",
+        "no output budget guard exists: a serialized payload cannot exceed a "
+        "budget nobody declared",
+        oracle="no output budget guard",
+    )
+    def test_an_oversized_area_payload_fails_planning_with_a_named_error(self) -> None:
+        guard = getattr(affected_scope, "enforce_output_budgets", None)
+        budget = getattr(affected_scope, "AREA_ROW_SET_BUDGET", None)
+        if guard is None or not isinstance(budget, int) or budget <= 0:
+            raise AssertionError(
+                "no output budget guard: `enforce_output_budgets` and the "
+                "declared `AREA_ROW_SET_BUDGET` byte budget are not defined"
+            )
+        # One row whose dispatch identity alone serializes past the budget:
+        # the guard must refuse it rather than trim a payload it cannot carry.
+        oversized = "a" * (budget + 1024)
+        rows = {
+            "huge": {
+                "test": [
+                    {
+                        "package": oversized,
+                        "gate": "L1",
+                        "environment": "ubuntu-latest",
+                        "runner": "ubuntu-latest",
+                    }
+                ],
+                "check": [],
+                "lint": [],
+                "wsl": [],
+            }
+        }
+        self.assertGreater(
+            len(schema.canonical(rows["huge"])), budget, "the fixture must exceed"
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            guard(rows)
+        self.assertIn("budget", str(raised.exception).lower())
 
 
 if __name__ == "__main__":

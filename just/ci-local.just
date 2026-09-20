@@ -476,7 +476,7 @@ ci-local *args="":
     # fell back to a second digest would still emit a plan, and every
     # downstream comparison against a producer's manifest would stop meaning
     # anything. It is ~0.1s wherever `scripts/target` already holds `ci-build`.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else

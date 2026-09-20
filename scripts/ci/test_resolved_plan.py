@@ -25,6 +25,7 @@ import affected_scope  # noqa: E402
 import build_key  # noqa: E402
 import schema  # noqa: E402
 from tool_guard import require_tools  # noqa: E402
+from pending_contracts import pending  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
@@ -1540,6 +1541,282 @@ class ChangeInventoryEndToEndTests(PlannerFixture):
             ["Cargo.lock"], plan["change_inventory"]["paths"]["configuration"]
         )
         self.assertEqual([], plan["change_inventory"]["paths"]["documentation"])
+
+
+class RowAdapterOracleTests(PlannerFixture):
+    """Pending contracts for the area-local row adapter (Phase 3 implements).
+
+    The adapter the direct-cell-execution feature adds is a pure function
+    `affected_scope.row_sets(plan) -> {area: {test: [...], check: [...],
+    lint: [...], wsl: [...], has_test_rows: bool, has_check_rows: bool,
+    has_lint_rows: bool, has_wsl_rows: bool}}`, derived only from the final
+    resolved plan. A row is `{package, gate, environment, runner}` in exactly
+    that key order (ruling R1) and nothing else. An executing cell's row goes
+    to `wsl` when its environment is `wsl2-ubuntu`, to `check` or `lint` by its
+    gate, and to `test` otherwise (native L1/L2/browser). Every fixture below
+    fails today because no such function exists; each recorded reason is the
+    oracle Phase 3 implements.
+    """
+
+    ROW_ORACLE = "the plan carries no row adapter"
+    ROW_SETS = ("test", "check", "lint", "wsl")
+    ROW_KEYS = ["package", "gate", "environment", "runner"]
+
+    def row_sets(self, plan: dict) -> dict:
+        adapter = getattr(affected_scope, "row_sets", None)
+        if adapter is None:
+            raise AssertionError(
+                f"{self.ROW_ORACLE}: `affected_scope.row_sets` is not defined, "
+                "so no matrix row can be derived from the plan's cells and "
+                "the workflows must keep reading environment lists"
+            )
+        rows = adapter(plan)
+        self.assertIsInstance(rows, dict)
+        return rows
+
+    def row_key(self, row: dict) -> tuple[str, str, str]:
+        return (row["package"], row["environment"], row["gate"])
+
+    def expected_set(self, cell: dict) -> str:
+        if cell["environment"] == "wsl2-ubuntu":
+            return "wsl"
+        if cell["gate"] in ("check", "lint"):
+            return cell["gate"]
+        return "test"
+
+    def corpus(self) -> dict[str, dict]:
+        """The Phase 1 corpus shapes (spikes/plans/README.md), planned live.
+
+        Produced by the real planner on the real workspace rather than loaded
+        from the frozen files, so the oracles stay meaningful after the schema
+        moves to version 5 and the frozen files become the previous
+        generation.
+        """
+        everything = self.plan(force_all=True)
+        executing = [
+            cell for cell in everything["cells"] if cell["execution"] == "execute"
+        ]
+
+        def accepted(cells: list[dict]) -> list[dict]:
+            return [
+                {
+                    "package": cell["package"],
+                    "environment": cell["environment"],
+                    "gate": cell["gate"],
+                    "origin": "local",
+                    "outcome": "pass",
+                    "evidence": {
+                        "ref": f"refs/notes/ci-local/{cell['environment']}"
+                    },
+                }
+                for cell in cells
+            ]
+
+        return {
+            "pr": self.plan("biscuit-hash/lib/src/lib.rs"),
+            "all": everything,
+            "all-reused": self.plan(
+                force_all=True, accepted_cells=accepted(executing)
+            ),
+            "mixed": self.plan(
+                force_all=True,
+                accepted_cells=accepted(
+                    cell
+                    for cell in executing
+                    if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
+                ),
+            ),
+            "nightly": self.plan(force_all=True, event="schedule"),
+            "prohibited": self.plan(
+                force_all=True,
+                prohibitions={
+                    "wsl2-ubuntu": {
+                        "owner": "ken",
+                        "reason": "spike: prohibit the WSL2 leg to shape the corpus",
+                        "expiry": "2027-12-31",
+                        "source": "current.json",
+                    }
+                },
+            ),
+        }
+
+    def assert_partitions_executing_cells(self, plan: dict) -> None:
+        rows = self.row_sets(plan)
+        environments = {
+            entry["name"]: entry for entry in plan["environments"]
+        }
+        packages = {entry["package"]: entry for entry in plan["packages"]}
+        executing = {
+            (cell["package"], cell["environment"], cell["gate"]): cell
+            for cell in plan["cells"]
+            if cell["execution"] == "execute"
+        }
+
+        self.assertEqual(
+            sorted({entry["area"] for entry in plan["areas"]}),
+            sorted(rows),
+            "every selected area appears in the row document, executing or not",
+        )
+        observed: dict[tuple[str, str, str], str] = {}
+        for area, document in sorted(rows.items()):
+            for name in self.ROW_SETS:
+                self.assertIn(name, document, f"area {area} lacks its {name} row set")
+                flag = document.get(f"has_{name}_rows")
+                self.assertIsInstance(
+                    flag,
+                    bool,
+                    f"area {area} lacks its scalar has_{name}_rows guard",
+                )
+                self.assertEqual(
+                    bool(document[name]),
+                    flag,
+                    f"area {area} has_{name}_rows is true exactly when the "
+                    f"{name} row set is nonempty",
+                )
+                for row in document[name]:
+                    self.assertEqual(
+                        self.ROW_KEYS,
+                        list(row),
+                        f"a row carries exactly the dispatch keys, in R1's "
+                        f"order: {row}",
+                    )
+                    key = self.row_key(row)
+                    self.assertNotIn(
+                        key,
+                        observed,
+                        f"row key {key} appears in both {observed.get(key)} and "
+                        f"{area}/{name}; one executing cell is exactly one row",
+                    )
+                    observed[key] = f"{area}/{name}"
+                    self.assertIn(
+                        key,
+                        executing,
+                        f"{area}/{name} carries a row no executing cell backs: "
+                        f"{row}",
+                    )
+                    self.assertEqual(
+                        area,
+                        packages[row["package"]]["area"],
+                        "a row is dispatched inside its package's area",
+                    )
+                    self.assertEqual(
+                        environments[row["environment"]]["runner"],
+                        row["runner"],
+                        "the runner comes from the plan's environment table",
+                    )
+                    self.assertEqual(
+                        name,
+                        self.expected_set(executing[key]),
+                        f"{key} landed in {name} but belongs in "
+                        f"{self.expected_set(executing[key])}",
+                    )
+
+        self.assertEqual(
+            sorted(executing),
+            sorted(observed),
+            "the four row sets partition the plan's executing cells exactly",
+        )
+        # Reused, accepted-gap, prohibited, and deferred work produces no row:
+        # everything not executing is absent, not merely outnumbered.
+        for cell in plan["cells"]:
+            if cell["execution"] != "execute":
+                self.assertNotIn(
+                    (cell["package"], cell["environment"], cell["gate"]),
+                    observed,
+                    f"a {cell['execution']}/{cell['state']} cell created a row",
+                )
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so the four row sets cannot "
+        "be derived and the partition cannot even be evaluated",
+        oracle="the plan carries no row adapter",
+    )
+    def test_the_four_row_sets_partition_the_executing_cells_for_each_corpus_shape(
+        self,
+    ) -> None:
+        # Not `subTest`: its failures are recorded by the harness rather than
+        # raised, so the pending wrapper could not see them. Every failing
+        # shape is named in one raised assertion instead.
+        problems = []
+        for name, plan in self.corpus().items():
+            try:
+                self.assert_partitions_executing_cells(plan)
+            except AssertionError as failure:
+                problems.append(f"{name}: {failure}")
+        if problems:
+            raise AssertionError("\n".join(problems))
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so the WSL2/native split "
+        "cannot be evaluated",
+        oracle="the plan carries no row adapter",
+    )
+    def test_a_wsl2_row_never_appears_in_the_native_test_set(self) -> None:
+        for name, plan in self.corpus().items():
+            rows = self.row_sets(plan)
+            for area, document in rows.items():
+                for row in document["test"]:
+                    self.assertNotEqual(
+                        "wsl2-ubuntu",
+                        row["environment"],
+                        f"{area}'s native test set carries the WSL2 row {row}; "
+                        "the guest is dispatched through the wsl set alone",
+                    )
+                for row in document["wsl"]:
+                    self.assertEqual(
+                        "wsl2-ubuntu",
+                        row["environment"],
+                        f"{area}'s wsl set carries the native row {row}",
+                    )
+
+    @pending(
+        "row-adapter",
+        "affected_scope defines no row adapter, so a zero-execution area "
+        "cannot be shown to keep its scheduling identity",
+        oracle="the plan carries no row adapter",
+    )
+    def test_an_area_with_zero_executing_cells_still_appears(self) -> None:
+        # The gap-only shape from the Phase 1 corpus: derived, as
+        # `spikes/plans/README.md` records, by keeping only the accepted-gap
+        # cells, the areas and packages that own them, and no builds. No real
+        # plan is gap-only today (lint never reuses), so the shape is
+        # synthesized on purpose: it is the all-reused-or-gap area whose audit,
+        # slice, and publisher must survive with no execution call at all.
+        everything = self.plan(force_all=True)
+        gap_cells = [
+            cell for cell in everything["cells"] if cell["state"] == "accepted-gap"
+        ]
+        gap_packages = sorted({cell["package"] for cell in gap_cells})
+        document = {
+            **everything,
+            "cells": gap_cells,
+            "packages": [
+                entry
+                for entry in everything["packages"]
+                if entry["package"] in gap_packages
+            ],
+            "builds": [],
+            "job_estimate": 0,
+        }
+        self.assertEqual(
+            [],
+            schema.validate_resolved_plan(document),
+            "the gap-only trim must stay a valid plan, or the fixture is "
+            "testing a document the planner would never write",
+        )
+        self.assertTrue(gap_cells, "the full-workspace plan carries no gap cells")
+
+        rows = self.row_sets(document)
+        scheduled = legacy_scope_document(document)["scheduled_areas"]
+        for area in scheduled:
+            self.assertIn(area, rows, "a gap-only area keeps its row document")
+            for name in self.ROW_SETS:
+                self.assertEqual(
+                    [], rows[area][name], f"a gap-only area schedules no {name} rows"
+                )
+                self.assertIs(False, rows[area][f"has_{name}_rows"])
 
 
 if __name__ == "__main__":

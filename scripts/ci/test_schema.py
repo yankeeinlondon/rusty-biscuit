@@ -1483,6 +1483,304 @@ class ReusableCellsTests(unittest.TestCase):
         self.assertTrue(rejected)
 
 
+# ---------------------------------------------------------------------------
+# Direct cell execution (features/2026-09-19-direct-cell-execution), Phase 2.
+#
+# Every fixture below is a pending oracle: it asserts the version-5 plan
+# contract Phase 3 of that feature implements, and today it fails for the
+# recorded reason. The shapes are pinned here so Phase 3 implements exactly
+# this vocabulary:
+#
+# - plan-level `skip_policy` (REQUIRED): the snapshot of
+#   `.github/ci/ci-baseline.toml` with `{source, content_hash, entries}` and
+#   per-entry `{package, environment, gate, owner, reason, source_run}` plus
+#   optional `backend` and `expiry`;
+# - area-level `execution_path` (REQUIRED): "rows" or "lists" (ruling R9);
+# - cell-level `profile` (optional in the table, required by consistency on
+#   exactly an executing L1/L2/browser cell) and `requires_node` (optional
+#   boolean, absent reads as false);
+# - new rejection codes `skip-policy-cell`, `skip-policy-expired`, and
+#   `skip-policy-provenance`, joining REJECTIONS;
+# - `validate_resolved_plan(document, today=None)`: the optional date is what
+#   turns an expired approval into a planner-time coded error (ruling R8).
+# ---------------------------------------------------------------------------
+
+
+def skip_policy(**overrides: object) -> dict:
+    """A well-formed snapshot of an empty baseline file.
+
+    The shipped `ci-baseline.toml` is empty, so the honest snapshot carries no
+    entries; the fixture adds one through `entries=` where a case needs it.
+    """
+    document: dict = {
+        "source": ".github/ci/ci-baseline.toml",
+        "content_hash": "0123456789abcdef",
+        "entries": [],
+    }
+    entries = overrides.pop("entries", None)
+    if entries is not None:
+        document["entries"] = entries
+    document.update(overrides)
+    return document
+
+
+def skip_entry(**overrides: object) -> dict:
+    record: dict = {
+        "package": "claudine",
+        "environment": "ubuntu-latest",
+        "gate": "L1",
+        "owner": "@ken",
+        "reason": "flaky under load; tracked in the baseline file",
+        "source_run": "12345678901",
+    }
+    record.update(overrides)
+    return record
+
+
+class DirectExecutionSchemaOracleTests(unittest.TestCase):
+    """Pending contracts for the version-5 resolved plan (Phase 3 implements)."""
+
+    def v5_plan(self, **overrides: object) -> dict:
+        """A complete version-5 document: today's shape plus the new fields."""
+        document = plan(
+            skip_policy=skip_policy(
+                entries=[skip_entry(backend="tmux", expiry="2027-06-30")]
+            ),
+        )
+        document["schema_version"] = 5
+        for entry in document["areas"]:
+            entry["execution_path"] = "rows"
+        for entry in document["cells"]:
+            if entry["execution"] == "execute" and entry["gate"] in schema.BUILD_GATES:
+                entry["profile"] = "ci"
+        document.update(overrides)
+        return document
+
+    @pending(
+        "schema-v5",
+        "the resolved plan schema is still version 4; Phase 3 bumps it to 5 "
+        "with the skip-policy snapshot beside the cells",
+        oracle="version-5 plan schema",
+    )
+    def test_version_5_is_the_plans_schema_and_the_receipts_do_not_move(self):
+        self.assertEqual(
+            5,
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "the direct-cell-execution fields force a version-5 plan: a "
+            "version-5 plan schema is required once rows and the skip policy "
+            "travel in the document",
+        )
+        self.assertEqual([], schema.validate_resolved_plan(self.v5_plan(), today="2026-09-20"))
+        # The version-5 plan schema moves alone: validation receipts stay
+        # reusable under their existing cell and gate-input checks, and the
+        # scope receipt keeps missing through its plan_schema_version check.
+        self.assertEqual(2, schema.RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.LEGACY_RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.SCOPE_RECEIPT_SCHEMA_VERSION)
+        shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(5, shipped["resolved_plan"]["schema_version"])
+
+    @pending(
+        "schema-v5",
+        "a version-4 document is still this tool's current generation, so it "
+        "validates; Phase 3 makes it miss as unknown-schema-version",
+        oracle="version-5 plan schema",
+    )
+    def test_a_version_4_plan_is_refused_by_version_before_field_set(self):
+        self.assertEqual(
+            5,
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "a version-4 refusal only exists once the tool writes a version-5 "
+            "plan schema",
+        )
+        stale = self.v5_plan()
+        stale["schema_version"] = 4
+        # A stale document also differs in shape; the version complaint must
+        # still be the only one, or a reader is sent after a corrupt document
+        # when the answer is that this tool moved on.
+        del stale["skip_policy"]
+        problems = schema.validate_resolved_plan(stale)
+        self.assertEqual(
+            [
+                "unknown-schema-version: resolved plan is version 4, this tool "
+                "writes 5"
+            ],
+            problems,
+        )
+
+    @pending(
+        "schema-v5",
+        "the skip-policy snapshot and the per-cell execution fields are not "
+        "part of the plan vocabulary yet",
+        oracle="skip_policy",
+    )
+    def test_the_new_execution_fields_are_required_where_the_spec_requires_them(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "skip_policy is a REQUIRED plan field: an optional snapshot would "
+            "let a plan silently lack the exact-skip policy (skip_policy is "
+            "the version-5 field this contract waits for)",
+        )
+        self.assertIs(True, schema.RESOLVED_PLAN_FIELDS["skip_policy"])
+        self.assertIn("execution_path", schema.AREA_FIELDS)
+        self.assertIs(True, schema.AREA_FIELDS["execution_path"])
+        # Optional in the table, required by consistency exactly where the
+        # specification assigns them.
+        self.assertIs(False, schema.CELL_FIELDS.get("profile"))
+        self.assertIs(False, schema.CELL_FIELDS.get("requires_node"))
+
+        missing_policy = self.v5_plan()
+        del missing_policy["skip_policy"]
+        self.assertIn(
+            "malformed-receipt: resolved plan is missing required field 'skip_policy'",
+            schema.validate_resolved_plan(missing_policy, today="2026-09-20"),
+        )
+        missing_path = self.v5_plan()
+        for entry in missing_path["areas"]:
+            entry.pop("execution_path")
+        self.assertTrue(
+            any(
+                "execution_path" in problem
+                for problem in schema.validate_resolved_plan(
+                    missing_path, today="2026-09-20"
+                )
+            ),
+            "an area record without its execution path must be refused by name",
+        )
+
+    @pending(
+        "schema-v5",
+        "no skip-policy validation exists: an entry naming an unknown cell "
+        "passes unnoticed because the plan carries no skip_policy at all",
+        oracle="skip-policy-cell",
+    )
+    def test_an_entry_naming_a_cell_the_plan_does_not_carry_is_rejected(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-cell rejection this fixture waits for cannot exist "
+            "while the plan carries no skip_policy",
+        )
+        document = self.v5_plan(
+            skip_policy=skip_policy(
+                entries=[
+                    skip_entry(),
+                    skip_entry(package="claudine", environment="macos-latest", gate="lint"),
+                ]
+            ),
+        )
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any(problem.startswith("skip-policy-cell:") for problem in problems),
+            f"an approval for a cell the plan does not carry is a coded "
+            f"rejection, not a silent pass: {problems}",
+        )
+
+    @pending(
+        "schema-v5",
+        "no skip-policy validation exists: an expired entry passes unnoticed",
+        oracle="skip-policy-expired",
+    )
+    def test_an_expired_entry_is_rejected_with_a_coded_reason(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-expired rejection this fixture waits for cannot "
+            "exist while the plan carries no skip_policy",
+        )
+        document = self.v5_plan(
+            skip_policy=skip_policy(entries=[skip_entry(expiry="2026-01-01")]),
+        )
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any(problem.startswith("skip-policy-expired:") for problem in problems),
+            f"an expired approval is a planner-time error (ruling R8): {problems}",
+        )
+        # An unexpired entry on the same shape stays valid, so the rule is the
+        # expiry and not the presence of the field.
+        fresh = self.v5_plan(
+            skip_policy=skip_policy(entries=[skip_entry(expiry="2027-06-30")]),
+        )
+        self.assertEqual([], schema.validate_resolved_plan(fresh, today="2026-09-20"))
+
+    @pending(
+        "schema-v5",
+        "no skip-policy validation exists: malformed provenance passes "
+        "unnoticed",
+        oracle="skip-policy-provenance",
+    )
+    def test_malformed_provenance_is_rejected_with_a_coded_reason(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-provenance rejection this fixture waits for cannot "
+            "exist while the plan carries no skip_policy",
+        )
+        no_hash = skip_policy()
+        del no_hash["content_hash"]
+        for broken in (
+            skip_policy(content_hash="not-hex!"),
+            skip_policy(source=""),
+            no_hash,
+        ):
+            with self.subTest(policy=broken):
+                document = self.v5_plan(skip_policy=broken)
+                problems = schema.validate_resolved_plan(document, today="2026-09-20")
+                self.assertTrue(
+                    any(
+                        problem.startswith("skip-policy-provenance:")
+                        for problem in problems
+                    ),
+                    f"provenance names the file and its content hash; a "
+                    f"snapshot that cannot say what it read excuses nothing: "
+                    f"{problems}",
+                )
+
+    @pending(
+        "schema-v5",
+        "the per-cell execution inputs are not validated: a test cell without "
+        "its canonical profile passes unnoticed",
+        oracle="profile",
+    )
+    def test_a_profile_belongs_to_exactly_an_executing_test_cell(self):
+        self.assertIn("profile", schema.CELL_FIELDS)
+        document = self.v5_plan()
+        executing_l1 = next(
+            entry
+            for entry in document["cells"]
+            if entry["gate"] == "L1" and entry["execution"] == "execute"
+        )
+        del executing_l1["profile"]
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any("profile" in problem for problem in problems),
+            f"an executing test cell without its canonical profile leaves the "
+            f"consumer to guess the selection: {problems}",
+        )
+        # The negative half: a lint cell carries no nextest profile at all.
+        linting = self.v5_plan(
+            cells=[cell(gate="lint", execution="execute", build=None, profile="ci")],
+        )
+        linting["cells"][0].pop("build", None)
+        problems = schema.validate_resolved_plan(linting, today="2026-09-20")
+        self.assertTrue(
+            any("profile" in problem for problem in problems),
+            f"a lint gate runs no nextest selection; a profile on it is a "
+            f"misbinding: {problems}",
+        )
+
+    @pending(
+        "schema-v5",
+        "the skip-policy codes are not in the rejection vocabulary yet",
+        oracle="skip-policy-cell",
+    )
+    def test_the_skip_policy_codes_join_the_rejection_vocabulary(self):
+        for code in ("skip-policy-cell", "skip-policy-expired", "skip-policy-provenance"):
+            self.assertIn(code, schema.REJECTIONS)
+        self.assertIn("skip-policy-cell", schema.contract()["vocabulary"]["rejections"])
+
+
 class PendingHarnessTests(unittest.TestCase):
     """The harness itself, so a pending fixture cannot pass vacuously."""
 
