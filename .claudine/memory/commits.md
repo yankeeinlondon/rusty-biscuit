@@ -781,16 +781,45 @@ belong here.
   alongside the call-site `M` updates that consume the new module path,
   even when the sub-modules individually look independent.
 - CLI test files (`cli/tests/cli.rs`, `cli/tests/snapshots.rs`, etc.) that
-  cover both focused subcommands AND aggregate output force the aggregate's
-  library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
-  in the same commit as the CLI tests, even when the aggregate driver is
-  technically library code. The coupling is through the test's imports:
-  the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
-  shape whose struct is owned by the library file, and the test will fail
-  to compile (or test a stale shape) if the library file is committed
-  separately. Splitting "library feat" and "CLI refactor" along the
-  conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
-  coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
-  the CLI test file reveals which library symbols the tests reference,
-  and any of those symbols' defining file belongs with the CLI commit
-  rather than the library one.
+    cover both focused subcommands AND aggregate output force the aggregate's
+    library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
+    in the same commit as the CLI tests, even when the aggregate driver is
+    technically library code. The coupling is through the test's imports:
+    the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
+    shape whose struct is owned by the library file, and the test will fail
+    to compile (or test a stale shape) if the library file is committed
+    separately. Splitting "library feat" and "CLI refactor" along the
+    conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
+    coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
+    the CLI test file reveals which library symbols the tests reference,
+    and any of those symbols' defining file belongs with the CLI commit
+    rather than the library one.
+- A `planning(<area>):` phase close whose `implementation-log.md`
+    `source_files_during_phase_N` (or `docs_updated_during_phase_N`,
+    `skills_files_updated_during_phase_N`) lists entries — as opposed
+    to being empty or measurement-only — must land AFTER those entries
+    are in history. The existing "working-tree-only" rule (line 667)
+    covers a narrow shape (a follow-up fix the developer accidentally
+    left uncommitted); the broader principle is that any per-phase
+    file list in implementation-log.md frontmatter, plus any named
+    file in `spikes/<name>.md` (e.g. the s0-baseline.md Phase 2
+    pending-contract inventory table that names seven test files by
+    path and the Python `@pending` / Rust `pending_contract`
+    mechanisms they use), plus the spec.md `message_to_agent`'s
+    forward-looking references to test files by name, all describe a
+    state that must match HEAD at the moment of the planning commit.
+    Committing the planning close first leaves `git log` as the only
+    way to resolve "this phase shipped these files"; committing the
+    test commits first makes the claim trivially true at every
+    subsequent read. Splitting is safe only when the per-phase file
+    lists are empty (a measurement-only phase) or when the named
+    files are docs created IN the planning commit (rulings.md,
+    spikes/*.md, s0-baseline.md sections). When a phase ships test
+    files across N packages (e.g. `scripts/ci/*` in the `scripts`
+    workspace = `repo-deps`, `tools/test-toolkit/tests/*` in
+    `test-toolkit`), the test commits can run in parallel — their
+    paths are disjoint — and the planning commit runs sequentially
+    after all of them land. See the direct-cell-execution Phase 2
+    close (222f7612d + f9d74abc5 + 11e2c4e95 + 09b9f9d5f, four
+    commits: three parallel test commits then the planning close)
+    for the canonical 2-package, test-only-phase shape.
