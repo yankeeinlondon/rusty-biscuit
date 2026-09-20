@@ -1,7 +1,7 @@
 ---
 title: Direct cell execution — hosted matrices built from the plan's cells
 created: 2026-09-19
-phase: 1
+phase: 2
 total_phases: 9
 agent: claude/opus
 yolo: true
@@ -22,6 +22,23 @@ docs_created_during_phase_1:
   - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
   - features/2026-09-19-direct-cell-execution/spikes/plans/README.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_runner_loss.py
+  - scripts/ci/affected_scope.py
+  - scripts/Cargo.toml
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - just/ci-local.just
+  - .githooks/tests/test-pre-push.sh
+  - scripts/ci/test_ci_local.py
+docs_updated_during_phase_2:
+  - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Implementation Plan — Direct Cell Execution
@@ -394,38 +411,38 @@ implementation oracle. Waves 1–3 are independent files and run concurrently.
 
 ### Wave 1 — Plan, adapter, and schema oracles
 
-- [ ] **Schema v5 oracles** — `scripts/ci/test_schema.py`: version 5 accepted and
+- [x] **Schema v5 oracles** — `scripts/ci/test_schema.py`: version 5 accepted and
       4 refused by version before field set; the new per-cell execution fields
       and `skip_policy` required where the specification requires them and
       optional where it does not; a `skip_policy` entry naming an absent cell,
       an expired entry, and a malformed provenance each rejected with a coded
       reason; `RECEIPT_SCHEMA_VERSION` and `SCOPE_RECEIPT_SCHEMA_VERSION`
       unchanged.
-- [ ] **Row adapter oracles** — `scripts/ci/test_resolved_plan.py`: for each plan
+- [x] **Row adapter oracles** — `scripts/ci/test_resolved_plan.py`: for each plan
       in the Phase 1 corpus, the four row sets partition the executing cells
       exactly; no duplicate key; every row joins to an `execute` cell and to its
       package record; reused, accepted-gap, prohibited, and deferred work
       produces no row; a WSL2 row never appears in the native test set; the
       per-area scalar flags are true exactly when their row set is nonempty; and
       an area with zero executing cells still appears in `scheduled_areas`.
-- [ ] **Selection-unchanged oracles** — `scripts/ci/test_affected_scope.py`: the
+- [x] **Selection-unchanged oracles** — `scripts/ci/test_affected_scope.py`: the
       row adapter reads nothing but the plan (assert by planning from a carried
       receipt with no checkout access); `check` and `lint` selection, dependent
       seam, event deferral, and build-owner derivation are byte-identical to
       today's outputs for the corpus.
-- [ ] **Capacity-guard oracles** — `test_affected_scope.py`: a synthetic plan
+- [x] **Capacity-guard oracles** — `test_affected_scope.py`: a synthetic plan
       whose largest row set exceeds `MATRIX_LIMIT`, and one whose serialized area
       payload exceeds the byte budget, each fail planning with a named error and
       no truncation.
 
 ### Wave 2 — Producer-completeness oracles
 
-- [ ] **New suite skeleton** — `scripts/ci/test_completion.py`, registered in
+- [x] **New suite skeleton** — `scripts/ci/test_completion.py`, registered in
       `SUITE_REGISTRY` under `repo-deps` and added to `just ci-local`'s self-test
       list. Remember the self-test list is spelled in four coupled files
       (`just/ci-local.just`, `scripts/ci/test_ci_local.py` twice,
       `.githooks/tests/test-pre-push.sh`) — editing one produces ten failures.
-- [ ] **AC5 fixture matrix** (pending): missing report; malformed report; missing
+- [x] **AC5 fixture matrix** (pending): missing report; malformed report; missing
       expected test (and that a skip approval cannot excuse it); an extra
       invocation filter that shrinks expected and observed together; duplicate
       test identities across binaries; retries normalized to one final outcome
@@ -435,14 +452,14 @@ implementation oracle. Waves 1–3 are independent files and run concurrently.
       backend proof absent; a companion failure; an upload failure; a
       cancellation; and a canonical tier exclusion that must **not** read as a
       missing test.
-- [ ] **Expected-manifest v2 oracles**: ignored tests and planned exclusions
+- [x] **Expected-manifest v2 oracles**: ignored tests and planned exclusions
       recorded explicitly rather than dropped; the resolved nextest version,
       environment, tier, target, and archive provenance present; a manifest
       generated on another target refused for the comparison.
 
 ### Wave 3 — Workflow, audit, and attribution oracles
 
-- [ ] **Workflow layout oracles** — `tools/test-toolkit/tests/ci_workflow_contracts.rs`
+- [x] **Workflow layout oracles** — `tools/test-toolkit/tests/ci_workflow_contracts.rs`
       (pending or newly written, using `workflow_reading`'s Rust equivalents
       already in that file): `_area-ci.yml` calls `_package-ci.yml` at most once;
       no reader-facing workflow declares an environment-list input; every
@@ -452,24 +469,24 @@ implementation oracle. Waves 1–3 are independent files and run concurrently.
       read-only and only `accepted-gaps` holds `checks: write`; every executing
       cell's job uploads JUnit, status, **and** a completion artifact; and the
       all-reused/gap-only area still runs its audit, slice, and publisher.
-- [ ] **Audit oracles** — `scripts/ci-rollup-tests.rs`: a new-format executing
+- [x] **Audit oracles** — `scripts/ci-rollup-tests.rs`: a new-format executing
       cell with no completion record, with a record bound to another revision or
       build key, or with a green status and an absent report inventory, each
       blocks; a legacy record still takes the legacy path; invalid reuse and
       invalid gaps still block; partial rerun evidence blocks; a skipped producer
       call with nonempty rows blocks; and a producer failure produces exactly one
       red check.
-- [ ] **Attribution oracles** — `scripts/ci/test_runner_loss.py`: labels derived
+- [x] **Attribution oracles** — `scripts/ci/test_runner_loss.py`: labels derived
       from the shipped workflows (never spelled by hand) resolve a lost native
       row and a lost WSL2 row to exactly one cell each, under both the three- and
       four-token label forms of R1.
 
 ### Checkpoint
 
-- [ ] Every new fixture fails for its recorded oracle reason; every existing
+- [x] Every new fixture fails for its recorded oracle reason; every existing
       suite is still green; `BISCUIT_PROMOTE_PENDING=1` shows exactly the
       contracts this plan will implement and nothing else.
-- [ ] `spikes/s0-baseline.md` is updated with the pending-contract inventory so
+- [x] `spikes/s0-baseline.md` is updated with the pending-contract inventory so
       each later phase knows which decorators it must remove.
 
 ## Phase 3 — Plan Schema v5, Skip Snapshot, and the Row Adapter

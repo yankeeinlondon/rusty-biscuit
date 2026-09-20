@@ -35,35 +35,39 @@ reviewed_on: 2026-09-19
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 (rulings, spikes, baseline) is complete. Before starting Phase 2,
-    read, in this order:
+    Phase 2 (failing oracles) is complete. Before starting Phase 3, read, in
+    this order:
 
-    1. rulings.md beside this spec — R1-R12 are binding; R3 rewrites the D4
-       staging contract to its negative and R11/R12 add selection-table
-       entries that must land as one change each with their paired fixtures.
-    2. spikes/plans/README.md — the eight-plan corpus (all, dispatch, nightly,
-       pr, all-reused, mixed, prohibited, gap-only) and exactly how each was
-       produced. gap-only.json is SYNTHESIZED (no area is gap-only in a real
-       plan today: lint never reuses, so every area always executes at least
-       its lint cells); give plan_fixtures.py a first-class producer for that
-       shape in Phase 3 rather than extending the hand-edit.
-    3. spikes/s2-nextest-list.md — the exact `nextest list` JSON shape and the
-       decision that `filter-match.status == "matches"` is sufficient under
-       four conditions (no `--run-ignored`; identity `<binary-id>::<test>`;
-       target provenance recorded; counts derived from `testcases`, never
-       `test-count`).
-    4. spikes/s0-baseline.md — the exact ci_workflow_contracts.rs edit set
-       (primary and secondary tables) and the twelve suites' green counts
-       (769 tests) at tree head 1266e5fc9.
-    5. spikes/s1-labels.md is DEFERRED (needs a push): its three questions
-       stay open; R1's both-forms parser is the mitigation. Do not block on
-       it.
+    1. spikes/s0-baseline.md section 6 — the pending-contract inventory (52
+       fixtures across seven files, each with the phase that promotes it) AND
+       the pinned vocabulary you must implement: `affected_scope.row_sets`,
+       `enforce_output_budgets` + `AREA_ROW_SET_BUDGET`, the v5 field set
+       (`skip_policy` `{source, content_hash, entries}` with entries
+       `{package, environment, gate, owner, reason, source_run}` + optional
+       `backend`/`expiry`; area-level `execution_path`; cell-level `profile`
+       and `requires_node`), the `skip-policy-cell` / `skip-policy-expired` /
+       `skip-policy-provenance` rejection codes, and
+       `validate_resolved_plan(document, today=None)`.
+    2. The pinned names are binding: the schema oracles in
+       scripts/ci/test_schema.py and the adapter oracles in
+       test_resolved_plan.py / test_affected_scope.py fail against exactly
+       these shapes, and the completion fixtures (test_completion.py) and
+       audit fixtures (scripts/ci-rollup-tests.rs) spell the SAME
+       completion-record field names — implement them once, identically.
+    3. Two mechanism facts: `@pending`/`pending_contract` cannot see subTest
+       failures (collect-and-raise instead), and
+       `BISCUIT_PROMOTE_PENDING=1` is a diagnostic mode in which nested
+       suites fail transitively (CompanionRunnerTests, the relocated-archive
+       L2 test) — judge promotion per-suite, not by a whole-workspace
+       promote run.
+    4. Phase 3's checkpoint promotes the Wave 1/Wave 2 Python oracles: run
+       `BISCUIT_PROMOTE_PENDING=1 python3 scripts/ci/test_schema.py` (and
+       test_resolved_plan, test_affected_scope) — every failure you see there
+       is a contract you are implementing; when a body passes, DELETE its
+       decorator. A decorator left on a passing body fails the suite with
+       ContractLanded by design.
 
-    Numbers moved from the plan's own table: on the Phase 1 tree,
-    `area_matrix` serializes to 79,929 B (largest area 7,908 B) and the
-    largest per-area row-set payload is 2,140 B. S3's budget constants
-    (16 KB per-area row-set payload, 512 KB total) are the ones Phase 3's
-    guard enforces and Phase 7 re-validates.
+    No human review is required before Phase 3.
 ---
 
 # Direct cell execution: hosted matrices built from the plan's cells

@@ -109,29 +109,36 @@ The D4 staging assertion (line 381) is the only test Phase 5 **rewrites to the
 negative** rather than migrates; every other entry migrates onto the new
 interfaces.
 
-## 3. The twelve Python suites' current pass counts
+## 3. The Python suites' current pass counts
 
-All green on this tree, 2026-09-20 (`python3 scripts/ci/test_<name>.py`):
+All green on this tree (`python3 scripts/ci/test_<name>.py`). Counts captured
+2026-09-20 at Phase 1 close; the Phase 2 column reflects the suite state after
+the failing-oracle phase landed (every suite still green — the pending
+decorators invert their fixtures — with `test_completion.py` new):
 
-| Suite | Tests | Result |
-|---|---:|---|
-| test_affected_scope.py | 251 | OK |
-| test_schema.py | 112 | OK |
-| test_ci_local.py | 87 | OK |
-| test_evidence_reuse.py | 76 | OK |
-| test_resolved_plan.py | 75 | OK |
-| test_runner_loss.py | 44 | OK |
-| test_constraints.py | 39 | OK |
-| test_local_evidence.py | 20 | OK |
-| test_publish_gaps.py | 19 | OK |
-| test_reuse_validation.py | 21 | OK |
-| test_cross_check.py | 13 | OK |
-| test_build_key.py | 12 | OK |
-| **total** | **769** | **12/12 OK** |
+| Suite | Phase 1 | Phase 2 | Result |
+|---|---:|---:|---|
+| test_affected_scope.py | 251 | 256 | OK |
+| test_schema.py | 112 | 120 | OK |
+| test_ci_local.py | 87 | 87 | OK |
+| test_evidence_reuse.py | 76 | 76 | OK |
+| test_resolved_plan.py | 75 | 78 | OK |
+| test_runner_loss.py | 44 | 47 | OK |
+| test_constraints.py | 39 | 39 | OK |
+| test_local_evidence.py | 20 | 20 | OK |
+| test_publish_gaps.py | 19 | 19 | OK |
+| test_reuse_validation.py | 21 | 21 | OK |
+| test_cross_check.py | 13 | 13 | OK |
+| test_build_key.py | 12 | 12 | OK |
+| test_completion.py | — | 22 | OK (new, Phase 2) |
+| **total** | **769** | **810** | **13/13 OK** |
 
-(`test_completion.py` does not exist yet; Phase 2 Wave 2 creates it and the
-self-test list is spelled in four coupled files — `just/ci-local.just`,
-`scripts/ci/test_ci_local.py` twice, `.githooks/tests/test-pre-push.sh`.)
+The self-test list is spelled in coupled files — `just/ci-local.just`,
+`scripts/ci/test_ci_local.py` (twice), `.githooks/tests/test-pre-push.sh`,
+plus `SUITE_REGISTRY` in `scripts/ci/affected_scope.py`, the
+`companion-suites` metadata in `scripts/Cargo.toml`, and
+`EXPECTED_COMPANION_OWNERS` in `test_affected_scope.py`. `test_completion.py`
+was registered in all of them in one change.
 
 ## 4. `affected_scope.py --all` statistics (this tree)
 
@@ -187,3 +194,82 @@ Notes the adapter phase must respect:
 - `nightly.json` carries wsl2 cells only; its Linux producer joins through
   build records, cell-less, exactly as the environment table's `events`
   decide.
+
+## 6. The Phase 2 pending-contract inventory (added 2026-09-20)
+
+Phase 2 froze every new contract as a pending fixture. Each later phase's
+checkpoint includes promoting its rows by deleting the decorator (Python) or
+the `pending_contract` wrapper (Rust). The Python mechanism is
+`scripts/ci/pending_contracts.py::pending`; the Rust mechanism is the
+`pending_contract` function reintroduced at the tail of
+`scripts/ci-rollup-tests.rs` and
+`tools/test-toolkit/tests/ci_workflow_contracts.rs`. Both honor
+`BISCUIT_PROMOTE_PENDING=1` as a *diagnostic* mode: it runs each pending body
+directly, so exactly these fixtures fail (and anything that shells into them —
+`CompanionRunnerTests`'s shipped-suite run, the relocated-archive L2 fixture —
+fails transitively; normal mode stays green).
+
+Promoting a fixture means its body now PASSES; a still-pending decorator on a
+passing body fails the suite with `ContractLanded`, so a contract cannot be
+implemented and silently left "pending".
+
+| File | Fixtures | Criterion | Promoted by |
+|---|---:|---|---|
+| `scripts/ci/test_schema.py` (`DirectExecutionSchemaOracleTests`) | 8 | `schema-v5` — version 5, v4 refused by version first, required/optional field split, `skip-policy-cell` / `skip-policy-expired` / `skip-policy-provenance` codes, `profile` consistency | Phase 3 |
+| `scripts/ci/test_resolved_plan.py` (`RowAdapterOracleTests`) | 3 | `row-adapter` — partition over the corpus shapes, WSL2/native split, zero-executing area survives | Phase 3 |
+| `scripts/ci/test_affected_scope.py` (`DirectExecutionOracleTests`) | 5 | `row-adapter` ×3 (plan-only purity, selection unchanged, corpus pr shape) and `capacity-guard` ×2 (`enforce_output_budgets`, `AREA_ROW_SET_BUDGET`) | Phase 3 |
+| `scripts/ci/test_completion.py` (new suite, 22 tests) | 20 | `AC5` ×17 and `manifest-v2` ×3 | Phase 4 |
+| `tools/test-toolkit/tests/ci_workflow_contracts.rs` (new section) | 8 | `workflow-layout` ×5, `AC5` ×2 (upload failure, cancellation), `row-set` ×1 | Phase 5 |
+| `scripts/ci/test_runner_loss.py` (`DirectExecutionAttributionOracleTests`) | 3 | `attribution` — four-token native and WSL2 labels, row-set inputs declared | Phase 5 |
+| `scripts/ci/ci-rollup-tests.rs` (new section) | 5 | `AC6` — no record, wrong revision, wrong build key, absent report inventory, `complete: false` outranks green JUnit | Phase 6 |
+| **total** | **52** | | |
+
+Non-pending coverage added in the same phase (ordinary tests that must SURVIVE
+the implementation): `every_matrix_in_the_reader_facing_workflows_keeps_fail_fast_false`
+(`ci_workflow_contracts.rs`) and `FixtureSelfCheckTests` (`test_completion.py`).
+
+Contracts the plan lists that were already covered by existing ordinary
+fixtures, verified during Phase 2 rather than duplicated: the four-level chain
+(`the_reusable_workflow_chain_stays_within_githubs_four_levels`), the
+read-only producer / single `checks: write` publisher confinement
+(`the_gap_publisher_is_the_only_job_holding_checks_write`), invalid reuse and
+invalid gaps blocking (`an_expired_policy_gap_blocks`,
+`policy-gap-incomplete`, conflicting-evidence rejection), partial rerun
+evidence blocking (missing-cell rollups), and the producer-failure /
+single-red-check split (`coverage-audit`'s `needs.package-ci.result == 'success'`
+enforce step, asserted by `only_recovery_and_diagnostic_steps_ignore_errors`
+and friends). The "skipped producer call with nonempty rows blocks" audit
+behavior is the same missing-coverage path (no statuses ⇒ MISSING ⇒ blocked);
+its genuinely new half — the guard that SKIPS the call — is the Phase 5
+`row-set` workflow oracle.
+
+### The vocabulary Phase 3+ must implement (pinned by these oracles)
+
+- `affected_scope.row_sets(plan)` — pure function; result is
+  `{area: {"test": [...], "check": [...], "lint": [...], "wsl": [...],
+  "has_test_rows": bool, "has_check_rows": bool, "has_lint_rows": bool,
+  "has_wsl_rows": bool}}`; each row is exactly `{package, gate, environment,
+  runner}` in that key order (R1); `wsl` takes every `wsl2-ubuntu` cell,
+  `check`/`lint` take their gates, `test` takes native L1/L2/browser.
+- `affected_scope.enforce_output_budgets(rows)` — raises `RuntimeError`
+  naming `MATRIX_LIMIT` for an over-limit row set and "budget" for a
+  serialized per-area payload past `affected_scope.AREA_ROW_SET_BUDGET`
+  bytes; never truncates.
+- `schema.RESOLVED_PLAN_SCHEMA_VERSION == 5`; plan-level required
+  `skip_policy` (`{source, content_hash, entries}`; entry
+  `{package, environment, gate, owner, reason, source_run}` + optional
+  `backend`, `expiry`); required area-level `execution_path` in
+  `{"rows", "lists"}`; optional cell-level `profile` (consistency: present
+  exactly on an executing L1/L2/browser cell) and `requires_node`; new
+  `REJECTIONS` codes `skip-policy-cell`, `skip-policy-expired`,
+  `skip-policy-provenance`; `validate_resolved_plan(document, today=None)`.
+- `scripts/ci/completion.py` — the CLI documented in `test_completion.py`'s
+  module docstring; expected manifest v2 with `{schema_version: 2,
+  environment, tier, target, nextest_version, from_archive, selection:
+  {filter, profile, test_args}, packages: {pkg: {tests, ignored, excluded}}}`;
+  completion record `{schema_version, package, environment, gate, complete,
+  head, run, attempt, nextest_version, reports, build?}`.
+- Workflow shapes: `_package-ci.yml` inputs `test-rows`/`check-rows`/
+  `lint-rows`/`wsl-rows`; no `-environments` input and no `check-os` in any
+  reader-facing workflow; `completion-<package>-<gate>-<environment>`
+  artifacts beside `status-`/`junit-`.
