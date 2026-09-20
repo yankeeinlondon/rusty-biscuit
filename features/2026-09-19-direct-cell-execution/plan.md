@@ -11,6 +11,17 @@ supersedes:
 packages:
   - repo-deps
   - test-toolkit
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - features/2026-09-19-direct-cell-execution/spec.md
+docs_created_during_phase_1:
+  - features/2026-09-19-direct-cell-execution/rulings.md
+  - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
+  - features/2026-09-19-direct-cell-execution/spikes/s1-labels.md
+  - features/2026-09-19-direct-cell-execution/spikes/s2-nextest-list.md
+  - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
+  - features/2026-09-19-direct-cell-execution/spikes/plans/README.md
+skills_files_updated_during_phase_1: []
 ---
 
 # Implementation Plan — Direct Cell Execution
@@ -184,7 +195,7 @@ Record each as a numbered entry in a new
 the consequence if it is later reversed. Where a ruling contradicts or
 reinterprets the specification, say so explicitly in that file.
 
-- [ ] **R1 — Row key set and job-label legibility.** GitHub builds a matrix
+- [x] **R1 — Row key set and job-label legibility.** GitHub builds a matrix
       job's label from *every* value in the row (the reason `ci.yml`'s `area-ci`
       matrix is a plain vector rather than an `include:` of package records), and
       a job that can be skipped as a whole may carry **no** `name:`, because the
@@ -198,7 +209,7 @@ reinterprets the specification, say so explicitly in that file.
       `package, gate, environment, runner` so the parsed prefix is stable, and
       make `runner_loss.py` accept both the three- and four-token forms so a
       later reversal is not a silent attribution loss.
-- [ ] **R2 — Where the completeness validator runs, and in what language.** An
+- [x] **R2 — Where the completeness validator runs, and in what language.** An
       archive consumer has no compiler, and the WSL2 guest installs only
       `ca-certificates curl git xz-utils jq`. **Ruling: implement the validator as
       `scripts/ci/completion.py` (stdlib only, like every other `scripts/ci`
@@ -210,7 +221,7 @@ reinterprets the specification, say so explicitly in that file.
       archive-staged `ci-build` binary. It would reach the guest for free, but
       `check` and `lint` cells consume no archive and would need a second
       implementation or a release build of `repo-deps` inside a gate job.
-- [ ] **R3 — Job layout inside the execution workflow, and the fate of D4
+- [x] **R3 — Job layout inside the execution workflow, and the fate of D4
       staging.** The specification prescribes three row-expanding jobs plus a
       WSL2 delegator; today L2 and browser are separate jobs ordered behind L1
       through `needs: test` with `!cancelled()` (contract
@@ -226,7 +237,7 @@ reinterprets the specification, say so explicitly in that file.
       watch: peak concurrent runners per area rises; Phase 7's capacity report
       records it, and the fallback — a second `needs:`-ordered job for the L2 and
       browser rows — is a two-line change if a measured run shows queue damage.
-- [ ] **R4 — "The repository's pinned Nextest version".** The specification
+- [x] **R4 — "The repository's pinned Nextest version".** The specification
       assumes a pin. The repository has none: all four workflows install through
       `taiki-e/install-action@nextest` and every build contract in
       `environments.json` declares `"nextest": "latest"`.
@@ -238,7 +249,7 @@ reinterprets the specification, say so explicitly in that file.
       build-key identity of every archive; note it as a follow-up candidate, do
       not take it here. The producer/consumer version equality check in
       `affected_scope._validate_compatibility` is unaffected.
-- [ ] **R5 — `_package-ci.yml` keeps its filename.** After this change it is
+- [x] **R5 — `_package-ci.yml` keeps its filename.** After this change it is
       called once per *area*, so its name is no longer descriptive. **Ruling: do
       not rename it.** It is named in `ORCHESTRATION_PATHS`, and that list is what
       keeps a workflow edit from invalidating every published local cell (before
@@ -247,14 +258,14 @@ reinterprets the specification, say so explicitly in that file.
       depth contract, the CI README, and two skills. Rewrite its header
       documentation to describe what it now is — the area's execution workflow —
       and leave the path alone. Rule 3.
-- [ ] **R6 — The specification's `status` value.** `status: draft` is outside the
+- [x] **R6 — The specification's `status` value.** `status: draft` is outside the
       declared enum (the spec's own Open Question). **Ruling: set
       `status: planned` — a value the enum defines and the accurate lifecycle
       state once this plan lands — in the same commit as this plan.** This
       resolves the invalid value without expanding the shared vocabulary with a
       `draft` alias. The author may prefer `draft-spec`; either is a one-word
       change and neither affects implementation.
-- [ ] **R7 — Row transport and the output budget.** Row sets travel as
+- [x] **R7 — Row transport and the output budget.** Row sets travel as
       `scope`-job outputs indexed per area in the `with:` block, exactly as
       `area_matrix` does today, and the immutable `ci-resolved-plan` artifact
       carries everything else. **Ruling: the planner is the only place a budget is
@@ -263,7 +274,7 @@ reinterprets the specification, say so explicitly in that file.
       payload exceeds a declared byte budget. It never truncates, never splits an
       area silently, and CI never re-derives the budget. Measured headroom today:
       21 rows and ~2.3 KB against 256 and the budget.
-- [ ] **R8 — The skip policy stays hand-edited and is snapshotted.**
+- [x] **R8 — The skip policy stays hand-edited and is snapshotted.**
       `.github/ci/ci-baseline.toml` remains the human-owned source of truth;
       the planner reads it once and writes a `skip_policy` snapshot into the plan
       with per-cell and backend applicability, owner, reason, `source_run`, and
@@ -275,7 +286,7 @@ reinterprets the specification, say so explicitly in that file.
       moves no data; the interpretation change (a missing result is a failure,
       never an approved skip) is encoded in `completion.py` and the audit and
       pinned by fixtures in both.
-- [ ] **R9 — Per-area path selection and rollback.** A committed allowlist,
+- [x] **R9 — Per-area path selection and rollback.** A committed allowlist,
       `.github/ci/direct-execution.json` (`{schema_version, areas: [...]}`),
       names the areas on the new path; the planner reads it and stamps
       `execution_path: "rows" | "lists"` on each area record. **Ruling: exactly
@@ -284,7 +295,7 @@ reinterprets the specification, say so explicitly in that file.
       branches on the area record, never on a workflow-level input. The trial
       value is `["root"]`. Phase 8 deletes the file, the field, and the `lists`
       branch together once every area is switched and this review closes.
-- [ ] **R10 — Completion records are their own artifact.**
+- [x] **R10 — Completion records are their own artifact.**
       `status-<package>-<gate>-<environment>` keeps its `always()` semantics and
       stays the failure-path diagnostic. The completion record ships as
       `completion-<package>-<gate>-<environment>`, written and uploaded **only
@@ -293,7 +304,7 @@ reinterprets the specification, say so explicitly in that file.
       A green status whose completion artifact is absent or mismatched is an
       audit failure. Keys stay `{package, environment, gate}` with backend and
       suite dimensions where already required.
-- [ ] **R11 — `_area-ci.yml` becomes a scheduling input; the selection tables must
+- [x] **R11 — `_area-ci.yml` becomes a scheduling input; the selection tables must
       say so.** `GLOBAL_PATHS_ALL_GATES` names `ci.yml`, `_package-ci.yml`,
       `environments.json`, and `affected_scope.py` — an edit to any of them forces
       workspace scope — and `ORCHESTRATION_PATHS` then keeps those same paths out
@@ -308,7 +319,7 @@ reinterprets the specification, say so explicitly in that file.
       one list only is the failure mode to guard against — the first spelling costs
       a needless full-workspace pre-push, the second invalidates every published
       cell on a workflow edit.
-- [ ] **R12 — `_expected_manifest` must become a CI entry recipe.**
+- [x] **R12 — `_expected_manifest` must become a CI entry recipe.**
       `CI_RECIPES_BY_GATE["test"]` is `("_test", "_test_l2", "_test_browser")`, and
       `just_gate_inputs` / `just_change_gates` work from that closure. A producer
       that calls `just _expected_manifest` directly would put a recipe on the
@@ -321,7 +332,7 @@ reinterprets the specification, say so explicitly in that file.
 
 ### Spikes
 
-- [ ] **S1 — Matrix labels, whole-job skips, and nesting under a single area
+- [x] **S1 — Matrix labels, whole-job skips, and nesting under a single area
       call** (`features/2026-09-19-direct-cell-execution/spikes/s1-labels.md`).
       Questions: what label does an `include:`-only matrix of four keys produce;
       what label does the same job show when its scalar guard skips it before
@@ -334,7 +345,7 @@ reinterprets the specification, say so explicitly in that file.
       behavior and R1's both-forms parser, and record the spike as deferred with
       the exact questions still open.** Do not dispatch a full-scope run to learn
       this.
-- [ ] **S2 — Nextest listing fidelity against the resolved version**
+- [x] **S2 — Nextest listing fidelity against the resolved version**
       (`spikes/s2-nextest-list.md`). Prove, with fixtures and no CI, how
       `nextest list --message-format json` reports: an `#[ignore]`d test; a test
       excluded by `cfg` on this target; a test excluded by the tier filter; two
@@ -346,7 +357,7 @@ reinterprets the specification, say so explicitly in that file.
       the resolved `cargo-nextest --version`, and a decision on whether
       `filter-match.status == "matches"` alone is sufficient (today's
       `_expected_manifest` assumes it is).
-- [ ] **S3 — Offline capacity and budget model** (`spikes/s3-capacity.md`).
+- [x] **S3 — Offline capacity and budget model** (`spikes/s3-capacity.md`).
       Extend the numbers already measured above to the nightly and
       `workflow_dispatch` plans and to each individual matrix: per-area row-set
       cardinality, serialized `with:` payload per area, total `scope` job output
@@ -357,7 +368,7 @@ reinterprets the specification, say so explicitly in that file.
 
 ### Baseline Capture
 
-- [ ] **Current-state inventory** (`spikes/s0-baseline.md`). Record, from this
+- [x] **Current-state inventory** (`spikes/s0-baseline.md`). Record, from this
       tree: every producer job label in the four reader-facing workflows; the
       full list of `ci_workflow_contracts` tests that assert an environment list,
       a per-package call, a `needs: test` ordering, or a job label (these are the
@@ -368,10 +379,10 @@ reinterprets the specification, say so explicitly in that file.
 
 ### Checkpoint
 
-- [ ] `rulings.md` records R1–R10 with consequences; S2 and S3 have written
+- [x] `rulings.md` records R1–R10 with consequences; S2 and S3 have written
       results; S1 has results or a recorded deferral with its open questions;
       the baseline inventory names the exact contract tests this plan will edit.
-- [ ] No production file has changed except the specification's `status`.
+- [x] No production file has changed except the specification's `status`.
 
 ## Phase 2 — Failing Oracles
 
