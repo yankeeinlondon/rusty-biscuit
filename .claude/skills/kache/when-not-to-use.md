@@ -66,8 +66,12 @@ kache reduces what accumulates (incremental is off; deps come back as links) and
 cheap. It does **not** shrink an individual artifact or stop cargo from letting one build tree grow.
 If a single `target/debug` is eating a disk, the levers are:
 
-- `[profile.dev] debug = "line-tables-only"` (or scoped to `[profile.dev.package."*"]`) — less
-  debug info produced in the first place
+- `[profile.dev] debug = 0` — less debug info produced in the first place. On macOS this also
+  governs *file count*, not just size: the dev default `split-debuginfo = "unpacked"` keeps a
+  `.o` per codegen unit alive in `target/debug/deps` to hold the DWARF, and Cargo never
+  garbage-collects them, so any non-zero `debug` grows that directory without bound. This
+  workspace runs `debug = 0` for exactly that reason; see
+  [`docs/kache-strategy.md`](../../../docs/kache-strategy.md).
 - `cargo sweep` / `kache clean` on a schedule — bounded growth
 - Capping or isolating the filesystem the build tree lives on
 
