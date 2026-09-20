@@ -25,7 +25,8 @@ serde_json = { version = "1.0", optional = true }
 serial_test = "3.2"
 serde_json = "1.0"
 wiremock = "0.6"
-reqwest = "0.13"
+# default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2"] }
 tokio = { version = "1.48", features = ["full"] }
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.

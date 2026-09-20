@@ -22,7 +22,8 @@ serde_json = "1.0"
 biscuit-file = { path = "../../biscuit-file/lib", features = ["toml"] }
 
 # HTTP
-reqwest = { version = "0.13", features = ["json", "stream"] }
+# default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2", "json", "stream"] }
 urlencoding = "2.1"
 
 # Platform-specific directories
