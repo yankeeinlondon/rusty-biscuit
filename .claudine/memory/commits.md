@@ -351,6 +351,25 @@ belong here.
   relationship between old and new IS the consolidation — commit both
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
+- A supersede banner may land as a NEW spec file added directly to
+  `fixes/_completed/` (or `features/_completed/`) on its first commit,
+  paired atomically with the successor spec. The variant covers the
+  case where the superseded spec was a draft that never advanced to
+  implementation, so it has no active-directory history — it ships
+  already in `_completed/` with `status: superseded` and `superseded-by:
+  ../<new>/spec.md` frontmatter. The atomic commit is still mandatory:
+  the new spec's `supersedes:` frontmatter and the supersede banner's
+  `superseded-by:` frontmatter must resolve against each other inside
+  one tree, so splitting them ships either a successor that points at a
+  non-existent banner or a banner that points at a non-existent
+  successor. See `817de5bb9` (planning(repo): schedule direct-cell-
+  execution feature and supersede 2026-09-12-better-cicd-flow fix) for
+  the canonical example: one commit added the successor
+  `features/2026-09-19-direct-cell-execution/spec.md` and the banner
+  `fixes/_completed/2026-09-12-better-cicd-flow/spec.md` together.
+  Contrast with the existing 5-file consolidation at `4616e9aec`, where
+  the superseded specs were already tracked at HEAD and only their
+  `status:` flipped.
 - `planning(<area>): close <fix> as invalidated` is distinct from
   `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
   (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
