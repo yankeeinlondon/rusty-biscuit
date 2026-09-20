@@ -152,7 +152,12 @@ belong here.
   and the two endpoints can even hold different contents. Put BOTH endpoints
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
-  afterwards for leftover `D` entries.
+  afterwards for leftover `D` entries. If the post-commit status shows a
+  staged ` D` on the old path, the rename was half-committed; record the
+  deletion in a follow-up `chore(<area>): remove orphaned <old-path> after
+  rename` commit (the staged `D` is already in the index, so `git commit
+  --only -F - -- <old-path>` is a one-line `--only` against an already-staged
+  deletion — no amend, no temp-index plumbing).
 - A staged rename is read at the NEW path. Once `git add` has registered the
   rename, only the new path is in the index; `git show :<old-path>` fails with
   "path does not exist (neither on disk nor in the index)". Read the staged
