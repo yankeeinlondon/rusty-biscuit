@@ -196,6 +196,13 @@ belong here.
   `-c commit.gpgsign=false`). If signing hangs or fails, stop and report.
 - Plumbing commits (`commit-tree` + `update-ref`) do NOT honor
   `commit.gpgsign=true`; pass `-S` to `commit-tree` explicitly.
+- `git filter-branch --msg-filter` (or any filter-branch filter) also strips
+  signatures: even with `commit.gpgsign=true`, the rewritten commits come out
+  with `%G? = N` rather than `G`. Verify with `git verify-commit <hash>` after
+  filter-branch; if unsigned, roll back via `git update-ref HEAD <pre-batch-sha>`
+  (keeps index/working tree staged) and replay with normal `git commit`. Using
+  filter-branch to "fix message only" forces an unsigned chain unless you
+  resign each commit afterwards, which is more invasive than a clean replay.
 - Commit exit status covers the index update, not the signature. Always follow
   up with `git verify-commit <hash>`; review-cycle tooling under
   `darkmatter/features/*` depends on `%G?` showing `G`.
@@ -451,8 +458,28 @@ belong here.
     catches the same miss next run, so the follow-up is documentation, not
     drift.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
-    <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
-    and the paths reappear staged for a single recommit.
+  <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
+  and the paths reappear staged for a single recommit.
+- `git commit --amend` (no explicit ref) targets HEAD silently. If the goal is
+  to fix a non-HEAD commit's message (e.g. commit N in a chain of N+1 — "I
+  mistyped a file count in the body and want to correct commit 3, not the tip"),
+  `git commit -F <corrected-msg> --amend` rewrites HEAD with the new message
+  *and HEAD's tree content*, so the chain becomes inconsistent: HEAD now
+  carries commit N's intended message but commit N+1's tree (or vice versa).
+  `--only -- <paths>` does NOT pin amend to those paths — it operates on HEAD
+  regardless. The clean fix is `git update-ref HEAD <pre-batch-sha>` (rolls
+  the chain back while leaving the index staged), then replay the commits in
+  order with `git commit -F <msg> -- <paths>`. Pre-flight `git log -1
+  --pretty=%P HEAD` to capture the pre-batch parent before any amend attempt.
+- A 7-commit rename-to-_completed batch where one commit's body said "the 14
+  files" but the diff had 13 was recovered this way: `git update-ref HEAD
+  9b797b61a` rolled the chain back to the pre-batch commit while keeping all
+  19 staged renames in the index, then the 7 `git commit --only -F <msg> --
+  <old-path> <new-path>` invocations replayed with corrected messages and
+  fresh GPG signatures. The new SHAs all differ from the originals (each
+  commit re-signs with the current author/key) but the tree content is
+  identical — verify with `git diff <old-sha> <new-sha>` for each corrected
+  commit to confirm only the message changed.
 - Multi-agent batch + `update-ref` chain loss. When agents A and B commit in
     parallel (B on top of A) and you `update-ref` from B back to A's parent to
     recover from a bad B, A is severed from HEAD too — A is still reachable
