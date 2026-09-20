@@ -18,6 +18,7 @@ import unittest.mock
 
 import affected_scope
 import companion_suites
+import diff_scope
 import schema
 from tool_guard import require_tools
 from affected_scope import (
@@ -76,6 +77,13 @@ CARGO_ENFORCED_BY = (
     "`ci.yml`'s `preflight` matrix on every selected operating system and by "
     "its `ci-tooling` job, both of which set up the pinned Rust toolchain and "
     "set BISCUIT_REQUIRE_CARGO"
+)
+
+#: Git is how every one of those jobs obtained the checkout it runs this suite
+#: from, so its absence is a host anomaly rather than an unprovisioned runner.
+GIT_ENFORCED_BY = (
+    "`ci.yml`'s `preflight` matrix and its `ci-tooling` job, each of which "
+    "checks this repository out with Git before the suite runs"
 )
 
 
@@ -3513,8 +3521,10 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
     #: suite that already exists. `repo-deps` owns every `scripts/ci/test_*.py`
     #: suite including `test_ci_local.py` and `test_runner_loss.py`, and the
     #: artifact publisher no package and no pnpm workspace entry selects;
-    #: `test-toolkit` owns the two `tools/test-audit` suites.
+    #: `test-toolkit` owns the two `tools/test-audit` suites and the lint-only
+    #: archive-path guard.
     EXPECTED_COMPANION_OWNERS = {
+        "archive-path-guard": "test-toolkit",
         "artifact-publisher": "repo-deps",
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
@@ -3548,7 +3558,14 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
             "the companion half of the registry must be the specification's "
             "ownership table exactly",
         )
-        recipeless = [name for name, entry in entries.items() if not entry["recipe"].strip()]
+        # Either half counts: a lint-only companion is the deliberate shape of
+        # a source-policy scan, which has no test half to attach to an L1 cell.
+        recipeless = [
+            name
+            for name, entry in entries.items()
+            if not str(entry.get("recipe", "")).strip()
+            and not str(entry.get("lint_recipe", "")).strip()
+        ]
         self.assertEqual(
             [],
             recipeless,
@@ -3586,13 +3603,38 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         registry = {
             name: dict(entry) for name, entry in suite_registry().items()
         }
+        # BOTH halves: `homelab-frontend` declares a lint half too, and an entry
+        # that still lints is still something CI runs.
         registry["homelab-frontend"]["recipe"] = ""
+        registry["homelab-frontend"]["lint_recipe"] = ""
         problems = validate_suite_registry(
             registry, {"homelab-server": ["homelab-frontend"]}
         )
         self.assertTrue(
             any("homelab-frontend" in problem for problem in problems),
             f"a suite with no canonical recipe must be rejected by name: {problems}",
+        )
+
+    def test_a_lint_only_suite_is_a_valid_registration(self) -> None:
+        # The archive-path guard's shape: a source-policy scan has no test half.
+        # Registering one anyway would run the same scan a second time inside
+        # its owner's L1 cell, under that package's evidence rules.
+        entry = dict(suite_registry()["archive-path-guard"])
+        self.assertNotIn("recipe", entry)
+        self.assertTrue(entry["lint_recipe"].strip())
+        self.assertEqual(
+            [],
+            validate_suite_registry(
+                {"archive-path-guard": entry},
+                {"test-toolkit": ["archive-path-guard"]},
+            ),
+        )
+        self.assertEqual(
+            [],
+            affected_scope.companion_records(
+                ["archive-path-guard"], "ubuntu-latest", "L1"
+            ),
+            "a lint-only suite must not attach to an L1 cell",
         )
 
     def test_a_registered_suite_nobody_declares_fails_validation(self) -> None:
@@ -4186,6 +4228,558 @@ class AreaDriftFlagTests(unittest.TestCase):
         self.assertNotIn("ci_tooling", tooling_only["flags"])
 
 
+class ArchiveGuardScopeTests(unittest.TestCase):
+    """The archive-path guard is selected by the source it SCANS, and the plan
+    carries the scope it must scan.
+
+    Scoped in both directions on purpose, like the area-drift flag above. Too
+    narrow and a violation reaches `main` unchecked, because nothing else
+    selects a repository-wide scan; too broad and every documentation edit pays
+    for a Linux cell. The mode half matters just as much: an empty changed-file
+    scan and a full-tree scan both report zero violations, so a plan that made
+    them indistinguishable would let a partial scan read as a complete one.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def guard(self, files: list[str], **kwargs: object) -> dict[str, object]:
+        environments = kwargs.pop("environments", None) or environments_for_tests()
+        plan = calculate_scope(
+            files,
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments,  # type: ignore[arg-type]
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan["archive_guard"]  # type: ignore[index,return-value]
+
+    # -- what selects a scan --------------------------------------------------
+
+    def test_rust_source_anywhere_selects_the_guard(self) -> None:
+        # Across package areas AND outside every workspace member: a
+        # member-only trigger would leave part of the scanned corpus unchecked,
+        # which is the gap this fix exists to close.
+        for path in [
+            "alpha/lib/src/lib.rs",
+            "claudine/cli/tests/compose_initialize_acceptance.rs",
+            "darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs",
+            "not-a-member/src/main.rs",
+            "tools/test-toolkit/src/lib.rs",
+        ]:
+            with self.subTest(path=path):
+                guard = self.guard([path])
+                self.assertTrue(guard["selected"], guard["reason"])
+                self.assertEqual([path], guard["paths"])
+
+    def test_each_guard_owned_input_selects_the_guard(self) -> None:
+        # The narrow owned list: the matcher, its fixture corpus, the driver,
+        # the canonical recipe, this selection rule, the registry binding, and
+        # the two workflow files carrying the guard's execution controls. Three
+        # of them are excluded from SCANNING and are still owned inputs.
+        for path in sorted(affected_scope.ARCHIVE_GUARD_OWN_INPUTS):
+            with self.subTest(path=path):
+                self.assertTrue(self.guard([path])["selected"])
+
+    def test_a_skipped_directory_or_build_script_selects_nothing(self) -> None:
+        # Every skipped directory the scanner declares, plus the build script
+        # rule. A path the planner selected and the scanner then refused is a
+        # cell that ran nothing.
+        for path in [
+            "target/debug/build/generated.rs",
+            ".git/hooks/sample.rs",
+            "node_modules/pkg/index.rs",
+            ".gitnexus/cache/entry.rs",
+            "scripts/ci-rollup.rs",
+            "alpha/lib/examples/demo.rs",
+            "alpha/fuzz/fuzz_targets/target.rs",
+            "alpha/lib/build.rs",
+        ]:
+            with self.subTest(path=path):
+                guard = self.guard([path])
+                self.assertFalse(guard["selected"], guard["reason"])
+                self.assertNotIn("mode", guard)
+                self.assertNotIn("paths", guard)
+
+    def test_documentation_and_unrelated_configuration_select_nothing(self) -> None:
+        # NOT a rule that every configuration edit selects the guard.
+        for path in [
+            "docs/topics/ci-cd.md",
+            "alpha/README.md",
+            "Cargo.lock",
+            "Cargo.toml",
+            ".github/workflows/ci.yml",
+            ".github/ci/environments.json",
+            "clippy.toml",
+        ]:
+            with self.subTest(path=path):
+                self.assertFalse(self.guard([path])["selected"])
+
+    # -- deletions and renames ------------------------------------------------
+
+    def test_a_deleted_rust_file_triggers_but_is_not_scanned(self) -> None:
+        # Exemption maintenance has to run when an exempted file disappears,
+        # and there is nothing left to read at the path itself.
+        guard = self.guard(["alpha/lib/src/gone.rs"], deleted=["alpha/lib/src/gone.rs"])
+        self.assertTrue(guard["selected"])
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual([], guard["paths"])
+
+    def test_a_rename_scans_the_destination_and_not_the_source(self) -> None:
+        guard = self.guard(
+            ["alpha/lib/src/before.rs", "alpha/lib/src/after.rs"],
+            deleted=["alpha/lib/src/before.rs"],
+        )
+        self.assertEqual(["alpha/lib/src/after.rs"], guard["paths"])
+
+    def test_the_inventory_records_deletions_exactly_when_it_has_a_diff(self) -> None:
+        inventory = affected_scope.change_inventory(
+            ["a/b.rs", "a/c.rs"], False, ["a/c.rs", "./a/c.rs"]
+        )
+        self.assertEqual(["a/c.rs"], inventory["deleted"])
+        self.assertNotIn("deleted", affected_scope.change_inventory([], True, ["a/c.rs"]))
+
+    # -- the mode decision table ----------------------------------------------
+
+    def test_a_pull_request_with_an_inventory_scans_the_changed_files(self) -> None:
+        guard = self.guard(["alpha/lib/src/lib.rs"], event="pull_request")
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual(["alpha/lib/src/lib.rs"], guard["paths"])
+
+    def test_a_push_scans_the_whole_corpus(self) -> None:
+        # Changed-file evidence from a pull request proves nothing about the
+        # files it omitted, so a merge does not inherit it.
+        guard = self.guard(["alpha/lib/src/lib.rs"], event="push")
+        self.assertEqual("full", guard["mode"])
+        self.assertNotIn("paths", guard)
+
+    def test_a_manual_full_workspace_run_scans_the_whole_corpus(self) -> None:
+        guard = self.guard([], force_all=True, event="workflow_dispatch")
+        self.assertEqual("full", guard["mode"])
+        self.assertNotIn("paths", guard)
+
+    def test_an_unavailable_diff_scans_the_whole_corpus(self) -> None:
+        # Reached through the scope function directly: the inventory reports
+        # `diff_available: false` only for a full-scope request today, and the
+        # rule must hold for any other producer of an absent diff.
+        guard = affected_scope.archive_guard_scope(
+            ["alpha/lib/src/lib.rs"],
+            full_scope=False,
+            deleted=[],
+            scheduled={"ubuntu-latest"},
+            event="pull_request",
+            diff_available=False,
+        )
+        self.assertEqual("full", guard["mode"])
+        self.assertNotIn("paths", guard)
+
+    def test_an_explicitly_empty_inventory_is_not_a_full_scan(self) -> None:
+        # The distinction the guard refuses to guess at: nothing eligible
+        # changed is a real, complete answer, and is never upgraded.
+        guard = self.guard(
+            ["alpha/lib/src/gone.rs", "docs/topics/ci-cd.md"],
+            deleted=["alpha/lib/src/gone.rs"],
+            event="pull_request",
+        )
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual([], guard["paths"])
+        self.assertNotEqual("full", guard["mode"])
+
+    def test_the_nightly_adds_no_linux_for_the_guard(self) -> None:
+        # The shipped table schedules WSL2 alone for `schedule`, and the guard
+        # is hosted on Linux only. It does not force Linux into an event that
+        # excludes it; the reason has to name the event so a reader can tell
+        # this apart from "nothing changed".
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments,
+            self.policy,
+            event="schedule",
+        )
+        guard = plan["archive_guard"]
+        self.assertFalse(guard["selected"], guard["reason"])
+        self.assertIn("schedule", guard["reason"])
+        self.assertEqual(
+            [],
+            [
+                cell
+                for cell in plan["cells"]
+                if cell["environment"] == "ubuntu-latest"
+            ],
+            "the nightly must gain no Linux cell for a Linux-only guard",
+        )
+
+    def test_a_proven_linux_environment_gains_no_guard_execution(self) -> None:
+        # The other half of the nightly rule. A pull request that already
+        # proved ubuntu-latest narrows the follow-up push to windows-latest;
+        # the guard is hosted on Linux alone, so it must accept that the scan
+        # already ran rather than invent the extra run the specification's
+        # "without inventing an extra Linux run" forbids.
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,  # type: ignore[arg-type]
+            environments,
+            self.policy,
+            event="push",
+            proven_event="pull_request",
+        )
+        self.assertEqual(["windows-latest"], [item["name"] for item in plan["environments"]])
+        guard = plan["archive_guard"]
+        self.assertFalse(guard["selected"], guard["reason"])
+        self.assertIn("ubuntu-latest", guard["reason"])
+        self.assertEqual(
+            [],
+            [cell for cell in plan["cells"] if cell["environment"] == "ubuntu-latest"],
+        )
+
+    # -- path spelling --------------------------------------------------------
+
+    def test_path_spellings_normalize_to_one_answer(self) -> None:
+        # The house convention, as `AreaDriftFlagTests` states it: a
+        # Windows-spelled diff and a POSIX-spelled one select the same scan.
+        for spelling in ("./alpha/lib/src/lib.rs", "alpha\\lib\\src\\lib.rs"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(
+                    ["alpha/lib/src/lib.rs"], self.guard([spelling])["paths"]
+                )
+
+    def test_the_path_list_is_sorted_and_deduplicated(self) -> None:
+        guard = self.guard(
+            [
+                "beta/src/lib.rs",
+                "alpha/lib/src/lib.rs",
+                "./beta/src/lib.rs",
+                "beta\\src\\lib.rs",
+            ]
+        )
+        self.assertEqual(["alpha/lib/src/lib.rs", "beta/src/lib.rs"], guard["paths"])
+
+    def test_every_scope_states_a_reason(self) -> None:
+        for files, kwargs in (
+            (["docs/topics/ci-cd.md"], {}),
+            (["alpha/lib/src/lib.rs"], {}),
+            (["alpha/lib/src/lib.rs"], {"event": "push"}),
+            ([], {"force_all": True}),
+        ):
+            with self.subTest(files=files, kwargs=kwargs):
+                self.assertTrue(self.guard(files, **kwargs)["reason"].strip())
+
+
+class ArchiveGuardOnlyCellTests(unittest.TestCase):
+    """Selecting the guard alone adds exactly one Linux execution.
+
+    Run against the shipped workspace because the contract is about the real
+    owner: `test-toolkit` declares four test tiers' worth of environments, two
+    Node companions, and a reverse-dependency seam that compiles eleven
+    consumers. A Rust file in another area says nothing about any of it, so
+    the one thing this selection may add is the guard's own lint cell.
+    """
+
+    GUARD_CELL = ("test-toolkit", "ubuntu-latest", "lint")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            workspace_packages(cls.metadata),
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    def plan(self, *files: str, **kwargs: object) -> dict[str, object]:
+        plan = calculate_scope(
+            list(files),
+            ROOT,
+            self.metadata,
+            self.environments,
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def toolkit_cells(self, plan: dict[str, object]) -> list[dict[str, object]]:
+        return [
+            cell
+            for cell in plan["cells"]  # type: ignore[index]
+            if cell["package"] == "test-toolkit"
+        ]
+
+    def test_a_guard_only_selection_is_one_lint_cell_and_nothing_else(self) -> None:
+        plan = self.plan("claudine/lib/src/lib.rs")
+        cells = self.toolkit_cells(plan)
+        self.assertEqual(1, len(cells), [cell["gate"] for cell in cells])
+        cell = cells[0]
+        self.assertEqual(
+            self.GUARD_CELL, (cell["package"], cell["environment"], cell["gate"])
+        )
+        self.assertEqual(
+            ["archive-path-guard"], [entry["name"] for entry in cell["companions"]]
+        )
+        self.assertIs(True, cell["companions_only"])
+        self.assertIn("archive-path guard", cell["selection_reason"])
+        self.assertIn("claudine/lib/src/lib.rs", cell["selection_reason"])
+
+    def test_a_guard_only_selection_claims_no_package_work(self) -> None:
+        record = next(
+            entry
+            for entry in self.plan("claudine/lib/src/lib.rs")["packages"]
+            if entry["package"] == "test-toolkit"
+        )
+        self.assertEqual(["lint"], record["gates"])
+        self.assertEqual(["archive-path-guard"], record["companion_suites"])
+        self.assertEqual([], record["tiers"])
+        self.assertEqual([], record["targets"])
+        self.assertNotIn(
+            "dependent_seam",
+            record,
+            "a Rust file elsewhere says nothing about this package's public API",
+        )
+
+    def test_a_guard_only_selection_adds_no_other_environment_or_build(self) -> None:
+        plan = self.plan("claudine/lib/src/lib.rs")
+        self.assertEqual(
+            [], [cell for cell in self.toolkit_cells(plan) if cell["gate"] != "lint"]
+        )
+        self.assertEqual(
+            {"ubuntu-latest"},
+            {cell["environment"] for cell in self.toolkit_cells(plan)},
+        )
+        self.assertEqual(
+            [],
+            [
+                build
+                for build in plan["builds"]  # type: ignore[index]
+                if build["package"] == "test-toolkit"
+            ],
+            "lint compiles its own configuration and consumes no archive",
+        )
+
+    def test_the_matrix_carries_the_guard_and_stands_clippy_down(self) -> None:
+        entry = next(
+            record
+            for record in legacy_scope_document(self.plan("claudine/lib/src/lib.rs"))[
+                "matrix"
+            ]
+            if record["package"] == "test-toolkit"
+        )
+        self.assertEqual(["lint"], entry["gates"])
+        self.assertIs(True, entry["lint_companions_only"])
+        self.assertEqual(["archive-path-guard"], entry["companion_suites"])
+        self.assertEqual([], entry["native_environments"])
+        self.assertEqual([], entry["check_os"])
+        self.assertEqual(
+            [],
+            entry["companion_environments"],
+            "the guard has no L1 half, so no test cell is asked to run it",
+        )
+
+    def test_an_already_selected_owner_gains_no_second_lint_cell(self) -> None:
+        # The other half of the contract: the guard rides the owner's ordinary
+        # lint cell, and `companions_only` stays absent because Clippy is still
+        # required work there.
+        plan = self.plan("tools/test-toolkit/src/lib.rs")
+        lint = [cell for cell in self.toolkit_cells(plan) if cell["gate"] == "lint"]
+        self.assertEqual(1, len(lint))
+        self.assertEqual(
+            ["archive-path-guard"], [entry["name"] for entry in lint[0]["companions"]]
+        )
+        self.assertNotIn("companions_only", lint[0])
+        self.assertTrue(
+            [cell for cell in self.toolkit_cells(plan) if cell["gate"] == "L1"],
+            "an ordinary selection still runs the package's own tests",
+        )
+
+    def test_a_documentation_change_schedules_no_guard_cell(self) -> None:
+        plan = self.plan("docs/topics/ci-cd.md")
+        self.assertFalse(plan["archive_guard"]["selected"])  # type: ignore[index]
+        self.assertEqual([], self.toolkit_cells(plan))
+
+    def test_the_guard_cell_is_never_satisfied_by_reuse(self) -> None:
+        # The spec's "initially prefer non-reusable guard execution": no
+        # evidence identity here can represent a scan's inputs, so a passing
+        # receipt for this cell must not stand in for the scan.
+        accepted = [
+            {
+                "package": "test-toolkit",
+                "environment": "ubuntu-latest",
+                "gate": "lint",
+                "outcome": "pass",
+                "origin": "local",
+            }
+        ]
+        cell = self.toolkit_cells(
+            self.plan("claudine/lib/src/lib.rs", accepted_cells=accepted)
+        )[0]
+        self.assertFalse(cell["reusable"])
+        self.assertEqual("execute", cell["execution"])
+        self.assertEqual("pending", cell["state"])
+
+
+class ArchiveGuardConfigurationInputTests(unittest.TestCase):
+    """The guard's registry and execution configuration selects a real scan.
+
+    Run against the shipped tree because the claim is about the real files.
+    `tools/test-toolkit/Cargo.toml` is the guard's registry binding only
+    because THAT manifest declares `archive-path-guard` in `companion-suites`,
+    and the two workflow files are owned inputs only because they carry the
+    guard's own execution controls; a fixture would prove neither.
+
+    All three already select `test-toolkit` through `SUITE_OWNER_*`, so the
+    lint cell and its attached companion exist either way. What used to be
+    missing was the PLAN's account of it: `selected: false` left the companion
+    reading an unselected scope and running an empty changed-file scan, which
+    is a cell that ran incidentally rather than the plan-owned execution the
+    contract requires.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            workspace_packages(cls.metadata),
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    #: The owned inputs that are configuration rather than guard source.
+    CONFIGURATION_INPUTS = (
+        "tools/test-toolkit/Cargo.toml",
+        ".github/workflows/_package-ci.yml",
+        ".github/workflows/_area-ci.yml",
+    )
+
+    def plan(self, *files: str, **kwargs: object) -> dict[str, object]:
+        plan = calculate_scope(
+            list(files),
+            ROOT,
+            self.metadata,
+            self.environments,
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_the_registry_binding_really_is_one(self) -> None:
+        # The premise the manifest entry rests on, checked rather than assumed:
+        # if the declaration moved, this class would be asserting about a file
+        # that no longer decides anything.
+        manifest = (ROOT / "tools/test-toolkit/Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn("[package.metadata.ci.tests]", manifest)
+        self.assertIn(affected_scope.ARCHIVE_GUARD_SUITE, manifest)
+
+    def test_the_registry_binding_selects_a_scan_on_a_pull_request(self) -> None:
+        guard = self.plan(
+            "tools/test-toolkit/Cargo.toml", event="pull_request"
+        )["archive_guard"]
+        self.assertTrue(guard["selected"], guard["reason"])
+        # Changed mode with an explicitly empty list: the manifest carries no
+        # `.rs` file, and an empty inventory is a complete answer that is never
+        # upgraded to a full scan. The scan the change actually needs — is the
+        # exemption list still live — is the driver's full-tree half, which
+        # runs in either mode.
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual([], guard["paths"])
+
+    def test_each_configuration_input_selects_a_scan(self) -> None:
+        for path in self.CONFIGURATION_INPUTS:
+            with self.subTest(path=path):
+                guard = self.plan(path, event="pull_request")["archive_guard"]
+                self.assertTrue(guard["selected"], guard["reason"])
+                self.assertEqual("changed", guard["mode"])
+                self.assertEqual([], guard["paths"])
+
+    def test_a_configuration_input_adds_no_cell_at_all(self) -> None:
+        # The containment rule for this half of the owned list. Each of these
+        # paths already selects the owner, so the guard's arrival must change
+        # the plan's ACCOUNT and not its work: the same three cells, no check
+        # cell, no second lint cell, no extra operating system.
+        for path in self.CONFIGURATION_INPUTS:
+            with self.subTest(path=path):
+                cells = [
+                    (cell["environment"], cell["gate"])
+                    for cell in self.plan(path, event="pull_request")["cells"]  # type: ignore[index]
+                    if cell["package"] == "test-toolkit"
+                ]
+                self.assertEqual(
+                    [
+                        ("macos-latest", "L1"),
+                        ("ubuntu-latest", "L1"),
+                        ("ubuntu-latest", "lint"),
+                    ],
+                    sorted(cells),
+                )
+
+    def test_the_guard_rides_the_owners_own_lint_cell(self) -> None:
+        # `companions_only` stays absent: Clippy is still required work here,
+        # so this is not the guard-only shape `ArchiveGuardOnlyCellTests`
+        # covers, and the workflow must not stand Clippy down.
+        lint = [
+            cell
+            for cell in self.plan("tools/test-toolkit/Cargo.toml")["cells"]  # type: ignore[index]
+            if cell["package"] == "test-toolkit" and cell["gate"] == "lint"
+        ]
+        self.assertEqual(1, len(lint))
+        self.assertIn(
+            affected_scope.ARCHIVE_GUARD_SUITE,
+            [entry["name"] for entry in lint[0]["companions"]],
+        )
+        self.assertNotIn("companions_only", lint[0])
+
+    def test_an_unrelated_manifest_or_workflow_selects_no_scan(self) -> None:
+        # Real files, so the narrowness is proved against the shipped tree and
+        # not a fixture: a manifest that binds no suite, the release workflow,
+        # and the top-level caller — which carries no guard-specific
+        # configuration and whose resolved-plan artifact every area reads.
+        for path in (
+            "messenger/lib/Cargo.toml",
+            ".github/workflows/release-plz.yml",
+            ".github/workflows/ci.yml",
+        ):
+            with self.subTest(path=path):
+                guard = self.plan(path, event="pull_request")["archive_guard"]
+                self.assertFalse(guard["selected"], guard["reason"])
+                self.assertNotIn("mode", guard)
+
+    def test_every_owned_input_still_exists(self) -> None:
+        # The policy is a list of path literals and nothing on this side
+        # resolves them, so a rename leaves an entry that matches no change and
+        # the guard silently stops being selected by the input it watches.
+        # `ci_workflow_contracts` asserts the same thing from the Rust side.
+        for path in sorted(affected_scope.ARCHIVE_GUARD_OWN_INPUTS):
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).exists(), path)
+
+
 class CompanionRecipeCheckTests(unittest.TestCase):
     """The companion-recipe existence check is a definition match, not a substring."""
 
@@ -4742,7 +5336,9 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
 
     def test_an_affected_area_plan_is_far_under_the_full_scope_ceilings(self) -> None:
         # AC1's counterpart: the ordinary case must not merely fit, it must be
-        # a small fraction of the full run.
+        # a small fraction of the full run. `tools` rides along because a Rust
+        # file is source the archive-path guard scans, and that adds exactly
+        # one Linux lint cell — see `ArchiveGuardOnlyCellTests`.
         scope = scope_document(
             ["claudine/lib/src/lib.rs"],
             ROOT,
@@ -4750,7 +5346,7 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
             self.environments,
             self.policy,
         )
-        self.assertEqual(["claudine"], scope["scheduled_areas"])
+        self.assertEqual(["claudine", "tools"], scope["scheduled_areas"])
         self.assertLess(scope["job_estimate"], self.full["job_estimate"])
 
     def test_a_nested_area_fans_out_beside_its_parent_never_inside_it(self) -> None:
@@ -4940,17 +5536,22 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
 
     def test_messenger_cli_change_selects_its_normal_package_cell(self) -> None:
+        # `test-toolkit` rides along on every Rust change as the archive-path
+        # guard's lint-only owner; the package under test still gets exactly
+        # its own normal cell.
         scope = self.scope("messenger/cli/src/lib.rs")
-        self.assertEqual(["messenger-cli"], scope["packages"])
+        self.assertEqual(["messenger-cli", "test-toolkit"], scope["packages"])
         self.assertEqual(
-            ["messenger-cli"],
+            ["messenger-cli", "test-toolkit"],
             [entry["package"] for entry in scope["matrix"]],
         )
 
     def test_workspace_excluded_zed_extension_selects_dmls_companion(self) -> None:
         scope = self.scope("darkmatter/dmls/zed-dmls/src/lib.rs")
-        self.assertEqual(["dmls"], scope["packages"])
-        self.assertEqual(["dmls"], [entry["package"] for entry in scope["matrix"]])
+        self.assertEqual(["dmls", "test-toolkit"], scope["packages"])
+        self.assertEqual(
+            ["dmls", "test-toolkit"], [entry["package"] for entry in scope["matrix"]]
+        )
         self.assertEqual(
             ["neovim", "zed-extension"],
             scope["matrix"][0]["runner_tools"],
@@ -5000,7 +5601,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         # change to sniff's direct dependents. On mismatch, the message below
         # hands back the computed list ready to paste into this fixture.
         scope = self.scope("sniff/lib/src/lib.rs")
-        self.assertEqual(["sniff"], scope["packages"])
+        self.assertEqual(["sniff", "test-toolkit"], scope["packages"])
         computed = scope["reverse_dependencies"]
         paste_ready = "\n".join(f'                "{name}",' for name in computed)
         hint = (
@@ -5333,6 +5934,117 @@ class ArchiveInventoryClosureTests(unittest.TestCase):
             any(record["companion_suites"] for record in self.plan["packages"]),
             "no package declares a companion suite",
         )
+
+
+class DiffScopeParserTests(unittest.TestCase):
+    """`--name-status -z` into the planner's `--deleted`/`--` argument tail.
+
+    The parser every selection boundary shares, so the NUL framing is proved
+    once: a status and each path are separate records, and a rename or copy
+    carries TWO paths for one status. Mis-stepping that puts a rename's SOURCE
+    in the changed list, which is exactly the "unexpectedly missing path" the
+    deletion identity exists to distinguish.
+    """
+
+    @staticmethod
+    def stream(*records: str) -> bytes:
+        return b"".join(record.encode() + b"\0" for record in records)
+
+    def parse(self, *records: str) -> tuple[list[str], list[str]]:
+        changed, deleted = diff_scope.parse_name_status(self.stream(*records))
+        return (
+            [path.decode() for path in changed],
+            [path.decode() for path in deleted],
+        )
+
+    def test_a_deletion_is_reported_as_changed_and_as_deleted(self) -> None:
+        self.assertEqual((["gone.rs"], ["gone.rs"]), self.parse("D", "gone.rs"))
+
+    def test_an_ordinary_edit_is_changed_and_not_deleted(self) -> None:
+        self.assertEqual((["kept.rs"], []), self.parse("M", "kept.rs"))
+
+    def test_a_rename_reports_its_destination_and_neither_path_as_deleted(self) -> None:
+        self.assertEqual(
+            (["after.rs"], []), self.parse("R100", "before.rs", "after.rs")
+        )
+
+    def test_a_copy_reports_its_destination_too(self) -> None:
+        self.assertEqual((["copy.rs"], []), self.parse("C75", "source.rs", "copy.rs"))
+
+    def test_a_rename_beside_a_deletion_keeps_the_two_apart(self) -> None:
+        # The regression in one record set: a parser that read the rename's
+        # two paths as two records would emit `before.rs` as a changed path
+        # that does not exist, and shift `D` onto the wrong name.
+        self.assertEqual(
+            (["after.rs", "gone.rs", "edited.rs"], ["gone.rs"]),
+            self.parse("R100", "before.rs", "after.rs", "D", "gone.rs", "M", "edited.rs"),
+        )
+
+    def test_a_path_containing_a_newline_survives(self) -> None:
+        self.assertEqual((["odd\nname.rs"], ["odd\nname.rs"]), self.parse("D", "odd\nname.rs"))
+
+    def test_an_empty_diff_yields_empty_lists(self) -> None:
+        self.assertEqual(([], []), self.parse())
+
+    def test_a_status_without_a_path_is_an_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "truncated"):
+            diff_scope.parse_name_status(self.stream("M"))
+
+    def test_a_rename_without_a_destination_is_an_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no destination"):
+            diff_scope.parse_name_status(self.stream("R100", "before.rs"))
+
+    def test_the_argument_tail_names_every_deletion_before_the_separator(self) -> None:
+        tail = diff_scope.arguments([b"after.rs", b"gone.rs"], [b"gone.rs"])
+        self.assertEqual(
+            ["--deleted", "gone.rs", "--", "after.rs", "gone.rs"],
+            [part.decode() for part in tail.split(b"\0")[:-1]],
+        )
+
+    def test_an_empty_change_set_still_emits_the_separator(self) -> None:
+        # `xargs -0` on a BSD host runs nothing at all for empty input, which
+        # is why the boundaries no longer need a branch for "no changes".
+        self.assertEqual(b"--\0", diff_scope.arguments([], []))
+
+    def test_the_tool_parses_a_real_git_diff_and_appends_untracked_paths(self) -> None:
+        require_tools("git", enforced_by=GIT_ENFORCED_BY)
+        with tempfile.TemporaryDirectory(prefix="diff-scope-") as temporary:
+            root = Path(temporary)
+            commit = [
+                "git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                "-c", "commit.gpgsign=false",
+            ]
+
+            def git(*args: str) -> None:
+                subprocess.run(
+                    commit + list(args), cwd=root, check=True, capture_output=True
+                )
+
+            (root / "kept.rs").write_text("a\n", encoding="utf-8")
+            (root / "gone.rs").write_text("b\n", encoding="utf-8")
+            (root / "before.rs").write_text("c" * 200 + "\n", encoding="utf-8")
+            git("init", "-q", "-b", "main")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            (root / "kept.rs").write_text("a2\n", encoding="utf-8")
+            git("rm", "-q", "gone.rs")
+            git("mv", "before.rs", "after.rs")
+            git("add", "-A")
+            git("commit", "-q", "-m", "head")
+
+            diff = subprocess.run(
+                ["git", "diff", "--name-status", "-z", "HEAD~1", "HEAD"],
+                cwd=root, check=True, capture_output=True,
+            ).stdout
+            parsed = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "ci" / "diff_scope.py"), "new.rs"],
+                input=diff, check=True, capture_output=True,
+            ).stdout
+            tail = [part.decode() for part in parsed.split(b"\0")[:-1]]
+
+        self.assertEqual(["--deleted", "gone.rs", "--"], tail[:3])
+        self.assertEqual({"after.rs", "gone.rs", "kept.rs", "new.rs"}, set(tail[3:]))
+        self.assertNotIn("before.rs", tail)
 
 
 if __name__ == "__main__":

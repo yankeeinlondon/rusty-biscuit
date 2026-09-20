@@ -75,7 +75,7 @@ const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 4;
+const PLAN_SCHEMA_VERSION: u32 = 5;
 
 /// Version of `.github/ci/environments.json`
 /// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2
@@ -1206,6 +1206,9 @@ struct ExpectedCell {
     /// status must report the companion step's success; a skipped companion
     /// downgrades an otherwise-green cell (R12).
     companion_suites: Vec<String>,
+    /// True when the plan made this cell's companions its whole required work.
+    /// See [`PlanCell::companions_only`].
+    companions_only: bool,
     /// The result a receipt already established for this cell. Present only on
     /// the plan path; a cell carrying one expects no CI job to have run.
     reused: Option<ReusedResult>,
@@ -1234,6 +1237,7 @@ impl ExpectedCell {
             gap: None,
             exclusion: None,
             companion_suites: Vec::new(),
+            companions_only: false,
             reused: None,
             accepted_gap: false,
             prohibition: None,
@@ -1476,6 +1480,14 @@ struct PlanCell {
     /// reading the names here is a translation rather than a second answer.
     #[serde(default)]
     companions: Vec<PlanCompanion>,
+    /// The plan's mark that this cell's required work is its companion suites
+    /// rather than the package's own gate command — the shape a companion the
+    /// change selected creates when the package itself was not selected. Its
+    /// producer deliberately skips clippy, so a missing companion result
+    /// leaves the cell with NO evidence rather than with an uncovered
+    /// companion, which is the distinction the diagnostic has to draw.
+    #[serde(default)]
+    companions_only: bool,
 }
 
 /// One companion suite as the plan attached it to a cell. Only the name is
@@ -1647,6 +1659,7 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
             .iter()
             .map(|companion| companion.name.clone())
             .collect();
+        expectation.companions_only = cell.companions_only;
 
         if let Some(gap) = &cell.gap {
             let declared = DeclaredGap {
@@ -2675,8 +2688,13 @@ fn status_cells(
                 ),
             ),
         };
-        let (state, reason) =
-            companion_lint_downgrade(status, &expectation.companion_suites, state, reason);
+        let (state, reason) = companion_lint_downgrade(
+            status,
+            &expectation.companion_suites,
+            expectation.companions_only,
+            state,
+            reason,
+        );
         cells.push(Cell {
             area: expectation.area.clone(),
             state,
@@ -2726,8 +2744,11 @@ fn status_cells(
         let (state, reason) = state_from_status(status);
 
         let expected_companions = lint_companions(policies, &status.package);
+        // No plan cell behind this status, so nothing records whether the cell
+        // was companions-only; the package policy's own lint companions are
+        // the expectation and the ordinary wording applies.
         let (state, reason) =
-            companion_lint_downgrade(Some(status), &expected_companions, state, reason);
+            companion_lint_downgrade(Some(status), &expected_companions, false, state, reason);
         let area = policies
             .iter()
             .find(|policy| policy.package == status.package)
@@ -2907,9 +2928,15 @@ fn companion_results(
 /// recipe — never every suite the package owns. A package whose companions are
 /// test-only has nothing to evidence here, and demanding it would fail a lint
 /// cell for work its job was never asked to run.
+///
+/// `companions_only` is the plan's mark that the cell has no clippy of its own
+/// (the producer skips it). The downgrade is the same either way — it already
+/// fails a green cell whose companion produced no success evidence — but such a
+/// cell has NO evidence rather than partial evidence, and the reason says so.
 fn companion_lint_downgrade(
     status: Option<&ProducerStatus>,
     expected: &[String],
+    companions_only: bool,
     state: CellState,
     reason: Option<String>,
 ) -> (CellState, Option<String>) {
@@ -2921,6 +2948,13 @@ fn companion_lint_downgrade(
     }
     let problems = companion_problems(expected, Some(status));
     match problems.into_iter().next() {
+        Some(problem) if companions_only => (
+            CellState::Fail,
+            Some(format!(
+                "{problem}; this cell's only work is its companions, so it \
+                 evidenced nothing at all"
+            )),
+        ),
         Some(problem) => (CellState::Fail, Some(problem)),
         None => (state, reason),
     }

@@ -29,6 +29,7 @@ def plan(**overrides: object) -> dict:
         "head": SHA_B,
         "change_class": "package",
         "change_inventory": change_inventory(),
+        "archive_guard": archive_guard(),
         "full_scope": False,
         "full_scope_gates": [],
         "areas": [
@@ -87,6 +88,18 @@ def change_inventory(**overrides: object) -> dict:
             "other": 0,
             "total": 1,
         },
+        "deleted": [],
+    }
+    document.update(overrides)
+    return document
+
+
+def archive_guard(**overrides: object) -> dict:
+    document = {
+        "selected": True,
+        "mode": "changed",
+        "paths": ["claudine/lib/src/lib.rs"],
+        "reason": "the pull_request event carries a change inventory",
     }
     document.update(overrides)
     return document
@@ -281,32 +294,29 @@ class ContractArtifactTests(unittest.TestCase):
     # R9: `RESOLVED_PLAN_SCHEMA_VERSION` moves when the plan's required field
     # set does. It reached 4 because build records and the change inventory
     # each claimed 3 on separate branches, so the merged shape needed a version
-    # of its own. `RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION`, and
+    # of its own, and 5 when the archive-path guard's scan scope joined them.
+    # `RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION`, and
     # `SCOPE_RECEIPT_SCHEMA_VERSION` do NOT move; the scope receipt's embedded
     # `plan_schema_version` check is what produces the one intended miss.
     # -----------------------------------------------------------------------
 
-    def test_the_plan_schema_carries_the_change_inventory_and_builds_at_version_4(self):
-        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 4:
+    def test_the_plan_schema_carries_the_guard_inventory_and_builds_at_version_5(self):
+        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 5:
             raise AssertionError(
-                "the resolved plan schema must be version 4 once it requires "
-                "both the change inventory and build records, got "
-                f"{schema.RESOLVED_PLAN_SCHEMA_VERSION}"
+                "the resolved plan schema must be version 5 once it requires "
+                "the change inventory, build records, and the archive-path "
+                f"guard's scope, got {schema.RESOLVED_PLAN_SCHEMA_VERSION}"
             )
-        self.assertIn(
-            "builds",
-            schema.RESOLVED_PLAN_FIELDS,
-            "version 4 is the union: build records are required too",
-        )
-        self.assertIn(
-            "change_inventory",
-            schema.RESOLVED_PLAN_FIELDS,
-            "the inventory is a REQUIRED plan field, not an optional sibling",
-        )
-        self.assertIs(True, schema.RESOLVED_PLAN_FIELDS["change_inventory"])
+        for field in ("builds", "change_inventory", "archive_guard"):
+            self.assertIs(
+                True,
+                schema.RESOLVED_PLAN_FIELDS.get(field),
+                f"{field} is a REQUIRED plan field, not an optional sibling",
+            )
         shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(4, shipped["resolved_plan"]["schema_version"])
+        self.assertEqual(5, shipped["resolved_plan"]["schema_version"])
         self.assertIn("change_inventory", shipped["resolved_plan"]["document"])
+        self.assertIn("archive_guard", shipped["resolved_plan"]["document"])
 
     def test_a_plan_without_the_inventory_is_rejected(self):
         document = plan()
@@ -474,6 +484,39 @@ class ChangeInventoryValidationTests(unittest.TestCase):
     def test_a_diff_inventory_may_not_also_carry_an_absence_reason(self):
         self.assert_named(self.problems(reason="both at once"), "absence reason")
 
+    def test_a_diff_inventory_must_carry_its_deletions(self):
+        document = plan(change_inventory=change_inventory())
+        del document["change_inventory"]["deleted"]
+        self.assert_named(schema.validate_resolved_plan(document), "'deleted'")
+
+    def test_a_no_diff_inventory_may_not_carry_deletions(self):
+        # Gated exactly like the buckets: a run that consulted no diff learned
+        # of no deletion either, and an empty list would claim otherwise.
+        document = plan(
+            change_inventory={
+                "diff_available": False,
+                "reason": "manual full scope",
+                "deleted": [],
+            }
+        )
+        self.assert_named(schema.validate_resolved_plan(document), "'deleted'")
+
+    def test_an_unsorted_or_windows_spelled_deletion_is_rejected(self):
+        self.assert_named(self.problems(deleted=["b.rs", "a.rs"]), "is not sorted")
+        self.assert_named(
+            self.problems(deleted=["a\\b.rs"]),
+            "not a normalized repository-relative path",
+        )
+        self.assert_named(self.problems(deleted=["a.rs", "a.rs"]), "repeats a path")
+
+    def test_a_deletion_that_leaves_the_checkout_is_rejected(self):
+        for spelling in ("/etc/passwd.rs", "C:/windows/a.rs", "../outside.rs"):
+            with self.subTest(path=spelling):
+                self.assert_named(
+                    self.problems(deleted=[spelling]),
+                    "not a normalized repository-relative path",
+                )
+
     def test_a_diff_inventory_must_carry_its_buckets(self):
         document = plan(change_inventory={"diff_available": True})
         self.assert_named(schema.validate_resolved_plan(document), "'paths'")
@@ -515,6 +558,21 @@ class ChangeInventoryValidationTests(unittest.TestCase):
             ),
             "not a normalized repository-relative path",
         )
+
+    def test_a_bucket_path_that_leaves_the_checkout_is_rejected(self):
+        for spelling in ("/etc/passwd.rs", "C:/windows/a.rs", "../outside.rs"):
+            with self.subTest(path=spelling):
+                self.assert_named(
+                    self.problems(
+                        paths={
+                            "configuration": [],
+                            "documentation": [],
+                            "source": [spelling],
+                            "other": [],
+                        }
+                    ),
+                    "not a normalized repository-relative path",
+                )
 
     def test_a_path_in_two_buckets_is_rejected(self):
         self.assert_named(
@@ -570,6 +628,142 @@ class ChangeInventoryValidationTests(unittest.TestCase):
     def test_a_non_object_inventory_is_rejected(self):
         self.assert_named(
             schema.validate_resolved_plan(plan(change_inventory=[])), "must be an object"
+        )
+
+
+class ArchiveGuardValidationTests(unittest.TestCase):
+    """The guard's scope is refused here rather than guessed at by the scanner.
+
+    An empty changed-file scan and a full-tree scan both report zero
+    violations. Every rule below exists so the two can never be confused: a
+    `changed` scan always names its paths, a `full` scan never carries a list a
+    reader could take for the whole of what was checked, and an unselected
+    guard describes no scope at all.
+    """
+
+    def problems(self, **overrides: object) -> list[str]:
+        return schema.validate_resolved_plan(plan(archive_guard=archive_guard(**overrides)))
+
+    def assert_named(self, problems: list[str], fragment: str) -> None:
+        self.assertTrue(problems, "the defect was accepted")
+        self.assertTrue(
+            all(problem.startswith("malformed-receipt:") for problem in problems),
+            f"every guard problem carries a code: {problems}",
+        )
+        self.assertTrue(
+            any(fragment in problem for problem in problems),
+            f"no problem named {fragment!r}: {problems}",
+        )
+
+    def test_the_three_valid_shapes_validate(self):
+        for scope in (
+            {"selected": False, "reason": "documentation-only change"},
+            {"selected": True, "mode": "full", "reason": "a push scans everything"},
+            {
+                "selected": True,
+                "mode": "changed",
+                "paths": ["a/b.rs"],
+                "reason": "pull request inventory",
+            },
+            # The real state an empty list spells, and the one a full scan
+            # must never be substituted for.
+            {
+                "selected": True,
+                "mode": "changed",
+                "paths": [],
+                "reason": "nothing eligible changed",
+            },
+        ):
+            with self.subTest(scope=scope):
+                self.assertEqual([], schema.validate_resolved_plan(plan(archive_guard=scope)))
+
+    def test_an_unselected_guard_may_not_describe_a_scope(self):
+        for field in ("mode", "paths"):
+            with self.subTest(field=field):
+                self.assert_named(
+                    schema.validate_resolved_plan(
+                        plan(
+                            archive_guard={
+                                "selected": False,
+                                "reason": "nothing selected it",
+                                field: "full" if field == "mode" else [],
+                            }
+                        )
+                    ),
+                    f"must not carry {field!r}",
+                )
+
+    def test_a_selected_guard_must_name_a_mode(self):
+        self.assert_named(
+            schema.validate_resolved_plan(
+                plan(archive_guard={"selected": True, "reason": "selected"})
+            ),
+            "must name a scan mode",
+        )
+
+    def test_an_unknown_mode_is_rejected(self):
+        self.assert_named(self.problems(mode="partial"), "expected one of")
+
+    def test_a_changed_scan_must_name_its_paths(self):
+        scope = archive_guard()
+        del scope["paths"]
+        self.assert_named(
+            schema.validate_resolved_plan(plan(archive_guard=scope)),
+            "explicit empty list",
+        )
+
+    def test_a_full_scan_may_not_carry_paths(self):
+        self.assert_named(
+            self.problems(mode="full"),
+            "must not carry paths",
+        )
+
+    def test_paths_must_be_sorted_deduplicated_and_normalized(self):
+        self.assert_named(self.problems(paths=["b.rs", "a.rs"]), "is not sorted")
+        self.assert_named(self.problems(paths=["a.rs", "a.rs"]), "repeats a path")
+        self.assert_named(
+            self.problems(paths=["a\\b.rs"]),
+            "not a normalized repository-relative path",
+        )
+        self.assert_named(
+            self.problems(paths=["./a/b.rs"]),
+            "not a normalized repository-relative path",
+        )
+
+    def test_a_path_that_leaves_the_checkout_is_rejected(self):
+        """The guard resolves each path against the checkout root.
+
+        An absolute path discards that root outright, a drive prefix does the
+        same on Windows, and a `..` component walks out without ever looking
+        absolute. All three would have the guard read — or report as an
+        ordinary deletion — a file outside the repository.
+        """
+        for spelling in (
+            "/etc/passwd.rs",
+            "C:/windows/system32.rs",
+            "C:relative.rs",
+            "//host/share/a.rs",
+            "../outside.rs",
+            "claudine/../../outside.rs",
+        ):
+            with self.subTest(path=spelling):
+                self.assert_named(
+                    self.problems(paths=[spelling]),
+                    "not a normalized repository-relative path",
+                )
+
+    def test_every_scope_must_state_a_reason(self):
+        self.assert_named(self.problems(reason="   "), "must state why")
+
+    def test_an_unknown_guard_field_is_rejected(self):
+        self.assert_named(self.problems(files=["a.rs"]), "unknown field")
+
+    def test_a_plan_without_the_guard_scope_is_rejected(self):
+        document = plan()
+        del document["archive_guard"]
+        self.assertIn(
+            "malformed-receipt: resolved plan is missing required field 'archive_guard'",
+            schema.validate_resolved_plan(document),
         )
 
 
@@ -774,6 +968,60 @@ class ResolvedPlanValidationTests(unittest.TestCase):
             "malformed-receipt: cell claudine/ubuntu-latest/L1 carries dependents but "
             "only a check cell compiles them",
             schema.validate_resolved_plan(plan(cells=[cell(dependents=["claudine-cli"])])),
+        )
+
+    def test_a_companions_only_lint_cell_validates(self):
+        # The archive-path guard's own cell: nothing selected the package, so
+        # its required work is the companion and not Clippy.
+        document = plan(
+            cells=[
+                cell(
+                    gate="lint",
+                    reusable=False,
+                    target_kinds=[],
+                    compile_coverage_from="",
+                    companions=[
+                        {
+                            "name": "archive-path-guard",
+                            "recipe": "cd tools/test-toolkit && just archive-path-guard",
+                            "environment": "ubuntu-latest",
+                            "counts": None,
+                            "counts_reason": "a lint gate reports no test counts",
+                        }
+                    ],
+                    companions_only=True,
+                )
+            ]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(document))
+
+    def test_a_companions_only_cell_with_no_companion_is_refused(self):
+        # It would stand Clippy down and run nothing at all — a green cell that
+        # verified nothing, which is the shape the plan exists to prevent.
+        problems = schema.validate_resolved_plan(
+            plan(cells=[cell(gate="lint", reusable=False, companions_only=True)])
+        )
+        self.assertTrue(
+            any("names no companion" in problem for problem in problems), problems
+        )
+
+    def test_companions_only_outside_a_lint_cell_is_refused(self):
+        problems = schema.validate_resolved_plan(
+            plan(cells=[cell(companions_only=True, companions=[{"name": "x"}])])
+        )
+        self.assertTrue(
+            any("only a lint cell has Clippy" in problem for problem in problems),
+            problems,
+        )
+
+    def test_a_false_companions_only_is_refused(self):
+        # Present only to assert the claim: `false` would be a third state a
+        # reader has to interpret, and absence already says "Clippy is required".
+        problems = schema.validate_resolved_plan(
+            plan(cells=[cell(gate="lint", reusable=False, companions_only=False)])
+        )
+        self.assertTrue(
+            any("present only to assert" in problem for problem in problems), problems
         )
 
     def test_area_must_be_derived_from_the_package_record(self):

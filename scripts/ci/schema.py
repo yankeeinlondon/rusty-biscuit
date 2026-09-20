@@ -68,6 +68,15 @@ which is derived from the gating packages a change selects. A version-2 or
 version-3 scope receipt therefore misses once as `scope-schema` and is never
 upgraded in place; validation receipts are untouched, so
 `RECEIPT_SCHEMA_VERSION` does not move.
+
+Version 5 adds the required `archive_guard` scope
+(`fixes/2026-09-19-less-brittle`) and the `deleted` half of the change
+inventory it reads. The guard scans repository source for compile-time paths
+that do not survive an archived run, and the planner is the only thing that
+knows which files an event put in scope; a plan that carried no answer would
+leave the guard choosing between an empty scan and a full one, and it refuses
+to guess. A version-4 scope receipt misses once as `scope-schema`, for the same
+reason every earlier one did.
 """
 
 from __future__ import annotations
@@ -82,7 +91,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 4
+RESOLVED_PLAN_SCHEMA_VERSION = 5
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -217,6 +226,10 @@ FAILURE_DETAIL_LIMIT = 20
 _SHA = re.compile(r"[0-9a-f]{40}")
 _IDENTITY = re.compile(r"[0-9a-f]{8,64}")
 
+#: A Windows drive prefix. `C:rel.rs` is drive-relative rather than absolute,
+#: so the leading-slash test does not cover it.
+_DRIVE = re.compile(r"[A-Za-z]:")
+
 #: A planned build key: sixteen lowercase hex digits of XXH64, as `ci-build
 #: key` writes it. Narrower than [`_IDENTITY`] on purpose — a SHA-256 here
 #: would mean something computed the key outside the one hashing boundary.
@@ -239,6 +252,12 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     #: gating packages a change selects, so the two are allowed to disagree and
     #: a reader is seeing the truth when they do.
     "change_inventory": True,
+    #: The archive-path guard's scan scope: whether the planner selected it and,
+    #: if so, whether the scan is the full eligible corpus or an explicit path
+    #: list. Required because an absent field and "nothing eligible changed" are
+    #: different claims, and the guard refuses to guess which one it is looking
+    #: at (fixes/2026-09-19-less-brittle).
+    "archive_guard": True,
     "full_scope": True,
     "full_scope_gates": True,
     "areas": True,
@@ -297,8 +316,29 @@ CHANGE_INVENTORY_FIELDS: dict[str, bool] = {
     "diff_available": True,
     "paths": False,
     "counts": False,
+    #: The subset of the diff's paths that were REMOVED. Gated exactly like
+    #: `paths` and `counts`. Declared rather than inferred: `git diff
+    #: --name-only` cannot tell a deletion from a path that is simply not there,
+    #: and a consumer that treated every missing path as a deletion would stop
+    #: checking a file the diff named.
+    "deleted": False,
     "reason": False,
 }
+
+#: Exactly one of three shapes, each carrying a non-empty `reason`. `mode` and
+#: `paths` are absent when `selected` is false: an unselected guard has no scope
+#: to describe, and an empty list there would be indistinguishable from the real
+#: "nothing eligible changed" state.
+ARCHIVE_GUARD_FIELDS: dict[str, bool] = {
+    "selected": True,
+    "mode": False,
+    "paths": False,
+    "reason": True,
+}
+
+#: The scan scopes a selected guard can have. `changed` always carries `paths`,
+#: even when empty; `full` never does.
+ARCHIVE_GUARD_MODES = ("changed", "full")
 
 AREA_FIELDS: dict[str, bool] = {
     "area": True,
@@ -380,6 +420,10 @@ CELL_FIELDS: dict[str, bool] = {
     #: only on a cell a companion attaches to, which is the same cell R7 makes
     #: non-reusable.
     "companions": False,
+    #: On a `lint` cell with companions only: the cell's required work is those
+    #: companions and NOT the package's own Clippy, because nothing selected the
+    #: package itself. Optional, so every cell written before it stays valid.
+    "companions_only": False,
     #: The planned build key this cell executes. Present exactly on an
     #: executing [`BUILD_GATES`] cell: a reused, governed, or prohibited cell
     #: consumes no build, and lint and check compile their own configurations.
@@ -541,6 +585,7 @@ def contract() -> dict[str, Any]:
             "build_consumer": BUILD_CONSUMER_FIELDS,
             "build_identity": BUILD_IDENTITY_FIELDS,
             "change_inventory": CHANGE_INVENTORY_FIELDS,
+            "archive_guard": ARCHIVE_GUARD_FIELDS,
         },
         "receipt": {
             "schema_version": RECEIPT_SCHEMA_VERSION,
@@ -568,6 +613,7 @@ def contract() -> dict[str, Any]:
             "origins": list(ORIGINS),
             "cell_states": list(CELL_STATES),
             "change_buckets": list(CHANGE_BUCKETS),
+            "archive_guard_modes": list(ARCHIVE_GUARD_MODES),
             "accepted_gap_state": ACCEPTED_GAP_STATE,
             "completions": list(COMPLETIONS),
             "outcomes": list(OUTCOMES),
@@ -643,6 +689,103 @@ def _str_list(where: str, value: Any, allowed: tuple[str, ...] | None = None) ->
     ]
 
 
+def _is_normalized_relative_path(entry: str) -> bool:
+    """Whether `entry` is one POSIX-spelled path inside the repository.
+
+    Containment is part of normalization here, not a separate rule: every
+    consumer resolves a plan path against the checkout root, and `/etc/passwd`,
+    `C:/windows`, or `pkg/../../outside.rs` each name a file nothing that read
+    this plan agreed to read.
+    """
+    if not entry or entry != entry.strip():
+        return False
+    if "\\" in entry or entry.startswith("./"):
+        return False
+    if entry.startswith("/"):
+        return False
+    if _DRIVE.match(entry):
+        return False
+    return ".." not in entry.split("/")
+
+
+def _unnormalized(where: str, entries: list[str]) -> list[str]:
+    return [
+        f"malformed-receipt: {where} carries {entry!r}, which is not a "
+        "normalized repository-relative path"
+        for entry in entries
+        if not _is_normalized_relative_path(entry)
+    ]
+
+
+def _normalized_path_list(where: str, value: Any) -> list[str]:
+    """Every reason `value` is not a sorted, de-duplicated, normalized path list.
+
+    One spelling per path, so a Windows-spelled diff and a POSIX-spelled one
+    produce the same document and two planners cannot disagree about whether a
+    file is in scope.
+    """
+    problems = _str_list(where, value)
+    if problems:
+        return problems
+    if list(value) != sorted(value):
+        problems.append(f"malformed-receipt: {where} is not sorted")
+    if len(set(value)) != len(value):
+        problems.append(f"malformed-receipt: {where} repeats a path")
+    return problems + _unnormalized(where, list(value))
+
+
+def _archive_guard(value: Any) -> list[str]:
+    """Every reason `value` is not a valid archive-path guard scope.
+
+    The rules the guard itself refuses to guess at: an unselected guard
+    describes no scope, a `changed` scan always names its paths (an explicitly
+    empty list is the real "nothing eligible changed" state and is never an
+    implicit full scan), and a `full` scan never carries a list a reader could
+    mistake for the whole of what was checked.
+    """
+    where = "resolved plan archive_guard"
+    problems = _keys(where, value, ARCHIVE_GUARD_FIELDS)
+    if problems:
+        return problems
+
+    selected = value["selected"]
+    if not isinstance(selected, bool):
+        return [f"malformed-receipt: {where} selected must be a boolean"]
+    if not isinstance(value["reason"], str) or not value["reason"].strip():
+        problems.append(
+            f"malformed-receipt: {where} must state why it holds the scope it does"
+        )
+
+    if not selected:
+        problems += [
+            f"malformed-receipt: {where} selected nothing and must not carry {name!r}"
+            for name in ("mode", "paths")
+            if name in value
+        ]
+        return problems
+
+    if "mode" not in value:
+        return problems + [
+            f"malformed-receipt: {where} is selected and must name a scan mode"
+        ]
+    problems += _member(f"{where} mode", value["mode"], ARCHIVE_GUARD_MODES, "malformed-receipt")
+
+    if value["mode"] == "changed":
+        if "paths" not in value:
+            problems.append(
+                f"malformed-receipt: {where} is a changed scan and must name its "
+                "paths; an empty scan is spelled as an explicit empty list"
+            )
+        else:
+            problems += _normalized_path_list(f"{where} paths", value["paths"])
+    elif value["mode"] == "full" and "paths" in value:
+        problems.append(
+            f"malformed-receipt: {where} is a full scan and must not carry paths; "
+            "a listed subset would read as the whole of what was checked"
+        )
+    return problems
+
+
 def _change_inventory(value: Any) -> list[str]:
     """Every reason `value` is not a valid change inventory, or an empty list.
 
@@ -662,7 +805,7 @@ def _change_inventory(value: Any) -> list[str]:
     if not available:
         problems = [
             f"malformed-receipt: {where} reports no diff and must not carry {name!r}"
-            for name in ("paths", "counts")
+            for name in ("paths", "counts", "deleted")
             if name in value
         ]
         if not isinstance(value.get("reason"), str) or not value.get("reason"):
@@ -676,13 +819,15 @@ def _change_inventory(value: Any) -> list[str]:
             f"malformed-receipt: {where} carries a diff inventory and must not "
             "also carry an absence reason"
         )
-    for name in ("paths", "counts"):
+    for name in ("paths", "counts", "deleted"):
         if name not in value:
             problems.append(
                 f"malformed-receipt: {where} carries a diff and is missing {name!r}"
             )
     if problems:
         return problems
+
+    problems += _normalized_path_list(f"{where} deleted", value["deleted"])
 
     paths, counts = value["paths"], value["counts"]
     if not isinstance(paths, dict) or sorted(paths) != sorted(CHANGE_BUCKETS):
@@ -708,12 +853,7 @@ def _change_inventory(value: Any) -> list[str]:
             continue
         if list(entries) != sorted(entries):
             problems.append(f"malformed-receipt: {where} {bucket} is not sorted")
-        problems += [
-            f"malformed-receipt: {where} {bucket} carries {entry!r}, which is "
-            "not a normalized repository-relative path"
-            for entry in entries
-            if "\\" in entry or entry.startswith("./") or entry != entry.strip()
-        ]
+        problems += _unnormalized(f"{where} {bucket}", entries)
         problems += [
             f"malformed-receipt: {where} places {entry!r} in more than one bucket"
             for entry in entries
@@ -767,6 +907,7 @@ def validate_resolved_plan(document: Any) -> list[str]:
         "malformed-receipt",
     )
     problems += _change_inventory(document["change_inventory"])
+    problems += _archive_guard(document["archive_guard"])
 
     areas = {}
     for entry in document["areas"]:
@@ -1228,6 +1369,22 @@ def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
         problems.append(
             f"malformed-receipt: {label} is in state 'reused' but its execution is {execution!r}"
         )
+    if "companions_only" in entry:
+        if entry["companions_only"] is not True:
+            problems.append(
+                f"malformed-receipt: {label} carries companions_only, which is "
+                "present only to assert the cell's work IS its companions"
+            )
+        if entry.get("gate") != "lint":
+            problems.append(
+                f"malformed-receipt: {label} is companions-only but only a lint "
+                "cell has Clippy to stand down"
+            )
+        if not entry.get("companions"):
+            problems.append(
+                f"malformed-receipt: {label} is companions-only and names no "
+                "companion, so it would run nothing at all"
+            )
     return problems
 
 
