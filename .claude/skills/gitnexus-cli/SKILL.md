@@ -19,11 +19,19 @@ Commands below use `node .gitnexus/run.cjs <command>` — the project-local runn
 just gitnexus
 ```
 
-The recipe short-circuits when `gitnexus status` already reports up-to-date, then
-runs `gitnexus analyze --skip-agents-md --force`. `--skip-agents-md` is the point:
-a bare `analyze` regenerates CLAUDE.md and AGENTS.md, which turns an index refresh
-into tracked diff noise. `--force` is there because incremental indexing fails
-often enough to be unreliable.
+In an interactive terminal, the recipe starts `gitnexus analyze --watch` in the
+foreground. Re-running it for the same worktree detects the recipe-managed
+watcher through `.gitnexus/just-watch.pid` and returns `gitnexus status` instead.
+Each linked worktree needs its own watcher: GitNexus resolves and watches the
+current worktree root, and every worktree has independent `.gitnexus/` storage.
+The inferred registry name is shared because GitNexus derives it from the
+canonical checkout, but that name does not widen the watcher's filesystem scope.
+
+When stdin or stdout is not a terminal, the recipe remains finite for hooks and
+agents: it short-circuits when `gitnexus status` reports up-to-date, otherwise it
+runs `gitnexus analyze --skip-agents-md --force`. `--skip-agents-md` prevents a
+one-shot refresh from rewriting CLAUDE.md and AGENTS.md. `--force` retains the
+known-reliable automation path.
 
 The underlying command, for reference and for the flags below:
 
@@ -48,7 +56,19 @@ Run from the project root. This parses all source files, builds the knowledge gr
 
 For Spring runtime enrichment, pass a JSON bundle, one endpoint JSON file, or a directory containing endpoint files. Route evidence is authoritative only when `runtimeConfirmed === true`; `runtimeSource` records provenance and may also accompany `handler-conflict`. Env/configprops values are never persisted.
 
-Use `node .gitnexus/run.cjs analyze --watch` for a long-lived local Git repository. It performs an initial analysis, queues scanner-admitted file changes, and retries intact failed batches with bounded backoff. Watch refreshes update only the graph: they skip AGENTS.md / CLAUDE.md injection and standard skill installation, so run a one-shot `analyze` when those generated files need updating. Watch rejects one-shot or context-output flags including `--force`, embedding flags, `--skills`, `--default-branch`, `--skip-agents-md`, `--skip-skills`, `--no-stats`, `--self-commit`, `--index-only`, and `--skip-git`. It never pulls remotes. Scheduled remote clone/pull is a different command: `gitnexus auto-sync`. Bare `gitnexus watch` is reserved and does not start either job. Running MCP and `serve` processes periodically check for a published replacement and reopen it without a restart. MCP checks are throttled to once every five seconds, so a tool call before the next check can briefly use the previous index.
+Use `just gitnexus` from an interactive terminal for a long-lived local watcher.
+It performs an initial analysis, queues scanner-admitted file changes, and retries
+intact failed batches with bounded backoff. Watch refreshes update only the graph:
+they skip AGENTS.md / CLAUDE.md injection and standard skill installation, so run
+a one-shot `analyze` when those generated files need updating. Watch rejects
+one-shot or context-output flags including `--force`, embedding flags, `--skills`,
+`--default-branch`, `--skip-agents-md`, `--skip-skills`, `--no-stats`,
+`--self-commit`, `--index-only`, and `--skip-git`. It never pulls remotes.
+Scheduled remote clone/pull is a different command: `gitnexus auto-sync`. Bare
+`gitnexus watch` is reserved and does not start either job. Running MCP and
+`serve` processes periodically check for a published replacement and reopen it
+without a restart. MCP checks are throttled to once every five seconds, so a tool
+call before the next check can briefly use the previous index.
 
 ### status — Check index freshness
 

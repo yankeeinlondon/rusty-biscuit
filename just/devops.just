@@ -162,10 +162,57 @@ deps:
     echo
     sniff repo package-dependencies "$(sniff repo package-area)"
 
-# Refresh the GitNexus index without rewriting agent instruction files.
+# Keep the GitNexus index fresh. Interactive runs watch this worktree; finite
+# callers retain the one-shot refresh used by hooks and agents.
 gitnexus:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    repo_root=$(git rev-parse --show-toplevel)
+    repo_root=$(cd "${repo_root}" && pwd -P)
+    watcher_file="${repo_root}/.gitnexus/just-watch.pid"
+
+    watcher_is_running() {
+        local watcher_pid
+        [[ -r "${watcher_file}" ]] || return 1
+        IFS= read -r watcher_pid < "${watcher_file}"
+        [[ "${watcher_pid}" =~ ^[0-9]+$ ]] || return 1
+        kill -0 "${watcher_pid}" 2>/dev/null
+    }
+
+    if watcher_is_running; then
+        gitnexus status
+        exit $?
+    fi
+
+    # A dead watcher cannot run its EXIT trap. Remove only its small ownership
+    # marker; the index itself remains untouched.
+    rm -f "${watcher_file}"
+
+    if [[ -t 0 && -t 1 ]]; then
+        mkdir -p "${repo_root}/.gitnexus"
+        if ! (set -o noclobber; printf '%s\n' "$$" > "${watcher_file}") 2>/dev/null; then
+            if watcher_is_running; then
+                gitnexus status
+                exit $?
+            fi
+            echo "Unable to claim the GitNexus watcher marker: ${watcher_file}" >&2
+            exit 1
+        fi
+
+        # shellcheck disable=SC2329
+        cleanup_gitnexus_watcher() {
+            local recorded_pid=""
+            IFS= read -r recorded_pid 2>/dev/null < "${watcher_file}" || true
+            if [[ "${recorded_pid}" == "$$" ]]; then
+                rm -f "${watcher_file}"
+            fi
+        }
+        trap cleanup_gitnexus_watcher EXIT
+
+        gitnexus analyze "${repo_root}" --watch
+        exit $?
+    fi
 
     status_output=""
     status_exit=0
