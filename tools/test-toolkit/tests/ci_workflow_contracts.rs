@@ -3835,6 +3835,80 @@ fn the_shipped_planner_omits_deletions_and_the_reader_refuses_an_unexpected_abse
     assert!(err.to_string().contains(MODIFIED), "{err}");
 }
 
+/// The guard reader's closed field set against the frozen cross-language
+/// contract `scripts/ci/schema.py::ARCHIVE_GUARD_FIELDS` is dumped into.
+///
+/// Both sides refuse a field outside the set, so a field added to one alone
+/// would have the planner emit a scope its own consumer rejects — or, worse,
+/// have the consumer ignore a renamed scope field and pass under semantics the
+/// producer never asked for.
+#[test]
+fn the_guard_scope_field_set_matches_the_frozen_contract() {
+    let text = read(".github/ci/schemas/contract.json");
+    let contract: serde_json::Value =
+        serde_json::from_str(&text).expect("the frozen contract parses");
+
+    let mut shipped: Vec<&str> = contract["resolved_plan"]["archive_guard"]
+        .as_object()
+        .expect("the frozen contract describes the guard scope's fields")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    shipped.sort_unstable();
+
+    assert_eq!(
+        shipped,
+        test_toolkit::archive_guard::PLAN_SCOPE_FIELDS,
+        "the guard's reader and the Python validator no longer close the \
+         `archive_guard` field set over the same names"
+    );
+}
+
+/// The shared accept/reject corpus, read by the guard's own plan reader.
+///
+/// `.github/ci/schemas/archive_guard_cases.json` is the one table
+/// `scripts/ci/test_schema.py::ArchiveGuardSharedCorpusTests` reads too, so a
+/// shape added there fails both suites until both readers agree on it. This
+/// half fixes only the verdict; the wording each side produces stays in that
+/// side's own tests.
+#[test]
+fn the_guards_reader_agrees_with_the_shared_scope_corpus() {
+    use test_toolkit::archive_guard::{GuardError, GuardPlan, PLAN_SCHEMA_VERSION};
+
+    let text = read(".github/ci/schemas/archive_guard_cases.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(&text).expect("the shared guard corpus parses");
+    let cases = corpus["cases"]
+        .as_array()
+        .expect("the corpus is a list of cases");
+    assert!(!cases.is_empty(), "an empty table synchronizes nothing");
+
+    for case in cases {
+        let name = case["name"].as_str().expect("every case is named");
+        let rule = case["rule"].as_str().expect("every case states its rule");
+        let valid = case["valid"].as_bool().expect("every case states its verdict");
+        let document = serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "archive_guard": case["archive_guard"],
+        });
+
+        let outcome =
+            GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &document.to_string());
+
+        match (valid, outcome) {
+            (true, Ok(_)) => {}
+            (false, Err(GuardError::MalformedPlan { .. })) => {}
+            (true, Err(error)) => panic!("`{name}` must be accepted — {rule}: {error}"),
+            (false, Ok(plan)) => {
+                panic!("`{name}` must be refused — {rule}; the reader accepted {plan:?}")
+            }
+            (false, Err(error)) => {
+                panic!("`{name}` must be refused as a malformed plan — {rule}: {error}")
+            }
+        }
+    }
+}
+
 /// The guard's plan-schema constant against the frozen cross-language contract
 /// the Python validator is written to.
 ///

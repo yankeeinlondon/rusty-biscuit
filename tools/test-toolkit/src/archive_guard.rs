@@ -347,6 +347,15 @@ impl std::error::Error for GuardError {
 // Scan scope
 // ---------------------------------------------------------------------------
 
+/// `names` as a comma-separated list of backticked field names.
+fn backticked(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Why `path` is not a normalized repository-relative path, or `None`.
 ///
 /// `scripts/ci/schema.py` enforces the same rules on the planner's side, and
@@ -523,6 +532,28 @@ impl GuardPlan {
         let scope = document
             .get(PLAN_KEY)
             .ok_or_else(|| malformed(format!("no top-level `{PLAN_KEY}` key")))?;
+
+        // Key set before scope, the order `_archive_guard` reads in: a field
+        // this reader does not know is a scope rule it cannot apply, and
+        // interpreting only the fields it recognizes would report a pass under
+        // semantics the planner never asked for.
+        let fields = scope.as_object().ok_or_else(|| {
+            malformed(format!("`{PLAN_KEY}` is {scope}, which is not an object"))
+        })?;
+        let mut unknown: Vec<&str> = fields
+            .keys()
+            .map(String::as_str)
+            .filter(|name| !PLAN_SCOPE_FIELDS.contains(name))
+            .collect();
+        unknown.sort_unstable();
+        if !unknown.is_empty() {
+            let plural = if unknown.len() == 1 { "" } else { "s" };
+            return Err(malformed(format!(
+                "`{PLAN_KEY}` carries unknown field{plural} {}; this reader understands {}",
+                backticked(&unknown),
+                backticked(&PLAN_SCOPE_FIELDS)
+            )));
+        }
 
         let reason = match scope.get("reason") {
             None => {
@@ -1880,6 +1911,48 @@ fn fixture_root() -> PathBuf {
         .expect_err("a plan that never mentions the guard cannot scope it");
 
         assert!(err.to_string().contains("no top-level `archive_guard` key"));
+    }
+
+    /// The Rust half of `test_schema.py::test_an_unknown_guard_field_is_rejected`.
+    #[test]
+    fn a_plan_carrying_an_unknown_guard_field_is_an_error() {
+        let err = read_scope(
+            r#"{"selected":true,"mode":"changed","paths":["a/b.rs"],"files":["a/b.rs"],
+                "reason":"a renamed scope field"}"#,
+        )
+        .expect_err("a scope field this reader cannot apply is never silently ignored");
+
+        assert!(matches!(err, GuardError::MalformedPlan { .. }), "{err}");
+        assert!(
+            err.to_string()
+                .contains("`archive_guard` carries unknown field `files`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn unknown_guard_fields_are_named_in_a_stable_order() {
+        let err = read_scope(
+            r#"{"selected":true,"mode":"full","zeta":1,"alpha":2,"reason":"a full scan"}"#,
+        )
+        .expect_err("unknown scope fields are refused");
+
+        assert!(
+            err.to_string()
+                .contains("carries unknown fields `alpha`, `zeta`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_guard_scope_that_is_not_an_object_is_an_error() {
+        for scope in ["[]", "7", r#""full""#, "null"] {
+            let err =
+                read_scope(scope).expect_err("a scope that is not an object carries no fields");
+
+            assert!(matches!(err, GuardError::MalformedPlan { .. }), "{err}");
+            assert!(err.to_string().contains("which is not an object"), "{err}");
+        }
     }
 
     #[test]
