@@ -14,6 +14,17 @@ is also their validator.
 so Rust tooling can assert against it without running Python. Regenerate it with
 `python3 scripts/ci/schema.py`; `scripts/ci/test_schema.py` fails when it drifts.
 
+`archive_guard_cases.json` is the second cross-language document here, and the
+only hand-authored one: an accept/reject corpus for the plan's `archive_guard`
+scope. Each case carries the scope fragment, whether the contract accepts it,
+and the rule it exercises. `scripts/ci/test_schema.py` runs it through
+`validate_resolved_plan` and
+`tools/test-toolkit/tests/ci_workflow_contracts.rs` through
+`GuardPlan::from_plan_json`, so a case added here fails both suites until both
+readers agree on it. It states behavior the generated field table cannot, which
+is why it is written rather than dumped; the verdict is all it fixes, and each
+side keeps its own tests for the wording it produces.
+
 > **Status.** `affected_scope.py` emits the resolved plan with
 > `--resolved-plan`, or with `--plan-out` alongside the legacy scope document.
 > Both receipt producers — the pre-push hook and `scripts/cross-check.sh` —
@@ -145,9 +156,9 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   `BISCUIT_ARCHIVE_GUARD_PLAN` hands a document straight to
   `test_toolkit::archive_guard::GuardPlan`, which the validator never sees, so
   that reader enforces this whole shape again — including the document's
-  `schema_version` against `PLAN_SCHEMA_VERSION`, the non-blank `reason`, and
-  the sorted, unique `paths`. A plan it refuses is an error, never an empty
-  scan.
+  `schema_version` against `PLAN_SCHEMA_VERSION`, the closed field set, the
+  non-blank `reason`, and the sorted, unique `paths`. A plan it refuses is an
+  error, never an empty scan.
 - `areas[]` — one entry per selected area, with the reason it was selected and
   the packages contributing to it. Nested areas such as `claudine/rendezvous`
   are their own entries, never folded into a parent.

@@ -1341,11 +1341,22 @@ member directory, plus the two owners' own manifests:
 
 | changed input | selects |
 |---|---|
-| `.github/ci/**` | `repo-deps` |
+| `.github/ci/schemas/contract.json`, `.github/ci/schemas/archive_guard_cases.json` | `repo-deps`, `test-toolkit` |
+| `.github/ci/**` (otherwise) | `repo-deps` |
 | `scripts/Cargo.toml` | `repo-deps` |
 | `.github/workflows/**` | `test-toolkit` |
 | `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `test-toolkit` |
 | `tools/test-toolkit/Cargo.toml` | `test-toolkit` |
+
+Those two documents name two owners because each is read by a Rust test as well
+as by `test_schema.py` — `contract.json`'s field contract and
+`archive_guard_cases.json`'s accept/reject corpus exist for exactly that
+cross-language assertion, so a change selecting the Python half alone would
+leave the agreement they encode unverified where it is consumed. They are named
+one by one rather than by a `schemas/` prefix: the directory also holds its own
+`README.md` and is where an unrelated future schema would land, and neither is
+an input the Rust suite reads, so those keep the `.github/ci/**` selection of
+`repo-deps` alone.
 
 A trigger selection is narrower than a source change: the changed path says
 nothing about the owner's public API, so it contributes no reverse
