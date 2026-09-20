@@ -9,192 +9,361 @@ related:
   - 2026-09-11-cicd-cleanup
   - 2026-09-19-hosted-evidence-reuse
   - 2026-09-19-nightly-scope
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-09-19
+review_iterations: 0
 ---
 
 # Direct cell execution: hosted matrices built from the plan's cells
 
 ## Why
 
-The planner already resolves one `{package, environment, gate}` cell for
-every unit of required coverage and decides, per cell, whether hosted CI
-executes it, reuses evidence for it, or omits it as an accepted gap. Hosted
-CI does not consume those cells. `legacy_scope_document` re-projects them
-into a per-package record carrying separate environment lists —
-`native_environments`, `check_os`, `l2_environments`,
-`browser_environments`, `node_environments`, `companion_environments`,
-`toolchain_environments`, `producing_environments`, `wsl` — and
-`_area-ci.yml` forwards each list to `_package-ci.yml` as its own input,
-where six jobs gate on them. Every list is a place where the plan and the
-matrix can disagree:
+A cell is one required gate for one package on one environment, identified by
+`{package, environment, gate}`. Test gates are L1 (unit tests), L2 (integration
+tests), and browser; check and lint are separate gates. Stored results use
+`tier` for the same gate dimension. Area groups packages for presentation and
+scheduling; it never replaces package identity.
 
-- PR #76 turned seven macOS cells `MISSING`: excluding an environment edited
-  the matrix while the rollup derived expected cells from the policy, and
-  nothing reconciled the two.
-- Every capability since has cost a list, a workflow input, and a contract
-  test pinning the pair: node environments on 2026-09-16, toolchain
-  environments on 2026-09-18, producing environments on 2026-09-19. Each
-  contract exists only because the projection can drop a side.
-- An area whose cells are all reused or accepted gaps still fans out a
-  runner so the audit has something to render ("an all-reused area must still
-  fan out", cicd-cleanup phase 5). PR #83's final run showed 104 skipped
-  checks beside 127 passes.
-- The coverage audit owns the verdict on expected tests, skips, and missing
-  evidence after execution, so a defect in the audit tool reds every area at
-  once: the environments schema version on run 35405580517 (14 areas) and
-  the fractional upload window on run 35412170320 (18 areas) were both
-  audit-tool failures presented as coverage failures.
+The planner already decides which cells execute, reuse passing evidence, or
+represent governed capability gaps. Hosted workflows currently consume a
+projection of those decisions into separate environment lists. Keeping those
+lists aligned with workflow inputs creates unnecessary opportunities to lose
+required work. The seven missing macOS cells reported in PR #76 illustrate
+why scheduling and expected coverage must agree.
 
-2026-09-12-better-cicd-flow described this fix. Its decisions 1, 4, 5, and 6
-have since shipped through other work (the plan's execution states and
-cumulative receipts, planner-decided `neutral` gaps, the policy-free
-`ci-gate`, advisory reporting). Its decisions 2 and 3 — matrices from
-executing cells, and producer-side completeness — did not, because
-cicd-cleanup's phase 6 stopped on rulings that have since been made and on
-a presentation fixture that live runs have since proven. This spec
-supersedes that draft with those two decisions, restated against the
-workflows as they are today.
+This feature removes the environment-list interface and moves test-completeness
+validation into the job that ran the tests. It supersedes the remaining direct
+scheduling and producer-completeness work in 2026-09-12-better-cicd-flow.
+It preserves the canonical plan, package identities, archive sharing,
+event-based environment policy, and the policy-free merge gate.
 
-## What exists today
+## Existing contracts and review corrections
 
-| surface | lines | role |
-|---|---|---|
-| `ci.yml` | 1,070 | validation, scope, preflight, producers, area fan-out, gate, reporting |
-| `_area-ci.yml` | 329 | one call per area; `package-ci` matrix over the area's package records, `accepted-gaps`, `coverage-audit` |
-| `_package-ci.yml` | 1,710 | 21 inputs; `check`, `test`, `lint`, `test-l2`, `test-browser`, `wsl2`, each gated on its own environment list |
-| `_wsl-ci.yml` | 816 | the archive-only guest, called from `_package-ci.yml` |
+The relevant sources are the [CI contracts](../../.github/ci/README.md),
+[resolved-plan schema](../../scripts/ci/schema.py), and the shipped workflows:
 
-The chain is four reusable-workflow levels deep, which is GitHub's limit.
-The planner's `cells[]` already carry everything a producer needs except the
-feature arguments, which sit on the package record. The rollup already keys
-every stored result on `{package, environment, tier}`.
+| Surface | Current responsibility |
+|---|---|
+| [ci.yml](../../.github/workflows/ci.yml) | Scope, preflight, native build owners, area calls, area-mapping check, merge gate, reporting |
+| [_area-ci.yml](../../.github/workflows/_area-ci.yml) | Package calls, accepted-gap publication, area coverage audit |
+| [_package-ci.yml](../../.github/workflows/_package-ci.yml) | Check, lint, native L1/L2/browser consumers, WSL2 delegation |
+| [_wsl-ci.yml](../../.github/workflows/_wsl-ci.yml) | Archive consumption and tests inside the WSL2 guest |
+
+The root `repo-deps` package's
+[`legacy_scope_document`](../../scripts/ci/affected_scope.py) already reads
+execution decisions from the resolved plan; it does not independently select
+scope. The change removes its hosted environment-list interface, not a second
+planner. Its policy and build projections, and local consumers of its package
+matrix, must remain until their readers have migrated.
+
+> Reader's note: the draft proposed skipping an entire area when no cell
+> executes. That would remove its blocking audit and accepted-gap publisher.
+> This revision retains the area call and skips only execution workflows.
+> Eliminating even the audit runner requires a separate ownership decision;
+> advisory reporting cannot replace a blocking coverage check.
+
+The call chain currently has four levels. Keeping that depth is a design
+constraint here, not GitHub.com's current maximum: GitHub documents ten levels
+and 50 unique reusable workflows. Matrix expansion remains limited to 256 jobs
+per matrix. Validate limits without scheduling a full workspace merely to
+probe platform behavior. See [reusable-workflow limits](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)
+and [matrix limits](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstrategymatrix).
+
+Exact-test skip approvals currently live in
+[ci-baseline.toml](../../.github/ci/ci-baseline.toml), not in plan cells. Expected
+test manifests are supported by the existing rollup contract but are not yet
+wired into producers. Both are implementation work, not existing guarantees.
 
 ## Decisions
 
-1. **The matrix is the executing cells.** The scope job publishes, per area,
-   a matrix whose rows are exactly `cells[] | select(.execution ==
-   "execute")` for that area, each row carrying the cell identity, its gate,
-   the package's feature and test arguments, the build record it consumes,
-   its declared L2 backends, runner tools, companion suites, and native
-   packages, and the exact-skip entries attached to it. No environment list
-   survives; `legacy_scope_document`'s matrix projection is deleted once
-   nothing reads it, and the planner's Python contracts prove
-   `planned execute cells == matrix rows` per area as one set equality.
-2. **One producer job per cell kind, dimensioned by the row.** `_package-ci`
-   becomes a cell-level workflow: a `test` job whose matrix is the area's
-   executing L1, L2, and browser rows (tier as a row field, not a job), a
-   `check` job over check rows, a `lint` job over lint rows, and the WSL2
-   guest over its rows. The three near-identical consumer jobs collapse into
-   one whose steps branch on the row's tier only where the tiers genuinely
-   differ (the L2 backend proof, the browser serialization).
-3. **Areas stay as the chunking unit and nothing else.** GitHub caps a matrix
-   at 256 entries and a full-workspace plan exceeds that, so `_area-ci` keeps
-   fanning out one call per area. An area with no executing cell schedules no
-   `package-ci` call at all: its reused and neutral cells are reported from
-   the plan by the audit alone. The chain stays at four levels; the change
-   flattens the package layer's inputs, it adds no workflow.
-4. **Producers validate their own completeness.** Before a test producer may
-   succeed it lists the expected tests on the target (`cargo nextest list
-   --archive-file`, which the consumer can run without a toolchain), runs the
-   complete planned gate with no unplanned filter, retains its JUnit and
-   status under the cell identity, compares expected identities with observed
-   pass, fail, and skip, and applies exactly the skip entries the row carries.
-   A missing expected test, an unexpected skip, a failed companion, or a
-   missing report fails the producer. Lint and check producers validate their
-   own status document.
-5. **The audit shrinks to what only a post-execution view can see.** With
-   producers truthful, `coverage-audit` keeps three questions: is any planned
-   executing cell missing a result (a lost runner, a dropped artifact); is
-   every omitted cell a governed, unexpired gap; and did a reused cell's
-   evidence match the plan. It stops re-deriving expected tests and skips. A
-   producer failure reaches `ci-gate` through the producer and creates no
-   second red check, as today.
-6. **`ci-gate` is unchanged.** It folds blocking job results and reads no
-   plan.
+### One matrix row per executing cell
 
-## What it buys
+The planner's output adapter emits area-local row sets derived only from the
+final resolved plan, after evidence reuse has been applied. Each executing cell
+appears exactly once; reused, accepted-gap, prohibited, and deferred work never
+creates an execution row. A prohibited or otherwise invalid omission must not
+be mistaken for a valid gap. Event-deferred environments remain outside the
+plan's required cells.
 
-- The PR #76 class of defect becomes impossible rather than tested for: the
-  matrix is the plan's cell list, not a projection of it.
-- Adding a capability costs a row field, not a list, an input, and a contract.
-- An audit-tool defect can no longer red every area; the audit decides only
-  missing evidence and gap policy.
-- Areas with nothing to execute cost no runner and no skipped checks.
-- `_package-ci.yml` loses its three-way duplication; the inputs drop from 21
-  to the row and the run-wide values.
-- 2026-09-19-hosted-evidence-reuse gets simpler: the thing reused across
-  trees is the thing scheduled.
+Use one row per cell, not a row bundling L1 and L2. Separate jobs preserve
+failure attribution and retries per gate. Archive creation already happens
+once per build record, so separate downloads do not require separate builds.
+Do not introduce a new L1 prerequisite that suppresses otherwise required L2
+or browser execution after a test failure.
 
-## Migration
+Rows carry only dispatch identity and the fields needed to expand the workflow:
+package, environment, gate, and runner. Job steps read the remaining execution
+contract from the immutable resolved-plan artifact using the exact cell key.
+The runner comes from the plan's environment table; `wsl2-ubuntu` is an
+execution environment hosted by a Windows runner, not a runner label.
+Consumers verify row identity and dispatch fields against the plan and refuse
+unknown, duplicate, non-executing, or mismatched cells.
 
-1. **Cell rows.** The planner emits `area_rows` (or the existing
-   `area_matrix` reshaped) from executing cells, with a Python contract that
-   the union of rows equals the executing cells and that every row's fields
-   come from the plan. Keep `legacy_scope_document` beside it until step 3.
-2. **The producer job.** Rewrite `_package-ci.yml`'s `test`, `test-l2`, and
-   `test-browser` into one row-driven job, and `check` and `lint` into
-   row-driven jobs, keeping every step whose contract test exists today
-   (build resolution and verification, sidecar provisioning, runner tools,
-   node provisioning, toolchain provisioning, the compiler-work counter).
-   Move each existing `ci_workflow_contracts` assertion onto the new shape
-   in the same change; a contract that pinned a list is replaced by one that
-   pins the row field.
-3. **The fan-out.** `_area-ci.yml` passes rows, not lists; `ci.yml` skips the
-   area call when its row set is empty. Delete `legacy_scope_document`'s
-   matrix half and the environment lists; the policy half stays until the
-   rollup reads policy from the plan.
-4. **Producer completeness.** Add the expected-test listing and comparison
-   to the test producer; move exact-skip validation there; reduce the audit.
-   The rollup's baseline handling is unchanged, since exact skips remain the
-   only pardonable state.
-5. **Prove it on one area first.** Land steps 1 to 3 behind the existing
-   `_package-ci` for every area but one (the root area: `repo-deps` and the
-   tools packages, whose suites are the pipeline's own), compare its results
-   with the projection's for three runs, then switch the rest.
+The plan must provide every required execution input: feature and test arguments,
+canonical tier/profile selection, slow-test policy, build reference, native
+prerequisites, runner tools, toolchain and Node requirements, L2 backends,
+companion suites, and check selectors and dependent compile requirements.
+Resolve missing fields in the planner, not from live manifests in downstream
+workflows. Store package-wide inputs on package records and cell-specific
+inputs on cells; do not duplicate complete package records into every row.
 
-## Not done
+Add the exact-skip policy snapshot to the resolved plan with its per-cell and
+backend applicability and provenance. Preserve existing owner, reason,
+source-run, and optional-expiry rules. The plan artifact is authoritative;
+rows do not carry another copy and producers do not reload a potentially
+different baseline. Because carried scope receipts must still work without
+reading manifests or policy, this addition requires a resolved-plan schema
+version increment, synchronized Python/Rust contracts, and rejection of older
+scope receipts through the existing schema-miss fallback. Do not invalidate
+validation receipts merely for a scheduling representation change; preserve
+existing gate-input checks and strengthen them where new completeness evidence
+is required.
 
-- Replacing `ci-rollup`'s policy document with the plan (cicd-cleanup's
-  remaining rollup work). The audit still reads `scope.json`'s policy list.
-- Hosted-evidence reuse across trees: 2026-09-19-hosted-evidence-reuse, which
-  this feature should land before.
-- Changing which environments an event schedules; the cadence policy stands.
+### A concrete workflow layout
 
-## Open questions
+`ci.yml` continues to call `_area-ci.yml` for every selected area requiring an
+audit, including areas containing only reused cells or accepted gaps. The area
+workflow calls `_package-ci.yml` once with its native test, check, and lint row
+sets, rather than once per package. Inside that workflow, three jobs expand
+the corresponding disjoint row sets. The native test job branches by tier only
+where execution differs, including backend proof and browser serialization.
+A fourth job delegates each WSL2 row to `_wsl-ci.yml`; the guest executes only
+the row's gate, never an additional internal tier matrix.
 
-1. **Row granularity.** One row per cell, or one row per `{package,
-   environment}` carrying the cell's tiers, so a package's L1 and L2 on one
-   environment share a runner and an archive download? Sharing halves the
-   downloads for L2-owning packages but re-couples tiers that today fail
-   independently. The compile-once specification wanted tiers staged behind
-   L1; a shared row keeps that as step order rather than job order.
-2. **Expected-test manifest for `cfg`-excluded tests.** `nextest list` on
-   the target names what compiled for it, so a test compiled out by `cfg` is
-   absent rather than skipped. Is absence acceptable as long as the source
-   marker count (`declared_test_tiers_match_owned_tests`) still holds, or
-   should the producer receive the producer-side list to diff against?
-3. **Where reused and neutral cells render** once their area fans out no
-   runner: the area audit only, or also a run-level summary in
-   `ci-reporting`?
-4. **Skip policy in the row or read by the producer** from the plan
-   artifact. The row is self-contained and testable; the plan is one fewer
-   copy of the entries.
+The union of those four row sets must equal the area's executing cells, with
+no duplicate keys. All matrices use `fail-fast: false`. Planner-emitted scalar
+flags guard empty row sets before matrix expansion, including skipping the
+entire execution-workflow call for an all-reused or gap-only area. The area
+audit resolves its package membership from the plan, not the execution rows.
+
+The plan's existing build-owner schedule stays separate. Every executing test
+cell retains exactly one valid build reference; owners compile and publish
+once per planned build record even when their native test cell is reused but
+a WSL2 consumer still needs the archive. Consumers preserve revision/tree,
+build-key, archive, sidecar, and path verification. They never rebuild a missing
+archive or derive a new build key. A failed build must not prevent consumers of
+unrelated successful builds from running. Check and lint retain their existing
+independent compilation, including the changed package's dependent compile
+requirements inside its check cell.
+
+Keep artifact/status/JUnit/receipt identities keyed by package, environment,
+and gate, with backend or suite dimensions where already required. A build
+record remains a build identity, never a result cell. Preserve run-attempt
+selection, current-result precedence, and retained passing evidence on retries.
+Do not collect cell results through a matrix reusable workflow's last output.
+
+Job labels are part of runner-loss attribution. Update the root `repo-deps`
+package's [runner-loss tooling](../../scripts/ci/runner_loss.py) and its
+workflow-derived fixtures with the new labels so a lost native or WSL2 runner
+still maps to exactly one cell. Labels must expose package, environment, and
+gate without dumping the row JSON. Jobs skipped before matrix expansion must
+not display unevaluated matrix expressions. Keep producer tokens read-only;
+only the existing accepted-gap publisher receives `checks: write`.
+
+### Producers prove completeness
+
+Before a test producer succeeds, it must:
+
+1. Verify its planned archive, provision runtime requirements, and list tests
+   on the execution target using the same archive and workspace remapping as
+   the run. Use Nextest's machine-readable listing. Provisioning precedes
+   listing because listing executes test binaries and may need runtime
+   libraries. Archive consumers do not require a compiler solely to list tests;
+   packages whose tests require a toolchain still receive the declared one.
+2. Construct the expected set from the canonical package, tier, profile,
+   feature configuration, slow-test policy, and declared backend invocations.
+   Derive it independently of any ad hoc invocation filter; an extra filter
+   must not shrink both the expected and observed sets and pass undetected.
+   Record ignored tests and planned exclusions explicitly. Never compare an
+   L1 report with every tier in a shared archive.
+3. Run the complete planned gate and every attached companion suite. Preserve
+   canonical recipes, timeout behavior, concurrency limits, serialization,
+   and compiler-work measurement. L2 and browser execution must not bring a
+   terminal or browser window into focus.
+4. Compare expected and observed identities, not counts. Use the existing
+   suite/test identity convention, scoped by cell, backend, and companion
+   suite; retain enough binary identity to detect collisions. Normalize
+   retries into one final outcome without hiding failures or accepting
+   duplicate reports. Fail on missing or malformed reports, missing expected
+   tests, unexpected identities, unapproved skips, failed tests or companions,
+   and absent required backend proof.
+5. Publish a versioned completion record, expected manifest, JUnit reports,
+   and diagnostics under the cell identity. The record binds the tested
+   revision, build key where applicable, gate inputs, run and attempt, and
+   report inventory. `complete` is set only after validation succeeds.
+   Upload required artifacts before the producer can succeed; an upload
+   failure fails the job. Failure-path publication remains best effort under
+   the existing cancellation rules.
+
+The listing and execution must use the repository's pinned Nextest version;
+verify its archive listing and ignored-test behavior with fixtures before
+selecting the parser. See [Nextest machine-readable lists](https://www.nexte.st/docs/machine-readable/list/)
+and [archive execution](https://nexte.st/docs/ci-features/archiving/).
+
+Tests compiled out by `cfg` are absent from that target's expected set, not
+skips. A producer-side list from a different target is not a valid comparison.
+Retain source-tier ownership checks, but do not claim they prove runtime
+coverage on every OS. An empty expected set needs a specific, plan-recorded
+reason; a companion-only cell is valid only if its declared suites complete.
+An empty JUnit document alone is never proof of successful coverage.
+
+> Reader's note: missing results now fail even when their identities appear in
+> a skip approval. The old baseline also allowed expected-but-unreported tests
+> to count as skips. This intentional tightening distinguishes an observed,
+> approved skip from a lost test. Migration must reject or replace any reliance
+> on silent absence with explicit skip evidence; it must not silently retain
+> the old interpretation. The baseline file was empty at review time.
+
+Check and lint producers validate and upload their own completion records,
+including both halves of a check that compiles unchanged dependents. This
+feature grants neither gate new evidence-reuse eligibility.
+
+### The area audit retains a blocking role
+
+The audit no longer recomputes expected test identities or exact skips for
+new-format executing cells. It checks that every executing cell has a valid,
+complete, correctly bound result and required report inventory; every reused
+cell has qualifying evidence; and every accepted gap has valid governance.
+It rejects duplicate/conflicting results and unplanned evidence according to
+the existing result-selection rules. An explicit current execution continues
+to outrank a reused claim and the discrepancy is reported.
+
+The audit must not accept a green status record unsupported by its required
+artifacts. Older reused evidence must remain subject to its existing checks;
+removing producer-side skip checks from the audit does not retroactively certify
+old receipts. During migration, keep the legacy validation path for records
+without the new completion contract, or schedule the cell when required proof
+cannot be established. Do not introduce cross-tree hosted reuse in this feature.
+
+Render the area slice even after a producer failure, without adding a second
+coverage-policy failure for that same producer error. Enforce the verdict when
+execution producers succeeded **or when none were required**. A skipped producer
+call despite nonempty execution rows is missing coverage, not permission to
+skip the audit. A cancellation or producer failure still blocks through the
+existing workflow result. Unreadable audit inputs remain an infrastructure
+failure rather than an invented test failure.
+
+Accepted gaps retain one neutral check per cell with owner, expiry, reason,
+and remediation. Publish them without waiting for test completion. The area
+summary and advisory run summary both include reused and accepted-gap cells;
+only the area audit owns the verdict. A failure remains stronger than a gap.
+
+`ci-gate` remains byte-identical: a policy-free fold of its existing blocking
+job results. `ci-reporting` remains advisory. Shared audit or validator defects
+can still affect multiple areas; moving validation does not eliminate that
+risk, so this spec makes no such reliability guarantee.
+
+## Migration and validation
+
+1. Add the versioned plan inputs and deterministic row adapter beside the
+   current projection. Prove identity equality **and uniqueness**, dispatch
+   fields, area membership, and complete joins back to the plan. Compare both
+   scheduling forms against the same plan without executing tests twice.
+2. Implement the row-driven workflow and producer completion contract together.
+   Preserve archive owners and all existing execution behavior. Move workflow
+   contract assertions onto the new interfaces; remove obsolete shape checks
+   only after their behavioral replacement passes.
+3. Introduce explicit version-aware audit handling before removing any old
+   completeness checks. Exercise all-reused, gap-only, mixed, and unexpectedly
+   skipped-producer areas. Keep selected areas separate from executing rows.
+4. Trial the new path on the root area while other areas use the existing path.
+   Choose the path once per area; never schedule both. Use local comparisons
+   and an ordinary affected-area CI run for reporting and artifact behavior.
+   If needed, use a minimal scratch workflow to test nesting and naming rules.
+   Do not mandate three duplicate executions or full-workspace dispatches.
+5. Switch remaining areas after the focused contracts pass and the trial's
+   observed cells match the plan. Retain a temporary area-level rollback switch
+   until this review closes. Rollback must restore compatible workflow and
+   audit readers together and must never erase evidence or weaken enforcement.
+6. Remove environment-list inputs and only the legacy projections with no
+   remaining readers. Migrate local hook/Just readers before deleting their
+   package matrix. Retain policy and build outputs until their consumers move.
+   Update CI documentation and rust-devops/OS skills to describe the new
+   topology and intentional skip-rule change; update root instructions where
+   they describe audit responsibility. Do not move this feature to `_completed`.
+
+Validate full-workspace and nightly **plans offline** for every individual
+matrix's cardinality, four-level call depth, unique-workflow count, job estimate,
+and serialized output sizes. Include area audit and build-owner overhead in
+estimates; area grouping alone is not proof of staying within limits. Fail
+clearly before dispatch if an area exceeds the supported row capacity or output
+budget; never truncate it. Design further partitioning only if measured plan
+sizes require it. Any larger live run needs an unanswered execution question
+and must respect existing evidence reuse and explicit execution constraints.
+
+## Open Questions
+
+### Should valid draft status be normalized before planning?
+
+The requested frontmatter schema allows `draft-spec`, while the existing
+`status: draft` is outside that enum. This review preserves that property as
+requested rather than silently changing lifecycle state.
+
+- **Recommended: change the value to `draft-spec` before finalization.** This
+  matches the supplied schema and the document's current intent. It requires
+  an explicit metadata correction but no repository-wide schema expansion.
+- **Allow `draft` as an alias in the shared schema.** This can accommodate older
+  documents, but expands the lifecycle vocabulary and conflicts with the exact
+  schema requested for this review. It belongs in a separate schema decision.
+
+The scheduling design decisions formerly left open are resolved above: one row
+per cell, target-derived expected tests, both area and run summaries, and skip
+policy stored in the plan artifact. Eliminating audit runners for areas with no
+executing cells is deferred because it changes blocking ownership, not merely
+presentation.
 
 ## Acceptance criteria
 
-1. For every area in a resolved plan, the published matrix rows are exactly
-   the area's cells with `execution == "execute"`, proven by a planner
-   contract and by a workflow contract over the shipped fan-out.
-2. No environment list remains in `_area-ci.yml` or `_package-ci.yml`
-   inputs; every producer condition reads a row field.
-3. An area with no executing cell schedules no `package-ci` call, and its
-   reused and accepted-gap cells still appear in the area audit and the run
-   summary.
-4. A test producer fails on a missing expected test, an unexpected skip, a
-   failed companion, or a missing report, with the reason in the job's own
-   log; the audit no longer evaluates those.
-5. A full-workspace `workflow_dispatch` run and a nightly both stay under
-   GitHub's matrix and nesting limits, measured on a real run.
-6. `ci-gate` is byte-identical to today.
-7. The Python suites, `ci_workflow_contracts`, the rollup suite, the hook
-   suite, and actionlint pass, and the root area's results match the
-   projection's across three consecutive runs before the switch.
+1. Every executing cell appears exactly once across the shipped dispatch row
+   sets, with matching identity and fields. Reused, accepted-gap, prohibited,
+   and event-deferred work creates no execution row. Duplicate, dropped, and
+   altered rows fail the relevant contracts.
+2. Hosted area/package workflows accept no independent environment lists.
+   Consumers verify row-to-plan binding and do not recalculate scope. Old scope
+   receipts fall back cleanly after the schema change; unchanged qualifying
+   validation evidence remains reusable under its applicable checks.
+3. All-reused and gap-only areas create no execution-workflow call but retain
+   their blocking audit, area slice, and summary. Neutral gap checks remain
+   visible. Unexpectedly skipped execution with required cells cannot pass.
+4. Native macOS, Linux, Windows, and WSL2 consumers preserve archive verification,
+   runtime provisioning, canonical gate behavior, artifact identity, and retry
+   attribution. Multiple consumers share one build; unrelated build failures
+   do not suppress them. Check/lint and dependent compile behavior are unchanged.
+5. Producer fixtures cover missing and malformed reports, missing tests, extra
+   filters, duplicate identities, retries, explicit ignored/approved skips,
+   expired approvals, empty suites, required backend failure, companion failure,
+   upload failure, and cancellation. A missing test cannot use a skip approval
+   to pass. Canonical tier exclusions do not create false missing-test failures.
+6. Audit fixtures reject absent or mismatched completion records and artifacts,
+   invalid reuse, invalid gaps, and partial rerun evidence. Legacy evidence
+   cannot silently bypass checks removed from the new execution path.
+7. Runner-loss fixtures derive actual job labels from the new workflows and
+   identify native and WSL2 cells. Matrix failures do not cancel siblings;
+   producer failures reach the unchanged `ci-gate` without duplicate policy
+   failures. Producer permissions remain read-only.
+8. Offline full-workspace and nightly plans satisfy matrix, nesting, and output
+   budgets. The focused root-area trial matches the plan without duplicate
+   gate runs. The Python suites, `ci_workflow_contracts`, rollup and hook suites,
+   and actionlint pass using canonical repository recipes where available.
+   No implementation or CI run is claimed by this specification review.
