@@ -215,8 +215,23 @@ belong here.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- A spec rename from `<area>/fixes/<name>/spec.md` (undated) into
+    `<area>/fixes/YYYY-MM-DD-<name>/spec.md` (dated active directory) is
+    also a `planning(<area>): schedule <name>` event, even though the
+    source path is not under `_unscheduled`. The undated directory is the
+    pre-convention carrier; moving it under the `YYYY-MM-DD-<name>/`
+    convention is the same "becomes an active, scheduled fix" signal that
+    `_unscheduled → YYYY-MM-DD-<name>/` carries, just with no
+    `_unscheduled/` indirection. R100 renames are the common case (spec
+    content is unchanged, the date prefix is derived from the existing
+    authorship metadata), so the commit legitimately ships zero source
+    diff while still belonging under `planning` rather than `chore` or
+    `refactor`. The rename needs both the old path (tracked at HEAD, not
+    in the index) and the new path (in the index) in the pathspec — the
+    standard rename rule applies because the old path's removal has to
+    land in the same commit as the new path's addition.
 - Multi-spec consolidation is one atomic `planning(<area>):` commit, not
-  N+M separate commits: marking N existing specs `status: superseded`
+    N+M separate commits: marking N existing specs `status: superseded`
   (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
   M new spec/annex files that absorb their content, and recording the
   ratification in a charter spec's decision block all belong together.
