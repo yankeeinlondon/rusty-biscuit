@@ -6192,3 +6192,406 @@ fn the_biscuit_tui_cli_l1_cell_already_compiles_the_terminal_test_target() {
          captured-stdout test is absent rather than passing"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Direct cell execution (`features/2026-09-19-direct-cell-execution`), Phase 2
+//
+// Pending oracles for the row-driven workflow layout Phase 5 implements. The
+// Python twin of this mechanism is `scripts/ci/pending_contracts.py`; both
+// honor `BISCUIT_PROMOTE_PENDING=1`, which runs each pending body directly so
+// an implementer can see exactly which contracts remain. Every fixture below
+// asserts the target shape and today fails for its recorded reason.
+// ---------------------------------------------------------------------------
+
+/// Whether `BISCUIT_PROMOTE_PENDING=1` asked pending fixtures to run their
+/// bodies directly.
+fn promote_pending() -> bool {
+    std::env::var("BISCUIT_PROMOTE_PENDING").as_deref() == Ok("1")
+}
+
+/// Run `body`, requiring it to fail with a message containing `oracle`.
+///
+/// ## Panics
+///
+/// When the body passes — the contract landed and the fixture must be promoted
+/// by deleting this wrapper — or when it fails for some other reason, which
+/// means the fixture itself broke rather than the contract being unbuilt.
+fn pending_contract(criterion: &str, reason: &str, oracle: &str, body: impl FnOnce()) {
+    if promote_pending() {
+        body();
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    std::panic::set_hook(previous);
+
+    match outcome {
+        Ok(()) => panic!(
+            "pending contract {criterion} now holds: {reason}. Remove the \
+             pending_contract wrapper so a later regression can fail this suite."
+        ),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+            assert!(
+                message.contains(oracle),
+                "pending contract {criterion} failed, but not for the recorded \
+                 reason. Expected the failure to mention {oracle:?}; the fixture \
+                 itself is probably broken.\n\nRecorded reason: {reason}\n\
+                 Actual failure: {message}"
+            );
+        }
+    }
+}
+
+/// The input names a workflow declares that carry a LIST OF ENVIRONMENTS —
+/// the interface this feature removes. `check-os` is the same interface under
+/// a shorter name.
+fn declared_environment_list_inputs(file: &str) -> Vec<String> {
+    let source = workflow(file);
+    let Some((_, inputs_section)) = source.split_once("\n    inputs:\n") else {
+        return Vec::new();
+    };
+    let section = inputs_section
+        .split_once("\n\n")
+        .map(|(inputs, _)| inputs)
+        .unwrap_or(inputs_section);
+    section
+        .lines()
+        .filter_map(|line| line.strip_prefix("      "))
+        .filter_map(|line| line.split(':').next())
+        .filter(|name| name.ends_with("-environments") || *name == "check-os")
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The row-expanding jobs of `_package-ci.yml`: those whose matrix comes from
+/// one of the four row-set inputs the area call passes.
+fn row_expanding_jobs() -> Vec<String> {
+    let source = workflow("_package-ci.yml");
+    let mut found = Vec::new();
+    for block in jobs(&source) {
+        let executable = executable_lines(&block);
+        if ["test-rows", "check-rows", "lint-rows", "wsl-rows"]
+            .iter()
+            .any(|name| executable.contains(&format!("inputs.{name}")))
+        {
+            found.push(
+                block
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_end_matches(':')
+                    .to_owned(),
+            );
+        }
+    }
+    found
+}
+
+/// Every step in the producer workflows whose artifact name begins with
+/// `completion-` — R10's separate, validated-then-uploaded artifact.
+fn completion_upload_steps() -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        for block in jobs(&workflow(file)) {
+            if executable_lines(&block).contains("name: completion-") {
+                found.push((
+                    file.to_owned(),
+                    block
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .trim_end_matches(':')
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// AC2 / migration step 2: `_area-ci.yml` calls the execution workflow ONCE
+/// for its area, never once per package.
+#[test]
+fn the_area_workflow_calls_the_execution_workflow_once() {
+    pending_contract(
+        "workflow-layout",
+        "the area workflow still fans out one execution call per package through \
+         a matrix; Phase 5 replaces the per-package fan-out with one guarded call",
+        "per-package fan-out",
+        || {
+            assert_eq!(
+                vec!["package-ci".to_owned()],
+                jobs_containing("_area-ci.yml", "uses: ./.github/workflows/_package-ci.yml"),
+                "exactly one job may call the execution workflow"
+            );
+            let call = executable_lines(&job_block("_area-ci.yml", "  package-ci:"));
+            assert!(
+                !call.contains("strategy:"),
+                "the per-package fan-out is gone: one call per area, no matrix"
+            );
+        },
+    );
+}
+
+/// AC2: no reader-facing workflow accepts an independent environment list.
+#[test]
+fn no_reader_facing_workflow_declares_an_environment_list_input() {
+    pending_contract(
+        "workflow-layout",
+        "the reader-facing workflows still declare environment-list inputs \
+         (native-environments, check-os, l2-environments, ...); Phase 5 deletes \
+         them in favor of row sets",
+        "environment list",
+        || {
+            for file in READER_FACING_WORKFLOWS {
+                let offenders = declared_environment_list_inputs(file);
+                assert!(
+                    offenders.is_empty(),
+                    "{file} still declares the environment list inputs \
+                     {offenders:?}; every consumer resolves its execution \
+                     contract from the resolved plan by exact cell key"
+                );
+            }
+        },
+    );
+}
+
+/// The row-expanding jobs exist, each behind its scalar guard, none labelled
+/// with an expression GitHub would render raw on a whole-job skip.
+#[test]
+fn every_row_expanding_job_carries_a_scalar_guard_and_no_expression_name() {
+    pending_contract(
+        "workflow-layout",
+        "no row-driven job exists yet; Phase 5 expands the four row-set inputs",
+        "row-driven",
+        || {
+            let rows = row_expanding_jobs();
+            assert!(
+                !rows.is_empty(),
+                "no row-driven job expands a row-set input; the workflows are \
+                 still driven by environment lists"
+            );
+            for job_id in &rows {
+                let block = job_block("_package-ci.yml", &format!("  {job_id}:"));
+                let executable = executable_lines(&block);
+                assert!(
+                    executable.contains("if:"),
+                    "{job_id} must carry the planner's scalar guard so an empty \
+                     row set skips before matrix expansion"
+                );
+                if let Some(name) = job_name(&block) {
+                    assert!(
+                        !name.contains("${{"),
+                        "{job_id} is skippable and must carry no expression name: \
+                         GitHub never evaluates the matrix context for a skipped job"
+                    );
+                }
+            }
+        },
+    );
+}
+
+/// R3's negative: expensive tiers no longer stage behind L1. One native test
+/// job over L1, L2, and browser rows cannot express `needs:`-ordered staging,
+/// and the specification forbids an L1 prerequisite that would suppress
+/// required L2 or browser work after a test failure.
+#[test]
+fn no_test_row_job_stages_behind_another_test_row_job() {
+    pending_contract(
+        "workflow-layout",
+        "test-l2 and test-browser still stage behind test through \
+         `needs: test` with `!cancelled()`; Phase 5's one native test job \
+         removes the staging (ruling R3)",
+        "staging",
+        || {
+            let source = workflow("_package-ci.yml");
+            assert!(
+                !source.contains("needs: test\n"),
+                "the D4 staging (`needs: test`) is gone: no test row's job may \
+                 depend on another test job's success"
+            );
+            for block in jobs(&source) {
+                let header = block.lines().next().unwrap_or("").trim().to_owned();
+                let executable = executable_lines(&block);
+                if !executable.contains("inputs.test-rows")
+                    && !executable.contains("inputs.wsl-rows")
+                {
+                    continue;
+                }
+                assert!(
+                    !executable.contains("\n    needs:"),
+                    "{header}: a row-expanding test job must not wait on another \
+                     test job"
+                );
+            }
+        },
+    );
+}
+
+/// R10 / AC5: every executing cell's producer uploads JUnit, status, AND a
+/// completion artifact; the completion upload is written only after
+/// validation succeeds.
+#[test]
+fn every_producer_uploads_a_completion_artifact() {
+    pending_contract(
+        "workflow-layout",
+        "no producer uploads a completion- artifact yet; Phase 5 adds the \
+         completion uploads beside the JUnit and status ones",
+        "completion",
+        || {
+            let uploads = completion_upload_steps();
+            assert!(
+                !uploads.is_empty(),
+                "no completion artifact upload exists; a green status without \
+                 its completion record must not be possible"
+            );
+            for (file, job_id) in &uploads {
+                let block = job_block(file, &format!("  {job_id}:"));
+                let executable = executable_lines(&block);
+                assert!(
+                    executable.contains("name: completion-"),
+                    "{file}:{job_id} names its completion artifact"
+                );
+                assert!(
+                    !executable.contains("\n        continue-on-error: true\n"),
+                    "{file}:{job_id}: a failed completion upload fails the job"
+                );
+            }
+        },
+    );
+}
+
+/// AC5's upload-failure case: a REQUIRED upload failure fails the producer.
+#[test]
+fn a_failed_required_upload_fails_the_job() {
+    pending_contract(
+        "AC5",
+        "the completion upload steps do not exist yet; Phase 5 makes a failed \
+         required upload fail the job",
+        "completion",
+        || {
+            let uploads = completion_upload_steps();
+            assert!(
+                !uploads.is_empty(),
+                "the completion upload this contract judges does not exist"
+            );
+            for (file, job_id) in &uploads {
+                let block = job_block(file, &format!("  {job_id}:"));
+                let executable = executable_lines(&block);
+                assert!(
+                    !executable.contains("continue-on-error: true"),
+                    "{file}:{job_id}: a failed required upload fails the job; an \
+                     unuploaded completion record would leave a green cell with \
+                     no evidence behind it"
+                );
+            }
+        },
+    );
+}
+
+/// AC5's cancellation case: failure-path publication stays best effort under
+/// the existing cancellation rules — the diagnostic uploads keep their
+/// non-success conditions while the completion upload stays required.
+#[test]
+fn cancellation_keeps_failure_path_publication_best_effort() {
+    pending_contract(
+        "AC5",
+        "the completion uploads do not exist yet, so their coexistence with \
+         the best-effort diagnostic uploads cannot be judged",
+        "completion",
+        || {
+            assert!(
+                !completion_upload_steps().is_empty(),
+                "the completion upload steps this contract judges do not exist"
+            );
+            for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+                for block in jobs(&workflow(file)) {
+                    let executable = executable_lines(&block);
+                    if executable.contains("name: junit-") {
+                        assert!(
+                            executable.contains("!cancelled()") || executable.contains("always()"),
+                            "{file}: the JUnit diagnostic upload keeps publishing \
+                             after a failure or cancellation"
+                        );
+                    }
+                }
+            }
+        },
+    );
+}
+
+/// AC3: an all-reused or gap-only area makes no execution call but keeps its
+/// blocking audit, its slice, and its gap publisher.
+#[test]
+fn an_all_reused_area_skips_execution_but_keeps_its_audit_slice_and_publisher() {
+    pending_contract(
+        "workflow-layout",
+        "the execution call is unguarded today, so a row-set guard cannot be \
+         shown to skip an all-reused area; Phase 5 adds it",
+        "row-set",
+        || {
+            let call = executable_lines(&job_block("_area-ci.yml", "  package-ci:"));
+            assert!(
+                call.contains("if:"),
+                "the execution call is guarded by the planner's row-set flags so \
+                 an all-reused or gap-only area makes no call at all"
+            );
+            assert!(
+                call.contains("has_test_rows")
+                    || call.contains("has_check_rows")
+                    || call.contains("has_lint_rows")
+                    || call.contains("has_wsl_rows"),
+                "the guard is the planner's scalar row-set flags"
+            );
+
+            // The area's own obligations survive the skipped call.
+            let audit = executable_lines(&job_block("_area-ci.yml", "  coverage-audit:"));
+            assert!(
+                audit.contains("if: always()"),
+                "the audit runs even when every producer was skipped"
+            );
+            assert!(
+                audit.contains("ci-results-"),
+                "the area's result slice is still uploaded"
+            );
+            let publisher = executable_lines(&job_block("_area-ci.yml", "  accepted-gaps:"));
+            assert!(
+                publisher.contains("publish_gaps.py"),
+                "the neutral gap checks are still published"
+            );
+        },
+    );
+}
+
+/// NOT pending: every matrix in the reader-facing workflows keeps
+/// `fail-fast: false`, today and under the row-driven layout Phase 5 lands.
+#[test]
+fn every_matrix_in_the_reader_facing_workflows_keeps_fail_fast_false() {
+    let mut checked = 0;
+    for file in READER_FACING_WORKFLOWS {
+        for block in jobs(&workflow(file)) {
+            if !block.contains("\n    strategy:") {
+                continue;
+            }
+            checked += 1;
+            let header = block.lines().next().unwrap_or("").trim().to_owned();
+            assert!(
+                block.contains("fail-fast: false"),
+                "{file}:{header} declares a matrix without fail-fast: false; one \
+                 red cell must never cancel its unevidenced siblings"
+            );
+        }
+    }
+    assert!(
+        checked > 0,
+        "the reader-facing workflows carry matrices; this contract went vacuous"
+    );
+}
