@@ -20,7 +20,7 @@ use crate::source_map::{PositionEncoding, SourceMap};
 use FmPathSegment::{Index, Key};
 
 fn claudine_schema_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/claudine.yaml")
+    biscuit_test_harness::manifest_dir!().join("../docs/schemas/claudine.yaml")
 }
 
 /// The shipped Claudine extension baseline's resolved shape (imports expanded).
