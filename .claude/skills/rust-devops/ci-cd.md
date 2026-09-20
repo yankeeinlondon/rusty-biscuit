@@ -97,7 +97,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   `.github/workflows/**`, `tools/test-audit/**`, `pnpm-lock.yaml`,
   `pnpm-workspace.yaml`, and `tools/test-toolkit/Cargo.toml` select
   `test-toolkit`. `scripts/**` and `tools/test-toolkit/**` need no entry — they
-  are those packages' own directories. The manifest entries are a deliberate
+  are those packages' own directories. Two exact paths select both owners —
+  `.github/ci/schemas/contract.json` and
+  `.github/ci/schemas/archive_guard_cases.json` — because a Rust test reads
+  them as well as `test_schema.py`; the rest of that directory keeps the
+  `.github/ci/**` selection, so the cross-language set stays a named list
+  rather than a directory. The manifest entries are a deliberate
   two-path exception to the repository-wide "a manifest selects nothing" rule
   and are not generalized. A trigger selection is narrower than a source
   change: it reports no reverse dependencies and carries no dependent seam,
