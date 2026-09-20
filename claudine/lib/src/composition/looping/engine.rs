@@ -56,6 +56,15 @@ const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5
 /// Returns parse/evaluation errors that prevent the engine from determining
 /// loop control flow. Per-iteration prompt/action failures are represented in
 /// [`LoopExecutionResult::error`] according to fail-fast semantics.
+///
+/// ## Notes
+///
+/// **Scheduled for deletion** by the fix `2026-09-20-lifecycle-handoff-gaps`
+/// (R7). This engine checks the loop condition *before* each iteration, so it
+/// can run zero times. The design is a check *after* each iteration, which is
+/// what [`execute_loop_with_lifecycle`] implements and what every command
+/// uses. Nothing outside this crate's tests calls this function; do not add a
+/// caller.
 pub fn execute_loop(
     source: &ResolvedCompositionSource,
     options: LoopExecutionOptions,
@@ -85,13 +94,20 @@ pub fn execute_loop(
 
 /// Execute a loop with an already parsed configuration and initial state.
 ///
-/// This is the core engine used by tests and by higher-level CLI integration.
-///
 /// ## Errors
 ///
 /// Returns condition evaluation errors. Runtime prompt/action failures are
 /// carried by the returned [`LoopExecutionResult`] so callers can report the
 /// final state together with the error.
+///
+/// ## Notes
+///
+/// **Scheduled for deletion** by the fix `2026-09-20-lifecycle-handoff-gaps`
+/// (R7). This engine checks the loop condition *before* each iteration, so it
+/// can run zero times. The design is a check *after* each iteration, which is
+/// what [`execute_loop_with_lifecycle`] implements and what every command
+/// uses. Nothing outside this crate's tests calls this function; do not add a
+/// caller.
 pub fn execute_loop_with_config(
     prompt_path: &Path,
     config: &LoopConfig,
