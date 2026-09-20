@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-6f2ea54170be340f
-last_updated: 2026-09-15
+hash: 61d07be7e22c9f45-585d42d315b87712
+last_updated: 2026-09-16
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -359,6 +359,14 @@ list when the pass runs at CI-shaped or multi-package scope, because a truncated
 list looks exactly like a narrow blast radius, which is the opposite of what the
 proof is for. Against a single package locally, fail-fast is correct and faster.
 
+**Restore corrupted sources with a fresh mtime.** Cargo rebuilds only when a
+source is newer than its build output. A restore that keeps the backup's older
+mtime (`cp -p`, Python's `shutil.copy2`) leaves the *last corruption's* binary
+in place. A byte-exact `cmp` then passes, and every later run silently tests
+broken code. Restore with a plain write or `touch` the files afterward. In
+`fixes/2026-09-12-shadow-home` Phase 11 this turned a passing L2 test red 40
+times out of 40 and made two full `just test-l2` runs unusable as evidence.
+
 ## Scope Verification Gates by Blast Radius
 
 Before running any final build, test, or lint gate:
@@ -581,6 +589,46 @@ reap them:
    Attribution is by workspace path, not parent PID (orphan reparenting is
    OS-specific).
 
+## Your Tests Run From an Archive, Not From This Checkout
+
+Every hosted L1, L2, browser, and WSL2 cell executes binaries a **different
+job** compiled. One native owner per planned build key produces an immutable
+Nextest archive; each consumer verifies its checksums, digest, inventory, and
+runtime ABI, then runs the canonical tier recipe in archive mode. No consumer
+has Cargo, rustc, Clippy, or a linker, and none will compile a replacement for
+anything it is missing — it refuses (`.github/ci/README.md`,
+[nextest.md](nextest.md), and `rust-devops`'s `ci-cd.md` for the CI contract).
+
+What that requires of a test:
+
+- **Never resolve a path at compile time.** `env!("CARGO_BIN_EXE_<name>")` and
+  `env!("CARGO_MANIFEST_DIR")` name the *producer's* directories. Use
+  `biscuit_test_harness::bin_exe!("<name>")` for a binary, which prefers
+  nextest's run-time `NEXTEST_BIN_EXE_*`, and
+  `biscuit_test_harness::manifest_dir!()` for a repository fixture, which
+  prefers the `--workspace-remap`-rewritten run-time variable. This is enforced:
+  `tools/test-toolkit/tests/archive_path_guard.rs` scans the repository and
+  fails on a new site, with a small allow-list for the targets that are never
+  archive-executed. The WSL2 guest no longer recreates the producer's checkout
+  path, so a baked path now fails there rather than being worked around.
+- **Declare anything the archive would not carry.** Test binaries, non-test
+  `bin` targets, build-script output, and linked paths are archived; a `dylib`
+  and an `example` are not. Those are `[package.metadata.ci] archive-includes`.
+  A compile-time *tool* another package's tests spawn is a `sidecars` entry.
+  Nothing is repaired by a consumer-side Cargo command.
+- **Provision runtime facilities, not compile-time ones.** tmux, Chrome, Node,
+  and CLI stubs are the consumer's job; anything that had to be *built* is the
+  producer's.
+- **Run it the same way locally.** `just cross-check <pkg> --os <os>` transfers
+  the immutable archive and manifest, verifies on the destination, hides the
+  producer's target directory, and extracts to a different path — which is what
+  makes a compile-time path assumption fail there rather than only in CI.
+
+A failing cell says which build it ran (planned key, realized digest,
+producer) and what each stage cost. A cell that could not run at all is
+`MISSING — blocked by build <key>`: its archive never arrived, and that is an
+infrastructure failure, never a test result and never baseline-eligible.
+
 ## Environment Contract
 
 | Variable                             | Purpose                                                                                                        |
@@ -653,8 +701,11 @@ so ancestor discovery cannot silently undo isolation.
 
 The builder must also control inherited application variables, Git plumbing
 such as `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`, and rendering inputs such as
-width and forced color. Scrub inherited values before applying intentional
-test overrides. Keep cache roots and platform home variables inside the
+width and forced color. That includes selectors for third-party tools the
+application launches (claudine: every provider overlay selector such as
+`CODEX_HOME`, read from provider metadata, plus profile-owned state such as
+`CODEX_SQLITE_HOME`) — a suite run from a wrapped agent session exports them.
+Scrub inherited values before applying intentional test overrides. Keep cache roots and platform home variables inside the
 fixture where the application uses them. Choose a documented deny list or a
 cleared environment based on actual runtime needs; Windows command stubs may
 need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
@@ -808,7 +859,7 @@ Open the topic file when the task matches:
 | Topic                                                                | File                                    |
 |----------------------------------------------------------------------|-----------------------------------------|
 | L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
-| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md`    |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture, sentinel waits) | `apple-terminal-harness-pitfalls.md`    |
 | CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
 | TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
 | Browser tests (computed-style assertions)                            | `browser-testing.md`                    |

@@ -307,6 +307,10 @@ pub(super) fn run_lifecycle_stack_only(
         err,
         Some(&timing),
     );
+    let mut ctx = ctx;
+    if !guard.start_emitted() {
+        ctx.shell_runner = &claudine::composition::lifecycle_executor::DisabledShellRunner;
+    }
     ctx.execute_stack_for_signal(guard.config())
 }
 

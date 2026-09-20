@@ -104,7 +104,8 @@ fn motivating_class_reads_numeric_code_values() {
 
 #[test]
 fn empirical_schema_fixture_loads_and_resolves() {
-    let area = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let gen_root = biscuit_test_harness::manifest_dir!();
+    let area = gen_root
         .parent()
         .expect("gen crate lives under the claudine package area");
     let topic = area.join("docs/research/agent-errors");

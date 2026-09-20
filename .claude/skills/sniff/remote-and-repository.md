@@ -70,11 +70,14 @@ repositories. Focused inspection may open a registered target to validate it:
 
 ## Recent commits
 
-`CommitDesc::describe_plain(today)` owns the per-commit plain block. The
-set-level `CommitDescSet::describe(true)` and `sniff repo recent-commits
---plain` are the concatenation of those blocks; a commit with no files has no
-block (`None`). Consumers render array elements from `describe_plain` instead
-of splitting the set output.
+`RecentCommits::collect(&repo, &options)` gathers the set;
+`RecentCommits::plain_blocks(&options)` owns the per-commit plain block. The
+set-level `to_plain` and `sniff repo recent-commits --plain` are those blocks
+joined by one blank line. Every collected commit has a block, so a consumer
+that omits no-file commits (Darkmatter's `ctx.recent_commits`) filters on
+`commit.files.is_empty()` itself, and takes the blocks rather than splitting
+the set output on blank lines, which the verbose layout also uses inside a
+block.
 
 ## Conflicts and branches
 

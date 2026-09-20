@@ -20,6 +20,8 @@
 //! - **reference a dash-separated key** — from an unknown-identifier diagnostic
 //!   that carries a [`expressions::KeyReferenceFix`] in `data`; replaces the
 //!   subtraction (`foo--bar`) with a reference to the key.
+//! - **rewrite with `+` concatenation** — from a nested-span-in-literal
+//!   diagnostic; applies the rewrite carried in its typed `data` payload.
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, NumberOrString, Position, Range,
@@ -30,6 +32,7 @@ use super::DocumentContext;
 use super::edits::EditBuilder;
 use crate::config::DmlsConfig;
 use crate::diagnostics::codes::{code, source};
+use crate::diagnostics::nested_span::NestedSpanRewrite;
 use crate::graph::{DocumentId, LinkTarget, NodeId, WorkspaceGraph, normalize_join};
 use crate::overlay::FrontmatterAst;
 use crate::overlay::expressions;
@@ -44,6 +47,7 @@ mod category {
     pub const CLOSE_BLOCK: &str = "close-directive-block";
     pub const WRAP_LITERAL: &str = "wrap-in-interpolation-literal";
     pub const KEY_REFERENCE: &str = "reference-dash-separated-key";
+    pub const REWRITE_CONCATENATION: &str = "rewrite-with-concatenation";
 }
 
 /// Code actions for the current document, driven by the request-context
@@ -85,6 +89,11 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
                 if enabled(ctx.config, category::KEY_REFERENCE) =>
             {
                 reference_dash_separated_key(ctx, diag)
+            }
+            code::EXPRESSION_NESTED_SPAN_IN_LITERAL
+                if enabled(ctx.config, category::REWRITE_CONCATENATION) =>
+            {
+                rewrite_with_concatenation(ctx, diag)
             }
             _ => None,
         };
@@ -261,7 +270,10 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
 /// The YAML value text to seed a missing required top-level `key` with when the
 /// schema types it as a single `literal(x)`, else `None` (an empty scaffold).
 fn literal_scaffold(shape: &darkmatter::markdown::schemas::SchemaShape, key: &str) -> Option<String> {
-    let def = crate::providers::frontmatter::def_at_path(shape, &[key])?;
+    let def = crate::providers::frontmatter::def_at_path(
+        shape,
+        &[crate::overlay::FmPathSegment::Key(key)],
+    )?;
     let value = crate::providers::frontmatter::sole_literal_value(def)?;
     Some(crate::providers::frontmatter::yaml_scalar_literal(value))
 }
@@ -292,7 +304,7 @@ fn migrate_deprecated_style_key(ctx: &DocumentContext, diag: &Diagnostic) -> Opt
     let replacement = tokens.next()?;
     let new_key = replacement.rsplit('.').next().unwrap_or(&replacement).to_string();
     let entry = ast.entry_by_dotted(&path)?;
-    let range = ctx.source_map.byte_range_to_lsp(entry.key_span.clone())?;
+    let range = ctx.source_map.byte_range_to_lsp(entry.key_span.clone()?)?;
     let mut builder = EditBuilder::new();
     builder.edit(
         ctx.uri.clone(),
@@ -420,6 +432,33 @@ fn key_reference_fix(ctx: &DocumentContext, diag: &Diagnostic) -> Option<express
         }
     };
     serde_json::from_value(data).ok()
+}
+
+// ── rewrite a nested span with `+` concatenation ──
+
+/// The `Rewrite with + concatenation` quick fix. Driven only by the
+/// diagnostic's typed payload; a diagnostic without a rewrite, or one computed
+/// against another document version, offers nothing.
+fn rewrite_with_concatenation(ctx: &DocumentContext, diag: &Diagnostic) -> Option<CodeAction> {
+    let payload = NestedSpanRewrite::from_data(diag.data.as_ref()?)?;
+    if payload.document_version != ctx.source_map.version() {
+        return None;
+    }
+    let mut builder = EditBuilder::new();
+    builder.edit(
+        ctx.uri.clone(),
+        TextEdit {
+            range: payload.range,
+            new_text: payload.new_text,
+        },
+    );
+    Some(CodeAction {
+        title: "Rewrite with + concatenation".to_string(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![diag.clone()]),
+        edit: Some(builder.build(ctx.profile)),
+        ..Default::default()
+    })
 }
 
 // ── shared helpers ──

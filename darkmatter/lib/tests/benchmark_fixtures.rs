@@ -15,8 +15,9 @@
 //! (rewrites `manifest.yaml` from the new bytes). Bump `generator.version` in
 //! `generate.sh` and the manifest whenever the emitted bytes change.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use biscuit_test_harness::manifest_dir;
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::compose::ComposeSource;
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 /// Absolute path to the area-owned `darkmatter/benchmarks/` directory.
 fn benchmarks_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    manifest_dir!()
         .join("../benchmarks")
 }
 

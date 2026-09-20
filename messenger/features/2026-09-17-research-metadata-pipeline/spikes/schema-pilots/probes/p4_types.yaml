@@ -1,0 +1,6 @@
+$schema:
+    Knowledge:
+      - "{ state: literal(known), value: number(integer; min(0); required) }"
+      - "{ state: literal(unknown), gap: string(required) }"
+      - "{ state: literal(not_applicable), reason: string(required) }"
+    Fact: "{ id: string(required), knowledge: Knowledge@this }"

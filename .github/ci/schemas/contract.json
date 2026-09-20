@@ -1,6 +1,6 @@
 {
   "resolved_plan": {
-    "schema_version": 3,
+    "schema_version": 4,
     "document": {
       "schema_version": true,
       "base": true,
@@ -15,6 +15,7 @@
       "reverse_dependencies": true,
       "environments": true,
       "cells": true,
+      "builds": true,
       "accepted_evidence": true,
       "evidence_rejections": false,
       "policy_gaps": true,
@@ -22,7 +23,11 @@
       "job_estimate": true,
       "preflight_os": true,
       "preflight_reason": true,
-      "flags": true
+      "flags": true,
+      "event": false,
+      "deferred_environments": false,
+      "proven_environments": false,
+      "producing_environments": false
     },
     "area": {
       "area": true,
@@ -41,8 +46,11 @@
       "l2_backends": true,
       "runner_tools": true,
       "companion_suites": true,
+      "archive_includes": true,
+      "sidecars": true,
       "l1_include_slow": true,
       "native": true,
+      "requires_toolchain": false,
       "exclusion": false,
       "input_paths": false,
       "dependent_seam": false
@@ -63,7 +71,41 @@
       "gap": false,
       "prohibition": false,
       "dependents": false,
-      "companions": false
+      "companions": false,
+      "build": false
+    },
+    "build": {
+      "key": true,
+      "package": true,
+      "producer": true,
+      "artifact": true,
+      "compatible_environments": true,
+      "compatibility_reason": true,
+      "consumers": true,
+      "identity": true
+    },
+    "build_consumer": {
+      "environment": true,
+      "gate": true
+    },
+    "build_identity": {
+      "source_commit": true,
+      "lockfile": true,
+      "rust": true,
+      "nextest": true,
+      "host": true,
+      "target": true,
+      "profile": true,
+      "rustflags": true,
+      "cargo_config": true,
+      "linker": true,
+      "archive_format": true,
+      "package": true,
+      "target_kinds": true,
+      "features": true,
+      "native": true,
+      "archive_includes": true,
+      "sidecars": true
     },
     "change_inventory": {
       "diff_available": true,
@@ -98,7 +140,12 @@
       "backends": true,
       "report": true,
       "failed_tests": false,
-      "failure_detail_truncated": false
+      "failure_detail_truncated": false,
+      "build": false
+    },
+    "cell_build": {
+      "key": true,
+      "digest": true
     },
     "host": {
       "os": true,
@@ -141,6 +188,10 @@
       "preflight_reason",
       "matrix",
       "policy",
+      "build_owners",
+      "build_slices",
+      "build_artifacts",
+      "build_runners",
       "job_estimate",
       "flags"
     ],
@@ -150,6 +201,7 @@
       "scope-head-mismatch",
       "scope-tree-mismatch",
       "scope-base-mismatch",
+      "scope-event-mismatch",
       "scope-malformed"
     ]
   },
@@ -163,6 +215,11 @@
     "gates": [
       "lint",
       "check",
+      "L1",
+      "L2",
+      "browser"
+    ],
+    "build_gates": [
       "L1",
       "L2",
       "browser"
@@ -225,6 +282,23 @@
       "v1-requires-exact-tree",
       "v1-not-equivalence-eligible",
       "v1-is-pass-only"
+    ],
+    "build_rejections": [
+      "build-manifest-missing",
+      "build-manifest-malformed",
+      "build-manifest-schema",
+      "build-digest-mismatch",
+      "build-key-mismatch",
+      "build-source-mismatch",
+      "build-environment-incompatible",
+      "build-runtime-incompatible",
+      "build-archive-missing",
+      "build-archive-corrupt",
+      "build-sidecar-missing",
+      "build-sidecar-corrupt",
+      "build-asset-missing",
+      "build-inventory-incomplete",
+      "build-inventory-unexpected"
     ]
   }
 }

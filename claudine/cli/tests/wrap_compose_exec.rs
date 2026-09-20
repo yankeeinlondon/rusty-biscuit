@@ -339,6 +339,7 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
 /bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'HOME=%s\n' "$HOME"
+  printf 'CODEX_HOME=%s\n' "$CODEX_HOME"
 } > "$CLAUDINE_ENV_FILE"
 exit 0
 "#,
@@ -360,7 +361,15 @@ exit 0
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(
-        env_lines.contains(&format!("HOME={}", home.join(".claudine").display())),
-        "runtime MCP for codex should use a shadow HOME; env: {env_lines}"
+        env_lines.contains(&format!("HOME={}\n", home.display())),
+        "runtime MCP for codex must leave HOME at the launch value; env: {env_lines}"
+    );
+    assert!(
+        env_lines.contains(&format!(
+            "CODEX_HOME={}{}",
+            home.join(".claudine").join("overlays").join("codex").display(),
+            std::path::MAIN_SEPARATOR
+        )),
+        "runtime MCP for codex should point CODEX_HOME at the overlay; env: {env_lines}"
     );
 }

@@ -87,6 +87,7 @@ windows = { version = "0.62", features = [
 winreg = "0.55"
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 criterion = { version = "0.5", features = ["html_reports"] }
 # Fixture writes gix has no API for (worktree-snapshot commits, checkout,
 # linked-worktree creation) + the libgit2 parity oracle. See note above.

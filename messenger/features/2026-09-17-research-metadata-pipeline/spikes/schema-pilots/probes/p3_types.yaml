@@ -1,0 +1,6 @@
+$schema:
+    State: enum(known,unknown,conflicting,not_applicable; required)
+    Item: "{ id: string(required), state: State@this, value: number(integer; min(0)) }"
+    Cond:
+      - "{ kind: literal(api_version), min: string(required) }"
+      - "{ kind: literal(media_kind), media: enum(image,video; required) }"

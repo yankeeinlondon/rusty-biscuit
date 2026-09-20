@@ -142,7 +142,7 @@ pub(super) fn run_composition_body(
     let hands_off = initial_transition.hands_off_source();
 
     // Whether `request.prepared` is an already-committed proxy target the harness
-    // loop will re-stage (narrow gate → `initialize` → stabilized reread → audit)
+    // loop will re-stage (shell-free bootstrap → `initialize` → stabilized reread → audit)
     // via its bootstrap. When adopting, the target's `initialize` has NOT fired
     // here (the setup pipeline skipped `route_initialize`), so this body must not
     // pre-parse the harness plan or run the pre-flight audit against the
@@ -152,11 +152,12 @@ pub(super) fn run_composition_body(
     let adopting = request.adopted_handoff.is_some();
 
     // Whether this document's canonical preparation withheld its schema verdict
-    // because the document declares an `initialize` of its own (R4). The setup
-    // pipeline routes that event below; the harness loop then owes the stabilized
-    // reread that sees any initialize-time mutation and reaches the verdict. An
-    // adopted target is excluded — its full staged bootstrap already covers both,
-    // and a document that hands off never reaches a verdict at all.
+    // (R4), so the harness loop owes the stabilized reread that sees any
+    // lifecycle-time mutation and reaches the verdict. A live document that
+    // authors `initialize` never arrives deferred: the command coordinator's
+    // staged boot already judged its post-`initialize` read. An adopted target
+    // is excluded — its full staged bootstrap already covers both — and a
+    // document that hands off never reaches a verdict at all.
     let stabilize_after_initialize =
         request.prepared.schema_verdict_deferred && !adopting && !hands_off;
 
@@ -235,8 +236,8 @@ pub(super) fn run_composition_body(
     // checks that need an effective-plan transform.
 
     // ── Pre-flight shell approval for harness commands ───────────
-    // Skipped for an adopted target: the staged boot runs the narrow
-    // initialize-shell gate and then the full post-stabilization audit itself,
+    // Skipped for an adopted target: the staged boot runs shell-free
+    // initialization and then the full post-stabilization audit itself,
     // so auditing the bootstrap read here (before the target's `initialize` and
     // stabilized reread) would audit a document the run will not execute.
     if !skip_preflight && !adopting {

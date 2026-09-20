@@ -24,7 +24,7 @@ const ASSET_SUFFIXES: [&str; 4] = [
 ];
 
 fn manifest_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
 }
 
 #[test]

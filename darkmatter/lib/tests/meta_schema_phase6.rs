@@ -10,7 +10,7 @@ use darkmatter::markdown::schemas::{
 
 #[test]
 fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml");
+    let path = biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let source = std::fs::read_to_string(&path).expect("read shipped base schema");
     let document = parse_standalone_schema_document(&source, &path)
         .expect("classify shipped base schema")

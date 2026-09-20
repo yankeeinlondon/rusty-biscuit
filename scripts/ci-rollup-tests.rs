@@ -5,6 +5,7 @@
 
 use super::*;
 use rstest::rstest;
+use serde_json::json;
 use std::env;
 
 // ---------------------------------------------------------------------------
@@ -218,6 +219,7 @@ fn classify_simple(expected: &[ExpectedCell], records: &[RunRecord]) -> Vec<Cell
         expected,
         records,
         statuses: &[],
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     })
 }
@@ -247,6 +249,7 @@ fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
         accepted_evidence: accepted_evidence(&cells),
         scope_degraded: false,
         scheduled: None,
+        builds: Vec::new(),
         records: Vec::new(),
         cells,
     }
@@ -608,6 +611,8 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -615,6 +620,7 @@ fn a_failing_lint_is_never_blamed_for_a_missing_l1_cell() {
         expected: &[expectation("claudine-cli", "windows-latest", Tier::L1)],
         records: &[],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -650,6 +656,8 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -657,6 +665,7 @@ fn a_producer_detail_explains_why_a_cell_has_no_evidence() {
         expected: &[expectation("claudine-cli", "wsl2-ubuntu", Tier::L1)],
         records: &[],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -682,6 +691,8 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -689,6 +700,7 @@ fn a_failing_l1_is_still_blamed_for_a_missing_l2_cell() {
         expected: &[expectation("darkmatter-cli", "ubuntu-latest", Tier::L2)],
         records: &[],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -808,6 +820,8 @@ fn a_producer_failure_downgrades_a_green_report() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let expected_tests = BTreeMap::new();
 
@@ -815,6 +829,7 @@ fn a_producer_failure_downgrades_a_green_report() {
         expected: &[expectation("homelab-server", "ubuntu-latest", Tier::L1)],
         records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -847,6 +862,8 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let expected_tests = BTreeMap::new();
     let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
@@ -857,6 +874,7 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
         records: &[rec],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
     assert_eq!(cell.state, CellState::Fail);
@@ -883,6 +901,8 @@ fn companion_status(result: &str, companion: Option<&str>) -> ProducerStatus {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }
 }
 
@@ -912,6 +932,7 @@ fn a_successful_companion_keeps_the_cell_green() {
         expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
         records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
     assert_eq!(cell.state, CellState::Pass);
@@ -929,6 +950,7 @@ fn a_skipped_companion_downgrades_a_green_report() {
         expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
         records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -960,6 +982,7 @@ fn a_companion_with_no_reported_outcome_downgrades_a_green_report() {
         expected: &[companion_expectation("homelab-server", "ubuntu-latest")],
         records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
     assert_eq!(cell.state, CellState::Fail);
@@ -982,6 +1005,8 @@ fn a_skipped_companion_downgrades_a_green_lint() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
 
     let cells = status_cells(
@@ -1015,6 +1040,8 @@ fn a_test_only_companion_does_not_downgrade_a_green_lint() {
         companions: BTreeMap::new(),
         duration_s: Some(42.0),
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
 
     let cell = only_cell(status_cells(
@@ -1047,6 +1074,8 @@ fn a_lint_status_with_no_duration_records_none() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let cell = only_cell(status_cells(
         &statuses,
@@ -1080,6 +1109,8 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     };
     let statuses = vec![
         status("pkg-success", "success"),
@@ -1126,6 +1157,8 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             companions: BTreeMap::new(),
             duration_s: None,
             dependents: Vec::new(),
+        build: None,
+        timings: None,
         },
         ProducerStatus {
             package: "outsider".to_owned(),
@@ -1137,6 +1170,8 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
             companions: BTreeMap::new(),
             duration_s: None,
             dependents: Vec::new(),
+        build: None,
+        timings: None,
         },
     ];
     let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")], &[]);
@@ -1342,6 +1377,14 @@ fn the_checked_in_environments_table_parses_and_is_well_governed() {
     let text = fs::read_to_string(&path).expect("environments.json is readable");
     let doc: EnvironmentsDoc = serde_json::from_str(&text).expect("environments.json parses");
 
+    // The version the audit refuses is the one thing `verdict` checks before
+    // it reads a single cell; run 35405580517 failed fourteen area audits on
+    // a table the planner had already moved to 3.
+    assert_eq!(
+        doc.schema_version, ENVIRONMENTS_SCHEMA_VERSION,
+        "the shipped environments table and this tool must agree on the schema version"
+    );
+
     assert_eq!(doc.environments.len(), 4);
     let names: BTreeSet<&str> = doc
         .environments
@@ -1514,6 +1557,7 @@ fn an_expected_test_with_no_result_counts_as_a_skip() {
         expected: &[expectation("a", "windows-latest", Tier::L1)],
         records: &[rec],
         statuses: &[],
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -1561,6 +1605,7 @@ fn a_package_with_no_evidence_does_not_manufacture_skips_from_the_manifest() {
         expected: &[expectation("a", "windows-latest", Tier::L1)],
         records: &[rec],
         statuses: &[],
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }));
 
@@ -2456,6 +2501,7 @@ fn compare_rollup(cells: Vec<Cell>) -> Rollup {
         accepted_evidence: Vec::new(),
         scope_degraded: false,
         scheduled: None,
+        builds: Vec::new(),
         records: Vec::new(),
         cells,
     }
@@ -3057,6 +3103,35 @@ fn a_version_one_receipt_renders_its_measurements_as_unrecorded() {
 }
 
 #[test]
+fn a_check_reused_through_its_l1_receipt_reports_no_test_counts() {
+    // `affected_scope.check_evidence`: a check cell has no receipt of its own,
+    // so it links the package's L1 receipt without carrying its counts.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let cell = only_cell(classify_simple(&expected, &[]));
+
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.counts, None, "an L1 test count is not a check measurement");
+    let evidence = cell.evidence.clone().expect("the L1 receipt is still named");
+    assert_eq!(
+        evidence.measurements,
+        "compile-only; covered by the passing L1 on macos-latest"
+    );
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+}
+
+#[test]
 fn a_reused_cell_that_also_produced_ci_evidence_reports_the_executed_result() {
     // The plan and the run disagree: something executed work the plan reused.
     // The executed result is the one with a report behind it, and the
@@ -3424,6 +3499,8 @@ fn a_cancelled_job_is_not_an_accepted_gap() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
     let cells = status_cells(
         &statuses,
@@ -3468,6 +3545,8 @@ fn a_status_gate_reports_the_target_coverage_the_plan_scheduled_it_for() {
         companions: BTreeMap::new(),
         duration_s: None,
         dependents: Vec::new(),
+        build: None,
+        timings: None,
     }];
 
     let cells = status_cells(
@@ -3501,6 +3580,103 @@ fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0].state, CellState::Missing);
     assert_eq!(cells[0].origin, Origin::Unproduced);
+}
+
+#[test]
+fn a_check_the_plan_reused_through_its_l1_receipt_expects_no_producer_status() {
+    // PR #84: the pushing host's L1 satisfied both areas' macOS check cells
+    // (`affected_scope.check_evidence`), so CI scheduled no macOS job and no
+    // status was uploaded. `status_cells` read that silence as MISSING and
+    // blocked the area, while the same reuse on a JUnit-backed tier passed.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["target_kinds"] = serde_json::json!(["example", "bench"]);
+    cell["compile_coverage_from"] = serde_json::json!("check");
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let cells = status_cells(
+        &[],
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    );
+
+    assert_eq!(cells.len(), 1);
+    let cell = &cells[0];
+    assert_eq!(cell.state, CellState::Pass);
+    assert_eq!(cell.origin, Origin::Local);
+    assert!(cell.scheduled);
+    assert_eq!(cell.counts, None, "an L1 test count is not a check measurement");
+    assert_eq!(cell.target_kinds, vec!["example".to_owned(), "bench".to_owned()]);
+    let evidence = cell.evidence.clone().expect("the L1 receipt is still named");
+    assert_eq!(evidence.reference, "refs/notes/ci-local/macos-latest");
+    assert_eq!(
+        evidence.measurements,
+        "compile-only; covered by the passing L1 on macos-latest"
+    );
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.starts_with("reused local evidence from")),
+        "{:?}",
+        cell.reasons
+    );
+}
+
+#[test]
+fn a_status_uploaded_for_a_reused_check_is_the_result_reported() {
+    // Mirrors the JUnit-tier rule: work the plan reused but a job executed
+    // anyway is reported from the executed result, not the receipt.
+    let mut cell = plan_cell_json("claudine", "macos-latest", "check", true);
+    cell["evidence"] = serde_json::json!({
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "check",
+        "origin": "local",
+        "outcome": "pass",
+        "covered_by": "L1",
+        "measurements": "compile-only; covered by the passing L1 on macos-latest",
+        "evidence": receipt_evidence("claudine", "L1", "pass", 3, 0)["evidence"],
+    });
+    let plan = plan_of(vec![cell]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let statuses = vec![ProducerStatus {
+        package: "claudine".to_owned(),
+        job: "check".to_owned(),
+        result: "failure".to_owned(),
+        environment: Some("macos-latest".to_owned()),
+        detail: Some("bench target failed to compile".to_owned()),
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: Some(4.0),
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["claudine"]),
+        &[],
+        &[policy("claudine")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert_eq!(cell.origin, Origin::Ci);
+    assert_eq!(cell.evidence, None);
+    assert_eq!(cell.duration_s, Some(4.0));
 }
 
 // --- AC11: area scope, and a summary that applies no policy --------------
@@ -4683,7 +4859,7 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     let environments = temp.path().join("environments.json");
     fs::write(
         &environments,
-        serde_json::json!({"schema_version": 1, "environments": []}).to_string(),
+        serde_json::json!({"schema_version": ENVIRONMENTS_SCHEMA_VERSION, "environments": []}).to_string(),
     )
     .unwrap();
 
@@ -4947,7 +5123,7 @@ fn a_non_gating_packages_governed_cells_survive_the_plan_path() {
     fs::write(
         &environments,
         serde_json::json!({
-            "schema_version": 1,
+            "schema_version": ENVIRONMENTS_SCHEMA_VERSION,
             "environments": [{"name": "ubuntu-latest", "capabilities": {}}],
         })
         .to_string(),
@@ -5226,6 +5402,7 @@ fn a_failed_l1_command_is_always_blocking() {
         expected: &[expectation("messenger", "windows-latest", Tier::L1)],
         records: &[record],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Fail);
@@ -5247,6 +5424,7 @@ fn a_folded_failure_status_downgrades_a_green_report_without_a_detail() {
         expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
         records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Fail);
@@ -5272,6 +5450,7 @@ fn a_failed_producer_with_no_report_is_missing() {
         expected: &[expectation("queue", "windows-latest", Tier::L1)],
         records: &[built_nothing],
         statuses: &statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Missing);
@@ -5284,11 +5463,772 @@ fn a_failed_producer_with_no_report_is_missing() {
         expected: &[expectation("queue", "macos-latest", Tier::L1)],
         records: &[],
         statuses: &[],
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Missing);
     let findings = verdict(&rollup_of(vec![cell], &["queue"]), &Baseline::default(), None);
     assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// Build-record attribution (fixes/2026-09-12-single-os-compile Task 4.2)
+// ---------------------------------------------------------------------------
+//
+// A build record is plumbing, never a result cell: nothing below keys, creates,
+// or baselines a cell on one. What it does is let a cell that could not run say
+// WHICH named build stopped it, instead of rendering the same blank MISSING a
+// never-scheduled leg gets.
+
+/// An executing cell that consumes `key`.
+fn consuming(package: &str, environment: &str, tier: Tier, key: &str) -> ExpectedCell {
+    let mut cell = expectation(package, environment, tier);
+    cell.build = Some(key.to_owned());
+    cell
+}
+
+/// One build-status document, as `ci.yml`'s owner leg uploads it.
+fn build_status(key: &str, package: &str, result: &str, stage: &str) -> BuildStatus {
+    BuildStatus {
+        key: key.to_owned(),
+        package: package.to_owned(),
+        producer: "ubuntu-latest".to_owned(),
+        result: result.to_owned(),
+        stage: stage.to_owned(),
+        digest: None,
+        detail: None,
+        stage_seconds: None,
+        timings: None,
+    }
+}
+
+fn classify_with_builds(
+    expected: &[ExpectedCell],
+    records: &[RunRecord],
+    builds: &[BuildStatus],
+) -> Vec<Cell> {
+    let by_key: BTreeMap<String, BuildStatus> = builds
+        .iter()
+        .map(|status| (status.key.clone(), status.clone()))
+        .collect();
+    classify(&ClassifyInputs {
+        expected,
+        records,
+        statuses: &[],
+        builds: &by_key,
+        expected_tests: &BTreeMap::new(),
+    })
+}
+
+#[test]
+fn a_cell_whose_build_failed_is_missing_and_names_the_build() {
+    let cell = only_cell(classify_with_builds(
+        &[consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
+        &[],
+        &[build_status("abc0123456789def", "sniff-cli", "failure", "compile")],
+    ));
+    assert_eq!(cell.state, CellState::Missing);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("blocked by build abc0123456789def")
+                && reason.contains("ubuntu-latest")
+                && reason.contains("compile")),
+        "the cell must name the build, its producer, and where it stopped: {:?}",
+        cell.reasons
+    );
+    // MISSING blocks, and the skip baseline judges skipped test identities
+    // only — so a failed build can never be excused into a merge.
+    let findings = verdict(
+        &rollup_of(vec![cell], &["sniff-cli"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+}
+
+#[test]
+fn a_cancelled_or_unuploaded_build_blocks_its_cells_just_as_a_failed_one_does() {
+    for (result, stage) in [("cancelled", "produce"), ("failure", "upload")] {
+        let cell = only_cell(classify_with_builds(
+            &[consuming("queue", "ubuntu-latest", Tier::L1, "0000111122223333")],
+            &[],
+            &[build_status("0000111122223333", "queue", result, stage)],
+        ));
+        assert_eq!(
+            cell.state,
+            CellState::Missing,
+            "a `{result}` build at the {stage} stage leaves no archive to run"
+        );
+        assert!(
+            cell.reasons.iter().any(|reason| reason.contains(stage)),
+            "the stage must reach the reader: {:?}",
+            cell.reasons
+        );
+    }
+}
+
+#[test]
+fn a_successful_build_leaves_its_consumers_exactly_as_they_were() {
+    let cells = classify_with_builds(
+        &[
+            consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
+            consuming("sniff-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def"),
+        ],
+        &[
+            passing_record("sniff-cli", "ubuntu-latest", Tier::L1),
+            passing_record("sniff-cli", "wsl2-ubuntu", Tier::L1),
+        ],
+        &[build_status("abc0123456789def", "sniff-cli", "success", "produce")],
+    );
+    assert_eq!(cells.len(), 2, "one build, two result cells");
+    for cell in &cells {
+        assert_eq!(cell.state, CellState::Pass);
+        assert!(
+            !cell.reasons.iter().any(|reason| reason.contains("blocked by")),
+            "a delivered build adds nothing to its consumers: {:?}",
+            cell.reasons
+        );
+    }
+}
+
+#[test]
+fn a_failed_build_leaves_an_unrelated_cell_untouched() {
+    let cells = classify_with_builds(
+        &[
+            consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
+            consuming("queue", "ubuntu-latest", Tier::L1, "4444555566667777"),
+        ],
+        &[passing_record("queue", "ubuntu-latest", Tier::L1)],
+        &[
+            build_status("abc0123456789def", "sniff-cli", "failure", "compile"),
+            build_status("4444555566667777", "queue", "success", "produce"),
+        ],
+    );
+    let blocked = cells.iter().find(|cell| cell.key.package == "sniff-cli").unwrap();
+    let healthy = cells.iter().find(|cell| cell.key.package == "queue").unwrap();
+    assert_eq!(blocked.state, CellState::Missing);
+    assert_eq!(healthy.state, CellState::Pass);
+}
+
+#[test]
+fn a_real_test_result_outranks_the_build_diagnostic() {
+    // The archive was delivered late, or its upload failed after the consumer
+    // already had it: whatever the plumbing says, the cell ran tests and the
+    // tests are the result. The note is still recorded.
+    let mut failing = record("darkmatter", "ubuntu-latest", Tier::L1);
+    failing.counts = Counts { total: 2, passed: 1, failed: 1, ..Counts::default() };
+    failing.failed_tests = vec!["darkmatter::render".to_owned()];
+    let cell = only_cell(classify_with_builds(
+        &[consuming("darkmatter", "ubuntu-latest", Tier::L1, "8888999900001111")],
+        &[failing],
+        &[build_status("8888999900001111", "darkmatter", "failure", "upload")],
+    ));
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("blocked by build")),
+        "the plumbing diagnostic is still reported: {:?}",
+        cell.reasons
+    );
+}
+
+#[test]
+fn a_cell_whose_build_published_no_status_is_not_inferred_to_be_blocked() {
+    // Producers whose consumers have not been cut over still compile in place.
+    // Their cells reference a record no owner job was scheduled for, and
+    // inferring a block from that absence would fail every one of them.
+    let cell = only_cell(classify_with_builds(
+        &[consuming("messenger", "macos-latest", Tier::L1, "aaaabbbbccccdddd")],
+        &[passing_record("messenger", "macos-latest", Tier::L1)],
+        &[],
+    ));
+    assert_eq!(cell.state, CellState::Pass);
+    assert!(!cell.reasons.iter().any(|reason| reason.contains("blocked by")));
+}
+
+#[test]
+fn a_reused_cell_consumes_no_build_and_cannot_be_blocked_by_one() {
+    // The overlay prunes a reused cell's build reference, so `plan_expected_cells`
+    // never carries one — proven here through the plan reader rather than by
+    // constructing the expectation by hand.
+    let plan: ResolvedPlan = serde_json::from_value(json!({
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "packages": [{"package": "sniff-cli"}],
+        "cells": [
+            {
+                "package": "sniff-cli", "area": "sniff", "environment": "ubuntu-latest",
+                "gate": "L1", "execution": "reuse", "origin": "local", "state": "reused",
+                "build": "abc0123456789def",
+                "evidence": {"outcome": "pass", "ref": "refs/notes/ci-local/ubuntu-latest"},
+            },
+            {
+                "package": "sniff-cli", "area": "sniff", "environment": "wsl2-ubuntu",
+                "gate": "L1", "execution": "execute", "origin": "ci", "state": "pending",
+                "build": "abc0123456789def",
+            },
+        ],
+    }))
+    .expect("the plan fixture parses");
+    let expected = plan_expected_cells(&plan).expect("the plan is readable");
+    let reused = expected
+        .iter()
+        .find(|cell| cell.key.environment == "ubuntu-latest")
+        .unwrap();
+    let executing = expected
+        .iter()
+        .find(|cell| cell.key.environment == "wsl2-ubuntu")
+        .unwrap();
+    assert_eq!(reused.build, None, "a reused cell demands no compile");
+    assert_eq!(executing.build.as_deref(), Some("abc0123456789def"));
+
+    let cells = classify_with_builds(
+        &expected,
+        &[],
+        &[build_status("abc0123456789def", "sniff-cli", "failure", "compile")],
+    );
+    let reused_cell = cells
+        .iter()
+        .find(|cell| cell.key.environment == "ubuntu-latest")
+        .unwrap();
+    assert_eq!(
+        reused_cell.state,
+        CellState::Pass,
+        "a receipt-satisfied cell is not blocked by a build nothing asked it to run"
+    );
+    assert!(
+        cells
+            .iter()
+            .find(|cell| cell.key.environment == "wsl2-ubuntu")
+            .is_some_and(|cell| cell.state == CellState::Missing)
+    );
+}
+
+#[test]
+fn a_rerun_that_publishes_both_attempts_keeps_the_failure() {
+    let temp = TempDir::new("build-status-rerun");
+    for (dir, result) in [("attempt-1", "failure"), ("attempt-2", "success")] {
+        let directory = temp
+            .path()
+            .join(format!("build-status-sniff-cli-ubuntu-latest-abc0123456789def-{dir}"));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("build-status.json"),
+            serde_json::to_string(&json!({
+                "schema_version": 1,
+                "key": "abc0123456789def",
+                "package": "sniff-cli",
+                "producer": "ubuntu-latest",
+                "artifact": "build-sniff-cli-ubuntu-latest-abc0123456789def",
+                "result": result,
+                "stage": "produce",
+                "consumers": [],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let statuses = read_build_statuses(temp.path()).unwrap();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(
+        statuses["abc0123456789def"].result, "failure",
+        "an owner leg that failed on either attempt did not deliver the archive \
+         this attempt's consumers were told to download"
+    );
+}
+
+#[test]
+fn a_consumer_reports_the_planned_key_and_realized_digest_it_ran() {
+    let statuses = vec![ProducerStatus {
+        package: "sniff-cli".to_owned(),
+        job: "L1".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: Some(ExecutedBuild {
+            key: "abc0123456789def".to_owned(),
+            producer: "ubuntu-latest".to_owned(),
+            digest: "fedcba9876543210".to_owned(),
+        }),
+        timings: None,
+    }];
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
+        records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
+        statuses: &statuses,
+        builds: &BTreeMap::new(),
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Pass);
+    assert!(
+        cell.reasons.iter().any(|reason| reason
+            == "ran build abc0123456789def produced on ubuntu-latest (realized fedcba9876543210)"),
+        "a consumer must report the one key and digest it executed: {:?}",
+        cell.reasons
+    );
+}
+
+/// A consumer that refused its inputs — a corrupt transfer, a missing sidecar,
+/// a wrong ABI — reports the refusal, not a test result. Nothing compiled a
+/// replacement, so there is no report to read and the cell is MISSING with the
+/// verifier's own account attached.
+#[test]
+fn a_consumer_that_refused_its_build_reports_the_refusal() {
+    let statuses = vec![ProducerStatus {
+        package: "sniff-cli".to_owned(),
+        job: "L1".to_owned(),
+        result: "failure".to_owned(),
+        environment: Some("wsl2-ubuntu".to_owned()),
+        detail: Some(
+            "build abc0123456789def produced on ubuntu-latest was refused by the \
+             guest's verification (failure); no test was started and nothing was \
+             compiled to replace it"
+                .to_owned(),
+        ),
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+    let cell = only_cell(classify(&ClassifyInputs {
+        expected: &[consuming("sniff-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def")],
+        records: &[],
+        statuses: &statuses,
+        // The owner delivered: the refusal is the consumer's, and the cell must
+        // still name the build rather than read as an unexplained absence.
+        builds: &BTreeMap::from([(
+            "abc0123456789def".to_owned(),
+            build_status("abc0123456789def", "sniff-cli", "success", "produce"),
+        )]),
+        expected_tests: &BTreeMap::new(),
+    }));
+    assert_eq!(cell.state, CellState::Missing);
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("refused") && reason.contains("abc0123456789def")),
+        "the refusal and the build it refused must both reach the reader: {:?}",
+        cell.reasons
+    );
+    assert!(
+        cell.reasons
+            .iter()
+            .any(|reason| reason.contains("nothing was compiled to replace it")),
+        "a refusal must never be repaired by compiling: {:?}",
+        cell.reasons
+    );
+    let findings = verdict(
+        &rollup_of(vec![cell], &["sniff-cli"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"), "{findings:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// Reporting surfaces: provenance and per-stage timings
+// ---------------------------------------------------------------------------
+//
+// The reporting contract asks for two things a reader cannot get from the grid:
+// which build each executing cell ran, and what each stage of reaching it cost.
+// Neither may become an identity — the cells below stay keyed on
+// `{package, environment, tier}` and no build produces a gate outcome.
+
+/// A consumer status carrying both the build it ran and what its stages cost.
+fn measured_consumer(environment: &str, timings: ConsumerTimings) -> ProducerStatus {
+    ProducerStatus {
+        package: "sniff-cli".to_owned(),
+        job: "L1".to_owned(),
+        result: "success".to_owned(),
+        environment: Some(environment.to_owned()),
+        detail: None,
+        companion: None,
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: Some(ExecutedBuild {
+            key: "abc0123456789def".to_owned(),
+            producer: "ubuntu-latest".to_owned(),
+            digest: "fedcba9876543210".to_owned(),
+        }),
+        timings: Some(timings),
+    }
+}
+
+fn measured_cell(environment: &str, timings: ConsumerTimings) -> Cell {
+    only_cell(classify(&ClassifyInputs {
+        expected: &[consuming("sniff-cli", environment, Tier::L1, "abc0123456789def")],
+        records: &[passing_record("sniff-cli", environment, Tier::L1)],
+        statuses: &[measured_consumer(environment, timings)],
+        builds: &BTreeMap::new(),
+        expected_tests: &BTreeMap::new(),
+    }))
+}
+
+#[test]
+fn an_executing_cell_displays_its_key_digest_producer_and_every_stage_apart() {
+    let cell = measured_cell(
+        "ubuntu-latest",
+        ConsumerTimings {
+            download_seconds: 7,
+            verify_seconds: 3,
+            extract_ms: 800,
+            execute_seconds: 41,
+        },
+    );
+    assert_eq!(
+        cell.build,
+        Some(CellBuild {
+            key: "abc0123456789def".to_owned(),
+            producer: "ubuntu-latest".to_owned(),
+            digest: "fedcba9876543210".to_owned(),
+            timings: Some(ConsumerTimings {
+                download_seconds: 7,
+                verify_seconds: 3,
+                extract_ms: 800,
+                execute_seconds: 41,
+            }),
+        })
+    );
+
+    let summary = render_grid(&rollup_of(vec![cell], &["sniff-cli"]));
+    assert!(summary.contains("### Build provenance"), "{summary}");
+    assert!(
+        summary.contains(
+            "| `sniff-cli/ubuntu-latest/L1` | `abc0123456789def` | `fedcba9876543210` | \
+             ubuntu-latest | 7s | 3s | 0.8s | 41s |"
+        ),
+        "every stage is its own column, and none of them is test time: {summary}"
+    );
+}
+
+#[test]
+fn a_stage_nothing_measured_renders_absent_rather_than_zero() {
+    // A guest that died before its measurements crossed back has no timings.
+    // Reporting `0s` would claim its transfer was instant.
+    let cell = measured_cell("wsl2-ubuntu", ConsumerTimings::default());
+    let mut blank = cell.clone();
+    blank.build = blank.build.map(|build| CellBuild {
+        timings: None,
+        ..build
+    });
+    let summary = render_grid(&rollup_of(vec![blank], &["sniff-cli"]));
+    assert!(
+        summary.contains("| — | — | — | — |"),
+        "an unmeasured stage is blank: {summary}"
+    );
+
+    let measured = render_grid(&rollup_of(vec![cell], &["sniff-cli"]));
+    assert!(
+        measured.contains("| 0s | 0s | 0.0s | 0s |"),
+        "a stage that finished inside one tick measured zero: {measured}"
+    );
+}
+
+/// One Linux archive, two environments, one digest. The provenance table is
+/// where a reader confirms that the L1 cell and the WSL2 cell ran the same
+/// program while publishing separate results.
+#[test]
+fn two_environments_consuming_one_build_each_report_the_same_key_and_digest() {
+    let linux = measured_cell(
+        "ubuntu-latest",
+        ConsumerTimings {
+            download_seconds: 4,
+            verify_seconds: 2,
+            extract_ms: 500,
+            execute_seconds: 30,
+        },
+    );
+    let guest = measured_cell(
+        "wsl2-ubuntu",
+        ConsumerTimings {
+            download_seconds: 11,
+            verify_seconds: 9,
+            extract_ms: 4200,
+            execute_seconds: 95,
+        },
+    );
+    let summary = render_grid(&rollup_of(vec![linux, guest], &["sniff-cli"]));
+    assert_eq!(
+        summary.matches("`abc0123456789def` | `fedcba9876543210`").count(),
+        2,
+        "both cells ran one build: {summary}"
+    );
+    assert!(summary.contains("| `sniff-cli/ubuntu-latest/L1` |"), "{summary}");
+    assert!(summary.contains("| `sniff-cli/wsl2-ubuntu/L1` |"), "{summary}");
+    // Separate result cells, unchanged: the shared build is reporting only.
+    assert!(summary.contains("### L1"), "{summary}");
+}
+
+#[test]
+fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
+    let mut rollup = rollup_of(
+        vec![measured_cell("ubuntu-latest", ConsumerTimings::default())],
+        &["sniff-cli"],
+    );
+    rollup.builds = build_reports(&BTreeMap::from([(
+        "abc0123456789def".to_owned(),
+        BuildStatus {
+            stage_seconds: Some(ProducerStageSeconds {
+                queue_seconds: 18,
+                upload_seconds: 26,
+            }),
+            timings: Some(ProducerTimings {
+                setup_ms: 120,
+                compile_archive_ms: 184_000,
+                sidecars_ms: 900,
+                inventory_ms: 300,
+                checksum_ms: 450,
+                total_ms: 185_770,
+            }),
+            digest: Some("fedcba9876543210".to_owned()),
+            ..build_status("abc0123456789def", "sniff-cli", "success", "produce")
+        },
+    )]));
+
+    let summary = render_grid(&rollup);
+    assert!(summary.contains("### Build records"), "{summary}");
+    assert!(
+        summary.contains(
+            "| `abc0123456789def` | `sniff-cli` | ubuntu-latest | success (produce) | 18s | \
+             184.0s | 26s |"
+        ),
+        "queue, compile+archive, and upload are each their own column: {summary}"
+    );
+}
+
+#[test]
+fn an_unreported_owner_stage_is_blank_and_a_build_is_never_a_result_cell() {
+    let cell = measured_cell("ubuntu-latest", ConsumerTimings::default());
+    let mut rollup = rollup_of(vec![cell], &["sniff-cli"]);
+    rollup.builds = build_reports(&BTreeMap::from([(
+        "abc0123456789def".to_owned(),
+        build_status("abc0123456789def", "sniff-cli", "failure", "compile"),
+    )]));
+
+    let summary = render_grid(&rollup);
+    assert!(
+        summary.contains("| `abc0123456789def` | `sniff-cli` | ubuntu-latest | failure (compile) | — | — | — |"),
+        "{summary}"
+    );
+    // A failed owner in the reporting table creates no cell and no finding of
+    // its own: the cell it blocks is the one that reports it, and this rollup
+    // has none such.
+    assert_eq!(rollup.cells.len(), 1);
+    assert!(rollup.cells.iter().all(|cell| cell.build.is_some()));
+    assert!(!any_block(&verdict(&rollup, &Baseline::default(), None)));
+}
+
+#[test]
+fn an_area_slice_carries_only_its_own_build_records() {
+    let mut rollup = two_area_rollup();
+    rollup.builds = build_reports(&BTreeMap::from([
+        (
+            "1111111111111111".to_owned(),
+            build_status("1111111111111111", "claudine", "success", "produce"),
+        ),
+        (
+            "2222222222222222".to_owned(),
+            build_status("2222222222222222", "sniff", "success", "produce"),
+        ),
+    ]));
+    let areas: BTreeSet<String> = ["claudine".to_owned()].into_iter().collect();
+    let narrowed = rollup.narrowed(&areas);
+    assert_eq!(
+        narrowed
+            .builds
+            .iter()
+            .map(|build| build.package.as_str())
+            .collect::<Vec<_>>(),
+        vec!["claudine"],
+        "an area's slice explains its own plumbing and nobody else's"
+    );
+}
+
+/// The whole reporting path, through real artifact directories.
+///
+/// A timing is only useful if it survives the artifacts, the document, and a
+/// second read of that document. This writes what the workflows actually
+/// upload — a consumer `status.json` with its stage windows and an owner's
+/// `build-status.json` with its queue and upload windows — rolls them up, and
+/// reads the result back twice.
+#[test]
+fn stage_timings_survive_the_artifacts_the_document_and_a_second_read() {
+    let temp = TempDir::new("timing-e2e");
+    let artifacts = temp.path().join("ci-artifacts");
+
+    let junit = artifacts.join("junit-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(junit.join("L1")).unwrap();
+    fs::write(
+        junit.join("L1").join("claudine.xml"),
+        crate::tests::junit("claudine", &passing_case("claudine::a")),
+    )
+    .unwrap();
+    fs::write(
+        junit.join("manifest.jsonl"),
+        serde_json::json!({
+            "tier": "L1", "package": "claudine", "xml": "L1/claudine.xml",
+            "exit_code": 0, "environment": "ubuntu-latest",
+            "duration_s": 41, "report_present": true,
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+
+    // Exactly the document `_package-ci.yml`'s status step writes.
+    let status = artifacts.join("status-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(&status).unwrap();
+    fs::write(
+        status.join("status.json"),
+        serde_json::json!({
+            "package": "claudine", "job": "L1", "environment": "ubuntu-latest",
+            "result": "success",
+            "build": {
+                "key": "abc0123456789def",
+                "producer": "ubuntu-latest",
+                "digest": "fedcba9876543210",
+            },
+            "timings": {
+                "download_seconds": 7, "verify_seconds": 3,
+                "extract_ms": 800, "execute_seconds": 41,
+            },
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    // Exactly the document `ci.yml`'s owner job writes, jq-augmented.
+    let build = artifacts.join("build-status-claudine-ubuntu-latest-abc0123456789def");
+    fs::create_dir_all(&build).unwrap();
+    fs::write(
+        build.join("build-status.json"),
+        serde_json::json!({
+            "schema_version": 1, "key": "abc0123456789def", "package": "claudine",
+            "producer": "ubuntu-latest",
+            "artifact": "build-claudine-ubuntu-latest-abc0123456789def",
+            "result": "success", "stage": "produce",
+            "digest": "fedcba9876543210", "consumers": [],
+            "timings": {
+                "setup_ms": 120, "compile_archive_ms": 184000, "sidecars_ms": 900,
+                "inventory_ms": 300, "checksum_ms": 450, "total_ms": 185770,
+            },
+            "stage_seconds": {"queue_seconds": 18, "upload_seconds": 26},
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let plan = temp.path().join("resolved-plan.json");
+    let mut cell = plan_cell_json("claudine", "ubuntu-latest", "L1", false);
+    cell["build"] = serde_json::json!("abc0123456789def");
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "packages": [{"package": "claudine"}],
+            "cells": [cell],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        serde_json::json!({"schema_version": ENVIRONMENTS_SCHEMA_VERSION, "environments": []})
+            .to_string(),
+    )
+    .unwrap();
+
+    let results = temp.path().join("results.json");
+    let summary = temp.path().join("summary.md");
+    let arguments = |out: &str| {
+        Args::parse(
+            [
+                "--artifacts",
+                artifacts.to_str().unwrap(),
+                "--plan",
+                plan.to_str().unwrap(),
+                "--environments",
+                environments.to_str().unwrap(),
+                "--out",
+                out,
+                "--summary",
+                summary.to_str().unwrap(),
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap()
+    };
+    assert_eq!(cmd_rollup(&arguments(results.to_str().unwrap())).unwrap(), 0);
+
+    let document: Rollup =
+        serde_json::from_str(&fs::read_to_string(&results).unwrap()).expect("the document reloads");
+    let cell = document
+        .cells
+        .iter()
+        .find(|cell| cell.key.tier == Tier::L1)
+        .expect("the L1 cell");
+    assert_eq!(cell.state, CellState::Pass);
+    let executed = cell.build.as_ref().expect("the cell names what it ran");
+    assert_eq!(executed.key, "abc0123456789def");
+    assert_eq!(executed.digest, "fedcba9876543210");
+    assert_eq!(
+        executed.timings,
+        Some(ConsumerTimings {
+            download_seconds: 7,
+            verify_seconds: 3,
+            extract_ms: 800,
+            execute_seconds: 41,
+        })
+    );
+    assert_eq!(
+        document.builds[0].stage_seconds,
+        Some(ProducerStageSeconds {
+            queue_seconds: 18,
+            upload_seconds: 26,
+        })
+    );
+    assert_eq!(
+        document.builds[0].timings.map(|entry| entry.compile_archive_ms),
+        Some(184_000)
+    );
+
+    // The summary a reader sees, from the same run.
+    let rendered = fs::read_to_string(&summary).unwrap();
+    assert!(rendered.contains("### Build provenance"), "{rendered}");
+    assert!(
+        rendered.contains("| 7s | 3s | 0.8s | 41s |"),
+        "the consumer's stages stay apart: {rendered}"
+    );
+    assert!(
+        rendered.contains("| 18s | 184.0s | 26s |"),
+        "the owner's stages stay apart: {rendered}"
+    );
+
+    // Read/write/read: the same artifacts roll up to the same bytes.
+    let again = temp.path().join("results-2.json");
+    assert_eq!(cmd_rollup(&arguments(again.to_str().unwrap())).unwrap(), 0);
+    assert_eq!(
+        fs::read_to_string(&results).unwrap(),
+        fs::read_to_string(&again).unwrap(),
+    );
+
+    // Identity is untouched: nothing is keyed on a build.
+    assert!(
+        document
+            .cells
+            .iter()
+            .all(|cell| !cell.key.to_string().contains("abc0123456789def")),
+        "a build key must never enter a cell's identity"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -5337,6 +6277,7 @@ fn classify_one(expected: &[ExpectedCell], statuses: &[ProducerStatus]) -> Cell 
         expected,
         records: &[passing_record("homelab-server", "ubuntu-latest", Tier::L1)],
         statuses,
+        builds: &BTreeMap::new(),
         expected_tests: &expected_tests,
     }))
 }
@@ -5461,6 +6402,7 @@ fn a_companion_outcome_on_a_cell_that_declared_none_is_rejected() {
         expected: &[expectation("queue", "ubuntu-latest", Tier::L1)],
         records: &[passing_record("queue", "ubuntu-latest", Tier::L1)],
         statuses: &[status],
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     }));
     assert_eq!(cell.state, CellState::Fail);
@@ -5554,6 +6496,7 @@ fn the_rollup_takes_its_companion_expectation_from_the_plan_cell() {
         expected: &expected,
         records: &records,
         statuses: &[],
+        builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
     });
     assert_eq!(

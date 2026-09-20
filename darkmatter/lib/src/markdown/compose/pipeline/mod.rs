@@ -302,7 +302,9 @@ impl Markdown {
             // collector already walks every child, nested `as_markdown` content
             // included; gated on a shell-executing
             // operation being enabled so the collection's own internal inline
-            // compose (which disables shell execution) cannot recurse.
+            // compose (which disables shell execution) cannot recurse. A
+            // frontmatter-surface compose checks its frontmatter commands only,
+            // so it never dereferences the body graph.
             if preflight_gate_applies(&options, runtime)
                 && !runtime
                     .preflight_validated()

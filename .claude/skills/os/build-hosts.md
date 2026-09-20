@@ -32,10 +32,14 @@ the output.
 ## `just cross-check`
 
 `scripts/cross-check.sh` (root `just cross-check <package> [--os
-linux|windows|wsl|macos|all] [nextest args]`) syncs a standing clone to
+linux|windows|wsl|macos|all] [nextest args]`) commits your working tree
+(tracked edits and untracked, non-ignored files) as one throwaway commit over
 `origin/<branch>` (falls back to `origin/main` when the branch is unpushed),
-applies the local tree's difference as one patch (tracked and untracked
-files), and runs the package's L1 suite there. Compile caches stay warm
+ships that commit as a `git bundle`, checks the standing clone out at it, and
+runs the package's L1 suite there. Your branch, index, and stash stack are
+untouched and nothing is signed. The commit is the tested revision and the
+plan's `head`, which is what lets archive mode run at all: `ci-build` refuses
+any checkout that is not `plan.head` or whose tracked tree is dirty. Compile caches stay warm
 between runs. It reads `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and
 `BUILD_MACOS`. The default `--os all` runs on every declared OS except the
 one the script is running on, since the local suite already covers it; the
@@ -55,26 +59,42 @@ filtered run; it passes the quoted filterset through intact.
 The hosts are shared. Each run holds a per-host lock
 (`ci-verification/.cross-check.lock`, an atomically created directory with an
 `owner` file naming the user, branch, base SHA, and start time) for the whole
-reset, apply, and test sequence, so overlapping runs queue instead of
+reset, checkout, and test sequence, so overlapping runs queue instead of
 clobbering the clone. A waiter prints the owner and gives up after 30 minutes
 with exit 75. A lock left by a dead run is reported, never removed by the
 script; only its owner removes it by hand. Never work in the standing clone
 directly; use your own worktree for ad hoc sessions.
 
 - Verify the banner line `cross-check: <pkg> @ origin/<branch> (<sha>) + N
-  patch line(s)` before trusting a result. If in doubt, confirm the remote
-  head: `ssh "$BUILD_WIN" "git -C W:\ci-verification\rusty-biscuit log -1
-  --oneline"`.
-- A clone left dirty by an earlier failed patch used to make the checkout
-  fail silently and apply the patch onto the old tree. The script now resets
-  and cleans first; recover an older clone by hand with `git reset --hard;
+  changed file(s) as <rev>` before trusting a result. If in doubt, confirm the
+  remote head: `ssh "$BUILD_WIN" "git -C W:\ci-verification\rusty-biscuit log
+  -1 --oneline"` — it is `<rev>`.
+- A clone left dirty by an earlier run used to make the checkout fail silently
+  and test the old tree. The script resets and cleans before checking the
+  tested revision out; recover an older clone by hand with `git reset --hard;
   git clean -fdq; git checkout --detach <sha>` over SSH.
 - Positional filter args are nextest test-name substrings. A binary name
   matches nothing ("0 tests run"). `-E 'test(...)'` breaks the recipe's
-  unquoted argument line; pass several name substrings instead.
+  unquoted argument line (a `|` in it is run as a shell pipe); pass several
+  name substrings instead, which nextest ORs.
 - Child-process stderr is not shown by a remote test failure. A probe that
   must be read back can append to `W:\ci-verification\probe.txt` and be read
   with `ssh "$BUILD_WIN" "Get-Content W:\ci-verification\probe.txt"`.
+- `BUILD_WIN` has **no usable `python3`**: the name resolves to a Cygwin shim
+  pointing at a deleted `Python313\python.exe`, so a command that merely probes
+  for `python3` finds one and then fails on use. A working 3.13 is reachable
+  only as `py`. Anything that runs `scripts/ci/*.py` over SSH must spell `py`
+  (measured 2026-09-15).
+- The `wsl` leg can print `FAIL` in the summary after a run whose own
+  `cross-check-exit:` marker is `0` and whose every test passed. Read the
+  marker, not the summary, before calling the leg red. Observed 2026-09-15:
+  the archive run writes its JUnit report to `<clone>/target/nextest/ci/
+  test-results.xml`, which is neither path `publish_wsl_receipt` looks in, so
+  the receipt step reports "produced no JUnit report"; the same fresh `target`
+  makes the restoring `mv target.hold target` nest the warm cache at
+  `target/target.hold` instead of restoring it, so the next WSL run also
+  rebuilds from cold. Both are `scripts/cross-check.sh` bookkeeping, not the
+  package under test.
 
 ## Storage rules on the Windows host
 
@@ -91,6 +111,44 @@ once filled the system drive to zero bytes and froze the host.
   Windows side and inside the WSL guest.
 - Check free space first: `ssh "$BUILD_WIN" "Get-PSDrive C, W"`; inside
   WSL, `ssh "$BUILD_WSL" 'df -h ~'`.
+- The standing clone's own target under `W:\ci-verification` is **also**
+  outside the scheduled sweep: `RustyBiscuit-CargoSweep` is rooted at the
+  `C:` checkout. On 2026-09-16 it held 161 GB, `W:` had 143 MB free, and
+  `cross-check --os windows` died compiling with `os error 112` (not enough
+  space). Running the scheduled task reclaimed nothing. `cross-check` has no
+  sweep of its own, so report it rather than deleting the shared target.
+  `W:` was freed by 2026-09-15. Later on 2026-09-16 a run failed *before*
+  compiling: the patch upload reported `scp: write remote
+  "W:/ci-verification/cross-check-….patch": Failure`, then git reported
+  `unable to write file …` and `Could not reset index file`. That pattern
+  points to write failures on `W:`, not to a patch bug. Check
+  `Get-PSDrive W` before debugging the patch.
+  On 2026-09-16 `W:` reported 0 GB free, and SSH to `$BUILD_WSL` failed at
+  key exchange with `Connection reset by peer`. The guest's VHDX lives on
+  `W:`, so treat a WSL reset as the same storage problem, not a network one.
+- The standing cross-check clone `W:\ci-verification\rusty-biscuit` does not
+  inherit that `target-dir` pin: it builds into its own `target\`, which the
+  daily `RustyBiscuit-CargoSweep` (scoped to `W:/rusty-biscuit-target`) never
+  touches. On 2026-09-17 that `target\` plus an orphan
+  `W:\ci-verification\rb-pr66` (62 GB, 2026-08-30) and the 131 GB WSL VHDX
+  left `W:` at 8 KB free while the sweep log reported success with
+  `free_gib=0`. A full `W:` fails `--os windows` at the patch upload (`scp
+  ... Failure`, `No space left on device`). The same day the WSL guest (its
+  VHDX lives on `W:`) reset every SSH connection
+  (`kex_exchange_identification: Connection reset`), so suspect a full `W:`
+  first when both legs fail together. Freeing `W:` is the owner's call.
+
+A stale lock on a standing clone does not block Linux evidence. Build a
+private clone that only *reads* the standing one: `git clone --shared
+--no-checkout ~/ci-verification/rusty-biscuit ~/scratch/<name>`. If the base
+commit is missing there, send the gap as a `git bundle` (`<remote tip>..<base>`)
+instead of fetching into the standing clone. Apply a
+`git diff --cached --binary <base>` built with a temporary `GIT_INDEX_FILE`, so
+untracked files come along and the local index is untouched. Run the recipes
+through `bash -lc`, which is what puts `just` and `cargo-nextest` on `PATH`.
+Delete `~/scratch/<name>` afterward; its `target/` is not swept.
+  Measure over SSH with `-EncodedCommand` (UTF-16LE base64): a `$` in an
+  inline PowerShell argument does not survive the remote shell.
 
 ## Compiler cache on the hosts
 

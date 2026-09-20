@@ -793,10 +793,11 @@ mod tests {
 
     #[test]
     fn execute_failure_applies_line_offset() {
-        if which::which("rustc").is_err() {
-            return;
-        }
-        let content = "::shell-block\nrustc --edition=invalid\n::end-block\n";
+        // Any non-zero exit will do; `false` is what the sibling failure tests
+        // use. This one drove `rustc --edition=invalid` until run 35326800778,
+        // where the archive consumer's rustup proxy spent the 10 s command
+        // budget installing the pinned toolchain and the block timed out.
+        let content = "::shell-block\nfalse\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 5)

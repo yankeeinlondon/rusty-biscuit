@@ -52,6 +52,7 @@ pub(crate) mod prep_context;
 mod provider_args;
 pub(crate) mod runner;
 pub(crate) mod selection;
+pub(crate) mod staged_boot;
 pub(crate) mod target;
 pub(crate) mod timeouts;
 
@@ -188,6 +189,30 @@ pub(crate) fn execute_composition_attempt(
         perf_enabled,
         Some(guard),
         skip_preflight,
+    )
+}
+
+/// Execute a staged document's first attempt under the guard that already
+/// emitted its `initialize`.
+///
+/// The command coordinator ran the staged boot (shell-free bootstrap read,
+/// `initialize`, stabilized reread), so `request.prepared` is the post-
+/// `initialize` read. The pipeline does not route `initialize` again, and it
+/// still runs the full lifecycle audit over that read.
+pub(crate) fn execute_staged_composition(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    perf_enabled: bool,
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+) -> Result<SingleCompositionOutcome> {
+    pipeline::execute_composition_request_inner_with_guard(
+        request,
+        verbose,
+        startup_timings,
+        perf_enabled,
+        Some(guard),
+        false,
     )
 }
 

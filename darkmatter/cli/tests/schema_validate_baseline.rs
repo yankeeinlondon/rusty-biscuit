@@ -15,12 +15,11 @@ mod common;
 
 use common::CliProcessFixture;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-const FIXTURES: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/schema_validate_baseline"
-);
+fn fixtures_root() -> PathBuf {
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/schema_validate_baseline")
+}
 
 /// The pre-change legacy cases the Phase-1 baseline recorded.
 const CASES: &[&str] = &[
@@ -38,7 +37,7 @@ const CASES: &[&str] = &[
 /// into a fresh working directory so the CLI resolves a deterministic,
 /// relative `doc.md` argument.
 fn stage_inputs(process: &CliProcessFixture, case: &str) -> PathBuf {
-    let src = Path::new(FIXTURES).join(case);
+    let src = fixtures_root().join(case);
     let work = process.cwd().join(case);
     fs::create_dir_all(&work).unwrap();
     for entry in fs::read_dir(&src).unwrap() {
@@ -54,7 +53,7 @@ fn stage_inputs(process: &CliProcessFixture, case: &str) -> PathBuf {
 }
 
 fn read_snapshot(case: &str, name: &str) -> String {
-    fs::read_to_string(Path::new(FIXTURES).join(case).join(name)).unwrap()
+    fs::read_to_string(fixtures_root().join(case).join(name)).unwrap()
 }
 
 fn normalize_document_url(mut output: String) -> String {

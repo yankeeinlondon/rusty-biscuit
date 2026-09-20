@@ -1,0 +1,99 @@
+# PILOT (schema_version 0) -- named types for the research-metadata schema pilot.
+#
+# Not an accepted contract. Written for the 2026-09-17 "Schema Pilots" task to
+# prove which parts of the Metadata Contract SimplifiedSchema can express.
+#
+# Why a separate file: in a standalone `$schema:` envelope every top-level
+# entry is BOTH a named type and a document property, so defining these types
+# inside `_schema.yaml` would let documents carry e.g. a `Constraint:` key
+# (see probes/p9*). `_schema.yaml` imports them with `Name@./_types.yaml`.
+#
+# Descriptions inside `{ ... }` cannot contain commas, so most field notes
+# live in YAML comments instead. Every inline object is on ONE line: a
+# multi-line quoted inline object fails to load from a standalone schema file
+# ("could not project SimplifiedSchema expression spans", probes/p14).
+$schema:
+    # ---- scalars and vocabularies -------------------------------------
+    Id: "string(pattern(^[a-z0-9][a-z0-9_.-]*$))"
+    State: enum(known,unknown,conflicting,not_applicable)
+    Confidence: enum(high,medium,low)
+    Support: enum(supported,conditional,unsupported)
+    Fidelity: enum(exact,approximate,unmapped)
+    SourceKind: enum(official_docs,source_code,sdk_validator,observed_fixture,secondary)
+    AdapterId: enum(discord,discord-webhook,slack,slack-webhook,telegram,whatsapp,signal)
+    # PILOT EXTENSIONS beyond the spec vocabulary: `bytes` (file/request sizes are
+    # not UTF-8 text) and `unknown` (an unknown bound has no known unit either).
+    Unit: enum(utf8_bytes,unicode_scalars,utf16_code_units,grapheme_clusters,items,unspecified_characters,bytes,unknown)
+    Stage: enum(field_value,parsed_text,serialized_payload,unknown)
+    # Semantic surfaces. `rich_*` covers embed/card/attachment-style rich objects.
+    Surface: "enum(body,summary,caption,attachment_description,notification_fallback,rich_title,rich_description,rich_field_name,rich_field_value,rich_footer_text,rich_author_name,block_text,rich_objects,rich_fields,blocks,attachments,media_group,request_payload,option_label,option_value,callback_data)"
+    # JSON Pointer, a header, the HTTP status, the plain-text body, an SDK
+    # error variant path, or a JSON-RPC error member.
+    # Regex groups must be single-quoted inside pattern(...) (probes/p12).
+    Locator: "string(pattern('^(/[^ ]*|header:[A-Za-z0-9-]+|http_status|body_text|sdk_variant:[A-Za-z0-9_:]+)$'))"
+    ImageRole: enum(inline_content,attachment,primary,thumbnail,accessory,author_icon,footer_icon,link_preview)
+    QuestionKind: enum(confirmation,single_choice,multiple_choice,text_input)
+
+    # ---- shared knowledge block ----------------------------------------
+    # Consistency between `state` and a record's `value` is a Rust rule: a
+    # discriminated union here cannot be `required` and cannot be an array item
+    # (probes/p3 and p4/p5).
+    Claim: "{ statement: string(required), value: number, evidence: Id[](required)@this }"
+    Knowledge: "{ state: State(required)@this, evidence: Id[](required)@this, confidence: Confidence@this, gap: Id@this, explanation: string, claims: Claim[]@this }"
+
+    # A flat typed condition. `kind` selects which of equals/min/max/one_of is
+    # meaningful; arrays of discriminated unions are rejected (probes/p3).
+    Condition: "{ kind: enum(message_form,account_tier,api_version,sdk_version,bridge_version,hosting_mode,media_kind,recipient_client,conversation_type; required), equals: string, min: string, max: string, one_of: string[] }"
+
+    Source: "{ id: Id(required)@this, kind: SourceKind(required)@this, url: url(scheme(https)), location: string, locator: string, retrieved: date, revision: string, note: string }"
+
+    Relationship: "{ kind: enum(receives_events_for,responds_to_interactions_from,requires_companion_interface; required), target: Id(required)@this, prerequisites: string[] }"
+
+    Interface: "{ interface_id: Id(required)@this, role: enum(sending_adapter,research_only; required), api_identity: string(required), endpoint_template: string, api_version: string, sdk: string, sdk_version: string, bridge: string, bridge_version: string, classification: enum(official,community; required), direction: enum(send_only,receive_only,callback_only,bidirectional,unknown; required), adapters: AdapterId[](required)@this, relationships: Relationship[]@this, applies_when: Condition[]@this }"
+
+    # ---- versions -------------------------------------------------------
+    ApiVersionFinding: "{ id: Id(required)@this, interface: Id(required)@this, versioning: enum(versioned,unversioned,unresearched; required), latest_stable: string, previews: string[], knowledge: Knowledge(required)@this }"
+    ChronologyEntry: "{ id: Id(required)@this, interface: Id(required)@this, subject: enum(provider_api,sdk,bridge; required), version: string(required), stability: enum(stable,preview,deprecated,unknown; required), release_date: date, release_date_state: State(required)@this, knowledge: Knowledge(required)@this }"
+
+    # ---- constraints ----------------------------------------------------
+    Member: "{ surface: Surface(required)@this, native_locator: string(required), repeated: boolean }"
+    Constraint: "{ id: Id(required)@this, interface: Id(required)@this, operation: string(required), surface: Surface(required)@this, native_locator: string(required), kind: enum(hard_max,recommended_max,aggregate_max,item_count_max,payload_bytes_max; required), value: number(integer; min(0)), unit: Unit(required)@this, measurement_stage: Stage(required)@this, enforced_by: enum(service,sdk,bridge), recommended_by: Id@this, overflow_behavior: enum(reject,truncate,split,transform,unknown; required), overflow_errors: Id[]@this, applies_when: Condition[](required)@this, aggregation_scope: enum(message,request,rich_object,item), members: Member[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- formatting -----------------------------------------------------
+    ConstructSupport: "{ state: State(required)@this, support: Support@this, syntax: string, restriction: string }"
+    # Every construct key is required so the schema itself enforces complete
+    # construct coverage (an explicit `state: unknown` is allowed).
+    Constructs: "{ emphasis: ConstructSupport(required)@this, strong: ConstructSupport(required)@this, strikethrough: ConstructSupport(required)@this, underline: ConstructSupport(required)@this, inline_code: ConstructSupport(required)@this, fenced_code: ConstructSupport(required)@this, links: ConstructSupport(required)@this, images: ConstructSupport(required)@this, headings: ConstructSupport(required)@this, lists: ConstructSupport(required)@this, block_quotes: ConstructSupport(required)@this, tables: ConstructSupport(required)@this, spoilers: ConstructSupport(required)@this, mentions: ConstructSupport(required)@this }"
+    FormatProfile: "{ id: Id(required)@this, family: enum(plain_text,markdown,markdown_subset,html,provider_markup; required), dialect: string, dialect_version: string, constructs: Constructs(required)@this, escaping: string, malformed_behavior: enum(reject,literal,strip,transform,unknown; required), knowledge: Knowledge(required)@this }"
+    Selector: "{ field: string(required), values: string[](required), default: string }"
+    FieldRelationship: "{ kind: enum(mutually_exclusive,required_together,optional_companion,fallback_for; required), target: Id(required)@this }"
+    TextBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: string(required), surface: Surface(required)@this, native_locator: string(required), representation: enum(text,markup,entities,structured_blocks; required), content_role: enum(primary,notification_fallback,accessibility_fallback,compatibility_fallback; required), profiles: Id[](required)@this, selector: Selector@this, entity_offset_unit: Unit@this, relationships: FieldRelationship[]@this, precedence: string, constraints: Id[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- images ---------------------------------------------------------
+    ImageBinding: "{ id: Id(required)@this, interface: Id(required)@this, operation: string(required), container_surface: Surface@this, role: ImageRole(required)@this, fidelity: Fidelity@this, native_locator: string(required), placement: enum(inline_anchor,standalone_media,card_main,card_thumbnail,section_accessory,author_area,footer_area,preview; required), placement_control: enum(explicit,provider_selected,unknown; required), submissions: enum(markup_reference,request_field,multipart_part,upload_then_reference,separate_operation)[](min(1); required), sources: enum(remote_url,upload_bytes,provider_media_id)[](required), collection: enum(single,ordered_list,album,gallery,carousel,provider_selected; required), min_items: number(integer; min(0)), max_items: number(integer; min(0)), shared_constraints: Id[]@this, caption_binding: Id@this, alt_text_binding: Id@this, supplied_by: enum(caller_supplied,provider_derived,account_scope,application_scope; required), applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+    RoleCell: "{ state: State(required)@this, support: Support@this, bindings: Id[](required)@this, gap: Id@this }"
+    # All eight canonical roles are required keys: the schema enforces a
+    # complete matrix per interface.
+    RoleMatrix: "{ inline_content: RoleCell(required)@this, attachment: RoleCell(required)@this, primary: RoleCell(required)@this, thumbnail: RoleCell(required)@this, accessory: RoleCell(required)@this, author_icon: RoleCell(required)@this, footer_icon: RoleCell(required)@this, link_preview: RoleCell(required)@this }"
+    RoleCoverage: "{ interface: Id(required)@this, roles: RoleMatrix(required)@this }"
+
+    # ---- errors ---------------------------------------------------------
+    Envelope: "{ id: Id(required)@this, interface: Id(required)@this, operations: string[](required), origin: enum(service,sdk,bridge,transport; required), body_format: enum(json,plain_text,empty,sdk_error,json_rpc,unknown; required), success_discriminator: Locator@this, code_locator: Locator@this, subcode_locator: Locator@this, message_locator: Locator@this, field_errors_locator: Locator@this, warnings_locator: Locator@this, correlation_id_locator: Locator@this, retry_after_locator: Locator@this, retry_after_unit: enum(seconds,milliseconds,unknown), knowledge: Knowledge(required)@this }"
+    # A conjunction: every present predicate must hold. Numeric and string
+    # native codes are distinct fields.
+    MatchSignature: "{ http_status: number(integer; min(100); max(599)), native_code_number: number(integer), native_code_string: string, native_subcode: string, discriminator_locator: Locator@this, discriminator_equals: string, exact_text_token: string, sdk_error_variant: string }"
+    ErrorRecord: "{ id: Id(required)@this, interface: Id(required)@this, operations: string[](required), envelope: Id(required)@this, origin: enum(service,sdk,bridge,transport; required), phase: enum(before_submission,response,delivery_event; required), outcome: enum(failure,warning; required), category: enum(authentication,permission,invalid_destination,invalid_content,content_too_large,unsupported_feature,delivery_policy,rate_limited,quota_exhausted,conflict,service_unavailable,transport,unknown; required), match: MatchSignature@this, candidate_match: MatchSignature@this, related_facts: Id[]@this, affected_fields: string[], delivery_certainty: enum(not_submitted,rejected,accepted,partial,unknown; required), recovery: enum(retry_candidate,after_correction,do_not_retry,unknown; required), replay_safety: enum(safe,unsafe,unknown; required), remediation: enum(refresh_credentials,grant_permission,correct_destination,shorten_content,change_format,wait,check_service,contact_operator,none), remediation_note: string, diagnostic_fields: string[], applies_when: Condition[]@this, fixtures: Id[]@this, knowledge: Knowledge(required)@this }"
+    ErrorFixture: "{ id: Id(required)@this, envelope: Id(required)@this, provenance: enum(captured,constructed_from_docs,observed_in_repo; required), expect: enum(match,no_match; required), expected_error: Id@this, http_status: number(integer), body: string, note: string }"
+
+    # ---- other capability facts (generic, pilot-only) ----------------
+    Capability: "{ id: Id(required)@this, interface: Id(required)@this, category: enum(attachments,addressing,attribution,location,expression,delivery_controls,delivery_eligibility,rate_limits,receipts; required), capability: Id(required)@this, support: Support@this, applies_when: Condition[]@this, knowledge: Knowledge(required)@this }"
+
+    # ---- interactivity --------------------------------------------------
+    InboundBinding: "{ id: Id(required)@this, interface: Id(required)@this, event: string(required), mechanism: enum(push_webhook,persistent_connection,long_poll,poll,local_event_stream,none; required), reach: enum(direct,groups,mentions,replies,commands_only,interactions_only,none,unknown)[](required), content: enum(full_text,partial_text,metadata_only,none,unknown; required), prerequisites: string[], reuses_send_identity: enum(yes,no,unknown), knowledge: Knowledge(required)@this }"
+    ConfirmationMapping: "{ affirmative: string(required), negative: string(required) }"
+    QuestionBinding: "{ id: Id(required)@this, interface: Id(required)@this, kind: QuestionKind(required)@this, mechanism: enum(buttons,select_menu,native_poll,text_input,other; required), operation: string(required), native_locator: string(required), companion_interface: Id@this, answer_event: string, answer_locator: Locator@this, answer_type: enum(boolean,option_id,option_id_array,string; required), confirmation_mapping: ConfirmationMapping@this, min_selections: number(integer; min(0)), max_selections: number(integer; min(0)), correlation_locator: Locator@this, opaque_state_constraint: Id@this, validation: enum(provider,application,both,unknown; required), visibility: enum(public,private,ephemeral,conditional,unknown; required), fidelity: Fidelity(required)@this, knowledge: Knowledge(required)@this }"
+    FormBinding: "{ id: Id(required)@this, interface: Id(required)@this, container: enum(modal,message_controls,native_form,none; required), opened_by: string, requires_user_action: enum(yes,no,unknown; required), question_kinds: QuestionKind[](required)@this, submission: enum(single_event,per_field_events,both,sequential_application,unknown; required), max_fields: number(integer; min(0)), companion_interface: Id@this, knowledge: Knowledge(required)@this }"
+
+    # ---- lifecycle -------------------------------------------------------
+    Gap: "{ id: Id(required)@this, status: enum(open,investigated; required), question: string(required), facts: Id[](required)@this, searches: string[], inspected_sources: Id[]@this, unresolved_reason: string, blocked_decision: string, next_investigation: string(required) }"
+    Change: "{ id: Id(required)@this, kind: enum(added,changed,removed,unresolved; required), facts: Id[](required)@this, summary: string(required) }"

@@ -907,38 +907,10 @@ fn lifecycle_with_shell_per_event(
     .expect("lifecycle config parses")
 }
 
-/// The narrow bootstrap gate approves exactly the commands `initialize` could
-/// select. A later event's command is not approved by it — that event's
-/// document may not survive the stabilized reread, so authorizing it here
-/// would authorize bytes the run may never audit.
-#[test]
-fn initialize_scoped_audit_approves_only_the_initialize_command() {
-    let config = lifecycle_with_shell_per_event(&["initialize", "success", "finalize"]);
-    let (_dir, options) = approval_options_with_whitelist(&["echo"]);
-
-    let gated = resolve_lifecycle_shell_approvals(
-        &config,
-        Path::new("<test>"),
-        &[LifecycleSignal::Initialize],
-        &options,
-    )
-    .expect("whitelisted initialize command approves");
-
-    assert_eq!(
-        gated.approved_commands,
-        HashSet::from(["echo initialize".to_string()]),
-        "the gate is scoped to initialize; got {:?}",
-        gated.approved_commands,
-    );
-    assert_eq!(gated.total_discovered, 1);
-}
-
-/// The post-stabilization audit covers every remaining lifecycle surface. Run
-/// over `LifecycleSignal::ALL` it reaches the events the gate deliberately
-/// skipped.
+/// The post-stabilization audit covers all shell-bearing lifecycle events.
 #[test]
 fn full_audit_covers_every_lifecycle_surface() {
-    let config = lifecycle_with_shell_per_event(&["initialize", "success", "finalize"]);
+    let config = lifecycle_with_shell_per_event(&["start", "success", "finalize"]);
     let (_dir, options) = approval_options_with_whitelist(&["echo"]);
 
     let audited = resolve_lifecycle_shell_approvals(
@@ -952,83 +924,12 @@ fn full_audit_covers_every_lifecycle_surface() {
     assert_eq!(
         audited.approved_commands,
         HashSet::from([
-            "echo initialize".to_string(),
+            "echo start".to_string(),
             "echo success".to_string(),
             "echo finalize".to_string(),
         ]),
         "got {:?}",
         audited.approved_commands,
-    );
-}
-
-/// Acceptance for the Phase 7 checkpoint: the narrow gate prompts once for an
-/// un-whitelisted `initialize` command, and the full audit that follows does
-/// **not** prompt for it again — the invocation-wide cache is keyed on the
-/// normalized command string, so the gate's approval is reused.
-#[test]
-fn full_audit_reuses_the_narrow_gates_approval_without_reprompting() {
-    let config = lifecycle_with_shell_per_event(&["initialize", "success"]);
-    let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
-    let dir = tempfile::TempDir::new().unwrap();
-    let options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
-        approval_handler: Some(handler.clone()),
-        ..Default::default()
-    };
-
-    resolve_lifecycle_shell_approvals(
-        &config,
-        Path::new("<test>"),
-        &[LifecycleSignal::Initialize],
-        &options,
-    )
-    .expect("the gate approves via the handler");
-    assert_eq!(
-        handler.calls(),
-        1,
-        "the gate prompts once, for the initialize command"
-    );
-
-    resolve_lifecycle_shell_approvals(
-        &config,
-        Path::new("<test>"),
-        &LifecycleSignal::ALL,
-        &options,
-    )
-    .expect("the full audit approves via the handler");
-    assert_eq!(
-        handler.calls(),
-        2,
-        "the full audit prompts only for `success`'s new command; \
-         re-prompting for initialize would mean the gate's approval was lost"
-    );
-}
-
-/// A denial inside the narrow gate is the ordinary typed shell denial: the
-/// gate is the same policy engine, only scoped.
-#[test]
-fn initialize_scoped_audit_propagates_a_denial() {
-    let config = lifecycle_with_shell_per_event(&["initialize"]);
-    let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::Deny));
-    let dir = tempfile::TempDir::new().unwrap();
-    let options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
-        approval_handler: Some(handler),
-        ..Default::default()
-    };
-
-    let error = resolve_lifecycle_shell_approvals(
-        &config,
-        Path::new("<test>"),
-        &[LifecycleSignal::Initialize],
-        &options,
-    )
-    .expect_err("a denied initialize command must not be approved");
-
-    assert!(
-        matches!(error, CompositionError::ShellCommandDenied { ref command, .. }
-            if command == "echo initialize"),
-        "expected the typed denial naming the command; got: {error:?}",
     );
 }
 

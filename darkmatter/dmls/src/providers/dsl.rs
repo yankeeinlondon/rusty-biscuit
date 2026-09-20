@@ -329,7 +329,7 @@ fn interpolation_hover_markdown(
 /// heading-less details avoid repeating the property name.
 fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = frontmatter::known_shape(ctx);
-    let def = frontmatter::def_at_path(&shape, &[name])?;
+    let def = frontmatter::def_at_path(&shape, &[crate::overlay::FmPathSegment::Key(name)])?;
     frontmatter::schema_hover_details(def)
 }
 
@@ -398,7 +398,7 @@ fn interpolation_definition(ctx: &DocumentContext, offset: usize) -> Option<Loca
     let name = expressions::root_identifier(&expr)?;
     let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
     let entry = ast.entry_by_dotted(&name)?;
-    let range = ctx.source_map.byte_range_to_lsp(entry.key_span.clone())?;
+    let range = ctx.source_map.byte_range_to_lsp(entry.key_span.clone()?)?;
     Some(Location::new(ctx.uri.clone(), range))
 }
 
@@ -711,7 +711,9 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 }
 
 /// Malformed body interpolations and unknown identifiers in any operand
-/// position (see [`KnownRoots`]).
+/// position (see [`KnownRoots`]), both `WARNING`: a body `{{ … }}` is only
+/// *inferred* to be an expression (foreign template syntax is common in
+/// prose), and an unknown root might be supplied at runtime.
 fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let body_base = body_base(ctx.text);
     let known_roots = KnownRoots::for_document(ctx);

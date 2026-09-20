@@ -436,9 +436,7 @@ fn tool_result_renders_status_word_when_status_present() {
 
 #[test]
 fn no_captured_fixture_ever_renders_raw_json_on_stderr() {
-    use std::path::Path as StdPath;
-
-    let fixtures_dir = StdPath::new(env!("CARGO_MANIFEST_DIR"))
+    let fixtures_dir = biscuit_test_harness::manifest_dir!()
         .join("..")
         .join("lib")
         .join("tests")

@@ -403,7 +403,7 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 6. **Document Discovery** (`filesystem::docs`) - Markdown documents with content hashing
 7. **Blast Radius** (`filesystem::blast_radius`) - Impact analysis for changed source files
 8. **Justfile Detection** (`filesystem::just`) - Justfile discovery and recipe parsing
-9. **Recent Commits** (`filesystem::git::recent_commits`) - Duration/hash/date-based commit queries
+9. **Recent Commits** (`filesystem::git::recent_commits`) - `RecentCommits::collect` with count/duration/date/hash selection, filters, remote links, and JSON/Prose/Markdown/plain reports ([topic](../docs/topics/repo/recent-commits.md))
 
 #### Git Detection
 
@@ -424,7 +424,7 @@ remote-tracking refresh.
 - `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
 - `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
 - `get_current_worktree_name` / `current_worktree_name_with_repo` - Linked-worktree name only, without enumerating every worktree; `None` in the main checkout
-- `CommitDesc::describe_plain` - One commit rendered as the plain block that `CommitDescSet::describe(true)` and `sniff repo recent-commits --plain` concatenate
+- `RecentCommits::plain_blocks` - Each commit rendered as the plain block that `RecentCommits::to_plain` and `sniff repo recent-commits --plain` join with a blank line
 - `merge_conflicts_at` - Actual unresolved paths from the live repository index
 - `merge_conflicts_with_branch_at` - Read-only committed-tip prediction for merging a local branch into the current branch
 

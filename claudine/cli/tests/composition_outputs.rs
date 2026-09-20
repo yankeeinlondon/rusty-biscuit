@@ -269,7 +269,7 @@ fn set_is_visible_to_a_later_event_and_writes_no_file() {
     let fixture = CliProcessFixture::named("composition-outputs");
     fake_goose(&fixture, "ok", 0);
     let md = fixture.cwd().join("doc.md");
-    let source = "---\ntitle: t\nphase: plan\nstart:\n  stack:\n    - action: {set: [phase, build]}\nsuccess:\n  info: 'phase={{ phase }}'\n---\nBody.\n";
+    let source = "---\ntitle: t\nphase: plan\nstart:\n  stack:\n    - action: {set: {phase: build}}\nsuccess:\n  info: 'phase={{ phase }}'\n---\nBody.\n";
     fs::write(&md, source).unwrap();
 
     let (_, stderr) = run(
@@ -307,7 +307,7 @@ fn set_targeting_a_reserved_key_fails_the_run_before_launch() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nstart:\n  stack:\n    - action: {set: [outputs, hijacked]}\n---\nBody.\n",
+        "---\ntitle: t\nstart:\n  stack:\n    - action: {set: {outputs: hijacked}}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -336,7 +336,7 @@ fn set_preserves_a_whole_value_type_end_to_end() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nstart:\n  stack:\n    - action: {set: [ready, '{{ true }}']}\nsuccess:\n  stack:\n    - when: ready\n      action: {info: 'ready-is-boolean-true'}\n---\nBody.\n",
+        "---\ntitle: t\nstart:\n  stack:\n    - action: {set: {ready: '{{ true }}'}}\nsuccess:\n  stack:\n    - when: ready\n      action: {info: 'ready-is-boolean-true'}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -465,7 +465,7 @@ exit 0
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nloop:\n  until: 'length(outputs) >= 2'\n  max: 3\nstart:\n  info: 'iter n={{ length(outputs) }} carried={{ carried }} prev={{ _loop_last_output }}'\n  stack:\n    - action: {set: [carried, 'from-iteration-1']}\ncarried: none\n---\nBody.\n",
+        "---\ntitle: t\nloop:\n  until: 'length(outputs) >= 2'\n  max: 3\nstart:\n  info: 'iter n={{ length(outputs) }} carried={{ carried }} prev={{ _loop_last_output }}'\n  stack:\n    - action: {set: {carried: 'from-iteration-1'}}\ncarried: none\n---\nBody.\n",
     )
     .unwrap();
 

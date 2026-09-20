@@ -594,7 +594,7 @@ mod tests {
     fn detect_environment_fast_on_rusty_biscuit_preserves_template_values() {
         // Regression: template consumers rely on these values staying stable
         // on the rusty-biscuit repository after topology changes.
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
         let ctx = detect_environment_fast(repo_root);
 

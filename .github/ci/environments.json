@@ -1,10 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "environments": [
     {
       "name": "ubuntu-latest",
       "runner": "ubuntu-latest",
       "native_key": "ubuntu-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
       "capabilities": {
         "tmux": true,
         "headless_browser": true,
@@ -29,12 +30,33 @@
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31"
         }
+      },
+      "build": {
+        "host": "x86_64-unknown-linux-gnu",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "ubuntu-latest",
+          "wsl2-ubuntu"
+        ],
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "gnu",
+          "libc": "glibc",
+          "native_libraries": []
+        }
       }
     },
     {
       "name": "windows-latest",
       "runner": "windows-latest",
       "native_key": "windows-latest",
+      "events": ["push", "workflow_dispatch"],
       "capabilities": {
         "tmux": {
           "available": false,
@@ -73,12 +95,32 @@
           "expiry": "2027-01-31",
           "closes": "features/_unscheduled/windows-l2-ci-leg"
         }
+      },
+      "build": {
+        "host": "x86_64-pc-windows-msvc",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "link.exe",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "windows-latest"
+        ],
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "msvc",
+          "libc": "msvc",
+          "native_libraries": []
+        }
       }
     },
     {
       "name": "macos-latest",
       "runner": "macos-latest",
       "native_key": "macos-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
       "capabilities": {
         "tmux": true,
         "headless_browser": {
@@ -108,12 +150,32 @@
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31"
         }
+      },
+      "build": {
+        "host": "aarch64-apple-darwin",
+        "target": "aarch64-apple-darwin",
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": [
+          "macos-latest"
+        ],
+        "runtime": {
+          "arch": "aarch64",
+          "abi": "darwin",
+          "libc": "libSystem",
+          "native_libraries": []
+        }
       }
     },
     {
       "name": "wsl2-ubuntu",
       "runner": "windows-latest",
       "native_key": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
       "capabilities": {
         "tmux": {
           "available": false,
@@ -157,6 +219,15 @@
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
           "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+        }
+      },
+      "build": {
+        "nextest": "latest",
+        "runtime": {
+          "arch": "x86_64",
+          "abi": "gnu",
+          "libc": "glibc",
+          "native_libraries": []
         }
       }
     }

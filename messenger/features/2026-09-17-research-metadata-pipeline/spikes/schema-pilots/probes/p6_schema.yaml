@@ -1,0 +1,2 @@
+$schema:
+    facts: "{ id: string(required), knowledge: { state: enum(known,unknown; required), value: number }(required) }[](required)"

@@ -29,13 +29,16 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use serde_json::{Map, Value};
 
+use super::super::authored_order::AuthoredOrder;
 use super::super::error::CompositionError;
+use super::super::lifecycle::{parse_lifecycle_config, validate_no_nested_spans_in_literals};
 use super::super::json_util::json_type_name;
 use super::super::types::ResolvedCompositionSource;
 use super::model::{ExecutableField, SequencePlan, StepExecutable};
@@ -44,7 +47,10 @@ use crate::invocation_context::{InvocationContext, SourceContext};
 
 mod shape;
 
-pub use shape::{GroupExecution, PreflightAction, PreflightGroup, PreflightStep, PreflightTask};
+pub use shape::{
+    GroupExecution, PreflightAction, PreflightGroup, PreflightStep, PreflightTask,
+    TaskDiagnosticProvenance,
+};
 
 /// A shell command discovered during preflight, with the location that
 /// contributed it. The `command` is the fully resolved byte string that will be
@@ -91,6 +97,39 @@ impl PreflightGraph {
     /// The prompt document at `path`, if the graph reached one.
     pub fn prompt_document(&self, path: &Path) -> Option<&PromptDocument> {
         self.prompt_documents.iter().find(|d| d.path == path)
+    }
+
+    /// Reject a nested `{{ … }}` span inside a single-pass lifecycle literal in
+    /// any referenced prompt document, before the first step runs.
+    ///
+    /// Passive: it reads each document's authored frontmatter as the graph
+    /// already resolved and parsed it — no compose, shell, remote fetch, or
+    /// prompt. A document whose lifecycle block does not parse is left to its
+    /// own turn, where canonical preparation reports that error and runs this
+    /// same validator. The sequence document itself is covered by Phase 1c,
+    /// which prepares every step through the same validator.
+    ///
+    /// ## Errors
+    ///
+    /// The first [`CompositionError::LifecycleNestedSpanInLiteral`], in
+    /// first-encounter document order.
+    pub fn validate_prompt_lifecycle_literals(&self) -> Result<(), CompositionError> {
+        for document in &self.prompt_documents {
+            let frontmatter = Value::Object(
+                document
+                    .markdown
+                    .frontmatter()
+                    .as_map()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            );
+            let Ok(lifecycle) = parse_lifecycle_config(&frontmatter, &document.path) else {
+                continue;
+            };
+            validate_no_nested_spans_in_literals(&frontmatter, &lifecycle, &document.path)?;
+        }
+        Ok(())
     }
 }
 
@@ -207,10 +246,11 @@ struct Loader<'a> {
     graph: PreflightGraph,
     /// Canonical paths currently being expanded, innermost last.
     ancestry: Vec<PathBuf>,
-    /// Immutable parsed data files, reusable across independent branches
-    /// (spec → *Task Resolution*: sharing parsed data is allowed; effective
-    /// parameters and runtime state stay invocation-local).
-    documents: HashMap<PathBuf, Value>,
+    /// Immutable parsed data files and their authored key order, reusable
+    /// across independent branches (spec → *Task Resolution*: sharing parsed
+    /// data is allowed; effective parameters and runtime state stay
+    /// invocation-local).
+    documents: HashMap<PathBuf, (Value, Arc<darkmatter::markdown::MappingOrders>)>,
     source: &'a ResolvedCompositionSource,
     /// The invoking document's canonical path, used for write-back collisions.
     source_path: PathBuf,
@@ -269,6 +309,7 @@ impl<'a> Loader<'a> {
         self.ancestry.push(self.source_path.clone());
         for (index, step) in plan.steps.iter().enumerate() {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
+            let property = format!("tasks[{index}]");
             let state = self.step_state(plan, index)?;
 
             let task = match &step.executable {
@@ -276,6 +317,8 @@ impl<'a> Loader<'a> {
                     executable,
                     &source_path,
                     &label,
+                    &property,
+                    &plan.authored.at(index),
                     &state,
                     None,
                 )?),
@@ -325,11 +368,14 @@ impl<'a> Loader<'a> {
     }
 
     /// Expand a step's declared executable into a task node.
+    #[allow(clippy::too_many_arguments)]
     fn load_step_task(
         &mut self,
         executable: &StepExecutable,
         origin: &Path,
         label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
         state: &EffectiveState,
         group_defaults: Option<&GroupDefaults>,
     ) -> Result<PreflightTask, CompositionError> {
@@ -339,12 +385,18 @@ impl<'a> Loader<'a> {
             &executable.options,
             origin,
             label,
+            property,
+            authored,
             state,
             group_defaults,
         )
     }
 
     /// Expand one executable field plus its options into a task node.
+    ///
+    /// `property` is the source-rooted semantic path of the task and `authored`
+    /// is its JSON Pointer in the *same* document — the two travel together and
+    /// are both reset when the walk crosses into another file.
     #[allow(clippy::too_many_arguments)]
     fn load_task(
         &mut self,
@@ -353,6 +405,8 @@ impl<'a> Loader<'a> {
         options: &Map<String, Value>,
         origin: &Path,
         label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
         state: &EffectiveState,
         group_defaults: Option<&GroupDefaults>,
     ) -> Result<PreflightTask, CompositionError> {
@@ -376,6 +430,10 @@ impl<'a> Loader<'a> {
             }
             ExecutableField::SideEffect => PreflightAction::SideEffect {
                 action: value.clone(),
+                authored_set_order: authored
+                    .child(field.key())
+                    .child("set")
+                    .owned_key_order(),
             },
             ExecutableField::Group => {
                 if group_defaults.is_some() {
@@ -387,7 +445,14 @@ impl<'a> Loader<'a> {
                         ),
                     });
                 }
-                let group = self.load_group(value, origin, label, state)?;
+                let group = self.load_group(
+                    value,
+                    origin,
+                    label,
+                    &property_child(property, field.key()),
+                    &authored.child(field.key()),
+                    state,
+                )?;
                 PreflightAction::Group(group)
             }
             ExecutableField::Task => {
@@ -418,6 +483,12 @@ impl<'a> Loader<'a> {
             teardown: options.get("teardown").cloned(),
             origin_dir,
             origin_path: origin.to_path_buf(),
+            authored: authored.clone(),
+            diagnostic: TaskDiagnosticProvenance {
+                source_path: origin.to_path_buf(),
+                action_property: property_child(property, field.key()),
+                task_property: property.to_string(),
+            },
         };
 
         self.collect_lifecycle_shell(&mut task, origin, label, state)?;
@@ -438,7 +509,7 @@ impl<'a> Loader<'a> {
         group_defaults: Option<&GroupDefaults>,
     ) -> Result<PreflightTask, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
-        let document = self.load_data_document(&path)?;
+        let (document, authored) = self.load_data_document(&path)?;
         let root = expect_object(&document, "task file", &path)?;
 
         expect_kind(&root, "task", &path)?;
@@ -455,6 +526,8 @@ impl<'a> Loader<'a> {
             &options,
             &path,
             &nested_label,
+            "",
+            &authored,
             state,
             group_defaults,
         );
@@ -463,26 +536,34 @@ impl<'a> Loader<'a> {
     }
 
     /// Resolve a `group:` value into a group node.
+    #[allow(clippy::too_many_arguments)]
     fn load_group(
         &mut self,
         value: &Value,
         origin: &Path,
         label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
         state: &EffectiveState,
     ) -> Result<PreflightGroup, CompositionError> {
         match value {
-            Value::Object(map) => self.build_group(map, origin, label, state),
+            Value::Object(map) => self.build_group(map, origin, label, property, authored, state),
             Value::String(raw) => {
                 let (name, reference) = split_catalog_reference(raw);
                 let path = self.resolve_reference(&reference, origin)?;
-                let document = self.load_data_document(&path)?;
+                let (document, document_authored) = self.load_data_document(&path)?;
                 let root = expect_object(&document, "group file", &path)?;
 
-                let group_map = match name {
-                    Some(name) => select_catalog_group(&root, &name, &path)?,
+                // A catalog selects one named entry, so the group's authored
+                // root is that entry's pointer, not the file root.
+                let (group_map, group_authored) = match name {
+                    Some(name) => {
+                        let (index, map) = select_catalog_group(&root, &name, &path)?;
+                        (map, document_authored.child("groups").at(index))
+                    }
                     None => {
                         expect_kind(&root, "group", &path)?;
-                        root.clone()
+                        (root.clone(), document_authored)
                     }
                 };
 
@@ -491,7 +572,14 @@ impl<'a> Loader<'a> {
                     biscuit_file::to_portable_string(&path)
                 );
                 self.enter(&path)?;
-                let result = self.build_group(&group_map, &path, &nested_label, state);
+                let result = self.build_group(
+                    &group_map,
+                    &path,
+                    &nested_label,
+                    "",
+                    &group_authored,
+                    state,
+                );
                 self.leave();
                 result
             }
@@ -507,11 +595,14 @@ impl<'a> Loader<'a> {
     }
 
     /// Validate a group definition and expand its tasks.
+    #[allow(clippy::too_many_arguments)]
     fn build_group(
         &mut self,
         map: &Map<String, Value>,
         origin: &Path,
         label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
         state: &EffectiveState,
     ) -> Result<PreflightGroup, CompositionError> {
         let name = match map.get("name") {
@@ -595,12 +686,15 @@ impl<'a> Loader<'a> {
             })?;
             let (field, value, options) = parse_task_object(task_map, origin)?;
             let task_label = format!("{label} → task {} of group `{name}`", index + 1);
+            let task_property = property_child(property, &format!("tasks[{index}]"));
             tasks.push(self.load_task(
                 field,
                 &value,
                 &options,
                 origin,
                 &task_label,
+                &task_property,
+                &authored.child("tasks").at(index),
                 state,
                 Some(&defaults),
             )?);
@@ -897,13 +991,22 @@ impl<'a> Loader<'a> {
     }
 
     /// Load and cache a data document (`kind: task`/`group`/`group-catalog`).
-    fn load_data_document(&mut self, path: &Path) -> Result<Value, CompositionError> {
-        if let Some(cached) = self.documents.get(path) {
-            return Ok(cached.clone());
+    ///
+    /// The returned cursor is rooted at that document, not at the referencing
+    /// one: crossing a file boundary replaces both the order source and the
+    /// pointer, exactly as it already resets the semantic `property` path.
+    fn load_data_document(
+        &mut self,
+        path: &Path,
+    ) -> Result<(Value, AuthoredOrder), CompositionError> {
+        if let Some((value, orders)) = self.documents.get(path) {
+            return Ok((value.clone(), AuthoredOrder::at_root(Arc::clone(orders))));
         }
-        let document = super::data::load_document(path)?;
-        self.documents.insert(path.to_path_buf(), document.clone());
-        Ok(document)
+        let loaded = super::data::load_document(path)?;
+        let orders = Arc::new(loaded.orders);
+        self.documents
+            .insert(path.to_path_buf(), (loaded.value.clone(), Arc::clone(&orders)));
+        Ok((loaded.value, AuthoredOrder::at_root(orders)))
     }
 
     /// Reject a reference back to a document already being expanded, reporting
@@ -933,6 +1036,16 @@ impl<'a> Loader<'a> {
     }
 }
 
+/// Join a source-rooted property to one of its children, treating the empty
+/// parent as the document root rather than producing a leading dot.
+pub(crate) fn property_child(parent: &str, child: &str) -> String {
+    if parent.is_empty() {
+        child.to_string()
+    } else {
+        format!("{parent}.{child}")
+    }
+}
+
 /// Group-level `operation`/`flow` defaults handed down to member tasks.
 struct GroupDefaults {
     operation: Option<String>,
@@ -957,11 +1070,16 @@ fn split_catalog_reference(raw: &str) -> (Option<String>, String) {
 }
 
 /// Find the one group named `name` in a `kind: group-catalog` document.
+///
+/// ## Returns
+///
+/// The group's position in the catalog's `groups:` list — which is what anchors
+/// its authored-order pointer — and the group itself.
 fn select_catalog_group(
     root: &Map<String, Value>,
     name: &str,
     path: &Path,
-) -> Result<Map<String, Value>, CompositionError> {
+) -> Result<(usize, Map<String, Value>), CompositionError> {
     expect_kind(root, "group-catalog", path)?;
 
     let groups = match root.get("groups") {
@@ -984,9 +1102,10 @@ fn select_catalog_group(
         .map(str::to_string)
         .collect();
 
-    let matches: Vec<&Value> = groups
+    let matches: Vec<(usize, &Value)> = groups
         .iter()
-        .filter(|g| g.get("name").and_then(Value::as_str) == Some(name))
+        .enumerate()
+        .filter(|(_, g)| g.get("name").and_then(Value::as_str) == Some(name))
         .collect();
 
     let lookup_failure = |problem: &str| CompositionError::SequenceGroupCatalogLookup {
@@ -997,9 +1116,10 @@ fn select_catalog_group(
     };
 
     match matches.as_slice() {
-        [only] => only
+        [(index, only)] => only
             .as_object()
             .cloned()
+            .map(|group| (*index, group))
             .ok_or_else(|| lookup_failure("is not an object")),
         [] => Err(lookup_failure("is not defined")),
         _ => Err(lookup_failure("is defined more than once")),

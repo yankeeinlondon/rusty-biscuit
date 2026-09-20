@@ -1,0 +1,43 @@
+---
+# A curated source without an explanation of its contribution (criterion 27).
+# expect-problem: /platforms/0/curated_sources/1
+$schema: ../../../../../../docs/platforms.schema.yaml
+roster_version: 1
+refresh_interval_days: 30
+curated_source_cap: 10
+platforms:
+- platform_id: discord
+  name: Discord
+  status: active
+  file: discord.md
+  website: https://discord.com
+  interfaces:
+  - interface_id: discord_bot_api
+    role: sending_adapter
+    api_identity: Discord HTTP API
+    adapters:
+    - discord
+    identification_url: https://docs.example.com/discord
+  curated_sources:
+  - url: https://docs.example.com/source-1
+    contribution: Distinct coverage 1.
+    interfaces:
+    - discord_bot_api
+    review: approved
+    approved_by: maintainer
+    approved_on: &id001 2026-09-17
+  - url: https://docs.example.com/source-2
+    interfaces:
+    - discord_bot_api
+    review: approved
+    approved_by: maintainer
+    approved_on: *id001
+  - url: https://docs.example.com/source-3
+    contribution: Distinct coverage 3.
+    interfaces:
+    - discord_bot_api
+    review: approved
+    approved_by: maintainer
+    approved_on: *id001
+excluded: []
+---

@@ -10,7 +10,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use biscuit_file::{Conditional, FetchError, FetchPolicy, PolicyClient, fetch_blocking};
 use gix::bstr::ByteSlice;
 
-use super::{ApiFlavor, resolve_remote_at};
+use super::commit_links::canonical_repository_url;
+use super::{ApiFlavor, GitHostingProvider, resolve_remote_at};
 use crate::{Result, SniffError};
 
 /// Checks a branch against the remote's live Git ref advertisement.
@@ -163,45 +164,28 @@ fn smart_http_advertisement_url(remote: &super::ResolvedRemote) -> Result<url::U
     Ok(url)
 }
 
+/// The HTTPS Git endpoint for a remote whose transport carries no HTTP(S) URL.
+///
+/// The endpoint is the repository's canonical HTTPS location — the same
+/// mapping [`commit_links::canonical_repository_url`] builds browser links
+/// from — so an SSH-only provider cannot be normalized one way for links and
+/// another for ref advertisement. Only these three providers publish an HTTPS
+/// Git endpoint derivable from the configured remote; every other provider
+/// falls back to its branch API.
 fn provider_https_git_url(remote: &super::ResolvedRemote) -> Result<url::Url> {
-    let host = remote.host.as_deref().unwrap_or_default();
-    let path = remote_git_path(&remote.fetch_url).unwrap_or_default();
-    let endpoint = match remote.api_flavor {
-        ApiFlavor::AzureDevOps => {
-            let segments = path
-                .strip_prefix("v3/")
-                .unwrap_or(&path)
-                .split('/')
-                .filter(|segment| !segment.is_empty())
-                .collect::<Vec<_>>();
-            if segments.len() != 3 {
-                return unsupported_provider_git_endpoint(remote);
-            }
-            format!(
-                "https://dev.azure.com/{}/{}/_git/{}",
-                urlencoding::encode(segments[0]),
-                urlencoding::encode(segments[1]),
-                urlencoding::encode(segments[2].trim_end_matches(".git"))
-            )
-        }
-        ApiFlavor::AwsCodeCommit if !host.is_empty() && path.starts_with("v1/repos/") => {
-            format!("https://{host}/{path}")
-        }
-        ApiFlavor::SourceHut if host.ends_with(".sr.ht") && !path.is_empty() => {
-            format!("https://{host}/{path}")
-        }
-        _ => return unsupported_provider_git_endpoint(remote),
+    let provider = GitHostingProvider::from_url(&remote.fetch_url);
+    if !matches!(
+        provider,
+        GitHostingProvider::AzureDevOps
+            | GitHostingProvider::AwsCodeCommit
+            | GitHostingProvider::SourceHut
+    ) {
+        return unsupported_provider_git_endpoint(remote);
+    }
+    let Some(endpoint) = canonical_repository_url(provider, &remote.fetch_url) else {
+        return unsupported_provider_git_endpoint(remote);
     };
     url::Url::parse(&endpoint).map_err(|error| unreachable_url(&endpoint, error))
-}
-
-fn remote_git_path(remote: &str) -> Option<String> {
-    if let Ok(url) = url::Url::parse(remote) {
-        return Some(url.path().trim_matches('/').to_string());
-    }
-    let (_, after_at) = remote.split_once('@')?;
-    let (_, path) = after_at.split_once(':')?;
-    Some(path.trim_matches('/').to_string())
 }
 
 fn unsupported_provider_git_endpoint<T>(remote: &super::ResolvedRemote) -> Result<T> {
@@ -1031,6 +1015,11 @@ mod tests {
                 remote(ApiFlavor::AzureDevOps, "ssh.dev.azure.com"),
                 "git@ssh.dev.azure.com:v3/acme/widgets/project.git",
                 "https://dev.azure.com/acme/widgets/_git/project",
+            ),
+            (
+                remote(ApiFlavor::AzureDevOps, "ssh.dev.azure.com"),
+                "ssh://git@ssh.dev.azure.com/v3/acme/My%20Project/My%20Repo",
+                "https://dev.azure.com/acme/My%20Project/_git/My%20Repo",
             ),
             (
                 remote(

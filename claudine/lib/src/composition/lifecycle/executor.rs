@@ -45,6 +45,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::expression::{
@@ -58,14 +59,14 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use super::super::error::CompositionError;
+use super::super::error::{CompositionError, LifecycleEvaluationReason};
 use super::{
     LifecycleConfig, LifecycleEmitter, LifecycleNotification, LifecycleSignal, audio_phases,
     first_undefined_stack_variable, tts_config_from_settings,
 };
 use super::actions::{
     CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
-    ProxyWithValue, RetryBackoff, is_known_side_effect,
+    ProxyWithValue, RetryBackoff, RuntimeSet, is_known_side_effect,
 };
 use crate::composition::coordinator::ActionLocation;
 use super::context::{
@@ -224,10 +225,23 @@ pub enum LifecycleExprError {
     Compose(#[from] Box<darkmatter::markdown::MarkdownError>),
 
     /// A failure the expression layer describes itself, with no lower-layer
-    /// error in hand: an undefined-variable rejection, the post-DM2 leak guard,
-    /// or a control argument of the wrong shape.
+    /// error in hand: an undefined-variable rejection or a control argument of
+    /// the wrong shape.
     #[error("{0}")]
     Prose(String),
+
+    /// The post-DM2 leak guard: resolution finished, but a `{{ … }}` span
+    /// survived in the rendered text.
+    #[error(
+        "the rendered text still contains `{span}` after every interpolation pass; a \
+         `{{{{ … }}}}` inside a quoted string literal is text and is never interpolated on \
+         this surface, and a frontmatter value that holds template syntax is not \
+         re-expanded at event time"
+    )]
+    SurvivingSpan {
+        /// The first surviving span, braces included.
+        span: String,
+    },
 }
 
 impl LifecycleExprError {
@@ -237,17 +251,14 @@ impl LifecycleExprError {
     }
 }
 
-/// A shell command that could not be started at all.
-///
-/// Distinct from a command that ran and exited non-zero: that is an exit code,
-/// reported through [`ShellRunner::run`]'s `Ok` arm. This is the failure to
-/// spawn.
-///
-/// `command` is carried so the `Display` is self-contained — the executor used
-/// to build this prose itself from an untyped runner error, which is what left
-/// the underlying [`std::io::Error`] unrecoverable.
+/// A shell command refused by the lifecycle boundary or unable to start.
+/// A command that ran and exited nonzero is reported through
+/// [`ShellRunner::run`]'s `Ok` arm. Spawn failures retain their I/O source.
 #[derive(Debug, thiserror::Error)]
 pub enum ShellRunError {
+    /// The lifecycle has not crossed the preflight boundary.
+    #[error("shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event")]
+    BeforePreflight,
     /// The shell process could not be spawned or waited on.
     #[error("command `{command}` failed to run: {source}")]
     Spawn {
@@ -265,9 +276,20 @@ pub enum ShellRunError {
 /// during pre-flight; this trait runs an already-approved command. Injectable
 /// so tests can assert command dispatch without spawning real processes.
 pub trait ShellRunner: Sync {
-    /// Run `command`. Returns the process exit code, or [`ShellRunError`] when
-    /// the process could not be spawned at all.
+    /// Return the exit code, or [`ShellRunError`] when execution is prohibited
+    /// or the process could not be started.
     fn run(&self, command: &str) -> Result<i32, ShellRunError>;
+}
+
+/// Runner for initialization and its early catch handlers. Approvals cannot
+/// enable shell execution on this route.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DisabledShellRunner;
+
+impl ShellRunner for DisabledShellRunner {
+    fn run(&self, _command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::BeforePreflight)
+    }
 }
 
 /// Production [`ShellRunner`] that runs commands through the system shell.
@@ -393,6 +415,46 @@ pub struct StackExecutionContext<'a> {
     pub settings: &'a GlobalSettings,
 }
 
+/// Which authored container a running stack came from, for the property paths
+/// its diagnostics report.
+///
+/// An event's items are reached through `{signal}.stack[i]`; a task's
+/// `setup:`/`teardown:` value *is* the list, so its items are `{root}[i]` with
+/// no `stack` segment. That spelling is the only difference between the two, so
+/// they share one loop and this is where it lives. Carried as a call argument
+/// rather than on [`StackExecutionContext`] because one context runs both kinds
+/// of stack, and as a borrowed root rather than on [`ActionLocation`] because
+/// that type is the owned, `Copy` proxy-provenance identity.
+#[derive(Debug, Clone, Copy)]
+enum StackRoot<'a> {
+    /// A lifecycle event block's `stack:`.
+    Event,
+    /// A task's `setup:`/`teardown:` list, at its source-rooted property.
+    Task(&'a str),
+}
+
+impl StackRoot<'_> {
+    /// The property of the `when:` guard on the `index`-th item.
+    fn when_property(&self, signal: LifecycleSignal, index: usize) -> String {
+        match self {
+            Self::Event => format!("{}.stack[{index}].when", signal.property_name()),
+            Self::Task(root) => format!("{root}[{index}].when"),
+        }
+    }
+
+    /// The property of the action `location` names.
+    fn action_property(&self, location: ActionLocation) -> String {
+        match self {
+            Self::Event => location.to_string(),
+            Self::Task(root) => format!(
+                "{root}[{}].action[{}]",
+                location.stack_index(),
+                location.action_index()
+            ),
+        }
+    }
+}
+
 /// What a single action did.
 enum ActionStep {
     /// Continue to the next action / item.
@@ -472,7 +534,7 @@ impl StackExecutionContext<'_> {
     /// only needs the stack actions evaluated.
     pub fn execute_stack_for_signal(&self, config: &LifecycleConfig) -> LifecycleEventOutcome {
         match config.stack(self.signal) {
-            Some(items) if !items.is_empty() => self.execute_stack(items),
+            Some(items) if !items.is_empty() => self.execute_stack(items, StackRoot::Event),
             _ => LifecycleEventOutcome::default(),
         }
     }
@@ -519,11 +581,17 @@ impl StackExecutionContext<'_> {
     /// A task stack has no event block of its own, so it never emits top-level
     /// communication; only the items run. Mutations reach the live cell exactly
     /// as they do for an event stack.
+    ///
+    /// `property` is the source-rooted path of the stack value itself
+    /// (`tasks[0].setup`). Item `n`'s diagnostics are rooted at `{property}[n]`,
+    /// so a task-stack failure names the authored task property rather than the
+    /// synthetic signal the stack was parsed under.
     pub fn execute_action_stack(
         &self,
         items: &[super::actions::LifecycleStackItem],
+        property: &str,
     ) -> LifecycleEventOutcome {
-        self.execute_stack(items)
+        self.execute_stack(items, StackRoot::Task(property))
     }
 
     /// Dispatch one action as a task's `side_effect:` primary and return the
@@ -541,15 +609,18 @@ impl StackExecutionContext<'_> {
     ///
     /// Returns the error snapshot for an unsuppressed dispatch failure, an
     /// expression-layer raise, or a non-side-effect action.
+    /// `property` is the source-rooted semantic path of a runtime `set`
+    /// mapping; nested value failures extend it with their key/index suffix.
     pub fn dispatch_task_side_effect(
         &self,
         action: &LifecycleAction,
+        property: &str,
     ) -> Result<Value, LifecycleErrorInfo> {
         let mut working: Map<String, Value> = match self.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
-        let result = self.dispatch_task_side_effect_inner(action, &mut working);
+        let result = self.dispatch_task_side_effect_inner(action, property, &mut working);
         if let Some(cell) = self.live_frontmatter {
             *cell.lock().expect(LIVE_POISONED) = working;
         }
@@ -561,9 +632,13 @@ impl StackExecutionContext<'_> {
     fn dispatch_task_side_effect_inner(
         &self,
         action: &LifecycleAction,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> Result<Value, LifecycleErrorInfo> {
         let dispatched = match &action.kind {
+            LifecycleActionKind::RuntimeSet(set) => self
+                .dispatch_runtime_set(set, property, working)
+                .map(|prior| Value::Object(prior.into_iter().collect())),
             LifecycleActionKind::SideEffect(effect) => {
                 self.dispatch_side_effect(&effect.verb, &effect.args, working)
             }
@@ -900,38 +975,39 @@ impl StackExecutionContext<'_> {
     /// is sent, so no side effect dispatches silently-empty or raw operational
     /// text.
     fn emit_top_level(&self, n: &LifecycleNotification) -> Result<(), ActionFailure> {
-        if let Some(text) = self.resolve_emit(n.stdout.as_deref())? {
+        if let Some(text) = self.resolve_emit("stdout", n.stdout.as_deref())? {
             self.emitter.emit_stdout(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.stderr.as_deref())? {
+        if let Some(text) = self.resolve_emit("stderr", n.stderr.as_deref())? {
             self.emitter.emit_stderr(self.signal, &text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.info.as_deref())? {
+        if let Some(text) = self.resolve_emit("info", n.info.as_deref())? {
             self.emitter.emit_info(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.warn.as_deref())? {
+        if let Some(text) = self.resolve_emit("warn", n.warn.as_deref())? {
             self.emitter.emit_warn(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.success.as_deref())? {
+        if let Some(text) = self.resolve_emit("success", n.success.as_deref())? {
             self.emitter.emit_success(&text, self.term);
         }
-        if let Some(text) = self.resolve_emit(n.message.as_deref())? {
+        if let Some(text) = self.resolve_emit("message", n.message.as_deref())? {
             self.emitter
                 .emit_message(&text, self.source_path, self.repo_root, self.messaging);
         }
-        if let Some(title) = self.resolve_emit(n.notify.as_deref())? {
+        if let Some(title) = self.resolve_emit("notify", n.notify.as_deref())? {
             self.emitter.emit_notification(&title);
         }
         for phase in audio_phases(n) {
             match phase {
                 super::AudioPhase::Speak(text) => {
-                    if let Some(text) = self.resolve_emit(Some(&text))? {
+                    let field = if n.say.is_some() { "say" } else { "say_first" };
+                    if let Some(text) = self.resolve_emit(field, Some(&text))? {
                         let config = tts_config_from_settings(self.settings.tts.as_ref());
                         self.emitter.emit_speech(&text, config);
                     }
                 }
                 super::AudioPhase::Effect(name) => {
-                    if let Some(name) = self.resolve_emit(Some(&name))? {
+                    if let Some(name) = self.resolve_emit("effect", Some(&name))? {
                         self.validate_effect_name(&name)
                             .map_err(ActionFailure::Dispatch)?;
                         self.emitter.emit_effect(&name);
@@ -949,7 +1025,11 @@ impl StackExecutionContext<'_> {
     /// through DM2 (strict) against [`Self::frontmatter`]; a resolution raise is
     /// returned as an [`ActionFailure::Evaluation`] so the caller fails the
     /// event closed rather than dispatching silently-empty or raw template text.
-    fn resolve_emit(&self, text: Option<&str>) -> Result<Option<String>, ActionFailure> {
+    fn resolve_emit(
+        &self,
+        field: &str,
+        text: Option<&str>,
+    ) -> Result<Option<String>, ActionFailure> {
         let Some(text) = text else { return Ok(None) };
         if !text.contains("{{") {
             return Ok(Some(text.to_string()));
@@ -964,10 +1044,10 @@ impl StackExecutionContext<'_> {
         self.resolve_string_value(text, fm)
             .map(|value| Some(scalar_string(&value)))
             .map_err(|error| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
-                    "interpolation",
-                    &error,
-                ))
+                ActionFailure::Evaluation(
+                    LifecycleErrorInfo::from_error_or_action("interpolation", &error)
+                        .at_property(format!("{}.{field}", self.signal.property_name())),
+                )
             })
     }
 
@@ -984,12 +1064,16 @@ impl StackExecutionContext<'_> {
     /// live cell so a *later* event observes this event's mutations — including
     /// mutations made before an early control/error return (the side effect
     /// already hit disk).
-    fn execute_stack(&self, items: &[super::actions::LifecycleStackItem]) -> LifecycleEventOutcome {
+    fn execute_stack(
+        &self,
+        items: &[super::actions::LifecycleStackItem],
+        root: StackRoot<'_>,
+    ) -> LifecycleEventOutcome {
         let mut working: Map<String, Value> = match self.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
-        let outcome = self.execute_stack_inner(items, &mut working);
+        let outcome = self.execute_stack_inner(items, root, &mut working);
         if let Some(cell) = self.live_frontmatter {
             *cell.lock().expect(LIVE_POISONED) = working;
         }
@@ -1005,6 +1089,7 @@ impl StackExecutionContext<'_> {
     fn execute_stack_inner(
         &self,
         items: &[super::actions::LifecycleStackItem],
+        root: StackRoot<'_>,
         working: &mut Map<String, Value>,
     ) -> LifecycleEventOutcome {
         for (stack_index, item) in items.iter().enumerate() {
@@ -1014,15 +1099,17 @@ impl StackExecutionContext<'_> {
                 // A `when:` guard that raised is an expression-layer evaluation
                 // error, not a side-effect dispatch failure.
                 Err(info) => {
+                    let property = root.when_property(self.signal, stack_index);
                     return LifecycleEventOutcome {
-                        evaluation_error: Some(info),
+                        evaluation_error: Some(info.at_property(property)),
                         ..Default::default()
                     };
                 }
             }
             for (action_index, action) in item.actions.iter().enumerate() {
                 let location = ActionLocation::new(self.signal, stack_index, action_index);
-                match self.run_action(action, location, working) {
+                let property = root.action_property(location);
+                match self.run_action(action, location, &property, working) {
                     ActionStep::Continue => {}
                     ActionStep::Control(control) => {
                         return LifecycleEventOutcome {
@@ -1038,7 +1125,7 @@ impl StackExecutionContext<'_> {
                     }
                     ActionStep::EvaluationErrored(info) => {
                         return LifecycleEventOutcome {
-                            evaluation_error: Some(info),
+                            evaluation_error: Some(info.at_property(property)),
                             ..Default::default()
                         };
                     }
@@ -1089,9 +1176,10 @@ impl StackExecutionContext<'_> {
         &self,
         action: &LifecycleAction,
         location: ActionLocation,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> ActionStep {
-        match self.execute_action_inner(action, location, working) {
+        match self.execute_action_inner(action, location, property, working) {
             Ok(None) => ActionStep::Continue,
             Ok(Some(control)) => ActionStep::Control(control),
             Err(ActionFailure::Evaluation(info)) => {
@@ -1132,10 +1220,15 @@ impl StackExecutionContext<'_> {
     /// [`ActionFailure::Evaluation`] for an expression-layer raise (which always
     /// halts) and [`ActionFailure::Dispatch`] for a side-effect failure (subject
     /// to `no_error` and the per-phase policy).
+    ///
+    /// `location` is the proxy-provenance identity; `property` is the authored
+    /// path the same action reports in diagnostics. The two differ for a task
+    /// `setup:`/`teardown:` stack, whose signal is synthetic.
     fn execute_action_inner(
         &self,
         action: &LifecycleAction,
         location: ActionLocation,
+        property: &str,
         working: &mut Map<String, Value>,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
@@ -1165,6 +1258,10 @@ impl StackExecutionContext<'_> {
             }
             LifecycleActionKind::Shell(shell) => {
                 self.run_shell_action(shell, working).map(|()| None)
+            }
+            LifecycleActionKind::RuntimeSet(set) => {
+                self.dispatch_runtime_set(set, &format!("{property}.set"), working)
+                    .map(|_| None)
             }
             LifecycleActionKind::SideEffect(effect) => self
                 .dispatch_side_effect(&effect.verb, &effect.args, working)
@@ -1247,17 +1344,26 @@ impl StackExecutionContext<'_> {
 
     /// Run a shell action. A failed command-string interpolation is an
     /// evaluation error; a non-zero exit or spawn failure is a dispatch error
-    /// (subject to `no_error` upstream). `on_error` is emitted as a warning
-    /// status line before a dispatch error propagates.
+    /// (subject to `no_error` upstream). Initialization and preflight prohibitions
+    /// are unsuppressible. `on_error` is emitted as a warning status line before
+    /// a dispatch error propagates.
     fn run_shell_action(
         &self,
         shell: &super::actions::ShellAction,
         fm: &Map<String, Value>,
     ) -> Result<(), ActionFailure> {
+        if self.signal == LifecycleSignal::Initialize {
+            return Err(ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
+                "shell", &ShellRunError::BeforePreflight,
+            )));
+        }
         let command = self.render_message(&shell.command, fm).map_err(|error| {
             ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action("shell", &error))
         })?;
         match self.shell_runner.run(&command) {
+            Err(ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_error_or_action("shell", &ShellRunError::BeforePreflight),
+            )),
             Ok(0) => Ok(()),
             Ok(code) => {
                 if let Some(on_error) = &shell.on_error {
@@ -1286,7 +1392,9 @@ impl StackExecutionContext<'_> {
     /// through DM2 (preserving whole-value typing), matching the literal-with-
     /// interpolation rule of communication bodies. A frontmatter-mutating verb
     /// that targets the document mirrors its change onto `working` so a later
-    /// action in the same stack reads the mutated value.
+    /// action in the same stack reads the mutated value. Lifecycle `set`
+    /// mappings use [`Self::dispatch_runtime_set`] instead of this positional
+    /// Darkmatter-effect path.
     fn dispatch_side_effect(
         &self,
         verb: &str,
@@ -1321,28 +1429,16 @@ impl StackExecutionContext<'_> {
                 .map(scalar_string)
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
+        let path = |idx: usize| -> Result<String, ActionFailure> {
+            let raw = s(idx)?;
+            self.resolve_effect_path(verb, &raw)
+        };
         let v = |idx: usize| -> Result<Value, ActionFailure> {
             values
                 .get(idx)
                 .cloned()
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
-
-        // `set` is the in-memory counterpart of `set_frontmatter`: it targets
-        // the runtime mutation layer rather than a file, so it takes
-        // `(key, value)` instead of `(file, prop, value)` and never reaches the
-        // effect engine's path-based verbs below.
-        if verb == "set" {
-            let key = s(0)?;
-            let value = v(1)?;
-            let prior = self
-                .apply_runtime_set(&key, value.clone(), working)
-                .map_err(|error| {
-                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
-                })?;
-            working.insert(key, value);
-            return Ok(prior);
-        }
 
         let result = match verb {
             "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, v(2)?),
@@ -1354,14 +1450,14 @@ impl StackExecutionContext<'_> {
             "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, v(2)?),
             "ensure_file" => {
                 if values.len() >= 2 {
-                    engine.ensure_file_with_content(&s(0)?, &s(1)?).map(Value::String)
+                    engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
                 } else {
-                    engine.ensure_file(&s(0)?).map(Value::String)
+                    engine.ensure_file(&path(0)?).map(Value::String)
                 }
             }
-            "ensure_dir" => engine.ensure_dir(&s(0)?).map(Value::String),
-            "append_line" => engine.append_line(&s(0)?, &s(1)?).map(Value::String),
-            "append_jsonl" => engine.append_jsonl(&s(0)?, v(1)?).map(Value::String),
+            "ensure_dir" => engine.ensure_dir(&path(0)?).map(Value::String),
+            "append_line" => engine.append_line(&path(0)?, &s(1)?).map(Value::String),
+            "append_jsonl" => engine.append_jsonl(&path(0)?, v(1)?).map(Value::String),
             "http_post" => engine.http_post(&s(0)?, s(1)?.into_bytes()),
             other => return Err(dispatch_err(format!("unknown side effect `{other}`"))),
         };
@@ -1375,24 +1471,113 @@ impl StackExecutionContext<'_> {
         Ok(out)
     }
 
-    /// Apply one `set` write to the invocation-local runtime layer and report
-    /// the value it replaced.
-    ///
-    /// Without a runtime cell the write is still key-checked — an author must
-    /// get the same typed refusal for `set: [outputs, …]` whether or not the
-    /// caller wired an accumulator — and the prior value is read from the
-    /// caller's working state.
-    fn apply_runtime_set(
+    /// Resolve against the pre-write snapshot; an absent destination is a
+    /// declared null, so optional values can be copied before being reset.
+    fn dispatch_runtime_set(
         &self,
-        key: &str,
-        value: Value,
-        working: &Map<String, Value>,
-    ) -> Result<Value, super::super::runtime_state::RuntimeMutationError> {
+        set: &RuntimeSet,
+        property: &str,
+        working: &mut Map<String, Value>,
+    ) -> Result<IndexMap<String, Value>, ActionFailure> {
+        let mut snapshot = working.clone();
+        for (key, _) in set.iter() {
+            snapshot.entry(key.clone()).or_insert(Value::Null);
+        }
+        let mut updates = IndexMap::with_capacity(set.len());
+        for (key, value) in set.iter() {
+            let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
+                let value_property = format!("{property}.{key}{suffix}");
+                let reason = match &error {
+                    LifecycleExprError::SurvivingSpan { span } => {
+                        LifecycleEvaluationReason::SurvivingSpan { span: span.clone() }
+                    }
+                    LifecycleExprError::Evaluate(_)
+                    | LifecycleExprError::Compose(_)
+                    | LifecycleExprError::Prose(_) => {
+                        LifecycleEvaluationReason::Expression
+                    }
+                };
+                let diagnostic = CompositionError::LifecycleEvaluationError {
+                    source_path: self.source_path.to_path_buf(),
+                    event: self.signal.property_name().to_string(),
+                    surface: "set".to_string(),
+                    message: error.to_string(),
+                    property: Some(value_property.clone()),
+                    reason: Box::new(reason.clone()),
+                };
+                let mut info = LifecycleErrorInfo::from_composition_error(&diagnostic)
+                    .at_property(value_property);
+                info.variant = "set".to_string();
+                info.reason = reason;
+                ActionFailure::Evaluation(info)
+            })?;
+            updates.insert(key.clone(), resolved);
+        }
+
+        let fallback;
         let state = match self.runtime_state {
-            Some(state) => return state.set(self.effect_engine, key, value, working),
-            None => super::super::runtime_state::RuntimeState::new(),
+            Some(state) => state,
+            None => {
+                fallback = super::super::runtime_state::RuntimeState::new();
+                &fallback
+            }
         };
-        state.set(self.effect_engine, key, value, working)
+        let prior = state
+            .set_batch(self.effect_engine, &updates, &snapshot)
+            .map_err(|error| {
+                ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action("set", &error))
+            })?;
+        for (key, value) in updates {
+            working.insert(key, value);
+        }
+        Ok(prior)
+    }
+
+    /// Resolve a document-authored mutation target through the same captured
+    /// file-reference context used by composition.
+    ///
+    /// Existing targets follow ordinary document resolution precedence. For a
+    /// missing implicit-relative target, creation stays anchored to the
+    /// mutation root, preserving the effect engine's existing relative
+    /// mutation policy; other reference kinds use their first document-scoped
+    /// candidate. A later transclusion therefore resolves the same identity.
+    /// Callers without a request snapshot retain the legacy behavior.
+    fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
+        let Some(request_context) = self.file_resolution_context else {
+            return Ok(raw.to_string());
+        };
+        let reference = FileReference::new(raw).map_err(|error| {
+            ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+        })?;
+        let document_context = request_context.for_source(self.source_path);
+        let mutation_context = request_context.for_base(self.effect_engine.mutation_root());
+        let resolved = reference
+            .resolve_in_context(&document_context)
+            .map_err(|error| {
+                ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+            })?;
+        let path = match resolved {
+            Some(path) => path,
+            None => reference
+                .candidate_plan(if reference.class().kind == FileReferenceKind::ImplicitRelative {
+                    &mutation_context
+                } else {
+                    &document_context
+                })
+                .map_err(|error| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
+                })?
+                .into_iter()
+                .next()
+                .map(|candidate| candidate.path().to_path_buf())
+                .ok_or_else(|| {
+                    ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(
+                        verb,
+                        format!("file reference `{raw}` has no local mutation target"),
+                    ))
+                })?,
+        };
+        Ok(path.to_string_lossy().into_owned())
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory
@@ -1864,10 +2049,10 @@ fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
 /// messenger/TTS/sound/stderr/stdout/notify dispatch ever sends raw syntax.
 fn reject_surviving_spans(value: Value) -> Result<Value, LifecycleExprError> {
     if let Value::String(s) = &value {
-        if !ExpressionFinder::find_all_plain(s).is_empty() {
-            return Err(LifecycleExprError::prose(format!(
-                "unresolved interpolation survived event-time resolution: `{s}`"
-            )));
+        if let Some(span) = ExpressionFinder::find_all_plain(s).first() {
+            return Err(LifecycleExprError::SurvivingSpan {
+                span: s[span.start..span.end].to_string(),
+            });
         }
     }
     Ok(value)

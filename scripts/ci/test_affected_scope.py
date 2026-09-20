@@ -19,6 +19,7 @@ import unittest.mock
 import affected_scope
 import companion_suites
 import schema
+from tool_guard import require_tools
 from affected_scope import (
     EXCLUSION_CLASSES,
     calculate_scope,
@@ -34,13 +35,18 @@ from affected_scope import (
     package_cells,
     check_arguments,
     dependent_seam,
+    CHECK_ENVIRONMENT,
     DEPENDENTS_ENVIRONMENT,
+    EVENT_NAMES,
+    schedule_environments,
     feature_args,
     apply_accepted_cells,
     capability,
     load_environments,
     package_ci_policy,
     validate_package_ci,
+    validate_sidecars,
+    load_sidecars,
     validate_no_shadow_workspaces,
     build_closure,
     estimate_jobs,
@@ -49,10 +55,52 @@ from affected_scope import (
     MATRIX_LIMIT,
     ROOT,
     ENVIRONMENTS_CONFIG,
+    build_contract,
+    build_owner_matrix,
+    archive_producers,
+    derive_build_records,
+    prune_build_records,
+    producer_of,
+    CONSUMER_BUILD_FIELDS,
+    PRODUCER_BUILD_FIELDS,
+    SIDECAR_TABLE,
 )
 
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
+
+#: Every job that runs this suite provisions a toolchain, so a missing Cargo
+#: here is a provisioning regression rather than a host without Rust. Both set
+#: BISCUIT_REQUIRE_CARGO; a developer host without Cargo still skips.
+CARGO_ENFORCED_BY = (
+    "`ci.yml`'s `preflight` matrix on every selected operating system and by "
+    "its `ci-tooling` job, both of which set up the pinned Rust toolchain and "
+    "set BISCUIT_REQUIRE_CARGO"
+)
+
+
+def seed_build_inputs(root: Path) -> None:
+    """Give a synthetic workspace the two files a planned build key reads.
+
+    The key digests the pinned toolchain and the resolved dependency graph, so
+    a root with neither has no build key to compute. Real checkouts always
+    carry both; a fixture root has to be told.
+    """
+    (root / "rust-toolchain.toml").write_text(
+        '[toolchain]\nchannel = "1.97.1"\n', encoding="utf-8"
+    )
+    lockfile = root / "Cargo.lock"
+    if not lockfile.exists():
+        lockfile.write_text("version = 4\n", encoding="utf-8")
+    # The closed sidecar vocabulary, for a fixture whose package declares one.
+    # Copied from the shipped table rather than invented, so a fixture cannot
+    # accept a name the real planner would refuse.
+    table = root / ".github" / "ci"
+    table.mkdir(parents=True, exist_ok=True)
+    (table / "sidecars.json").write_text(
+        (ROOT / SIDECAR_TABLE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
 
 def scope_document(
@@ -108,6 +156,7 @@ class AffectedScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # alpha-core depends on shared; beta-app depends on alpha-core.
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
@@ -559,6 +608,7 @@ class ClosureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # biscuit-speaks -> [playa (optional), espeak]; its dependents are the
         # real claudine/research closure from the repo.
         packages = [
@@ -641,6 +691,7 @@ class NativeClosureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # consumer (declares no native) -> native-lib (declares ALSA).
         packages = [
             package(self.root, "consumer", "consumer/Cargo.toml"),
@@ -876,14 +927,25 @@ class PackagePolicyTests(unittest.TestCase):
                 today=TODAY,
             )
 
-    def test_messenger_desktop_stubs_runner_tool_is_accepted(self) -> None:
+    def test_messenger_desktop_stubs_is_a_build_sidecar_not_a_runner_tool(self) -> None:
+        # It moved: the stubs are `required-features = ["desktop"]` bin targets
+        # the PRODUCER compiles, not a facility the consumer provisions. The
+        # old spelling has to stop validating, or both would be legal at once.
         validate_package_ci(
             "messenger",
-            ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+            ci_policy(tests={"sidecars": ["messenger-desktop-stubs"]}),
             self.RUNNER_LABELS,
-            root=Path("/"),
+            root=ROOT,
             today=TODAY,
         )
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "messenger",
+                ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+                self.RUNNER_LABELS,
+                root=ROOT,
+                today=TODAY,
+            )
 
     def test_zed_extension_runner_tool_is_accepted(self) -> None:
         validate_package_ci(
@@ -966,6 +1028,55 @@ class MatrixRecordTests(unittest.TestCase):
             environments=environments_for_tests(),
         )
         self.assertEqual(record["node_environments"], ["ubuntu-latest"])
+
+    def test_toolchain_environments_follow_the_declaration_and_the_capability(self) -> None:
+        # Run 35326800778: `repo-deps` and `test-toolkit` shell out to cargo
+        # from an archive whose consumer had no pinned toolchain, and the
+        # concurrent rustup auto-installs the tests triggered raced each other.
+        # The consumer provisions the pin once, on exactly the L1 hosts the
+        # declaration reaches; the WSL2 guest stays a governed gap instead.
+        environments = environments_for_tests()
+        record = matrix_record(
+            plan_package(package="repo-deps", requires_toolchain=True),
+            environments=environments,
+        )
+        self.assertEqual(
+            record["toolchain_environments"],
+            [
+                environment["name"]
+                for environment in environments
+                if not capability(environment, "archive_only")
+                and capability(environment, "cargo_toolchain")
+            ],
+        )
+        self.assertNotIn("wsl2-ubuntu", record["toolchain_environments"])
+
+        # Narrowed to hosted execution: a cell a receipt already satisfied
+        # schedules no runner and so provisions nothing.
+        narrowed = matrix_record(
+            plan_package(package="repo-deps", requires_toolchain=True),
+            environments=environments,
+            executing={("ubuntu-latest", "L1")},
+        )
+        self.assertEqual(narrowed["toolchain_environments"], ["ubuntu-latest"])
+
+        # A package that never shells out provisions nothing anywhere, and a
+        # declaration without a test gate (check-only) provisions nothing.
+        self.assertEqual(
+            matrix_record(plan_package(package="a"), environments=environments)[
+                "toolchain_environments"
+            ],
+            [],
+        )
+        self.assertEqual(
+            matrix_record(
+                plan_package(package="repo-deps", requires_toolchain=True, gates=["check"]),
+                environments=environments,
+                gates={"check"},
+            )["toolchain_environments"],
+            [],
+        )
+
     def test_a_companion_suite_host_is_never_satisfied_by_local_evidence(self) -> None:
         # A companion suite is not in any local receipt, so its CI host must
         # still run even when the package's Rust half was validated locally.
@@ -1018,13 +1129,15 @@ class EnvironmentsTests(unittest.TestCase):
         from affected_scope import KNOWN_CAPABILITIES
 
         doc = {
-            "schema_version": 1,
+            "schema_version": 3,
             "environments": [
                 {
                     "name": "x",
                     "runner": "x",
                     "native_key": "x",
+                    "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
                     "capabilities": {key: True for key in KNOWN_CAPABILITIES if key != "tmux"},
+                    "build": producer_build("x", "x86_64", "gnu", "glibc", ["x"]),
                 }
             ],
         }
@@ -1038,18 +1151,20 @@ class EnvironmentsTests(unittest.TestCase):
         import json
 
         doc = {
-            "schema_version": 1,
+            "schema_version": 3,
             "environments": [
                 {
                     "name": "x",
                     "runner": "x",
                     "native_key": "x",
+                    "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
                     "capabilities": {
                         "tmux": {"available": False, "reason": "r", "owner": "@o", "expiry": "2026-01-01"},
                         "headless_browser": True,
                         "node_pnpm": True,
                         "archive_only": False,
                     },
+                    "build": producer_build("x", "x86_64", "gnu", "glibc", ["x"]),
                 }
             ],
         }
@@ -1057,6 +1172,536 @@ class EnvironmentsTests(unittest.TestCase):
         path.write_text(json.dumps(doc))
         with self.assertRaises(RuntimeError):
             load_environments(path, today=TODAY)
+
+
+class ArchiveIncludeAndSidecarPolicyTests(unittest.TestCase):
+    """`[package.metadata.ci.tests]`'s two producer-owned declarations.
+
+    An archive include or a sidecar is validated at SCHEDULING time because a
+    malformed one is a scheduling-time mistake: discovering it as a failed
+    producer minutes into a CI run costs a whole fan-out.
+    """
+
+    RUNNER_LABELS = {"ubuntu-latest", "windows-latest", "macos-latest"}
+
+    def validate(self, tests: dict) -> None:
+        validate_package_ci(
+            "alpha", ci_policy(tests=tests), self.RUNNER_LABELS, root=ROOT, today=TODAY
+        )
+
+    def test_a_profile_relative_include_with_platform_placeholders_is_accepted(self) -> None:
+        self.validate(
+            {
+                "archive-includes": [
+                    "examples/discovery_probe",
+                    "{DLL_PREFIX}archive_portability_dylib{DLL_SUFFIX}",
+                    "tools/probe{EXE_SUFFIX}",
+                ]
+            }
+        )
+
+    def test_an_absolute_include_is_refused(self) -> None:
+        for entry in ("/etc/passwd", "C:/Windows/system32/cmd.exe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError) as caught:
+                self.validate({"archive-includes": [entry]})
+            self.assertIn("relative", str(caught.exception))
+
+    def test_an_include_that_escapes_the_target_directory_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["../../etc/passwd"]})
+        self.assertIn("escapes", str(caught.exception))
+
+    def test_a_backslash_spelling_is_refused(self) -> None:
+        # One spelling has to survive a Windows producer handing a path to a
+        # Linux consumer's manifest reader.
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["examples\\probe"]})
+        self.assertIn("forward slashes", str(caught.exception))
+
+    def test_an_unknown_placeholder_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"archive-includes": ["{PROFILE}/probe"]})
+        self.assertIn("placeholder", str(caught.exception))
+
+    def test_an_include_that_names_its_own_profile_directory_is_refused(self) -> None:
+        # The producer supplies `<triple>/<profile>`; a package that spelled it
+        # too would name `x86_64-.../debug/debug/examples/probe`.
+        for entry in ("debug/examples/probe", "release/probe", "target/debug/probe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError) as caught:
+                self.validate({"archive-includes": [entry]})
+            self.assertIn("profile directory", str(caught.exception))
+
+    def test_an_empty_or_padded_include_is_refused(self) -> None:
+        for entry in ("", " examples/probe"):
+            with self.subTest(entry=entry), self.assertRaises(RuntimeError):
+                self.validate({"archive-includes": [entry]})
+
+    def test_includes_must_be_a_list_of_strings(self) -> None:
+        for value in ("examples/probe", [1], {"path": "examples/probe"}):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                self.validate({"archive-includes": value})
+
+    def test_a_sidecar_outside_the_closed_table_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"sidecars": ["build-whatever-i-like"]})
+        self.assertIn("unknown build sidecar", str(caught.exception))
+
+    def test_a_duplicated_sidecar_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.validate({"sidecars": ["harness-broker", "harness-broker"]})
+        self.assertIn("duplicates", str(caught.exception))
+
+    def test_every_shipped_sidecar_name_is_accepted(self) -> None:
+        for name in load_sidecars(ROOT):
+            with self.subTest(sidecar=name):
+                self.validate({"sidecars": [name]})
+
+    def test_declaring_no_sidecars_never_reads_the_table(self) -> None:
+        # A workspace with no sidecars at all — every synthetic fixture, and
+        # most real packages — must not need the file to exist.
+        validate_sidecars("alpha", [], Path("/nonexistent-root-2b41"))
+
+    def test_the_shipped_sidecar_table_is_a_closed_well_formed_vocabulary(self) -> None:
+        # Passive corpus test over the one shipped artifact of this contract.
+        sidecars = load_sidecars(ROOT)
+        self.assertTrue(sidecars)
+        for name, spec in sidecars.items():
+            with self.subTest(sidecar=name):
+                self.assertIsInstance(spec.get("package"), str)
+                self.assertTrue(spec["package"])
+                self.assertTrue(spec.get("bins"))
+                self.assertTrue(all(isinstance(b, str) for b in spec["bins"]))
+                self.assertIsInstance(spec.get("features", []), list)
+                self.assertGreater(len(spec.get("reason", "")), 40)
+
+    def test_a_sidecar_table_from_another_generation_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".github" / "ci").mkdir(parents=True)
+            (root / SIDECAR_TABLE).write_text(
+                '{"schema_version": 99, "sidecars": {}}', encoding="utf-8"
+            )
+            with self.assertRaises(RuntimeError) as caught:
+                load_sidecars(root)
+        self.assertIn("schema version", str(caught.exception))
+
+    def test_a_compile_time_sidecar_never_reappears_as_a_runner_tool(self) -> None:
+        # Until Task 6.5 the two compile-time sidecars were projected back into
+        # `runner_tools` so the reusable workflow's legacy `cargo build` steps
+        # kept firing. Those steps are gone; a projection that outlived them
+        # would ask a consumer with no Cargo to build its own fixture.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            seed_build_inputs(root)
+            packages = [
+                package(
+                    root,
+                    "alpha",
+                    "alpha/Cargo.toml",
+                    ci=ci_policy(
+                        tests={
+                            "sidecars": ["darkmatter-md-fixture", "harness-broker"],
+                            "runner-tools": ["ai-provider-stubs"],
+                        }
+                    ),
+                )
+            ]
+            policy = package_ci_policy(
+                {item["id"]: item for item in packages},
+                runner_labels=self.RUNNER_LABELS,
+                root=root,
+                today=TODAY,
+            )
+        record = policy["alpha"]
+        self.assertEqual(
+            record["sidecars"], ["darkmatter-md-fixture", "harness-broker"]
+        )
+        self.assertEqual(record["runner_tools"], ["ai-provider-stubs"])
+
+
+class BuildContractTests(unittest.TestCase):
+    """The compile contracts of `.github/ci/environments.json`.
+
+    `fixes/2026-09-12-single-os-compile/spec.md` section 5: compatibility is
+    declared and predicate-checked, never inferred from an OS name, and
+    Linux-to-WSL2 is the only cross-environment edge the table can express.
+    """
+
+    def table(self, **mutate) -> list[dict]:
+        environments = environments_for_tests()
+        by_name = {entry["name"]: entry for entry in environments}
+        for name, changes in mutate.items():
+            by_name[name.replace("_", "-")]["build"].update(changes)
+        return environments
+
+    def write(self, environments: list[dict], version: int = 3) -> Path:
+        path = Path(tempfile.mkdtemp()) / "environments.json"
+        for entry in environments:
+            entry["capabilities"].setdefault("wezterm", False)
+            entry["capabilities"].setdefault("kitty", False)
+            entry["capabilities"].setdefault("apple-terminal", False)
+        path.write_text(json.dumps({"schema_version": version, "environments": environments}))
+        return path
+
+    # -- the shipped table --------------------------------------------------
+
+    def test_the_shipped_table_declares_one_contract_per_producer(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        for name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+            contract = build_contract(environments, name)
+            self.assertEqual(sorted(PRODUCER_BUILD_FIELDS), sorted(contract))
+            self.assertIn(name, contract["executes"])
+
+    def test_linux_to_wsl2_is_the_only_cross_environment_edge(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        edges = {
+            environment["name"]: [
+                name
+                for name in environment["build"]["executes"]
+                if name != environment["name"]
+            ]
+            for environment in environments
+            if "executes" in environment["build"]
+        }
+        self.assertEqual(
+            {"ubuntu-latest": ["wsl2-ubuntu"], "windows-latest": [], "macos-latest": []},
+            edges,
+        )
+
+    def test_the_wsl2_guest_is_compiled_for_by_its_native_key(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        self.assertEqual("ubuntu-latest", producer_of(environments, "wsl2-ubuntu"))
+        for name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+            self.assertEqual(name, producer_of(environments, name))
+
+    def test_the_archive_only_guest_declares_only_its_runtime_predicates(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        self.assertEqual(sorted(CONSUMER_BUILD_FIELDS), sorted(guest["build"]))
+        with self.assertRaises(RuntimeError):
+            build_contract(environments, "wsl2-ubuntu")
+
+    def test_every_producer_in_the_shipped_table_owns_an_archive(self) -> None:
+        # Since Task 6.5 there is no held-back state to declare: every native
+        # producer owns the archive its consumers execute, and the WSL2 guest
+        # is carried by the Linux producer that hosts it. The assertion that
+        # would catch a regression to compiling in place is now that the set of
+        # producers and the set of archive owners are the same set.
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        producers = {
+            environment["name"]
+            for environment in environments
+            if "executes" in environment.get("build", {})
+        }
+        self.assertEqual(
+            {"ubuntu-latest", "macos-latest", "windows-latest"}, producers
+        )
+        self.assertEqual(producers, archive_producers(environments))
+
+    def test_a_producer_carries_its_guest_with_it(self) -> None:
+        # There is no state in which a producer's archive is consumed by one of
+        # its compatible environments and compiled again by another: ownership
+        # is per PRODUCER, and `executes` is what a producer serves.
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        for producer in archive_producers(environments):
+            contract = build_contract(environments, producer)
+            self.assertIn("wsl2-ubuntu", contract["executes"] + ["wsl2-ubuntu"])
+            self.assertEqual(producer, producer_of(environments, producer))
+
+    # -- refusals -----------------------------------------------------------
+
+    def test_a_contract_carrying_a_retired_migration_field_is_refused(self) -> None:
+        # `archive_cutover` was the Phase 4/5 switch; Task 6.5 removed it with
+        # the compile-in-place paths it guarded. The vocabulary is closed, so a
+        # table that still carries it fails rather than being quietly ignored —
+        # which is what would happen on a branch that revived the old data.
+        path = self.write(self.table(ubuntu_latest={"archive_cutover": True}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("archive_cutover", str(raised.exception))
+
+    def test_native_windows_cannot_be_paired_with_the_wsl2_guest(self) -> None:
+        # The guest's `native_key` is ubuntu-latest, so no Windows contract can
+        # claim it — before the ABI and libc comparison would also refuse it.
+        path = self.write(self.table(windows_latest={"executes": ["windows-latest", "wsl2-ubuntu"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("native_key", str(raised.exception))
+
+    def test_a_producer_may_not_execute_in_another_native_environment(self) -> None:
+        path = self.write(self.table(ubuntu_latest={"executes": ["macos-latest", "ubuntu-latest", "wsl2-ubuntu"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("archive-only", str(raised.exception))
+
+    def test_a_mismatched_abi_refuses_the_edge(self) -> None:
+        environments = environments_for_tests()
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        guest["build"]["runtime"]["abi"] = "musl"
+        path = self.write(environments)
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("abi is", str(raised.exception))
+
+    def test_a_consumer_missing_a_required_native_library_refuses_the_edge(self) -> None:
+        path = self.write(
+            self.table(ubuntu_latest={"runtime": {
+                "arch": "x86_64", "abi": "gnu", "libc": "glibc",
+                "native_libraries": ["libasound2"],
+            }})
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("libasound2", str(raised.exception))
+
+    def test_a_nextest_skew_between_producer_and_guest_refuses_the_edge(self) -> None:
+        environments = environments_for_tests()
+        guest = next(e for e in environments if e["name"] == "wsl2-ubuntu")
+        guest["build"]["nextest"] = "0.9.100"
+        path = self.write(environments)
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("nextest", str(raised.exception))
+
+    def test_a_producer_that_does_not_execute_its_own_archive_is_refused(self) -> None:
+        path = self.write(self.table(macos_latest={"executes": []}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("always executes what it compiles", str(raised.exception))
+
+    def test_an_environment_without_a_build_contract_is_refused(self) -> None:
+        environments = environments_for_tests()
+        del environments[0]["build"]
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(self.write(environments), today=TODAY)
+        self.assertIn("must declare a 'build' contract", str(raised.exception))
+
+    def test_an_unknown_build_field_is_refused(self) -> None:
+        path = self.write(self.table(macos_latest={"sccache": True}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("sccache", str(raised.exception))
+
+    def test_a_version_one_table_is_refused_rather_than_read_without_contracts(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(self.write(environments_for_tests(), version=1), today=TODAY)
+        self.assertIn("schema_version must be 3", str(raised.exception))
+
+    def test_an_unsorted_executes_list_is_refused(self) -> None:
+        path = self.write(self.table(ubuntu_latest={"executes": ["wsl2-ubuntu", "ubuntu-latest"]}))
+        with self.assertRaises(RuntimeError) as raised:
+            load_environments(path, today=TODAY)
+        self.assertIn("sorted", str(raised.exception))
+
+
+class BuildDerivationTests(unittest.TestCase):
+    """Which cells create consumer demand, on a synthetic two-package workspace."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {
+                "nodes": [
+                    {"id": "alpha-core", "deps": []},
+                    {"id": "beta-app", "deps": []},
+                ]
+            },
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, *files: str, **kwargs) -> dict:
+        return calculate_scope(
+            list(files),
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,
+        )
+
+    def test_declared_includes_and_sidecars_reach_the_build_identity(self) -> None:
+        # They are IN the key because changing either set changes what the
+        # producer emits, and therefore what a consumer must find. Sorted, so
+        # two packages that declare the same set in a different order do not
+        # split a key over nothing.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            seed_build_inputs(root)
+            declared = ci_policy(
+                tests={
+                    "archive-includes": ["tools/probe{EXE_SUFFIX}", "examples/first"],
+                    "sidecars": ["harness-broker", "darkmatter-md-fixture"],
+                }
+            )
+            packages = [package(root, "alpha-core", "alpha/lib/Cargo.toml", ci=declared)]
+            metadata = {
+                "workspace_members": [item["id"] for item in packages],
+                "packages": packages,
+                "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            }
+            policy = package_ci_policy(
+                {item["id"]: item for item in packages},
+                runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+                root=root,
+                today=TODAY,
+            )
+            plan = calculate_scope(
+                ["alpha/lib/src/lib.rs"],
+                root,
+                metadata,
+                environments_for_tests(),
+                policy,
+            )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        record = next(
+            entry for entry in plan["builds"] if entry["producer"] == "ubuntu-latest"
+        )
+        self.assertEqual(
+            record["identity"]["archive_includes"],
+            ["examples/first", "tools/probe{EXE_SUFFIX}"],
+        )
+        self.assertEqual(
+            record["identity"]["sidecars"],
+            ["darkmatter-md-fixture", "harness-broker"],
+        )
+        package_record = next(
+            entry for entry in plan["packages"] if entry["package"] == "alpha-core"
+        )
+        self.assertEqual(
+            package_record["archive_includes"],
+            ["tools/probe{EXE_SUFFIX}", "examples/first"],
+        )
+
+    def test_one_more_declared_include_splits_the_build_key(self) -> None:
+        # The reason includes are keyed at all: an archive built before a
+        # package declared a new payload is not the archive its tests now need.
+        keys = []
+        for includes in ([], ["examples/first"]):
+            with tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                seed_build_inputs(root)
+                packages = [
+                    package(
+                        root,
+                        "alpha-core",
+                        "alpha/lib/Cargo.toml",
+                        ci=ci_policy(tests={"archive-includes": includes}),
+                    )
+                ]
+                metadata = {
+                    "workspace_members": [item["id"] for item in packages],
+                    "packages": packages,
+                    "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+                }
+                policy = package_ci_policy(
+                    {item["id"]: item for item in packages},
+                    runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+                    root=root,
+                    today=TODAY,
+                )
+                plan = calculate_scope(
+                    ["alpha/lib/src/lib.rs"],
+                    root,
+                    metadata,
+                    environments_for_tests(),
+                    policy,
+                )
+            keys.append(
+                next(
+                    entry["key"]
+                    for entry in plan["builds"]
+                    if entry["producer"] == "ubuntu-latest"
+                )
+            )
+        self.assertNotEqual(keys[0], keys[1])
+
+    def test_a_prohibited_cell_demands_no_build(self) -> None:
+        # A constraint stops an EXECUTION, so the owner it would have needed
+        # must not be scheduled either.
+        plan = self.plan(
+            "alpha/lib/src/lib.rs",
+            prohibitions={
+                "macos-latest": {
+                    "owner": "ken",
+                    "reason": "do not run macOS for this branch",
+                    "expiry": "2099-01-01",
+                    "source": "macos.toml",
+                }
+            },
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        producers = {record["producer"] for record in plan["builds"]}
+        self.assertNotIn("macos-latest", producers)
+        self.assertIn("ubuntu-latest", producers)
+
+    def test_only_demanded_owners_are_scheduled(self) -> None:
+        plan = self.plan(
+            "alpha/lib/src/lib.rs",
+            accepted_cells=[
+                {
+                    "package": "alpha-core",
+                    "environment": environment,
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "evidence": {"ref": f"refs/notes/ci-local/{environment}"},
+                }
+                for environment in ("windows-latest", "macos-latest")
+            ],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual(
+            ["ubuntu-latest"], sorted({r["producer"] for r in plan["builds"]})
+        )
+
+    def test_a_record_names_why_its_guest_is_compatible(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        linux = next(r for r in plan["builds"] if r["producer"] == "ubuntu-latest")
+        self.assertIn("x86_64-unknown-linux-gnu", linux["compatibility_reason"])
+        self.assertIn("wsl2-ubuntu", linux["compatibility_reason"])
+        windows = next(r for r in plan["builds"] if r["producer"] == "windows-latest")
+        self.assertIn("own producer environment", windows["compatibility_reason"])
+
+    def test_prune_is_idempotent_and_removes_only_satisfied_demand(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        once = prune_build_records(plan["builds"], plan["cells"])
+        twice = prune_build_records(once, plan["cells"])
+        self.assertEqual(plan["builds"], once)
+        self.assertEqual(once, twice)
+
+    def test_two_selected_packages_get_one_key_each_per_producer(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs", "beta/app/src/lib.rs")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        linux = sorted(
+            (r["package"], r["key"])
+            for r in plan["builds"]
+            if r["producer"] == "ubuntu-latest"
+        )
+        self.assertEqual(["alpha-core", "beta-app"], [name for name, _ in linux])
+        self.assertEqual(2, len({key for _, key in linux}))
+
+    def test_an_owner_matrix_entry_lists_the_packages_it_compiles(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs", "beta/app/src/lib.rs")
+        owners = {entry["environment"]: entry for entry in build_owner_matrix(plan)}
+        self.assertEqual(
+            ["alpha-core", "beta-app"], owners["ubuntu-latest"]["packages"]
+        )
+        self.assertEqual(2, len(owners["ubuntu-latest"]["builds"]))
 
 
 class ShadowWorkspaceTests(unittest.TestCase):
@@ -1104,6 +1749,7 @@ class GatesFalseScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "excluded", "excluded/Cargo.toml"),
         ]
@@ -1162,6 +1808,7 @@ class NonPropagationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         (self.root / "homelab").mkdir()
         (self.root / "homelab" / "justfile").write_text(
             "test-frontend:\nlint-frontend:\n"
@@ -1176,7 +1823,7 @@ class NonPropagationTests(unittest.TestCase):
                     tests={
                         "tiers": ["L1", "L2"],
                         "l2-backends": ["tmux"],
-                        "runner-tools": ["messenger-desktop-stubs"],
+                        "sidecars": ["messenger-desktop-stubs"],
                         "companion-suites": ["homelab-frontend"],
                     }
                 ),
@@ -1231,6 +1878,7 @@ class BuildClosureEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         names = ["seed", "normal", "seed-dev", "transitive-dev", "normal-dev"]
         packages = [package(self.root, name, f"{name}/Cargo.toml") for name in names]
         self.packages = {item["id"]: item for item in packages}
@@ -1279,6 +1927,7 @@ class LockfileScopeBranchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "beta-app", "beta/app/Cargo.toml"),
@@ -1355,6 +2004,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "alpha-cli", "alpha/cli/Cargo.toml"),
@@ -1414,6 +2064,7 @@ class AreaFanOutTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # Two packages in one area, one in another, one nested area, and one
         # root-level member — the five layouts the repository actually uses.
         packages = [
@@ -1554,6 +2205,7 @@ class AllReusedAreaFanOutTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
@@ -1666,13 +2318,13 @@ class EstimateJobsTests(unittest.TestCase):
             environments=environments_for_tests(),
             accepted={},
         )
-        # lint (1) + check for the bench target on three native environments
-        # (3) + L1 on three native environments (3) + L1 on wsl2-ubuntu (2:
+        # lint (1) + check for the bench target on the check environment (1)
+        # + L1 on three native environments (3) + L1 on wsl2-ubuntu (2:
         # archive builder + guest) + L2 where a backend is hostable (2: ubuntu,
         # macOS). The Windows and WSL L2 cells are governed policy gaps and
         # launch nothing; the WSL guest compiles nothing, so no check there.
         self.assertEqual(
-            estimate_jobs(cells, environments_for_tests()), 1 + 3 + 3 + 2 + 2
+            estimate_jobs(cells, environments_for_tests()), 1 + 1 + 3 + 2 + 2
         )
 
     def test_a_reused_cell_costs_no_job(self) -> None:
@@ -1703,11 +2355,12 @@ class EstimateJobsTests(unittest.TestCase):
 
 
 class CheckCellTests(unittest.TestCase):
-    """A check cell covers the uncovered kinds on every native environment.
+    """A check cell covers the uncovered kinds on the one check environment.
 
     The L1 build compiles `lib`, `bin`, and `test`; `example` and `bench` are
-    compiled by no test gate, so their check runs wherever a toolchain exists
-    and is selected explicitly, never through `--all-targets`.
+    compiled by no test gate, so their check runs on `CHECK_ENVIRONMENT` and is
+    selected explicitly, never through `--all-targets`. One environment, like
+    lint (fixes/2026-09-18-ci-cadence, decision 3).
     """
 
     NATIVE = ["ubuntu-latest", "windows-latest", "macos-latest"]
@@ -1741,20 +2394,31 @@ class CheckCellTests(unittest.TestCase):
         )
         return [cell for cell in cells if cell["gate"] == "check"]
 
-    def test_an_example_target_is_checked_on_each_native_environment_only(self) -> None:
+    def test_an_example_target_is_checked_on_the_check_environment_only(self) -> None:
         checks = self.check_cells(["lib", "example"])
-        self.assertEqual(self.NATIVE, [cell["environment"] for cell in checks])
-        for cell in checks:
-            self.assertEqual(["example"], cell["target_kinds"])
-            self.assertEqual("check", cell["compile_coverage_from"])
-            self.assertEqual("execute", cell["execution"])
-            self.assertIn("example", cell["selection_reason"])
-            self.assertIn(cell["environment"], cell["selection_reason"])
+        self.assertEqual([CHECK_ENVIRONMENT], [cell["environment"] for cell in checks])
+        (cell,) = checks
+        self.assertEqual(["example"], cell["target_kinds"])
+        self.assertEqual("check", cell["compile_coverage_from"])
+        self.assertEqual("execute", cell["execution"])
+        self.assertIn("example", cell["selection_reason"])
+        self.assertIn(f"checked on {CHECK_ENVIRONMENT} only", cell["selection_reason"])
         # The guest compiles nothing: its uncovered kinds are covered by the
         # runner that builds its archive, and the reason says so there.
-        by_environment = {cell["environment"]: cell for cell in checks}
-        self.assertIn("wsl2-ubuntu", by_environment["ubuntu-latest"]["selection_reason"])
-        self.assertNotIn("wsl2-ubuntu", by_environment["windows-latest"]["selection_reason"])
+        self.assertIn("wsl2-ubuntu", cell["selection_reason"])
+
+    def test_a_plan_without_the_check_environment_checks_nowhere(self) -> None:
+        # A run that schedules only deferred environments (a push to main
+        # after a validated pull request) still compiles the L1 kinds there;
+        # the example and bench kinds were checked by the run that had Linux.
+        environments = [
+            environment
+            for environment in environments_for_tests()
+            if environment["name"] == "windows-latest"
+        ]
+        cells = package_cells(self.ARGUMENTS, "a", ["lib", "example"], environments, {})
+        self.assertEqual([], [cell for cell in cells if cell["gate"] == "check"])
+        self.assertEqual(["L1"], [cell["gate"] for cell in cells if cell["environment"] == "windows-latest"])
 
     def test_check_arguments_carry_exactly_the_uncovered_selectors(self) -> None:
         cases = {
@@ -1781,31 +2445,79 @@ class CheckCellTests(unittest.TestCase):
         )
         self.assertEqual("-p a", record["check_args"])
 
-    def test_a_reused_macos_l1_leaves_the_macos_check_executing(self) -> None:
-        # A receipt records L1, L2, and browser only, so neither a per-cell nor
-        # a whole-environment acceptance can satisfy a check cell.
-        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
+    def test_a_reused_linux_l1_reuses_the_check_and_another_host_reuses_nothing(self) -> None:
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
         cells = package_cells(
             self.ARGUMENTS,
             "a",
             ["lib", "example"],
             environments_for_tests(),
-            {("a", "macos-latest", "L1"): evidence},
-            accepted_environments={"macos-latest": evidence},
+            {
+                ("a", "ubuntu-latest", "L1"): evidence,
+                ("a", "macos-latest", "L1"): {**evidence, "evidence": "refs/notes/ci-local/macos-latest"},
+            },
+        )
+        by_key = {(cell["environment"], cell["gate"]): cell for cell in cells}
+        self.assertEqual("reuse", by_key[("ubuntu-latest", "L1")]["execution"])
+        check = by_key[("ubuntu-latest", "check")]
+        self.assertEqual("reuse", check["execution"])
+        self.assertEqual("local", check["origin"])
+        self.assertEqual("L1", check["evidence"]["covered_by"])
+        self.assertEqual("refs/notes/ci-local/ubuntu-latest", check["evidence"]["evidence"])
+        self.assertNotIn("counts", check["evidence"], "test counts are not a check measurement")
+        # A macOS L1 pass stands in for no check: there is no macOS check cell
+        # to stand in for, and the Linux cell is not its to cover.
+        self.assertEqual("reuse", by_key[("macos-latest", "L1")]["execution"])
+        self.assertNotIn(("macos-latest", "check"), by_key)
+
+    def test_a_whole_environment_acceptance_does_not_satisfy_a_check(self) -> None:
+        # A version-1 note proves no particular package was built.
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
+        cells = package_cells(
+            self.ARGUMENTS,
+            "a",
+            ["lib", "example"],
+            environments_for_tests(),
+            {},
+            accepted_environments={"ubuntu-latest": evidence},
         )
         states = {(cell["environment"], cell["gate"]): cell["execution"] for cell in cells}
-        self.assertEqual("reuse", states[("macos-latest", "L1")])
-        self.assertEqual("execute", states[("macos-latest", "check")])
+        self.assertEqual("reuse", states[("ubuntu-latest", "L1")])
+        self.assertEqual("execute", states[("ubuntu-latest", "check")])
 
-    def test_a_prohibited_environment_turns_its_check_cell_prohibited(self) -> None:
-        checks = self.check_cells(
-            ["lib", "bench"], prohibitions={"windows-latest": self.CONSTRAINT}
+    def test_a_check_that_compiles_dependents_is_never_reused(self) -> None:
+        evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
+        cells = package_cells(
+            self.ARGUMENTS,
+            "a",
+            ["lib", "example"],
+            environments_for_tests(),
+            {("a", "ubuntu-latest", "L1"): evidence},
+            dependents=["b"],
         )
-        by_environment = {cell["environment"]: cell for cell in checks}
-        self.assertEqual("prohibited", by_environment["windows-latest"]["state"])
-        self.assertEqual("omit", by_environment["windows-latest"]["execution"])
-        self.assertEqual("execute", by_environment["ubuntu-latest"]["execution"])
-        self.assertEqual("execute", by_environment["macos-latest"]["execution"])
+        check = next(
+            cell for cell in cells
+            if cell["environment"] == "ubuntu-latest" and cell["gate"] == "check"
+        )
+        self.assertFalse(check["reusable"])
+        self.assertEqual("execute", check["execution"])
+        self.assertEqual(["b"], check["dependents"])
+
+    def test_a_prohibited_check_environment_turns_the_check_cell_prohibited(self) -> None:
+        checks = self.check_cells(
+            ["lib", "bench"], prohibitions={CHECK_ENVIRONMENT: self.CONSTRAINT}
+        )
+        (check,) = checks
+        self.assertEqual(CHECK_ENVIRONMENT, check["environment"])
+        self.assertEqual("prohibited", check["state"])
+        self.assertEqual("omit", check["execution"])
+        # A prohibition elsewhere touches no check: there is no cell there.
+        self.assertEqual(
+            ["execute"],
+            [cell["execution"] for cell in self.check_cells(
+                ["lib", "bench"], prohibitions={"windows-latest": self.CONSTRAINT}
+            )],
+        )
 
     def test_check_os_lists_every_executing_check_environment(self) -> None:
         def record(executing: set[tuple[str, str]]) -> dict[str, object]:
@@ -1826,12 +2538,287 @@ class CheckCellTests(unittest.TestCase):
         self.assertEqual([], record(set())["check_os"])
 
 
+class EventSchedulingTests(unittest.TestCase):
+    """Environments are scheduled by GitHub event (fixes/2026-09-18-ci-cadence).
+
+    Each environment names the events that schedule it. The planner drops the
+    rest of the table for a run — no cell, no build, no preflight runner — and
+    records them in `deferred_environments`; a reused pull request validation
+    drops the environments it proved into `proven_environments` instead.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib", "example"]),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    @staticmethod
+    def shipped_events() -> list[dict[str, object]]:
+        """The test table carrying the shipped table's `events` policy."""
+        events = {
+            "ubuntu-latest": ["pull_request", "push", "workflow_dispatch"],
+            "windows-latest": ["push", "workflow_dispatch"],
+            "macos-latest": ["pull_request", "push", "workflow_dispatch"],
+            "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
+        }
+        environments = environments_for_tests()
+        for environment in environments:
+            environment["events"] = events[environment["name"]]
+        return environments
+
+    def plan(self, **kwargs: object) -> dict[str, object]:
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            self.metadata,
+            self.shipped_events(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    @staticmethod
+    def names(environments: list[dict[str, object]]) -> list[str]:
+        return [environment["name"] for environment in environments]
+
+    def test_the_shipped_table_schedules_each_environment_as_decided(self) -> None:
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        events = {environment["name"]: environment["events"] for environment in environments}
+        # The nightly is WSL2's alone (fixes/2026-09-19-nightly-scope):
+        # Windows is proven by every push to main, and Linux joins the
+        # nightly as WSL2's producer without cells of its own.
+        self.assertEqual(
+            {
+                "ubuntu-latest": ["pull_request", "push", "workflow_dispatch"],
+                "windows-latest": ["push", "workflow_dispatch"],
+                "macos-latest": ["pull_request", "push", "workflow_dispatch"],
+                "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
+            },
+            events,
+        )
+
+    def test_a_table_without_events_or_with_an_unknown_one_is_refused(self) -> None:
+        for mutate, fragment in (
+            (lambda environment: environment.pop("events"), "events"),
+            (lambda environment: environment.update(events=[]), "events"),
+            (lambda environment: environment.update(events=["nightly"]), "events"),
+            (lambda environment: environment.update(events=["push", "push"]), "repeats"),
+        ):
+            environments = self.shipped_events()
+            mutate(environments[0])
+            path = Path(tempfile.mkdtemp()) / "environments.json"
+            path.write_text(json.dumps({"schema_version": 3, "environments": environments}))
+            with self.subTest(fragment=fragment), self.assertRaises(RuntimeError) as raised:
+                load_environments(path, today=TODAY)
+            self.assertIn(fragment, str(raised.exception))
+
+    def test_each_event_schedules_its_environments_and_defers_the_rest(self) -> None:
+        cases = {
+            "pull_request": (["ubuntu-latest", "macos-latest"], ["windows-latest", "wsl2-ubuntu"]),
+            "push": (["ubuntu-latest", "windows-latest", "macos-latest"], ["wsl2-ubuntu"]),
+            "schedule": (["wsl2-ubuntu"], ["ubuntu-latest", "windows-latest", "macos-latest"]),
+            "workflow_dispatch": (
+                ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
+                [],
+            ),
+        }
+        for event, (expected_scheduled, expected_deferred) in cases.items():
+            with self.subTest(event=event):
+                scheduled, deferred, proven = schedule_environments(self.shipped_events(), event)
+                self.assertEqual(expected_scheduled, self.names(scheduled))
+                self.assertEqual(expected_deferred, [entry["name"] for entry in deferred])
+                self.assertEqual([], proven)
+                for entry in deferred:
+                    self.assertNotIn(event, entry["events"])
+
+    def test_a_scheduled_guest_brings_its_producer_without_cells(self) -> None:
+        # The nightly schedules WSL2 alone. Its archives are compiled on
+        # Linux, so Linux joins the plan's table for its build records and
+        # preflight runner — and for nothing else: no lint, check, or test
+        # cell, which the pull request already proved. Before this, Linux
+        # stayed on the schedule event for the archives alone and put 161
+        # cells into every nightly (fixes/2026-09-19-nightly-scope).
+        plan = self.plan(event="schedule")
+        self.assertEqual(["ubuntu-latest", "wsl2-ubuntu"], self.names(plan["environments"]))
+        self.assertEqual(
+            {"wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]}
+        )
+        self.assertEqual(
+            [{"name": "ubuntu-latest", "for": ["wsl2-ubuntu"]}], plan["producing_environments"]
+        )
+        self.assertEqual(
+            ["windows-latest", "macos-latest"],
+            [entry["name"] for entry in plan["deferred_environments"]],
+        )
+        self.assertEqual({"ubuntu-latest"}, {record["producer"] for record in plan["builds"]})
+        for record in plan["builds"]:
+            self.assertEqual(
+                [{"environment": "wsl2-ubuntu", "gate": "L1"}], record["consumers"]
+            )
+        # The owner job runs on the producer's runner, so it preflights there
+        # too, beside the runner hosting the guest.
+        self.assertIn("ubuntu-latest", plan["preflight_os"])
+        self.assertIn("windows-latest", plan["preflight_os"])
+        # And the workflow-facing projection schedules no Linux cell either.
+        matrix = {entry["package"]: entry for entry in legacy_scope_document(plan)["matrix"]}
+        self.assertEqual([], matrix["alpha-core"]["native_environments"])
+        self.assertEqual([], matrix["alpha-core"]["check_os"])
+        self.assertTrue(matrix["alpha-core"]["wsl"])
+        owners = legacy_scope_document(plan)["build_owners"]
+        self.assertEqual(["ubuntu-latest"], [owner["environment"] for owner in owners])
+
+    def test_an_event_that_schedules_no_guest_brings_no_producer(self) -> None:
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                plan = self.plan(event=event)
+                self.assertNotIn("producing_environments", plan)
+                self.assertIn("ubuntu-latest", self.names(plan["environments"]))
+
+    def test_no_event_or_every_environment_schedules_the_whole_table(self) -> None:
+        for kwargs in ({"event": None}, {"event": "pull_request", "all_environments": True}):
+            with self.subTest(kwargs=kwargs):
+                scheduled, deferred, proven = schedule_environments(self.shipped_events(), **kwargs)
+                self.assertEqual(4, len(scheduled))
+                self.assertEqual(([], []), (deferred, proven))
+
+    def test_a_record_without_events_is_scheduled_on_every_event(self) -> None:
+        environments = environments_for_tests()
+        for environment in environments:
+            environment.pop("events", None)
+        for event in EVENT_NAMES:
+            scheduled, deferred, _ = schedule_environments(environments, event)
+            self.assertEqual(4, len(scheduled), event)
+            self.assertEqual([], deferred)
+
+    def test_an_unknown_event_is_refused(self) -> None:
+        for kwargs in ({"event": "nightly"}, {"event": "push", "proven_event": "merge"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(RuntimeError):
+                schedule_environments(self.shipped_events(), **kwargs)
+
+    def test_a_proven_event_drops_what_it_validated_and_plans_the_rest(self) -> None:
+        scheduled, deferred, proven = schedule_environments(
+            self.shipped_events(), "push", proven_event="pull_request"
+        )
+        self.assertEqual(["windows-latest"], self.names(scheduled))
+        self.assertEqual(["wsl2-ubuntu"], [entry["name"] for entry in deferred])
+        self.assertEqual(
+            [
+                {"name": "ubuntu-latest", "event": "pull_request"},
+                {"name": "macos-latest", "event": "pull_request"},
+            ],
+            proven,
+        )
+
+    def test_a_pull_request_plan_carries_no_deferred_cell_build_or_preflight(self) -> None:
+        plan = self.plan(event="pull_request")
+        self.assertEqual("pull_request", plan["event"])
+        self.assertEqual(["ubuntu-latest", "macos-latest"], self.names(plan["environments"]))
+        self.assertEqual(
+            [
+                {"name": "windows-latest", "events": ["push", "workflow_dispatch"]},
+                {"name": "wsl2-ubuntu", "events": ["schedule", "workflow_dispatch"]},
+            ],
+            plan["deferred_environments"],
+        )
+        self.assertNotIn("proven_environments", plan)
+        cell_environments = {cell["environment"] for cell in plan["cells"]}
+        self.assertEqual({"ubuntu-latest", "macos-latest"}, cell_environments)
+        self.assertEqual({"ubuntu-latest", "macos-latest"}, {build["producer"] for build in plan["builds"]})
+        self.assertEqual(["macos-latest", "ubuntu-latest"], plan["preflight_os"])
+        matrix = legacy_scope_document(plan)["matrix"]
+        self.assertFalse(matrix[0]["wsl"], "no WSL2 leg on a pull request")
+
+    def test_a_plan_without_an_event_is_byte_identical_to_before(self) -> None:
+        plan = self.plan()
+        for field in ("event", "deferred_environments", "proven_environments"):
+            self.assertNotIn(field, plan)
+        self.assertEqual(4, len(plan["environments"]))
+
+    def test_a_reused_pull_request_narrows_a_push_to_what_it_could_not_prove(self) -> None:
+        plan = self.plan(event="push", proven_event="pull_request")
+        self.assertEqual(["windows-latest"], self.names(plan["environments"]))
+        self.assertEqual(
+            [
+                {"name": "ubuntu-latest", "event": "pull_request"},
+                {"name": "macos-latest", "event": "pull_request"},
+            ],
+            plan["proven_environments"],
+        )
+        self.assertEqual({"windows-latest"}, {cell["environment"] for cell in plan["cells"]})
+        # The check environment was proven by the pull request; nothing checks
+        # here, and the L1 build still compiles the L1 kinds.
+        self.assertEqual([], [cell for cell in plan["cells"] if cell["gate"] == "check"])
+        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
+
+    def test_a_full_scope_run_preflights_only_the_scheduled_runners(self) -> None:
+        # A full-scope nightly: WSL2's cells on the Windows-hosted guest, and
+        # Linux as their producer — so those two runners preflight, and the
+        # deferred Windows and macOS do not.
+        plan = self.plan(force_all=True, event="schedule")
+        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
+        self.assertEqual(
+            [
+                {"name": "windows-latest", "events": ["push", "workflow_dispatch"]},
+                {"name": "macos-latest", "events": ["pull_request", "push", "workflow_dispatch"]},
+            ],
+            plan["deferred_environments"],
+        )
+        self.assertEqual({"wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]})
+
+    def test_the_label_plans_every_environment_for_a_pull_request(self) -> None:
+        plan = self.plan(event="pull_request", all_environments=True)
+        self.assertEqual(4, len(plan["environments"]))
+        self.assertNotIn("deferred_environments", plan)
+        self.assertEqual("pull_request", plan["event"])
+
+    def test_the_schema_refuses_a_deferred_environment_the_plan_also_schedules(self) -> None:
+        plan = self.plan(event="pull_request")
+        broken = {**plan, "deferred_environments": [{"name": "ubuntu-latest", "events": ["push"]}]}
+        problems = schema.validate_resolved_plan(broken)
+        self.assertTrue(any("also schedules" in problem for problem in problems), problems)
+        for field, value in (
+            ("event", "nightly"),
+            ("deferred_environments", []),
+            ("proven_environments", [{"name": "windows-latest"}]),
+        ):
+            with self.subTest(field=field):
+                self.assertNotEqual([], schema.validate_resolved_plan({**plan, field: value}))
+
+    def test_the_cli_plans_by_event_and_refuses_it_with_apply_to(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+             "--apply-to", "plan.json", "--event", "push"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("--event", result.stderr)
+
+
 class CheckCellScopeTests(unittest.TestCase):
     """The same contract read off a plan: declared targets in, cells and matrix out."""
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib", "example"]),
             package(self.root, "beta-app", "beta/app/Cargo.toml", targets=["bin", "test"]),
@@ -1873,9 +2860,7 @@ class CheckCellScopeTests(unittest.TestCase):
             for cell in plan["cells"]  # type: ignore[union-attr]
             if cell["gate"] == "check"
         }
-        self.assertEqual(
-            {("alpha-core", environment) for environment in CheckCellTests.NATIVE}, checks
-        )
+        self.assertEqual({("alpha-core", CHECK_ENVIRONMENT)}, checks)
         records = {entry["package"]: entry for entry in plan["packages"]}  # type: ignore[union-attr]
         self.assertEqual("-p alpha-core --examples", records["alpha-core"]["check_args"])
         self.assertEqual("-p beta-app", records["beta-app"]["check_args"])
@@ -1892,9 +2877,9 @@ class CheckCellScopeTests(unittest.TestCase):
             for entry in legacy_scope_document(plan)["matrix"]
         }
         self.assertEqual("-p alpha-core --examples", matrix["alpha-core"]["check_args"])
-        # macOS L1 reused and Windows prohibited: the check still runs on the
-        # two environments that can host it, and macOS is one of them.
-        self.assertEqual(["ubuntu-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
+        # macOS L1 reused and Windows prohibited: neither hosts a check, so
+        # the one check environment is the whole projection.
+        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
         self.assertEqual([], matrix["beta-app"]["check_os"])
 
 
@@ -1911,6 +2896,7 @@ class DependentSeamTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         # beta-app and gamma-lib depend on alpha-core; gamma-lib also depends
         # on delta-lib; excluded-app depends on alpha-core but gates nothing.
         packages = [
@@ -2042,30 +3028,25 @@ class DependentSeamTests(unittest.TestCase):
         self.assertIn("also compiles 2 unchanged dependent(s)", cell["selection_reason"])
         self.assertIn("beta-app, gamma-lib", cell["selection_reason"])
 
-    def test_uncovered_kinds_keep_every_native_check_and_only_linux_carries_the_seam(self) -> None:
-        # delta-lib declares a bench, so its own check runs on every native
-        # environment as before; gamma-lib's seam rides on the Linux cell only,
-        # and the Windows and macOS cells are not widened by it.
+    def test_uncovered_kinds_check_on_linux_which_also_carries_the_seam(self) -> None:
+        # delta-lib declares a bench, so its own check runs on the one check
+        # environment; gamma-lib's seam rides on that same Linux cell, which
+        # is also `DEPENDENTS_ENVIRONMENT`.
         plan = self.plan("delta/lib/src/lib.rs")
         checks = self.check_cells(plan, "delta-lib")
-        self.assertEqual(
-            ["macos-latest", "ubuntu-latest", "windows-latest"], sorted(checks)
-        )
-        for environment, cell in checks.items():
-            self.assertEqual(["bench"], cell["target_kinds"])
-            self.assertEqual(
-                environment == DEPENDENTS_ENVIRONMENT, "dependents" in cell, environment
-            )
+        self.assertEqual([DEPENDENTS_ENVIRONMENT], sorted(checks))
+        cell = checks[DEPENDENTS_ENVIRONMENT]
+        self.assertEqual(["bench"], cell["target_kinds"])
         self.assertEqual(["gamma-lib"], checks[DEPENDENTS_ENVIRONMENT]["dependents"])
         self.assertIn("bench target(s)", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
         self.assertIn("also compiles 1 unchanged", checks[DEPENDENTS_ENVIRONMENT]["selection_reason"])
         record = next(entry for entry in plan["packages"] if entry["package"] == "delta-lib")  # type: ignore[union-attr]
         self.assertEqual("-p delta-lib --benches", record["check_args"])
         self.assertEqual("-p gamma-lib --lib", record["dependent_seam"]["check_args"])
-        # gamma-lib has an example but no dependents: its own check runs
-        # everywhere and no cell carries a seam.
+        # gamma-lib has an example but no dependents: its own check runs on
+        # the check environment and no cell carries a seam.
         gamma_checks = self.check_cells(self.plan("gamma/lib/src/lib.rs"), "gamma-lib")
-        self.assertEqual(3, len(gamma_checks))
+        self.assertEqual(1, len(gamma_checks))
         self.assertEqual([], [cell for cell in gamma_checks.values() if "dependents" in cell])
 
     def test_a_dependent_that_is_itself_selected_is_excluded_from_the_seam(self) -> None:
@@ -2140,12 +3121,10 @@ class DependentSeamFixtureTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        import shutil
-
-        if shutil.which("cargo") is None:
-            raise unittest.SkipTest("cargo is not on PATH")
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
         cls.temporary_directory = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary_directory.name).resolve()
+        seed_build_inputs(cls.root)
         (cls.root / "Cargo.toml").write_text(
             '[workspace]\nresolver = "2"\nmembers = ["alpha/lib", "beta/app"]\n',
             encoding="utf-8",
@@ -2231,7 +3210,7 @@ class DependentSeamFixtureTests(unittest.TestCase):
 class ApplyFixture(unittest.TestCase):
     """A workspace holding every evidence-eligibility case, plus evidence for each.
 
-    A `check` cell (never reusable), a companion-suite L1 on the Node host
+    A `check` cell satisfied only by its package's L1 pass, a companion-suite L1 on the Node host
     (never reusable), a governed gap (never reusable), a prohibited cell that
     evidence satisfies, and one that nothing satisfies.
     """
@@ -2247,6 +3226,7 @@ class ApplyFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         (self.root / "homelab").mkdir()
         (self.root / "homelab" / "justfile").write_text(
             "test-frontend:\nlint-frontend:\n"
@@ -2294,8 +3274,9 @@ class ApplyFixture(unittest.TestCase):
              "origin": "local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/macos-latest"}},
             {"package": "alpha-core", "environment": "wsl2-ubuntu", "gate": "L1",
              "origin": "prior-local", "outcome": "pass", "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"}},
-            # Never reusable, whatever a receipt claims:
-            {"package": "alpha-core", "environment": "macos-latest", "gate": "check", "origin": "local"},
+            # Never accepted as themselves, whatever a receipt claims (a check
+            # is satisfied only through its package's L1 pass):
+            {"package": "alpha-core", "environment": "ubuntu-latest", "gate": "check", "origin": "local"},
             {"package": "web-server", "environment": "ubuntu-latest", "gate": "L1", "origin": "local"},
             {"package": "alpha-core", "environment": "windows-latest", "gate": "L2", "origin": "local"},
         ]
@@ -2347,13 +3328,16 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         self.assertEqual(("reuse", "reused"), states["alpha-core/macos-latest/L1"])
         self.assertEqual(("execute", "pending"), states["web-server/macos-latest/L1"])
         self.assertEqual(("reuse", "reused"), states["alpha-core/wsl2-ubuntu/L1"], "evidence satisfies the prohibition")
-        self.assertEqual(("execute", "pending"), states["alpha-core/macos-latest/check"])
+        self.assertEqual(("execute", "pending"), states["alpha-core/ubuntu-latest/check"], "no Linux L1 pass to cover it")
+        self.assertNotIn("alpha-core/macos-latest/check", states, "check is a single-environment gate")
         self.assertEqual(("execute", "pending"), states["web-server/ubuntu-latest/L1"], "companion host")
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/windows-latest/L2"])
         self.assertEqual(("omit", "accepted-gap"), states["alpha-core/wsl2-ubuntu/L2"])
         self.assertEqual(("omit", "prohibited"), states["web-server/wsl2-ubuntu/L1"], "no evidence, still prohibited")
         self.assertEqual(["web-server/wsl2-ubuntu/L1"], applied["prohibited_cells"])
         self.assertEqual(self.rejections, applied["evidence_rejections"])
+        # Two L1 passes; neither is on the check environment, so no check rides
+        # on them.
         self.assertEqual(2, len(applied["accepted_evidence"]))
         self.assertNotIn("prohibition", next(
             cell for cell in applied["cells"]  # type: ignore[union-attr]
@@ -2402,7 +3386,7 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         projection = legacy_scope_document(plan)
         matrix = {entry["package"]: entry for entry in projection["matrix"]}
         self.assertNotIn("macos-latest", matrix["alpha-core"]["native_environments"])
-        self.assertEqual(["ubuntu-latest", "windows-latest", "macos-latest"], matrix["alpha-core"]["check_os"])
+        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
         self.assertEqual(["ubuntu-latest"], matrix["web-server"]["node_environments"])
         policy = {entry["package"]: entry for entry in projection["policy"]}
         self.assertFalse(policy["excluded"]["gates"])
@@ -2527,13 +3511,17 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
 
     #: The specification's ownership table (section 2), plus the companion
     #: suite that already exists. `repo-deps` owns every `scripts/ci/test_*.py`
-    #: suite including `test_ci_local.py` and `test_runner_loss.py`;
+    #: suite including `test_ci_local.py` and `test_runner_loss.py`, and the
+    #: artifact publisher no package and no pnpm workspace entry selects;
     #: `test-toolkit` owns the two `tools/test-audit` suites.
     EXPECTED_COMPANION_OWNERS = {
+        "artifact-publisher": "repo-deps",
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
+        "test_build_key.py": "repo-deps",
         "test_ci_local.py": "repo-deps",
         "test_constraints.py": "repo-deps",
+        "test_cross_check.py": "repo-deps",
         "test_evidence_reuse.py": "repo-deps",
         "test_local_evidence.py": "repo-deps",
         "test_publish_gaps.py": "repo-deps",
@@ -2720,6 +3708,7 @@ class ToolingPathOwnershipTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [
             package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
             package(self.root, "repo-deps", "scripts/Cargo.toml"),
@@ -2885,6 +3874,7 @@ class PreflightSkipTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
@@ -2938,6 +3928,7 @@ class ChangeInventoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
         packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
@@ -3097,6 +4088,102 @@ class ChangeBucketCorpusTests(unittest.TestCase):
             self.assertEqual(
                 set(), tables[left] & tables[right], f"{left} and {right} overlap"
             )
+
+
+class AreaDriftFlagTests(unittest.TestCase):
+    """AC15: a change that can move planner-vs-sniff area derivation must run
+    the contract that asks sniff.
+
+    Scoped in both directions on purpose. Too narrow and a real divergence
+    schedules the contract nowhere, which is silent; too broad and every pull
+    request pays for a release `sniff-cli`.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [package(self.root, "alpha-core", "alpha/lib/Cargo.toml")]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def scope(self, files: list[str]) -> dict[str, object]:
+        return scope_document(
+            files, self.root, self.metadata, environments_for_tests(), self.policy
+        )
+
+    def test_the_two_authorities_set_the_area_drift_flag(self) -> None:
+        for path in [
+            # sniff's own detection rule — the direction suite ownership cannot see.
+            "sniff/lib/src/filesystem/repo/detection.rs",
+            "sniff/cli/src/main.rs",
+            # The planner's replica of that rule, and the contract itself.
+            "scripts/ci/affected_scope.py",
+            "scripts/ci/test_resolved_plan.py",
+            "./scripts/ci/affected_scope.py",
+            "scripts\\ci\\test_resolved_plan.py",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertTrue(scope["flags"]["area_drift"])
+
+    def test_any_manifest_at_any_depth_sets_the_area_drift_flag(self) -> None:
+        # A manifest that appears, moves, or disappears re-maps areas without
+        # touching either authority, and a name-only diff cannot say which of
+        # the three happened. The root manifest carries workspace membership.
+        for path in [
+            "Cargo.toml",
+            "alpha/lib/Cargo.toml",
+            "claudine/rendezvous/core/Cargo.toml",
+            "darkmatter/lib/tests/fixtures/validate/file_match_valid/Cargo.toml",
+            "tools\\test-toolkit\\Cargo.toml",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertTrue(scope["flags"]["area_drift"])
+
+    def test_changes_that_cannot_move_area_derivation_leave_the_flag_alone(self) -> None:
+        # Source, docs, the lockfile, workflows, and the rest of the CI tooling
+        # — including suites that share the tooling leg — cannot re-map an area.
+        # `Cargo.lock` is the near miss worth pinning: it sits beside the root
+        # manifest and names the resolved graph, but not where a manifest lives.
+        for path in [
+            "alpha/lib/src/lib.rs",
+            "Cargo.lock",
+            "docs/topics/ci-cd.md",
+            ".github/workflows/ci.yml",
+            "scripts/ci/test_affected_scope.py",
+            "scripts/ci-rollup.rs",
+            "sniffer/lib/src/lib.rs",
+        ]:
+            with self.subTest(path=path):
+                scope = self.scope([path])
+                self.assertFalse(scope["flags"]["area_drift"])
+
+    def test_area_drift_is_a_flag_of_its_own_and_not_suite_ownership(self) -> None:
+        # Suite ownership replaced the `ci_tooling` boolean, and it cannot
+        # serve here: it selects the package that owns a changed CI input,
+        # which says nothing about sniff's own detection rule. So the drift
+        # flag stays a flag, and stays the only one the plan carries.
+        sniff_only = self.scope(["sniff/lib/src/filesystem/repo/detection.rs"])
+        self.assertTrue(sniff_only["flags"]["area_drift"])
+        self.assertNotIn("ci_tooling", sniff_only["flags"])
+
+        tooling_only = self.scope(["scripts/ci/test_ci_local.py"])
+        self.assertFalse(tooling_only["flags"]["area_drift"])
+        self.assertNotIn("ci_tooling", tooling_only["flags"])
 
 
 class CompanionRecipeCheckTests(unittest.TestCase):
@@ -3782,8 +4869,10 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             missing.append("all-feature policy")
         if messenger["native"] != {"ubuntu-latest": ["libdbus-1-dev"]}:
             missing.append("libdbus-1-dev native prerequisite")
-        if messenger["runner_tools"] != ["messenger-desktop-stubs"]:
-            missing.append("messenger-desktop-stubs runner tool")
+        if messenger["runner_tools"] != []:
+            missing.append("runner tools (its desktop stubs are a build sidecar)")
+        if messenger["sidecars"] != ["messenger-desktop-stubs"]:
+            missing.append("messenger-desktop-stubs build sidecar")
 
         scope = self.scope("messenger/lib/src/lib.rs")
         record = next(
@@ -3820,13 +4909,18 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             "check-args: ${{ matrix.check_args }}" in area_ci,
             "test-args: ${{ matrix.test_args }}" in area_ci,
             "cargo check ${{ inputs.check-args }}" in package_ci,
-            'just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}'
+            # The declared features still reach the canonical recipe; archive
+            # mode only adds the verified archive and this checkout ahead of
+            # them, and `_archive_drop_build_flags` drops what nextest refuses.
+            'just _test "${{ inputs.package }}" --no-fail-fast' in package_ci,
+            '${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }}'
             in package_ci,
-            # The archive build gets package and features only: `check_args`
-            # carries example/bench selectors that must not reach the guest.
-            "archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}" in package_ci,
+            # The guest is a pure consumer: it is handed the plan's build
+            # records and downloads one, so no archive selector exists for a
+            # check argument to leak into.
+            "builds: ${{ inputs.builds }}" in package_ci,
             "test-args: ${{ inputs.test-args }}" in package_ci,
-            "${{ inputs.archive-args }}" in wsl_ci,
+            "${{ inputs.builds }}" in wsl_ci,
             "${{ inputs.check-args }}" not in wsl_ci,
             "${{ inputs.test-args }}" in wsl_ci,
             # Per-gate selection: the matrix's `gates` reaches every job that
@@ -3968,10 +5062,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("name: ci-resolved-plan", plan)
         self.assertIn("path: ci-artifacts/ci-resolved-plan", plan)
         self.assertNotIn("github-token:", current)
-        self.assertIn("pattern: '{junit-*,status-*}'", current)
+        # Build statuses ride in the same union: a cell blocked by a named
+        # build record is only explicable if that record's account arrives too.
+        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn("pattern: '{junit-*,status-*}'", newest)
+        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", newest)
 
 
 # --- helpers ---------------------------------------------------------------
@@ -4001,23 +5097,60 @@ def plan_package(**overrides: object) -> dict[str, object]:
     return record
 
 
+def producer_build(
+    host: str,
+    arch: str,
+    abi: str,
+    libc: str,
+    executes: list[str],
+) -> dict:
+    """A native producer's compile contract, in the shape the table declares."""
+    return {
+        "host": host,
+        "target": host,
+        "profile": "test",
+        "rustflags": "",
+        "cargo_config": [],
+        "linker": "cc",
+        "archive_format": "tar.zst",
+        "nextest": "latest",
+        "executes": executes,
+        "runtime": {
+            "arch": arch,
+            "abi": abi,
+            "libc": libc,
+            "native_libraries": [],
+        },
+    }
+
+
 def environments_for_tests() -> list[dict[str, object]]:
     return [
         {
             "name": "ubuntu-latest",
             "runner": "ubuntu-latest",
             "native_key": "ubuntu-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": True,
                 "headless_browser": True,
                 "node_pnpm": True,
+                "cargo_toolchain": True,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "x86_64-unknown-linux-gnu",
+                "x86_64",
+                "gnu",
+                "glibc",
+                ["ubuntu-latest", "wsl2-ubuntu"],
+            ),
         },
         {
             "name": "windows-latest",
             "runner": "windows-latest",
             "native_key": "windows-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": {
                     "available": False,
@@ -4027,24 +5160,38 @@ def environments_for_tests() -> list[dict[str, object]]:
                 },
                 "headless_browser": False,
                 "node_pnpm": False,
+                "cargo_toolchain": True,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "x86_64-pc-windows-msvc", "x86_64", "msvc", "msvc", ["windows-latest"]
+            ),
         },
         {
             "name": "macos-latest",
             "runner": "macos-latest",
             "native_key": "macos-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": True,
                 "headless_browser": False,
                 "node_pnpm": False,
+                "cargo_toolchain": True,
                 "archive_only": False,
             },
+            "build": producer_build(
+                "aarch64-apple-darwin",
+                "aarch64",
+                "darwin",
+                "libSystem",
+                ["macos-latest"],
+            ),
         },
         {
             "name": "wsl2-ubuntu",
             "runner": "windows-latest",
             "native_key": "ubuntu-latest",
+            "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
             "capabilities": {
                 "tmux": {
                     "available": False,
@@ -4054,7 +5201,17 @@ def environments_for_tests() -> list[dict[str, object]]:
                 },
                 "headless_browser": False,
                 "node_pnpm": False,
+                "cargo_toolchain": False,
                 "archive_only": True,
+            },
+            "build": {
+                "nextest": "latest",
+                "runtime": {
+                    "arch": "x86_64",
+                    "abi": "gnu",
+                    "libc": "glibc",
+                    "native_libraries": [],
+                },
             },
         },
     ]
@@ -4067,6 +5224,115 @@ def workspace_packages_from(metadata: dict[str, object]) -> dict[str, dict[str, 
         for package in metadata["packages"]  # type: ignore[index]
         if package["id"] in members
     }
+
+
+class ArchiveInventoryClosureTests(unittest.TestCase):
+    """Task 6.4: what a real package's archive must carry, closed declaratively.
+
+    A passive corpus test over the whole workspace rather than a synthetic
+    fixture: the classes this closes — the L2 harness broker, the backend
+    proof, the cross-package `md` fixture, messenger's desktop stubs — are
+    exactly the ones a synthetic fixture cannot have, because they are real
+    binaries of real packages.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # The planner reads `cargo metadata`; without Cargo there is no
+        # workspace to close over and the guard says where that is checked.
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+                "--all",
+                "--resolved-plan",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        # A planner that cannot resolve a full-scope plan is the loudest
+        # failure this suite can see. This was a SkipTest until 2026-09-15,
+        # which reported the whole class green on a total planner regression.
+        if result.returncode != 0:
+            raise AssertionError(
+                f"the planner could not resolve a full-scope plan: {result.stderr}"
+            )
+        cls.plan = json.loads(result.stdout)
+
+    def test_every_ci_hostable_l2_package_declares_the_binaries_its_recipe_needs(self) -> None:
+        offenders = {
+            record["package"]: affected_scope.missing_tier_sidecars(record)
+            for record in self.plan["packages"]
+            if affected_scope.missing_tier_sidecars(record)
+        }
+        self.assertEqual(
+            {},
+            offenders,
+            "these packages execute L2 on a CI runner and would have to build the "
+            "harness broker or the backend proof with a Cargo their archive "
+            "consumer does not have",
+        )
+
+    def test_the_rule_names_exactly_what_is_missing(self) -> None:
+        # The negative direction, on the same function the corpus check uses.
+        hostable = {"tiers": ["L1", "L2"], "l2_backends": ["tmux"]}
+        self.assertEqual(
+            ["backend-proof", "harness-broker"],
+            affected_scope.missing_tier_sidecars({**hostable, "sidecars": []}),
+        )
+        self.assertEqual(
+            ["backend-proof"],
+            affected_scope.missing_tier_sidecars(
+                {**hostable, "sidecars": ["harness-broker"]}
+            ),
+        )
+        self.assertEqual(
+            [],
+            affected_scope.missing_tier_sidecars(
+                {**hostable, "sidecars": ["backend-proof", "harness-broker"]}
+            ),
+        )
+
+    def test_a_gui_only_l2_tier_owes_no_sidecar(self) -> None:
+        # It renders a governed capability gap and never executes on a runner,
+        # so compiling two binaries for it would change its build key for
+        # nothing.
+        self.assertEqual(
+            [],
+            affected_scope.missing_tier_sidecars(
+                {"tiers": ["L1", "L2"], "l2_backends": ["wezterm", "kitty"], "sidecars": []}
+            ),
+        )
+
+    def test_at_least_one_real_package_exercises_each_declarative_class(self) -> None:
+        """The corpus must actually contain what it claims to be closing.
+
+        A rule that no package triggers is a rule that proves nothing, and this
+        is how the audit notices a class being silently dropped from the
+        vocabulary rather than fixed.
+        """
+        declared_sidecars = {
+            name for record in self.plan["packages"] for name in record["sidecars"]
+        }
+        table = set(load_sidecars(ROOT))
+        self.assertEqual(
+            table,
+            declared_sidecars,
+            "every sidecar in the table must be declared by some package, and no "
+            "package may declare one the table does not offer",
+        )
+        self.assertTrue(
+            any(record["archive_includes"] for record in self.plan["packages"]),
+            "no package declares an archive include; the dynamic-library and "
+            "build-output classes would then be untested against real metadata",
+        )
+        self.assertTrue(
+            any(record["companion_suites"] for record in self.plan["packages"]),
+            "no package declares a companion suite",
+        )
 
 
 if __name__ == "__main__":

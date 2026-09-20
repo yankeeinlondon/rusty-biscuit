@@ -797,7 +797,10 @@ exit 0
             .iter()
             .position(|arg| arg == "--model")
             .expect("a configured default must be delivered on argv, not left to rediscovery");
-        assert_eq!(args.get(model_index + 1).map(String::as_str), Some("config-default-model"));
+        assert_eq!(
+            args.get(model_index + 1).map(String::as_str),
+            Some("config-default-model")
+        );
     }
 }
 

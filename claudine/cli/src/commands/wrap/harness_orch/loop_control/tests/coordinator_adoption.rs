@@ -207,6 +207,54 @@ fn adopt_commits_identity_and_discards_source_execution_state() {
     );
 }
 
+/// An adopted target that ran its gate and `initialize` against its bootstrap
+/// read owes only the stabilized tail — and a direct document's stabilization
+/// arm cannot demote it, so the target keeps its launch rebuild.
+#[test]
+fn a_target_initialized_from_its_bootstrap_read_owes_only_the_stabilized_tail() {
+    let AdoptFixture { fx, target } = adopt_fixture();
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    let mut state = prompt_state(&fx.source_path);
+    let mut active = ActiveDocumentState::initial();
+    let mut coord = coordinator(&fx.source_path);
+
+    coord.mark_target_initialized();
+    assert!(
+        !coord.bootstrap_pending(),
+        "nothing is owed before a document is adopted"
+    );
+
+    coord
+        .adopt(
+            request_for(&fx.source_path, &target, vec![fx.source_path.clone()]),
+            Some(fx._dir.path()),
+            &mut state,
+            &mut guard,
+            &mut active,
+        )
+        .unwrap();
+    assert!(coord.owes_full_bootstrap());
+
+    coord.mark_target_initialized();
+    coord.arm_stabilization();
+    assert!(!coord.owes_full_bootstrap(), "initialize is never owed twice");
+    assert_eq!(
+        coord.take_bootstrap_pending(),
+        Some(BootstrapStage::TargetInitialized)
+    );
+    assert_eq!(coord.take_bootstrap_pending(), None);
+}
+
 /// A refused hand-off must never half-activate the target. This is the
 /// resolver-bypass regression, now structurally impossible: the coordinator is
 /// the only caller of `resolve_proxy_target`, so `initialize` and terminal

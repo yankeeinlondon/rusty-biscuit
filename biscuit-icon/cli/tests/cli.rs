@@ -1,3 +1,4 @@
+use biscuit_test_harness::manifest_dir;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use wiremock::matchers::{method, path, query_param};
@@ -2205,8 +2206,7 @@ fn v54_cache_clear_subcommand_parses_cleanly() {
 /// shipping a binary that could not inline any images.
 #[test]
 fn install_recipe_enables_image_feature() {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let justfile = std::path::Path::new(manifest)
+    let justfile = manifest_dir!()
         .parent()
         .expect("biscuit-icon/cli has a parent dir")
         .join("justfile");

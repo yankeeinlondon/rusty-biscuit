@@ -1,0 +1,28 @@
+# Draft documentation, not an implemented runtime schema. The filename retains
+# earlier terminology; the canonical conditional document kind is schema-trigger.
+# Top-level match conditions use AND; group members use OR. The full predicate
+# family is in scope, but this sketch's catalog is incomplete. Exact predicate
+# contracts and group encoding still require design agreement.
+kind: schema
+name: schema-trigger
+description: provides the draft schema definition for a schema-trigger file
+$schema:
+    kind: const(schema-trigger) -> unique identifier
+    name: string(required) -> a dasherized name (no whitespace) for this schema-trigger
+    match: matcher[]
+    $schema: schema -> the _inline_ or _file reference_ to the schema that will be activated when all match conditions are met
+    types: schema -> optionally allowing for types to be defined that the `$schema` property can then leverage
+types:
+    condition:
+        - expression: expression(required) -> normal Darkmatter expression subject to the passive activation function policy
+        - file_exists: file(required) -> tests for the existence of a file in the local file system
+        - file_absent: file(required) -> tests for the absence of a file in the local file system
+        - can_execute: string(required;min-length(2)) -> tests whether the passed in string is an "executable"
+        - timezone: string(required)
+        - in_repo -> tests whether the CWD is in a repo
+        - not_in_repo -> tests whether CWD is _not_ in a repo
+    group: condition[]
+
+    matcher:
+        - condition
+        - group

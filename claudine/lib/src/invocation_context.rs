@@ -1,6 +1,7 @@
 //! Request-scoped launch and repository evidence for Claudine invocations.
 
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -498,10 +499,161 @@ struct RepositoryCache {
     exact_non_repositories: HashMap<PathBuf, Arc<RepositoryEntry>>,
 }
 
+/// Environment variables that name a user home on a supported platform.
+///
+/// Unix launches populate `HOME`; native Windows populates `USERPROFILE` and
+/// the `HOMEDRIVE`/`HOMEPATH` pair; an MSYS, Git-Bash, or WSL-interop launch can
+/// carry both sets at once. All four are recorded on every platform so a
+/// consumer never has to decide which names its host "should" have had.
+pub const HOME_VARIABLES: [&str; 4] = ["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"];
+
+/// Whether two environment-variable names address the same variable.
+///
+/// Windows resolves names case-insensitively, so a lookup that compares bytes
+/// would miss a `Path`/`PATH` or `UserProfile`/`USERPROFILE` spelling the OS
+/// considers identical.
+fn env_names_match(left: &OsStr, right: &OsStr) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+/// The user home as it stood when the invocation was captured.
+///
+/// Absence is `None` and never an empty string: an unset `HOME` and an empty
+/// `HOME` are different launch states, and a child process can tell them apart.
+/// `resolved` is the same authority [`InvocationContext::home_dir`] reports;
+/// the raw variables are what a child environment must reproduce byte for byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeBaseline {
+    resolved: Option<PathBuf>,
+    variables: [Option<OsString>; HOME_VARIABLES.len()],
+}
+
+impl HomeBaseline {
+    /// Capture the ambient home state of the current process.
+    pub fn capture() -> Self {
+        Self {
+            resolved: home_dir(),
+            variables: HOME_VARIABLES.map(std::env::var_os),
+        }
+    }
+
+    /// Build a baseline from explicit values, `variables` in
+    /// [`HOME_VARIABLES`] order.
+    ///
+    /// The twin of [`EnvBaseline::from_entries`]: a consumer that has to plan
+    /// against a home other than this process's — a test fixture, a replayed
+    /// invocation — states it rather than mutating the process to make
+    /// [`HomeBaseline::capture`] observe it.
+    pub fn from_parts(
+        resolved: Option<PathBuf>,
+        variables: [Option<OsString>; HOME_VARIABLES.len()],
+    ) -> Self {
+        Self {
+            resolved,
+            variables,
+        }
+    }
+
+    /// The resolved user home directory, when the host has one.
+    pub fn resolved(&self) -> Option<&Path> {
+        self.resolved.as_deref()
+    }
+
+    /// The captured raw value of one [`HOME_VARIABLES`] entry.
+    ///
+    /// Returns `None` both for a variable that was unset at capture and for a
+    /// name outside the home vocabulary.
+    pub fn variable(&self, name: &str) -> Option<&OsStr> {
+        HOME_VARIABLES
+            .iter()
+            .position(|candidate| env_names_match(OsStr::new(candidate), OsStr::new(name)))
+            .and_then(|index| self.variables[index].as_deref())
+    }
+
+    /// Every home variable in [`HOME_VARIABLES`] order, present or absent.
+    pub fn variables(&self) -> impl Iterator<Item = (&'static str, Option<&OsStr>)> + '_ {
+        HOME_VARIABLES
+            .iter()
+            .zip(self.variables.iter())
+            .map(|(name, value)| (*name, value.as_deref()))
+    }
+}
+
+/// The complete launch environment, preserved exactly as the OS supplied it.
+///
+/// [`InvocationContext::environment`] remains the lossy `String` view that
+/// context projection and templating consume. This record exists beside it
+/// because child-environment assembly must reproduce values that no UTF-8
+/// conversion survives, and because *absence* of a variable is load-bearing
+/// when a provider-owned key has to be removed or restored.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EnvBaseline {
+    entries: Vec<(OsString, OsString)>,
+}
+
+impl EnvBaseline {
+    /// Capture the ambient environment of the current process.
+    pub fn capture() -> Self {
+        Self {
+            entries: std::env::vars_os().collect(),
+        }
+    }
+
+    /// Build a baseline from explicit entries.
+    pub fn from_entries<I, K, V>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into()))
+                .collect(),
+        }
+    }
+
+    /// Every captured variable, in the order the OS enumerated it.
+    pub fn iter(&self) -> impl Iterator<Item = (&OsStr, &OsStr)> + '_ {
+        self.entries
+            .iter()
+            .map(|(key, value)| (key.as_os_str(), value.as_os_str()))
+    }
+
+    /// The captured raw value of one variable.
+    pub fn get<K: AsRef<OsStr>>(&self, name: K) -> Option<&OsStr> {
+        let name = name.as_ref();
+        self.entries
+            .iter()
+            .find(|(key, _)| env_names_match(key, name))
+            .map(|(_, value)| value.as_os_str())
+    }
+
+    /// The number of captured variables.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether nothing was captured.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 #[derive(Debug)]
 struct InvocationInner {
     launch_cwd: PathBuf,
-    home_dir: Option<PathBuf>,
+    home_baseline: HomeBaseline,
+    env_baseline: EnvBaseline,
     environment: HashMap<String, String>,
     launch_repository: Arc<RepositoryEntry>,
     launch_result: sniff::SniffResult,
@@ -694,8 +846,16 @@ impl InvocationContext {
         observation: FilesystemObservation,
     ) -> Self {
         let cwd = absolutize(cwd);
-        let environment = std::env::vars().collect::<HashMap<_, _>>();
-        let home_dir = home_dir();
+        // The lossy map is projected from the raw baseline rather than captured
+        // separately: `std::env::vars()` panics on a non-UTF-8 variable, and two
+        // independent reads could disagree if the environment moved between them.
+        let env_baseline = EnvBaseline::capture();
+        let environment = env_baseline
+            .iter()
+            .filter_map(|(key, value)| Some((key.to_str()?.to_string(), value.to_str()?.to_string())))
+            .collect::<HashMap<_, _>>();
+        let home_baseline = HomeBaseline::capture();
+        let home_dir = home_baseline.resolved().map(Path::to_path_buf);
         let work = InvocationWork::default();
         work.git_root_discoveries.fetch_add(1, Ordering::Relaxed);
 
@@ -711,7 +871,7 @@ impl InvocationContext {
         let launch_file_resolution = build_file_resolution_context(
             &cwd,
             None,
-            home_dir.clone(),
+            home_dir,
             environment.clone(),
             launch_repository_root,
             launch_repository.repo_info(),
@@ -732,7 +892,8 @@ impl InvocationContext {
         Self {
             inner: Arc::new(InvocationInner {
                 launch_cwd: cwd,
-                home_dir,
+                home_baseline,
+                env_baseline,
                 environment,
                 launch_repository,
                 launch_result,
@@ -751,7 +912,21 @@ impl InvocationContext {
     }
 
     pub fn home_dir(&self) -> Option<&Path> {
-        self.inner.home_dir.as_deref()
+        self.inner.home_baseline.resolved()
+    }
+
+    /// The immutable launch home snapshot.
+    ///
+    /// Later ambient mutation cannot move it, which is what lets child-process
+    /// assembly project the *launch* home rather than whatever a wrapper stage
+    /// has since written into its own process.
+    pub fn home_baseline(&self) -> &HomeBaseline {
+        &self.inner.home_baseline
+    }
+
+    /// The immutable launch environment snapshot, in raw [`OsString`] form.
+    pub fn env_baseline(&self) -> &EnvBaseline {
+        &self.inner.env_baseline
     }
 
     pub fn environment(&self) -> &HashMap<String, String> {
@@ -835,7 +1010,7 @@ impl InvocationContext {
         let file_resolution = build_file_resolution_context(
             &base_dir,
             Some(&source_path),
-            self.inner.home_dir.clone(),
+            self.inner.home_baseline.resolved().map(Path::to_path_buf),
             self.inner.environment.clone(),
             repository_root.as_deref(),
             entry.repo_info(),
@@ -1116,10 +1291,8 @@ impl InvocationContext {
                         captured = true;
                         match repository_root {
                             Some(root) => {
-                                if let Ok(set) =
-                                    sniff::filesystem::git::get_recent_commits_by_count(root, 10)
-                                {
-                                    evidence = evidence.with_recent_commits(Some(set.commits));
+                                if let Ok(set) = recent_commits_at(root, 10) {
+                                    evidence = evidence.with_recent_commits(Some(set));
                                 }
                             }
                             None => evidence = evidence.with_recent_commits(None),
@@ -1286,11 +1459,7 @@ impl InvocationContext {
                     return None;
                 }
                 let commits = match repository_root.as_deref() {
-                    Some(root) => Some(
-                        sniff::filesystem::git::get_recent_commits_by_count(root, 10)
-                            .ok()?
-                            .commits,
-                    ),
+                    Some(root) => Some(recent_commits_at(root, 10).ok()?),
                     None => None,
                 };
                 evidence.with_recent_commits(commits)
@@ -1830,3 +1999,16 @@ impl darkmatter::markdown::compose::ContextExtension for DocumentEpoch {
 #[cfg(test)]
 mod tests;
 
+/// The newest `count` commits of the repository containing `root`.
+///
+/// A `root` outside any repository is an error, not an empty set: both callers
+/// have already established that a repository is present.
+fn recent_commits_at(
+    root: &std::path::Path,
+    count: usize,
+) -> sniff::Result<sniff::filesystem::git::RecentCommits> {
+    use sniff::filesystem::git::{GitRepo, RecentCommits, RecentCommitsOptions};
+    let repo = GitRepo::discover(root)?
+        .ok_or_else(|| sniff::SniffError::NotARepository(root.to_path_buf()))?;
+    RecentCommits::collect(&repo, &RecentCommitsOptions::new().count(count))
+}

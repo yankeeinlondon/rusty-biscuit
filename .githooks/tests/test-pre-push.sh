@@ -2096,7 +2096,7 @@ stage_ci_local_harness() {
     # The recipe's self-test loop: no-op stubs, since this fixture tests the
     # recipe's scheduling, not those suites.
     local suite
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py; do
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         : >"$harness/scripts/ci/$suite"
     done
     cat >"$harness/scripts/ci/affected_scope.py" <<EOF

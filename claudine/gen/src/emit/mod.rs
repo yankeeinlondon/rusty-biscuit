@@ -344,7 +344,7 @@ pub fn emit_data_file(
         .flat_map(|fragment| fragment.fields.drain(..))
         .collect::<Vec<_>>();
     fields.sort_by_key(|field| field.order);
-    if fields.len() != 47 || fields.iter().enumerate().any(|(order, field)| order != field.order as usize) {
+    if fields.len() != 49 || fields.iter().enumerate().any(|(order, field)| order != field.order as usize) {
         return Err(unmappable(
             "data.rs",
             "domain fragments did not emit each ProviderInfo field exactly once".to_string(),

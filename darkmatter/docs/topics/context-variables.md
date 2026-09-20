@@ -64,7 +64,7 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 |-------|--------------|------------|
 | **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
 | **Git** | One `GitRepo::discover` plus branch, worktree, and index-stage reads | `branch`, `worktree`, `merge_conflicts` |
-| **GitHistory** | `get_recent_commits_by_count` (ten commits and their file changes); never demanded by ordinary Git facts | `recent_commits` |
+| **GitHistory** | `RecentCommits::collect` (ten commits and their file changes); never demanded by ordinary Git facts | `recent_commits` |
 | **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `package_areas`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
 | **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_source_code_files`, `staged_files`, `untracked_files`, `dirty_packages`, `dirty_package_areas`, `staged_packages`, `staged_package_areas`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
@@ -104,7 +104,7 @@ failure message prints the up-to-date block to paste back.
 > Only a value embedded in _surrounding text_ is stringified. A frontmatter
 > value whose entire content is `"{{ ctx.foo }}"` still resolves to a real
 > array — see the
-> [whole-value exception](../inline/fm-interpolation.md#whole-value-exception-strict).
+> [whole-value exception](../inline/fm-interpolation.md#whole-values-keep-their-type).
 >
 > **Migration.** A bare `{{ ctx.foo }}` previously rendered newline-joined. A
 > document that relied on that output moves to

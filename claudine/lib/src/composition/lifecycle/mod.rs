@@ -27,7 +27,8 @@ use super::error::{ActionExprError, CompositionError};
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
-    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError,
+    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError, RuntimeSet,
+    RuntimeSetError,
     RetryBackoff, rewrite_to_positional, ShellAction,
     SideEffectAction, side_effect_signature,
 };
@@ -42,18 +43,22 @@ pub mod control;
 pub mod executor;
 pub mod runtime;
 mod parse;
+mod source_map;
 mod validate;
 
 use action_shape::*;
 pub(crate) use audio::*;
+pub(crate) use parse::parse_task_action_stack_with_order;
 pub use parse::{
     parse_lifecycle_config, parse_single_action, parse_task_action_stack,
     scan_removed_validation_keys,
 };
+pub(crate) use parse::parse_lifecycle_config_with_orders;
+pub(crate) use parse::parse_single_action_with_order;
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
     validate_no_err_in_no_error_events,
-    validate_no_interpolation_leaks, validate_no_undefined_lifecycle_variables,
+    validate_no_nested_spans_in_literals, validate_no_undefined_lifecycle_variables,
 };
 pub(crate) use validate::first_undefined_stack_variable;
 #[cfg(test)]
@@ -82,7 +87,7 @@ const LIFECYCLE_COMM_FIELDS: &[&str] = &[
 /// [`LIFECYCLE_COMM_FIELDS`] iteration order.
 ///
 /// Shared by the lifecycle string guards that walk top-level communication
-/// surfaces (the leak scan and the `err`-availability scan) so they agree on
+/// surfaces (the nested-span scan and the `err`-availability scan) so they agree on
 /// the field set and iteration order.
 fn notification_comm_fields(
     n: &LifecycleNotification,
@@ -265,7 +270,7 @@ pub struct LifecycleStacks {
 /// The seven composition lifecycle signals, in deterministic iteration
 /// order: `Initialize`, `Start`, `Success`, `Blocked`, `Failure`,
 /// `Finalize`, `Loop`. This order is used by validators that walk every
-/// event surface (interpolation-leak scan, undefined-variable scan, `err`
+/// event surface (nested-span scan, undefined-variable scan, `err`
 /// scan) and is exposed via [`Self::all`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LifecycleSignal {
@@ -658,7 +663,13 @@ impl<'a> LifecycleRunGuard<'a> {
         signal: LifecycleSignal,
         stack_ctx: &super::lifecycle_executor::StackExecutionContext<'_>,
     ) -> super::lifecycle_executor::LifecycleEventOutcome {
-        stack_ctx.with_signal(signal).execute_event(&self.config)
+        let mut context = stack_ctx.with_signal(signal);
+        // `start` follows successful preflight; proxy adoption resets it. Catch
+        // events reached before that boundary must not inherit a shell runner.
+        if !self.start_emitted {
+            context.shell_runner = &super::lifecycle_executor::DisabledShellRunner;
+        }
+        context.execute_event(&self.config)
     }
 
     /// Execute the full lifecycle event (top-level notification + stack) for

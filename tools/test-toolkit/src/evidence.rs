@@ -109,21 +109,23 @@ pub fn backend_executions_path() -> PathBuf {
     stage_dir().join(BACKEND_EXECUTIONS_FILE)
 }
 
-/// The workspace root containing this crate.
+/// The workspace root containing the running test's package.
 ///
-/// Derived from this crate's compile-time manifest directory rather than the
-/// current directory: nextest runs each test with its *own* package as the
-/// working directory, so every test process would otherwise resolve a different
-/// staging root and the evidence would scatter.
+/// Derived from a manifest directory rather than the current directory:
+/// nextest runs each test with its *own* package as the working directory, and
+/// the ancestor walk normalizes any of them to the one workspace root, so every
+/// test process stages evidence in the same place. `manifest_dir!` resolves at
+/// run time, which is what makes the root the *consumer's* checkout when the
+/// binaries came out of an archive built elsewhere.
 #[must_use]
 pub fn workspace_root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = biscuit_test_harness::manifest_dir!();
         manifest_dir
             .ancestors()
             .find(|candidate| is_workspace_root(candidate))
-            .unwrap_or(manifest_dir)
+            .unwrap_or(manifest_dir.as_path())
             .to_path_buf()
     })
     .as_path()

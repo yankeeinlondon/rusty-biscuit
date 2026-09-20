@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 fn worktree_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .unwrap()

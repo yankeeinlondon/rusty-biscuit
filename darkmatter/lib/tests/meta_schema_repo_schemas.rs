@@ -8,7 +8,7 @@
 //! standalone-schema recognizer, and a bare-name reference to
 //! `feature-review.yaml` must resolve and actively validate review frontmatter.
 
-use std::{fs, path::Path};
+use std::fs;
 
 use darkmatter::markdown::{
     Markdown,
@@ -18,11 +18,12 @@ use darkmatter::markdown::{
         resolve::resolve_schema_with_roots,
     },
 };
+use biscuit_test_harness::manifest_dir;
 use serde_json::json;
 
 /// Repo-root `schemas/` directory, relative to `darkmatter/lib`.
 fn repo_schemas_dir() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas")
+    manifest_dir!().join("../../schemas")
 }
 
 /// A `.yaml` file in `schemas/` is a plain schema unless it carries a `kind`

@@ -7,9 +7,9 @@ what that contract means for a test author and how to reproduce its failures.
 
 ## The archive-mode contract
 
-CI builds `x86_64-unknown-linux-gnu` test binaries once on `ubuntu-latest`
-with `cargo nextest archive` and only *runs* them inside the WSL2 guest. The
-guest has no rustup, no cargo, and no toolchain. Consequences:
+CI builds `x86_64-unknown-linux-gnu` test binaries once on `ubuntu-latest` with
+`cargo nextest archive` and only *runs* them inside the WSL2 guest. The guest
+has no rustup, no cargo, and no toolchain. Consequences:
 
 - Anything resolved at **compile time** to a builder path does not exist in
   the guest. `env!("CARGO_BIN_EXE_<name>")` names the builder's target
@@ -39,6 +39,32 @@ phase is only the archive download and extraction, and its wall clock is
 dominated by slow test execution, so it is never evidence for
 native Windows behavior and is never compared with the `windows-latest` leg
 as one environment ([ci-runners.md](ci-runners.md)).
+
+Since `fixes/2026-09-12-single-os-compile`, `_wsl-ci.yml` owns **no producer
+job**. It downloads the same `build-<package>-ubuntu-latest-<key>` artifact,
+checksum, and realized digest native Linux consumes, and publishes its own
+distinct `{package, wsl2-ubuntu, L1}` cell. Three things follow that a test
+author hits:
+
+- **Verification runs in the guest, not on its Windows host.** The predicates
+  that matter are the guest's — architecture, ABI, libc, and the dynamic
+  libraries the archived binaries resolve against. `ci-build`'s `host_runtime()`
+  reads `cfg!`, so a host-side run would report `msvc` and prove nothing. The
+  verifier travels inside the artifact; the guest could not build one.
+- **The guest clones to its own `GUEST_ROOT`** (`/home/biscuit/checkout`), a
+  path chosen to coincide with no producer's. It used to recreate the manifest's
+  `producer_workspace` because ~160 targets read the compile-time
+  `env!("CARGO_MANIFEST_DIR")` whatever `--workspace-remap` said; those are
+  migrated to `biscuit_test_harness::manifest_dir!()`, and
+  `tools/test-toolkit/tests/archive_path_guard.rs` fails the run if one returns.
+  Do not reintroduce the derivation — it would hide the next baked path rather
+  than surface it.
+- **The guest cannot write `$GITHUB_OUTPUT`** (it is a Windows path). Anything
+  the host needs from the guest crosses the 9p workspace as a file: the
+  manifest is read on the host, and the guest leaves
+  `wsl-timing/verify.seconds`, `wsl-timing/l1.seconds`, and a copy of the
+  verdict for the status step to read. A guest that dies leaves none, and the
+  stages report as absent rather than zero.
 
 ## Faithful reproduction on the WSL host
 
@@ -110,6 +136,38 @@ IP, shared across GitHub's runner fleet). Every other environment installs
 inside the guest, so the installer is called with an explicit `--tag` and a
 token instead. The nearby log text "the WSL2 guest failed to provision" is a
 later diagnostic step, not the cause.
+
+## Lost runner during provisioning (open; instrumented, not fixed)
+
+The other way a guest leg dies with no report: GitHub's annotation reads "The
+hosted runner lost communication with the server", the job is killed about
+45 minutes after it started, and no log is retained. Every occurrence so far
+was inside guest provisioning, before any repository code ran: three on
+2026-08-27/28 and one on 2026-09-18 (`sniff-cli`, run 35308326156, while the
+`sniff` and `biscuit-terminal` legs of the same run provisioned from the same
+cached image within seconds of it). Over the twelve runs with WSL2 legs
+between 2026-09-12 and 2026-09-18 that is 1 loss in 62 legs. Other projects
+report the same shape on `windows-2025` in September 2026 —
+[astral-sh/uv-dev#1804](https://github.com/astral-sh/uv-dev/issues/1804) and
+[GemTalk/Jasper#580](https://github.com/GemTalk/Jasper/issues/580), the latter
+measuring 17 of 3735 legs dying in `Vampire/setup-wsl` — and none has
+established a cause; the step-level `timeout-minutes` does not fire, so it is
+the runner agent that stops, not `wsl.exe`.
+
+What this means when reading a red WSL leg:
+
+- Treat it as a failure with an unknown cause, not as noise. Do not amend an
+  acceptance criterion or rerun by hand to make it go away.
+- `ci-infra-retry.yml` reruns the lost job once, automatically, when every
+  failure in the run was a lost runner. A real failure anywhere else in the
+  run vetoes that retry on purpose, so fix the real failure first; the retry
+  then covers the loss on the next run.
+- The provisioning phase is now recorded. `_wsl-ci.yml` asks the action only
+  to register the distribution (`--no-launch`, no VM); "Boot the guest and
+  verify it is WSL2" is the first VM start and "Install guest packages" the
+  first apt run. The job's step list (`gh api .../actions/jobs/<id>`, which
+  survives a lost runner) names the phase, which is the one measurement the
+  loss leaves behind. When the next loss lands, record its step here.
 
 ## Level 2 on WSL
 

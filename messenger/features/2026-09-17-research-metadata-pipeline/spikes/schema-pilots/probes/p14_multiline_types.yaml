@@ -1,0 +1,5 @@
+$schema:
+    X: "{
+        a: string,
+        b: string
+    }"

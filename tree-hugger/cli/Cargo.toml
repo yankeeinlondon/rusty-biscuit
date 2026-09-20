@@ -25,6 +25,7 @@ biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 assert_cmd = "2.0"
 predicates = "3.1"
 serial_test = "3"
@@ -38,5 +39,9 @@ required-features = ["terminal-tests"]
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm", "kitty"]
+# The L2 tier spawns one shared terminal pane through the harness broker.
+# It is a compile-time binary of another package, so the producer builds it
+# as a sidecar; an archive consumer has no Cargo to build one with.
+sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []

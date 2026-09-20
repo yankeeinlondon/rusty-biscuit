@@ -14,11 +14,11 @@ mod bench_ids;
 use std::fs;
 use std::path::PathBuf;
 
+use biscuit_test_harness::manifest_dir;
 use bench_ids::{CI_BENCH_IDS, ci_filter_regex};
 
 fn text_file_path() -> PathBuf {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest_dir).join("benches/ci-bench-ids.txt")
+    manifest_dir!().join("benches/ci-bench-ids.txt")
 }
 
 fn load_text_file_ids() -> Vec<String> {

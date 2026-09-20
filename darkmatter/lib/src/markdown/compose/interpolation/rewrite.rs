@@ -6,6 +6,7 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
+use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::report::ExpressionOrigin;
@@ -392,26 +393,6 @@ pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
     }
     let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
-}
-
-/// Returns the single interpolation span when `input`'s trimmed content is
-/// exactly one `{{ expr }}` (only whitespace before and after the span).
-///
-/// Returns `None` for plain strings, mixed text (`"a {{ x }}"`), and strings
-/// holding more than one expression — those route to the
-/// [`interpolate_text`] string path. Detection is independent of parse/eval
-/// outcome, so a malformed whole-value `{{ … }}` is still recognized as
-/// whole-value and held to the strict parse-and-evaluate contract.
-pub(crate) fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
-    let mut locations = ExpressionFinder::find_all_plain(input);
-    if locations.len() != 1 {
-        return None;
-    }
-    let loc = locations.remove(0);
-    if !input[..loc.start].trim().is_empty() || !input[loc.end..].trim().is_empty() {
-        return None;
-    }
-    Some(loc)
 }
 
 /// Returns `true` when `input`'s trimmed content is exactly one interpolation

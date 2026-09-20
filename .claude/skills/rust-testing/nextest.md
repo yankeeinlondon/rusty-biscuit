@@ -194,8 +194,22 @@ cargo nextest archive --archive-file tests.tar.zst
 cargo nextest run --archive-file tests.tar.zst
 ```
 
-The `wsl2-ubuntu` leg of every area's CI runs this way (`.github/workflows/_wsl-ci.yml`):
-the archive is built on `ubuntu-latest` and only executed inside the guest.
+**Every** hosted test cell runs this way, not just WSL2. One native owner per
+planned build key produces the archive; L1, L2, browser, and the `wsl2-ubuntu`
+guest verify and execute it with no Cargo, rustc, or linker in reach
+(`fixes/2026-09-12-single-os-compile`, `.github/ci/README.md`). Linux owns both
+its own cells and the guest's; macOS and native Windows own theirs.
+
+Two consequences for a test author:
+
+- **A test that reaches a compiler fails in CI, on every OS.** It is no longer
+  only the WSL2 guest that lacks one.
+- **Extraction is not free and is measured.** `cargo nextest run
+  --archive-file` extracts inside the run, so CI reports the extraction window
+  from `ci-build verify`'s own `--extract-to` instead, and a cell's download,
+  verification, extraction, and execution appear as four separate numbers. A
+  suite that slows down because its archive grew shows up in `extract_ms`, not
+  in test time.
 
 ### Never bake a binary path with `env!`
 
@@ -221,13 +235,44 @@ line wrap it once in a `OnceLock<String>` helper (see
 `--workspace-remap` does not help here: it relocates *source* paths, not the
 build's target directory.
 
-### Examples are built but not archived
+### A fixture path has the same trap, one level up
 
-An archive carries test binaries and non-test **bin** targets. A test that
-spawns an *example* (biscuit-terminal's `discovery_probe`) finds nothing in the
-guest unless the example is named in `archive.include` in `.config/nextest.toml`
-— which is per-path, has no glob support, and needs one entry per target-dir
-layout (`debug/…` locally, `<triple>/debug/…` when CI builds with `--target`).
+`env!("CARGO_MANIFEST_DIR")` is also the build host's checkout. `--workspace-remap`
+**does** help here — it rewrites the *run-time* `CARGO_MANIFEST_DIR` to the
+consumer's checkout — but only for code that reads the variable at run time.
+`biscuit_test_harness::manifest_dir!()` is the counterpart of `bin_exe!`:
+
+```rust
+let fixture = biscuit_test_harness::manifest_dir!().join("tests/fixtures/sample.md");
+```
+
+### Examples, dynamic libraries, and other unarchived outputs
+
+An archive carries test binaries, non-test **bin** targets, build-script output
+directories, and linked paths. It does **not** carry an example (biscuit-terminal's
+`discovery_probe`) or a workspace `dylib`; a test that needs one finds nothing in
+the guest.
+
+Declare them in the owning package's `[package.metadata.ci.tests]
+archive-includes`, relative to the profile output directory, with `{DLL_PREFIX}`,
+`{DLL_SUFFIX}`, and `{EXE_SUFFIX}` covering the three producers' spellings.
+`ci-build produce` supplies the `<triple>/<profile>` prefix and generates the
+nextest config. Writing `archive.include` into `.config/nextest.toml` by hand
+still works but is per-path, has no glob support, and needs one entry per
+target-dir layout (`debug/…` locally, `<triple>/debug/…` when CI builds with
+`--target`) — which is exactly how `discovery_probe` was silently missing from
+the macOS and Windows archives until it became a declared include.
+
+An include only **copies** what the build produced, and `cargo nextest archive`
+never builds an example. `ci-build produce` therefore builds every declared
+`examples/<name>` entry before archiving; a hand-written `archive.include` for
+an example has no such step behind it, and `on-missing = "ignore"` turns the
+absence into a test that panics on a missing file instead of a build that
+failed.
+
+A binary a test *spawns* but does not link — another package's compile-time tool
+— is a **build sidecar** instead: name it in `sidecars`, from the closed
+vocabulary in `.github/ci/sidecars.json`.
 
 ## Output Formats
 

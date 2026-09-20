@@ -1373,83 +1373,42 @@ fn detect_git_with_request_surfaces_corrupt_history() {
     );
 }
 
+/// Every selection form walks history through the same collector, so each must
+/// surface a corrupt `HEAD` commit as an error rather than a short history.
 #[test]
-fn recent_commits_by_count_surfaces_corrupt_history() {
+fn recent_commits_collection_surfaces_corrupt_history_for_every_selection() {
+    use sniff::filesystem::git::{GitRepo, NamedDate, RecentCommits, RecentCommitsOptions};
+
     let dir = TempDir::new().unwrap();
     let repo = build_linear_main(dir.path(), 2);
     let sha = head_sha(&repo);
 
     corrupt_loose_object(dir.path(), &sha);
 
-    assert!(
-        sniff::filesystem::get_recent_commits_by_count(dir.path(), 10).is_err(),
-        "corrupt history must surface through get_recent_commits_by_count"
-    );
-}
-
-#[test]
-fn recent_commits_by_duration_surfaces_corrupt_history() {
-    use chrono::Duration;
-    let dir = TempDir::new().unwrap();
-    let repo = build_linear_main(dir.path(), 2);
-    let sha = head_sha(&repo);
-
-    corrupt_loose_object(dir.path(), &sha);
-
-    assert!(
-        sniff::filesystem::get_recent_commits_by_duration(dir.path(), Duration::weeks(520), "5y")
-            .is_err(),
-        "corrupt history must surface through get_recent_commits_by_duration"
-    );
-}
-
-#[test]
-fn recent_commits_in_range_surfaces_corrupt_history() {
-    use chrono::{TimeZone, Utc};
-    let dir = TempDir::new().unwrap();
-    let repo = build_linear_main(dir.path(), 2);
-    let sha = head_sha(&repo);
-
-    corrupt_loose_object(dir.path(), &sha);
-
-    let since = Utc.timestamp_opt(0, 0).unwrap();
-    let until = Utc::now();
-    assert!(
-        sniff::filesystem::get_recent_commits_in_range(dir.path(), since, until, "all").is_err(),
-        "corrupt history must surface through get_recent_commits_in_range"
-    );
-}
-
-#[test]
-fn recent_commits_by_date_surfaces_corrupt_history() {
-    use chrono::NaiveDate;
-    let dir = TempDir::new().unwrap();
-    let repo = build_linear_main(dir.path(), 2);
-    let sha = head_sha(&repo);
-
-    corrupt_loose_object(dir.path(), &sha);
-
-    let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-    assert!(
-        sniff::filesystem::get_recent_commits_by_date(dir.path(), date).is_err(),
-        "corrupt history must surface through get_recent_commits_by_date"
-    );
-}
-
-#[test]
-fn recent_commits_by_hash_surfaces_corrupt_history() {
-    let dir = TempDir::new().unwrap();
-    let repo = build_linear_main(dir.path(), 2);
-    let sha = head_sha(&repo);
-
-    corrupt_loose_object(dir.path(), &sha);
-
-    // Targeting HEAD itself skips the merge-base reachability probe, so the
-    // corruption surfaces through the history collector rather than the probe.
-    assert!(
-        sniff::filesystem::get_recent_commits_by_hash(dir.path(), &sha).is_err(),
-        "corrupt history must surface through get_recent_commits_by_hash"
-    );
+    let selections = [
+        ("count", RecentCommitsOptions::new().count(10)),
+        (
+            "duration",
+            RecentCommitsOptions::new().duration(chrono::Duration::weeks(520)),
+        ),
+        (
+            "date",
+            RecentCommitsOptions::new().date(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()),
+        ),
+        ("today", RecentCommitsOptions::new().named_date(NamedDate::Today)),
+        // Targeting HEAD itself skips the merge-base reachability probe, so the
+        // corruption surfaces through the history walk rather than the probe.
+        ("hash", RecentCommitsOptions::new().hash(sha.clone())),
+    ];
+    for (label, options) in selections {
+        let result = GitRepo::discover(dir.path()).and_then(|discovered| {
+            RecentCommits::collect(&discovered.expect("inside a repository"), &options)
+        });
+        assert!(
+            result.is_err(),
+            "corrupt history must surface through the {label} selection: {result:?}"
+        );
+    }
 }
 
 #[test]

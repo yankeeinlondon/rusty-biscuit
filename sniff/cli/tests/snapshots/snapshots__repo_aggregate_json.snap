@@ -13,11 +13,6 @@ expression: stable
       "upstream": null
     }
   ],
-  "commit_family_keys": {
-    "documentation_changes": null,
-    "recent_commits": "last 3d",
-    "source_code_changes": null
-  },
   "context": {
     "area": "",
     "is_current_package_area_dirty": false,
@@ -66,6 +61,44 @@ expression: stable
       "area-b/beta/src/lib.rs"
     ]
   },
+  "documentation_changes": [
+    {
+      "author": {
+        "email": "test@test.com",
+        "name": "Test"
+      },
+      "bullet_points": [],
+      "description": "",
+      "file_types": {
+        "cicd": false,
+        "configuration": true,
+        "documentation": true,
+        "images": false,
+        "source_code": true,
+        "web_assets": false
+      },
+      "files": [
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "docs/guide.md",
+          "removed": 0
+        }
+      ],
+      "heading": "initial aggregate fixture",
+      "operation": null,
+      "package_areas": [
+        "area-a",
+        "area-b"
+      ],
+      "packages": [
+        "alpha",
+        "beta"
+      ],
+      "remote": false,
+      "scope": null
+    }
+  ],
   "git_status": {
     "current_branch": "main",
     "file_changes": [
@@ -136,6 +169,118 @@ expression: stable
   "packages": [
     "alpha",
     "beta"
+  ],
+  "recent_commits": [
+    {
+      "author": {
+        "email": "test@test.com",
+        "name": "Test"
+      },
+      "bullet_points": [],
+      "description": "",
+      "file_types": {
+        "cicd": false,
+        "configuration": true,
+        "documentation": true,
+        "images": false,
+        "source_code": true,
+        "web_assets": false
+      },
+      "files": [
+        {
+          "added": 6,
+          "kind": "added",
+          "path": "Cargo.toml",
+          "removed": 0
+        },
+        {
+          "added": 7,
+          "kind": "added",
+          "path": "area-a/alpha/Cargo.toml",
+          "removed": 0
+        },
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "area-a/alpha/src/lib.rs",
+          "removed": 0
+        },
+        {
+          "added": 7,
+          "kind": "added",
+          "path": "area-b/beta/Cargo.toml",
+          "removed": 0
+        },
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "area-b/beta/src/lib.rs",
+          "removed": 0
+        },
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "docs/guide.md",
+          "removed": 0
+        }
+      ],
+      "heading": "initial aggregate fixture",
+      "operation": null,
+      "package_areas": [
+        "area-a",
+        "area-b"
+      ],
+      "packages": [
+        "alpha",
+        "beta"
+      ],
+      "remote": false,
+      "scope": null
+    }
+  ],
+  "source_code_changes": [
+    {
+      "author": {
+        "email": "test@test.com",
+        "name": "Test"
+      },
+      "bullet_points": [],
+      "description": "",
+      "file_types": {
+        "cicd": false,
+        "configuration": true,
+        "documentation": true,
+        "images": false,
+        "source_code": true,
+        "web_assets": false
+      },
+      "files": [
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "area-a/alpha/src/lib.rs",
+          "removed": 0
+        },
+        {
+          "added": 1,
+          "kind": "added",
+          "path": "area-b/beta/src/lib.rs",
+          "removed": 0
+        }
+      ],
+      "heading": "initial aggregate fixture",
+      "operation": null,
+      "package_areas": [
+        "area-a",
+        "area-b"
+      ],
+      "packages": [
+        "alpha",
+        "beta"
+      ],
+      "remote": false,
+      "scope": null
+    }
   ],
   "staged": {
     "documentation": [],

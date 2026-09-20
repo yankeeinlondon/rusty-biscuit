@@ -1,4 +1,5 @@
-//! Locating a workspace binary that a test spawns.
+//! Locating a workspace binary a test spawns, and the checkout it reads
+//! fixtures from.
 //!
 //! `env!("CARGO_BIN_EXE_<name>")` is a compile-time constant holding an
 //! absolute path inside the *build* host's target directory. That is wrong for
@@ -10,6 +11,11 @@
 //!
 //! [`bin_exe!`](macro@crate::bin_exe) asks the environment instead, and falls
 //! back to the compile-time value.
+//!
+//! `env!("CARGO_MANIFEST_DIR")` is the same trap for a *fixture*: it names the
+//! build host's checkout, while nextest's `--workspace-remap` rewrites only the
+//! run-time variable. [`manifest_dir!`](macro@crate::manifest_dir) is its
+//! counterpart.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -62,6 +68,38 @@ fn resolve_with(
         .map_or_else(|| PathBuf::from(compiled), PathBuf::from)
 }
 
+/// The directory of the calling crate's `Cargo.toml`, resolved at run time.
+///
+/// The same hazard as [`bin_exe!`](macro@crate::bin_exe), one level up:
+/// `env!("CARGO_MANIFEST_DIR")` is the *build* host's checkout path, so a test
+/// that reads a repository fixture through it looks for the producer's
+/// directory when it runs from an archive somewhere else. Nextest's
+/// `--workspace-remap` rewrites the run-time variable to the consumer's
+/// checkout; this macro prefers it and keeps the compile-time value as the
+/// fallback for a run that built its own binaries.
+///
+/// ```ignore
+/// let fixture = manifest_dir!().join("tests/fixtures/sample.md");
+/// ```
+#[macro_export]
+macro_rules! manifest_dir {
+    () => {
+        $crate::bin_exe::manifest_dir(env!("CARGO_MANIFEST_DIR"))
+    };
+}
+
+/// Implementation of [`manifest_dir!`](macro@crate::manifest_dir); call the
+/// macro instead.
+pub fn manifest_dir(compiled: &str) -> PathBuf {
+    manifest_dir_with(compiled, |var| std::env::var_os(var))
+}
+
+fn manifest_dir_with(compiled: &str, lookup: impl Fn(&str) -> Option<OsString>) -> PathBuf {
+    lookup("CARGO_MANIFEST_DIR")
+        .filter(|path| !path.is_empty())
+        .map_or_else(|| PathBuf::from(compiled), PathBuf::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +149,33 @@ mod tests {
         );
 
         assert_eq!(path, PathBuf::from("/extracted/md"));
+    }
+
+    #[test]
+    fn a_remapped_workspace_moves_the_manifest_directory() {
+        // What `--workspace-remap` does: the run-time variable names the
+        // CONSUMER's checkout, and a fixture read through it is found there.
+        let path = manifest_dir_with(
+            "/build-host/rusty-biscuit/darkmatter/cli",
+            env_of(&[("CARGO_MANIFEST_DIR", "/guest/checkout/darkmatter/cli")]),
+        );
+
+        assert_eq!(path, PathBuf::from("/guest/checkout/darkmatter/cli"));
+    }
+
+    #[test]
+    fn the_compile_time_manifest_directory_is_the_fallback() {
+        let compiled = "/build-host/rusty-biscuit/darkmatter/cli";
+        assert_eq!(
+            manifest_dir_with(compiled, env_of(&[])),
+            PathBuf::from(compiled)
+        );
+        // An empty value is how a shell spells "unset"; it must not resolve to
+        // the filesystem root.
+        assert_eq!(
+            manifest_dir_with(compiled, env_of(&[("CARGO_MANIFEST_DIR", "")])),
+            PathBuf::from(compiled)
+        );
     }
 
     #[test]

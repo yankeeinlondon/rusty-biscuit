@@ -1,0 +1,12 @@
+[package]
+name = "archive-portability-sidecar"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A compile-time tool the package under test spawns but does not link. The
+# producer builds it and ships it beside the archive; nothing in the archive
+# references it, so an archive alone is not enough.
+[[bin]]
+name = "archive-portability-sidecar"
+path = "src/main.rs"

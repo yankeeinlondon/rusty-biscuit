@@ -2368,4 +2368,86 @@ mod tests {
             assert_eq!(err.position, 4);
         }
     }
+
+    /// DMLS projects literal-block (`|-`) expression diagnostics through raw
+    /// source coordinates, which carry the block's YAML indentation. That
+    /// projection is only sound while the parser treats the indentation as
+    /// insignificant expression whitespace, so these pin that property on
+    /// the pre-fix incident fixtures (captured from `cd6e036c4^`).
+    mod raw_literal_block_indentation {
+        use super::*;
+
+        const REVIEW_SPEC_INLINE: &str = include_str!(
+            "../../../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
+        );
+        const COMMIT: &str = include_str!(
+            "../../../../../../claudine/cli/tests/fixtures/nested_span_regression/commit.md"
+        );
+
+        /// Returns `(raw, decoded)` inner expression text for every `|-`
+        /// block scalar under `key`: `raw` keeps the authored indentation,
+        /// `decoded` strips the block's indentation as YAML does.
+        fn literal_block_expressions(source: &str, key: &str) -> Vec<(String, String)> {
+            let header = format!("{key}: |-");
+            let lines: Vec<&str> = source.lines().collect();
+            let mut found = Vec::new();
+            for (index, line) in lines.iter().enumerate() {
+                if line.trim_start() != header {
+                    continue;
+                }
+                let owner_indent = line.len() - line.trim_start().len();
+                let block: Vec<&str> = lines[index + 1..]
+                    .iter()
+                    .copied()
+                    .take_while(|l| l.len() - l.trim_start().len() > owner_indent)
+                    .collect();
+                let block_indent = block[0].len() - block[0].trim_start().len();
+                let raw = block.join("\n");
+                let decoded = block
+                    .iter()
+                    .map(|l| &l[block_indent..])
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                found.push((inner(&raw), inner(&decoded)));
+            }
+            found
+        }
+
+        fn inner(block: &str) -> String {
+            let open = block.find("{{").expect("block opens a span") + 2;
+            let close = block.rfind("}}").expect("block closes a span");
+            block[open..close].to_string()
+        }
+
+        fn assert_indentation_is_insignificant(raw: &str, decoded: &str) {
+            assert_ne!(raw, decoded, "fixture must actually carry indentation");
+            assert_eq!(parse(raw).unwrap(), parse(decoded).unwrap());
+            assert_eq!(
+                parse_condition(raw).unwrap(),
+                parse_condition(decoded).unwrap()
+            );
+            let spanned = parse_spanned(raw).unwrap();
+            assert_eq!(spanned.erase(), parse(decoded).unwrap());
+            let trimmed = raw.trim();
+            let start = raw.find(trimmed).unwrap();
+            assert_eq!(spanned.span, start..start + trimmed.len());
+        }
+
+        #[test]
+        fn review_spec_inline_say_blocks_parse_identically_raw_and_decoded() {
+            let blocks = literal_block_expressions(REVIEW_SPEC_INLINE, "say");
+            assert_eq!(blocks.len(), 2, "success.say and failure.say");
+            for (raw, decoded) in &blocks {
+                assert_indentation_is_insignificant(raw, decoded);
+            }
+        }
+
+        #[test]
+        fn commit_resides_in_block_parses_identically_raw_and_decoded() {
+            let blocks = literal_block_expressions(COMMIT, "resides_in");
+            assert_eq!(blocks.len(), 1);
+            let (raw, decoded) = &blocks[0];
+            assert_indentation_is_insignificant(raw, decoded);
+        }
+    }
 }

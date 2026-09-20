@@ -45,6 +45,8 @@ struct Inputs {
     document_mcp_tags: Vec<String>,
     /// The inline write-grant posture, `None` for a run that writes nothing.
     write_posture: Option<String>,
+    /// The provider overlay plan the attempt launches under.
+    overlay: Option<claudine::provider_overlay::OverlayPlan>,
 }
 
 impl Default for Inputs {
@@ -60,6 +62,7 @@ impl Default for Inputs {
             child_env: HashMap::new(),
             document_mcp_tags: Vec::new(),
             write_posture: None,
+            overlay: None,
         }
     }
 }
@@ -79,6 +82,7 @@ fn key_of(inputs: &Inputs) -> SessionCompatibilityKey {
         &inputs.document_mcp_tags,
         &launch,
         inputs.write_posture.as_deref(),
+        inputs.overlay.as_ref(),
     )
 }
 
@@ -201,6 +205,7 @@ fn swapping_the_provider_changes_provider_binary_and_resume_protocol() {
         &[],
         &[],
         &launch,
+        None,
         None,
     );
     let named = base.incompatibilities(&codex);
@@ -340,6 +345,7 @@ fn resume_only_differences_do_not_change_the_key() {
         &[],
         &resume_launch,
         None,
+        None,
     );
     assert!(
         base.is_compatible(&resume_key),
@@ -363,4 +369,85 @@ fn a_changed_document_mcp_tag_projects_the_mcp_facet() {
         base.incompatibilities(&tagged),
         vec!["MCP server set".to_string()]
     );
+}
+
+/// A pure overlay plan for `provider` under a fixed home: planning touches no
+/// filesystem, so the facet projection is tested without materializing one.
+fn overlay_plan(provider: Provider, reasons: &[claudine::provider_overlay::OverlayReason]) -> claudine::provider_overlay::OverlayPlan {
+    let home = claudine::invocation_context::HomeBaseline::from_parts(
+        Some(PathBuf::from("/home/u")),
+        Default::default(),
+    );
+    let env = claudine::invocation_context::EnvBaseline::default();
+    claudine::provider_overlay::OverlayPlanner::new(&home, &env)
+        .plan(provider, reasons.iter().copied().collect())
+        .expect("the fixture requests a supported reason set")
+}
+
+/// The overlay facet folds the whole plan: a launch without one reads `none`,
+/// and the reason set, selector value, visible root, and exclusions all
+/// appear, so two plans that show the provider a different configuration view
+/// never compare equal. The per-launch root name is not part of the view, so
+/// two launches of the same plan key equal.
+#[test]
+fn the_overlay_facet_folds_the_complete_plan() {
+    use claudine::provider_overlay::OverlayReason::{Mcp, RepoResources};
+
+    let none = key_of(&Inputs::default());
+    assert_eq!(none.overlay, "none");
+
+    let repo = key_of(&Inputs {
+        overlay: Some(overlay_plan(Provider::Codex, &[RepoResources])),
+        ..Default::default()
+    });
+    for part in [
+        "provider=codex".to_string(),
+        "reasons=repo_resources".to_string(),
+        "CODEX_HOME=<overlay>".to_string(),
+        "root=<overlay>".to_string(),
+        "exclude=agents,prompts,skills".to_string(),
+    ] {
+        assert!(repo.overlay.contains(&part), "missing `{part}` in {}", repo.overlay);
+    }
+    assert_eq!(none.incompatibilities(&repo), vec!["provider overlay"]);
+
+    // Same selector and root, different reasons: `--repo` hides resources an
+    // MCP-only overlay mirrors, so the facet must move.
+    let mcp = key_of(&Inputs {
+        overlay: Some(overlay_plan(Provider::Codex, &[Mcp])),
+        ..Default::default()
+    });
+    assert!(mcp.overlay.contains("exclude="), "{}", mcp.overlay);
+    assert_eq!(repo.incompatibilities(&mcp), vec!["provider overlay"]);
+
+    let (first, second) = (
+        overlay_plan(Provider::Codex, &[RepoResources]),
+        overlay_plan(Provider::Codex, &[RepoResources]),
+    );
+    assert_ne!(first.storage_root(), second.storage_root(), "fixture check: distinct launch roots");
+    let same = key_of(&Inputs {
+        overlay: Some(second),
+        ..Default::default()
+    });
+    assert!(repo.incompatibilities(&same).is_empty(), "{} vs {}", repo.overlay, same.overlay);
+
+    // A parent-shaped selector keeps the child segment below the launch root.
+    let gemini = key_of(&Inputs {
+        overlay: Some(overlay_plan(Provider::Gemini, &[Mcp])),
+        ..Default::default()
+    });
+    assert!(gemini.overlay.contains("GEMINI_CLI_HOME=<overlay>;"), "{}", gemini.overlay);
+    assert!(gemini.overlay.contains("root=<overlay>/.gemini;"), "{}", gemini.overlay);
+}
+
+/// The facet reads the plan, not the child environment: the selector already
+/// sitting in the environment (the invocation's base) does not stand in for a
+/// plan the attempt does not carry.
+#[test]
+fn the_overlay_facet_ignores_a_selector_the_plan_does_not_carry() {
+    let with_env = key_of(&Inputs {
+        child_env: env_with(&[("CODEX_HOME", "/home/u/.codex-overlay")]),
+        ..Default::default()
+    });
+    assert_eq!(with_env.overlay, "none");
 }

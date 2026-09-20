@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleConfig;
-use super::super::prepare::{PrepareOptions, prepare_direct, prepare_inline};
+use super::super::prepare::{BootstrapPreparation, PrepareOptions, prepare_direct, prepare_inline};
 use super::super::types::{CompositionMode, LoopConfig, ResolvedCompositionSource};
 use super::config::extract_control_variables;
 
@@ -58,6 +58,9 @@ pub fn build_loop_seed(
 pub struct LoopSeed {
     /// Iteration-control seed frontmatter (control variables + CLI setters).
     pub seed: Map<String, Value>,
+    /// Full bootstrap state for initialize and its catch handlers. Kept out of
+    /// the control seed so derived values still recompose on each iteration.
+    pub initialize_frontmatter: Map<String, Value>,
     /// Lifecycle config parsed from the **full** composed effective
     /// frontmatter — carries every event block, unlike [`Self::seed`].
     pub lifecycle: LifecycleConfig,
@@ -90,25 +93,57 @@ pub fn build_loop_seed_with_lifecycle(
             prepare_inline(source, prepare_options.clone())?
         }
     };
-    let effective = &prepared.effective_frontmatter;
-    let control_vars = extract_control_variables(config);
+    Ok(LoopSeed {
+        seed: lift_seed(
+            config,
+            &prepared.effective_frontmatter,
+            prepare_options.set_overrides.as_ref(),
+        ),
+        lifecycle: prepared.lifecycle,
+        initialize_frontmatter: prepared.effective_frontmatter.as_object().cloned().unwrap_or_default(),
+    })
+}
 
+/// The loop seed for a document whose `initialize` has not run yet.
+///
+/// Takes the seed and lifecycle from the initialize-bootstrap read instead of a
+/// full compose, so recognizing loop ownership never dereferences the body
+/// `initialize` may still be about to create. Loop control reads frontmatter
+/// only, so both constructors lift the same seed from the same effective
+/// frontmatter.
+#[must_use]
+pub fn build_loop_seed_from_bootstrap(
+    bootstrap: &BootstrapPreparation,
+    config: &LoopConfig,
+) -> LoopSeed {
+    LoopSeed {
+        seed: lift_seed(
+            config,
+            &bootstrap.effective_frontmatter,
+            bootstrap.input_layers.set_overrides.as_ref(),
+        ),
+        lifecycle: bootstrap.lifecycle.clone(),
+        initialize_frontmatter: bootstrap.effective_frontmatter.as_object().cloned().unwrap_or_default(),
+    }
+}
+
+fn lift_seed(
+    config: &LoopConfig,
+    effective: &Value,
+    set_overrides: Option<&Value>,
+) -> Map<String, Value> {
     let mut seed = Map::new();
 
-    if let Some(Value::Object(set_overrides)) = &prepare_options.set_overrides {
+    if let Some(Value::Object(set_overrides)) = set_overrides {
         for (key, value) in set_overrides {
             seed.insert(key.clone(), value.clone());
         }
     }
 
-    for name in control_vars {
+    for name in extract_control_variables(config) {
         if let Some(value) = effective.get(&name) {
             seed.insert(name, value.clone());
         }
     }
-
-    Ok(LoopSeed {
-        seed,
-        lifecycle: prepared.lifecycle,
-    })
+    seed
 }

@@ -1,0 +1,26 @@
+---
+# An assessment without fingerprints cannot be reused or invalidated (criterion 32).
+# expect-problem: /assessments/0/fingerprints
+$schema: ../../../../../../docs/research/implementation/_schema.yaml
+schema_version: 1
+inspected_revision: d57faf7e8
+fingerprint_algorithm: xxh64
+assessments:
+- id: map.fx
+  adapter: discord
+  category: constraints
+  platform_id: discord
+  facts:
+  - c.fx
+  status: implemented
+  summary: s
+  code_refs:
+  - a.rs
+  test_refs: []
+  assessed_revision: d57faf7e8
+  fingerprints: []
+  review:
+    status: proposed
+    proposed_by: agent
+  requires_messenger_update: false
+---

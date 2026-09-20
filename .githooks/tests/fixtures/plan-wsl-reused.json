@@ -1,1 +1,201 @@
-{"accepted_evidence":[],"areas":[{"area":"pkg","packages":["alpha"],"selection_reason":"source change"}],"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cells":[{"area":"pkg","compile_coverage_from":"L1","environment":"ubuntu-latest","execution":"execute","gate":"L1","origin":"ci","package":"alpha","reusable":true,"selection_reason":"no evidence for this environment","state":"pending","target_kinds":["lib","test"]},{"area":"pkg","compile_coverage_from":"L1","environment":"wsl2-ubuntu","evidence":{"ref":"refs/notes/ci-local/wsl2-ubuntu"},"execution":"reuse","gate":"L1","origin":"prior-local","package":"alpha","reusable":true,"selection_reason":"satisfied by a prior cross-check receipt","state":"reused","target_kinds":["lib","test"]}],"change_class":"package","change_inventory":{"counts":{"configuration":0,"documentation":0,"other":0,"source":1,"total":1},"diff_available":true,"paths":{"configuration":[],"documentation":[],"other":[],"source":["alpha/src/lib.rs"]}},"environments":[{"capabilities":{"archive_only":false,"headless_browser":true,"node_pnpm":true,"tmux":true},"name":"ubuntu-latest","native_key":"ubuntu-latest","runner":"ubuntu-latest"},{"capabilities":{"archive_only":false,"headless_browser":false,"node_pnpm":false,"tmux":false},"name":"windows-latest","native_key":"windows-latest","runner":"windows-latest"},{"capabilities":{"archive_only":false,"headless_browser":false,"node_pnpm":false,"tmux":true},"name":"macos-latest","native_key":"macos-latest","runner":"macos-latest"},{"capabilities":{"archive_only":true,"headless_browser":false,"node_pnpm":false,"tmux":false},"name":"wsl2-ubuntu","native_key":"ubuntu-latest","runner":"windows-latest"}],"flags":{"ci_tooling":false},"full_scope":false,"full_scope_gates":[],"head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","job_estimate":2,"packages":[{"area":"pkg","check_args":"-p alpha","companion_suites":[],"gates":["L1"],"l1_include_slow":false,"l2_backends":[],"native":{},"package":"alpha","runner_tools":[],"selection_reason":"source change","targets":["lib","test"],"test_args":"","tiers":["L1"]}],"policy_gaps":[],"preflight_os":["ubuntu-latest"],"preflight_reason":"package-local change","prohibited_cells":[],"reverse_dependencies":[],"schema_version":3,"source_packages":["alpha"]}
+{
+  "accepted_evidence": [],
+  "areas": [
+    {
+      "area": "pkg",
+      "packages": [
+        "alpha"
+      ],
+      "selection_reason": "source change"
+    }
+  ],
+  "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "builds": [
+    {
+      "artifact": "build-alpha-ubuntu-latest-616c7068611f7571",
+      "compatibility_reason": "x86_64-unknown-linux-gnu archive produced on ubuntu-latest",
+      "compatible_environments": [
+        "ubuntu-latest",
+        "wsl2-ubuntu"
+      ],
+      "consumers": [
+        {
+          "environment": "ubuntu-latest",
+          "gate": "L1"
+        }
+      ],
+      "identity": {
+        "archive_format": "tar.zst",
+        "archive_includes": [],
+        "cargo_config": [],
+        "features": "",
+        "host": "x86_64-unknown-linux-gnu",
+        "linker": "cc",
+        "lockfile": "aaaabbbbccccdddd",
+        "native": [],
+        "nextest": "latest",
+        "package": "alpha",
+        "profile": "test",
+        "rust": "1.97.1",
+        "rustflags": "",
+        "sidecars": [],
+        "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "target": "x86_64-unknown-linux-gnu",
+        "target_kinds": [
+          "lib",
+          "test"
+        ]
+      },
+      "key": "616c7068611f7571",
+      "package": "alpha",
+      "producer": "ubuntu-latest"
+    }
+  ],
+  "cells": [
+    {
+      "area": "pkg",
+      "build": "616c7068611f7571",
+      "compile_coverage_from": "L1",
+      "environment": "ubuntu-latest",
+      "execution": "execute",
+      "gate": "L1",
+      "origin": "ci",
+      "package": "alpha",
+      "reusable": true,
+      "selection_reason": "no evidence for this environment",
+      "state": "pending",
+      "target_kinds": [
+        "lib",
+        "test"
+      ]
+    },
+    {
+      "area": "pkg",
+      "compile_coverage_from": "L1",
+      "environment": "wsl2-ubuntu",
+      "evidence": {
+        "ref": "refs/notes/ci-local/wsl2-ubuntu"
+      },
+      "execution": "reuse",
+      "gate": "L1",
+      "origin": "prior-local",
+      "package": "alpha",
+      "reusable": true,
+      "selection_reason": "satisfied by a prior cross-check receipt",
+      "state": "reused",
+      "target_kinds": [
+        "lib",
+        "test"
+      ]
+    }
+  ],
+  "change_class": "package",
+  "change_inventory": {
+    "counts": {
+      "configuration": 0,
+      "documentation": 0,
+      "other": 0,
+      "source": 1,
+      "total": 1
+    },
+    "diff_available": true,
+    "paths": {
+      "configuration": [],
+      "documentation": [],
+      "other": [],
+      "source": [
+        "alpha/src/lib.rs"
+      ]
+    }
+  },
+  "environments": [
+    {
+      "capabilities": {
+        "archive_only": false,
+        "headless_browser": true,
+        "node_pnpm": true,
+        "tmux": true
+      },
+      "name": "ubuntu-latest",
+      "native_key": "ubuntu-latest",
+      "runner": "ubuntu-latest"
+    },
+    {
+      "capabilities": {
+        "archive_only": false,
+        "headless_browser": false,
+        "node_pnpm": false,
+        "tmux": false
+      },
+      "name": "windows-latest",
+      "native_key": "windows-latest",
+      "runner": "windows-latest"
+    },
+    {
+      "capabilities": {
+        "archive_only": false,
+        "headless_browser": false,
+        "node_pnpm": false,
+        "tmux": true
+      },
+      "name": "macos-latest",
+      "native_key": "macos-latest",
+      "runner": "macos-latest"
+    },
+    {
+      "capabilities": {
+        "archive_only": true,
+        "headless_browser": false,
+        "node_pnpm": false,
+        "tmux": false
+      },
+      "name": "wsl2-ubuntu",
+      "native_key": "ubuntu-latest",
+      "runner": "windows-latest"
+    }
+  ],
+  "flags": {
+    "ci_tooling": false
+  },
+  "full_scope": false,
+  "full_scope_gates": [],
+  "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "job_estimate": 2,
+  "packages": [
+    {
+      "archive_includes": [],
+      "area": "pkg",
+      "check_args": "-p alpha",
+      "companion_suites": [],
+      "gates": [
+        "L1"
+      ],
+      "l1_include_slow": false,
+      "l2_backends": [],
+      "native": {},
+      "package": "alpha",
+      "runner_tools": [],
+      "selection_reason": "source change",
+      "sidecars": [],
+      "targets": [
+        "lib",
+        "test"
+      ],
+      "test_args": "",
+      "tiers": [
+        "L1"
+      ]
+    }
+  ],
+  "policy_gaps": [],
+  "preflight_os": [
+    "ubuntu-latest"
+  ],
+  "preflight_reason": "package-local change",
+  "prohibited_cells": [],
+  "reverse_dependencies": [],
+  "schema_version": 4,
+  "source_packages": [
+    "alpha"
+  ]
+}

@@ -1,7 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::fs;
 
 fn fix_artifact(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .join("../fixes/_completed/2026-09-03-tts-not-finishing")
         .join(name);
     fs::read_to_string(&path)
@@ -65,7 +65,7 @@ fn regression_matrix_covers_every_phase_one_failure_category() {
 
 #[test]
 fn protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records() {
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let fixture_dir = biscuit_test_harness::manifest_dir!()
         .join("../fixes/_completed/2026-09-03-tts-not-finishing/fixtures");
     let mut fixture_names = Vec::new();
 

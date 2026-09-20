@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 /// Reads a committed manifest fixture by stem.
 fn fixture_text(stem: &str) -> String {
-    let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path: PathBuf = biscuit_test_harness::manifest_dir!()
         .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path)

@@ -477,7 +477,7 @@ Quirks:
 - The adapter depends on a private Antigravity SQLite schema. Source comments say permission/error shapes were reverse-engineered from real `agy` DBs.
 - Streaming is polling-based, not provider stdout streaming.
 - The adapter ignores `agy` stdout and only captures stderr for diagnostics.
-- `HOME` matters. The adapter defaults to `os.homedir()/.gemini/antigravity-cli/conversations`; Claudine's wrapped HOME/shadow HOME patterns can accidentally point it at an empty state directory.
+- `HOME` matters. The adapter defaults to `os.homedir()/.gemini/antigravity-cli/conversations`. Claudine never changes `HOME` for a wrapped launch (it refuses `claudine antigravity --repo` instead), so the adapter sees the user's real state directory; any caller that does move `HOME` points it at an empty one.
 - Native `agy` has a `--sandbox` flag, but the adapter does not expose a first-class ACP sandbox capability. Claudine can pass it through `AGY_EXTRA_ARGS` or wrapper configuration if desired.
 - `agy` 1.1.0 request-review mode pauses before file writes in the native TUI, but that approval loop is not bridged to ACP.
 - Google ToS/FAQ concerns are not theoretical: the adapter README and related GitHub issues document account suspension risk for third-party access patterns.

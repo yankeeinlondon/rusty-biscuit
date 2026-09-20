@@ -6,12 +6,13 @@
 //! borrowed context, F13 leftmost-longest replacement automaton, and F14
 //! scan fast-path must all preserve.
 
+use biscuit_test_harness::manifest_dir;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
 use std::path::PathBuf;
 
 fn fixture_text(stem: &str) -> String {
-    let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path: PathBuf = manifest_dir!()
         .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("fixture {} readable: {e}", path.display()))

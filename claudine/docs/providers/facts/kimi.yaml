@@ -296,3 +296,20 @@ unmapped_native_events: []
 # classify_jsonrpc_error; the numeric values mirror the wire-protocol
 # constants in lib/src/stream/protocol/kimi.rs (KimiJsonRpcError). Unknown
 # codes fall through to the message branch.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# Source root is `~/.kimi-code`, NOT `~/.kimi` (the retired `kimi-cli` layout
+# the agent offset still names).
+overlay_selector:
+  env_var: KIMI_CODE_HOME
+  shape: provider_dir
+  relocates:
+  - config
+  - auth
+  - sessions
+  additive: false
+  source_root: "~/.kimi-code"
+# Kimi exposes no one-run MCP injection mechanism.
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: unsupported
+  mcp: unsupported

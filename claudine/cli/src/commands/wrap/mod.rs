@@ -4,7 +4,7 @@ pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod live_semantic_sink;
 pub(crate) mod profile;
-pub(crate) mod repo_home;
+pub(crate) mod provider_overlay;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
 pub(crate) mod session_report;
@@ -44,7 +44,8 @@ pub(crate) use harness_orch::{
     build_harness_shell_options, build_harness_shell_options_for_source,
     build_harness_shell_options_for_source_with_cache, build_harness_shell_options_with_cache,
     execute_harness_attempt, find_wrapper_harness_source, harness_policy_root,
-    harness_prompt_mode_label, materialize_harness_prompt, materialize_passthrough_harness_seed,
+    harness_prompt_mode_label, load_overlaid_document, materialize_harness_prompt,
+    materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, run_harness_loop,
 };
 pub(crate) use inline::{
@@ -548,8 +549,12 @@ fn run_provider_wrapper_inner(
         deferred_warnings.push(warn);
     }
 
-    let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
-        && matches!(provider, Provider::Codex | Provider::Gemini);
+    let overlay_reasons = provider_overlay::overlay_reasons(
+        provider,
+        repo_requested,
+        args.mcp || !args.mcp_use.is_empty(),
+        &launch_workspace.child_cwd,
+    );
 
     let child_env_started = std::time::Instant::now();
     let mut env_plan_result = env::build_child_env_with_launch(
@@ -560,8 +565,9 @@ fn run_provider_wrapper_inner(
         !non_interactive_requested,
         &raw_agent_params,
         &env_overrides,
-        repo_requested,
-        needs_mcp_shadow_home,
+        overlay_reasons,
+        invocation.home_baseline(),
+        invocation.env_baseline(),
         launch_workspace,
         perf_enabled,
     );

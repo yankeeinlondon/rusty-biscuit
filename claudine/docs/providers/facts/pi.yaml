@@ -317,3 +317,21 @@ unmapped_native_events: []
 # from lib/src/stream/providers/pi.rs::ERROR_KEYWORDS). Pi is a message-only
 # classifier (no structured error kind), so `kind_buckets` is omitted. Sequence
 # order IS the cascade order (first substring hit wins).
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# Source root is `~/.pi/agent`, not `~/.pi`. `PI_CODING_AGENT_SESSION_DIR` is a
+# separate, narrower selector for session storage — Pi's analogue of
+# `CODEX_SQLITE_HOME` — and is deliberately not recorded here.
+overlay_selector:
+  env_var: PI_CODING_AGENT_DIR
+  shape: provider_dir
+  relocates:
+  - config
+  - auth
+  - sessions
+  additive: false
+  source_root: "~/.pi/agent"
+# Pi exposes no one-run MCP injection flag.
+overlay_capabilities:
+  repo_resources: native_root
+  repo_prompt: unsupported
+  mcp: unsupported

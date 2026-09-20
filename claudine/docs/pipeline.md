@@ -7,7 +7,7 @@ description: |-
     named so they can be discussed, reordered, parallelized, deferred, or
     eliminated in pursuit of an order-of-magnitude speedup of both real and
     perceived latency.
-last_updated: 2026-07-23
+last_updated: 2026-09-17
 ---
 
 # Compose / Inline-Compose Pipeline
@@ -101,7 +101,45 @@ correctly.
 | B3.5 | **Final model resolution** [M] | Re-run model resolution with the (potentially refreshed) catalog. |
 | B3.6 | **Install `AGENT` env var** [M] | Both into the parent process env (`set_var`) and into `env_overrides` for the child. |
 
-### B4. Shell preflight (template commands)
+### B4. Staged initialization and shell preflight
+
+For live `compose` and `inline-compose`, a document with an authored
+`initialize` key takes the staged path below. Newly adopted proxy targets also
+enter staged initialization. Direct documents without that key retain eager
+body discovery and schema validation. Parsing the root document and capturing
+its request context are permitted before initialization; following a body
+include is not.
+
+1. `prepare_bootstrap` composes only the frontmatter/lifecycle surface using
+   Darkmatter's `ComposeOptions::only_frontmatter_surface()`. The result is a
+   `BootstrapPreparation`, not a completed prompt.
+2. Reject initialization shell actions and bootstrap frontmatter shell expansion.
+   Approvals, `--yolo`, false conditions, and `no_error` cannot allow them.
+3. Run `initialize` once. A skip, error, or proxy handoff leaves the abandoned
+   body's dependencies unread.
+4. Reread the stabilized document with caller inputs, provenance, document
+   epoch, and resolution context retained.
+5. Discover and approve body and remaining lifecycle commands; complete
+   canonical composition and the schema verdict. Only then
+   may the provider receive the prompt. An include still missing at this point
+   fails with the ordinary typed diagnostic and `blocked`/`finalize` routing.
+
+Early blocked/failure/finalize handlers remain shell-free until successful
+preflight reaches `start`. Non-shell initialization effects remain available.
+
+The B4–B6 tables describe the eager path; staged documents defer the body audit
+and full preparation until step 4 above. Loop seed preparation uses the
+bootstrap surface; iteration 1 composes the stabilized reread. Retry/resume
+reread and audit without another initialization. Later loop iterations reuse
+the audited structural plan.
+
+`--dry-run` retains the eager discovery path without initialization effects or
+dynamic proxy traversal, so generated includes can still be missing. Sequences
+retain static preflight over the complete graph: create includes before
+starting the sequence, not in an earlier sequence task. See
+[composition](topics/composition.md#documents-that-declare-initialize) and
+[lifecycle](topics/lifecycle.md#lifecycle-properties).
+
 
 The composition pipeline pre-approves shell-expansion commands found in
 the template body so Darkmatter can run them non-interactively.
@@ -167,8 +205,8 @@ the `composition_prepare` span.
 
 | # | Step | Notes |
 |---|------|-------|
-| C3.1 | **Decide MCP shadow-HOME need** [M] | Codex/Gemini + (`--mcp` or `--use`). |
-| C3.2 | **Decide repo shadow-HOME need** [O-flag] | `--repo`. |
+| C3.1 | **Decide overlay reasons (`provider_overlay::overlay_reasons`)** [M] | `--repo` → `repo_resources`; `--mcp`/`--use` → `mcp` only for a provider with an MCP verdict (Codex, Gemini, OpenCode inline); repository prompts → `repo_prompt` (Codex). |
+| C3.2 | **Plan the provider overlay** [O-flag] | Inside C3.3. An `Unsupported` verdict stops the launch with `provider.overlay_unsupported`; a build failure with `provider.overlay_failed`. Both are pre-spawn and have no fallback. Home variables are never written. |
 | C3.3 | **Build child env (`env::build_child_env_with_launch`)** [M] | Uses the pre-computed `LaunchWorkspaceContext` from `request.prep_launch_workspace` (W0). No redundant `resolve_launch_workspace_context` call. |
 | C3.4 | **Apply `--operation` env override** [O-flag] | |
 | C3.5 | **Apply request-level env overrides** [M] | E.g., `FAIL_FAST` from sequence. |
@@ -177,7 +215,7 @@ the `composition_prepare` span.
 | C3.8 | **MCP: lex `#tags` from prompt** [O-flag] | |
 | C3.9 | **MCP: `compute_session_set`** [O-flag] | Resolve tags → server set; ambiguity prompts in TTY+interactive. |
 | C3.10 | **MCP: handle missing/ambiguous tags** [O-flag] | `--strict` makes them fatal. |
-| C3.11 | **MCP: provider injector** [O-flag, O-prov] | Codex/Gemini/OpenCode get runtime injection (writes shadow config or sets `OPENCODE_CONFIG_CONTENT`); other providers hard-fail with a hint to use `claudine mcp export`. |
+| C3.11 | **MCP: provider injector** [O-flag, O-prov] | Codex/Gemini/OpenCode/Kilo get runtime injection (writes shadow config or sets `OPENCODE_CONFIG_CONTENT`/`KILO_CONFIG_CONTENT`); other providers hard-fail with a hint to use `claudine mcp export`. |
 
 ### C4. Provider argv assembly
 
@@ -425,7 +463,7 @@ combos:
 - No `loop:` frontmatter: skips F5 entirely; B6 runs once.
 - No `lifecycle:` frontmatter: skips D4 (`load_claudine_config` for runtime config).
 - No `--mcp` / `--use`: skips C3.6-C3.11.
-- No `--repo` and no MCP: skips shadow-HOME setup in C3.3.
+- No overlay reason (no `--repo`, no root-requiring MCP injection, no Codex repository prompts): skips provider-overlay planning and materialization in C3.3.
 - No harness frontmatter: skips D6.harness/preflight shell-approval differences; still runs through E1.1 with the bare plan.
 - TTY + explicit `--<provider>`: skips picker in B3.2.tty.
 - `--<provider>` flag: skips all picker UI.

@@ -25,7 +25,7 @@ fn read_to_string(path: &Path) -> String {
 }
 
 fn repository_root(process: &CliProcessFixture) -> PathBuf {
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let checkout = biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(Path::parent)
         .expect("darkmatter CLI crate should live two levels below the repository root")

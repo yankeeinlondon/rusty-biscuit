@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-f5ad4b547fc2e7fb
-last_updated: 2026-09-08
+hash: ef46db3751d8e999-3c56b01a01fcef18
+last_updated: 2026-09-17
 ---
 # Darkmatter
 
@@ -9,6 +9,8 @@ last_updated: 2026-09-08
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
+- YAML frontmatter rejects duplicate keys at every mapping depth; explicit
+  document merges continue to use their selected conflict strategy
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 

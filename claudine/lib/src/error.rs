@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::diagnostics::{Category, Diagnostic, Disposition, Origin, code_spec, null_detail_for};
-use crate::provider::Provider;
+use crate::provider::{OverlayReason, Provider};
+use crate::provider_overlay::OverlayStage;
 
 /// Heterogeneous lower-layer cause of a policy-engine parse failure.
 ///
@@ -173,6 +174,49 @@ pub enum ClaudineError {
     /// Provider adapter parse/format error.
     #[error("adapter error: {0}")]
     Adapter(#[from] crate::hook_adapters::AdapterError),
+
+    /// A provider has no verified provider-owned mechanism for a requested
+    /// overlay activation reason.
+    ///
+    /// Raised before the provider is spawned. Claudine refuses the requested
+    /// mode rather than replacing the child's home or weakening the isolation
+    /// the caller asked for. Only the *name* of a selector variable is
+    /// carried — never its value, and never file content (Invariant 8).
+    #[error(
+        "{provider} cannot satisfy {} through a provider-owned selector: {next_action}",
+        <&'static str>::from(*reason)
+    )]
+    ProviderOverlayUnsupported {
+        /// Provider whose overlay was requested.
+        provider: Provider,
+        /// The activation reason that cannot be satisfied.
+        reason: OverlayReason,
+        /// The provider-owned variable that would have carried the overlay,
+        /// when the provider has one at all.
+        selector: Option<&'static str>,
+        /// What the caller can do instead.
+        next_action: String,
+    },
+
+    /// Building a provider overlay failed before the provider was spawned.
+    ///
+    /// The launch stops here: there is no null-home fallback and no
+    /// silently weakened launch.
+    #[error(
+        "provider overlay for {provider} failed at {stage} ({}): {source}",
+        <&'static str>::from(*reason)
+    )]
+    ProviderOverlayFailed {
+        /// Provider whose overlay was being built.
+        provider: Provider,
+        /// The activation reason the overlay was being built for.
+        reason: OverlayReason,
+        /// What Claudine was doing when it failed.
+        stage: OverlayStage,
+        /// The filesystem failure `stage` describes.
+        #[source]
+        source: std::io::Error,
+    },
 
     /// Provider does not support automatic config creation.
     #[error("config creation not supported for provider: {provider}")]
@@ -380,6 +424,8 @@ impl Diagnostic for ClaudineError {
             // `provider.*` — the agent run as infrastructure.
             ClaudineError::ProviderNotAvailable(_) => "provider.unavailable",
             ClaudineError::Adapter(_) => "provider.stream_error",
+            ClaudineError::ProviderOverlayUnsupported { .. } => "provider.overlay_unsupported",
+            ClaudineError::ProviderOverlayFailed { .. } => "provider.overlay_failed",
             // `io.*` — filesystem / network plumbing.
             ClaudineError::Io(e) => match e.kind() {
                 std::io::ErrorKind::PermissionDenied => "io.permission_denied",
@@ -460,6 +506,33 @@ impl Diagnostic for ClaudineError {
             // only knows the provider name; the executable path is unknown.
             ClaudineError::ProviderNotAvailable(provider) => {
                 base["provider"] = json!(provider);
+            }
+            // `provider.overlay_unsupported` declares `provider`, `reason`,
+            // `selector`, `next_action`. `selector` is a variable name; the
+            // value it would have carried is deliberately not projected.
+            ClaudineError::ProviderOverlayUnsupported {
+                provider,
+                reason,
+                selector,
+                next_action,
+            } => {
+                base["provider"] = json!(provider.to_string());
+                base["reason"] = json!(<&'static str>::from(*reason));
+                base["selector"] = json!(selector);
+                base["next_action"] = json!(next_action);
+            }
+            // `provider.overlay_failed` declares `provider`, `reason`,
+            // `stage`, `message`.
+            ClaudineError::ProviderOverlayFailed {
+                provider,
+                reason,
+                stage,
+                ..
+            } => {
+                base["provider"] = json!(provider.to_string());
+                base["reason"] = json!(<&'static str>::from(*reason));
+                base["stage"] = json!(stage.as_str());
+                base["message"] = json!(self.to_string());
             }
             // `io.read_failed` declares `path`.
             ClaudineError::SystemPromptFileNotFound(path) => {

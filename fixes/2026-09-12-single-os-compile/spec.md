@@ -5,6 +5,7 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-12
 implemented: false
+review_iterations: 3
 area: repository-ci
 depends-on:
   - fixes/2026-09-11-cicd-cleanup/spec.md

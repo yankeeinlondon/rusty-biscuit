@@ -497,7 +497,8 @@ fn scan_focus_stealing(area_root: &Path) -> Result<Vec<String>, String> {
 // every recipe that would run it.
 #[test]
 fn focus_stealing_apis_stay_in_keyboard_tier_files() {
-    let area_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let cli_root = biscuit_test_harness::manifest_dir!();
+    let area_root = cli_root
         .parent()
         .expect("CLI crate should be inside the Claudine package area");
     let violations = scan_focus_stealing(area_root).expect("focus-stealing scan");
@@ -538,7 +539,8 @@ fn focus_stealing_detection_ignores_comments_and_honors_tier_naming() {
 
 #[test]
 fn repository_test_placement() {
-    let area_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let cli_root = biscuit_test_harness::manifest_dir!();
+    let area_root = cli_root
         .parent()
         .expect("CLI crate should be inside the Claudine package area");
     let (violations, exception_errors) = scan_repository(area_root).expect("repository scan");

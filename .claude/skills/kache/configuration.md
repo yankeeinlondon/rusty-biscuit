@@ -1,5 +1,38 @@
 # Configuration and best practices
 
+## Version-specific recovery findings (0.19–0.23, 2026-09-17)
+
+These findings supersede older defaults described below and in the overview:
+
+- On macOS, 0.19 caches executables and test harnesses by default, including
+  potentially large dSYM bundles. `cache_executables = false` favors library
+  reuse in a constrained store; it does not delete existing entries or targets.
+- The default GC protects entries with externally retained blobs, including
+  APFS clones. It can skip an entire entry containing both shared and private
+  artifacts. `local_max_size` is therefore not a hard ceiling under that policy.
+  `gc_evict_shared = true` permits size eviction of those entries, sacrificing
+  cache hits without reclaiming blocks that targets still retain. Read
+  `kache gc --json`: `entries_unreclaimable`, `entries_pinned`, and actual
+  reclaimed bytes distinguish policy skips from failures.
+- Private and shared bytes are separate portions of the store. Shared bytes
+  are real blocks, not additional pointers inflating the private-byte count;
+  adding cache and target directory sizes can double-count them.
+- Identical 24-hour and 7-day statistics can mean **rotated history**, not a new
+  cache. The 10 MiB event log default retained roughly half an hour under this
+  host's concurrent builds. Check event timestamps and rotation metadata.
+  `event_log_max_size` and `event_log_keep_lines` control retention. Keep
+  `explain_miss` temporary: it reads event history on misses.
+- An agent's isolated HOME can produce misleading Cargo-wiring warnings and
+  resolve a different config from the daemon. Use the daemon's reported config
+  with `KACHE_CONFIG` and the actual host `CARGO_HOME` when diagnosing it.
+- Version 0.22 moves GC off the daemon's store lock; this is not proof that
+  every SQLite busy/snapshot failure is fixed. Verify the installed version's
+  GC results. Version 0.23.1 was validated with a repeated library build on APFS.
+
+Sources: [0.19 config](https://github.com/kunobi-ninja/kache/blob/v0.19.0/src/config.rs),
+[0.19 eviction](https://github.com/kunobi-ninja/kache/blob/v0.19.0/crates/kache-store/src/store.rs),
+[0.22 release](https://github.com/kunobi-ninja/kache/releases/tag/v0.22.0).
+
 ## Where things live
 
 | Item | Path |
@@ -13,7 +46,9 @@
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |
 
 `kache doctor` prints the resolved store and Cargo wiring. Use it rather than guessing, especially
-if the home directory or Cargo config is synced across hosts.
+if the home directory or Cargo config is synced across hosts. Before accepting its report that the
+wrapper is absent, inspect the process's effective `HOME` and `CARGO_HOME`: an agent or sandbox can
+shadow `~/.cargo/config.toml` while the real host config remains correct.
 
 ## Host policy versus repository policy
 
@@ -149,6 +184,33 @@ Consequences worth planning around:
 Use `kache why-miss <crate>` when something you expected to hit didn't — it names the differing key
 component instead of leaving you to guess.
 
+### Diagnosing poor reuse
+
+Do not collapse every successful store interaction into a "hit":
+
+- A **hit** avoids compilation by restoring an existing artifact.
+- A **duplicate** (`dup`) compiles first and only then discovers that the produced content already
+  exists. It saves physical storage, not compiler time.
+- A **passthrough** is an unsupported or deliberately uncached compiler shape.
+- A **miss** compiles and stores a new key.
+
+When one crate accumulates many recent entries with zero hits, investigate key proliferation before
+changing the store cap. Compare rustc versions, target triples, profiles and codegen flags, feature
+sets and Cargo feature unification, generated inputs, and dependency hashes. Concurrent worktrees
+often expose this because nominally similar package selections can resolve different build graphs.
+
+Dependency-level explanations must be recorded before the reproduction:
+
+```toml
+[cache]
+explain_miss = true
+```
+
+Enable this temporarily, reproduce the expected hit, then run `kache why-miss <crate>`. Without the
+recorded explanation data, a generic key mismatch cannot identify the dependency cascade. Reading a
+large event history on every miss has overhead, so disable it after diagnosis unless continuous
+attribution is worth that cost.
+
 ## Observability
 
 ```bash
@@ -162,6 +224,9 @@ kache report --format perfetto -o trace.json     # build trace for profiling
 
 `report` also emits `json`, `chrome-trace`, `github` and `text`, with `--top N` and `--root <path>`
 to scope to one build tree.
+
+`stats --last-build` is a session view, not necessarily one Cargo command. Read
+[versions.md](versions.md) before using it to reconcile a live-monitor count with historical stats.
 
 For an adoption review, record the weighted hit rate and estimated time saved alongside store size,
 representative target size, free space, worktree count, and remote status. A young cache may deserve

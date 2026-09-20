@@ -31,6 +31,11 @@ pub struct SequenceArgs {
     /// Accepts: true, false, 1, 0, yes, no.
     #[arg(long = "fail-fast", value_name = "BOOL", value_parser = parse_boolish)]
     pub fail_fast: Option<bool>,
+
+    /// Enforce the shared budget in this ledger (see `claudine budget init`)
+    /// across every agent launch, retry, and wait of this run.
+    #[arg(long = "budget-ledger", value_name = "PATH")]
+    pub budget_ledger: Option<std::path::PathBuf>,
 }
 
 fn parse_boolish(s: &str) -> Result<bool, String> {
@@ -53,7 +58,15 @@ pub fn run_sequence(
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<()> {
-    let code = run_sequence_inner(args, verbose, startup_timings)?;
+    let code = match args.budget_ledger.clone() {
+        Some(ledger) => {
+            let shared = args.shared.clone();
+            crate::budget::run_with_ledger(&ledger, &shared, || {
+                run_sequence_inner(args, verbose, startup_timings)
+            })?
+        }
+        None => run_sequence_inner(args, verbose, startup_timings)?,
+    };
     std::process::exit(code);
 }
 
@@ -226,6 +239,7 @@ fn run_sequence_inner(
         shared,
         args,
         fail_fast,
+        budget_ledger: _,
     } = args;
 
     if shared.timeout.is_some() && shared.interactive {
@@ -513,6 +527,7 @@ mod tests {
             shared: shared_args(),
             args: vec![file.to_string_lossy().into_owned()],
             fail_fast: None,
+            budget_ledger: None,
         };
         let report = run_sequence_inner(args, 0, None).unwrap_err();
         let err = report

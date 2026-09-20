@@ -79,6 +79,26 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 - For when/why a feature changed → [timeline.md](timeline.md)
 - For a specific subsystem → the deep topic docs under [Reference Documents](#reference-documents)
 
+## Initialization shell boundary
+
+Loop initialization uses the full bootstrap frontmatter separately from the
+control-variable seed. Share its live state with catch handlers and retain
+`set` writes in the invocation RuntimeState for subsequent preparations.
+Mapping `set` destinations absent from the pre-write snapshot are known null
+bindings; this permits copying an optional value before resetting it. Existing
+values still win over those null defaults, and unrelated unknown roots remain
+errors.
+
+`initialize` runs before preflight and is shell-free. Reject shell actions even
+in dead branches and reject bootstrap frontmatter `$(...)` expansion; approval
+flags, whitelists, caches, and handlers cannot grant an exception. Non-shell
+effects keep their existing restrictions. Early blocked/failure/finalize chains
+cannot execute shells either, including catch evaluation-error routes, and
+`no_error` cannot suppress the prohibition. The shared runtime permits lifecycle
+shells only from `start`, after preflight, and proxy adoption resets that boundary.
+Keep parser rejection and the runtime backstop together. See the binding ruling
+in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
+
 ## Library Module Map
 
 The primary public modules are below; the shared `error` type and flat
@@ -151,6 +171,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
 | `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated`, and stamps a Darkmatter `Simple` `hash:` |
 | `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
+| `claudine budget init\|show\|suspend\|resume\|grant <ledger>` | Create and operate a persisted run budget; `sequence --budget-ledger <ledger>` enforces it across every launch, retry, restart, and crash (exit `76` exhausted, `77` blocked) — [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
 
 **Administration**
 
@@ -183,6 +204,7 @@ An empty `ctx.area` at the repository root is expected.
 | Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting) | [CLI Pre-Parsing](cli-pre-parsing.md) |
 | System prompt | File-backed `--append-system-prompt`/`--asp` + `--replace-system-prompt`/`--rsp`, launch-CWD `system-prompt.md` discovery, per-provider delivery; direct wrappers also take `--edit` | [System Prompt](system-prompt.md) |
 | Timeouts | Two rules only — `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`) | [Timeouts](timeouts.md) |
+| Run budgets | `sequence --budget-ledger` debits each agent launch before spawn in `execute_attempt_phase` and caps its `timeout` at the remaining active time, rounded **up** to whole seconds (the wall-clock timer has 1 s resolution); step boundaries, retry backoff, settle, and a heartbeat thread check exhaustion. The run is installed process-wide (`budget::run`), so every hook is a no-op without a ledger | [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
 | Runaway content guards | Three volume backstops — `exit_expressions`, `runaway_repetition` (≥30 cycles), `runaway_volume` (50k lines / 32 MiB) — mapping to `Aborted`/`AgentFailure`, never a retry | [Timeouts § Content guards](timeouts.md#content-guards-runaway-output) |
 | OpenCode stalled-generation | Live-but-dead backstop: trips only on retry churn **and** progress silence (`stall_timeout`, default `10m`); not a third timeout | [Timeouts § Stall](timeouts.md#opencode-stalled-generation-backstop) · [OpenCode Event Sources](opencode-event-sources.md) |
 | Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](signal-handling.md) |
@@ -195,7 +217,7 @@ An empty `ctx.area` at the repository root is expected.
 | Composition diagnostics | Prepare-time did-you-mean warnings (unknown function / `ctx.*`, `--silent`-suppressed); frontmatter-rooted errors append a highlighted, line-numbered YAML block (TTY-gated) | [Composition](composition.md#prepare-time-warnings) |
 | Whole-value frontmatter | A value that is *exactly one* `{{ … }}` / `$(…)` span is executable state — it must resolve and must never leak as raw syntax | [Composition § Whole-value](composition.md#whole-value-frontmatter-expansion-is-executable-state) |
 | Sequences | Two phases: static preflight over the whole task graph (dynamic sources snapshot once, shell approved byte-for-byte, no exceptions), then just-in-time composition at each step's turn against the live file. One executable per task; `outputs` is the sole accumulator; groups run serial or parallel | Sequences · [architecture.md § Sequences](architecture.md#sequences) |
-| Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), leak & err-placement guards, `no_error`, the `stdout` channel | [Lifecycle](lifecycle.md) |
+| Lifecycle stacks | Seven flow-control verbs (`stop`/`skip`/`error`/`proxy`/`retry`/`resume`/`defer`; `defer` unimplemented), two action forms, early/late binding via Darkmatter DM1/DM2 (strict, fail-closed), nested-span-in-literal, surviving-span & err-placement guards, `no_error`, the `stdout` channel. Lifecycle YAML mutation is mapping-only (`set: {property: value}`); the capability/loop DSL retains `set(key, value)` | [Lifecycle](lifecycle.md) |
 | Document handoffs | `proxy` swaps the active document; one coordinator owns identity, one canonical service prepares every entry reason, so a proxied target behaves like the same document invoked directly. Key/value `proxy.with:` adds a transient, source-evaluated, typed frontmatter overlay for the immediate target | [Lifecycle § Proxy Handoffs](lifecycle.md#proxy-handoffs) · [Composition § Handoffs](composition.md#document-handoffs-and-the-equivalence-contract) |
 | Retry/resume re-entry | Both replace only the provider-attempt slice: canonical fresh read, overlay + provenance kept, budgets decrement, no second `initialize`. The whole launch bundle is recomputed at that fresh read, not snapshotted at adoption, and that bundle *is* the launch — a retry spawns under the refreshed plan. `resume` also compares a session-compatibility key and refuses (`LifecycleResumeIncompatible`) when a facet moved — every document-reachable facet refuses end-to-end; workspace CWD and system-prompt content are immutable invocation inputs | [Lifecycle § Retry and resume](lifecycle.md#retry-and-resume-re-entry) · [Composition § Retry and resume](composition.md#retry-and-resume-re-entry) |
 | Dry run | `--dry-run` stops at a seam right after provider/model resolution — **no selected-executable validation, lifecycle events, MCP/argv/CWD setup, proxy traversal, or `inline-compose` mutation**. The selected agent need not be installed. `::shell` spans in the document graph are composition, not lifecycle, and still run for real | [Composition § Dry Run](composition.md#dry-run) |
@@ -208,10 +230,10 @@ Claudine stores normalized MCP data in `~/.claudine/mcp/catalog.json`, `~/.claud
 Provider rollout:
 
 - **Import and sync:** Claude, Codex, Gemini, OpenCode
-- **Runtime wrapper injection:** Codex, Gemini, OpenCode
+- **Runtime wrapper injection:** Codex, Gemini, OpenCode, Kilo
 - **No MCP support yet:** Goose, Kimi, Qwen
 
-Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,...]` adds explicit servers and enables MCP mode. Codex/Gemini inject via a shadow HOME under `~/.claudine`; Codex keeps SQLite state at its pre-shadow native `sqlite_home`/`CODEX_SQLITE_HOME`/`CODEX_HOME` destination so database and WAL/SHM files are never linked into the overlay. OpenCode uses `OPENCODE_CONFIG_CONTENT`. Claude, Goose, Kimi, and Qwen wrappers direct users to `claudine mcp export <provider> --apply` instead. Read [MCP Catalog](mcp-catalog.md) and [MCP Mode](mcp-mode.md) before changing MCP behavior.
+Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,...]` adds explicit servers and enables MCP mode. Codex/Gemini inject into a per-launch provider overlay under `~/.claudine/overlays`, selected through `CODEX_HOME`/`GEMINI_CLI_HOME` — never by changing `HOME`, so nested tools keep the user's identity; Codex keeps SQLite state at its pre-overlay native `sqlite_home`/`CODEX_SQLITE_HOME`/`CODEX_HOME` destination so database and WAL/SHM files are never linked into the overlay. OpenCode and Kilo use `OPENCODE_CONFIG_CONTENT` and `KILO_CONFIG_CONTENT`. Claude, Goose, Kimi, and Qwen wrappers direct users to `claudine mcp export <provider> --apply` instead. Read [MCP Catalog](mcp-catalog.md) and [MCP Mode](mcp-mode.md) before changing MCP behavior.
 
 ## Reference Documents
 

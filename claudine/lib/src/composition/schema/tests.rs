@@ -19,7 +19,7 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
 }
 
 fn shipped_implement_plan() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above claudine/lib")
@@ -138,12 +138,10 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     assert_eq!(
         commands,
         [
-            "git add ..",
-            "just commit",
-            "gitnexus analyze --force",
-            "git add ..",
-            "git commit -m \"\"",
-            "gitnexus analyze --force",
+            format!("git add {}", prepared.source_repo_root.as_ref().unwrap().display()),
+            "just commit".to_string(),
+            "git add ..".to_string(),
+            "git commit -m \"\"".to_string(),
         ],
         "preflight is condition-blind, so both branches must resolve without an unknown-root error",
     );

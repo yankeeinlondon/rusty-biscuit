@@ -34,7 +34,10 @@ use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
 
-pub use frontmatter::{FmEntry, FmValueKind, FrontmatterAst, YamlParseError};
+pub use frontmatter::{
+    FmEntry, FmEntryRole, FmPathSegment, FmScalarStyle, FmValueKind, FrontmatterAst,
+    YamlParseError, format_dotted,
+};
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
 };
@@ -1064,7 +1067,7 @@ mod tests {
 
     #[test]
     fn shipped_schema_corpus_uses_content_classification() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas");
+        let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
             ("claudine-types.yaml".to_string(), "ready"),
             ("claudine.yaml".to_string(), "ready"),
@@ -1131,7 +1134,7 @@ mod tests {
     }
 
     fn copy_dialect_fixture(root: &Path) {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let source = biscuit_test_harness::manifest_dir!()
             .join("../tests/fixtures/schema-triggers");
         for directory in ["schemas", "docs"] {
             std::fs::create_dir_all(root.join(directory)).unwrap();

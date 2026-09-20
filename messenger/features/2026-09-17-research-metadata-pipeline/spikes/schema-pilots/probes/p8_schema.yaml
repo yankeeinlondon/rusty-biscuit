@@ -1,0 +1,2 @@
+$schema:
+    facts: "Fact[](required)@./p8_types.yaml"

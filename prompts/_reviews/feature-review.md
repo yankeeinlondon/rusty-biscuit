@@ -19,40 +19,40 @@ spec_name: "{{ parent_dir(spec) }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
-    message: "🏃‍♂️ starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area || ctx.repo}}** {{ctx.area_description}}_)"
+    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
     stack:
         - when: "frontmatter(review,'ready') == true"
           action:
               - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: |-
-                    ✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)
+                    ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
               - effect: small-group-cheer
         - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
           action:
               - message: |-
                     🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
 
-                    {{ as_ordered_list(frontmatter(review,"human_review_items")) }}    
+                    {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
               - info: |-
-                    {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items'))}} items):
+                    review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
     
-                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
+                    {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
         - when: "frontmatter(review,'ready') != true"
           action:
               - warn: |-
                     {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
               - message: |-
-                    ⚠️  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area || ctx.repo}}** {{ctx.area_description}} _completed_ but was deemed NOT production ready! Findings include:
+                    ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
 
                     {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
-              - effect: sad-trombone
-        - when: "frontmatter(review,'ready') != true && frontmatter(review,'human_review') == true"
-          action:
-              - message: |-
-                    In addition to the review findings, there _are_ human review items as well:
 
-                    {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
+                    {{ 
+                        frontmatter(review,'human_review') == true
+                            ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
+                            : '- no _human review_ is required at this point'
+                    }}
+              - effect: sad-trombone
 failure:
     stderr: |-
         {{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
@@ -137,7 +137,9 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ## Closure
 
-- Save your review suggestions to "@{{review}}"
+### Review Frontmatter
+
+- Save your review suggestions/findings to "@{{review}}"
 - Save the following frontmatter properties to the review file (@{{review}}):
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
@@ -155,7 +157,17 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
     - set the `implemented` property to `true`
 ::end-block
-- Set the spec file's ({{spec}}) `review_iterations` Frontmatter property to '{{iteration}}'
+
+### Spec Frontmatter
+
+The spec file which underpins the requirements for this feature review needs to have it's frontmatter properties updated too:
+
+- the spec file is located at: {{spec}}
+- Set the `review_iterations` Frontmatter property to '{{iteration}}'
+- if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
+
+### Summarize
+
 - Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
 
 ::block when="iteration != 1"

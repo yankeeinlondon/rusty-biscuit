@@ -51,14 +51,14 @@ fn recent_commits_fn(args: &[Value], context: &ResolutionContext) -> Result<Valu
     let Some(root) = context.repository_root.as_deref() else {
         return Ok(Value::Array(Vec::new()));
     };
-    let set = sniff::filesystem::git::get_recent_commits_by_count(root, count).map_err(|error| {
-        ExpressionError::Other {
+    let set = crate::markdown::compose::context::capture::fetch_recent_commits(root, count).map_err(
+        |error| ExpressionError::Other {
             function: "recent_commits".to_string(),
             message: format!("failed to read history of repository {}: {error}", root.display()),
-        }
-    })?;
+        },
+    )?;
     Ok(Value::Array(
-        crate::markdown::compose::context::capture::render_recent_commits(&set.commits)
+        crate::markdown::compose::context::capture::render_recent_commits(&set, count)
             .into_iter()
             .map(Value::String)
             .collect(),

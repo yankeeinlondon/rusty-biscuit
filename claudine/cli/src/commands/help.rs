@@ -97,6 +97,10 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
                 cmd(
+                    "budget",
+                    "Create and operate the shared budget ledger a sequence run enforces",
+                ),
+                cmd(
                     "dashboard",
                     "Show the mesh NOW view: live sessions across rendezvous hosts",
                 ),

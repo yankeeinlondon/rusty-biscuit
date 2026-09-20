@@ -15,7 +15,7 @@ The same machinery powers three surfaces:
 - the `DarkmatterSchemas` library API, and
 - an always-on stage inside the **compose pipeline** that validates (and lightly **coerces**) frontmatter before any shell expansion runs.
 
-This guide covers all three from a user's perspective. For the complete grammar reference — every type, every constraint, and the full JSON Schema mapping — see [`docs/topics/schema-definition.md`](../topics/schema-definition.md).
+This guide covers all three from a user's perspective. For the complete grammar reference — every type, every constraint, and the full JSON Schema mapping — see [`docs/topics/schemas/definition.md`](../topics/schemas/definition.md).
 
 ## Why It Exists
 
@@ -58,7 +58,7 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `url`, `email`, `any` — and every constraint is tabulated in [the topic reference](../topics/schema-definition.md#types).
+All properties are **optional** unless marked `required`. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `url`, `email`, `any` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
 
 ### 2. File reference
 
@@ -436,7 +436,7 @@ if !report.valid {
 }
 ```
 
-`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`. See [the topic reference](../topics/schema-definition.md#library-api) for the full type surface.
+`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`. See [the topic reference](../topics/schemas/definition.md#library-api) for the full type surface.
 
 ## Limitations (v1)
 
@@ -447,6 +447,6 @@ if !report.valid {
 
 ## See Also
 
-- [`docs/topics/schema-definition.md`](../topics/schema-definition.md) — the complete grammar, type, and constraint reference.
+- [`docs/topics/schemas/definition.md`](../topics/schemas/definition.md) — the complete grammar, type, and constraint reference.
 - [`docs/inline/fm-interpolation.md`](./fm-interpolation.md) — the stage that runs immediately before schema validation.
 - [`docs/inline/fm-shell-expansion.md`](./fm-shell-expansion.md) — the stage that runs immediately after.

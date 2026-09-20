@@ -46,31 +46,12 @@ use crate::commands::schema_interactive::{
 };
 use crate::commands::wrap::composition::{
     CompositionPrepContext, eagerly_resolve_target, execute_composition_attempt,
-    execute_composition_request_inner, install_agent_env_for_composition,
+    execute_composition_request_inner, execute_staged_composition,
+    install_agent_env_for_composition, staged_boot,
 };
 use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::wrap::wrap_terminal;
 use crate::output::emit_execution_header;
-
-/// Whether this document owes its schema verdict to the stabilized reread taken
-/// after its own `initialize` runs.
-///
-/// R4 puts `initialize` before schema validation precisely so a document can add
-/// or repair a schema property from its own bootstrap. Reaching the verdict
-/// first would fail the document for a violation the next stage is about to fix.
-/// A document that declares no `initialize` has nothing to wait for and is
-/// judged where it is read.
-///
-/// Keyed on the *authored* key, not on the parsed lifecycle: a malformed or
-/// empty `initialize:` must still defer, because the pipeline routes it either
-/// way and something downstream owes the verdict.
-fn defers_schema_verdict_to_initialize(source: &ResolvedCompositionSource) -> bool {
-    source
-        .markdown
-        .frontmatter()
-        .as_map()
-        .contains_key("initialize")
-}
 
 /// Enrich a `color_eyre::Report` with a frontmatter excerpt when its root
 /// cause is a frontmatter-rooted [`CompositionError`].
@@ -210,7 +191,7 @@ pub(crate) fn run_composition_inner(
         interactive_opts,
     )
     .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
-    let (source, mut set_overrides) = if defers_schema_verdict_to_initialize(&source) {
+    let (source, mut set_overrides) = if staged_boot::authors_initialize(&source) {
         (source, set_overrides)
     } else {
         let term = crate::log::terminal();
@@ -480,16 +461,26 @@ pub(crate) fn prepare_and_run_active_document(
         claudine::harness::report::report_proxy_handoff(&source.resolved_path, &wrap_terminal());
     }
 
-    // Who owns this document's schema verdict. A proxied target always defers:
-    // the harness's staged bootstrap reads it once before its `initialize` and
-    // once after, and only the second read judges it. The caller's own document
-    // defers when it declares an `initialize` of its own — the setup pipeline
-    // routes that event, and the harness then stabilizes and judges.
-    let schema_stage = if first && !defers_schema_verdict_to_initialize(&source) {
+    // Who owns this document's schema verdict on the eager route. A proxied
+    // target defers: the harness's staged bootstrap reads it once before its
+    // `initialize` and once after, and only the second read judges it. A
+    // document that authors `initialize` defers too; live, the staged boot below
+    // judges its stabilized reread instead, and every read taken before its
+    // `initialize` (a dry run's included) withholds the verdict.
+    let schema_stage = if first && !staged_boot::authors_initialize(&source) {
         claudine::composition::SchemaStage::Validate
     } else {
         claudine::composition::SchemaStage::DeferToStabilizedReread
     };
+
+    // A live document that authors `initialize` — the caller's own or an
+    // adopted target — is booted in stages: nothing may dereference a body
+    // dependency before its `initialize` has had the chance to create it. The
+    // command-level body audit below is therefore skipped for it; the staged
+    // boot audits the stabilized reread instead. A dry run fires no lifecycle
+    // event, so it keeps the eager path and may still report a transclusion
+    // only `initialize` would have created.
+    let staged = !shared.dry_run && staged_boot::authors_initialize(&source);
 
     // Build per-document provider-selection state from the invocation owner
     // and definitive source bundle without another repository observation.
@@ -607,47 +598,14 @@ pub(crate) fn prepare_and_run_active_document(
         ctx
     };
 
-    // Preflight must see the same resolved environment as the main prepare
-    // pass, including frontmatter values derived from `env.AGENT`.
     // ── Pre-flight shell approval ────────────────────────────────────────
     //
-    // Composes against the epoch snapshot above, so the commands this audit
-    // discovers are the commands the main prepare expands: same snapshot, same
-    // `AGENT`, same target identity. The snapshot is launch-anchored, never
-    // process-CWD-anchored — the wrapper mutates the parent CWD to the repo
-    // root, so an ambient capture would answer `ctx.area` differently
-    // depending on when it ran.
-    let compose_options = {
-        document_epoch.record_prepared_context_consumer(
-            claudine::invocation_context::PreparedContextConsumer::Preflight,
-        );
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
-            prepared_context.clone(),
-        )
-        .with_context_authority(document_epoch.compose_context_authority())
-        .with_source_file(&source.resolved_path)
-        .with_file_resolution_context(file_resolution_context.clone())
-        // Lifecycle subtrees remain deferred because their file references
-        // may target artifacts created before the event fires. Their shell
-        // commands are audited separately by `collect_lifecycle_shell_commands`.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-        // Retain the captured launch directory as diagnostic metadata;
-        // document-authored references use the request-scoped resolver.
-        .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
-        // Discovery, not judgment: this pass exists to find `::shell`
-        // directives. The verdict belongs to canonical preparation — and for
-        // a document with an `initialize`, to the reread taken after it — so
-        // reporting one here would put the schema ahead of `initialize`
-        // again (R4) and would render Darkmatter's raw error instead of the
-        // typed one the direct route renders (AC28).
-        .with_deferred_schema_verdict(true);
-        if let Some(ref overrides) = set_overrides {
-            opts = opts.with_set_overrides(overrides.clone());
-        }
-        opts = opts.with_caller_input_records(caller_input_records.clone());
-        opts
-    };
-
+    // Every audit — eager or staged — composes against the epoch snapshot
+    // above, so the commands it discovers are the commands the main prepare
+    // expands: same snapshot, same `AGENT`, same target identity. The snapshot
+    // is launch-anchored, never process-CWD-anchored — the wrapper mutates the
+    // parent CWD to the repo root, so an ambient capture would answer
+    // `ctx.area` differently depending on when it ran.
     let approval_options = crate::commands::wrap::apply_composition_shell_overrides(
         crate::commands::wrap::build_harness_shell_options_for_source_with_cache(
             &source.resolved_path,
@@ -658,23 +616,22 @@ pub(crate) fn prepare_and_run_active_document(
         shared.yolo,
     );
 
-    let shell_approval_t = std::time::Instant::now();
-    let preflight = {
-        let _span = info_span!("compose_prep.shell_preflight").entered();
-        claudine::composition::resolve_shell_approvals(
-            Some(&source.markdown),
-            Some(&compose_options),
+    let boot = if staged {
+        DocumentBoot::Staged(approval_options)
+    } else {
+        eager_shell_preflight(
+            shared,
+            &source,
+            &prep_context,
+            &prepared_context,
+            &document_epoch,
+            &file_resolution_context,
+            set_overrides.as_ref(),
+            &caller_input_records,
             &approval_options,
-            None,
-            None,
+            &mut prep_substages,
         )?
     };
-    record_prep_substage(
-        &mut prep_substages,
-        perf_enabled,
-        "shell approval",
-        shell_approval_t,
-    );
 
     // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
     // any of the prep phases (compose source parse, target resolution,
@@ -697,7 +654,7 @@ pub(crate) fn prepare_and_run_active_document(
         resolved_target,
         env_overrides,
         header_emitted,
-        preflight,
+        boot,
         Arc::clone(shared_approval_cache),
         Arc::clone(ledger),
         system_prompt_args,
@@ -716,6 +673,82 @@ pub(crate) fn prepare_and_run_active_document(
     )?;
 
     Ok((outcome, commit_repo_root))
+}
+
+/// How a document's shell commands are approved before it runs.
+enum DocumentBoot {
+    /// Everything was discovered and approved up front, body included.
+    Eager(claudine::composition::PreFlightResult),
+    /// The document authors `initialize`: approval is staged around it, with
+    /// these policy options.
+    Staged(claudine::harness::ShellApprovalOptions),
+}
+
+/// The command-level template audit for a document without `initialize`:
+/// discover every body `::shell` (condition-blind, through every
+/// transclusion) and approve it before anything runs.
+#[allow(clippy::too_many_arguments)]
+fn eager_shell_preflight(
+    shared: &SharedComposeArgs,
+    source: &ResolvedCompositionSource,
+    prep_context: &CompositionPrepContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    document_epoch: &claudine::invocation_context::DocumentEpoch,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    set_overrides: Option<&serde_json::Value>,
+    caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
+    approval_options: &claudine::harness::ShellApprovalOptions,
+    prep_substages: &mut Vec<crate::perf::SubstageTiming>,
+) -> Result<DocumentBoot> {
+    let compose_options = {
+        document_epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Preflight,
+        );
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
+            prepared_context.clone(),
+        )
+        .with_context_authority(document_epoch.compose_context_authority())
+        .with_source_file(&source.resolved_path)
+        .with_file_resolution_context(file_resolution_context.clone())
+        // Lifecycle subtrees remain deferred because their file references
+        // may target artifacts created before the event fires. Their shell
+        // commands are audited separately by `collect_lifecycle_shell_commands`.
+        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+        // Retain the captured launch directory as diagnostic metadata;
+        // document-authored references use the request-scoped resolver.
+        .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
+        // Discovery, not judgment: this pass exists to find `::shell`
+        // directives. The verdict belongs to canonical preparation — and for
+        // an `initialize`-declaring dry run, which still reaches this audit,
+        // withholding it keeps the schema from outranking `initialize` (R4) —
+        // and reporting one here would render Darkmatter's raw error instead
+        // of the typed one the direct route renders (AC28).
+        .with_deferred_schema_verdict(true);
+        if let Some(overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts = opts.with_caller_input_records(caller_input_records.clone());
+        opts
+    };
+
+    let shell_approval_t = std::time::Instant::now();
+    let preflight = {
+        let _span = info_span!("compose_prep.shell_preflight").entered();
+        claudine::composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            approval_options,
+            None,
+            None,
+        )?
+    };
+    record_prep_substage(
+        prep_substages,
+        shared.perf,
+        "shell approval",
+        shell_approval_t,
+    );
+    Ok(DocumentBoot::Eager(preflight))
 }
 
 /// Validate timeout flags against interactive mode and parse their values.
@@ -841,9 +874,13 @@ fn build_and_run_loop(
     // post-`initialize` stabilized reread. Threaded from the coordinator so a
     // looping document is judged at the same lifecycle point as a single one.
     schema_stage: claudine::composition::SchemaStage,
-    // Whether this document arrived through a committed proxy handoff, which is
-    // the entry reason iteration 1 records on its prepared composition.
-    is_proxy_target: bool,
+    // The bootstrap read of a document that authors `initialize`. Its seed and
+    // lifecycle come from that read, and iteration 1 composes the stabilized
+    // reread rather than the pre-`initialize` snapshot.
+    staged: Option<&StagedBoot>,
+    // Direct, or a committed proxy target: the entry reason iteration 1 records
+    // on its prepared composition.
+    entry: claudine::composition::DocumentEntryReason,
     kind: CompositionKind,
     file_for_loop: &str,
     resolved_target: Option<ResolvedExecutionTarget>,
@@ -867,40 +904,31 @@ fn build_and_run_loop(
         claudine::invocation_context::PreparedContextConsumer::LoopCondition,
     );
 
-    // Build the seed AND parse lifecycle from the document's full composed
+    // Build the seed AND parse lifecycle from the document's effective
     // frontmatter. The seed lifts only iteration-control variables, so parsing
     // lifecycle from it would drop every event block and leave the loop with no
     // `initialize`/`start`/terminal/`finalize` or `loop:` gate concerns. The
     // non-loop path parses lifecycle from `prepared.lifecycle`; this matches it.
-    let loop_seed =
-        build_loop_seed_with_lifecycle(source, &config, loop_prepare_options.clone(), kind.mode())?;
+    // A staged document seeds from its bootstrap read: loop control reads
+    // frontmatter only, and its body may include what `initialize` creates.
+    let loop_seed = match staged {
+        Some(staged) => claudine::composition::build_loop_seed_from_bootstrap(
+            &staged.bootstrap,
+            &config,
+        ),
+        None => build_loop_seed_with_lifecycle(
+            source,
+            &config,
+            loop_prepare_options.clone(),
+            kind.mode(),
+        )?,
+    };
     let initial_frontmatter = loop_seed.seed;
     let lifecycle_config = loop_seed.lifecycle;
 
     let effective_repo_root = prep_context.source_repo_root.as_deref();
-    let (lifecycle_settings, lifecycle_messaging) = if lifecycle_config.is_empty() {
-        (
-            claudine::events::GlobalSettings::default(),
-            claudine::messaging::RuntimeMessagingSettings {
-                user: None,
-                repo: None,
-            },
-        )
-    } else {
-        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
-            Ok(config) => (
-                claudine::dispatch::loader::bridge_tts_settings(&config),
-                claudine::dispatch::loader::bridge_messaging_settings(&config),
-            ),
-            Err(_) => (
-                claudine::events::GlobalSettings::default(),
-                claudine::messaging::RuntimeMessagingSettings {
-                    user: None,
-                    repo: None,
-                },
-            ),
-        }
-    };
+    let (lifecycle_settings, lifecycle_messaging) =
+        staged_boot::lifecycle_settings(&lifecycle_config, effective_repo_root);
 
     let term = wrap_terminal();
     let lifecycle_ctx = LifecycleRuntimeContext {
@@ -924,11 +952,18 @@ fn build_and_run_loop(
     // One cell for the whole `--loop` run: a `set` written in iteration 1 and
     // every committed `outputs` entry stay visible to later iterations.
     let runtime_state = std::sync::Arc::new(claudine::composition::RuntimeState::new());
+    // A staged document's stabilized reread and the approvals it earned. Later
+    // iterations compose from it, never from the pre-`initialize` snapshot.
+    let mut stabilized: Option<(ResolvedCompositionSource, std::collections::HashSet<String>)> =
+        None;
+    let staged_start = std::time::Instant::now();
 
     run_loop_with_overrides(
         source,
         &config,
         initial_frontmatter,
+        &loop_seed.initialize_frontmatter,
+        &runtime_state,
         loop_options,
         &lifecycle_config,
         &lifecycle_ctx,
@@ -958,6 +993,10 @@ fn build_and_run_loop(
                 // the full audit, and judges the document `initialize` left
                 // behind. Reaching the verdict here instead would put the schema
                 // ahead of `initialize` for every looping document (R4).
+                //
+                // A staged document never takes that deferred read: iteration 1
+                // is its stabilized reread, taken here after the engine's
+                // `initialize`, and it owns the verdict.
                 let mut iteration_options = loop_prepare_options.clone();
                 iteration_options.set_overrides =
                     Some(claudine::composition::layered_set_overrides(
@@ -965,19 +1004,69 @@ fn build_and_run_loop(
                         Some(&runtime_state.snapshot()),
                         None,
                     ));
-                if ctx.iteration == 1 {
-                    kind.prepare_staged(
+                match (staged, ctx.iteration) {
+                    (Some(staged), 1) => {
+                        let read = staged_boot::reread_and_audit(
+                            &source.resolved_path,
+                            &source.original_ref,
+                            proxy_overlay,
+                            iteration_options,
+                            staged.approved.clone(),
+                            &staged.approval_options,
+                        )
+                        .and_then(|(fresh, options)| {
+                            let approved = options.pre_approved_commands.clone().unwrap_or_default();
+                            kind.prepare_staged(
+                                &fresh,
+                                options,
+                                entry,
+                                claudine::composition::SchemaStage::Validate,
+                            )
+                            .map(|prepared| (fresh, approved, prepared))
+                        });
+                        match read {
+                            Ok((fresh, approved, prepared)) => {
+                                stabilized = Some((fresh, approved));
+                                prepared
+                            }
+                            // The engine only records an iteration error, so the
+                            // document's `blocked`/`finalize` fire here, once.
+                            Err(error) => {
+                                let document = staged_boot::StagedDocument {
+                                    bootstrap: &staged.bootstrap,
+                                    settings: &lifecycle_settings,
+                                    messaging: &lifecycle_messaging,
+                                    effect_engine: &effect_engine,
+                                    context: prepared_context,
+                                    emitter: &emitter,
+                                    term: &term,
+                                    repo_root: effective_repo_root,
+                                    launch_area: prep_context.launch_workspace.launch_cwd.as_path(),
+                                    current: Some(document_epoch.current_authority()),
+                                    document_start: staged_start,
+                                };
+                                return Err(staged_boot::route_stabilized_failure(
+                                    guard, &document, error,
+                                ));
+                            }
+                        }
+                    }
+                    (Some(staged), _) => {
+                        let (live, approved) = stabilized
+                            .as_ref()
+                            .map_or((source, &staged.approved), |(fresh, approved)| {
+                                (fresh, approved)
+                            });
+                        iteration_options.pre_approved_commands = Some(approved.clone());
+                        kind.prepare_without_schema(live, iteration_options)?
+                    }
+                    (None, 1) => kind.prepare_staged(
                         source,
                         iteration_options,
-                        if is_proxy_target {
-                            claudine::composition::DocumentEntryReason::ProxyTarget
-                        } else {
-                            claudine::composition::DocumentEntryReason::Direct
-                        },
+                        entry,
                         schema_stage,
-                    )?
-                } else {
-                    kind.prepare_without_schema(source, iteration_options)?
+                    )?,
+                    (None, _) => kind.prepare_without_schema(source, iteration_options)?,
                 }
             };
 
@@ -1163,7 +1252,7 @@ fn execute_loop_or_single(
     resolved_target: Option<ResolvedExecutionTarget>,
     env_overrides: BTreeMap<String, String>,
     header_emitted: bool,
-    preflight: claudine::composition::PreFlightResult,
+    boot: DocumentBoot,
     shared_approval_cache: SharedApprovalCache,
     handoff_ledger: SharedRunLedger,
     system_prompt_args: &SystemPromptArgs,
@@ -1178,10 +1267,11 @@ fn execute_loop_or_single(
     // caller's document), re-applied on every re-materialization of a proxied
     // target so a retry/resume keeps the pre-schema handoff input (AC26).
     proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
-    // The already-committed handoff a proxied target adopts for its staged
-    // bootstrap on the single (non-loop) path, or `None` for the caller's
-    // document. A looping target routes its `initialize` through the loop engine
-    // instead, so this is consumed only by the single-execution branch below.
+    // The already-committed handoff a proxied target adopts for the harness's
+    // staged bootstrap on the eager single (non-loop) path, or `None` for the
+    // caller's document. A looping target routes its `initialize` through the
+    // loop engine, and a staged target through the coordinator's own staged
+    // boot, so only the eager single-execution branch below hands it on.
     adopted_handoff: Option<Box<ProxyHandoff>>,
     file_resolution_context: biscuit_file::FileResolutionContext,
     // The document-epoch snapshot: the one target-adjusted launch capture the
@@ -1210,12 +1300,16 @@ fn execute_loop_or_single(
     // context groups it was not captured with. `current.*` stays event-time and
     // is captured separately.
 
+    let eager_approved = match &boot {
+        DocumentBoot::Eager(preflight) => Some(preflight.approved_commands.clone()),
+        DocumentBoot::Staged(_) => None,
+    };
     let loop_prepare_options = PrepareOptions {
         invocation_context: Some(prep_context.invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
         caller_input_records: caller_input_records.clone(),
-        pre_approved_commands: Some(preflight.approved_commands.clone()),
+        pre_approved_commands: eager_approved.clone(),
         env_overrides: env_overrides.clone(),
         perf_enabled: shared.perf,
         source_repo_root: prep_context.source_repo_root.clone(),
@@ -1229,14 +1323,42 @@ fn execute_loop_or_single(
         allow_empty_body: false,
         // R4 applies to a looping document exactly as it does to a single one.
         // Every read the loop route takes *before* the engine emits `initialize`
-        // — the seed compose here and the iteration-1 compose below — must
-        // withhold the verdict when the coordinator selected the deferred stage,
-        // or a document whose own `initialize` supplies a required property is
-        // rejected before the event that would have supplied it. Hard-coding
-        // `false` here is what made a looping target fail where the identical
-        // document invoked without `loop:` succeeded.
+        // must withhold the verdict when the coordinator selected the deferred
+        // stage, or a document whose own `initialize` supplies a required
+        // property is rejected before the event that would have supplied it.
+        // Hard-coding `false` here is what made a looping target fail where the
+        // identical document invoked without `loop:` succeeded.
         defer_schema_verdict: schema_stage
             == claudine::composition::SchemaStage::DeferToStabilizedReread,
+    };
+
+    let is_proxy_target = adopted_handoff.is_some();
+    let entry = if is_proxy_target {
+        claudine::composition::DocumentEntryReason::ProxyTarget
+    } else {
+        claudine::composition::DocumentEntryReason::Direct
+    };
+
+    // Stages 1-2 of a staged boot run before loop recognition picks a route, so
+    // the loop and single routes gate the same bootstrap read. A failure here
+    // precedes the document's own lifecycle, so it has no catch stack to reach.
+    let staged = match boot {
+        DocumentBoot::Eager(_) => None,
+        DocumentBoot::Staged(approval_options) => {
+            let (bootstrap, approved) = staged_boot::bootstrap_document(
+                &source,
+                kind.mode(),
+                entry,
+                loop_prepare_options.clone(),
+                &approval_options,
+            )
+            .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+            Some(StagedBoot {
+                bootstrap,
+                approved,
+                approval_options,
+            })
+        }
     };
 
     if !shared.dry_run {
@@ -1245,7 +1367,8 @@ fn execute_loop_or_single(
             &loop_prepare_options,
             loop_options,
             schema_stage,
-            adopted_handoff.is_some(),
+            staged.as_ref(),
+            entry,
             kind,
             &file_for_loop,
             resolved_target.clone(),
@@ -1303,82 +1426,53 @@ fn execute_loop_or_single(
         }
     }
 
-    // Canonical preparation owns the schema verdict; documents with initialize
-    // defer it until their stabilized reread, after lifecycle repair or routing.
+    if let Some(staged) = staged {
+        if let Some(ref mut timings) = startup_timings {
+            timings.prep_phase = compose_entry.elapsed();
+            timings.prep_substages = prep_substages;
+        }
+        return run_staged_single(
+            shared,
+            file,
+            kind,
+            staged,
+            entry,
+            loop_prepare_options,
+            &proxy_overlay,
+            &prep_context,
+            resolved_target,
+            &env_overrides,
+            header_emitted,
+            shared_approval_cache,
+            handoff_ledger,
+            system_prompt_args,
+            verbose,
+            startup_timings,
+        );
+    }
+
+    // Canonical preparation owns the schema verdict; an adopted target defers
+    // it to the harness's stabilized reread.
     let prepared = {
         let _span = match kind {
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
-        let entry = if adopted_handoff.is_some() {
-            claudine::composition::DocumentEntryReason::ProxyTarget
-        } else {
-            claudine::composition::DocumentEntryReason::Direct
+        let options = PrepareOptions {
+            pre_approved_commands: eager_approved,
+            defer_schema_verdict: false,
+            ..loop_prepare_options
         };
-        let options_for = |set_overrides: Option<serde_json::Value>,
-                           caller_input_records: darkmatter::markdown::compose::CallerInputRecords| {
-            PrepareOptions {
-                invocation_context: Some(prep_context.invocation.clone()),
-                document_epoch: Some(document_epoch.clone()),
-                set_overrides,
-                caller_input_records,
-                pre_approved_commands: Some(preflight.approved_commands.clone()),
-                env_overrides: env_overrides.clone(),
-                perf_enabled: shared.perf,
-                source_repo_root: prep_context.source_repo_root.clone(),
-                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
-                prepared_context: Some(prepared_context.clone()),
-                file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
-                file_resolution_context: Some(file_resolution_context.clone()),
-                name_coercion_keys: Vec::new(),
-                allow_empty_body: false,
-                defer_schema_verdict: false,
-            }
-        };
-        let first = kind.prepare_staged(
+        prepare_collecting_missing(
+            kind,
             &source,
-            options_for(set_overrides.clone(), caller_input_records.clone()),
+            options,
             entry,
             schema_stage,
-        );
-        // A required property the document's own expression left `null` (or
-        // an eager value that only the composed frontmatter can judge) is a
-        // launch gap the caller may still fill interactively — exactly as the
-        // pre-prepare collector does for a property absent from the raw source.
-        // One collection, one retry; a denied or cancelled collection keeps the
-        // typed `MissingProperties` so the non-TTY remediation renders.
-        let prepared = match first {
-            Err(CompositionError::MissingProperties { ref missing, .. })
-                if resolve_interactive_options(shared.silent).allowed()
-                    && missing.iter().all(|p| p.interactive_shape.is_some()) =>
-            {
-                match collect_missing_values(missing) {
-                    Ok(collected) if !collected.is_empty() => {
-                        let mut merged = set_overrides
-                            .as_ref()
-                            .and_then(serde_json::Value::as_object)
-                            .cloned()
-                            .unwrap_or_default();
-                        merged.extend(collected);
-                        let merged = serde_json::Value::Object(merged);
-                        let records = claudine::composition::CallerInputLayers::from_caller_overrides(
-                            Some(merged.clone()),
-                            prep_context.invocation.launch_file_resolution_context().clone(),
-                        )
-                        .caller_input_records;
-                        kind.prepare_staged(
-                            &source,
-                            options_for(Some(merged), records),
-                            entry,
-                            schema_stage,
-                        )
-                    }
-                    _ => first,
-                }
-            }
-            other => other,
-        };
-        prepared.map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
+            shared,
+            &prep_context,
+        )
+            .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);
@@ -1412,6 +1506,226 @@ fn execute_loop_or_single(
     // (for a terminal-recovery / target-initialize-chain route) hoists it here
     // rather than adopting it in place, so the coordinator re-prepares the target
     // through the canonical launch pipeline and reruns loop-vs-single (R6/R7).
+    match outcome.initialize_handoff {
+        Some(handoff) => Ok(ActiveDocumentOutcome::Handoff(handoff)),
+        None => Ok(ActiveDocumentOutcome::Done(outcome.exit_code)),
+    }
+}
+
+/// A staged document's bootstrap read, taken and gated before its `initialize`.
+struct StagedBoot {
+    bootstrap: claudine::composition::BootstrapPreparation,
+    /// The approvals granted so far: the bootstrap's frontmatter commands.
+    approved: std::collections::HashSet<String>,
+    approval_options: claudine::harness::ShellApprovalOptions,
+}
+
+/// Prepare a document at `stage`, collecting a missing required value once.
+///
+/// A required property the document's own expression left `null` (or an eager
+/// value that only the composed frontmatter can judge) is a launch gap the
+/// caller may still fill interactively — exactly as the pre-prepare collector
+/// does for a property absent from the raw source. One collection, one retry; a
+/// denied or cancelled collection keeps the typed `MissingProperties` so the
+/// non-TTY remediation renders.
+fn prepare_collecting_missing(
+    kind: CompositionKind,
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    entry: claudine::composition::DocumentEntryReason,
+    stage: claudine::composition::SchemaStage,
+    shared: &SharedComposeArgs,
+    prep_context: &CompositionPrepContext,
+) -> std::result::Result<PreparedComposition, CompositionError> {
+    let first = kind.prepare_staged(source, options.clone(), entry, stage);
+    match first {
+        Err(CompositionError::MissingProperties { ref missing, .. })
+            if resolve_interactive_options(shared.silent).allowed()
+                && missing.iter().all(|p| p.interactive_shape.is_some()) =>
+        {
+            match collect_missing_values(missing) {
+                Ok(collected) if !collected.is_empty() => {
+                    let mut merged = options
+                        .set_overrides
+                        .as_ref()
+                        .and_then(serde_json::Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    merged.extend(collected);
+                    let merged = serde_json::Value::Object(merged);
+                    let records = claudine::composition::CallerInputLayers::from_caller_overrides(
+                        Some(merged.clone()),
+                        prep_context.invocation.launch_file_resolution_context().clone(),
+                    )
+                    .caller_input_records;
+                    kind.prepare_staged(
+                        source,
+                        PrepareOptions {
+                            set_overrides: Some(merged),
+                            caller_input_records: records,
+                            ..options
+                        },
+                        entry,
+                        stage,
+                    )
+                }
+                _ => first,
+            }
+        }
+        other => other,
+    }
+}
+
+/// Run a staged, non-looping document: its `initialize`, the stabilized
+/// reread, and then the pipeline under the guard that emitted `initialize`.
+///
+/// Mirrors the loop route, whose engine emits `initialize` before iteration 1
+/// composes: the `PreparedComposition` the pipeline receives is always the
+/// post-`initialize` read, and the pipeline never routes `initialize` again.
+#[allow(clippy::too_many_arguments)]
+fn run_staged_single(
+    shared: &SharedComposeArgs,
+    file: String,
+    kind: CompositionKind,
+    staged: StagedBoot,
+    entry: claudine::composition::DocumentEntryReason,
+    options: PrepareOptions,
+    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    prep_context: &CompositionPrepContext,
+    resolved_target: Option<ResolvedExecutionTarget>,
+    env_overrides: &BTreeMap<String, String>,
+    header_emitted: bool,
+    shared_approval_cache: SharedApprovalCache,
+    handoff_ledger: SharedRunLedger,
+    system_prompt_args: &SystemPromptArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<ActiveDocumentOutcome> {
+    let StagedBoot {
+        bootstrap,
+        approved,
+        approval_options,
+    } = staged;
+    let repo_root = prep_context.source_repo_root.as_deref();
+    let launch_area = prep_context.launch_workspace.launch_cwd.as_path();
+    let runtime = staged_boot::StagedLifecycleRuntime::new(
+        &bootstrap,
+        env_overrides,
+        repo_root,
+        prep_context.launch_workspace.child_cwd.as_path(),
+    );
+    let term = wrap_terminal();
+    let emitter = DefaultLifecycleEmitter;
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &runtime.settings,
+        messaging: &runtime.messaging,
+        term: &term,
+        source_path: &bootstrap.resolved_path,
+        repo_root,
+        launch_area: Some(launch_area),
+        context: Some(&runtime.context),
+    };
+    let mut guard =
+        claudine::composition::LifecycleRunGuard::new(&bootstrap.lifecycle, &lifecycle_ctx, &emitter);
+    let document = staged_boot::StagedDocument {
+        bootstrap: &bootstrap,
+        settings: &runtime.settings,
+        messaging: &runtime.messaging,
+        effect_engine: &runtime.effect_engine,
+        context: &runtime.context,
+        emitter: &emitter,
+        term: &term,
+        repo_root,
+        launch_area,
+        // Same precedence as `prepare_document`: the epoch's authority when
+        // the document has one, else the invocation's, else fail closed.
+        current: options
+            .document_epoch
+            .as_ref()
+            .map(claudine::invocation_context::DocumentEpoch::current_authority)
+            .or_else(|| {
+                options
+                    .invocation_context
+                    .as_ref()
+                    .map(claudine::invocation_context::InvocationContext::current_authority)
+            }),
+        document_start: std::time::Instant::now(),
+    };
+
+    // Eager resolution returns no target only for a dry run, which never stages.
+    let Some(provider) = resolved_target.as_ref().map(|target| target.provider) else {
+        return Err(eyre!(
+            "a staged boot requires the execution target resolved for its live run"
+        ));
+    };
+    match staged_boot::route_staged_initialize(
+        &mut guard,
+        &document,
+        prep_context.launch_workspace.child_cwd.as_path(),
+        provider,
+        &handoff_ledger,
+        Some(&prep_context.invocation),
+    )? {
+        staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::Done(0)),
+        staged_boot::StagedInitialize::Handoff(handoff) => {
+            return Ok(ActiveDocumentOutcome::Handoff(handoff));
+        }
+        staged_boot::StagedInitialize::Proceed => {}
+    }
+
+    let prepared = {
+        let _span = match kind {
+            CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
+            CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
+        };
+        staged_boot::reread_and_audit(
+            &bootstrap.resolved_path,
+            &file,
+            proxy_overlay,
+            options,
+            approved,
+            &approval_options,
+        )
+        .and_then(|(fresh, options)| {
+            prepare_collecting_missing(
+                kind,
+                &fresh,
+                options,
+                entry,
+                claudine::composition::SchemaStage::Validate,
+                shared,
+                prep_context,
+            )
+        })
+        .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?
+    };
+    emit_dropped_optional_warnings(&prepared.dropped_optionals);
+    emit_compose_warnings(&prepared.warnings, shared.silent);
+    guard.set_config(prepared.lifecycle.clone());
+
+    let request = build_execution_request(
+        shared,
+        file,
+        prepared,
+        resolved_target,
+        system_prompt_args,
+        env_overrides,
+        Some(shared_approval_cache),
+        header_emitted,
+        kind.mode(),
+        prep_context,
+        std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        proxy_overlay,
+        handoff_ledger,
+        None,
+    );
+    let outcome = execute_staged_composition(
+        request,
+        verbose,
+        startup_timings,
+        shared.perf,
+        &mut guard,
+    )?;
     match outcome.initialize_handoff {
         Some(handoff) => Ok(ActiveDocumentOutcome::Handoff(handoff)),
         None => Ok(ActiveDocumentOutcome::Done(outcome.exit_code)),

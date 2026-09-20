@@ -1,0 +1,63 @@
+---
+# PILOT implementation assessments (schema_version 0). Not reviewed; every
+# record is `proposed`. The `---` fences are required: `md schema validate`
+# reads only frontmatter, so an unfenced YAML file validates vacuously
+# (probes/p11).
+$schema: ./_mappings.schema.yaml
+schema_version: 0
+inspected_revision: d57faf7e8
+fingerprint_algorithm: [sha256-file, sha256-canonical-json-record]
+
+assessments:
+  - id: map.discord.content_sdk_validation
+    adapter: discord
+    platform_doc: discord.md
+    facts: [c.discord.bot.content.sdk_max, err.discord.bot.sdk_validation]
+    status: partial
+    summary: "twilight rejects over-length content before the request, but the adapter maps ErrorType::Validation to MessengerError::Transport, losing the not_submitted/invalid_content classification."
+    code_refs: ["messenger/lib/src/provider/discord.rs:208", "messenger/lib/src/receipt.rs:64"]
+    test_refs: []
+    assessed_revision: d57faf7e8
+    fingerprints:
+      - { input: messenger/lib/src/provider/discord.rs, kind: code_file, digest: "sha256:d39f670e8f50802cb0122019d77313325c05923738713c17fc42a39131e5ecfc" }
+      - { input: messenger/lib/src/receipt.rs, kind: code_file, digest: "sha256:1209d1b734932f7e18b76929c94bbac865bfae5c2eb0ace50b41719d5b8bec05" }
+      - { input: discord.md#c.discord.bot.content.sdk_max, kind: research_fact, digest: "sha256:f0e1959b1fe02d4d1282c9ad18315ead3e9fa6ee1956d192dd245850f4ed05b0" }
+      - { input: discord.md#err.discord.bot.sdk_validation, kind: research_fact, digest: "sha256:93ee64fcd3fc017c57db2f84983442c60683ca52235a15666005ad91f71b736e" }
+    review: { status: proposed, proposed_by: claude-code/claude-opus-5 }
+    requires_messenger_update: true
+    follow_up: Preserve SDK validation as a distinct pre-submission error.
+
+  - id: map.discord-webhook.content_limit
+    adapter: discord-webhook
+    platform_doc: discord.md
+    facts: [c.discord.webhook.content.service_max, err.discord.webhook.content_field]
+    status: missing
+    summary: "No preflight against the 2000 bound; the 400 field-error body is passed through verbatim."
+    code_refs: ["messenger/lib/src/provider/discord_webhook.rs:253"]
+    test_refs: []
+    assessed_revision: d57faf7e8
+    fingerprints:
+      - { input: messenger/lib/src/provider/discord_webhook.rs, kind: code_file, digest: "sha256:9500ae073588411306db529763967a7db2a91458f3abf5487eb8070d082ab407" }
+      - { input: discord.md#c.discord.webhook.content.service_max, kind: research_fact, digest: "sha256:a3a05190d21d02fc646077c238fd863ab3044a808c46a9f0dfc4d8b7606db2c8" }
+      - { input: discord.md#err.discord.webhook.content_field, kind: research_fact, digest: "sha256:6700f3df00d3c08fe0f24b300c764f35282fc7ecb0d7021beb27e9ead69d8318" }
+    review: { status: proposed, proposed_by: claude-code/claude-opus-5 }
+    requires_messenger_update: true
+    follow_up: messenger/fixes/2026-09-06-truncation
+
+  - id: map.telegram.text_binding
+    adapter: telegram
+    platform_doc: telegram.md
+    facts: [tb.telegram.send_message.markup, tb.telegram.send_message.entities]
+    status: unassessed
+    stale_reason: fingerprint_changed
+    summary: "Illustration of invalidation: the recorded telegram.rs digest is from e178f0263 and no longer matches the checkout, so the prior assessment is not reused."
+    code_refs: ["messenger/lib/src/provider/telegram.rs:233"]
+    test_refs: []
+    assessed_revision: e178f0263
+    fingerprints:
+      - { input: messenger/lib/src/provider/telegram.rs, kind: code_file, digest: "sha256:cce2ac615e6b0f03ca26ddef0912553bf90075d46a230b81d10f585ca37f62f2" }
+      - { input: telegram.md#tb.telegram.send_message.markup, kind: research_fact, digest: "sha256:84982f051e50a27d9bf8f0d250ececbbe6433364cb42c97409c05dc25de4c327" }
+      - { input: telegram.md#tb.telegram.send_message.entities, kind: research_fact, digest: "sha256:04ce14ffacfd512da6a1e3acded931c68752cd32800bc984ad8b41a3e683885f" }
+    review: { status: proposed, proposed_by: claude-code/claude-opus-5 }
+    requires_messenger_update: false
+---

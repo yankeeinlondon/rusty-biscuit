@@ -8,6 +8,7 @@ use claudine::provider::Provider;
 use color_eyre::eyre::{Report, Result};
 
 mod args;
+mod budget;
 mod argv;
 mod cli_utils;
 mod commands;
@@ -421,6 +422,7 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Budget(args) => commands::budget::run(args),
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),

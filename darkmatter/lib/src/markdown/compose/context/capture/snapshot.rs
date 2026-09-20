@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sniff::filesystem::docs::{self as sniff_docs, MarkdownMeta};
-use sniff::filesystem::git::{CommitDesc, FileChange, FileStatus, GitInfo, GitRepo};
+use sniff::filesystem::git::{FileChange, FileStatus, GitInfo, GitRepo, RecentCommits};
 use sniff::filesystem::LanguageBreakdown;
 use sniff::filesystem::repo::{self as sniff_repo, Package, RepoInfo};
 use sniff::hardware::{self, GpuInfo, HardwareInfo};
@@ -73,7 +73,7 @@ pub struct ContextCaptureEvidence {
     os: EvidenceSlot<Option<OsInfo>>,
     hardware: EvidenceSlot<Option<HardwareInfo>>,
     gpus: EvidenceSlot<Vec<GpuInfo>>,
-    recent_commits: EvidenceSlot<Option<Vec<CommitDesc>>>,
+    recent_commits: EvidenceSlot<Option<RecentCommits>>,
     network_interfaces: EvidenceSlot<Option<Vec<NetworkInterface>>>,
     gateways: EvidenceSlot<Option<DefaultGateways>>,
 }
@@ -202,7 +202,7 @@ impl ContextCaptureEvidence {
     /// or `None` outside a repository.
     ///
     /// `ctx.recent_commits` renders at most ten of them.
-    pub fn with_recent_commits(mut self, commits: Option<Vec<CommitDesc>>) -> Self {
+    pub fn with_recent_commits(mut self, commits: Option<RecentCommits>) -> Self {
         self.recent_commits = EvidenceSlot::Supplied(commits);
         self
     }
@@ -413,11 +413,10 @@ impl ContextCapture {
                 Some(root) => {
                     #[cfg(test)]
                     HISTORY_CAPTURE_COUNT.fetch_add(1, Ordering::Relaxed);
-                    match sniff::filesystem::git::get_recent_commits_by_count(
-                        root,
-                        super::git::RECENT_COMMIT_COUNT,
-                    ) {
-                        Ok(set) => super::git::render_recent_commits(&set.commits),
+                    match super::git::fetch_recent_commits(root, super::git::RECENT_COMMIT_COUNT) {
+                        Ok(set) => {
+                            super::git::render_recent_commits(&set, super::git::RECENT_COMMIT_COUNT)
+                        }
                         Err(error) => {
                             diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
                                 area: "git_history",
@@ -849,11 +848,8 @@ impl ContextCapture {
         let recent_commits = evidence
             .recent_commits
             .as_ref()
-            .and_then(Option::as_deref)
-            .map(|commits| {
-                let newest = &commits[..commits.len().min(super::git::RECENT_COMMIT_COUNT)];
-                super::git::render_recent_commits(newest)
-            })
+            .and_then(Option::as_ref)
+            .map(|commits| super::git::render_recent_commits(commits, super::git::RECENT_COMMIT_COUNT))
             .unwrap_or_default();
 
         Self {

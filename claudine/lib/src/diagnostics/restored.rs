@@ -36,6 +36,7 @@ use std::fmt;
 
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use biscuit_terminal::terminal::Terminal;
 use serde_json::Value;
@@ -127,6 +128,7 @@ fn snapshot_from_cause(cause: &DiagnosticCause) -> DiagnosticSnapshot {
         detail: cause.detail.clone(),
         message: cause.message.clone(),
         cause: None,
+        frontmatter_excerpt: None,
     }
 }
 
@@ -158,6 +160,14 @@ impl BlockError for RestoredDiagnostic {
 
     fn block_source(&self) -> Option<&(dyn BlockError + 'static)> {
         self.cause.as_deref().map(|cause| cause as &dyn BlockError)
+    }
+
+    fn report_block_error(&self, term: &Terminal) -> String {
+        let mut rendered = self.status_block(term).render(term);
+        if let Some(excerpt) = &self.snapshot.frontmatter_excerpt {
+            rendered.push_str(&excerpt.render_appendix(term));
+        }
+        rendered
     }
 }
 

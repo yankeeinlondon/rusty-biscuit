@@ -7,7 +7,7 @@
 //! failing outcome into fleet success. These tests parse and execute the real
 //! committed lifecycle through the production machinery.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use biscuit_terminal::terminal::Terminal;
@@ -24,7 +24,7 @@ use serde_json::json;
 
 /// The committed fleet prompt under the claudine package area.
 fn fleet_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("lib crate lives under the claudine package area")
         .join("docs/research/agent-errors/_fleet.md")

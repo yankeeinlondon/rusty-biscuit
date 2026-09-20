@@ -12,7 +12,8 @@ use crate::markdown::compose::directives_api::{
 use crate::markdown::compose::expression::{
     ComparisonOp, EvaluationLookup, Expr, parse, parse_condition, scalar_string,
 };
-use crate::markdown::compose::interpolation::rewrite::{interpolate_value, whole_value_span};
+use crate::markdown::compose::expression::lint::whole_value_span;
+use crate::markdown::compose::interpolation::rewrite::interpolate_value;
 use crate::markdown::compose::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError,
 };

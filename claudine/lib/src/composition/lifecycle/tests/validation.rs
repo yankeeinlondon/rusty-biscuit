@@ -87,54 +87,6 @@ fn scan_returns_none_for_clean_frontmatter() {
 }
 
 #[test]
-fn validation_is_the_dispatch_gate_for_leaked_lifecycle() {
-    // The `LifecycleRunGuard` does not re-validate; it dispatches whatever
-    // string the config holds. The contract "no side effect dispatches a
-    // leaked expression" is upheld by `validate_no_interpolation_leaks`
-    // running in the prepare layer, *before* a guard is ever built. This
-    // test proves both halves of that boundary against the fake emitter.
-    let leaked = parse_lifecycle_config(
-        &json!({ "start": { "message": "{{ broken( }}" } }),
-        dummy_path(),
-    )
-    .unwrap();
-
-    // 1. Validation rejects the leaked config — the production choke point.
-    let err = validate_no_interpolation_leaks(&leaked, dummy_path(), &[]).unwrap_err();
-    assert!(matches!(
-        err,
-        CompositionError::LifecycleInterpolationLeak { .. }
-    ));
-
-    // 2. A guard built from that same config WOULD dispatch the raw span
-    //    (the message reaches the emitter verbatim), confirming the guard
-    //    itself is not the gate — only the prepare-layer validation is.
-    let (settings, messaging, term) = test_ctx();
-    let ctx = LifecycleRuntimeContext {
-        settings: &settings,
-        messaging: &messaging,
-        term: &term,
-        source_path: Path::new("/tmp/test.md"),
-        repo_root: None,
-        launch_area: None,
-        context: None,
-    };
-    let emitter = RecordingEmitter::new();
-    {
-        let mut guard = make_guard(&leaked, &ctx, &emitter);
-        guard.emit_start_once();
-        guard.defuse();
-    }
-    assert!(
-        emitter.actions().iter().any(|a| matches!(
-            a,
-            EmittedAction::Message { text } if text.contains("{{ broken(")
-        )),
-        "guard does not self-gate; validation must run before a guard exists"
-    );
-}
-
-#[test]
 fn undefined_bare_variable_flags_missing_root() {
     let effective = json!({ "area": "claudine" });
     let defined = effective.as_object();

@@ -1107,7 +1107,7 @@ Implement {{plan}} from {{review}}.
 
 #[test]
 fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area() {
-    let checkout = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let checkout = biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(std::path::Path::parent)
         .expect("claudine CLI crate should live two levels below the repository root")

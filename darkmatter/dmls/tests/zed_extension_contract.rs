@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use toml::Value;
 
 fn extension_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("zed-dmls")
+    biscuit_test_harness::manifest_dir!().join("zed-dmls")
 }
 
 fn parse_toml(path: &Path) -> Value {

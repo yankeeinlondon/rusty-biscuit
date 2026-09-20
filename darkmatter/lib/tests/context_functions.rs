@@ -236,16 +236,25 @@ fn recent_commits_calls_match_the_eager_capture_format() {
 /// agreeing with them here closes AC24's parity chain without this crate
 /// spawning the `sniff` binary.
 fn sniff_plain_blocks(root: &Path, count: usize) -> Vec<String> {
-    let set = sniff::filesystem::get_recent_commits_by_count(root, count)
-        .expect("the fixture is a readable repository");
-    let today = chrono::Local::now().date_naive();
-    set.commits.iter().filter_map(|commit| commit.describe_plain(today)).collect()
+    use sniff::filesystem::git::{GitRepo, RecentCommits, RecentCommitsOptions};
+    let repo = GitRepo::discover(root)
+        .expect("the fixture is a readable repository")
+        .expect("the fixture is a repository");
+    let set = RecentCommits::collect(&repo, &RecentCommitsOptions::new().count(count))
+        .expect("the fixture's history is readable");
+    let options = RecentCommitsOptions::new();
+    set.commits()
+        .iter()
+        .zip(set.plain_blocks(&options))
+        .filter(|(commit, _)| !commit.files.is_empty())
+        .map(|(_, block)| block)
+        .collect()
 }
 
 /// AC24: each element of `ctx.recent_commits` is byte-equal to the
 /// corresponding block of `sniff repo recent-commits --plain`.
 ///
-/// Both sides reach `describe_plain`, so what this proves is not that the
+/// Both sides reach `plain_blocks`, so what this proves is not that the
 /// renderer is correct — that is Sniff's own contract — but that a block
 /// survives Darkmatter's capture, JSON array projection, and body
 /// interpolation *unaltered*. Commit blocks are multi-line, indented Markdown,
@@ -266,9 +275,10 @@ fn ctx_recent_commits_is_byte_equal_to_the_sniff_plain_rendering() {
     assert!(newest.starts_with("- ["), "a block opens with its list marker: {newest:?}");
     assert!(newest.contains("entry 12"), "the newest commit leads: {newest:?}");
     assert!(
-        newest.contains("    - adds entry 12\n"),
-        "the description keeps its four-space continuation indent: {newest:?}"
+        newest.contains("  - added: history/12.txt\n"),
+        "the files block keeps its two-space continuation indent: {newest:?}"
     );
+    assert!(!newest.contains("**"), "plain blocks carry no markup: {newest:?}");
     assert!(
         !eager.iter().any(|block| block.contains("Today") || block.contains("Yesterday")),
         "the fixture's commits are old enough to carry absolute dates: {eager:?}"

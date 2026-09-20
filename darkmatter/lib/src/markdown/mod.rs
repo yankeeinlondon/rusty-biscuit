@@ -41,6 +41,7 @@ pub mod highlighting;
 pub mod inline;
 mod inline_html;
 pub mod language_grammar;
+mod mapping_orders;
 pub mod normalize;
 pub mod output;
 pub mod reference;
@@ -64,6 +65,7 @@ pub use hash::{
     SectionTuple,
 };
 pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
+pub use mapping_orders::MappingOrders;
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,

@@ -271,9 +271,7 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// runs at submit time, not at toggle time. Any active validation
     /// error is cleared.
     pub fn deselect_all(&mut self) {
-        for flag in &mut self.selected {
-            *flag = false;
-        }
+        self.selected.fill(false);
         self.validation_error = None;
     }
 

@@ -1,8 +1,8 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn area_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine lib should be nested in the package area")
         .to_path_buf()
@@ -76,6 +76,6 @@ fn notification_recipes_keep_their_background_cli_contract() {
         .expect("package area should be nested in the workspace");
     let notify = fs::read_to_string(root.join("just/notify.just"))
         .expect("notification recipes should be readable");
-    assert!(notify.contains("so-you-say \"{{args}}\" --background"));
-    assert!(notify.contains("playa effect \"{{effect}}\" --background"));
+    assert!(notify.contains("so-you-say \"{{ args }}\" --background"));
+    assert!(notify.contains("playa effect \"{{ effect }}\" --background"));
 }

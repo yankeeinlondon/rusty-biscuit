@@ -14,13 +14,12 @@
 //!
 //! In CI, run with `--run-ignored only` on this specific test binary.
 
-use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 fn nextest_config() -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path = biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(|p| p.parent())
         .expect("test-toolkit lives under <repo>/tools/test-toolkit")
@@ -65,6 +64,17 @@ fn ci_profile_disables_all_retries() {
     assert!(
         config.contains(r#"junit = { path = "test-results.xml" }"#),
         "the CI profile must emit JUnit for dashboards and per-shard artifacts"
+    );
+}
+
+/// Package-wide L1 caps must not defeat the OS-aware worker budget exported by
+/// the canonical recipes. Resource-specific exceptions remain test-scoped.
+#[test]
+fn ci_profile_does_not_serialize_claudine_cli_l1() {
+    let config = nextest_config();
+    assert!(
+        !config.contains("claudine-cli-ci-l1"),
+        "Claudine CLI L1 must inherit the runner's worker budget instead of a fixed test group"
     );
 }
 

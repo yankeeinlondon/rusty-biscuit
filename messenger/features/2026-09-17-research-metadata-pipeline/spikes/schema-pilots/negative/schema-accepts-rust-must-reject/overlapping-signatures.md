@@ -1,0 +1,48 @@
+---
+$schema: ../../_schema.yaml
+schema_version: 0
+platform_id: discord
+created: 2026-09-17
+last_updated: 2026-09-17
+agent: claude-code
+model: claude-opus-5
+sources:
+  - { id: src.a, kind: official_docs, url: "https://example.com/a", retrieved: 2026-09-17 }
+interfaces:
+  - { interface_id: discord.bot, role: sending_adapter, api_identity: Discord HTTP API, classification: official, direction: send_only, adapters: [discord] }
+api_versions: []
+chronology: []
+constraints:
+  - id: c.a
+    interface: discord.bot
+    operation: create_message
+    surface: body
+    native_locator: content
+    kind: hard_max
+    value: 2000
+    unit: unspecified_characters
+    measurement_stage: field_value
+    enforced_by: service
+    overflow_behavior: unknown
+    applies_when: []
+    knowledge: { state: known, evidence: [src.a] }
+format_profiles: []
+text_bindings: []
+image_bindings: []
+role_coverage: []
+envelopes:
+  - { id: env.a, interface: discord.bot, operations: [create_message], origin: service, body_format: json, code_locator: /code, knowledge: { state: known, evidence: [src.a] } }
+errors:
+  - { id: err.a, interface: discord.bot, operations: [create_message], envelope: env.a, origin: service, phase: response, outcome: failure, category: invalid_content, match: { http_status: 400, native_code_number: 50035 }, delivery_certainty: rejected, recovery: after_correction, replay_safety: unknown, knowledge: { state: known, evidence: [src.a] } }
+  - { id: err.b, interface: discord.bot, operations: [create_message], envelope: env.a, origin: service, phase: response, outcome: failure, category: content_too_large, match: { http_status: 400, native_code_number: 50035 }, delivery_certainty: rejected, recovery: after_correction, replay_safety: unknown, knowledge: { state: known, evidence: [src.a] } }
+error_fixtures: []
+capabilities: []
+inbound_bindings: []
+question_bindings: []
+form_bindings: []
+changes: []
+gaps: []
+requires_messenger_update: false
+---
+
+Rule SR-MATCH-OVERLAP: two errors with identical signatures in the same scope. Schema accepts; Rust must reject.

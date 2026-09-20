@@ -111,7 +111,7 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub sandbox: bool,
 
-    /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
+    /// Use only repo-scoped skills, commands, and agents via a provider overlay.
     #[arg(long)]
     pub repo: bool,
 

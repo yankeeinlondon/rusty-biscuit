@@ -221,8 +221,10 @@
 
 ### Test tiers
 
-- `terminal-tests` enables the real-terminal harness and tier gate for the
-  library and CLI integration targets.
+- `terminal-tests` carries the real-terminal harness into the non-test build and
+  enables the tier gate for the library and CLI integration targets. The harness
+  crate is separately an unconditional `[dev-dependencies]` entry of both
+  packages, so L1 targets can call its `manifest_dir!()` without the feature.
 - `browser-tests` enables the headless-browser harness used by computed-style
   tests. Browser-only items are cfg-gated inside the mixed parity target.
 

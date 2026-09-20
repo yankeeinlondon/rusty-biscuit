@@ -1,0 +1,12 @@
+# Reviewed research corrections, schema version 1.
+#
+# Validates `messenger/docs/research/platforms/_overrides.yaml`, which exists
+# only when a concrete correction needs one. Overrides apply explicitly after
+# validation; reports show both the researched and the effective value. The
+# Rust validator fails on an expired (`review_by` in the past), orphaned
+# (`fact` no longer exists), or stale (`target_hash`/`schema_hash` mismatch)
+# override. Named types live in ./_types.yaml.
+$schema:
+    schema_version: literal(1; required)
+    overrides: "Override[](required)@./_types.yaml"
+    "<pattern::^(prompt|hash)$>": any

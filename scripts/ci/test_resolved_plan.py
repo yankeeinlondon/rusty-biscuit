@@ -9,8 +9,9 @@ Baseline for these numbers: `fixes/2026-09-11-cicd-cleanup/baseline-2026-09-11.m
 
 from __future__ import annotations
 
+import copy
 import json
-import shutil
+import os
 import subprocess
 import sys
 import unittest
@@ -21,13 +22,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected_scope  # noqa: E402
+import build_key  # noqa: E402
 import schema  # noqa: E402
+from tool_guard import require_tools  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
     apply_accepted_cells,
     area_slug,
+    build_owner_matrix,
     calculate_scope,
+    archive_producers,
     legacy_scope_document,
     load_environments,
     load_metadata,
@@ -39,7 +44,9 @@ from affected_scope import (  # noqa: E402
 TODAY = date(2026, 7, 27)
 
 #: The one workspace member where `sniff repo package-area` disagrees with
-#: sniff's own area universe, measured 2026-09-11 over all 73 members.
+#: sniff's own area universe, measured 2026-09-11 over all 73 members and
+#: re-measured 2026-09-15 against a release `sniff-cli` built from this
+#: worktree, which answers identically.
 #:
 #: `sniff repo package-area` run from `biscuit-test-harness/` answers
 #: `biscuit-test-harness`, but `sniff repo package-areas` does not list that
@@ -50,6 +57,27 @@ TODAY = date(2026, 7, 27)
 #: is what the planner emits. Named here rather than tolerated silently: when
 #: sniff is fixed, this entry fails and gets deleted.
 SNIFF_SELF_INCONSISTENT = {"biscuit-test-harness": ("root", "biscuit-test-harness")}
+
+#: Named because a skip that says only "requires sniff" claims nothing about
+#: where the invariant IS checked, and AC15 had no written answer to that.
+#: `ci-tooling` and `preflight` both run this suite and neither provisions the
+#: binary: a release `sniff-cli` costs 4m25s cold and 1m39s with a warm
+#: dependency cache, measured in
+#: `reviews/2026-09-15-python-test-code/spike-4-results.md`.
+SNIFF_ENFORCED_BY = (
+    "`ci.yml`'s `area-drift` job, which builds sniff-cli, sets "
+    "BISCUIT_REQUIRE_SNIFF, and whose result `ci-gate` folds"
+)
+SNIFF_DETAIL = (
+    "The nightly `area-drift` workflow is the backstop, and `just ci-local` on "
+    "a developer host that has sniff installed runs it too. `ci-tooling` and "
+    "`preflight` do not provision it."
+)
+
+
+def require_sniff() -> None:
+    """Skip where `sniff` is genuinely absent; fail where it was provisioned."""
+    require_tools("sniff", enforced_by=SNIFF_ENFORCED_BY, detail=SNIFF_DETAIL)
 
 
 def sniff_package_area(directory: Path) -> str:
@@ -374,10 +402,10 @@ class AreaGroupingTests(PlannerFixture):
         zed = self.plan("darkmatter/dmls/zed-dmls-cli/src/main.rs")
         self.assertEqual(["darkmatter/dmls"], self.selected_areas(zed))
 
-    @unittest.skipUnless(shutil.which("sniff"), "requires sniff")
     def test_the_planners_area_matches_sniff_for_every_layout_the_repo_uses(
         self,
     ) -> None:
+        require_sniff()
         # Five layouts, because sniff's rule is not "the manifest's parent
         # directory" and a reimplementation that assumed so would pass on the
         # common case and be wrong for three of these. Phase 3 derives the rule;
@@ -401,8 +429,8 @@ class AreaGroupingTests(PlannerFixture):
                 mismatched.append((name, derived[name], actual))
         self.assertEqual([], mismatched)
 
-    @unittest.skipUnless(shutil.which("sniff"), "requires sniff")
     def test_every_workspace_members_area_matches_sniff(self) -> None:
+        require_sniff()
         # AC15 in full: every member, not a sample. The five-layout fixture
         # above stays because it names the layouts a reader has to think about;
         # this one is what actually catches drift when a package moves.
@@ -419,6 +447,11 @@ class AreaGroupingTests(PlannerFixture):
         )
 
         names = sorted(directories)
+        # 8 is where the wall time stops improving: 10.9s serial, 7.1s at four,
+        # 6.2s at eight, 6.1s at sixteen. The ~70s of system time is inside
+        # sniff's own per-invocation walk and is flat across every pool width,
+        # so narrowing the pool buys nothing and costs 4.7s (measured
+        # 2026-09-15, `reviews/2026-09-15-python-test-code/spike-4-results.md`).
         with ThreadPoolExecutor(max_workers=8) as pool:
             answers = dict(
                 zip(names, pool.map(sniff_package_area, [directories[n] for n in names]))
@@ -436,8 +469,8 @@ class AreaGroupingTests(PlannerFixture):
             "the planner replicates sniff's rule and owns no mapping of its own",
         )
 
-    @unittest.skipUnless(shutil.which("sniff"), "requires sniff")
     def test_the_area_universe_is_a_subset_of_sniffs(self) -> None:
+        require_sniff()
         universe = set(
             json.loads(
                 subprocess.run(
@@ -507,11 +540,13 @@ class TargetCoverageTests(PlannerFixture):
             if cell["package"] == package and cell["gate"] == "check"
         ]
 
-    def test_example_targets_are_checked_on_each_native_environment_not_the_guest(self) -> None:
+    def test_example_targets_are_checked_on_the_check_environment_not_the_guest(self) -> None:
         plan = self.plan("biscuit-speaks/lib/src/lib.rs")
         record = self.package_record(plan, "biscuit-speaks")
         self.assertEqual(["lib", "test", "example"], record["targets"], "fixture: examples only")
-        self.assertEqual(self.NATIVE, self.check_environments(plan, "biscuit-speaks"))
+        self.assertEqual(
+            [affected_scope.CHECK_ENVIRONMENT], self.check_environments(plan, "biscuit-speaks")
+        )
         for cell in self.cells(plan):
             if cell["package"] == "biscuit-speaks" and cell["gate"] == "check":
                 self.assertEqual(["example"], cell["target_kinds"])
@@ -537,8 +572,10 @@ class TargetCoverageTests(PlannerFixture):
                 self.assertEqual(expected, [token for token in tokens if token in self.SELECTORS.values()])
                 self.assertEqual(["-p", record["package"]], tokens[:2])
                 self.assertEqual([], [token for token in tokens if token in self.BLANKET])
+                # One check environment, like lint (fixes/2026-09-18-ci-cadence,
+                # decision 3): the example and bench kinds compile once.
                 self.assertEqual(
-                    self.NATIVE if expected else [],
+                    [affected_scope.CHECK_ENVIRONMENT] if expected else [],
                     self.check_environments(plan, record["package"]),
                 )
                 shapes_seen.add(tuple(expected))
@@ -547,29 +584,49 @@ class TargetCoverageTests(PlannerFixture):
             {(), ("--examples",), ("--benches",), ("--examples", "--benches")}, shapes_seen
         )
 
-    def test_a_reused_macos_l1_keeps_the_macos_check_cell_executing(self) -> None:
-        accepted = [
-            {
-                "package": "biscuit-speaks",
-                "environment": "macos-latest",
-                "gate": "L1",
-                "outcome": "pass",
-                "origin": "local",
+    def test_a_reused_linux_l1_reuses_the_check_cell_and_macos_reuses_none(self) -> None:
+        def accepted(environment: str) -> list[dict[str, str]]:
+            return [
+                {
+                    "package": "biscuit-speaks",
+                    "environment": environment,
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "origin": "local",
+                }
+            ]
+
+        def states(plan: dict) -> dict[tuple[str, str], str]:
+            return {
+                (cell["environment"], cell["gate"]): cell["execution"]
+                for cell in self.cells(plan)
+                if cell["package"] == "biscuit-speaks"
             }
-        ]
-        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted)
-        states = {
-            (cell["environment"], cell["gate"]): cell["execution"]
-            for cell in self.cells(plan)
-            if cell["package"] == "biscuit-speaks"
-        }
-        self.assertEqual("reuse", states[("macos-latest", "L1")], "fixture: macOS L1 reused")
-        self.assertEqual("execute", states[("macos-latest", "check")])
-        scheduled = legacy_scope_document(plan)
-        matrix = scheduled["area_matrix"]["biscuit-speaks"]["include"]
+
+        check = affected_scope.CHECK_ENVIRONMENT
+        # biscuit-speaks has unchanged direct dependents, so its one check
+        # cell also compiles their seam — which no local run builds, so the
+        # Linux L1 pass covers the L1 cell and never the check.
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted(check))
+        linux = states(plan)
+        self.assertEqual("reuse", linux[(check, "L1")], "fixture: Linux L1 reused")
+        self.assertEqual("execute", linux[(check, "check")])
+        seam = next(
+            cell for cell in self.cells(plan)
+            if cell["package"] == "biscuit-speaks" and cell["gate"] == "check"
+        )
+        self.assertFalse(seam["reusable"])
+        self.assertIn("claudine", seam["dependents"])
+        matrix = legacy_scope_document(plan)["area_matrix"]["biscuit-speaks"]["include"]
         entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
-        self.assertEqual(self.NATIVE, entry["check_os"])
-        self.assertNotIn("macos-latest", entry["native_environments"])
+        self.assertEqual([check], entry["check_os"])
+        self.assertNotIn(check, entry["native_environments"])
+        # A macOS pass stands in for no check: there is no macOS check cell.
+        plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted("macos-latest"))
+        macos = states(plan)
+        self.assertEqual("reuse", macos[("macos-latest", "L1")], "fixture: macOS L1 reused")
+        self.assertNotIn(("macos-latest", "check"), macos)
+        self.assertEqual("execute", macos[(check, "check")])
 
     def test_the_workflow_command_joined_with_check_args_selects_only_the_declared_kinds(self) -> None:
         # The review's "test the final command": the planner's string and the
@@ -590,11 +647,14 @@ class TargetCoverageTests(PlannerFixture):
         self.assertNotIn("--benches", command)
         for flag in self.BLANKET:
             self.assertNotIn(flag, command)
-        self.assertIn(
-            "archive-args: -p ${{ inputs.package }} ${{ inputs.test-args }}",
-            package_ci,
-            "the WSL archive build must receive package and features, never the check selectors",
+        # The guest consumes a build record rather than an archive argument
+        # list, so there is no selector for a check flag to leak into. Comments
+        # explain what was removed; only executable YAML can violate it.
+        self.assertIn("builds: ${{ inputs.builds }}", package_ci)
+        executable = "\n".join(
+            line for line in package_ci.splitlines() if not line.lstrip().startswith("#")
         )
+        self.assertNotIn("archive-args", executable)
 
 
 class EnvironmentCoverageTests(PlannerFixture):
@@ -886,6 +946,466 @@ class ResultCompletenessTests(PlannerFixture):
         for area, slug in slugs.items():
             self.assertEqual(area_slug(area), slug)
             self.assertNotIn("/", f"ci-results-{slug}.json")
+
+
+class BuildOwnershipTests(PlannerFixture):
+    """Validation checkpoint 2 of `fixes/2026-09-12-single-os-compile/plan.md`.
+
+    Every fixture runs the real planner against the real workspace, so a
+    build key here is the key CI would compute for the same change.
+    """
+
+    #: Declares L1, L2, and browser, so its one compatible Linux configuration
+    #: is demanded by more than one tier.
+    THREE_TIER_PACKAGE = "biscuit-terminal"
+    THREE_TIER_SOURCE = "biscuit-terminal/lib/src/lib.rs"
+
+    def builds_of(self, plan: dict, package: str) -> dict[str, dict]:
+        return {
+            record["producer"]: record
+            for record in plan["builds"]
+            if record["package"] == package
+        }
+
+    def test_the_plan_is_valid_and_every_executing_tier_names_one_build(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        for cell in plan["cells"]:
+            executing_tier = (
+                cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES
+            )
+            self.assertEqual(
+                executing_tier,
+                "build" in cell,
+                f"{cell['package']}/{cell['environment']}/{cell['gate']}",
+            )
+
+    def test_l1_and_browser_consumers_share_one_compatible_linux_key(self) -> None:
+        # The specification's central claim: tiers whose only compile-time
+        # difference is a runtime nextest filter compile once.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        keys = {
+            (cell["environment"], cell["gate"]): cell["build"]
+            for cell in plan["cells"]
+            if cell["package"] == self.THREE_TIER_PACKAGE and "build" in cell
+        }
+        self.assertEqual(
+            keys[("ubuntu-latest", "L1")],
+            keys[("ubuntu-latest", "browser")],
+            "L1 and browser differ only in a runtime filter and must share one build",
+        )
+        self.assertEqual(
+            keys[("ubuntu-latest", "L1")],
+            keys[("wsl2-ubuntu", "L1")],
+            "the WSL2 guest consumes the Linux producer's archive",
+        )
+
+    def test_one_linux_build_still_yields_two_distinct_result_cells(self) -> None:
+        # Spec section 5: a Linux pass is never WSL2 evidence.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        record = self.builds_of(plan, self.THREE_TIER_PACKAGE)["ubuntu-latest"]
+        self.assertIn({"environment": "ubuntu-latest", "gate": "L1"}, record["consumers"])
+        self.assertIn({"environment": "wsl2-ubuntu", "gate": "L1"}, record["consumers"])
+        results = [
+            (cell["environment"], cell["gate"])
+            for cell in plan["cells"]
+            if cell["package"] == self.THREE_TIER_PACKAGE and cell["gate"] == "L1"
+        ]
+        self.assertIn(("ubuntu-latest", "L1"), results)
+        self.assertIn(("wsl2-ubuntu", "L1"), results)
+
+    def test_each_native_producer_owns_exactly_one_key_for_the_package(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        owners = [
+            record["producer"]
+            for record in plan["builds"]
+            if record["package"] == self.THREE_TIER_PACKAGE
+        ]
+        self.assertEqual(
+            ["macos-latest", "ubuntu-latest", "windows-latest"], sorted(owners)
+        )
+        self.assertEqual(len(owners), len(set(owners)), "a key may have one owner only")
+
+    def test_incompatible_target_abis_split_the_key(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        records = self.builds_of(plan, self.THREE_TIER_PACKAGE)
+        keys = {name: record["key"] for name, record in records.items()}
+        self.assertEqual(3, len(set(keys.values())), keys)
+        self.assertNotIn(
+            "wsl2-ubuntu", records["windows-latest"]["compatible_environments"]
+        )
+
+    def test_a_governed_gap_creates_no_consumer_demand(self) -> None:
+        # Every L2 cell of this package is an accepted gap (its only backend is
+        # a GUI emulator no runner hosts), so no build lists an L2 consumer.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        gaps = [
+            cell
+            for cell in plan["cells"]
+            if cell["package"] == self.THREE_TIER_PACKAGE and cell["gate"] == "L2"
+        ]
+        self.assertTrue(gaps)
+        self.assertTrue(all(cell["execution"] == "omit" for cell in gaps), gaps)
+        self.assertEqual(
+            [],
+            [
+                consumer
+                for record in plan["builds"]
+                for consumer in record["consumers"]
+                if consumer["gate"] == "L2"
+            ],
+        )
+
+    def test_an_all_reused_plan_schedules_no_owner(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        accepted = [
+            {
+                "package": cell["package"],
+                "environment": cell["environment"],
+                "gate": cell["gate"],
+                "outcome": "pass",
+                "evidence": {"ref": f"refs/notes/ci-local/{cell['environment']}"},
+            }
+            for cell in plan["cells"]
+            if cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES
+        ]
+        applied = apply_accepted_cells(plan, accepted, [])
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        self.assertEqual([], applied["builds"], "a satisfied cell demands no compile")
+        self.assertTrue(all("build" not in cell for cell in applied["cells"]))
+
+    def test_evidence_for_one_environment_leaves_the_other_owners_standing(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        before = self.builds_of(plan, self.THREE_TIER_PACKAGE)
+        applied = apply_accepted_cells(
+            plan,
+            [
+                {
+                    "package": self.THREE_TIER_PACKAGE,
+                    "environment": "macos-latest",
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "evidence": {"ref": "refs/notes/ci-local/macos-latest"},
+                }
+            ],
+            [],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        after = self.builds_of(applied, self.THREE_TIER_PACKAGE)
+        self.assertNotIn("macos-latest", after)
+        self.assertEqual(
+            {name: record["key"] for name, record in before.items() if name != "macos-latest"},
+            {name: record["key"] for name, record in after.items()},
+            "the overlay removes demand; it never recomputes a key",
+        )
+
+    def test_partial_evidence_shrinks_a_shared_records_consumer_list(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        applied = apply_accepted_cells(
+            plan,
+            [
+                {
+                    "package": self.THREE_TIER_PACKAGE,
+                    "environment": "wsl2-ubuntu",
+                    "gate": "L1",
+                    "outcome": "pass",
+                    "evidence": {"ref": "refs/notes/ci-local/wsl2-ubuntu"},
+                }
+            ],
+            [],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        record = self.builds_of(applied, self.THREE_TIER_PACKAGE)["ubuntu-latest"]
+        self.assertNotIn({"environment": "wsl2-ubuntu", "gate": "L1"}, record["consumers"])
+        self.assertIn({"environment": "ubuntu-latest", "gate": "L1"}, record["consumers"])
+
+    def test_lint_and_check_cells_reference_no_build_and_keep_their_coverage(self) -> None:
+        # Spec section 6: Clippy is another compiler driver and check-only
+        # kinds may emit no executable, so neither consumes an archive.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        compile_gates = [
+            cell for cell in plan["cells"] if cell["gate"] in ("lint", "check")
+        ]
+        self.assertTrue(compile_gates)
+        for cell in compile_gates:
+            self.assertNotIn("build", cell)
+        checks = [cell for cell in compile_gates if cell["gate"] == "check"]
+        self.assertTrue(checks, "the check cells must survive build derivation")
+        self.assertTrue(all(cell["compile_coverage_from"] == "check" for cell in checks))
+
+    def test_two_packages_get_two_keys_from_one_owner(self) -> None:
+        plan = self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs")
+        linux = [
+            record for record in plan["builds"] if record["producer"] == "ubuntu-latest"
+        ]
+        self.assertEqual(
+            ["claudine", "playa"], sorted(record["package"] for record in linux)
+        )
+        self.assertEqual(
+            2, len({record["key"] for record in linux}), "one key per package"
+        )
+
+    def test_a_different_feature_graph_splits_the_key(self) -> None:
+        # The isolated feature graph is a keyed input, so the same package
+        # compiled with other features is a different build rather than a
+        # silent union.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        record = self.builds_of(plan, self.THREE_TIER_PACKAGE)["ubuntu-latest"]
+        base = build_key.planned_key(record["identity"])
+        self.assertEqual(record["key"], base)
+        for field, value in (
+            ("features", "--no-default-features"),
+            ("target_kinds", ["lib"]),
+            ("rustflags", "-C debuginfo=0"),
+            ("sidecars", ["messenger-desktop-stubs"]),
+            ("archive_includes", ["fixtures/"]),
+            ("lockfile", "0000000000000000"),
+        ):
+            other = {**record["identity"], field: value}
+            self.assertNotEqual(
+                base,
+                build_key.planned_key(other),
+                f"changing {field} must split the build key",
+            )
+
+    def test_no_unchanged_reverse_dependent_becomes_an_owner_or_a_consumer(self) -> None:
+        plan = self.plan("darkmatter/lib/src/lib.rs")
+        reported = set(plan["reverse_dependencies"])
+        self.assertTrue(reported)
+        self.assertEqual(
+            [],
+            sorted({record["package"] for record in plan["builds"]} & reported),
+            "a reported dependent must receive no build record",
+        )
+        areas = {record["area"] for record in plan["areas"]}
+        owners = build_owner_matrix(plan)
+        self.assertTrue(owners)
+        for owner in owners:
+            for package in owner["packages"]:
+                entry = self.package_record(plan, package)
+                self.assertIn(entry["area"], areas)
+
+    def cutover(self, plan: dict) -> set:
+        return archive_producers(plan["environments"])
+
+    def test_the_owner_matrix_is_derived_only_from_the_final_plan(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        owners = build_owner_matrix(plan)
+        cutover = self.cutover(plan)
+        self.assertEqual(sorted(cutover), [owner["environment"] for owner in owners])
+        runners = {
+            environment["name"]: environment["runner"]
+            for environment in plan["environments"]
+        }
+        for owner in owners:
+            self.assertEqual(runners[owner["environment"]], owner["runner"])
+        self.assertEqual(
+            sorted(
+                record["key"]
+                for record in plan["builds"]
+                if record["producer"] in cutover
+            ),
+            sorted(entry["key"] for owner in owners for entry in owner["builds"]),
+            "every cut-over record reaches exactly one owner slice",
+        )
+
+    def test_every_native_producer_reaches_the_owner_matrix_after_the_cutover(
+        self,
+    ) -> None:
+        # Phase 5's outcome, as a property of the two workflow-facing
+        # projections rather than of a workflow condition: macOS and native
+        # Windows own their archives exactly as Linux already did, each on its
+        # own runner, and each package's matrix entry names all three.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        owners = {owner["environment"]: owner for owner in build_owner_matrix(plan)}
+        self.assertEqual(
+            ["macos-latest", "ubuntu-latest", "windows-latest"], sorted(owners)
+        )
+        self.assertEqual("macos-latest", owners["macos-latest"]["runner"])
+        self.assertEqual("windows-latest", owners["windows-latest"]["runner"])
+
+        records = self.builds_of(plan, self.THREE_TIER_PACKAGE)
+        entry = next(
+            item
+            for item in legacy_scope_document(plan)["matrix"]
+            if item["package"] == self.THREE_TIER_PACKAGE
+        )
+        self.assertEqual(
+            sorted(record["key"] for record in records.values()),
+            sorted(item["key"] for item in entry["builds"]),
+            "every producer's record now reaches its package's consumers",
+        )
+        # The one pairing that must stay structurally impossible, restated where
+        # the workflow reads it: the Windows consumer's artifact is the Windows
+        # owner's, never the Linux one the WSL2 guest shares.
+        windows = next(
+            item for item in entry["builds"] if item["producer"] == "windows-latest"
+        )
+        self.assertEqual(records["windows-latest"]["artifact"], windows["artifact"])
+        self.assertNotEqual(records["ubuntu-latest"]["artifact"], windows["artifact"])
+        self.assertEqual(
+            [{"environment": "windows-latest", "gate": "L1"}],
+            records["windows-latest"]["consumers"],
+        )
+
+    def test_an_environment_that_owns_nothing_reaches_no_owner_job(self) -> None:
+        # The archive-only guest is the one environment with no producer
+        # contract. It consumes the Linux record and must never appear as an
+        # owner, in the matrix or in a package's build references — which is
+        # what would send a consumer looking for an artifact nobody uploads.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        owners = {owner["environment"] for owner in build_owner_matrix(plan)}
+        self.assertNotIn("wsl2-ubuntu", owners)
+        self.assertEqual(owners, self.cutover(plan))
+        scoped = legacy_scope_document(plan)
+        entry = next(
+            item
+            for item in scoped["matrix"]
+            if item["package"] == self.THREE_TIER_PACKAGE
+        )
+        self.assertEqual(
+            set(),
+            {item["producer"] for item in entry["builds"]} - owners,
+            "a package's matrix entry names only archives an owner will produce",
+        )
+        # And the guest's cells are still served: by the Linux record, as one of
+        # its consumers.
+        linux = next(
+            record
+            for record in plan["builds"]
+            if record["package"] == self.THREE_TIER_PACKAGE
+            and record["producer"] == "ubuntu-latest"
+        )
+        self.assertIn(
+            "wsl2-ubuntu",
+            {consumer["environment"] for consumer in linux["consumers"]},
+        )
+
+    def test_the_package_matrix_carries_its_own_build_references(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        cutover = self.cutover(plan)
+        scheduled = [
+            record for record in plan["builds"] if record["producer"] in cutover
+        ]
+        self.assertTrue(scheduled)
+        scoped = legacy_scope_document(plan)
+        entry = next(
+            item
+            for item in scoped["matrix"]
+            if item["package"] == self.THREE_TIER_PACKAGE
+        )
+        self.assertEqual(
+            sorted(record["key"] for record in scheduled),
+            sorted(item["key"] for item in entry["builds"]),
+        )
+        self.assertEqual(
+            sorted(record["artifact"] for record in scheduled),
+            sorted(item["artifact"] for item in entry["builds"]),
+        )
+        self.assertEqual(scoped["build_owners"], build_owner_matrix(plan))
+
+    def test_the_owner_slices_flatten_to_the_workflow_matrix(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        scoped = legacy_scope_document(plan)
+        owners = scoped["build_owners"]
+        slices = scoped["build_slices"]
+        self.assertEqual(
+            sorted(entry["artifact"] for owner in owners for entry in owner["builds"]),
+            [entry["artifact"] for entry in slices],
+            "one leg per record, in deterministic artifact order",
+        )
+        self.assertEqual(
+            [entry["artifact"] for entry in slices], scoped["build_artifacts"]
+        )
+        self.assertEqual(
+            {entry["artifact"]: entry["runner"] for entry in slices},
+            scoped["build_runners"],
+        )
+        for entry in slices:
+            self.assertEqual(
+                f"build-{entry['package']}-{entry['producer']}-{entry['key']}",
+                entry["artifact"],
+            )
+            self.assertTrue(entry["consumers"], "an owner leg exists only for demand")
+
+    def test_an_owner_leg_carries_its_own_native_prerequisites(self) -> None:
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        scoped = legacy_scope_document(plan)
+        for entry in scoped["build_slices"]:
+            declared = self.package_record(plan, entry["package"])["native"]
+            self.assertEqual(
+                sorted(declared.get(entry["producer"], [])),
+                entry["native"],
+                "the leg installs the prerequisites of the compile it performs",
+            )
+        for owner in scoped["build_owners"]:
+            self.assertEqual(
+                sorted({name for build in owner["builds"] for name in build["native"]}),
+                owner["native"],
+                "the producer's union is the union of its records",
+            )
+
+    def test_one_linux_build_feeds_native_linux_and_the_wsl2_guest(self) -> None:
+        # Validation checkpoint 4, as a property of the documents: one key, one
+        # artifact, and one owner leg serving the native Linux tiers AND the
+        # WSL2 guest — which keeps its own, separate result cell.
+        plan = self.plan(self.THREE_TIER_SOURCE)
+        record = self.builds_of(plan, self.THREE_TIER_PACKAGE)["ubuntu-latest"]
+        consumers = {
+            (entry["environment"], entry["gate"]) for entry in record["consumers"]
+        }
+        self.assertIn(("ubuntu-latest", "L1"), consumers)
+        self.assertIn(("wsl2-ubuntu", "L1"), consumers)
+        self.assertTrue(
+            {gate for environment, gate in consumers if environment == "ubuntu-latest"}
+            - {"L1"},
+            "this fixture must also carry a Linux L2 or browser consumer",
+        )
+        self.assertEqual(
+            {"ubuntu-latest", "wsl2-ubuntu"},
+            {environment for environment, _ in consumers},
+            "a Linux archive is consumed by exactly its own environment and its guest",
+        )
+
+        # The two environments reach the SAME artifact through the workflow
+        # projections, and remain two distinct result cells.
+        scoped = legacy_scope_document(plan)
+        entry = next(
+            item
+            for item in scoped["matrix"]
+            if item["package"] == self.THREE_TIER_PACKAGE
+        )
+        linux = [item for item in entry["builds"] if item["producer"] == "ubuntu-latest"]
+        self.assertEqual(1, len(linux))
+        self.assertEqual(record["artifact"], linux[0]["artifact"])
+        self.assertEqual(
+            [record["artifact"]],
+            [
+                slice_["artifact"]
+                for slice_ in scoped["build_slices"]
+                if slice_["package"] == self.THREE_TIER_PACKAGE
+                and slice_["producer"] == "ubuntu-latest"
+            ],
+            "one owner leg, not one per consuming environment",
+        )
+        cells = {
+            (cell["environment"], cell["gate"])
+            for cell in plan["cells"]
+            if cell["package"] == self.THREE_TIER_PACKAGE
+            and cell.get("build") == record["key"]
+        }
+        self.assertEqual(consumers, cells)
+        self.assertIn(("wsl2-ubuntu", "L1"), cells)
+        self.assertIn(("ubuntu-latest", "L1"), cells)
+
+    def test_a_documentation_change_schedules_no_owner_at_all(self) -> None:
+        plan = self.plan("docs/architecture.md")
+        self.assertEqual([], plan["builds"])
+        scoped = legacy_scope_document(plan)
+        self.assertEqual([], scoped["build_owners"])
+        self.assertEqual([], scoped["build_slices"])
+        self.assertEqual([], scoped["build_artifacts"])
+        self.assertEqual({}, scoped["build_runners"])
 
 
 class ScopeReceiptMigrationTests(PlannerFixture):

@@ -321,7 +321,15 @@ impl MetricsTree {
         let mut body = String::new();
         for row in &rows {
             let truncated = truncate_to_width(&row.label, label_w, unicode);
-            let mut label = format!("{truncated:<label_w$}");
+            // Escape the label AFTER truncating and padding it. Labels are
+            // caller-supplied literals, and truncation can strand a Prose
+            // delimiter against the ellipsis — `classified_embedded_language_`
+            // + `…` opens an italic span that a later row's underscore closes,
+            // eating two visible columns and shearing the value column off the
+            // grid. Escaping here (not before the column math) keeps the
+            // accounting honest: Prose consumes the backslashes, so the padded
+            // width computed above is still what reaches the screen.
+            let mut label = Prose::escape_text(&format!("{truncated:<label_w$}"));
             if row.emphasize {
                 label = format!("<b>{label}</b>");
             }
@@ -667,6 +675,98 @@ mod tests {
             ],
         )
         .emphasized()
+    }
+
+    #[test]
+    fn truncated_underscore_labels_do_not_leak_markup_at_any_width() {
+        // Truncating `classified_embedded_language_hint` can leave an
+        // underscore pressed against the ellipsis. Unescaped, that underscore
+        // opens a Prose italic span which a later row's underscore closes,
+        // swallowing one visible column per row and shearing the value column
+        // off the grid computed before markup parsing. Widths 27 through 48
+        // were corrupt before `build_markup` escaped the padded label; the
+        // sweep covers that band plus the narrowest supported width (20) and
+        // the first clean width (49), which pin its two edges. Wider terminals
+        // only repeat the clean case. `saw_underscore_cut` keeps the sweep
+        // honest: if truncation ever stops landing on an underscore, the test
+        // fails instead of passing vacuously.
+        use crate::terminal::Terminal;
+
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(722)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "classified_embedded_language_hint",
+                    MetricValue::Duration(Duration::from_millis(400)),
+                    MetricShare::Of(0.55),
+                ),
+                MetricNode::leaf(
+                    "resolved_repository_worktree_root",
+                    MetricValue::Duration(Duration::from_millis(100)),
+                    MetricShare::Of(0.13),
+                ),
+                MetricNode::leaf(
+                    "shared_walk_docs",
+                    MetricValue::Duration(Duration::from_millis(30)),
+                    MetricShare::Of(0.04),
+                ),
+            ],
+        )
+        .emphasized();
+
+        let mut saw_underscore_cut = false;
+        for unicode in [true, false] {
+            for width in std::iter::once(20u32).chain(27..=49) {
+                let term = Terminal::builder()
+                    .width(width)
+                    .supports_unicode(unicode)
+                    .build();
+                let rendered = MetricsTree::new(root.clone()).render(&term);
+                assert!(
+                    !rendered.contains("\u{1b}[3m"),
+                    "label truncation opened an italic span (unicode={unicode}, width={width}):\n{rendered:?}"
+                );
+
+                let plain = strip_ansi(&rendered);
+                let rows: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
+                assert_eq!(rows.len(), 4, "expected four rows (unicode={unicode}, width={width}):\n{plain}");
+
+                let cut = if unicode { "_…" } else { "_..." };
+                saw_underscore_cut |= rows.iter().any(|l| l.contains(cut));
+
+                // Undecorated rows are a fixed-width grid: label, value, and
+                // share columns are all padded, so every row must end at the
+                // same column. A swallowed underscore shortens exactly the
+                // rows that carry one.
+                let widths: Vec<usize> = rows.iter().map(|l| l.chars().count()).collect();
+                assert!(
+                    widths.iter().all(|w| *w == widths[0]),
+                    "rows lost visible columns to markup (unicode={unicode}, width={width}): {widths:?}\n{plain}"
+                );
+
+                // The value column itself must still line up at the unit.
+                let unit_columns: Vec<usize> = rows
+                    .iter()
+                    .filter_map(|l| l.find("ms").map(|idx| l[..idx].chars().count()))
+                    .collect();
+                assert_eq!(
+                    unit_columns.len(),
+                    4,
+                    "every row carries a ms value (unicode={unicode}, width={width}):\n{plain}"
+                );
+                assert!(
+                    unit_columns.iter().all(|c| *c == unit_columns[0]),
+                    "value column misaligned (unicode={unicode}, width={width}): {unit_columns:?}\n{plain}"
+                );
+            }
+        }
+        assert!(
+            saw_underscore_cut,
+            "the sweep never truncated a label immediately after an underscore, \
+             so it does not exercise the regression"
+        );
     }
 
     #[test]

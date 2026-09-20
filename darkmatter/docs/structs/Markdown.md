@@ -148,6 +148,12 @@ md.fm_insert("author", "Ken")?;
 
 ### Merging
 
+Parsing one YAML frontmatter document rejects duplicate keys at every mapping
+depth, including mappings nested in arrays. Darkmatter no longer accepts YAML's
+last-value-wins behavior for authored duplicates. This parse rule is separate
+from explicit document merging: `fm_merge_with` still resolves conflicts using
+the selected strategy below.
+
 **`fm_merge_with(data, strategy)`** merges external data into the frontmatter using a conflict resolution strategy:
 
 | Strategy | Behavior on Duplicate Keys |

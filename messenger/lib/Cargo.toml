@@ -23,6 +23,13 @@ twilight-util = { version = "0.17", optional = true, features = ["builder"] }
 jsonwebtoken = { version = "9", optional = true }
 sniff = { path = "../../sniff/lib", optional = true }
 tokio = { version = "1", features = ["process", "time"], optional = true }
+# Provider-research maintenance (`research` feature only): passive schema
+# validation, file-reference resolution, and xxh64 fingerprints. Never part of
+# an ordinary send build.
+darkmatter = { path = "../../darkmatter/lib", optional = true }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"], optional = true }
+biscuit-hash = { path = "../../biscuit-hash/lib", optional = true }
+serde_path_to_error = { version = "0.1", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4", optional = true }
@@ -40,6 +47,13 @@ tempfile = "3.15"
 wiremock = "0.6"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+# `manifest_dir!()`: the research fixtures resolve the manifest directory at
+# run time so they still find the corpus when run from an archive.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# Research-contract corpus (`tests/research_corpus.rs`): library schema
+# validation plus darkmatter's test-only effect counters. A dev-dependency
+# never enters the send path's normal dependency graph.
+darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
 
 [features]
 default = ["discord", "slack"]
@@ -59,6 +73,10 @@ desktop = [
 ]
 apns = ["dep:reqwest", "dep:jsonwebtoken"]
 fcm = ["dep:reqwest"]
+# Typed loading and semantic validation of the provider research contract
+# (`messenger::research`). Maintenance consumers only; see
+# `features/2026-09-17-research-metadata-pipeline/architecture.md`.
+research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error", "dep:sniff"]
 
 # Helper-stub binaries used by the desktop helper integration tests.
 # They are tiny (only `std`) and only built when the `desktop` feature is
@@ -114,8 +132,10 @@ bench = false
 
 [package.metadata.ci.tests]
 all-features = true
-local-features = ["desktop"]
-runner-tools = ["messenger-desktop-stubs"]
+local-features = ["desktop", "research"]
+# `required-features = ["desktop"]` bin targets that nextest does not archive
+# with the test binaries; the producer compiles them and ships them beside it.
+sidecars = ["messenger-desktop-stubs"]
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libdbus-1-dev"]

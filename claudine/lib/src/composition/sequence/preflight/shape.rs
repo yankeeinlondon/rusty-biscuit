@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use serde_json::{Map, Value};
 
+use crate::composition::authored_order::AuthoredOrder;
+
 /// One sequence step's preflight node.
 #[derive(Debug, Clone)]
 pub struct PreflightStep {
@@ -47,6 +49,32 @@ pub struct PreflightTask {
     pub origin_dir: PathBuf,
     /// The document that authored this task.
     pub origin_path: PathBuf,
+    /// Authored mapping order of the owning document, positioned at this task.
+    ///
+    /// `setup:`/`teardown:` are parsed at execution time from the raw values
+    /// above, so the cursor that reaches their `set:` mappings has to be
+    /// recorded here while preflight still knows where in the document the task
+    /// came from. Default when the owning document records no key order.
+    pub authored: AuthoredOrder,
+    /// Source location used when an executable reports an authored-property
+    /// diagnostic. This is fixed during preflight because external groups and
+    /// task files change both halves independently of the invoking sequence.
+    pub diagnostic: TaskDiagnosticProvenance,
+}
+
+/// Authored source location for diagnostics raised while executing a task.
+#[derive(Debug, Clone)]
+pub struct TaskDiagnosticProvenance {
+    /// The document that owns `action_property`.
+    pub source_path: PathBuf,
+    /// Exact source-rooted path of the task's executable property.
+    pub action_property: String,
+    /// Exact source-rooted path of the task itself, the root every other task
+    /// property hangs off (`tasks[0]`, `tasks[1].group.tasks[0]`).
+    ///
+    /// Empty when the task *is* the document — an external `kind: task` file,
+    /// where `setup` is already the source-rooted spelling.
+    pub task_property: String,
 }
 
 /// The five executable shapes, resolved.
@@ -68,6 +96,8 @@ pub enum PreflightAction {
     SideEffect {
         /// The authored action, evaluated at execution time.
         action: Value,
+        /// Authored destination order retained outside ordinary JSON maps.
+        authored_set_order: Option<Vec<String>>,
     },
     /// Execute a group.
     Group(PreflightGroup),

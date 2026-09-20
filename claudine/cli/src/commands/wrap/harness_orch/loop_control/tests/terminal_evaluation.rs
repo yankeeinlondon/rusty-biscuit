@@ -827,9 +827,9 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
 #[test]
 fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        // A `shell: false` action errors and routes_to_failure(Initialize).
+        // Creating a directory over a file raises a non-shell dispatch error.
         "initialize": {
-            "stack": [{"action": {"shell": "false"}}]
+            "stack": [{"action": {"ensure_dir": "prompt.md"}}]
         },
         "failure": {
             "stderr": "fail",
@@ -837,6 +837,7 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
         },
         "finalize": { "stderr": "final" }
     }));
+    std::fs::write(&fx.source_path, "existing file").unwrap();
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,

@@ -103,8 +103,13 @@ Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
   a consumer that only needs local detection — such as `rendezvous-core`, which
   depends on Sniff with `default-features = false` — pulls in neither an async
   runtime nor an HTTP stack.
-- The CLI's `test-fixtures` feature enables its terminal harness and two helper
-  binaries exclusively for L2 styling tests. Their test targets declare
-  `required-features`, so ordinary local L1 neither builds empty L2 binaries nor
-  compiles the terminal harness. CI enables the feature for its reusable
+- The CLI's `test-fixtures` feature carries `biscuit-test-harness` into the
+  non-test build and enables two helper binaries, exclusively for L2 styling
+  tests. Their test targets declare `required-features`, so ordinary local L1
+  does not build empty L2 binaries. CI enables the feature for its reusable
   all-tier archive; `just test-l2` enables it explicitly.
+- `biscuit-test-harness` is additionally an unconditional `[dev-dependencies]`
+  entry of both packages, independent of that feature: L1 tests call its
+  `manifest_dir!()` so fixture lookups resolve against the run-time manifest
+  directory, which is what makes a nextest archive built elsewhere find its
+  fixtures in the executing checkout.

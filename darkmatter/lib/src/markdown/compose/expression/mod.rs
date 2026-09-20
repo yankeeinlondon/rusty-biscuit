@@ -73,6 +73,7 @@ pub mod error;
 pub mod file_suggestions;
 pub mod functions;
 pub mod lexer;
+pub mod lint;
 pub(crate) mod path_projection;
 pub mod parser;
 pub mod resolve_ctx;
@@ -95,6 +96,7 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
     Lexer, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,

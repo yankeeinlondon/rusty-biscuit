@@ -1,0 +1,5 @@
+kind: schema
+types:
+    Item: "{ id: string(required) }"
+$schema:
+    items: "Item[](required)@this"

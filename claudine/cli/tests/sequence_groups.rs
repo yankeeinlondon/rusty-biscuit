@@ -641,12 +641,12 @@ sequence:
           shell: "sleep 1; printf 'e\n'"
           setup:
             - action:
-                - set: [shared, from-early]
+                - set: {shared: from-early}
         - name: late
           shell: "printf 'l\n'"
           setup:
             - action:
-                - set: [shared, from-late]
+                - set: {shared: from-late}
   - name: beta
     prompt: reader.md
 ---

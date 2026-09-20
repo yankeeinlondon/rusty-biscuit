@@ -121,6 +121,146 @@ fn captured_process_state_is_immutable_for_later_projections() {
     drop(guard);
 }
 
+/// Point every home variable at one directory, restoring the prior state when
+/// the returned guards drop.
+fn set_home_variables(value: &Path) -> Vec<test_toolkit::EnvGuard> {
+    HOME_VARIABLES
+        .iter()
+        .map(|name| test_toolkit::EnvGuard::set_safe(name, value))
+        .collect()
+}
+
+/// The launch home is a snapshot, not a live read. Every variable the
+/// invocation recorded must keep its launch value once the process moves on,
+/// because child-environment assembly projects the baseline rather than the
+/// wrapper's current process state.
+#[test]
+#[serial_test::serial(cwd, env)]
+fn home_and_env_baselines_do_not_follow_a_post_capture_mutation() {
+    let launch_home = TempDir::new().unwrap();
+    let moved_home = TempDir::new().unwrap();
+    let guards = set_home_variables(launch_home.path());
+
+    let invocation = InvocationContext::capture_at(launch_home.path());
+    let resolved_at_capture = invocation.home_dir().map(Path::to_path_buf);
+
+    let moved = set_home_variables(moved_home.path());
+    assert_eq!(
+        std::env::var_os("HOME").as_deref(),
+        Some(moved_home.path().as_os_str()),
+        "the mutation this test relies on did not take effect"
+    );
+
+    for (name, value) in invocation.home_baseline().variables() {
+        assert_eq!(
+            value,
+            Some(launch_home.path().as_os_str()),
+            "{name} must keep its launch value after an ambient mutation"
+        );
+    }
+    assert_eq!(
+        invocation.env_baseline().get("HOME"),
+        Some(launch_home.path().as_os_str())
+    );
+    // Downstream projections of the same snapshot must agree with it.
+    assert_eq!(
+        invocation.home_dir(),
+        resolved_at_capture.as_deref(),
+        "the resolved home moved with the ambient environment"
+    );
+    assert_eq!(
+        invocation.environment().get("HOME").map(String::as_str),
+        launch_home.path().to_str()
+    );
+    #[cfg(unix)]
+    assert_eq!(invocation.home_dir(), Some(launch_home.path()));
+
+    drop(moved);
+    drop(guards);
+}
+
+/// `HOME` is absent on a native Windows launch and on a stripped Unix
+/// environment. The baseline records that absence as absence: inventing a value
+/// from a sibling variable would hand a provider a home the launch never had.
+#[test]
+#[serial_test::serial(cwd, env)]
+fn an_absent_home_is_captured_as_absent_and_is_not_synthesized() {
+    let profile_home = TempDir::new().unwrap();
+    let home = test_toolkit::EnvGuard::remove_safe("HOME");
+    let user_profile = test_toolkit::EnvGuard::set_safe("USERPROFILE", profile_home.path());
+
+    let invocation = InvocationContext::capture_at(profile_home.path());
+
+    assert_eq!(invocation.home_baseline().variable("HOME"), None);
+    assert_eq!(
+        invocation.home_baseline().variable("USERPROFILE"),
+        Some(profile_home.path().as_os_str())
+    );
+    assert_eq!(invocation.env_baseline().get("HOME"), None);
+    assert!(!invocation.environment().contains_key("HOME"));
+
+    drop(user_profile);
+    drop(home);
+}
+
+/// An empty `HOME` is a value a child can observe, and it is not the same
+/// launch state as an unset one. Windows deletes a variable assigned an empty
+/// string, so only Unix can express the distinction.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial(cwd, env)]
+fn an_empty_home_is_captured_as_a_present_empty_value() {
+    let fixture = TempDir::new().unwrap();
+    let home = test_toolkit::EnvGuard::set_safe("HOME", "");
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+
+    assert_eq!(
+        invocation.home_baseline().variable("HOME"),
+        Some(std::ffi::OsStr::new(""))
+    );
+    assert_eq!(
+        invocation.env_baseline().get("HOME"),
+        Some(std::ffi::OsStr::new(""))
+    );
+
+    drop(home);
+}
+
+/// A Unix home need not be UTF-8. The raw baseline round-trips it byte for
+/// byte, while the lossy `String` map cannot carry it at all — which is the
+/// whole reason the raw record exists beside the map.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial(cwd, env)]
+fn a_non_utf8_home_survives_the_raw_baseline_round_trip() {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    let fixture = TempDir::new().unwrap();
+    let mut raw = fixture.path().as_os_str().as_bytes().to_vec();
+    raw.extend_from_slice(&[0xff, 0xfe]);
+    let value = std::ffi::OsString::from_vec(raw);
+    let home = test_toolkit::EnvGuard::set_safe("HOME", &value);
+
+    let invocation = InvocationContext::capture_at(fixture.path());
+
+    assert_eq!(
+        invocation.home_baseline().variable("HOME"),
+        Some(value.as_os_str())
+    );
+    assert_eq!(
+        invocation.env_baseline().get("HOME"),
+        Some(value.as_os_str())
+    );
+    assert_eq!(
+        invocation.environment().get("HOME"),
+        None,
+        "a non-UTF-8 value has no lossless String form and must not be guessed at"
+    );
+
+    drop(home);
+}
+
 #[test]
 fn launch_and_same_repository_source_share_one_topology_probe() {
     let fixture = TempDir::new().unwrap();

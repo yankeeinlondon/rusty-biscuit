@@ -1,7 +1,6 @@
 ---
 description: |-
-    This prompt is used to learn from a long review/fix cycle and see if there are ways in which the prompts, agent skills, or other repo or environmental factors could be improved to make
-    this cycle more efficient going forward.
+    This prompt is used to learn from a long review/fix cycle and see if there are ways in which the prompts, agent skills, or other repo or environmental factors could be improved to make this cycle more efficient going forward.
 $schema:
     spec: file(required;eager;match(**/*spec*.md)) -> the specification file that represented the core requirements for this elongated review/fix cycle
     iterations: number -> The number of iterations that it took to complete this cycle (_or at least to get to the point where a lineage review felt necessary_).

@@ -2,19 +2,19 @@
   "algorithm": "xxh64",
   "seed": 0,
   "artifacts": [
-    { "path": "docs/providers/catalog.json", "hash": "12260637771893196635" },
+    { "path": "docs/providers/catalog.json", "hash": "4992177613331685818" },
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },
-    { "path": "lib/src/provider/antigravity/data.rs", "hash": "18088126246647318762" },
-    { "path": "lib/src/provider/claude/data.rs", "hash": "17533988623237661960" },
-    { "path": "lib/src/provider/codex/data.rs", "hash": "7419477328587556717" },
-    { "path": "lib/src/provider/gemini/data.rs", "hash": "10106394183872838059" },
-    { "path": "lib/src/provider/goose/data.rs", "hash": "7046982462789047438" },
-    { "path": "lib/src/provider/kilo/data.rs", "hash": "17544087474510118917" },
-    { "path": "lib/src/provider/kimi/data.rs", "hash": "3882671515899400190" },
-    { "path": "lib/src/provider/opencode/data.rs", "hash": "10931200895418274740" },
-    { "path": "lib/src/provider/pi/data.rs", "hash": "13802176548921371712" },
-    { "path": "lib/src/provider/qwen/data.rs", "hash": "13888146271741682622" }
+    { "path": "lib/src/provider/antigravity/data.rs", "hash": "12939088638076069542" },
+    { "path": "lib/src/provider/claude/data.rs", "hash": "911876181393434815" },
+    { "path": "lib/src/provider/codex/data.rs", "hash": "12727705138327263807" },
+    { "path": "lib/src/provider/gemini/data.rs", "hash": "415360698101652047" },
+    { "path": "lib/src/provider/goose/data.rs", "hash": "5391727857946260268" },
+    { "path": "lib/src/provider/kilo/data.rs", "hash": "5422643129856984303" },
+    { "path": "lib/src/provider/kimi/data.rs", "hash": "3836535313942094980" },
+    { "path": "lib/src/provider/opencode/data.rs", "hash": "15234864195975480763" },
+    { "path": "lib/src/provider/pi/data.rs", "hash": "2889607625502041169" },
+    { "path": "lib/src/provider/qwen/data.rs", "hash": "16044807788105734804" }
   ]
 }

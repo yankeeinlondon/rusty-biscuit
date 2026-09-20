@@ -217,6 +217,12 @@ pub fn frontmatter_authoring(
     let shape = effective_shape(outcome);
     let mut values = Vec::new();
     for (index, entry) in ast.entries().iter().enumerate() {
+        // Sequence interiors belong to the value that owns the sequence: the
+        // semantic parsers locate them through `locate_schema_value`, so an item
+        // is never a semantic value of its own.
+        if ast.is_in_sequence(index) {
+            continue;
+        }
         // The authored key chain, not `dotted.split('.')`: a property named
         // `build.target` is one key, and splitting it would look up a nested
         // `build` → `target` path that does not exist, silently dropping the

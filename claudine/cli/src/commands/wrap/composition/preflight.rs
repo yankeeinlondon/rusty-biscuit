@@ -21,7 +21,7 @@ use claudine::composition::{
     decide_lifecycle_transition,
 };
 use claudine::composition::lifecycle_executor::StackExecutionContext;
-use claudine::composition::lifecycle_executor::SystemShellRunner;
+use claudine::composition::lifecycle_executor::DisabledShellRunner;
 use claudine::events::GlobalSettings;
 use claudine::messaging::RuntimeMessagingSettings;
 use darkmatter::effects::EffectEngine;
@@ -160,7 +160,7 @@ pub(super) fn emit_preflight_blocked_and_finalize_in_context(
         prepared_context,
         file_resolution_context,
         effect_engine,
-        shell_runner: &SystemShellRunner,
+        shell_runner: &DisabledShellRunner,
         emitter,
         term,
         source_path,

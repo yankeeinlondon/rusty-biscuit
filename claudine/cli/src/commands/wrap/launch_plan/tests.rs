@@ -31,9 +31,10 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         has_model_env: false,
         mcp: None,
         opencode_config_base: None,
+        kilo_config_base: None,
         codex_last_message_path: PathBuf::from("/tmp/claudine-test-last.txt"),
         provider_env_baseline: HashMap::new(),
-        codex_sqlite_home: None,
+        overlay: Some(no_overlay_intent()),
         credential_policy: CredentialPolicyInputs::default(),
         workspace_cwd: PathBuf::from("/repo"),
         write_grant_env: HashMap::new(),
@@ -43,6 +44,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
             env_overlay: vec![("YOLO".into(), "false".into())],
             structured_codex: false,
             write_posture: None,
+            overlay: None,
         },
         replay_supported: true,
     };
@@ -53,6 +55,17 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
     // as a failure rather than as two independently-maintained literals.
     recorded.invocation.args = replay(&recorded, &facets).unwrap().args;
     recorded
+}
+
+/// Overlay intent with neither `--repo` nor `--mcp`, planned against no home:
+/// no provider is given an overlay.
+fn no_overlay_intent() -> OverlayRebuildInputs {
+    OverlayRebuildInputs {
+        repo_resources: false,
+        mcp_requested: false,
+        home: HomeBaseline::from_parts(None, Default::default()),
+        env: EnvBaseline::default(),
+    }
 }
 
 /// The property the verbatim shortcut rests on: for the invocation's *own*
@@ -283,14 +296,14 @@ fn a_replay_removes_a_provider_owned_env_key_it_no_longer_writes() {
 }
 
 /// A provider-shaped key that had a value *before* the invocation's own stages
-/// wrote it is restored to that value rather than deleted — the shadow `HOME`
-/// case, where deleting the key would hand the child no home at all.
+/// wrote it is restored to that value rather than deleted — an explicit
+/// ambient overlay selector, which is the user's own configuration root.
 #[test]
 fn a_replay_restores_rather_than_deletes_a_key_that_had_a_prior_value() {
     let mut inputs = inputs();
     inputs.provider_env_baseline = HashMap::from([(
-        OsString::from("HOME"),
-        Some(OsString::from("/home/real")),
+        OsString::from("CODEX_HOME"),
+        Some(OsString::from("/home/real/codex")),
     )]);
     inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
         .unwrap()
@@ -304,11 +317,11 @@ fn a_replay_restores_rather_than_deletes_a_key_that_had_a_prior_value() {
 
     assert!(
         plan.env_overlay.contains(&EnvChange::Set(
-            OsString::from("HOME"),
-            OsString::from("/home/real"),
+            OsString::from("CODEX_HOME"),
+            OsString::from("/home/real/codex"),
         )),
-        "a shadow HOME the rebuild does not re-materialize must fall back to the \
-         real one; got {:?}",
+        "an overlay selector the rebuild does not re-apply must fall back to the \
+         user's own value; got {:?}",
         plan.env_overlay,
     );
 }
@@ -446,32 +459,191 @@ fn explicit_include_survives_a_provider_switch() {
     );
 }
 
-#[test]
-fn a_replay_onto_codex_uses_the_pre_shadow_sqlite_home() {
-    let mut inputs = inputs_for(Provider::Goose);
-    inputs.codex_sqlite_home = Some(OsString::from("/home/real/.codex"));
+// -- provider overlays -----------------------------------------------------------------
 
-    let patch = patch_after_switch(&inputs, Provider::Codex);
-
-    assert!(patch.contains(&EnvChange::Set(
-        OsString::from("CODEX_SQLITE_HOME"),
-        OsString::from("/home/real/.codex"),
-    )));
+/// A private home holding a Codex configuration, plus the workspace the
+/// overlay is planned from. Nothing here reads the developer's real home.
+struct OverlayFixture {
+    _dir: tempfile::TempDir,
+    home: PathBuf,
+    workspace: PathBuf,
 }
 
+impl OverlayFixture {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home dir");
+        let workspace = dir.path().join("repo");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex").join("config.toml"), "model = \"fixture\"\n").unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        Self { _dir: dir, home, workspace }
+    }
+
+    fn home_baseline(&self) -> HomeBaseline {
+        HomeBaseline::from_parts(
+            Some(self.home.clone()),
+            [Some(self.home.as_os_str().to_owned()), None, None, None],
+        )
+    }
+
+    /// Inputs opening on `provider` under `--repo`, with the invocation's own
+    /// overlay built and its variables recorded the way the composition
+    /// pipeline records them: every overlay variable absent beforehand.
+    fn repo_inputs(&self, provider: Provider) -> LaunchPlanInputs {
+        let mut inputs = inputs_for(provider);
+        inputs.workspace_cwd = self.workspace.clone();
+        let intent = OverlayRebuildInputs {
+            repo_resources: true,
+            mcp_requested: false,
+            home: self.home_baseline(),
+            env: EnvBaseline::default(),
+        };
+        let reasons =
+            super::super::provider_overlay::overlay_reasons(provider, true, false, &self.workspace);
+        let (plan, _) = super::super::provider_overlay::build_overlay(
+            provider,
+            reasons,
+            &self.workspace,
+            false,
+            Some(&self.workspace),
+            &intent.home,
+            &intent.env,
+        )
+        .unwrap();
+        for (name, _) in plan.env_patch() {
+            inputs.provider_env_baseline.insert(name, None);
+        }
+        inputs.invocation.overlay = Some(plan);
+        inputs.overlay = Some(intent);
+        inputs
+    }
+
+}
+
+/// The storage root a recorded overlay plan owns — unique per launch, so read
+/// from the plan rather than predicted.
+fn overlay_root(plan: Option<&OverlayPlan>) -> OsString {
+    plan.and_then(OverlayPlan::storage_root)
+        .expect("the plan owns an overlay root")
+        .as_os_str()
+        .to_owned()
+}
+
+fn switched(inputs: &LaunchPlanInputs, provider: Provider) -> LaunchPlan {
+    let facets = DocumentLaunchFacets {
+        provider,
+        ..inputs.invocation.facets.clone()
+    };
+    build_launch_plan(inputs, &facets).unwrap()
+}
+
+/// Invariant 7, Claude to Codex under `--repo`: the retry drops both variables
+/// Claude's overlay wrote, then builds Codex's own overlay and applies its whole
+/// patch — the selector and the SQLite state pinned at the pre-overlay root —
+/// without naming a home variable.
 #[test]
-fn a_replay_away_from_codex_removes_the_derived_sqlite_home() {
-    let mut inputs = inputs_for(Provider::Codex);
-    inputs.codex_sqlite_home = Some(OsString::from("/home/real/.codex"));
-    inputs
-        .provider_env_baseline
-        .insert(OsString::from("CODEX_SQLITE_HOME"), None);
+fn a_replay_onto_codex_applies_the_codex_overlay_plan() {
+    let fixture = OverlayFixture::new();
+    let inputs = fixture.repo_inputs(Provider::Claude);
 
-    let patch = patch_after_switch(&inputs, Provider::Goose);
+    let plan = switched(&inputs, Provider::Codex);
 
-    assert!(patch.contains(&EnvChange::Remove(OsString::from(
-        "CODEX_SQLITE_HOME"
-    ))));
+    for name in ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"] {
+        assert!(
+            plan.env_overlay.contains(&EnvChange::Remove(name.into())),
+            "Claude's {name} must not reach the Codex child; got {:?}",
+            plan.env_overlay,
+        );
+    }
+
+    let codex_overlay = overlay_root(plan.overlay.as_ref());
+    assert!(plan.env_overlay.contains(&EnvChange::Set("CODEX_HOME".into(), codex_overlay.clone())));
+    assert!(plan.env_overlay.contains(&EnvChange::Set(
+        "CODEX_SQLITE_HOME".into(),
+        fixture.home.join(".codex").into_os_string(),
+    )));
+    assert!(
+        plan.env_overlay.iter().all(|change| !claudine::invocation_context::HOME_VARIABLES
+            .iter()
+            .any(|home| change.key() == OsStr::new(home))),
+        "an overlay never writes a home variable; got {:?}",
+        plan.env_overlay,
+    );
+    let overlay = plan.overlay.as_ref().expect("the rebuilt plan records Codex's overlay");
+    assert_eq!(overlay.provider(), Provider::Codex);
+    assert!(
+        Path::new(&codex_overlay).join("config.toml").exists(),
+        "the target's overlay is materialized before the child reads it",
+    );
+}
+
+/// Invariant 7, leaving Codex: every variable Codex's overlay wrote is removed
+/// when it was absent at launch, and the rebuilt plan records no overlay.
+#[test]
+fn a_replay_away_from_codex_removes_every_codex_overlay_variable() {
+    let fixture = OverlayFixture::new();
+    let mut inputs = fixture.repo_inputs(Provider::Codex);
+    inputs.overlay = Some(OverlayRebuildInputs {
+        repo_resources: false,
+        ..inputs.overlay.clone().unwrap()
+    });
+
+    let plan = switched(&inputs, Provider::Goose);
+
+    for name in ["CODEX_HOME", "CODEX_SQLITE_HOME"] {
+        assert!(
+            plan.env_overlay.contains(&EnvChange::Remove(name.into())),
+            "{name} must not reach the Goose child; got {:?}",
+            plan.env_overlay,
+        );
+    }
+    assert!(plan.overlay.is_none());
+}
+
+/// A replay that keeps the provider — here only the session mode moved —
+/// re-applies the invocation's own overlay, so the baseline restore cannot strip
+/// the `--repo` selector from a same-provider retry.
+#[test]
+fn a_same_provider_replay_keeps_the_invocation_overlay() {
+    let fixture = OverlayFixture::new();
+    let inputs = fixture.repo_inputs(Provider::Codex);
+    let moved = DocumentLaunchFacets {
+        non_interactive: false,
+        ..inputs.invocation.facets.clone()
+    };
+
+    let plan = build_launch_plan(&inputs, &moved).unwrap();
+
+    assert!(plan.replayed);
+    let codex_overlay = overlay_root(inputs.invocation.overlay.as_ref());
+    assert!(plan.env_overlay.contains(&EnvChange::Set("CODEX_HOME".into(), codex_overlay)));
+    assert!(!plan.env_overlay.contains(&EnvChange::Remove("CODEX_HOME".into())));
+    assert_eq!(plan.overlay, inputs.invocation.overlay);
+}
+
+/// A provider move onto a provider with no verified `--repo` mechanism refuses
+/// with the direct launch's typed diagnostic instead of launching it without
+/// isolation.
+#[test]
+fn a_replay_onto_a_provider_that_cannot_honor_repo_refuses_typed() {
+    let fixture = OverlayFixture::new();
+    let inputs = fixture.repo_inputs(Provider::Codex);
+    let facets = DocumentLaunchFacets {
+        provider: Provider::Antigravity,
+        ..inputs.invocation.facets.clone()
+    };
+
+    let error = match build_launch_plan(&inputs, &facets) {
+        Ok(_) => panic!("antigravity --repo must refuse"),
+        Err(error) => error,
+    };
+
+    let snapshot = claudine::diagnostics::DiagnosticSnapshot::select(&error)
+        .expect("the refusal keeps its registered diagnostic");
+    assert_eq!(snapshot.code, "provider.overlay_unsupported");
+    assert!(!error.to_string().to_lowercase().contains("credential"), "{error}");
 }
 
 /// A rebuild that holds the provider still leaves credential admission alone:
@@ -866,7 +1038,7 @@ fn recorded_only_inputs_refuse_a_moved_facet() {
         writable_document: None,
     };
     let inputs =
-        LaunchPlanInputs::recorded_only(facets.clone(), vec!["recorded".to_string()], None);
+        LaunchPlanInputs::recorded_only(facets.clone(), vec!["recorded".to_string()], None, None);
 
     // Unchanged facets still work: the recorded plan is all this path needs.
     assert_eq!(

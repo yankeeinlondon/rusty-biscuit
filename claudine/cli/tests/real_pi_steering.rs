@@ -215,8 +215,8 @@ impl RpcChild {
         fs::write(root.join("AGENTS.md"), "Fixture context marker: CONTEXT_NONCE\n").unwrap();
         fs::write(root.join(".pi/prompts/probe-template.md"), "---\ndescription: Fixture template\n---\nTEMPLATE_NONCE\n").unwrap();
         fs::write(root.join(".pi/skills/probe-skill/SKILL.md"), "---\nname: probe-skill\ndescription: Fixture skill\n---\nSKILL_NONCE\n").unwrap();
-        let extension = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/steering/pi-probe.ts");
+        let extension =
+            biscuit_test_harness::manifest_dir!().join("tests/fixtures/steering/pi-probe.ts");
         let mut child = Command::new(binary)
             .current_dir(root)
             .env("PI_CODING_AGENT_DIR", root.join("agent"))

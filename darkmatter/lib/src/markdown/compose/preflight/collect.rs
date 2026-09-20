@@ -199,6 +199,58 @@ pub(crate) fn collect_effects(
     Ok((entries, icmp, capabilities, graph))
 }
 
+/// Collects the frontmatter `$(...)` commands of one document, without reading
+/// its body.
+///
+/// This is the approval set for a
+/// [`ComposeOptions::only_frontmatter_surface`] compose: every command that
+/// projection could execute, including every non-empty ternary branch. Body
+/// `::shell`/`::shell-block` directives, transclusions, and
+/// prologue/epilogue children are neither parsed nor dereferenced, so a body
+/// that includes a file which does not exist yet does not fail here. Keys in
+/// `ComposeOptions::exclude_keys` contribute no commands.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::Markdown;
+/// use darkmatter::markdown::compose::ComposeOptions;
+/// use darkmatter::markdown::compose::preflight::collect::collect_frontmatter_shell_commands;
+///
+/// let md: Markdown = "---\nwho: \"$(whoami)\"\n---\n::shell echo body\n::file ./missing.md\n".into();
+/// let entries = collect_frontmatter_shell_commands(&md, &ComposeOptions::new()).unwrap();
+/// assert_eq!(entries.len(), 1);
+/// assert_eq!(entries[0].normalized, "whoami");
+/// ```
+///
+/// ## Errors
+///
+/// - Propagates frontmatter `$(...)` parse errors.
+/// - Returns [`ShellExpansionError::DynamicCommandShape`] when a command's text
+///   still depends on a value that cannot be resolved before execution.
+pub fn collect_frontmatter_shell_commands(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> MarkdownResult<Vec<ShellCommandEntry>> {
+    let source_file = match &options.source {
+        ComposeSource::File(p) => p.clone(),
+        ComposeSource::Url(u) => PathBuf::from(u.as_str()),
+        ComposeSource::Unknown => PathBuf::from("<unknown>"),
+    };
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    let mut local_entries = Vec::new();
+    scan_one_frontmatter(
+        markdown,
+        options,
+        &source_file,
+        &mut seen,
+        &mut entries,
+        &mut local_entries,
+    )?;
+    Ok(entries)
+}
+
 /// Collects every command from one document and recurses into its referenced
 /// children, condition-blind.
 ///

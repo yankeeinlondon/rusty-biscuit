@@ -1,0 +1,31 @@
+---
+# The largest accepted refresh intervals: 3660 days (ten 366-day years) for
+# the roster default and for a platform. Expect: valid.
+$schema: ../../../../../docs/platforms.schema.yaml
+roster_version: 1
+refresh_interval_days: 3660
+curated_source_cap: 10
+platforms:
+- platform_id: discord
+  name: Discord
+  status: active
+  file: discord.md
+  website: https://discord.com
+  refresh_interval_days: 3660
+  interfaces:
+  - interface_id: discord_bot_api
+    role: sending_adapter
+    api_identity: Discord HTTP API
+    adapters:
+    - discord
+    identification_url: https://docs.example.com/discord
+  curated_sources:
+  - url: https://docs.example.com/source-1
+    contribution: Distinct coverage 1.
+    interfaces:
+    - discord_bot_api
+    review: approved
+    approved_by: maintainer
+    approved_on: 2026-09-17
+excluded: []
+---

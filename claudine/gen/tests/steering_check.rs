@@ -14,7 +14,7 @@ fn generation_stops_before_writes_when_steering_gate_fails() {
     )
     .expect("roster");
     fs::copy(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/research/steering/_schema.yaml"),
+        biscuit_test_harness::manifest_dir!().join("../docs/research/steering/_schema.yaml"),
         research.join("_schema.yaml"),
     )
     .expect("schema");

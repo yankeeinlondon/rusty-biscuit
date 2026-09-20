@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use claudine::invocation_context::{EnvBaseline, HomeBaseline};
+use claudine::provider_overlay::{OverlayPlan, OverlayReasons};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::profile::WrapperProfile;
-use super::repo_home;
+use super::provider_overlay;
 
 pub(crate) use claudine::composition::{LaunchWorkspaceContext, PackageContext};
 
@@ -122,15 +124,27 @@ pub(crate) struct EnvPlan {
     // `repo_root`.
     pub(crate) child_cwd: PathBuf,
     pub(crate) warnings: Vec<String>,
-    pub(crate) shadow_home_path: Option<PathBuf>,
+    /// The provider overlay this launch was built with, `None` when no reason
+    /// asked for one. Its env patch is already applied to `env`.
+    pub(crate) overlay: Option<OverlayPlan>,
     /// Measured breakdown of the child-env build cost, for `--perf`. Empty
     /// unless the caller requested perf timing; when no effective root is
-    /// supplied the dominant cost is the shadow-HOME `repo root detect` sniff
+    /// supplied the dominant cost is the overlay's `repo root detect` sniff
     /// git walk (~hundreds of ms under `--repo`). When the caller threads a
     /// known root through `build_child_env_with_launch`, that cost collapses
     /// to microseconds. The caller attaches these as `Breakdown` children of
     /// the `child env build` substage.
     pub(crate) perf_substages: Vec<crate::perf::SubstageTiming>,
+}
+
+impl EnvPlan {
+    /// The directory the provider reads its configuration from under this
+    /// launch's overlay, when one was materialized.
+    pub(crate) fn overlay_visible_root(&self) -> Option<&Path> {
+        self.overlay
+            .as_ref()
+            .and_then(OverlayPlan::provider_visible_root)
+    }
 }
 
 /// The child-visible interactivity markers one session mode implies.
@@ -166,8 +180,9 @@ pub(crate) fn build_child_env(
     agent_params: &[String],
     cwd: &Path,
     env_overrides: &[(String, String)],
-    repo: bool,
-    force_shadow_home: bool,
+    overlay_reasons: OverlayReasons,
+    home_baseline: &HomeBaseline,
+    env_baseline: &EnvBaseline,
     repo_root_hint: Option<&Path>,
 ) -> Result<EnvPlan> {
     let launch_ctx = resolve_launch_workspace_context(cwd, repo_root_hint);
@@ -179,8 +194,9 @@ pub(crate) fn build_child_env(
         interactive,
         agent_params,
         env_overrides,
-        repo,
-        force_shadow_home,
+        overlay_reasons,
+        home_baseline,
+        env_baseline,
         launch_ctx,
         false,
     )
@@ -192,7 +208,18 @@ pub(crate) fn build_child_env(
 ///
 /// Canonical callers pass the launch workspace projected by the invocation
 /// owner alongside its launch and environment projections, so this function
-/// performs no filesystem discovery.
+/// performs no filesystem discovery and reads no ambient environment: the
+/// child inherits the invocation's [`EnvBaseline`], not the wrapper's current
+/// process state.
+///
+/// `overlay_reasons` comes from `provider_overlay::overlay_reasons`. A
+/// non-empty set builds the overlay and applies its provider-owned selector;
+/// the child's home variables stay as the baseline projected them.
+///
+/// ## Errors
+///
+/// A refused or failed overlay is returned before anything is spawned. There
+/// is no degraded launch.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_child_env_with_launch(
     profile: &dyn WrapperProfile,
@@ -202,16 +229,17 @@ pub(crate) fn build_child_env_with_launch(
     interactive: bool,
     agent_params: &[String],
     env_overrides: &[(String, String)],
-    repo: bool,
-    force_shadow_home: bool,
+    overlay_reasons: OverlayReasons,
+    home_baseline: &HomeBaseline,
+    env_baseline: &EnvBaseline,
     launch_ctx: LaunchWorkspaceContext,
     perf: bool,
 ) -> Result<EnvPlan> {
-    // `child env build` is dominated by the shadow-HOME branch under `--repo`;
-    // when perf is requested we time `env sanitize` and `shadow home sync` so
+    // `child env build` is dominated by the overlay branch under `--repo`;
+    // when perf is requested we time `env sanitize` and `provider overlay` so
     // the substage breakdown points at the real cost. On the production path the
     // already-resolved launch-child root is threaded through, so `repo root
-    // detect` collapses to microseconds and the shadow sync's filesystem linking
+    // detect` collapses to microseconds and the overlay's filesystem linking
     // is what remains; only the fallback (no supplied root) still pays the sniff
     // git walk.
     let sanitize_start = perf.then(std::time::Instant::now);
@@ -222,7 +250,7 @@ pub(crate) fn build_child_env_with_launch(
         .map(|k| (*k).to_string())
         .collect();
     let (mut env, removed, included, mut warnings) =
-        sanitize_process_env(&include_set, &auto_include);
+        sanitize_process_env(env_baseline, &include_set, &auto_include);
     let mut added = BTreeMap::new();
     let sanitize_elapsed = sanitize_start.map(|t| t.elapsed());
 
@@ -284,42 +312,21 @@ pub(crate) fn build_child_env_with_launch(
 
     warnings.extend(launch_ctx.warnings.iter().cloned());
 
-    let mut shadow_home_path = None;
-    let needs_shadow_home = force_shadow_home
-        || repo_home::needs_shadow_home(
+    let mut overlay = None;
+    let mut overlay_breakdown: Option<provider_overlay::OverlayTimings> = None;
+    if !overlay_reasons.is_empty() {
+        let (plan, timings) = provider_overlay::build_overlay(
             provider,
+            overlay_reasons,
             &launch_ctx.child_cwd,
-            repo,
-            Some(launch_ctx.child_cwd.as_path()),
-        );
-
-    let mut shadow_breakdown: Option<repo_home::RepoHomeTimings> = None;
-
-    // Use a shadow HOME when repo-only isolation is requested, or when Codex
-    // needs repo-local prompt overlay because custom prompts are user-scoped.
-    // The already-resolved launch-child root is passed through so the shadow-HOME
-    // pipeline does not re-run repo-root detection.
-    if needs_shadow_home {
-        match repo_home::build_repo_home_env(
-            provider,
-            &launch_ctx.child_cwd,
-            repo,
             perf,
             Some(launch_ctx.child_cwd.as_path()),
-        ) {
-            Ok((shadow_env, shadow_path, timings)) => {
-                for (key, value) in shadow_env {
-                    env.insert(key, value);
-                }
-                shadow_home_path = shadow_path;
-                shadow_breakdown = timings;
-            }
-            Err(e) => {
-                warnings.push(format!("failed to create shadow HOME: {}", e));
-                // Fall back to original behavior
-                set_added_env(&mut env, &mut added, "HOME", "/dev/null".to_string());
-            }
-        }
+            home_baseline,
+            env_baseline,
+        )?;
+        provider_overlay::apply_overlay_env(&mut env, &plan);
+        overlay = Some(plan);
+        overlay_breakdown = timings;
     }
 
     if let Some(package_ctx) = launch_ctx.package_context.clone() {
@@ -364,7 +371,7 @@ pub(crate) fn build_child_env_with_launch(
         agent_cwd,
     );
 
-    let perf_substages = build_env_perf_substages(sanitize_elapsed, shadow_breakdown);
+    let perf_substages = build_env_perf_substages(sanitize_elapsed, overlay_breakdown);
 
     Ok(EnvPlan {
         env,
@@ -375,7 +382,7 @@ pub(crate) fn build_child_env_with_launch(
         repo_root: launch_ctx.repo_root,
         child_cwd: launch_ctx.child_cwd,
         warnings,
-        shadow_home_path,
+        overlay,
         perf_substages,
     })
 }
@@ -383,22 +390,23 @@ pub(crate) fn build_child_env_with_launch(
 /// Assemble the `child env build` perf breakdown from the measured phases.
 ///
 /// Returns empty when perf was not requested (`sanitize_elapsed` is `None`).
-/// `shadow home sync` is only present when the shadow-HOME branch ran (i.e.
-/// under `--repo` or a Codex prompt overlay); it carries `repo root detect`
+/// `provider overlay` is present only when an overlay was materialized (i.e.
+/// under `--repo`, a Codex prompt overlay, or a root-backed MCP injector; an
+/// inline plan such as OpenCode MCP records none); it carries `repo root detect`
 /// as its own child, which is either microsecond-scale local work when a
 /// known root was supplied or the sniff git walk that dominates the substage
 /// when falling back.
 fn build_env_perf_substages(
     sanitize_elapsed: Option<std::time::Duration>,
-    shadow: Option<repo_home::RepoHomeTimings>,
+    overlay: Option<provider_overlay::OverlayTimings>,
 ) -> Vec<crate::perf::SubstageTiming> {
     let Some(sanitize) = sanitize_elapsed else {
         return Vec::new();
     };
     let mut out = vec![crate::perf::SubstageTiming::new("env sanitize", sanitize)];
-    if let Some(t) = shadow {
+    if let Some(t) = overlay {
         out.push(crate::perf::SubstageTiming {
-            name: "shadow home sync",
+            name: "provider overlay",
             elapsed: t.total,
             children: vec![crate::perf::SubstageTiming::new(
                 "repo root detect",

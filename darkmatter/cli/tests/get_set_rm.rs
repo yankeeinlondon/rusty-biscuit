@@ -209,6 +209,20 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
 }
 
 #[test]
+fn test_get_rejects_duplicate_keys_through_the_normal_cli_path() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-rejects-duplicate-keys");
+    let yaml = "---\nstatus: first\nstatus: second\n---\n# Doc\n";
+
+    fixture
+        .command()
+        .args(["get", "-", "status"])
+        .write_stdin(yaml)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate entry with key"));
+}
+
+#[test]
 fn test_get_tab_indented_frontmatter_property_is_populated() {
     let fixture = CliProcessFixture::named(
         "get-set-rm-test-get-tab-indented-frontmatter-property-is-populated",

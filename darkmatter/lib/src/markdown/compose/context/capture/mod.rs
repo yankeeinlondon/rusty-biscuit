@@ -48,7 +48,7 @@ pub(crate) use document::{NONCE_AREA, RootDocument};
 #[cfg(test)]
 pub(crate) use document::test_seam::with_forced_nonce_failure;
 pub(crate) use observations::CapturedObservations;
-pub(crate) use git::render_recent_commits;
+pub(crate) use git::{fetch_recent_commits, render_recent_commits};
 pub use capabilities::DeferredCapabilities;
 pub use groups::{ContextGroup, ContextRequirements};
 pub use snapshot::ContextCaptureEvidence;

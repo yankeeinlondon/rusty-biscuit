@@ -301,3 +301,13 @@ unmapped_native_events: []
 # omitted. Sequence order IS the cascade order; the auth bucket is checked
 # first and its `401`/`403`/`sign in` needles were empirically hardened for
 # agy's keyring/OAuth failure modes.
+# Provider-overlay redirection surface (fixes/2026-09-12-shadow-home audit).
+# Antigravity's only redirection lever is `HOME` itself, which also moves
+# authentication, project cache, settings, plugin state, and the OAuth store —
+# and breaks keyring auth. That is precisely the practice this fix removes, so
+# no provider-scoped selector exists and every reason is refused before spawn.
+overlay_selector: null
+overlay_capabilities:
+  repo_resources: unsupported
+  repo_prompt: unsupported
+  mcp: unsupported

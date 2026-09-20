@@ -1,28 +1,18 @@
 ---
 prompt: |-
-    We are writing a Rust program who's utility is to write messages to various platforms. In this document, the goal is to do a deep dive on the Signal messaging platform.
+    Refresh the **Signal** research document (`platform_id: signal`).
 
-    Your response should include:
+    Follow the shared research instructions in
+    `messenger/docs/research/platforms/_fleet.md` (paths are relative to the
+    repository root). A single-document refresh is that file's
+    **Pass 2 — Curated Reconciliation**. The platform's interfaces and curated
+    sources are its `signal` entry in `messenger/docs/platforms.yaml`. Write
+    frontmatter that conforms to `messenger/docs/research/platforms/_schema.yaml`.
 
-    - what API or API's are provided to communicate with this platform?
-        - is there a URL to a formal definition of an OpenAPI schema?
-        - what is the URL to their API docs?
-    - what capabilities does the API/API's provide?
-        - how do we originate a message and send it onto the platform?
-        - how can we respond to other messages on the platform?
-    - what kind of authentication and authorization is used in the API?
-    - what Rust crates are designed to help with interacting with this platform?
-        - if there are more than one crate, which would you most recommend and why?
-        - for all the others, describe when this crate might be the best fit
-    - what "gotchas" have other developers run into when writing to the API's for this provider? How can these obstacles be worked around?
-    - If you were to build a data model/schema to represent a message for this platform, what would it look like? 
-        - describe using a Rust struct
-        - after providing the struct, describe below "WHY" you think this is the right format; focus particular on things you think might not be self-evident by the data structure alone.
-
-
-    Your final deliverable is a Markdown document (written to the body of this page) which well formed and idiomatic Markdown. Tables are Markdown tables. Links are Markdown links. All code examples should be in Rust.
-
-    If you want visualize an idea then using a Mermaid block is the best way to do that.
+    Run this only against a candidate copy of this document, never the
+    accepted file in `messenger/docs/research/platforms/`. Independent
+    discovery (Pass 1) never runs through inline-compose, because
+    inline-compose exposes this document's previous prose.
 last_updated: 2026-03-09
 ---
 

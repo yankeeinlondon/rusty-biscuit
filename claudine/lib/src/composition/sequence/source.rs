@@ -12,10 +12,12 @@
 //! any line-delimited file — is foreign data.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use serde_json::{Map, Value};
 
+use super::super::authored_order::AuthoredOrder;
 use super::super::error::{CompositionError, SequenceLoadCause};
 use super::data::{self, SourceFormat};
 use super::expr::SourceExpressionLookup;
@@ -123,7 +125,9 @@ pub fn load_referenced_sequence(
     document_fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
     let format = SourceFormat::for_path(path);
-    let document = data::load_document(path)?;
+    let loaded = data::load_document(path)?;
+    let orders = Arc::new(loaded.orders);
+    let document = loaded.value;
 
     if let Some(offset) = &reference.offset
         && format.is_line_delimited()
@@ -145,7 +149,7 @@ pub fn load_referenced_sequence(
 
     if formal {
         let root = document.as_object().expect("formal implies an object root");
-        return formal::normalize_formal_plan(
+        let mut plan = formal::normalize_formal_plan(
             items,
             formal::formal_keys(root)?,
             SequenceSource::External {
@@ -155,7 +159,13 @@ pub fn load_referenced_sequence(
             path,
             frontmatter,
             document_fail_fast,
-        );
+        )?;
+        // The steps are the referenced document's own `sequence:` list, read
+        // without an offset or operator, so its authored key order applies
+        // element for element. Data read through either of those is reshaped
+        // before it becomes a step list and keeps canonical order instead.
+        plan.authored = AuthoredOrder::new(orders, "/sequence");
+        return Ok(plan);
     }
 
     normalize_plan(

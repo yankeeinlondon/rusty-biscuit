@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, path::Path};
+use std::collections::BTreeSet;
 
 use darkmatter::markdown::{
     Markdown,
@@ -7,6 +7,7 @@ use darkmatter::markdown::{
         darkmatter_base_schema, parse_yaml_schema, to_json_schema,
     },
 };
+use biscuit_test_harness::manifest_dir;
 use serde_yaml_ng::Value as YamlValue;
 
 fn base_api() -> DarkmatterSchemas {
@@ -16,7 +17,7 @@ fn base_api() -> DarkmatterSchemas {
 }
 
 fn claudine_schema_path() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/claudine.yaml")
+    manifest_dir!().join("../docs/schemas/claudine.yaml")
 }
 
 fn validate_with_base(frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
@@ -290,11 +291,11 @@ fn document_schema_definitions_override_baseline_properties() {
 
 #[test]
 fn schema_document_transcludes_same_file_as_library_source() {
-    let doc_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let doc_path = manifest_dir!()
         .join("../docs/schemas/darkmatter-schema.md")
         .canonicalize()
         .expect("schema docs path must exist");
-    let schema_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let schema_path = manifest_dir!()
         .join("../docs/schemas/darkmatter.yaml")
         .canonicalize()
         .expect("schema YAML path must exist");

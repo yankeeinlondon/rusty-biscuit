@@ -35,6 +35,7 @@ biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 jsonschema = { version = "0.55", default-features = false }
 
@@ -52,5 +53,9 @@ reason = "Code-generation tool; runs at build time and has no runtime hot paths.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]
+# The L2 tier spawns one shared terminal pane through the harness broker.
+# It is a compile-time binary of another package, so the producer builds it
+# as a sidecar; an archive consumer has no Cargo to build one with.
+sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []

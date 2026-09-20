@@ -39,7 +39,7 @@ fn shipped_baseline() -> darkmatter::markdown::schemas::EffectiveSchema {
 #[test]
 fn shipped_base_schema_declares_schema_semantics_and_precise_raw_json_wording() {
     let source = fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/darkmatter.yaml"),
+        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml"),
     )
     .expect("real shipped base-schema artifact");
     let declaration = source

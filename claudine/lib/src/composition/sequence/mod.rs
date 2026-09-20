@@ -40,10 +40,12 @@ pub mod source;
 pub mod task;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use biscuit_file::classify_list;
 use serde_json::{Map, Value};
 
+use super::authored_order::AuthoredOrder;
 use super::json_util::json_type_name;
 use super::types::ResolvedCompositionSource;
 
@@ -126,7 +128,7 @@ pub fn resolve_sequence_plan_with(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    let plan = match grammar::classify_source(&sequence_value)? {
+    let mut plan = match grammar::classify_source(&sequence_value)? {
         // A directly invoked YAML document is itself the formal document, so it
         // takes the same template/`$schema` pipeline a referenced one does; a
         // Markdown frontmatter that merely declares a list is not.
@@ -178,6 +180,13 @@ pub fn resolve_sequence_plan_with(
             )?
         }
     };
+
+    // An inline `sequence:` list lives in this document's own frontmatter, so
+    // its steps are indexed under `/sequence`. A referenced plan already
+    // carries the *referenced* document's order root and must keep it.
+    if sequence_value.is_array() {
+        plan.authored = AuthoredOrder::new(Arc::new(fm.mapping_orders().clone()), "/sequence");
+    }
 
     Ok(Some(plan))
 }

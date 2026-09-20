@@ -96,8 +96,9 @@ answer, and two receipts on one environment covering different packages combine 
 each cell is resolved by the newest note that qualifies for it. A receipt from an
 **older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
 `git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
-included) plus that gate's global inputs — and the comparison is recomputed over both trees
-rather than read out of the receipt. `schema_version: 1` notes are exact-tree, pass-only,
+included) plus that gate's global inputs, plus the Just recipes the gate's CI entry recipes
+reach, compared by recipe rather than by file — and the comparison is recomputed over both
+trees rather than read out of the receipt. `schema_version: 1` notes are exact-tree, pass-only,
 whole-environment, never upgraded in place, and render their measurements as
 `not recorded (v1 receipt)`.
 
@@ -162,9 +163,10 @@ change a local host's budget. L1, sanity, and real-resource recipes export
 runs inherit `test-threads = -2` from `.config/nextest.toml`. Cargo build-job
 limits are unchanged.
 
-Existing CI-profile test groups remain narrower limits: Claudine L1 allows
-four concurrent tests, Claudine CLI L1 allows one, and Sniff L1 on Windows
-allows one. These caps still apply when the overall worker budget is larger.
+Resource-specific CI-profile test groups remain narrower limits: Claudine L1
+allows four concurrent tests and Sniff L1 on Windows allows one. Claudine CLI
+L1 inherits the OS-aware worker budget; a fixed package-wide cap would silently
+defeat the public runners' available concurrency.
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
 a fixed selection. Install the hook dispatcher with:
@@ -184,9 +186,21 @@ Run the hook's local regression suite with
 
 ### Layer 2 — Dependency-scoped CI
 
-`ci.yml` runs on pull requests and pushes to `main`. Its first job validates the canonical recipe
-surface, obtains the changed file set from the event's exact base and head SHAs, verifies every
-published local receipt per cell, and resolves the plan.
+`ci.yml` runs on pull requests, pushes to `main`, and a nightly schedule. Its first job validates
+the canonical recipe surface, obtains the changed file set from the event's exact base and head
+SHAs, verifies every published local receipt per cell, and resolves the plan.
+
+**Environments are scheduled by event.** Each record in `.github/ci/environments.json` names the
+GitHub events that schedule it, and the planner plans nothing for an environment the event does
+not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
+(`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
+latter normally from the pre-push hook's local evidence; a push to `main` adds `windows-latest`;
+the nightly run (08:00 UTC) plans `wsl2-ubuntu` alone over the packages that changed since the
+last successful nightly, with `ubuntu-latest` joining cell-less as the producer of their archives
+(`fixes/2026-09-19-nightly-scope`); `workflow_dispatch` plans every environment over the full
+workspace. A push to `main` whose pull request
+validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
+environment for a pull request from its next push.
 
 `ci.yml` defines **exactly six top-level jobs**, and a contract test pins the set: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
@@ -218,7 +232,7 @@ contract change.
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
 `cargo metadata`, credits the L1 build with the `lib`, `bin`, and `test` kinds, and schedules a
-`check` cell on each native environment where `example` or `bench` targets exist, with
+`check` cell on `ubuntu-latest` alone where `example` or `bench` targets exist, with
 explicit `--examples`/`--benches` selectors in place of `--all-targets`. A package with unchanged
 direct reverse dependents also owns a `check` cell on `ubuntu-latest`, which compiles them against
 its public API as a second step (Open Question 1, Option B): the dependents get no area, job, or
@@ -265,6 +279,35 @@ so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as r
 (63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
 `job-id (matrix values)` when it runs. `lint` has no matrix, so it keeps a static
 `lint (ubuntu-latest)` — its environment has to be visible.
+
+### One native owner compiles, every tier consumes
+
+Every executing L1, L2, and browser cell names exactly one **build record** in the resolved plan,
+and one job compiles it. `ci.yml`'s `build` job is a `fail-fast: false` matrix over the plan's own
+owner projection — one leg per producer environment — that installs the union of build prerequisites, produces
+each package’s Nextest archive in a shared target tree with its manifest and declared sidecars, includes the verifier, and
+uploads `build-<package>-<producer>-<key>` with run-scoped retention.
+
+A consumer downloads that artifact, runs `ci-build verify` — plan key, realized digest, source
+identity, producer/execution compatibility, archive and sidecar checksums, expected binaries, and
+the host's own runtime ABI and observed external library identities — before tests run. Inventory and
+runtime inspection extract the verified archive; the consumer then runs the canonical tier recipe
+in archive mode. A rejection is a stable infrastructure verdict that stops the cell; nothing
+compiles a replacement, and a consumer that finds no build record for its cell refuses rather than
+compiling in place. Linux and WSL2 share one Linux archive and publish two separate result cells;
+native Windows and WSL2 are structurally incompatible and can never pair. Clippy and the
+check-only example/bench targets stay their own compile configurations, in their own jobs, with
+their own caches.
+
+A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
+JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell
+`MISSING — blocked by build <key>`, which blocks; unaffected areas and environments proceed.
+
+Seven stages are reported separately — producer queue, compile+archive, and upload; consumer
+download, verify, extract, and execute — so no transfer or setup cost hides inside test time. Each
+executing cell displays the planned key, realized digest, and producer it ran, under **Build
+provenance** in its area's summary. See
+[.github/ci/README.md](../../.github/ci/README.md#what-each-stage-cost).
 
 ### Each area audits its planned coverage
 
@@ -375,11 +418,15 @@ the last entry retired when Biscuit TUI's attached-console captured-stdout test 
 
 Messenger and all three Rendezvous crates are owned by their ordinary
 package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares
-all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
-native workflow builds and verifies all six helpers once before L1 and exports
-`MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
-sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
-the package/environment/tier identity consumed by their area's coverage audit.
+all-feature coverage and the six desktop-notifier helpers as a
+`messenger-desktop-stubs` build **sidecar**: its producer compiles them, the
+manifest records each one's size and digest, and every consumer takes them
+verified from `<artifact>-sidecars/` with `MESSENGER_STUB_BIN_DIR` exported from
+that directory. The old `runner-tools` prebuild that compiled them on the test
+runner is gone. The same path carries them to the toolchain-free WSL2 guest, and
+on native Windows they arrive under their `.exe` names. JUnit and producer-status
+artifacts retain the package/environment/tier identity consumed by their area's
+coverage audit.
 `sniff-performance.yml`
 stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
 not correctness. `build-integrations.yml` stays release-triggered.
@@ -473,11 +520,12 @@ Releases are automated end-to-end by `release-plz.yml` in the public repository.
 ## Caching and Performance
 
 Every Rust workflow uses `Swatinem/rust-cache@v2` with `workspaces: ". -> target"` and a workflow-
-or matrix-scoped `shared-key`. The package gates key **per package and per job kind**:
-`package-ci-<package>-check-<os>`, `package-ci-<package>-lint-ubuntu-latest`, and
-`package-ci-<package>-test-<environment>`. The L2, browser, and WSL-archive jobs deliberately
-reuse the `test` key for their environment — they compile the same crates as the L1 leg, so one
-warm cache serves every tier instead of three cold ones. Other examples: `coverage-affected`,
+or matrix-scoped `shared-key`. The package gates key **per package and per job kind**, and only
+where something still compiles: `package-ci-<package>-check-<os>`,
+`package-ci-<package>-lint-ubuntu-latest`, and `build-<package>-<producer>` for the native
+build owner. **No test tier has a cache key at all.** L1, L2, browser, and the WSL2 guest
+consume that owner's archive: they restore no cache, install no toolchain, and compile nothing —
+and a restored cache is the one thing that can make a silent rebuild look fast. Other examples: `coverage-affected`,
 `coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are intentionally scoped
 rather than global — this trades hit rate for protection against a poisoned target directory
 taking down the entire pipeline.
@@ -545,9 +593,11 @@ remain owned by that action.
 
 What a reviewer can rely on when approving a PR:
 
-1. **Every affected gating package passed its configured environment matrix** against the exact
-   pinned Rust version in `rust-toolchain.toml`. Native L1 runs on Linux,
-   Windows, and macOS; `wsl2-ubuntu` is a distinct archive-based L1 cell.
+1. **Every affected gating package passed the environments its event schedules** against the
+   exact pinned Rust version in `rust-toolchain.toml`. A pull request proves Linux and macOS;
+   the push to `main` after it adds Windows; the nightly run adds `wsl2-ubuntu`, a distinct
+   archive-based L1 cell. Windows and WSL2 failures are therefore found after merge and fixed
+   forward, by decision (`fixes/2026-09-18-ci-cadence`).
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 
@@ -568,11 +618,11 @@ What a reviewer can rely on when approving a PR:
 What CI explicitly does **not** guarantee:
 
 - **Compile coverage inside the WSL2 guest.** L1 compiles and runs the `lib`, `bin`, and `test`
-    kinds on each native environment; the guest only runs the `ubuntu-latest` archive. A `check`
-    cell on each native environment compiles `example` and `bench` through explicit
+    kinds on each scheduled native environment; the guest only runs the `ubuntu-latest` archive.
+    A `check` cell on `ubuntu-latest` alone compiles `example` and `bench` through explicit
     `--examples`/`--benches` selectors, and it is scheduled for packages that declare those
-    kinds; a package with neither gets a check job only on `ubuntu-latest`, and only to compile
-    its unchanged direct reverse dependents.
+    kinds; a package with neither gets a check job only to compile its unchanged direct reverse
+    dependents. Example and bench kinds are never compiled on Windows or macOS.
 
 - **Performance regressions blocking merge.** Bench results are tracked in Bencher but not gated.
 - **External-resource (L4 `test-real`) tests passing.** Those tiers are explicitly excluded from

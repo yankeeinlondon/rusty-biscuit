@@ -1,0 +1,106 @@
+{
+  "native_version": "claudine 0.1.0",
+  "native_binary": "/Users/ken/.cargo/bin/claudine",
+  "native_binary_bytes": 118538944,
+  "source_revision_verified": false,
+  "tested_os": "macOS; host identified separately with sniff os --json",
+  "native_sequence": {
+    "command": [
+      "sequence",
+      "--goose",
+      "sequence.md"
+    ],
+    "code": 0,
+    "elapsed_seconds": 0.626
+  },
+  "native_input_observations": [
+    {
+      "discovery": true,
+      "history": false,
+      "curated": false,
+      "reconciliation": false,
+      "maintenance": false,
+      "review": false
+    },
+    {
+      "discovery": false,
+      "history": true,
+      "curated": true,
+      "reconciliation": true,
+      "maintenance": false,
+      "review": false
+    },
+    {
+      "discovery": false,
+      "history": false,
+      "curated": true,
+      "reconciliation": false,
+      "maintenance": true,
+      "review": false
+    },
+    {
+      "discovery": false,
+      "history": true,
+      "curated": false,
+      "reconciliation": false,
+      "maintenance": false,
+      "review": true
+    }
+  ],
+  "native_workers_distinct": true,
+  "native_timeout_is_not_fleet_deadline": {
+    "command": [
+      "sequence",
+      "--goose",
+      "--timeout",
+      "1s",
+      "slow-sequence.md"
+    ],
+    "code": 0,
+    "elapsed_seconds": 1.837
+  },
+  "native_single_worker_timeout": {
+    "command": [
+      "compose",
+      "--goose",
+      "--timeout",
+      "1s",
+      "cancel.md"
+    ],
+    "code": 143,
+    "elapsed_seconds": 1.235
+  },
+  "native_timed_out_child_gone": true,
+  "native_timeout_stderr_present": true,
+  "prototype_only": {
+    "launch_codes_including_retry": [
+      0,
+      7,
+      0,
+      0,
+      0
+    ],
+    "restart_after_invocation_exhaustion": {
+      "stopped": true,
+      "ledger": {
+        "limit": 5,
+        "used": 5,
+        "seconds": 60,
+        "consumed_seconds": 0.714
+      }
+    },
+    "restart_after_consumed_time_exhaustion": {
+      "stopped": true,
+      "ledger": {
+        "limit": 10,
+        "used": 5,
+        "seconds": 0.714,
+        "consumed_seconds": 0.714
+      }
+    },
+    "new_launches_after_exhaustion": 0,
+    "clock_assumption": "Only measured execution charged; offline pause policy not decided"
+  },
+  "accepted_baseline_unchanged": true,
+  "audio_spool_absent": true
+}

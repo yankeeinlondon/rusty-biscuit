@@ -103,7 +103,7 @@ Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
 - **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure. `--budget-ledger <path>` caps the whole run with a persisted invocation and active-time budget that `claudine budget` creates and operates ([Shared execution budgets](docs/cli/budget.md))
 
 **Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
 
@@ -116,6 +116,20 @@ All three commands share a wrapper-grade execution pipeline with full support fo
 **Unified Harness Execution.** Every non-dry-run `compose` and `inline-compose` run flows through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; the plan now carries only timeout configuration (the pre/post validation and handler-recovery DSL has been retired in favor of lifecycle stacks). The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-stack recovery (`Retry`/`Resume`/`Proxy`) through one code path.
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
+
+Live `compose` and `inline-compose` documents with `initialize` can create
+files their bodies include: Claudine runs shell-free initialization, then
+rereads, audits, and composes the body. Initialization shell actions, bootstrap
+frontmatter shell expansion, and shells in early catch handlers are forbidden;
+`-y`, whitelists, and cached approvals cannot override this restriction. Dry runs do
+not initialize. Sequence includes must exist before the sequence starts. See
+[initialization ordering](./docs/topics/composition.md#documents-that-declare-initialize).
+
+Loop initialization and its catch handlers can read the full bootstrap
+frontmatter, including derived fields. Mapping-based `set` writes made during
+loop initialization persist into subsequent iterations. An absent destination
+key in a `set` mapping reads as null during that mapping's snapshot evaluation;
+null interpolated into text renders empty.
 
 For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
 
@@ -238,7 +252,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting and diagnostics
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
 - [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)
-- [Repo Isolation](./docs/topics/repo-isolation.md) - Shadow HOME behavior for `--repo`
+- [Repo Isolation](./docs/topics/repo-isolation.md) - Provider-overlay behavior for `--repo`, and what it never changes
 - [Stream Parsing](./docs/topics/stream-parsing.md) - Provider-native structured stream handling
 
 ## Monorepo Dependencies

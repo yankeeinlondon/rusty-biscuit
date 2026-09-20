@@ -40,6 +40,12 @@ pub(crate) const REDACTED_VALUE: &str = "<redacted>";
 /// shell-preflight resolver already uses for its diagnostics
 /// (`composition::preflight`), so a proxy diagnostic and a shell diagnostic
 /// name the same property the same way.
+///
+/// This is the *event* spelling only. A task's `setup:`/`teardown:` stack runs
+/// under a synthetic signal, so its diagnostics are rooted at the authored task
+/// property instead; the executor's `StackRoot` decides which spelling an
+/// action reports, while this type stays the signal-and-index identity a proxy
+/// is attributed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionLocation {
     signal: LifecycleSignal,

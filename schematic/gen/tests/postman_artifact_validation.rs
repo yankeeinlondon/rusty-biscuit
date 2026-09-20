@@ -9,7 +9,7 @@
 //! pointer / message returned by [`jsonschema`], so triage can jump
 //! directly to the broken node.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use jsonschema::Validator;
@@ -48,9 +48,9 @@ fn validate_postman_json(value: &Value) -> Result<(), Vec<String>> {
 /// Returns the absolute path to the `schematic/postman/` directory
 /// holding committed artifacts.
 fn postman_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
-        .expect("CARGO_MANIFEST_DIR has a parent")
+        .expect("schematic/gen has a parent")
         .join("postman")
 }
 

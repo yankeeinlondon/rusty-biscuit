@@ -571,3 +571,404 @@ fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
         "non-TTY missing file must report autocomplete unavailable; stderr was:\n{stderr}"
     );
 }
+
+/// The nested-span regression fixtures are byte-identical copies of
+/// `prompts/_reviews/review-spec-inline.md` and `prompts/commit.md` at
+/// `cd6e036c4^`, before the prompt-only repair. Later tests prove validation
+/// rejects exactly these defects, so a "repaired" fixture would make them
+/// vacuous; this pins the defect bytes that must survive.
+#[test]
+fn nested_span_regression_fixtures_preserve_pre_fix_defects() {
+    let review = include_str!("fixtures/nested_span_regression/review-spec-inline.md");
+    for defect in [
+        r#"? "The review of the draft specification file in {{ctx.area}} has completed""#,
+        r#": "The review of the draft specification file in the {{ctx.repo_name}} repo has completed""#,
+        r#"? "The inline review of the draft specification {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.area}} package area failed to complete!""#,
+        r#": "The inline review {{ title_case(without_date(parent_dir(spec))) }} in the {{ctx.repo_name}} repo failed to complete!""#,
+    ] {
+        assert!(review.contains(defect), "review fixture lost: {defect}");
+    }
+    assert_eq!(review.matches("say: |-").count(), 2);
+
+    let commit = include_str!("fixtures/nested_span_regression/commit.md");
+    for defect in [
+        "? 'are all part of the {{ctx.dirty_package_areas}} package area'",
+        r": 'are spread across {{length(ctx.dirty_package_areas)}}:\n {{as_unordered_list(ctx.dirty_package_areas)}}'",
+    ] {
+        assert!(commit.contains(defect), "commit fixture lost: {defect}");
+    }
+    assert!(commit.contains("resides_in: |-"));
+}
+
+// -- nested spans in single-pass lifecycle literals (spec D2/D4) ------------
+
+const INCIDENT: &str = include_str!("fixtures/nested_span_regression/review-spec-inline.md");
+
+/// A lifecycle whose `success.say` nests a span inside a quoted literal.
+const DEFECT_LIFECYCLE: &str =
+    "success:\n    say: \"{{ ok ? 'done in {{area}}' : 'failed' }}\"\n";
+
+/// Install a `goose` stub that appends one line to `$PROVIDER_MARKER` per run.
+fn install_marker_provider(fixture: &CliProcessFixture) -> std::path::PathBuf {
+    #[cfg(unix)]
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\necho run >> \"$PROVIDER_MARKER\"\necho done\nexit 0\n",
+    );
+    #[cfg(windows)]
+    fs::write(
+        fixture.bin_dir().join("goose.cmd"),
+        "@echo off\r\necho run>> \"%PROVIDER_MARKER%\"\r\necho done\r\nexit /b 0\r\n",
+    )
+    .unwrap();
+    fixture.cwd().join("provider-runs.log")
+}
+
+fn provider_runs(marker: &std::path::Path) -> usize {
+    fs::read_to_string(marker).map_or(0, |log| log.lines().count())
+}
+
+/// Run `claudine` with `args` and the marker env, returning `(success, stderr)`
+/// with block gutters removed and wrapped lines rejoined by single spaces.
+fn run_with_marker(
+    fixture: &CliProcessFixture,
+    marker: &std::path::Path,
+    args: &[&str],
+) -> (bool, String) {
+    let output = fixture
+        .command()
+        .env("PROVIDER_MARKER", marker)
+        .args(args)
+        .output()
+        .unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr))
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        fixture.audio_spool().read_dir().map_or(true, |mut d| d.next().is_none()),
+        "no lifecycle audio may be queued"
+    );
+    (output.status.success(), stderr)
+}
+
+fn assert_nested_span_rejection(stderr: &str, property: &str) {
+    assert!(
+        stderr.contains("nested interpolation inside a string literal"),
+        "stderr must carry the nested-span error; stderr was:\n{stderr}"
+    );
+    assert!(stderr.contains(property), "stderr must name `{property}`:\n{stderr}");
+}
+
+fn write_incident(fixture: &CliProcessFixture) -> std::path::PathBuf {
+    let incident = fixture.cwd().join("review-spec-inline.md");
+    fs::write(&incident, INCIDENT).unwrap();
+    fs::write(fixture.cwd().join("draft-spec.md"), "# Draft\n").unwrap();
+    incident
+}
+
+/// Acceptance 1: the pre-fix incident is refused at prepare time with the
+/// property, the literal, and the `+` rewrite, and no provider starts — for a
+/// real run and for `--dry-run` alike.
+#[test]
+fn compose_rejects_the_pre_fix_incident_before_any_provider_starts() {
+    let fixture = CliProcessFixture::named("nested-span-compose");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let incident = write_incident(&fixture);
+    let incident = incident.to_str().unwrap();
+
+    for dry_run in [false, true] {
+        let mut args = vec!["compose", "--goose"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        args.extend([incident, "spec=draft-spec.md"]);
+        let (success, stderr) = run_with_marker(&fixture, &marker, &args);
+        assert!(!success, "dry_run={dry_run}: the incident must be refused:\n{stderr}");
+        assert_nested_span_rejection(&stderr, "success.say");
+        assert!(
+            stderr.contains("The review of the draft specification file in {{ctx.area}} has completed"),
+            "dry_run={dry_run}: stderr must quote the literal:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(r#"" + ctx.area + ""#),
+            "dry_run={dry_run}: stderr must print the `+` rewrite:\n{stderr}"
+        );
+        assert!(!stderr.contains("resolve the missing"), "{stderr}");
+        assert_eq!(provider_runs(&marker), 0, "dry_run={dry_run}: no provider may start");
+    }
+}
+
+#[test]
+fn inline_compose_rejects_a_nested_span_before_any_provider_starts() {
+    let fixture = CliProcessFixture::named("nested-span-inline");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("inline.md");
+    let original = format!("---\nprompt: Write the summary.\n{DEFECT_LIFECYCLE}---\nBody\n");
+    fs::write(&doc, &original).unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["inline-compose", "--goose", doc.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert_eq!(provider_runs(&marker), 0);
+    assert_eq!(fs::read_to_string(&doc).unwrap(), original, "the document is untouched");
+}
+
+/// Acceptance 2: a `proxy` handoff prepares its target before launch, so the
+/// incident is refused when the entry document proxies to it.
+#[test]
+fn proxy_to_the_incident_is_rejected_before_any_provider_starts() {
+    let fixture = CliProcessFixture::named("nested-span-proxy");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    write_incident(&fixture);
+    let entry = fixture.cwd().join("entry.md");
+    fs::write(
+        &entry,
+        "---\ninitialize:\n    stack:\n        - action:\n              proxy: ./review-spec-inline.md\n---\nEntry body\n",
+    )
+    .unwrap();
+
+    let (success, stderr) = run_with_marker(
+        &fixture,
+        &marker,
+        &["compose", "--goose", entry.to_str().unwrap(), "spec=draft-spec.md"],
+    );
+    assert!(!success, "{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert_eq!(provider_runs(&marker), 0);
+}
+
+/// Acceptance 2: a statically referenced step document is pre-scanned, so
+/// neither step one nor step two ever starts.
+#[test]
+fn sequence_referencing_the_incident_in_step_two_starts_no_step() {
+    let fixture = CliProcessFixture::named("nested-span-sequence-ref");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    fs::write(fixture.cwd().join("first.md"), "---\nagent: goose\n---\nFirst step\n").unwrap();
+    fs::write(
+        fixture.cwd().join("second.md"),
+        format!("---\nagent: goose\n{DEFECT_LIFECYCLE}---\nSecond step\n"),
+    )
+    .unwrap();
+    let sequence = fixture.cwd().join("sequence.md");
+    fs::write(
+        &sequence,
+        "---\nagent: goose\nsequence:\n    - name: first\n      prompt: ./first.md\n    - name: second\n      prompt: second.md\n---\nSequence body\n",
+    )
+    .unwrap();
+
+    for dry_run in [false, true] {
+        let mut args = vec!["sequence", "--goose"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        args.push(sequence.to_str().unwrap());
+        let (success, stderr) = run_with_marker(&fixture, &marker, &args);
+        assert!(!success, "dry_run={dry_run}: {stderr}");
+        assert_nested_span_rejection(&stderr, "success.say");
+        assert!(stderr.contains("second.md"), "the referenced document is named:\n{stderr}");
+        assert_eq!(provider_runs(&marker), 0, "dry_run={dry_run}: no step may start");
+    }
+}
+
+/// Phase 1c prepares every step of the sequence document through the shared
+/// validator, so a defect in the sequence's own lifecycle starts no step.
+#[test]
+fn sequence_document_with_a_nested_span_starts_no_step() {
+    let fixture = CliProcessFixture::named("nested-span-sequence-self");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let sequence = fixture.cwd().join("sequence.md");
+    fs::write(
+        &sequence,
+        format!(
+            "---\nagent: goose\n{DEFECT_LIFECYCLE}sequence:\n    - one\n    - two\n---\nStep {{{{ state }}}}\n"
+        ),
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["sequence", "--goose", sequence.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert_eq!(provider_runs(&marker), 0);
+}
+
+/// Predicates, action operands, and `proxy … with` values are single-pass
+/// surfaces too.
+#[test]
+fn predicates_operands_and_proxy_with_values_are_rejected_before_launch() {
+    let fixture = CliProcessFixture::named("nested-span-surfaces");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let cases = [
+        (
+            "start:\n    stack:\n        - when: \"label == 'in {{area}}'\"\n          action: stop\n",
+            "start.stack[0].when",
+        ),
+        (
+            "start:\n    stack:\n        - action:\n              info: \"{{ ok ? 'in {{area}}' : 'x' }}\"\n",
+            "start.stack[0].action[0].message",
+        ),
+        (
+            "failure:\n    stack:\n        - action:\n              action: proxy\n              target: ./next.md\n              with:\n                  note: \"{{ 'in {{area}}' }}\"\n",
+            "failure.stack[0].action[0].with.note",
+        ),
+        (
+            "loop:\n    while: \"status != 'at {{step}}'\"\n    max: 2\n",
+            "loop.while",
+        ),
+    ];
+    for (index, (lifecycle, property)) in cases.into_iter().enumerate() {
+        let doc = fixture.cwd().join(format!("surface-{index}.md"));
+        fs::write(&doc, format!("---\n{lifecycle}---\nBody\n")).unwrap();
+        let (success, stderr) =
+            run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+        assert!(!success, "{property}: {stderr}");
+        assert_nested_span_rejection(&stderr, property);
+        assert_eq!(provider_runs(&marker), 0, "{property}: no provider may start");
+    }
+}
+
+#[test]
+fn colliding_proxy_overlay_paths_are_rejected_before_launch() {
+    let fixture = CliProcessFixture::named("nested-span-proxy-path-collision");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("collision.md");
+    fs::write(
+        &doc,
+        "---\nfailure:\n    stack:\n        - action:\n              action: proxy\n              target: ./next.md\n              with:\n                  a:\n                      b: \"{{ ok ? 'bad {{ x }}' : 'fine' }}\"\n                  \"a.b\": fine\n---\nBody\n",
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+    assert!(!success, "the colliding nested defect must be refused: {stderr}");
+    assert_nested_span_rejection(&stderr, "failure.stack[0].action[0].with.a.b");
+    assert_eq!(provider_runs(&marker), 0, "no provider may start");
+}
+
+/// Acceptance 4: synthesized action bodies, mixed strings, ordinary
+/// whole-value frontmatter, and the valid `+` form still launch the provider.
+#[test]
+fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
+    let fixture = CliProcessFixture::named("nested-span-negative-controls");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("controls.md");
+    fs::write(
+        &doc,
+        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in {{area}}' : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+    assert!(success, "valid forms must run:\n{stderr}");
+    assert_eq!(provider_runs(&marker), 1, "the provider launches exactly once");
+    assert!(!stderr.contains("nested interpolation"), "{stderr}");
+}
+
+/// D4: a frontmatter value that holds template text reaches the event-time
+/// guard, which names the lifecycle key and the typed reason and selects the
+/// concatenate/`{{{ … }}}` hint rather than the missing-path one.
+#[test]
+fn surviving_span_at_event_time_names_the_property_and_specific_hint() {
+    let fixture = CliProcessFixture::named("nested-span-runtime-backstop");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("backstop.md");
+    fs::write(
+        &doc,
+        "---\ntmpl: \"{{{ctx.repo_name}}}\"\nstart:\n    info: \"{{ tmpl }}\"\n---\nBody\n",
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert!(stderr.contains("lifecycle evaluation error"), "{stderr}");
+    assert!(stderr.contains("start.info"), "the property is named:\n{stderr}");
+    assert!(
+        stderr.contains("still contains `{{ctx.repo_name}}` after every interpolation pass"),
+        "the typed reason is rendered:\n{stderr}"
+    );
+    assert!(stderr.contains("concatenate with `+`"), "{stderr}");
+    assert!(!stderr.contains("resolve the missing"), "the old hint must not appear:\n{stderr}");
+    assert_eq!(provider_runs(&marker), 0);
+}
+
+/// `retry` and `resume` re-read the document and run canonical preparation
+/// again, so a defect written by the first provider run is refused before a
+/// second provider start.
+#[cfg(unix)]
+#[test]
+fn reentry_refuses_a_defect_introduced_by_the_previous_attempt() {
+    let fixture = CliProcessFixture::named("nested-span-reentry");
+    fixture.seed_user_config();
+    let marker = fixture.cwd().join("provider-runs.log");
+    // `resume` needs a captured session, so its provider is a Claude stub that
+    // reports one on the stream before failing.
+    let claude_init = "echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\",\"model\":\"m\",\"tools\":[]}'\n";
+    let cases = [
+        ("retry", "goose", "", "failure:\n    stack:\n        - action:\n              retry: 2\n", 1),
+        ("resume", "claude", claude_init, "failure:\n    stack:\n        - action:\n              resume: continue\n", 1),
+    ];
+    for (label, provider, stream, recovery, exit_code) in cases {
+        let _ = fs::remove_file(&marker);
+        let doc = fixture.cwd().join(format!("{label}.md"));
+        let defect_doc = fixture.cwd().join(format!("{label}-defect.md"));
+        fs::write(&doc, format!("---\n{recovery}---\nBody\n")).unwrap();
+        fs::write(&defect_doc, format!("---\n{recovery}{DEFECT_LIFECYCLE}---\nBody\n")).unwrap();
+        // The first run swaps in the defective lifecycle, then fails (or, for
+        // the loop, succeeds) so the recovery path re-enters preparation.
+        write_executable(
+            &fixture.bin_dir().join(provider),
+            &format!(
+                "#!/bin/sh\necho run >> \"$PROVIDER_MARKER\"\ncp '{}' '{}'\n{stream}echo done\nexit {exit_code}\n",
+                defect_doc.display(),
+                doc.display()
+            ),
+        );
+
+        let flag = format!("--{provider}");
+        let (success, stderr) =
+            run_with_marker(&fixture, &marker, &["compose", &flag, doc.to_str().unwrap()]);
+        assert!(!success, "{label}: {stderr}");
+        assert_nested_span_rejection(&stderr, "success.say");
+        assert_eq!(
+            provider_runs(&marker),
+            1,
+            "{label}: the re-entry must be refused before a second provider start:\n{stderr}"
+        );
+    }
+}
+
+/// A document loop parses its lifecycle once, in the seed preparation, and
+/// every iteration reuses that stamped config; the seed preparation is
+/// therefore where a loop document's defect is refused, before iteration 1.
+#[test]
+fn loop_document_with_a_nested_span_starts_no_iteration() {
+    let fixture = CliProcessFixture::named("nested-span-loop");
+    fixture.seed_user_config();
+    let marker = install_marker_provider(&fixture);
+    let doc = fixture.cwd().join("loop.md");
+    fs::write(
+        &doc,
+        format!("---\nloop:\n    while: \"true\"\n    max: 3\n{DEFECT_LIFECYCLE}---\nBody\n"),
+    )
+    .unwrap();
+
+    let (success, stderr) =
+        run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
+    assert!(!success, "{stderr}");
+    assert_nested_span_rejection(&stderr, "success.say");
+    assert_eq!(provider_runs(&marker), 0);
+}

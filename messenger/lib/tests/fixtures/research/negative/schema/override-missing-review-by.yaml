@@ -1,0 +1,18 @@
+---
+# An override must carry an expiration/review date.
+# expect-problem: /overrides/0
+$schema: ../../../../../../docs/research/platforms/_overrides.schema.yaml
+schema_version: 1
+overrides:
+- id: ovr.fx
+  platform_id: discord
+  fact: c.fx
+  field: value
+  effective_value: '1'
+  target_hash: xxh64:0123456789abcdef
+  schema_hash: xxh64:0123456789abcdef
+  evidence:
+  - src.fx.docs
+  reason: r
+  author: a
+---

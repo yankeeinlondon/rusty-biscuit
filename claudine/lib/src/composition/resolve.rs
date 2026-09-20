@@ -287,6 +287,12 @@ pub fn load_yaml_document(path: &Path) -> Result<Markdown, CompositionError> {
             })?;
     }
 
+    // A whole-file YAML source has no `---` block for Darkmatter to collect
+    // order from, so the order index comes from the document this frontmatter
+    // was projected out of.
+    let frontmatter = frontmatter
+        .with_mapping_orders(darkmatter::markdown::MappingOrders::collect(yaml.value()));
+
     Ok(darkmatter::markdown::Markdown::with_frontmatter(
         frontmatter,
         "",
@@ -324,6 +330,10 @@ pub fn without_formal_sequence_keys(
         // better than panicking on an unreachable branch.
         let _ = frontmatter.insert(key, value.clone());
     }
+    // Dropping two root keys does not move anything the order index points at,
+    // so it travels with the rebuilt frontmatter.
+    let frontmatter =
+        frontmatter.with_mapping_orders(source.markdown.frontmatter().mapping_orders().clone());
 
     ResolvedCompositionSource {
         original_ref: source.original_ref.clone(),

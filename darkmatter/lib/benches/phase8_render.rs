@@ -40,7 +40,7 @@ use std::path::PathBuf;
 
 /// Loads a committed manifest fixture by stem.
 fn fixture(stem: &str) -> Markdown {
-    let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let path: PathBuf = biscuit_test_harness::manifest_dir!()
         .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     let text = std::fs::read_to_string(&path)

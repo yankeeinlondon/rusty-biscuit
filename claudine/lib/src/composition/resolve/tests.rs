@@ -448,19 +448,19 @@ fn is_markdown_path_variants() {
     assert!(!is_markdown_path(Path::new("test")));
 }
 
-/// Acceptance criterion #5: the shipped `prompts/cross-platform.md` prompt
+/// Acceptance criterion #5: the shipped `prompts/_reviews/cross-platform.md` prompt
 /// (already fixed to `---` fences) loads as a composition source with
 /// non-empty frontmatter and a body that begins with the real heading. No
 /// YAML keys from the frontmatter may leak into the body.
 #[test]
 fn cross_platform_prompt_composes_cleanly() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
     let workspace_root = manifest_dir
         .parent()
         .expect("claudine/lib parent")
         .parent()
         .expect("workspace root");
-    let path = workspace_root.join("prompts/cross-platform.md");
+    let path = workspace_root.join("prompts/_reviews/cross-platform.md");
 
     let source = resolve_composition_source(path.to_str().unwrap())
         .expect("cross-platform.md should resolve and parse cleanly");
