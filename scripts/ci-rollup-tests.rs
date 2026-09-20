@@ -6531,3 +6531,358 @@ fn the_legacy_single_companion_outcome_still_downgrades() {
     let cell = classify_one(&[expectation], &[status]);
     assert_eq!(cell.state, CellState::Fail);
 }
+
+// ---------------------------------------------------------------------------
+// Direct cell execution (`features/2026-09-19-direct-cell-execution`), Phase 2
+//
+// Pending audit oracles for the completion-record contract Phase 6
+// implements: a new-format executing cell must carry a valid, complete,
+// correctly bound completion record with its declared report inventory, or
+// the area verdict blocks. The Python twin of this mechanism is
+// `scripts/ci/pending_contracts.py`; both honor `BISCUIT_PROMOTE_PENDING=1`.
+//
+// The legacy-path retention ("records without the new contract keep the
+// expected-manifest/baseline path") is additionally pinned by the ordinary
+// fixtures already in this file: `an_owned_unexpired_policy_gap_does_not_block`
+// and the reused-cell rollups judge evidence that carries no completion
+// record at all, so a Phase 6 that demanded one from reused or gap cells
+// would fail those suites directly.
+// ---------------------------------------------------------------------------
+
+/// Whether `BISCUIT_PROMOTE_PENDING=1` asked pending fixtures to run their
+/// bodies directly.
+fn promote_pending() -> bool {
+    std::env::var("BISCUIT_PROMOTE_PENDING").as_deref() == Ok("1")
+}
+
+/// Run `body`, requiring it to fail with a message containing `oracle`.
+///
+/// ## Panics
+///
+/// When the body passes — the contract landed and the fixture must be promoted
+/// by deleting this wrapper — or when it fails for some other reason, which
+/// means the fixture itself broke rather than the contract being unbuilt.
+fn pending_contract(criterion: &str, reason: &str, oracle: &str, body: impl FnOnce()) {
+    if promote_pending() {
+        body();
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    std::panic::set_hook(previous);
+
+    match outcome {
+        Ok(()) => panic!(
+            "pending contract {criterion} now holds: {reason}. Remove the \
+             pending_contract wrapper so a later regression can fail this suite."
+        ),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned());
+            assert!(
+                message.contains(oracle),
+                "pending contract {criterion} failed, but not for the recorded \
+                 reason. Expected the failure to mention {oracle:?}; the fixture \
+                 itself is probably broken.\n\nRecorded reason: {reason}\n\
+                 Actual failure: {message}"
+            );
+        }
+    }
+}
+
+/// The one-area fixture the completion oracles judge: a plan with a single
+/// executing L1 cell, a green JUnit report, and (optionally) the cell's
+/// completion record.
+struct CompletionFixture {
+    artifacts: PathBuf,
+    plan: PathBuf,
+    environments: PathBuf,
+    baseline: PathBuf,
+}
+
+const FIXTURE_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+fn completion_fixture(
+    temp: &TempDir,
+    completion: Option<serde_json::Value>,
+    cell_build: Option<&str>,
+) -> CompletionFixture {
+    let artifacts = temp.path().join("ci-artifacts");
+    let junit_dir = artifacts.join("junit-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(junit_dir.join("L1")).unwrap();
+    fs::write(
+        junit_dir.join("L1").join("claudine.xml"),
+        junit(
+            "claudine",
+            &format!(
+                "{}{}",
+                passing_case("claudine::a"),
+                passing_case("claudine::b")
+            ),
+        ),
+    )
+    .unwrap();
+    fs::write(
+        junit_dir.join("manifest.jsonl"),
+        serde_json::json!({
+            "tier": "L1", "package": "claudine", "xml": "L1/claudine.xml",
+            "exit_code": 0, "environment": "ubuntu-latest",
+            "duration_s": 7, "report_present": true,
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+
+    let mut cell = plan_cell_json("claudine", "ubuntu-latest", "L1", false);
+    if let Some(key) = cell_build {
+        cell["build"] = serde_json::json!(key);
+    }
+    let plan = temp.path().join("resolved-plan.json");
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "head": FIXTURE_HEAD,
+            "packages": [{"package": "claudine"}],
+            "cells": vec![cell],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    if let Some(record) = completion {
+        let directory = artifacts.join("completion-claudine-L1-ubuntu-latest");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("completion.json"),
+            serde_json::to_string_pretty(&record).unwrap() + "\n",
+        )
+        .unwrap();
+    }
+
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        serde_json::json!({"schema_version": ENVIRONMENTS_SCHEMA_VERSION, "environments": []}).to_string(),
+    )
+    .unwrap();
+    let baseline = temp.path().join("ci-baseline.toml");
+    fs::write(&baseline, "schema_version = 3\n").unwrap();
+
+    CompletionFixture { artifacts, plan, environments, baseline }
+}
+
+/// The record shape R10 pins: keyed by cell, binding revision, build, run,
+/// attempt, nextest version, and the report inventory.
+fn completion_record(overrides: serde_json::Value) -> serde_json::Value {
+    let mut record = serde_json::json!({
+        "schema_version": 1,
+        "package": "claudine",
+        "environment": "ubuntu-latest",
+        "gate": "L1",
+        "complete": true,
+        "head": FIXTURE_HEAD,
+        "run": 123456,
+        "attempt": 1,
+        "nextest_version": "cargo-nextest 0.9.136",
+        "reports": ["L1/claudine.xml"],
+    });
+    if let serde_json::Value::Object(fields) = overrides {
+        for (name, value) in fields {
+            record[name] = value;
+        }
+    }
+    record
+}
+
+/// Roll the fixture area up and judge it; returns the verdict exit code.
+fn verdict_of(fixture: &CompletionFixture, temp: &TempDir) -> i32 {
+    let results = temp.path().join("claudine-results.json");
+    let summary = temp.path().join("summary.md");
+    let rollup_args = Args::parse(
+        [
+            "--artifacts",
+            fixture.artifacts.to_str().unwrap(),
+            "--plan",
+            fixture.plan.to_str().unwrap(),
+            "--environments",
+            fixture.environments.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--out",
+            results.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    assert_eq!(
+        cmd_rollup(&rollup_args).unwrap(),
+        0,
+        "the area's cells rolled up green before the verdict is judged"
+    );
+
+    let verdict_args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--baseline",
+            fixture.baseline.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    cmd_verdict(&verdict_args).unwrap()
+}
+
+/// AC6: an executing cell with no completion record blocks the verdict, and
+/// a valid, correctly bound record clears it.
+#[test]
+fn an_executing_cell_without_a_completion_record_blocks_the_verdict() {
+    pending_contract(
+        "AC6",
+        "ci-rollup ignores completion artifacts entirely: an executing cell with \
+         green JUnit and no completion record passes the verdict; Phase 6 \
+         requires the record",
+        "completion record",
+        || {
+            let temp = TempDir::new("completion-missing");
+            let without = completion_fixture(&temp, None, None);
+            assert_eq!(
+                EXIT_BLOCKED,
+                verdict_of(&without, &temp),
+                "an executing cell with no completion record blocks: a green \
+                 status without its completion record is unproven coverage"
+            );
+
+            let with = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+            assert_eq!(
+                0,
+                verdict_of(&with, &temp),
+                "a valid, correctly bound completion record clears the same area"
+            );
+        },
+    );
+}
+
+/// AC6: the record must bind the run's tested revision.
+#[test]
+fn a_completion_record_bound_to_another_revision_blocks() {
+    pending_contract(
+        "AC6",
+        "ci-rollup ignores completion artifacts entirely, so a record naming \
+         another revision cannot be refused; Phase 6 binds the record to the \
+         tested revision",
+        "completion record",
+        || {
+            let temp = TempDir::new("completion-revision");
+            let other_head = "c".repeat(40);
+            let fixture = completion_fixture(
+                &temp,
+                Some(completion_record(json!({ "head": other_head }))),
+                None,
+            );
+            assert_eq!(
+                EXIT_BLOCKED,
+                verdict_of(&fixture, &temp),
+                "a completion record naming a revision other than the run's \
+                 tested one is evidence about a different tree"
+            );
+        },
+    );
+}
+
+/// AC6: the record must bind the build key its cell executed.
+#[test]
+fn a_completion_record_bound_to_another_build_key_blocks() {
+    pending_contract(
+        "AC6",
+        "ci-rollup ignores completion artifacts entirely, so a record naming \
+         another build key cannot be refused; Phase 6 binds the record to the \
+         cell's planned build",
+        "completion record",
+        || {
+            let temp = TempDir::new("completion-build");
+            let fixture = completion_fixture(
+                &temp,
+                Some(completion_record(json!({ "build": "fedcba9876543210" }))),
+                Some("0123456789abcdef"),
+            );
+            assert_eq!(
+                EXIT_BLOCKED,
+                verdict_of(&fixture, &temp),
+                "a completion record naming a build other than the one the \
+                 cell's plan resolved is evidence from a different compile"
+            );
+        },
+    );
+}
+
+/// AC6: a green status whose declared report inventory is absent blocks.
+#[test]
+fn a_green_status_with_an_absent_report_inventory_blocks() {
+    pending_contract(
+        "AC6",
+        "ci-rollup ignores completion artifacts entirely, so a record whose \
+         declared reports are missing cannot be refused; Phase 6 checks the \
+         inventory against the artifacts",
+        "completion record",
+        || {
+            let temp = TempDir::new("completion-inventory");
+            let fixture = completion_fixture(
+                &temp,
+                Some(completion_record(
+                    json!({ "reports": ["L1/claudine.xml", "L1/vanished.xml"] }),
+                )),
+                None,
+            );
+            assert_eq!(
+                EXIT_BLOCKED,
+                verdict_of(&fixture, &temp),
+                "a completion record declaring a report nothing uploaded is \
+                 not supported by its artifacts"
+            );
+        },
+    );
+}
+
+/// The record is authoritative: `complete: false` blocks even though the JUnit
+/// and status artifacts are green. This is the strongest form of the
+/// legacy-path contract — an old-shape green area (no record at all) is judged
+/// by the legacy path, but a record that EXISTS and denies completeness wins.
+#[test]
+fn an_incomplete_completion_record_blocks_green_junit() {
+    pending_contract(
+        "AC6",
+        "ci-rollup ignores completion artifacts entirely, so a record that \
+         denies completeness cannot block green JUnit; Phase 6 makes the \
+         record authoritative",
+        "completion record",
+        || {
+            let temp = TempDir::new("completion-incomplete");
+            let fixture = completion_fixture(
+                &temp,
+                Some(completion_record(json!({ "complete": false }))),
+                None,
+            );
+            assert_eq!(
+                EXIT_BLOCKED,
+                verdict_of(&fixture, &temp),
+                "a completion record that did not validate cannot be outranked \
+                 by the green reports it was supposed to certify"
+            );
+        },
+    );
+}
