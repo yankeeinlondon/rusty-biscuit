@@ -2362,9 +2362,21 @@ _check_canonical:
 _readme_files:
     @sniff docs --readme --json "$(sniff repo package-area)"
 
+#   just status                 full overview of this package area
+#   just status <subject>       fuzzy-match one feature/fix and list it
+#   just status --recent        only listings touched in the last 7 days
+#   just status --recent-all    the same, every package area, grouped
+#
+# The summary sits last because that is the only line `just --list` shows.
+# feature and fix status; --recent / --recent-all narrow to the last 7 days
 status subject="":
     #!/usr/bin/env bash
     set -euo pipefail
+
+    case "{{ subject }}" in
+        --recent)     just _status_recent area; exit 0 ;;
+        --recent-all) just _status_recent all;  exit 0 ;;
+    esac
 
     # No subject — show full overview (original behaviour)
     if [[ -z "{{ subject }}" ]]; then
@@ -2428,7 +2440,7 @@ status subject="":
 
     # Single scheduled match → immediate display
     if [[ ${#scheduled[@]} -eq 1 && -n "${scheduled[0]}" ]]; then
-        eza "${scheduled[0]}" -lga ---icons=always --hyperlink
+        eza "${scheduled[0]}" -lga --icons=always --hyperlink
         exit 0
     fi
 
@@ -2458,7 +2470,168 @@ status subject="":
     fi
 
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
-    eza "${matched}" -lga ---icons=always --hyperlink
+    eza "${matched}" -lga --icons=always --hyperlink
+
+# Active feature/fix listings holding a file touched inside the recent window.
+# `scope` is `area` for the current package area, `all` for every package area
+# in the repo, each under its own heading and silent when it has nothing.
+#
+# Python rather than find/stat: the listing's *newest* mtime is what decides
+# and what is displayed, and `stat`'s format flags differ between BSD and GNU,
+# so a shell version would not behave the same on macOS, Linux and Windows.
+_status_recent scope="area":
+    #!/usr/bin/env python3
+    import os
+    import subprocess
+    import sys
+    import time
+
+    RECENT_DAYS = 7
+    SCOPE = "{{ scope }}"
+
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    ITALIC = "\033[3m"
+    UNDERLINE = "\033[4m"
+    RESET = "\033[0m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+
+    now = time.time()
+    cutoff = now - RECENT_DAYS * 86400
+    window = "last " + str(RECENT_DAYS) + " days"
+
+    def sniff(*args):
+        try:
+            done = subprocess.run(
+                ["sniff", "repo", *args], capture_output=True, text=True
+            )
+        except OSError:
+            return ""
+        return done.stdout.strip() if done.returncode == 0 else ""
+
+    def age(mtime):
+        secs = max(0, int(now - mtime))
+        if secs < 3600:
+            return str(max(1, secs // 60)) + "m ago"
+        if secs < 86400:
+            return str(secs // 3600) + "h ago"
+        return str(secs // 86400) + "d ago"
+
+    def hyperlink(path, label):
+        target = "file://" + os.path.abspath(path)
+        return "\033]8;;" + target + "\033\\" + label + "\033]8;;\033\\"
+
+    def meta_of(row):
+        unit = " file" if row[3] == 1 else " files"
+        return str(row[3]) + unit + " · " + age(row[4])
+
+    def scan(area_dir):
+        rows = []
+        for kind in ("features", "fixes"):
+            base = os.path.join(area_dir, kind)
+            if not os.path.isdir(base):
+                continue
+            for entry in os.scandir(base):
+                if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                    continue
+                count = 0
+                newest = 0.0
+                newest_file = ""
+                for root, dirs, files in os.walk(entry.path):
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                    for name in files:
+                        if name.startswith("."):
+                            continue
+                        path = os.path.join(root, name)
+                        try:
+                            mtime = os.stat(path).st_mtime
+                        except OSError:
+                            continue
+                        if mtime < cutoff:
+                            continue
+                        count += 1
+                        if mtime > newest:
+                            newest = mtime
+                            newest_file = os.path.relpath(path, entry.path)
+                if count:
+                    rows.append(
+                        (kind, entry.name, entry.path, count, newest, newest_file)
+                    )
+        rows.sort(key=lambda row: row[4], reverse=True)
+        return rows
+
+    def block(rows, indent, heading_style, spaced):
+        name_w = max(len(row[1]) for row in rows)
+        meta_w = max(len(meta_of(row)) for row in rows)
+        for kind, label in (("features", "Features"), ("fixes", "Fixes")):
+            group = [row for row in rows if row[0] == kind]
+            if not group:
+                continue
+            print(indent + heading_style + label + RESET)
+            if spaced:
+                print()
+            for row in group:
+                name = hyperlink(row[2], row[1]) + " " * (name_w - len(row[1]))
+                trail = DIM + meta_of(row).ljust(meta_w) + "   " + row[5] + RESET
+                print(indent + "  " + name + "   " + trail)
+            if spaced:
+                print()
+
+    def title(subject):
+        print()
+        print(
+            "  📅 " + BOLD + "Recent" + RESET
+            + " " + DIM + "· " + window + " ·" + RESET
+            + " " + BOLD + subject + RESET
+        )
+        print()
+
+    if SCOPE == "area":
+        rows = scan(os.getcwd())
+        title(sniff("area") or os.path.basename(os.getcwd()))
+        if rows:
+            block(rows, "  ", BOLD + BLUE + UNDERLINE, True)
+        else:
+            print("  " + DIM + ITALIC + "nothing touched in the " + window + RESET)
+            print()
+        sys.exit(0)
+
+    if SCOPE != "all":
+        print("_status_recent: scope must be `area` or `all`", file=sys.stderr)
+        sys.exit(2)
+
+    root = sniff("root") or os.getcwd()
+    areas = [a for a in sniff("package-areas", "--list").splitlines() if a.strip()]
+    if not areas:
+        print("_status_recent: `sniff repo package-areas` found none", file=sys.stderr)
+        sys.exit(1)
+    title("all package areas")
+
+    listings = 0
+    shown = 0
+    for area in areas:
+        area_dir = root if area == "root" else os.path.join(root, area)
+        rows = scan(area_dir)
+        if not rows:
+            continue
+        if shown:
+            print()
+        shown += 1
+        listings += len(rows)
+        print("  " + BOLD + CYAN + "▌ " + area + RESET)
+        block(rows, "    ", BOLD + BLUE, False)
+
+    print()
+    if shown:
+        noun = " listing across " if listings == 1 else " listings across "
+        areas_noun = " package area" if shown == 1 else " package areas"
+        print(
+            "  " + DIM + str(listings) + noun + str(shown) + areas_noun + RESET
+        )
+    else:
+        print("  " + DIM + ITALIC + "nothing touched in the " + window + RESET)
+    print()
 
 # show the directory structure of the given directory
 _structure dir:
