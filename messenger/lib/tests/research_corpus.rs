@@ -25,9 +25,7 @@ use serde_json::Value;
 /// leg) remap `CARGO_MANIFEST_DIR` onto the extracted workspace, while the
 /// compile-time `env!` value names the builder's checkout.
 fn lib_dir() -> PathBuf {
-    std::env::var_os("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    biscuit_test_harness::manifest_dir!()
 }
 
 fn messenger_dir() -> PathBuf {

@@ -25,7 +25,7 @@ const INCIDENT: &str = include_str!(
 );
 
 fn schemas_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas")
+    biscuit_test_harness::manifest_dir!().join("../docs/schemas")
 }
 
 /// Runs `f` with a context for `text` at client document `version`.

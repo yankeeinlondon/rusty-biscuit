@@ -7953,6 +7953,7 @@ dependencies = [
  "async-trait",
  "biscuit-file",
  "biscuit-hash",
+ "biscuit-test-harness",
  "bytes",
  "darkmatter",
  "futures",
