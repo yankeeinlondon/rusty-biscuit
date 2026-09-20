@@ -767,6 +767,52 @@ class ArchiveGuardValidationTests(unittest.TestCase):
         )
 
 
+GUARD_CASES_PATH = schema.ROOT / ".github" / "ci" / "schemas" / "archive_guard_cases.json"
+
+
+def guard_cases() -> list[dict]:
+    return json.loads(GUARD_CASES_PATH.read_text(encoding="utf-8"))["cases"]
+
+
+class ArchiveGuardSharedCorpusTests(unittest.TestCase):
+    """The accept/reject table this validator shares with the guard's own reader.
+
+    `BISCUIT_ARCHIVE_GUARD_PLAN` hands
+    `test_toolkit::archive_guard::GuardPlan::from_plan_json` a document this
+    validator never saw, so the two must agree on every shape or the guard
+    executes under semantics the planner was refused. Each side keeps its own
+    tests for the wording it produces; this one fixes only what the two accept.
+    A case added to the table fails both suites until both readers implement
+    it.
+    """
+
+    def test_every_case_is_named_once_and_states_its_rule(self):
+        cases = guard_cases()
+        self.assertTrue(cases, "an empty table synchronizes nothing")
+        names = [case["name"] for case in cases]
+        self.assertEqual(sorted(set(names)), sorted(names), f"a name is reused: {names}")
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                self.assertIsInstance(case["valid"], bool)
+                self.assertTrue(case["rule"].strip())
+                self.assertIn("archive_guard", case)
+
+    def test_the_validator_agrees_with_the_shared_corpus(self):
+        for case in guard_cases():
+            with self.subTest(case=case["name"]):
+                problems = schema.validate_resolved_plan(
+                    plan(archive_guard=deepcopy(case["archive_guard"]))
+                )
+                if case["valid"]:
+                    self.assertEqual([], problems, case["rule"])
+                    continue
+                self.assertTrue(problems, f"the defect was accepted: {case['rule']}")
+                self.assertTrue(
+                    all(problem.startswith("malformed-receipt:") for problem in problems),
+                    f"every guard problem carries a code: {problems}",
+                )
+
+
 class ResolvedPlanValidationTests(unittest.TestCase):
     def test_a_well_formed_plan_validates(self):
         self.assertEqual(schema.validate_resolved_plan(plan()), [])
