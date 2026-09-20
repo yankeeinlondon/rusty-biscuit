@@ -1,36 +1,36 @@
 ---
 title: CI/CD stabilization — land the three-PR stack and get real Windows evidence
-status: draft
+status: abandoned
 created: 2026-07-30
 builds_on:
-  - fixes/2026-07-27-refactor
+    - fixes/2026-07-27-refactor
 pull_requests:
-  - "#19 docs/cross-platform-ci-plan -> main"
-  - "#21 fix/windows-sniff -> main"
-  - "#22 fix/unchained-hug-schematic -> fix/windows-sniff"
+    - "#19 docs/cross-platform-ci-plan -> main"
+    - "#21 fix/windows-sniff -> main"
+    - "#22 fix/unchained-hug-schematic -> fix/windows-sniff"
 source_code:
-  - .cargo/config.toml
-  - .claude/skills/kache/installation.md
-  - .github/actions/enable-kache/action.yml
-  - .github/actions/report-kache/action.yml
-  - .github/ci/README.md
-  - .github/kache-version
-  - .github/ci/areas.json
-  - .github/ci/ci-baseline.toml
-  - .github/workflows/_area-ci.yml
-  - .github/workflows/_wsl-ci.yml
-  - .github/workflows/ci.yml
-  - .github/workflows/pr-health.yml
-  - .gitignore
-  - Cargo.lock
-  - README.md
-  - docs/initialization.md
-  - docs/kache-strategy.md
-  - justfile
-  - scripts/init.ps1
-  - scripts/ci/affected_scope.py
-  - scripts/ci/test_affected_scope.py
-  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+    - .cargo/config.toml
+    - .claude/skills/kache/installation.md
+    - .github/actions/enable-kache/action.yml
+    - .github/actions/report-kache/action.yml
+    - .github/ci/README.md
+    - .github/kache-version
+    - .github/ci/areas.json
+    - .github/ci/ci-baseline.toml
+    - .github/workflows/_area-ci.yml
+    - .github/workflows/_wsl-ci.yml
+    - .github/workflows/ci.yml
+    - .github/workflows/pr-health.yml
+    - .gitignore
+    - Cargo.lock
+    - README.md
+    - docs/initialization.md
+    - docs/kache-strategy.md
+    - justfile
+    - scripts/init.ps1
+    - scripts/ci/affected_scope.py
+    - scripts/ci/test_affected_scope.py
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
 ---
 
 # CI/CD stabilization
@@ -54,14 +54,14 @@ Success is not "CI is green". Success is:
 
 ## Current state (measured 2026-07-30)
 
-| | PR 19 `docs/cross-platform-ci-plan` | PR 21 `fix/windows-sniff` | PR 22 `fix/unchained-hug-schematic` |
-|---|---|---|---|
-| Base | `main` | `main` | `fix/windows-sniff` |
-| Remote head | `b09b1f50e` | `02a89f149` | `f83c69da5` |
-| Files changed | 268 | 195 | 15 |
-| Ancestry | 34 commits on `8fc3adc3a` | 27 commits on `8fc3adc3a` | 6 commits on PR 21 |
-| CI jobs scheduled | 168 cells | **32 jobs, 0 area jobs** | **0 runs** |
-| Failures | 43 (all named) | 2 | unknown |
+|                   | PR 19 `docs/cross-platform-ci-plan` | PR 21 `fix/windows-sniff` | PR 22 `fix/unchained-hug-schematic` |
+| ----------------- | ----------------------------------- | ------------------------- | ----------------------------------- |
+| Base              | `main`                              | `main`                    | `fix/windows-sniff`                 |
+| Remote head       | `b09b1f50e`                         | `02a89f149`               | `f83c69da5`                         |
+| Files changed     | 268                                 | 195                       | 15                                  |
+| Ancestry          | 34 commits on `8fc3adc3a`           | 27 commits on `8fc3adc3a` | 6 commits on PR 21                  |
+| CI jobs scheduled | 168 cells                           | **32 jobs, 0 area jobs**  | **0 runs**                          |
+| Failures          | 43 (all named)                      | 2                         | unknown                             |
 
 Ancestry, branch heads, and pull-request metadata were verified through the
 GitHub API against a fully unshallowed clone. The Actions job counts and log
@@ -76,16 +76,16 @@ was wrong**, and the repair phase has been removed.
 The local clone was shallow. `.git/shallow` contained exactly
 `43056c8bcad232ce56228d9dbe086673f0af6c59` — the same commit the finding named as
 PR 19's "root". A shallow boundary makes Git treat that commit as parentless
-*locally*, so `git merge-base` fails, `git rev-list --max-parents=0` reports it as
+_locally_, so `git merge-base` fails, `git rev-list --max-parents=0` reports it as
 a root, and the branch appears to contain only 18 commits.
 
 Verified ancestry, after `git fetch --unshallow`:
 
-| Comparison | Merge base | Relationship |
-|---|---|---|
+| Comparison     | Merge base  | Relationship                              |
+| -------------- | ----------- | ----------------------------------------- |
 | `main` ↔ PR 19 | `8fc3adc3a` | PR 19 is 34 ahead, 0 behind — `MERGEABLE` |
-| `main` ↔ PR 21 | `8fc3adc3a` | PR 21 is 27 ahead, 0 behind |
-| PR 19 ↔ PR 21 | `2d6a606d5` | diverged: PR 21 +12, PR 19 +19 |
+| `main` ↔ PR 21 | `8fc3adc3a` | PR 21 is 27 ahead, 0 behind               |
+| PR 19 ↔ PR 21  | `2d6a606d5` | diverged: PR 21 +12, PR 19 +19            |
 
 PR 21 branched from PR 19 at a **real shared commit**, `2d6a606d5`
 ("docs(devops): record the silently-unscheduled-PR failure mode and its guard").
@@ -108,9 +108,9 @@ carries
 
 ```yaml
 if: >-
-  !cancelled() &&
-  needs.scope.outputs.has_areas == 'true' &&
-  (needs.canary.result == 'success' || needs.canary.result == 'skipped')
+    !cancelled() &&
+    needs.scope.outputs.has_areas == 'true' &&
+    (needs.canary.result == 'success' || needs.canary.result == 'skipped')
 ```
 
 and `canary / playa / check (windows-latest)` failed, so the fan-out never
@@ -123,7 +123,7 @@ operating system.
 `fix/windows-sniff`, so no `ci` run is created at all; only `pr-health` and
 Socket report. Five product fixes are unverified.
 
-This is the same *class* of defect `pr-health.yml` exists to catch (absence of a
+This is the same _class_ of defect `pr-health.yml` exists to catch (absence of a
 run), but the guard checks only whether GitHub can create a merge ref. Its push
 path can pass a mergeable stacked PR and print that CI can be scheduled without
 checking whether `ci.yml`'s base-branch filter excludes it. Phase 3 aligns those
@@ -139,16 +139,16 @@ cleanly onto a merged PR 19.
 
 What PR 21 is missing, and what each omission costs:
 
-| PR 19 commit | Missing from PR 21 | Consequence |
-|---|---|---|
-| `43056c8bc` runtime `cargo_bin` | 56 `cargo_bin!` macro sites remain | **Causes the `biscuit-hash / wsl2` failure** |
-| removal of `-D warnings` from `check` | `_area-ci.yml:115` still sets it | **Causes the `playa / check (windows)` failure** |
-| `656299926` `node` capability | `areas.json` has no `node: true`; the config validator that made an undeclared pnpm user fail loudly is also gone | homelab's 22 frontend tests silently never run |
-| `0ecd4e45d` anchored tier filters | `test(/level2_/)` instead of an anchored tier predicate | Unanchored predicates match substrings anywhere in the path |
-| `9a01ba383` `report-kache` action | absent | No cache-effectiveness signal at all |
-| `61466f94e` committed `Cargo.lock` | `.gitignore:68` re-ignores `**/Cargo.lock` | CI re-resolves every dependency every run; a past run cannot be reproduced |
-| `eca67d517` baseline pruning | 6 retired entries restored | Now-passing cells stay masked |
-| `ae5525845` ci-rollup fix | passing evidence from unscheduled cells still erased | Rollup misreports |
+| PR 19 commit                          | Missing from PR 21                                                                                                | Consequence                                                                |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `43056c8bc` runtime `cargo_bin`       | 56 `cargo_bin!` macro sites remain                                                                                | **Causes the `biscuit-hash / wsl2` failure**                               |
+| removal of `-D warnings` from `check` | `_area-ci.yml:115` still sets it                                                                                  | **Causes the `playa / check (windows)` failure**                           |
+| `656299926` `node` capability         | `areas.json` has no `node: true`; the config validator that made an undeclared pnpm user fail loudly is also gone | homelab's 22 frontend tests silently never run                             |
+| `0ecd4e45d` anchored tier filters     | `test(/level2_/)` instead of an anchored tier predicate                                                           | Unanchored predicates match substrings anywhere in the path                |
+| `9a01ba383` `report-kache` action     | absent                                                                                                            | No cache-effectiveness signal at all                                       |
+| `61466f94e` committed `Cargo.lock`    | `.gitignore:68` re-ignores `**/Cargo.lock`                                                                        | CI re-resolves every dependency every run; a past run cannot be reproduced |
+| `eca67d517` baseline pruning          | 6 retired entries restored                                                                                        | Now-passing cells stay masked                                              |
+| `ae5525845` ci-rollup fix             | passing evidence from unscheduled cells still erased                                                              | Rollup misreports                                                          |
 
 ### Defect 1 — `playa / check (windows-latest)` is `-D warnings`, not a compile error
 
@@ -202,7 +202,7 @@ performing the merge must have explicit authority to bypass the required check;
 this plan does not turn a draft status into that authorization.
 
 Chosen over widening `ci-baseline.toml` deliberately. Baselining 43 cells to
-land the branch that *made them visible* would convert a one-time exception into
+land the branch that _made them visible_ would convert a one-time exception into
 43 standing masks, each needing its own retirement later. The admin merge leaves
 the failures loudly red, which is the correct signal going into Phase 4.
 
@@ -326,22 +326,22 @@ Baseline from PR 19's verdict (run 30489327076), the only measured run with full
 visibility. Numeric entries are failing-test counts, not job or rollup-cell
 counts; textual entries describe missing producer evidence:
 
-| Area | Windows observation | Other environment observations |
-|---|---|---|
-| `sniff` | **394** | 5 ubuntu, 4 macOS |
-| `biscuit-terminal` | 36 | 2 ubuntu, 3 macOS |
-| `schematic` | 8 | |
-| `tree-hugger` | 6 | |
-| `unchained-ai` | 5 | |
-| `biscuit-file` | 4 | |
-| `queue` | 2 | |
-| `research` | 2 | |
-| `renderable` | 1 | |
-| `biscuit-tui` | 1 | |
-| `biscuit-icon` | — | 1 wsl2 |
-| `biscuit-speaks` | — | 1 ubuntu, 1 macOS |
-| `claudine` | build failure + missing shards | 15+ ubuntu |
-| `darkmatter` | MISSING (timeout) | 26 ubuntu, 1 macOS |
+| Area               | Windows observation            | Other environment observations |
+| ------------------ | ------------------------------ | ------------------------------ |
+| `sniff`            | **394**                        | 5 ubuntu, 4 macOS              |
+| `biscuit-terminal` | 36                             | 2 ubuntu, 3 macOS              |
+| `schematic`        | 8                              |                                |
+| `tree-hugger`      | 6                              |                                |
+| `unchained-ai`     | 5                              |                                |
+| `biscuit-file`     | 4                              |                                |
+| `queue`            | 2                              |                                |
+| `research`         | 2                              |                                |
+| `renderable`       | 1                              |                                |
+| `biscuit-tui`      | 1                              |                                |
+| `biscuit-icon`     | —                              | 1 wsl2                         |
+| `biscuit-speaks`   | —                              | 1 ubuntu, 1 macOS              |
+| `claudine`         | build failure + missing shards | 15+ ubuntu                     |
+| `darkmatter`       | MISSING (timeout)              | 26 ubuntu, 1 macOS             |
 
 PR 21 and PR 22 may address much of this. **None of it is verified**, which is
 the entire argument for Phases 2 and 3. Re-derive this table from the first
@@ -378,14 +378,14 @@ Already specced, to run after these merges:
 
 From `report-kache` in run 30489327076:
 
-| Leg | Hit rate | Weighted by compile cost | Time saved |
-|---|---|---|---|
-| `biscuit-terminal` ubuntu | 3.8% (26 hit / 666 miss) | **0.4%** | ~2s |
-| `biscuit-terminal` macOS | 6.2% (44 / 664) | **2.3%** | ~15s |
-| `playa` ubuntu | 0% (0 / 17) | 0% | n/a |
-| `playa` macOS | 0% (0 / 17) | 0% | n/a |
-| `biscuit-hash` ubuntu | 0% (0 / 2) | 0% | n/a |
-| `biscuit-hash` macOS | 100% (2 / 0) | 100% | 437ms |
+| Leg                       | Hit rate                 | Weighted by compile cost | Time saved |
+| ------------------------- | ------------------------ | ------------------------ | ---------- |
+| `biscuit-terminal` ubuntu | 3.8% (26 hit / 666 miss) | **0.4%**                 | ~2s        |
+| `biscuit-terminal` macOS  | 6.2% (44 / 664)          | **2.3%**                 | ~15s       |
+| `playa` ubuntu            | 0% (0 / 17)              | 0%                       | n/a        |
+| `playa` macOS             | 0% (0 / 17)              | 0%                       | n/a        |
+| `biscuit-hash` ubuntu     | 0% (0 / 2)               | 0%                       | n/a        |
+| `biscuit-hash` macOS      | 100% (2 / 0)             | 100%                     | 437ms      |
 
 Against the local macOS measurement of **99.6% warm, 35.1 → 18.3 min**
 (`docs/kache-strategy.md`). The measured CI legs are getting essentially
@@ -423,14 +423,14 @@ and should remain while kache is disabled. The kache report does not measure
 
 ### Target configuration
 
-| Target | Decision | Rationale |
-|---|---|---|
-| **macOS dev** | **Opt in after probe** | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support. |
-| **Linux dev** | **Opt in after probe** | ext4 is hardlink mode: store ingestion is a second copy and live target links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
-| **Windows dev** | **Off by default** | NTFS defaults to copy restore. Opt in only after a ReFS Dev Drive (store and target together) is measured. |
-| **WSL2 dev** | **Qualified like Linux** | A normal distro root is commonly ext4 in a VHDX; measure storage and restore behavior. |
-| **WSL2 CI guest** | **No** | It executes a prebuilt nextest archive and compiles nothing inside the guest. |
-| **CI** | **Off for now** | Keep `rust-cache`. Revisit only with an S3/R2 backend. |
+| Target            | Decision                 | Rationale                                                                                                                                     |
+| ----------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **macOS dev**     | **Opt in after probe**   | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support.                                    |
+| **Linux dev**     | **Opt in after probe**   | ext4 is hardlink mode: store ingestion is a second copy and live target links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
+| **Windows dev**   | **Off by default**       | NTFS defaults to copy restore. Opt in only after a ReFS Dev Drive (store and target together) is measured.                                    |
+| **WSL2 dev**      | **Qualified like Linux** | A normal distro root is commonly ext4 in a VHDX; measure storage and restore behavior.                                                        |
+| **WSL2 CI guest** | **No**                   | It executes a prebuilt nextest archive and compiles nothing inside the guest.                                                                 |
+| **CI**            | **Off for now**          | Keep `rust-cache`. Revisit only with an S3/R2 backend.                                                                                        |
 
 ### Actions
 
@@ -570,14 +570,14 @@ Per repo policy, run gates only for the recorded scope — never
 
 ## Execution log — 2026-07-30
 
-| Phase | State | Evidence |
-|---|---|---|
-| 1 — land PR 19 | **done** | merge commit `53cfeec00`; admin override inside a restored-on-exit ruleset window; `enforcement=active`, `bypass_actors=0` after |
-| 2 — replay PR 21 | **done** | `git rebase --onto main 2d6a606d5`; 11 of 12 clean, one conflict; head `f2f600a9f` |
-| 3 — stacked CI + PR 22 | **done** | `ci.yml`/`pr-health.yml` base filters removed; PR 22 head `c3f8ae798`; first-ever `ci` run **30562649123** (112 jobs) |
-| 4 — Windows burn-down | **handed to Ken** | targets identified below; owned on a separate branch |
-| 5 — remove the blinders | **done** | run **30595280027**: 238 jobs, 151 pass, 55 fail, **0 without a verdict**, 2.4h |
-| 6 — close the WSL2 blind spots | **retry done; SIGBUS cause CONFIRMED** | provisioning 403 from job 91060753989; disk exhaustion confirmed in run 30605643702, all 4 claudine shards |
+| Phase                          | State                                  | Evidence                                                                                                                         |
+| ------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — land PR 19                 | **done**                               | merge commit `53cfeec00`; admin override inside a restored-on-exit ruleset window; `enforcement=active`, `bypass_actors=0` after |
+| 2 — replay PR 21               | **done**                               | `git rebase --onto main 2d6a606d5`; 11 of 12 clean, one conflict; head `f2f600a9f`                                               |
+| 3 — stacked CI + PR 22         | **done**                               | `ci.yml`/`pr-health.yml` base filters removed; PR 22 head `c3f8ae798`; first-ever `ci` run **30562649123** (112 jobs)            |
+| 4 — Windows burn-down          | **handed to Ken**                      | targets identified below; owned on a separate branch                                                                             |
+| 5 — remove the blinders        | **done**                               | run **30595280027**: 238 jobs, 151 pass, 55 fail, **0 without a verdict**, 2.4h                                                  |
+| 6 — close the WSL2 blind spots | **retry done; SIGBUS cause CONFIRMED** | provisioning 403 from job 91060753989; disk exhaustion confirmed in run 30605643702, all 4 claudine shards                       |
 
 Recovery tags pushed to the remote: `recovery/pr19-pre-merge` (`b09b1f50e`),
 `recovery/pr21-pre-rebase` (`02a89f149`), `recovery/pr22-pre-rebase`
@@ -604,20 +604,20 @@ provide:
   that was never scheduled.
 
 Both now keep `needs:` for ordering and run on `!cancelled()`. Removing the gate
-also made the run *faster* — 2.4 h for 238 jobs versus 4.0 h for 172 — because
+also made the run _faster_ — 2.4 h for 238 jobs versus 4.0 h for 172 — because
 areas start immediately instead of queuing behind the canary stage. Wall clock
 here is bounded by runner concurrency, not job duration.
 
 Supporting fixes in the same phase:
 
-| Commit | Blinder removed |
-|---|---|
-| `64837bd21` | `sniff repo --json` aborted on CI's shallow clone (`try_find_object`); added a test owning its own depth-1 fixture |
-| `ba2f46229` | 30 min job ceiling killed cells into MISSING → 45 min |
-| `3a274b2fa` | 30 s per-test kill failed correct tests → 90 s; claudine's shard had 11 timeouts and **zero** assertion failures |
+| Commit                   | Blinder removed                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `64837bd21`              | `sniff repo --json` aborted on CI's shallow clone (`try_find_object`); added a test owning its own depth-1 fixture                 |
+| `ba2f46229`              | 30 min job ceiling killed cells into MISSING → 45 min                                                                              |
+| `3a274b2fa`              | 30 s per-test kill failed correct tests → 90 s; claudine's shard had 11 timeouts and **zero** assertion failures                   |
 | `268ab36bf`, `be7e4f613` | per-package invocation resolved features per package, rebuilding crates 3× and hiding feature-gated tests; one resolution per area |
-| `7f2bbf7ce` | `progress_resets_stall_clock` had never run in CI; 40 ms budget widened |
-| `e5ee7c7f8` | a dead WSL2 guest rendered identically to a tier with no tests; producer now records *why* |
+| `7f2bbf7ce`              | `progress_resets_stall_clock` had never run in CI; 40 ms budget widened                                                            |
+| `e5ee7c7f8`              | a dead WSL2 guest rendered identically to a tier with no tests; producer now records _why_                                         |
 
 ### Phase 6 — the two remaining WSL2 blind spots
 
@@ -676,15 +676,15 @@ whichever write hit the wall first.
 
 It is a capacity threshold, not a claudine-code question:
 
-| Area | Archive (zstd) | WSL2 outcome |
-|---|---:|---|
-| `claudine` | **6.4 GiB** | runner disk exhausted during extraction, all 4 shards |
-| `darkmatter` | 3.9 GiB | extraction survived; 4 shards reported real test failures |
-| `biscuit-terminal` | 870 MiB | reported normally |
-| every other area | ≤ 451 MiB | reported normally |
+| Area               | Archive (zstd) | WSL2 outcome                                              |
+| ------------------ | -------------: | --------------------------------------------------------- |
+| `claudine`         |    **6.4 GiB** | runner disk exhausted during extraction, all 4 shards     |
+| `darkmatter`       |        3.9 GiB | extraction survived; 4 shards reported real test failures |
+| `biscuit-terminal` |        870 MiB | reported normally                                         |
+| every other area   |      ≤ 451 MiB | reported normally                                         |
 
 **A dead runner is a reporting gap Phase 5 did not close.** Phase 5 taught a dead
-*guest* to explain itself, and that works: darkmatter published all four
+_guest_ to explain itself, and that works: darkmatter published all four
 `status-darkmatter-L1-wsl2-ubuntu-*` artifacts. claudine published **none** — not
 a blank detail, no artifact at all. `Record producer status` carries
 `if: always()`, but `always()` cannot help when the runner has no disk to write
@@ -714,10 +714,10 @@ Before run 30605643702 named the disk directly, the SIGBUS in run 30595280027
 _test was terminated by signal 7`, then a staging step that failed with exit 11
 because the guest was no longer usable) admitted three candidate stores:
 
-| Candidate | Why it would give SIGBUS | Verdict |
-|---|---|---|
-| `/tmp` is a tmpfs sized from guest RAM | a tmpfs page that cannot be allocated on fault is delivered as SIGBUS, with no write to fail | ruled out |
-| guest ext4 inside the VHDX filled | writeback failure on a mapped region | ruled out |
+| Candidate                                     | Why it would give SIGBUS                                                                        | Verdict       |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------- |
+| `/tmp` is a tmpfs sized from guest RAM        | a tmpfs page that cannot be allocated on fault is delivered as SIGBUS, with no write to fail    | ruled out     |
+| guest ext4 inside the VHDX filled             | writeback failure on a mapped region                                                            | ruled out     |
 | the Windows volume the VHDX grows into filled | the VHDX cannot extend, so the guest sees I/O errors while its own `df` still shows free blocks | **confirmed** |
 
 The measurements that would have discriminated them were built before the answer
@@ -765,21 +765,20 @@ came through. Only a dead guest loses evidence.
 
 Both were taken up in Phase 6 above, which supersedes the leads recorded here.
 
-1. **claudine wsl2, all four shards** — nextest killed by SIGBUS (signal 7, exit
-   135) ~3m45s in, right after `Extracting 153 binaries`. claudine has the
+1. **claudine wsl2, all four shards** — nextest killed by SIGBUS (signal 7, exit 135) ~3m45s in, right after `Extracting 153 binaries`. claudine has the
    largest archive (153 binaries, vs darkmatter 130, biscuit-terminal 55).
    Signal 7 is what the kernel delivers when a memory-mapped file cannot be
    backed, so VHDX disk or memory exhaustion is the lead. **Diagnose before
-   fixing.** *Phase 6 kept this lead and narrowed it: archive BYTES separate the
+   fixing.** _Phase 6 kept this lead and narrowed it: archive BYTES separate the
    areas far more sharply than binary counts (6.4 GiB vs 3.9 GiB vs ≤ 870 MiB),
    and a tmpfs `/tmp` joined the candidate list because it is the store whose
-   exhaustion surfaces as SIGBUS with no write to fail.*
+   exhaustion surfaces as SIGBUS with no write to fail._
 2. **darkmatter wsl2 shard 3/4** — `Provision the WSL2 guest` failed with
    `wsl.exe` exit 4294967295. A flake; the other three provisioned. Wants a
    bounded retry on that step only — never on the test step, where a retried
-   timeout would look healthy. *Phase 6 disproved "a flake": the logs name a 403
+   timeout would look healthy. _Phase 6 disproved "a flake": the logs name a 403
    throttle on `wsl.exe --update`, and the action was already retrying ten times
-   in 2.4 s. The retry only helps with a delay in front of it.*
+   in 2.4 s. The retry only helps with a delay in front of it._
 
 `claudine/windows-latest/L1` also renders MISSING, but honestly: the crate fails
 to BUILD, so the test set is genuinely unknown. That is the rollup working.
@@ -789,22 +788,22 @@ to BUILD, so the test set is genuinely unknown. That is the rollup working.
 macOS and ubuntu are healthy: 14 failures between them. This is Windows (550)
 and WSL2 (353).
 
-| Area | macOS | ubuntu | Windows | WSL2 |
-|---|---:|---:|---:|---:|
-| `darkmatter` | · | 1 | **480** | MISSING |
-| `tree-hugger` | · | · | 6 | **150** |
-| `biscuit-terminal` | 3 | 2 | 36 | 48 |
-| `biscuit-file` | · | · | 4 | 43 |
-| `biscuit-speaks` | · | · | · | 34 |
-| `schematic` | · | · | 8 | 24 |
-| `research` | · | · | 2 | 28 |
-| `sniff` | 3 | 1 | 5 | 19 |
-| `unchained-ai` | · | · | 5 | 6 |
-| others | 1 | 3 | 4 | 1 |
+| Area               | macOS | ubuntu | Windows |    WSL2 |
+| ------------------ | ----: | -----: | ------: | ------: |
+| `darkmatter`       |     · |      1 | **480** | MISSING |
+| `tree-hugger`      |     · |      · |       6 | **150** |
+| `biscuit-terminal` |     3 |      2 |      36 |      48 |
+| `biscuit-file`     |     · |      · |       4 |      43 |
+| `biscuit-speaks`   |     · |      · |       · |      34 |
+| `schematic`        |     · |      · |       8 |      24 |
+| `research`         |     · |      · |       2 |      28 |
+| `sniff`            |     3 |      1 |       5 |      19 |
+| `unchained-ai`     |     · |      · |       5 |       6 |
+| others             |     1 |      3 |       4 |       1 |
 
 **Target 1 — `md.exe` stack-overflows on Windows (~451 tests, 49% of all
 failures).** `code=-1073741571` = `0xC00000FD` = `STATUS_STACK_OVERFLOW`, on
-*every* subcommand (`compose`, `clean`, `schema`, `code-block`, `get`, `set`,
+_every_ subcommand (`compose`, `clean`, `schema`, `code-block`, `get`, `set`,
 `hash`, `graph`, `rm`) — so it is at startup, not in one code path. Windows gives
 the main thread 1 MB against 8 MB on Linux/macOS. Candidates: a Windows-scoped
 `-C link-arg=/STACK:8388608`, or moving the work onto a thread with an explicit
@@ -814,7 +813,7 @@ scoped to `[target.x86_64-pc-windows-msvc]`.
 
 **Target 2 — archived tests resolve fixture paths to the build host (~250–350
 tests, 9 areas).** `Io { path: "/home/runner/work/rusty-biscuit/…", NotFound }`
-is the *Windows host's* checkout; the guest has the repo at
+is the _Windows host's_ checkout; the guest has the repo at
 `/home/runner/rusty-biscuit`. `--workspace-remap` fixes nextest's bookkeeping but
 not paths baked into the binary at compile time via `CARGO_MANIFEST_DIR`. Same
 class as the `cargo_bin!` bug already fixed in `43056c8bc`; one helper likely
@@ -867,8 +866,8 @@ bought.
 - [x] `ci.yml` schedules stacked pull requests and `pr-health.yml` has the same
       applicability contract, enforced by a workflow-contract test.
 - [~] PR 22 runs CI while stacked (**done**) and the duplicate `research`
-      symlink implementation is resolved to one (**done**); retargeting to
-      `main` waits on PR 21 landing.
+  symlink implementation is resolved to one (**done**); retargeting to
+  `main` waits on PR 21 landing.
 - [x] The Windows failure table is re-derived from a post-replay run,
       with failures, timeouts, cancellations, missing evidence, and policy gaps
       distinguished.
@@ -880,8 +879,8 @@ bought.
 - [x] kache action calls, reports, reusable-workflow inputs, and per-area policy
       are removed from CI; `Swatinem/rust-cache@v2` remains.
 - [~] `.github/kache-version` is `0.12.0` and the developer installer verifies
-      the installed executable against it — true on the branch; reaches `main`
-      when PR 21 lands.
+  the installed executable against it — true on the branch; reaches `main`
+  when PR 21 lands.
 - [ ] Any future kache CI experiment is separately scoped, uses a reviewed
       commit-SHA-pinned action or explicit backend, and reports weighted hit rate
       plus wall-clock comparison against a no-kache control.
@@ -905,6 +904,6 @@ bought.
 - [ ] `ci-rollup` can distinguish "the producer's runner died before it could
       write a status" from "the producer was never scheduled". Found by this
       phase: claudine published no status artifact at all, because `always()`
-      cannot run on a runner with no disk. Phase 5 closed the dead-*guest* case
+      cannot run on a runner with no disk. Phase 5 closed the dead-_guest_ case
       only.
 - [ ] Phase 4 burn-down proceeds against a run in which every cell reported.
