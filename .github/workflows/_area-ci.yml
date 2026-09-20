@@ -107,6 +107,10 @@ jobs:
       runner-tools: ${{ toJSON(matrix.runner_tools) }}
       companion-suites: ${{ toJSON(matrix.companion_suites) }}
       companion-environments: ${{ toJSON(matrix.companion_environments) }}
+      # A lint cell the planner created for a companion suite alone (today the
+      # archive-path guard). The package's own Clippy is skipped there, so the
+      # companion's result IS the cell's — see `_package-ci.yml`'s lint job.
+      lint-companions-only: ${{ matrix.lint_companions_only }}
       native: ${{ toJSON(matrix.native) }}
       wsl: ${{ matrix.wsl }}
       # The build records this package's executing cells consume, narrowed by

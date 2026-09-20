@@ -1,12 +1,13 @@
 {
   "resolved_plan": {
-    "schema_version": 4,
+    "schema_version": 5,
     "document": {
       "schema_version": true,
       "base": true,
       "head": true,
       "change_class": true,
       "change_inventory": true,
+      "archive_guard": true,
       "full_scope": true,
       "full_scope_gates": true,
       "areas": true,
@@ -72,6 +73,7 @@
       "prohibition": false,
       "dependents": false,
       "companions": false,
+      "companions_only": false,
       "build": false
     },
     "build": {
@@ -111,7 +113,14 @@
       "diff_available": true,
       "paths": false,
       "counts": false,
+      "deleted": false,
       "reason": false
+    },
+    "archive_guard": {
+      "selected": true,
+      "mode": false,
+      "paths": false,
+      "reason": true
     }
   },
   "receipt": {
@@ -253,6 +262,10 @@
       "documentation",
       "source",
       "other"
+    ],
+    "archive_guard_modes": [
+      "changed",
+      "full"
     ],
     "accepted_gap_state": "ACCEPTED GAP",
     "completions": [

@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 4 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 5 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 
@@ -36,7 +36,7 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
 > it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 4`,
-> versioned independently of the plan's 4, the receipt's 2, and the baseline's
+> versioned independently of the plan's 5, the receipt's 2, and the baseline's
 > 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
@@ -79,6 +79,15 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > scope receipt misses once as `scope-schema` for the same reason a version-1
 > one did; validation receipts are untouched, so their version stays at 2 and
 > nothing already-recorded is invalidated.
+>
+> Version 5 adds the required `archive_guard` scope
+> (`fixes/2026-09-19-less-brittle`) and the `deleted` half of the change
+> inventory it reads. The archive-path guard scans repository source for
+> compile-time paths that do not survive an archived run, and the planner is
+> the only thing that knows which files an event put in scope; a plan carrying
+> no answer would leave the guard choosing between an empty scan and a full
+> one, and it refuses to guess. A version-4 scope receipt misses once as
+> `scope-schema`, for the reason every earlier one did.
 
 ## Resolved plan
 
@@ -94,7 +103,8 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
 
 - `event`, `deferred_environments`, `proven_environments` — optional, absent
   rather than empty, so a plan resolved without an event is byte-identical to
-  one from before they existed and the version stays at 4 (R9). `event` is
+  one from before they existed and the version did not move for them (R9).
+  `event` is
   the GitHub event the plan was resolved for; `deferred_environments` lists
   the table's environments that event does not schedule, each with the
   `events` that do; `proven_environments` lists the environments an earlier
@@ -110,7 +120,34 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   *sibling* of `change_class`, not a summary of it: `change_class` is derived
   from the gating packages a change selects, so a change to a `gates = false`
   package's Rust source correctly reports `change_class: documentation` beside
-  a `source` bucket.
+  a `source` bucket. `deleted` names the subset the diff reports as removed,
+  gated exactly like `paths` and `counts` and declared rather than inferred:
+  `git diff --name-only` cannot tell a deletion from a path that is simply
+  absent.
+- **Every path list in the plan is repository-relative and stays there.**
+  One POSIX spelling, no leading `./`, no surrounding whitespace, and — because
+  every consumer resolves a listed path against the checkout root — no absolute
+  path, no Windows drive prefix, and no `..` component. A path that leaves the
+  checkout is rejected by the validator rather than resolved: joining it against
+  the root would discard the root, and a *missing* escaping path would otherwise
+  be indistinguishable from an ordinary deletion. Applies to
+  `change_inventory.paths.*`, `change_inventory.deleted`, and
+  `archive_guard.paths` alike; `test_toolkit::archive_guard` enforces the same
+  rules on the reading side.
+- `archive_guard` — whether the archive-path guard was selected and, if so,
+  whether it scans the full eligible corpus or an explicit path list. Exactly
+  one of `{selected: false, reason}`, `{selected: true, mode: "full", reason}`,
+  or `{selected: true, mode: "changed", paths, reason}`; `paths` is present
+  exactly in `changed` mode, and an explicitly empty list there is the real
+  "nothing eligible changed" state, never an implicit full scan. The guard is
+  Linux-hosted, so an event that schedules no `ubuntu-latest` records
+  `selected: false` rather than adding a runner to that event.
+  `BISCUIT_ARCHIVE_GUARD_PLAN` hands a document straight to
+  `test_toolkit::archive_guard::GuardPlan`, which the validator never sees, so
+  that reader enforces this whole shape again — including the document's
+  `schema_version` against `PLAN_SCHEMA_VERSION`, the non-blank `reason`, and
+  the sorted, unique `paths`. A plan it refuses is an error, never an empty
+  scan.
 - `areas[]` — one entry per selected area, with the reason it was selected and
   the packages contributing to it. Nested areas such as `claudine/rendezvous`
   are their own entries, never folded into a parent.
@@ -142,7 +179,9 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   `state` (what is true now), `reusable` (whether any local receipt may ever
   satisfy it — false for `check` and for the L1 host a companion suite needs),
   the target kinds covered, which gate supplied the compile coverage, and a
-  selection reason.
+  selection reason. An optional `companions_only` on a `lint` cell says the
+  cell's required work is its companions and not the package's own Clippy —
+  the shape a guard-only selection takes, where nothing selected the package.
 - `builds[]` — the run-scoped build records the executing test cells consume
   (see below). Empty when nothing executes.
 - `accepted_evidence[]`, `policy_gaps[]`, `prohibited_cells[]` — the three

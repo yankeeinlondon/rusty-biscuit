@@ -84,15 +84,18 @@ nowhere else.
 
 ## `ci.yml`'s jobs
 
-`ci.yml` defines exactly six top-level jobs, and a contract test pins the set:
+`ci.yml` defines exactly eight top-level jobs, and a contract test
+(`ci_defines_exactly_the_surviving_top_level_jobs`) pins the set:
 
 | job | blocks the merge? | what it is for |
 |---|---|---|
 | `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
 | `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
 | `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
+| `build` | yes | the native archive owners; a failed owner is an infrastructure failure of the run |
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
-| `ci-gate` | yes — **the required check** | a policy-free fold of the four above |
+| `area-drift` | yes | AC15's planner-vs-sniff contract; skips where area derivation cannot move |
+| `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
 | `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
 
 There is no job that owns a test suite on CI's behalf. Every suite belongs to a
@@ -683,7 +686,7 @@ outcome; the registry — never the workflow — decides which recipe runs where
 
 | registry field | meaning |
 |---|---|
-| `recipe` | the command the owner's **test** job runs |
+| `recipe` | the command the owner's **test** job runs. A suite may omit it and declare only a `lint_recipe`: `archive-path-guard` is a source-policy scan with no test half, and giving it one would run the same scan twice on Linux |
 | `lint_recipe` | the command the owner's **lint** job runs, when the suite has a lint half. A suite without one is absent from the lint cell rather than expected there and never run |
 | `environment` | the ONE environment that runs it. Only that cell loses its reuse (R7); the owner's other L1 cells stay reusable |
 | `counts` / `counts_args` | how `companion_suites.py` obtains machine-readable counts: `json` (this repository's own document, written by `suite_runner.py`) or `vitest` (`--reporter=json`) |
@@ -1156,6 +1159,16 @@ rename contributes one logical path. A full-scope request (`--all`,
 `workflow_dispatch`) has no diff, so it records that explicitly rather than an
 empty list that would read as "nothing changed".
 
+Version 5 added `deleted`, the subset of those paths the diff reported as
+removed. A deleted path is still in its bucket — it changed — and the extra
+list is what lets a reader tell it from a path that is simply absent, which
+`git diff --name-only` cannot express. Every boundary therefore takes
+`git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`
+into `--deleted <path>... -- <changed path>...`: the scope step of `ci.yml`,
+`just/ci-local.just` (which unions untracked files, never deletions), and
+`.githooks/pre-push`. A rename's destination is the changed path; its source is
+reported nowhere, being neither a declared removal nor a file left to read.
+
 It is a sibling of `change_class`, not a replacement: `classify_preflight()`
 still returns `change_class` and that is still what sets preflight breadth.
 
@@ -1177,7 +1190,149 @@ gate, so a change to CI's own tooling reaches CI as an ordinary package job.
 → owner, canonical recipe, environment, kind (`cargo` or `companion`), and how
 that suite reports counts. `validate_suite_registry` rejects an unknown,
 unowned, doubly-owned, recipe-less, or undeclared suite, and a companion that
-neither reports counts nor says why it cannot.
+neither reports counts nor says why it cannot. "Recipe-less" means *neither*
+half: a lint-only companion is the deliberate shape of a source-policy scan.
+
+### The archive-path guard
+
+One registered suite is selected by the source it CHECKS rather than by its
+owner. `archive-path-guard` scans repository Rust source for compile-time paths
+that no archived run resolves, so package ownership would schedule it almost
+nowhere and violations accumulated until an unrelated change happened to select
+`test-toolkit`. Its triggers are two narrow rules in `affected_scope.py`:
+
+| changed input | selects |
+|---|---|
+| any `.rs` file the scanner would read — outside workspace members included, deletions included | the guard |
+| `ARCHIVE_GUARD_OWN_INPUTS`, source half: the matcher, its fixture corpus, the driver, `tools/test-toolkit/justfile`, `scripts/ci/affected_scope.py` | the guard |
+| `ARCHIVE_GUARD_OWN_INPUTS`, configuration half: `tools/test-toolkit/Cargo.toml`, `.github/workflows/_package-ci.yml`, `.github/workflows/_area-ci.yml` | the guard |
+| anything else — documentation, lockfiles, and every other manifest or workflow file | nothing |
+
+An input is owned when it carries configuration whose **only** consumer is the
+guard, so a change to it can alter whether the scan runs or what it covers
+while every other check stays green. That is what keeps the list narrow rather
+than "every workflow, manifest, or lockfile edit selects the guard".
+
+| owned configuration | what it decides |
+|---|---|
+| `tools/test-toolkit/Cargo.toml` | its `[package.metadata.ci.tests] companion-suites` is the only declaration binding `archive-path-guard` to an owner; drop the entry and the scan silently never runs again |
+| `.github/workflows/_package-ci.yml` | the `BISCUIT_ARCHIVE_GUARD_PLAN` export (one reader, the guard) and the companions-only status fold |
+| `.github/workflows/_area-ci.yml` | the sole conduit for `lint-companions-only` |
+
+All three already select `test-toolkit` through `SUITE_OWNER_PREFIXES` /
+`SUITE_OWNER_PATHS`, so the lint cell and its attached companion exist either
+way and these entries add **no** cell. What they add is the plan's account of
+the run: before them the companion read a `selected: false` scope and performed
+an empty changed-file scan — a cell that ran incidentally rather than the
+plan-owned execution the contract requires.
+
+Deliberately **not** owned: `.github/workflows/ci.yml` carries no
+guard-specific configuration and the resolved-plan artifact it uploads is read
+by every area, so losing it is loud and general; `.github/ci/environments.json`
+decides whether Linux is scheduled at all, and when it is not the guard can run
+nowhere; `scripts/ci/schema.py` and its generated `contract.json` only
+*validate* the `archive_guard` block, whose emitter (`archive_guard_scope`) is
+already owned; `just/ci-local.just` is the local driver that no CI guard
+execution ever runs.
+
+`ci_workflow_contracts` asserts the whole list from the Rust side, including
+that every entry still exists on disk — a renamed owned input is a selection
+rule that matches nothing.
+
+`ARCHIVE_GUARD_SKIPPED_DIRS` mirrors `test_toolkit::archive_guard::SKIPPED_DIRS`,
+and `ci_workflow_contracts` fails when the two disagree: a path the planner
+selects and the scanner then refuses is a cell that ran nothing.
+
+When the guard triggers and `test-toolkit` is not otherwise selected, the plan
+carries exactly one new cell — `{test-toolkit, ubuntu-latest, lint}` — with
+`companions_only: true`, meaning its required work is the guard and not the
+package's Clippy. No check cell, no test tier, no second operating system, and
+no dependent compile seam. When `test-toolkit` *is* selected normally, its
+ordinary lint cell carries the guard companion and `companions_only` is absent.
+Lint cells are never reusable, which is deliberate here: a changed-file pull
+request scan must never be presented as a completed full-tree push scan.
+
+The scan scope itself travels on the plan as `archive_guard`; see
+[the schema README](schemas/README.md#resolved-plan). The guard is Linux-hosted
+and never forces Linux into an event that excludes it, so the WSL2-only nightly
+records `selected: false` rather than gaining a runner.
+
+#### How the cell executes
+
+`companions_only` reaches the workflow as `_area-ci.yml`'s
+`lint-companions-only` input, which `_package-ci.yml`'s `lint` job reads three
+times:
+
+1. the **Lint** step — Clippy — carries `if: ${{ !inputs.lint-companions-only }}`.
+   A guard-only cell lints a package no change selected, so it skips Clippy
+   rather than doing work nothing asked for. The step is gated, never deleted:
+   every ordinary lint cell runs it exactly as before. A skipped Clippy records
+   no `duration_s`, which the status step already spells as an absent
+   measurement rather than a `0`.
+2. the **Download the resolved execution plan** step, gated on the same
+   condition as the companion step that reads it, so a lint cell with no
+   companion pays no transfer. `BISCUIT_ARCHIVE_GUARD_PLAN` is then exported to
+   the companion step as an **absolute** path — neither the recipe
+   (`cd tools/test-toolkit && …`) nor nextest's test binary runs in the
+   workspace directory the artifact landed in.
+3. the **Record producer status** fold. On a companions-only cell the
+   companion's outcome **is** the cell's outcome and only `success` passes.
+   Reading the skipped Clippy as a failure would block every pull request that
+   touches a Rust file; reading it as a pass would let a cell that ran nothing
+   go green.
+
+**A missing plan is an error, deliberately.** `download-artifact` fails the job
+when `ci-resolved-plan` is absent, and the variable is exported unconditionally
+so a file that arrived unreadable makes the guard hard-error. The alternative —
+exporting it only when the file exists — would turn a lost artifact into a
+full-tree scan recorded as this cell's evidence, and a full-tree result
+attributed to a run that never had a plan is exactly the false evidence this
+cell exists to prevent.
+
+`companion_suites.py` runs every attached lint suite in one process and each
+recipe inherits that environment, so the variable reaches the other lint
+companions too. That is inert today: the only other lint-half suite is
+`homelab-frontend`, whose `lint-frontend` recipe never reads it.
+
+Failure reaches `ci-gate` through the existing fold — `lint` →
+`_package-ci.yml` → `_area-ci.yml`'s `package-ci` → `ci.yml`'s `area-ci` →
+`ci-gate` — and the guard adds **no** top-level job. A planned guard cell that
+never ran is the owning area's `coverage-audit` to catch: `status_cells`
+reports it `MISSING`, and a companions-only cell whose sole companion went
+unreported is `Fail`, because such a cell evidenced nothing at all.
+
+#### What the scan does not cover
+
+The scan is a bounded source-policy check, not a proof that every archived
+target is portable. `SKIPPED_DIRS` excludes `target`, `.git`, `node_modules`,
+`.gitnexus`, `examples`, `fuzz`, and — the broad one — `scripts`. Each entry
+carries its reason in `test_toolkit::archive_guard::SKIPPED_DIRS`.
+
+**`scripts` is not unexecuted.** `repo-deps` runs from an archive like every
+other member; its baked `CARGO_MANIFEST_DIR` sites happen to resolve on the
+hosted native consumers because those share the producer's checkout path.
+Tightening that gap and repairing the affected script tests is separate work.
+Changed-file mode additionally ignores violations in untouched files by design;
+a full-tree run finds those when one is selected.
+
+#### Evidence
+
+**Guard execution is not reusable.** Lint cells are already `reusable: false`,
+which is what the specification's "initially prefer non-reusable guard
+execution" asks for and is why no receipt machinery was added. Reuse would need
+the cell's identity to include the scan mode, the selected path set, every
+scanned file's contents, the full-tree exemption-maintenance inputs, and the
+guard's own implementation — package-local source identity cannot represent a
+repository-wide scan, and changed-file pull-request evidence can never satisfy
+a full-tree push scan.
+
+`just ci-local` executes a planned guard cell through the same canonical
+recipe, with `BISCUIT_ARCHIVE_GUARD_PLAN` naming the plan that run just
+resolved — never a re-derived diff — and skips the package's own Clippy on a
+companions-only cell exactly as CI does. On a host that is not `ubuntu-latest`
+it prints that the planned `ubuntu-latest` execution **remains outstanding**: a
+local pass proves the source policy holds in that tree and is not the Linux
+execution the plan scheduled.
 
 Selection follows ownership. `scripts/**` and `tools/test-toolkit/**` are their
 owners' package directories, so ordinary source ownership already selects them.

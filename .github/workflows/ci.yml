@@ -208,8 +208,17 @@ jobs:
             if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
               scope_args=(--all)
             else
-              mapfile -d '' changed_files < <(git diff --name-only -z "$base" "$head")
-              scope_args=(-- "${changed_files[@]}")
+              # One diff, two lists. `--name-status` is what separates a
+              # deletion from a path that is merely absent; `diff_scope.py`
+              # turns the stream into `--deleted <path>... -- <changed path>...`
+              # so the change inventory carries that identity and the
+              # archive-path guard never has to guess. The arguments land in a
+              # file rather than a process substitution: `pipefail` sees a
+              # failing diff or parse there, and would not see it there.
+              diff_arguments="$(mktemp)"
+              git diff --name-status -z "$base" "$head" | python3 scripts/ci/diff_scope.py > "$diff_arguments"
+              mapfile -d '' scope_args < "$diff_arguments"
+              rm -f "$diff_arguments"
             fi
           fi
 
