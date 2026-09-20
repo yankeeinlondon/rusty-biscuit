@@ -1,6 +1,6 @@
 ---
 created: 2026-09-18
-status: draft
+status: resolved
 implemented: false
 area: biscuit-test-harness
 related:
@@ -178,6 +178,24 @@ The change sits in `biscuit-test-harness`, a dev-dependency of nearly every
 package, so the push that lands it re-runs most of the hook's cells locally
 (the closure rule includes a dependency's tree). Land it alone, on a quiet
 branch, and not stacked with unrelated work.
+
+## Resolution (2026-09-19)
+
+Resolved by PR #85 without implementing the fix above. #85 settled the cause
+on hypothesis 3 — a concurrent run's stale-resource reaper killing this
+run's shared session by its dead broker pid — and tagged shared panes with
+the run's own `BISCUIT_HARNESS_OWNER_PID`, with `send-keys` now reporting
+tmux's diagnostic and the live session list. It merged to `main` on
+2026-09-19 (b1feb1fb2).
+
+Evidence since: fourteen pre-push hook runs on the development Mac that day,
+several with the dmls, darkmatter-cli, sniff-cli, and claudine-cli L2 tiers
+back to back, and none reproduced `tmux send-keys failed` on a first test.
+Fix item 1 (the `has-session` verification after spawn and on attach) is not
+implemented: nothing occurred for it to guard against, and landing it costs a
+hook run over most of the workspace. If the signature returns, #85's
+diagnostics name the hypothesis, and item 1 can be reconsidered with
+evidence.
 
 ## Out of scope
 
