@@ -197,49 +197,57 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
     }
 }
 
-#[test]
-fn test_compose_cleanup_preserves_nested_lists_inside_blockquotes() {
+/// One test per list kind: each does three composes, and every compose pays a
+/// repository discovery, so all nine in one test crowd the slow-test budget.
+fn assert_compose_cleanup_preserves_nested_list_inside_blockquote(source: &str) {
     use crate::markdown::cleanup::{
         cleanup_content, cleanup_content_with_indent, reflow_to_width,
     };
 
-    let fixtures = [
-        concat!(
-            "> - Parent alpha beta gamma delta epsilon.\n",
-            ">   - Child alpha beta gamma delta epsilon.\n"
-        ),
-        concat!(
-            "> 1. Parent alpha beta gamma delta epsilon.\n",
-            ">    1. Child alpha beta gamma delta epsilon.\n"
-        ),
-        concat!(
-            "> - [ ] Parent alpha beta gamma delta epsilon.\n",
-            ">   - [x] Child alpha beta gamma delta epsilon.\n"
-        ),
-    ];
+    let default_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
+    let (default, _) = Markdown::from(source)
+        .compose_with(default_options)
+        .unwrap();
+    let direct_default = cleanup_content(source);
+    assert_eq!(default.content(), direct_default);
 
-    for source in fixtures {
-        let default_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
-        let (default, _) = Markdown::from(source)
-            .compose_with(default_options)
-            .unwrap();
-        let direct_default = cleanup_content(source);
-        assert_eq!(default.content(), direct_default);
+    let configured_options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_indent_size(2);
+    let (configured, _) = Markdown::from(source)
+        .compose_with(configured_options)
+        .unwrap();
+    assert_eq!(configured.content(), cleanup_content_with_indent(source, 2));
 
-        let configured_options = ComposeOptions::new()
-            .only(&[ComposeOperation::Cleanup])
-            .with_indent_size(2);
-        let (configured, _) = Markdown::from(source)
-            .compose_with(configured_options)
-            .unwrap();
-        assert_eq!(configured.content(), cleanup_content_with_indent(source, 2));
+    let fixed_options = ComposeOptions::new()
+        .only(&[ComposeOperation::Cleanup])
+        .with_fixed_width(24);
+    let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
+    assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
+}
 
-        let fixed_options = ComposeOptions::new()
-            .only(&[ComposeOperation::Cleanup])
-            .with_fixed_width(24);
-        let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
-        assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
-    }
+#[test]
+fn test_compose_cleanup_preserves_nested_bullet_lists_inside_blockquotes() {
+    assert_compose_cleanup_preserves_nested_list_inside_blockquote(concat!(
+        "> - Parent alpha beta gamma delta epsilon.\n",
+        ">   - Child alpha beta gamma delta epsilon.\n"
+    ));
+}
+
+#[test]
+fn test_compose_cleanup_preserves_nested_ordered_lists_inside_blockquotes() {
+    assert_compose_cleanup_preserves_nested_list_inside_blockquote(concat!(
+        "> 1. Parent alpha beta gamma delta epsilon.\n",
+        ">    1. Child alpha beta gamma delta epsilon.\n"
+    ));
+}
+
+#[test]
+fn test_compose_cleanup_preserves_nested_task_lists_inside_blockquotes() {
+    assert_compose_cleanup_preserves_nested_list_inside_blockquote(concat!(
+        "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+        ">   - [x] Child alpha beta gamma delta epsilon.\n"
+    ));
 }
 
 #[test]

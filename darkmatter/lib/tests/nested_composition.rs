@@ -376,46 +376,97 @@ fn preflight_discovers_nested_effects_without_composing_them() {
 
 /// AC32: a nested shape discovery cannot know fails before any command runs,
 /// whether it waits on frontmatter shell expansion or on a shell probe.
-#[test]
-fn dynamic_nested_and_probe_dependent_shapes_fail_before_execution() {
+///
+/// One test per shape: each case is a preflight plus a compose, and every
+/// request pays a repository discovery, so all six in one test exceed the
+/// slow-test budget.
+fn assert_shape_fails_before_execution(name: &str, frontmatter: &str, body: &str, dependency: &str) {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("frontmatter-ran");
     let sentinel_text = biscuit_file::to_portable_string(&sentinel);
-    // (document, extra frontmatter lines, body, expected dependency)
-    let cases = [
-        ("pending.md", "part: \"$(printf '::shell echo late')\"\n", "{{ as_markdown(part) }}\n", "frontmatter.part"),
-        ("probe-arg.md", "", "{{ as_markdown(can_execute(\"git\") ? \"::shell echo a\" : doc.ran) }}\n", "can_execute()"),
-        ("probe-shell.md", "", "::shell echo {{ has_alias(\"ll\") }}\n", "has_alias()"),
-        ("probe-block.md", "", "::shell-block\necho {{ has_user_function(\"f\") }}\n::end-block\n", "has_user_function()"),
-        ("nested-arg.md", "", "{{ as_markdown(as_markdown(\"::shell echo inner\")) }}\n", "as_markdown()"),
-        ("probe-frontmatter.md", "probe: '$(echo {{ has_builtin_function(\"cd\") }})'\n", "body\n", "has_builtin_function()"),
-    ];
+    let (path, document) = root_document(
+        temp.path(),
+        name,
+        &format!("---\nran: \"$(touch {sentinel_text})\"\n{frontmatter}---\n{body}"),
+    );
+    let options = ComposeOptions::new().with_source_file(&path);
 
-    for (name, frontmatter, body, dependency) in cases {
-        let (path, document) = root_document(
-            temp.path(),
-            name,
-            &format!("---\nran: \"$(touch {sentinel_text})\"\n{frontmatter}---\n{body}"),
-        );
-        let options = ComposeOptions::new().with_source_file(&path);
+    let error = document.compose_preflight(&options).expect_err(name);
+    let MarkdownError::ShellExpansion(inner) = &error else {
+        panic!("{name}: expected a shell expansion error, got {error:?}");
+    };
+    let ShellExpansionError::UnevaluatedDependencyShape { dependency: found, .. } = inner.as_ref() else {
+        panic!("{name}: expected a dynamic shape, got {inner:?}");
+    };
+    assert!(found.contains(dependency), "{name}: {found}");
 
-        let error = document.compose_preflight(&options).expect_err(name);
-        let MarkdownError::ShellExpansion(inner) = &error else {
-            panic!("{name}: expected a shell expansion error, got {error:?}");
-        };
-        let ShellExpansionError::UnevaluatedDependencyShape { dependency: found, .. } = inner.as_ref() else {
-            panic!("{name}: expected a dynamic shape, got {inner:?}");
-        };
-        assert!(found.contains(dependency), "{name}: {found}");
+    let approved: HashSet<String> = [format!("touch {sentinel_text}"), "printf '::shell echo late'".to_string()]
+        .into_iter()
+        .collect();
+    document
+        .compose_with(options.with_pre_approved_commands(approved))
+        .expect_err(name);
+    assert!(!sentinel.exists(), "{name}: a frontmatter command ran before the rejection");
+}
 
-        let approved: HashSet<String> = [format!("touch {sentinel_text}"), "printf '::shell echo late'".to_string()]
-            .into_iter()
-            .collect();
-        document
-            .compose_with(options.with_pre_approved_commands(approved))
-            .expect_err(name);
-        assert!(!sentinel.exists(), "{name}: a frontmatter command ran before the rejection");
-    }
+#[test]
+fn a_shape_pending_frontmatter_shell_expansion_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "pending.md",
+        "part: \"$(printf '::shell echo late')\"\n",
+        "{{ as_markdown(part) }}\n",
+        "frontmatter.part",
+    );
+}
+
+#[test]
+fn a_probe_dependent_as_markdown_argument_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "probe-arg.md",
+        "",
+        "{{ as_markdown(can_execute(\"git\") ? \"::shell echo a\" : doc.ran) }}\n",
+        "can_execute()",
+    );
+}
+
+#[test]
+fn a_probe_dependent_shell_directive_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "probe-shell.md",
+        "",
+        "::shell echo {{ has_alias(\"ll\") }}\n",
+        "has_alias()",
+    );
+}
+
+#[test]
+fn a_probe_dependent_shell_block_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "probe-block.md",
+        "",
+        "::shell-block\necho {{ has_user_function(\"f\") }}\n::end-block\n",
+        "has_user_function()",
+    );
+}
+
+#[test]
+fn a_nested_as_markdown_argument_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "nested-arg.md",
+        "",
+        "{{ as_markdown(as_markdown(\"::shell echo inner\")) }}\n",
+        "as_markdown()",
+    );
+}
+
+#[test]
+fn a_probe_dependent_frontmatter_shell_value_fails_before_execution() {
+    assert_shape_fails_before_execution(
+        "probe-frontmatter.md",
+        "probe: '$(echo {{ has_builtin_function(\"cd\") }})'\n",
+        "body\n",
+        "has_builtin_function()",
+    );
 }
 
 /// A frontmatter `as_markdown` call composes before the root reaches its
