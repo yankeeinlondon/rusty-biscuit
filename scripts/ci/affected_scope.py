@@ -3593,6 +3593,10 @@ def calculate_scope(
             # The area's selection reason must not claim a source change it
             # never saw: what selected the guard was source in another area.
             suite_ids = suite_ids | {owner_id}
+            # `reverse_ids` was settled before this selection existed. An owner
+            # that is also an unchanged direct dependent now holds a record, and
+            # a reported dependent is one selected nowhere.
+            reverse_ids = reverse_ids - {owner_id}
 
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
