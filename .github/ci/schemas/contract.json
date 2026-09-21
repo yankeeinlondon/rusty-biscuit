@@ -1,12 +1,13 @@
 {
   "resolved_plan": {
-    "schema_version": 6,
+    "schema_version": 7,
     "document": {
       "schema_version": true,
       "base": true,
       "head": true,
       "change_class": true,
       "change_inventory": true,
+      "archive_guard": true,
       "full_scope": true,
       "full_scope_gates": true,
       "areas": true,
@@ -75,6 +76,7 @@
       "prohibition": false,
       "dependents": false,
       "companions": false,
+      "companions_only": false,
       "build": false,
       "profile": false,
       "requires_node": false,
@@ -117,6 +119,7 @@
       "diff_available": true,
       "paths": false,
       "counts": false,
+      "deleted": false,
       "reason": false
     },
     "skip_policy": {
@@ -146,7 +149,13 @@
       "check",
       "lint",
       "wsl"
-    ]
+    ],
+    "archive_guard": {
+      "selected": true,
+      "mode": false,
+      "paths": false,
+      "reason": true
+    }
   },
   "receipt": {
     "schema_version": 2,
@@ -367,6 +376,10 @@
       "documentation",
       "source",
       "other"
+    ],
+    "archive_guard_modes": [
+      "changed",
+      "full"
     ],
     "accepted_gap_state": "ACCEPTED GAP",
     "completions": [

@@ -223,18 +223,43 @@ ci-local *args="":
             echo "ci-local: cannot resolve base ref '${base}' (set --base or CI_LOCAL_BASE)." >&2
             exit 2
         fi
-        changed="$( { git diff --name-only "${merge_base}"; git ls-files --others --exclude-standard; } | sort -u )"
-        if [[ -z "${changed}" ]]; then
+        # One diff, two lists. `--name-status` is what separates a deletion
+        # from a path that is merely absent, and `diff_scope.py` renders the
+        # stream as `--deleted <path>... -- <changed path>...` so the change
+        # inventory carries that identity. Untracked files are changed paths
+        # no diff reports and are never deletions, so they ride along as the
+        # parser's positional arguments — NUL-delimited the whole way, which
+        # the old word-split list was not.
+        untracked=()
+        while IFS= read -r -d '' path; do
+            untracked+=("${path}")
+        done < <(git ls-files --others --exclude-standard -z)
+        diff_arguments="$(mktemp)"
+        git diff --name-status -z "${merge_base}" \
+            | python3 scripts/ci/diff_scope.py ${untracked[@]+"${untracked[@]}"} > "${diff_arguments}"
+        path_args=()
+        while IFS= read -r -d '' argument; do
+            path_args+=("${argument}")
+        done < "${diff_arguments}"
+        rm -f "${diff_arguments}"
+        # The tail is `--deleted <path>` pairs, then `--`, then the changed
+        # paths; stepping the pairs finds the separator without assuming any
+        # path's spelling.
+        separator=0
+        while (( separator < ${#path_args[@]} )) && [[ "${path_args[separator]}" == "--deleted" ]]; do
+            separator=$(( separator + 2 ))
+        done
+        changed_count=$(( ${#path_args[@]} - separator - 1 ))
+        if (( changed_count == 0 )); then
             echo "ci-local: no changes relative to ${base} (${merge_base:0:9}); nothing to gate."
             exit 0
         fi
         # The revision pair is part of the plan: a receipt records the head it
         # tested, and a reviewer reconciles the plan against the outgoing work.
         scope_args+=(--base "${merge_base}" --head "$(git rev-parse HEAD)")
-        # shellcheck disable=SC2086
-        python3 scripts/ci/affected_scope.py "${scope_args[@]}" ${changed} > "${scope_file}"
+        python3 scripts/ci/affected_scope.py "${scope_args[@]}" "${path_args[@]}" > "${scope_file}"
         echo
-        echo "Changed vs ${base} (${merge_base:0:9}): $(wc -l <<< "${changed}" | tr -d ' ') file(s)"
+        echo "Changed vs ${base} (${merge_base:0:9}): ${changed_count} file(s)"
     fi
 
     # `--plan` resolves published evidence first, so a reviewer sees the cells
@@ -318,6 +343,18 @@ ci-local *args="":
                     "Change inventory: \($i.counts.total // 0) changed path(s)",
                     ($i.paths // {} | to_entries[] | select(.value | length > 0)
                       | "  \(.key) (\(.value | length)) — \(.value | join(", "))")
+                  end' "${plan_view}"
+            # Parity with `ci-plan`'s `ArchiveGuard::summary`: a reviewer must
+            # be able to tell a changed-file scan from a full-tree one on both
+            # surfaces, because only the full-tree one is repository-wide proof.
+            echo
+            jq -r '.archive_guard as $g
+                | if ($g.selected // false) | not then
+                    "Archive-path guard: not selected — \($g.reason // "no reason recorded")"
+                  elif $g.mode == "changed" then
+                    "Archive-path guard: changed-file scan of \(($g.paths // []) | length) file(s) — \($g.reason // "")"
+                  else
+                    "Archive-path guard: full-tree scan of the eligible corpus — \($g.reason // "")"
                   end' "${plan_view}"
             echo
             echo "Resolved plan (cell / execution / origin / state)"
@@ -525,12 +562,53 @@ ci-local *args="":
                 failed+=("check ${package} (check-only selection)")
             fi
         fi
-        if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]]; then
+        # A companions-only lint cell exists for a companion suite the change
+        # selected, not for the package, so its producer skips clippy — see
+        # `_package-ci.yml`'s lint job. Linting here anyway would run work CI
+        # will not run and report a gate that does not exist.
+        companions_only="$(jq -r --arg p "${package}" '[.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any' "${plan_file}")"
+        if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]] && [[ "${companions_only}" != "true" ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
             else
                 abort_if_interrupted "$?"
                 failed+=("lint ${package}")
+            fi
+        fi
+        # The archive-path guard, whenever the plan attached it to this
+        # package's lint cell. `companion_suites.py` is the same runner CI's
+        # lint job uses, so the recipe it runs is the registry's one canonical
+        # string rather than a second spelling that could drift from it.
+        #
+        # `BISCUIT_ARCHIVE_GUARD_PLAN` names the plan THIS run just resolved:
+        # the scan covers the files the planner selected, and the recipe
+        # computes no diff of its own (the spec's "one scheduler").
+        #
+        # No receipt machinery is needed to keep this out of CI's evidence: a
+        # lint cell is already `reusable=False` in the plan, so nothing here can
+        # be reused for the ubuntu-latest execution — which is what the message
+        # below states outright on a non-Linux host.
+        guard_planned=false
+        if [[ -s "${plan_file}" ]]; then
+            guard_planned="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "lint") | (.companions // [])[] | select(.name == "archive-path-guard")] | length > 0' "${plan_file}")"
+        fi
+        if (( run_lint == 1 )) && [[ "${guard_planned}" == "true" ]]; then
+            guard_note=""
+            if [[ "${local_environment}" != "ubuntu-latest" ]]; then
+                guard_note=" — the planned ubuntu-latest execution remains OUTSTANDING"
+                echo "archive-path guard: this host is ${local_environment:-unidentified}, not ubuntu-latest."
+                echo "  A pass here is a local check only; the planned ubuntu-latest execution of"
+                echo "  ${package}/ubuntu-latest/lint remains OUTSTANDING and no local result stands in for it."
+            fi
+            if BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}" python3 scripts/ci/companion_suites.py \
+                --suites '["archive-path-guard"]' \
+                --environment ubuntu-latest \
+                --gate lint \
+                --out "${reports_dir}/archive-path-guard.json"; then
+                passed+=("archive-path-guard ${package}${guard_note}")
+            else
+                abort_if_interrupted "$?"
+                failed+=("archive-path-guard ${package}")
             fi
         fi
         if (( run_test == 1 )) && [[ " ${gates} " == *" test "* ]] && cell_runs_here "${package}" L1; then

@@ -1153,6 +1153,32 @@ if len(problems) != 1 or not problems[0].startswith("scope-schema:"):
 PYCHECK
 }
 
+test_the_committed_scope_declares_deletions_and_omits_rename_sources() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    local repo="$tmpdir/repo" main_sha
+    local commit=(git -c user.name=hook-test -c user.email=hook@example.com -c commit.gpgsign=false)
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    git -C "$repo" rm -q pkg/alpha/src/lib.rs
+    git -C "$repo" mv README.md READING.md
+    "${commit[@]}" -C "$repo" commit -q -m "delete one file and rename another"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/main "$main_sha"
+    assert_exit "deletion scope" "$tmpdir" 0 || return 1
+    # The deletion reaches the planner declared as one, so the change
+    # inventory can tell it from a path that is merely absent and the
+    # archive-path guard never has to guess which it is looking at.
+    assert_contains "deletion declared" "$tmpdir/planner.log" \
+        "--deleted pkg/alpha/src/lib.rs" || return 1
+    # The rename's destination is the path that still exists and is scanned.
+    assert_contains "rename destination planned" "$tmpdir/planner.log" "READING.md" || return 1
+    # Its SOURCE is the unexpectedly-missing path this fixture exists to rule
+    # out: it is gone from the tree, so planning it as changed would hand the
+    # guard an absence nothing explains, and declaring it deleted would claim
+    # a removal the diff never reported.
+    assert_not_contains "rename source excluded" "$tmpdir/planner.log" "README.md" || return 1
+}
+
 test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
@@ -2510,6 +2536,7 @@ run_test "a blocked strict failure publishes its note; CI reruns it"  test_a_blo
 run_test "a complete warn failure publishes its note"                 test_a_complete_warn_failure_publishes_its_note
 run_test "scope-only publishes committed scope for a push to main"    test_scope_only_publishes_committed_scope_for_a_push_to_main
 run_test "the published scope receipt binds this plan generation"     test_the_published_scope_receipt_binds_this_plan_generation
+run_test "committed scope declares deletions, omits rename sources"   test_the_committed_scope_declares_deletions_and_omits_rename_sources
 run_test "a feature push records the PR base, not its previous tip"   test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip
 run_test "a branch-creating push records the remote's main tip, says so" test_a_branch_creating_push_records_the_remote_main_tip_and_says_so
 run_test "a dirty strict run publishes scope but no validation"       test_a_dirty_strict_run_publishes_scope_but_no_validation_receipt

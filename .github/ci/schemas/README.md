@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 6 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 7 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 | Expected manifest | 2 | `just _expected_manifest`, on the execution target | `scripts/ci/completion.py` |
@@ -18,6 +18,17 @@ proves it did it.
 `contract.json` in this directory is the field contract dumped from that module
 so Rust tooling can assert against it without running Python. Regenerate it with
 `python3 scripts/ci/schema.py`; `scripts/ci/test_schema.py` fails when it drifts.
+
+`archive_guard_cases.json` is the second cross-language document here, and the
+only hand-authored one: an accept/reject corpus for the plan's `archive_guard`
+scope. Each case carries the scope fragment, whether the contract accepts it,
+and the rule it exercises. `scripts/ci/test_schema.py` runs it through
+`validate_resolved_plan` and
+`tools/test-toolkit/tests/ci_workflow_contracts.rs` through
+`GuardPlan::from_plan_json`, so a case added here fails both suites until both
+readers agree on it. It states behavior the generated field table cannot, which
+is why it is written rather than dumped; the verdict is all it fixes, and each
+side keeps its own tests for the wording it produces.
 
 > **Status.** `affected_scope.py` emits the resolved plan with
 > `--resolved-plan`, or with `--plan-out` alongside the legacy scope document.
@@ -42,7 +53,7 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
 > it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 5`,
-> versioned independently of the plan's 6, the receipt's 2, and the baseline's
+> versioned independently of the plan's 7, the receipt's 2, and the baseline's
 > 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
@@ -86,14 +97,29 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > one did; validation receipts are untouched, so their version stays at 2 and
 > nothing already-recorded is invalidated.
 >
-> Version 5 is `features/2026-09-19-direct-cell-execution`. The hosted
-> workflows stop receiving environment lists and expand one matrix row per
-> executing cell, so every input a downstream job used to be handed has to be
-> answerable from the plan alone: the plan-level `skip_policy` snapshot of
-> `ci-baseline.toml`, the area-level `execution_path`, and the per-cell
-> `profile` and `requires_node`. A version-4 scope receipt misses once as
-> `scope-schema`; the receipt version stays at 2, because a change in how work
-> is dispatched is not a reason to invalidate a cell that was validated.
+> Version 5 adds the required `archive_guard` scope
+> (`fixes/2026-09-19-less-brittle`) and the `deleted` half of the change
+> inventory it reads. The archive-path guard scans repository source for
+> compile-time paths that do not survive an archived run, and the planner is
+> the only thing that knows which files an event put in scope; a plan carrying
+> no answer would leave the guard choosing between an empty scan and a full
+> one, and it refuses to guess. A version-4 scope receipt misses once as
+> `scope-schema`, for the reason every earlier one did.
+>
+> `2026-09-19-direct-cell-execution` numbered its own changes 5 and 6 on a
+> branch developed alongside it. The hosted workflows stop receiving
+> environment lists and expand one matrix row per executing cell, so every
+> input a downstream job used to be handed has to be answerable from the plan
+> alone: the plan-level `skip_policy` snapshot of `ci-baseline.toml`, the
+> area-level `execution_path`, the per-cell `profile` and `requires_node`, and
+> an executing L2 cell's `backends`.
+>
+> Version 7 is those two together, for the reason version 4 exists: "5" named
+> two incompatible shapes, and a document of either would pass the version
+> check and then fail on a field it never carried. A version-5 or version-6
+> scope receipt misses once as `scope-schema`; the receipt version stays at 2,
+> because neither a change in how work is dispatched nor a new scan scope is a
+> reason to invalidate a cell that was validated.
 
 ## Resolved plan
 
@@ -126,7 +152,34 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   *sibling* of `change_class`, not a summary of it: `change_class` is derived
   from the gating packages a change selects, so a change to a `gates = false`
   package's Rust source correctly reports `change_class: documentation` beside
-  a `source` bucket.
+  a `source` bucket. `deleted` names the subset the diff reports as removed,
+  gated exactly like `paths` and `counts` and declared rather than inferred:
+  `git diff --name-only` cannot tell a deletion from a path that is simply
+  absent.
+- **Every path list in the plan is repository-relative and stays there.**
+  One POSIX spelling, no leading `./`, no surrounding whitespace, and — because
+  every consumer resolves a listed path against the checkout root — no absolute
+  path, no Windows drive prefix, and no `..` component. A path that leaves the
+  checkout is rejected by the validator rather than resolved: joining it against
+  the root would discard the root, and a *missing* escaping path would otherwise
+  be indistinguishable from an ordinary deletion. Applies to
+  `change_inventory.paths.*`, `change_inventory.deleted`, and
+  `archive_guard.paths` alike; `test_toolkit::archive_guard` enforces the same
+  rules on the reading side.
+- `archive_guard` — whether the archive-path guard was selected and, if so,
+  whether it scans the full eligible corpus or an explicit path list. Exactly
+  one of `{selected: false, reason}`, `{selected: true, mode: "full", reason}`,
+  or `{selected: true, mode: "changed", paths, reason}`; `paths` is present
+  exactly in `changed` mode, and an explicitly empty list there is the real
+  "nothing eligible changed" state, never an implicit full scan. The guard is
+  Linux-hosted, so an event that schedules no `ubuntu-latest` records
+  `selected: false` rather than adding a runner to that event.
+  `BISCUIT_ARCHIVE_GUARD_PLAN` hands a document straight to
+  `test_toolkit::archive_guard::GuardPlan`, which the validator never sees, so
+  that reader enforces this whole shape again — including the document's
+  `schema_version` against `PLAN_SCHEMA_VERSION`, the closed field set, the
+  non-blank `reason`, and the sorted, unique `paths`. A plan it refuses is an
+  error, never an empty scan.
 - `areas[]` — one entry per selected area, with the reason it was selected, the
   packages contributing to it, and the `execution_path` that area dispatches
   through — always `rows`, the only form a shipped workflow implements; the
@@ -160,10 +213,13 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   `state` (what is true now), `reusable` (whether any local receipt may ever
   satisfy it — false for `check` and for the L1 host a companion suite needs),
   the target kinds covered, which gate supplied the compile coverage, and a
-  selection reason. An executing test cell also carries the `profile` its
+  selection reason. An optional `companions_only` on a `lint` cell says the
+  cell's required work is its companions and not the package's own Clippy —
+  the shape a guard-only selection takes, where nothing selected the package.
+  An executing test cell also carries the `profile` its
   nextest selection runs under — the same answer its expected-test listing and
   its gate command both read — and `requires_node` where that cell provisions
-  Node and pnpm. An executing L2 cell also carries `backends` (version 6): the
+  Node and pnpm. An executing L2 cell also carries `backends`: the
   sorted subset of the package's `l2_backends` its environment can host, which
   is what the producer sets `BISCUIT_TEST_REQUIRED_BACKENDS` to and what
   `completion.py` demands a `backend-proofs.json` entry for. A gap, reused, or

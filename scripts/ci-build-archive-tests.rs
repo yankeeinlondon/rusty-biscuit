@@ -3005,6 +3005,14 @@ fn run_relocated(dir: &Path, package: &str, archive: &Path, consumer: &Path) {
 /// a relocation costs two copies of the source plus a full dependency build, and
 /// two of them running concurrently under nextest exhausted the temp filesystem
 /// and took an unrelated fixture down with them.
+///
+/// `messenger` was measured for this list in `2026-09-19-less-brittle` and
+/// deliberately left off: its CI feature set (`all-features`) resolves 777
+/// crates against these two packages' 317 combined, and building its tests into
+/// an empty target directory cost 2m32s and 2.9 GB on a 16-core host — more than
+/// this whole fixture, on a runner with ~14 GB free. Its migrated fixture reads
+/// are covered by `messenger/lib/tests/research_relocation.rs` instead, which
+/// remaps `CARGO_MANIFEST_DIR` onto a scratch checkout and compiles nothing.
 #[test]
 fn slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout() {
     let packages = ["test-toolkit", "biscuit-file"];

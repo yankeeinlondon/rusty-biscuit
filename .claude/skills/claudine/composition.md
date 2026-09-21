@@ -742,7 +742,7 @@ initialize → start → (success | blocked | failure) → finalize → loop
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
 - **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`. The **completion verdict** sits immediately before them (`… → provider → inline closure → verdict → success | failure → finalize`), so it — not the provider's exit code alone — chooses which one fires. It runs once per composition: once per sequence step and once per loop iteration.
 - **`finalize`** fires once per iteration, immediately after the terminal event.
-- **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing.
+- **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing. The gate follows every iteration, including the first, so a loop always runs at least once.
 
 Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current`/`current_env` globals, and examples.
 
@@ -765,6 +765,8 @@ The loop renderer's leniency and JSON re-parse serve state mutation (a loop acti
 ### Loop Execution
 
 A frontmatter `loop:` block turns the prompt into a repeating run. The first iteration runs `initialize` once; later iterations re-enter at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration, and the loop condition is evaluated at the post-`finalize` gate after any `loop:` lifecycle concerns.
+
+The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. The full counting table is in `claudine/docs/topics/flow-control/looping.md` ("Iteration semantics").
 
 ### Authoring
 

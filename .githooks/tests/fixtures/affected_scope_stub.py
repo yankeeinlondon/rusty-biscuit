@@ -64,6 +64,29 @@ def just_recipe_closure(recipes: dict, entries: tuple) -> set:
     return set()
 
 
+#: This stub's plan schedules `macos-latest` alone, and the archive-path guard
+#: is hosted on `ubuntu-latest` alone, so the guard is never selected here
+#: whatever changed. `affected_scope.archive_guard_scope` makes that check
+#: before any mode decision, which is why one constant covers the full-scope
+#: branch too.
+NO_GUARD_ENVIRONMENT = {
+    "selected": False,
+    "reason": (
+        "this run schedules no ubuntu-latest cell; the guard is hosted there "
+        "alone and does not force it into an event that excludes it"
+    ),
+}
+
+#: The same refusal for a plan whose diff selected nothing to scan.
+NO_GUARD_TRIGGER = {
+    "selected": False,
+    "reason": (
+        "no scanned source and no owned guard input changed; a documentation "
+        "or unrelated configuration change selects no scan"
+    ),
+}
+
+
 def preflight_reason() -> str:
     if POLICY.is_file():
         return json.loads(POLICY.read_text(encoding="utf-8"))["preflight_reason"]
@@ -89,7 +112,7 @@ def fixed_plan(base: str, head: str) -> dict:
         "native": {},
     }
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "base": base,
         "head": head,
         "change_class": "package",
@@ -111,7 +134,9 @@ def fixed_plan(base: str, head: str) -> dict:
                 "other": 0,
                 "total": 1,
             },
+            "deleted": [],
         },
+        "archive_guard": NO_GUARD_ENVIRONMENT,
         "full_scope": False,
         "full_scope_gates": [],
         "areas": [
@@ -216,7 +241,9 @@ def empty_plan(base: str, head: str) -> dict:
                 name: 0
                 for name in ("configuration", "documentation", "source", "other", "total")
             },
+            "deleted": [],
         },
+        archive_guard=NO_GUARD_TRIGGER,
         areas=[],
         packages=[],
         source_packages=[],

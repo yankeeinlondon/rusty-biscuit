@@ -5,7 +5,7 @@
 `just ci-local` stub planner all assemble a resolved plan literally, because
 what they test is what happens *after* planning. Every generation of the schema
 adds fields that follow mechanically from the cells — build records at version
-3, the nextest profile and the skip-policy snapshot at version 5 — and
+3, the nextest profile and the skip-policy snapshot at version 7 — and
 hand-writing them in four places would guarantee they drift from the cells they
 claim to serve.
 
@@ -14,6 +14,10 @@ claim to serve.
 derivation reads the environment table's build contracts, the shipped baseline
 file, and digests through `ci-build`, none of which a document fixture has or
 needs.
+
+[`archive_guard`] is here for the same reason: the plan made the guard's scan
+scope a required field, and it is a selection decision no post-planning fixture
+makes.
 """
 
 from __future__ import annotations
@@ -54,6 +58,26 @@ CONTRACTS: dict[str, dict[str, Any]] = {
         "executes": ["windows-latest"],
     },
 }
+
+
+def archive_guard(paths: list[str] | None = None) -> dict[str, Any]:
+    """The archive-path guard scope a hand-written plan must carry.
+
+    The default is the honest one for a fixture that performed no selection:
+    the guard was not selected, so it describes no scope. Pass `paths` where a
+    fixture needs a changed-file scan to be present.
+    """
+    if paths is None:
+        return {
+            "selected": False,
+            "reason": "fixture plan; no scan scope was selected",
+        }
+    return {
+        "selected": True,
+        "mode": "changed",
+        "paths": sorted(set(paths)),
+        "reason": "fixture plan; changed-file scan",
+    }
 
 
 def _key(package: str, producer: str) -> str:

@@ -98,7 +98,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   `.github/workflows/**`, `tools/test-audit/**`, `pnpm-lock.yaml`,
   `pnpm-workspace.yaml`, and `tools/test-toolkit/Cargo.toml` select
   `test-toolkit`. `scripts/**` and `tools/test-toolkit/**` need no entry — they
-  are those packages' own directories. The manifest entries are a deliberate
+  are those packages' own directories. Two exact paths select both owners —
+  `.github/ci/schemas/contract.json` and
+  `.github/ci/schemas/archive_guard_cases.json` — because a Rust test reads
+  them as well as `test_schema.py`; the rest of that directory keeps the
+  `.github/ci/**` selection, so the cross-language set stays a named list
+  rather than a directory. The manifest entries are a deliberate
   two-path exception to the repository-wide "a manifest selects nothing" rule
   and are not generalized. A trigger selection is narrower than a source
   change: it reports no reverse dependencies and carries no dependent seam,
@@ -118,10 +123,13 @@ computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
 committed mapping file.
 
-`RESOLVED_PLAN_SCHEMA_VERSION` is **5**. Version 5 is the direct-cell-execution
-work — live in the workflows since Phase 5: a hosted job expands one matrix row
-per executing cell and answers every execution question from the plan, so the
-document gained the plan-level
+`RESOLVED_PLAN_SCHEMA_VERSION` is **7**, the union of two lines of work that
+each numbered themselves 5: the archive-path guard's scope
+(`fixes/2026-09-19-less-brittle`, below) on `main`, and the
+direct-cell-execution work, which reached 6 on its own branch. That is the
+version-4 situation again, resolved the same way. Direct cell execution makes a
+hosted job expand one matrix row per executing cell and answer every execution
+question from the plan, so the document gained the plan-level
 `skip_policy` snapshot of `.github/ci/ci-baseline.toml`, the area-level
 `execution_path` (only `rows` is admitted — every area switched together,
 and rollback is a revert, not a per-area allowlist), the per-cell `profile`
@@ -193,6 +201,25 @@ named two incompatible shapes and a document from either branch was refused for
 a *missing field* rather than a version skew. The validator checks the version
 before the field set for that reason: an older document usually differs in
 both, and the field complaint sends the reader after a corrupt document.
+
+The required `archive_guard` scope and the `deleted` half of the change
+inventory it reads come from `fixes/2026-09-19-less-brittle`. The archive-path
+guard scans repository source for compile-time paths that no archived run
+resolves; the planner is the only thing that knows which files an event put in
+scope, and a plan carrying no answer would leave the guard choosing between an
+empty scan and a full one. It is exactly one of `{selected: false, reason}`,
+`{selected: true, mode: "full", reason}`, or
+`{selected: true, mode: "changed", paths, reason}` — an explicitly empty
+`paths` is the real "nothing eligible changed" state and is never upgraded to a
+full scan. `--deleted PATH` is how a caller declares a removal, because
+`git diff --name-only` cannot tell one from a missing file. Every selection
+boundary — `ci.yml`'s scope step, `just/ci-local.just`, and `.githooks/pre-push`
+— therefore takes `git diff --name-status -z` and renders it through
+`scripts/ci/diff_scope.py`, the one parser that emits
+`--deleted <path>... -- <changed path>...`. A rename contributes its
+destination to the changed list and nothing at all under its old name: the
+source is not a reported deletion, and listing it as changed would be exactly
+the unexplained absence the declaration exists to remove.
 
 Version 3 added the required
 `change_inventory`: the calculator's own input paths, normalized to one
@@ -658,8 +685,54 @@ the plan — registration alone schedules nothing.
 `repo-deps` owns the thirteen `scripts/ci/test_*.py` planner contracts plus
 `artifact-publisher`; its Rust binaries (`ci-rollup`, `ci-plan`, `ci-build`,
 `drift`) run in its own `repo-deps-l1` cell. `test-toolkit` owns
-`ci_workflow_contracts` (`test-toolkit-l1`), `test-audit-typecheck`, and
-`test-audit-vitest`.
+`ci_workflow_contracts` (`test-toolkit-l1`), `test-audit-typecheck`,
+`test-audit-vitest`, and the **lint-only** `archive-path-guard`.
+
+`archive-path-guard` is the one registered suite with no `recipe` at all: a
+source-policy scan has no test half, and giving it one would run the same scan
+a second time inside its owner's L1 cell under that package's evidence rules.
+It is also the one suite selected by the source it CHECKS — any `.rs` file the
+scanner would read, plus an eight-entry list of its own inputs — rather than by
+its owner's package directory. An input is owned when its configuration has no
+consumer but the guard: the matcher, its fixture corpus, the driver, the
+canonical recipe, `affected_scope.py`, `tools/test-toolkit/Cargo.toml` (the
+`companion-suites` registry binding), `_package-ci.yml` (the
+`BISCUIT_ARCHIVE_GUARD_PLAN` export and companions-only fold), and
+`cell_contract.py`, the conduit that carries `companions_only` to the job. `ci.yml`, `environments.json`, `schema.py`, and `just/ci-local.just`
+are deliberately **not** owned; see the policy's own comment for each reason.
+When nothing else selects `test-toolkit`, the
+plan gains exactly one cell, `{test-toolkit, ubuntu-latest, lint}`, carrying
+`companions_only: true`: its required work is the guard and not Clippy. Lint
+cells are never reusable, so a changed-file pull request scan can never be
+presented as a completed full-tree push scan.
+
+That field reaches the workflow like every other execution input: the lint
+job resolves its row through `cell_contract.py` and reads
+`steps.cell.outputs.companions_only`. No workflow input carries it — the
+reusable workflows accept rows and run scalars only. In `_package-ci.yml`'s
+`lint` job it does three things, and the third is the one to get right:
+
+- the Clippy step carries `if: ${{ steps.cell.outputs.companions_only != 'true' }}`
+  — gated, never deleted, so every ordinary lint cell is untouched;
+- the companion step receives `BISCUIT_ARCHIVE_GUARD_PLAN` (an **absolute**
+  path) naming the plan the job already downloaded to resolve its cell. A
+  missing plan is an **error**: a silent full-tree fallback would be recorded
+  as this cell's evidence for a run that never had a plan;
+- `Record producer status` folds a companions-only cell from its **companion's**
+  outcome, where only `success` passes. Reading the skipped Clippy as a failure
+  blocks every Rust pull request; reading it as a pass greenlights a cell that
+  ran nothing.
+
+Failure reaches `ci-gate` through the existing `needs.*.result` fold with no
+new top-level job; a planned cell that never ran is `MISSING` in the owning
+area's coverage audit. `just ci-local` runs a planned guard cell through the
+same canonical recipe against the plan it just resolved, and on a non-Linux
+host prints that the planned `ubuntu-latest` execution remains outstanding
+rather than implying a local pass stood in for it. The scan's skipped
+directories — `target`, `.git`, `node_modules`, `.gitnexus`, `examples`,
+`fuzz`, and the broad `scripts` — are a documented limitation, not a claim
+that those trees are unexecuted. See
+[`.github/ci/README.md`](../../../.github/ci/README.md#the-archive-path-guard).
 
 The sniff area contracts (`scripts/ci/test_resolved_plan.py`, class
 `AreaGroupingTests`) are enforced **on the merge path**, by `ci.yml`'s own

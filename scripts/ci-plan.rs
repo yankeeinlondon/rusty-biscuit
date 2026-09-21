@@ -38,6 +38,11 @@ struct Plan {
     /// written before schema 3 still renders the cells it does carry.
     #[serde(default)]
     change_inventory: ChangeInventory,
+    /// The archive-path guard's scan scope. Defaulted so a plan written before
+    /// schema 5 still renders; an absent block reads as "not selected", which
+    /// is what a plan that never resolved one means.
+    #[serde(default)]
+    archive_guard: ArchiveGuard,
     #[serde(default)]
     areas: Vec<Area>,
     #[serde(default)]
@@ -145,6 +150,39 @@ struct Build {
 struct Consumer {
     environment: String,
     gate: String,
+}
+
+/// Whether the archive-path guard runs, and over how much.
+///
+/// The file count is rendered beside the mode because an empty changed-file
+/// scan and a full-tree scan both report zero violations, and only the count
+/// tells a reviewer which one the run is about to perform.
+#[derive(Debug, Default, Deserialize)]
+struct ArchiveGuard {
+    #[serde(default)]
+    selected: bool,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+    #[serde(default)]
+    reason: String,
+}
+
+impl ArchiveGuard {
+    fn summary(&self) -> String {
+        if !self.selected {
+            return format!("**Archive-path guard** — not selected: {}", self.reason);
+        }
+        let scope = match (self.mode.as_deref(), self.paths.as_deref()) {
+            (Some("changed"), Some(paths)) => {
+                format!("changed-file scan of {} file(s)", paths.len())
+            }
+            (Some("full"), _) => "full-tree scan of the eligible corpus".to_owned(),
+            (mode, _) => format!("scan mode {}", mode.unwrap_or("unstated")),
+        };
+        format!("**Archive-path guard** — {scope}: {}", self.reason)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -392,6 +430,9 @@ fn render(plan: &Plan, term: &Terminal) -> String {
         out.push_str(&UnorderedList::new(inventory).render(term));
         out.push('\n');
     }
+
+    out.push_str(&Prose::new(plan.archive_guard.summary()).render(term));
+    out.push('\n');
 
     // Spec section 7: the absence of scheduled work is a decision a reviewer
     // has to see stated, not infer from an empty table.

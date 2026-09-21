@@ -2,7 +2,9 @@
 
 Claudine compositions support **per-prompt loops** declared in Markdown frontmatter. A loop wraps a single composition document so the same prompt is executed repeatedly until a stopping condition is met, with optional frontmatter mutations between iterations.
 
-Looping applies to `claudine compose` and `claudine inline-compose`. For multi-step pipelines composed of _different_ documents, use [`claudine sequence`](./agent-flows/seqences.md) instead.
+**The condition is checked at the end of each iteration, not before it.** A loop therefore always runs at least once, and the condition decides whether there is a *next* iteration. See [Iteration semantics](#iteration-semantics) for exactly how many times a given condition runs.
+
+Looping applies to `claudine compose` and `claudine inline-compose`. For multi-step pipelines composed of _different_ documents, use [`claudine sequence`](./sequences.md) instead.
 
 ## Frontmatter shape
 
@@ -21,9 +23,9 @@ Recognized keys:
 
 | Key         | Type                    | Required                             | Description                                                                                                                                                   |
 |-------------|-------------------------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `while`     | string                  | one of `while` / `until` is required | Boolean expression. Loop continues **while** the expression is truthy.                                                                                        |
-| `until`     | string                  | one of `while` / `until` is required | Boolean expression. Loop continues **until** the expression is truthy.                                                                                        |
-| `action`    | string \| object \| array | optional                             | One or more frontmatter mutations applied **after** each successful iteration.                                                                                |
+| `while`     | string                  | one of `while` / `until` is required | Boolean expression, evaluated after each iteration. Another iteration runs **while** it is truthy.                                                            |
+| `until`     | string                  | one of `while` / `until` is required | Boolean expression, evaluated after each iteration. Another iteration runs **until** it is truthy.                                                            |
+| `action`    | string \| object \| array | optional                             | One or more frontmatter mutations, applied after an iteration **only when the loop is going to continue**.                                                    |
 | `actions`   | string \| object \| array | optional                             | Alias for `action`. Cannot be combined with `action`.                                                                                                         |
 | `max`       | positive integer        | optional                             | Per-document iteration cap. Defaults to `100` when unset.                                                                                                     |
 | `fail_fast` | boolean                 | optional                             | When `true` (default), the loop halts on the first iteration failure. When `false`, the loop continues past failures until the condition or the cap stops it. |
@@ -36,7 +38,7 @@ unknown `loop.max_iterations` key (did you mean `max`?); valid keys are: while, 
 
 ## Conditions
 
-Conditions use the **Darkmatter expression language**. The full grammar — supported operators, comparison and truthiness rules, helper functions (`Length`, `Contains`, `HasKey`, `And`, `Or`, `number`, `round`), short-circuit semantics, ternaries, and known limitations like the missing `<=` operator — is documented in [Darkmatter Boolean Conditional Logic](@darkmatter/docs/topics/boolean-conditional-logic.md). Treat that doc as authoritative; this section only summarizes what is loop-specific.
+Conditions use the **Darkmatter expression language**. The full grammar — supported operators, comparison and truthiness rules, helper functions (`Length`, `Contains`, `HasKey`, `And`, `Or`, `number`, `round`), short-circuit semantics, and ternaries — is documented in [Darkmatter Boolean Conditional Logic](@darkmatter/docs/topics/boolean-conditional-logic.md). Treat that doc as authoritative; this section only summarizes what is loop-specific.
 
 What's available inside a loop's `while:` / `until:` expression:
 
@@ -45,7 +47,7 @@ What's available inside a loop's `while:` / `until:` expression:
 - **Environment variables** under `env.NAME`.
 - **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`). Canonical preparation stores the exact `ComposeContext` derived from the invocation's launch inputs and the active document's source. Loop iterations and sequence steps derive from that request snapshot rather than recapturing the wrapper's ambient CWD, so the child-working-directory switch cannot make CWD-derived values drift between iterations or steps.
 - **Literals** — strings (`'review'` / `"review"`), numbers, `true`, `false`, `null`.
-- **Comparisons** — `==`, `!=`, `>`, `>=`, `<`. `<=` 
+- **Comparisons** — `==`, `!=`, `>`, `>=`, `<`, `<=`.
 - **Boolean operators** — `&&`, `||`, unary `!`, with `&&` binding tighter than `||`.
 - **Helper functions** — `Length(...)`, `Contains(...)`, `HasKey(...)`, `number(...)`, `round(...)`, etc. Function names are case-insensitive.
 - **Ternaries** — `cond ? a : b`.
@@ -65,11 +67,13 @@ loop:
   while: "Contains(_loop_last_output, 'NEEDS_RETRY') && retries < 3"
 ```
 
+Because the condition runs after an iteration, `_loop_last_output` and `_loop_last_exit_code` name the iteration that **just finished** when the condition reads them. Both examples above therefore react to the run they follow, with no lag.
+
 `while` and `until` are mutually exclusive. Use one or the other.
 
 ## Actions
 
-Actions describe how frontmatter changes between iterations. They are **applied at the end of each successful iteration**, so iteration `N+1` sees the post-action state.
+Actions describe how frontmatter changes between iterations. They are applied **after the condition has decided that the loop continues**, so iteration `N+1` sees the post-action state. When the condition ends the loop, the actions are not applied, and the final state is the one the last iteration ran with.
 
 The canonical key is `action:`; `actions:` is accepted as an alias. The two cannot be combined in the same document.
 
@@ -134,11 +138,17 @@ In addition to the aforementioned _mutation operations_ which mutate "real state
 |------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `_loop_count`          | number  | 1-based iteration counter. `1` on the first iteration.                                                                                                                                                               |
 | `_loop_is_first`       | boolean | `true` on iteration 1, `false` thereafter.                                                                                                                                                                           |
-| `_loop_is_last`        | boolean | `true` when this iteration's post-action condition will terminate the loop, **or** when this iteration is about to hit `max`. `false` otherwise.                                                                     |
-| `_loop_last_output`    | string  | Captured stdout from the previous iteration. Empty string on iteration 1.                                                                                                                                            |
-| `_loop_last_exit_code` | number  | **Process exit code** of the previous iteration's prompt run (Unix-style: `0` = success, non-zero = failure). `0` on iteration 1 because no prior run exists. **Narrow utility — read the note below before using.** |
+| `_loop_is_last`        | boolean | A **prediction made before the iteration runs**: `true` when the condition already says "stop" against this iteration's state, **or** when this iteration is the `max`-th. See the caveat below.                        |
+| `_loop_last_output`    | string  | In the body and in `start`: captured stdout from the **previous** iteration (empty on iteration 1). In the condition and in actions: stdout from the iteration that **just finished**.                                |
+| `_loop_last_exit_code` | number  | **Process exit code** of a prompt run (Unix-style: `0` = success, non-zero = failure), with the same timing as `_loop_last_output`. `0` in iteration 1's body because no prior run exists. **Narrow utility — read the note below before using.** |
 
-These variables can be referred to in interpolation, conditional page blocks, your `while`/`until` expression, or even as part of your mutation operations. For example:
+These variables can be referred to in interpolation, conditional page blocks, your `while`/`until` expression, your mutation operations, and the `start`, `success`, `failure`, and `finalize` lifecycle events.
+
+> **`_loop_is_last` is a prediction, not a fact.** It is computed before the iteration starts, from the state that iteration begins with and the *previous* iteration's output. When the condition depends on something the iteration itself changes — `_loop_last_output`, `_loop_last_exit_code`, or a file the agent writes and the condition reads through `frontmatter(...)` — the iteration that actually turns out to be last will have seen `_loop_is_last: false`. It is exact for conditions over `_loop_count` and over frontmatter that only the loop's own actions change, and it is always `true` on the `max`-th iteration.
+
+> **Known defect.** The `loop:` block's own notification fields and stack (`loop: { info: "…" }`) cannot read the `_loop_*` values; referencing one there fails the run with an "unknown root" error. They can read ordinary frontmatter. Tracked as F8 in the fix `2026-09-20-lifecycle-handoff-gaps`.
+
+For example:
 
 ```yaml
 loop:
@@ -236,7 +246,7 @@ For "did the agent actually succeed at its task?" — exit code is the wrong too
 ```yaml
 ---
 loop:
-  until: "_loop_count > 3"
+  until: "_loop_count >= 3"
   action: increment(counter)
 counter: 0
 ---
@@ -250,15 +260,47 @@ First time? {{_loop_is_first}}
 
 ## Iteration semantics
 
-Each iteration follows a strict **pre-check order**:
+`initialize` fires once, before the first iteration. Each iteration then runs a full composition cycle, and the decision about a next iteration is taken at the **loop gate**, which follows that iteration's `finalize`:
 
-1. **Compute `_loop_is_last`** by speculatively applying actions and re-evaluating the condition against that lookahead. The user-visible state is unchanged.
-2. **Evaluate the condition** (`while` / `until`) against the current effective state — frontmatter plus ambient variables for *this* iteration.
-3. If the condition says stop, the loop exits with the current `_loop_count - 1` iterations recorded.
-4. **Run the prompt** with the iteration's effective state.
-5. **Apply actions** in order to produce iteration `N+1`'s frontmatter.
+1. **Predict `_loop_is_last`** from the state this iteration begins with.
+2. **Run the iteration**: compose the body against the iteration's state, fire `start`, launch the agent, fire `success` or `failure`, then `finalize`.
+3. **At the loop gate**, in this order:
+    1. run any lifecycle concerns authored inside the `loop:` block;
+    2. evaluate the condition against **the state this iteration ran with**, plus `_loop_last_output` and `_loop_last_exit_code` from this iteration;
+    3. if the condition says stop, the loop ends and the actions are **not** applied;
+    4. otherwise apply the actions, producing the state iteration `N+1` runs with.
 
-This means actions applied at the end of iteration N are visible to the condition check, the prompt body, and any expressions in iteration N+1.
+Two consequences are worth committing to memory.
+
+**The first iteration is unconditional.** A condition that is false from the start still runs the prompt once. To run zero times, opt the whole document out with a `skip` from `initialize`:
+
+```yaml
+initialize:
+    stack:
+        - when: "length(work) == 0"
+          action:
+              - info: "nothing to do"
+              - skip
+```
+
+**The condition is asked of the iteration that just ran, so a counter counts one further than it reads.** With `n: 0` and `action: "increment(n)"`:
+
+| Condition | Iterations | Each body sees |
+|---|---|---|
+| `while: "n < 0"` | 1 | `n=0` |
+| `while: "n < 1"` | 2 | `n=0`, `n=1` |
+| `while: "n < 2"` | 3 | `n=0`, `n=1`, `n=2` |
+| `until: "n == 2"` | 3 | `n=0`, `n=1`, `n=2` |
+| `until: "_loop_count >= 3"` | 3 | `_loop_count` of `1`, `2`, `3` |
+| `until: "_loop_count > 3"` | 4 | `_loop_count` of `1`, `2`, `3`, `4` |
+
+Read a condition as "*did the iteration that just finished satisfy this?*" rather than "*may the next one start?*". `until: "n == 2"` stops after the iteration that ran with `n=2`. For exactly `k` runs, the clearest spelling is `until: "_loop_count >= k"`.
+
+### Leaving a loop early
+
+- An explicit `error` in the `loop:` block's stack fails the run before the condition is evaluated.
+- A `proxy` raised by an iteration's `success`, `failure`, or `finalize` is meant to end the loop and hand off to its target, which is not an extra iteration of this loop. **Known defect:** the handoff is currently not performed and the loop continues; tracked as F2 in the fix `2026-09-20-lifecycle-handoff-gaps`. Until it is fixed, use a lifecycle `retry` for bounded repetition in a document that also has to hand off.
+- `retry`, `resume`, and `proxy` authored inside the `loop:` block itself are not supported and fail the run with `LifecycleSetupPhaseRecoveryUnsupported`.
 
 ## Iteration cap
 
@@ -270,7 +312,7 @@ Every loop is bounded so a runaway condition cannot hang indefinitely.
 
 Precedence is **CLI > environment > frontmatter > built-in default**.
 
-When the cap is hit and the condition would still continue, the loop exits with `LoopLimitExceeded` carrying the prompt path and the iteration number that breached the cap.
+The `max`-th iteration always sees `_loop_is_last: true`. If the condition still says "continue" after it, the loop exits with `LoopLimitExceeded`, carrying the prompt path and the iteration number that breached the cap, and the run fails. A loop that reaches its cap and whose condition then says "stop" ends normally.
 
 ## Fail-fast semantics
 
@@ -293,7 +335,7 @@ On interrupt the CLI:
 - **Immediately** writes an INFO status line directly to stderr from the signal handler — this lands *before* the interrupted agent's dying-breath events are rendered, so it is the first thing the operator sees after the terminal echoes `^C`. The line is column-1 aligned (a leading newline pushes it off the `^C`) and the prompt path is rendered as an OSC8 hyperlink with the visible text resolved relative to the repo root (or CWD when not in a repo).
 - **Relabels** the agent's terminal-error block from `Agent Error` to `User Action — User pressed CTRL+C to stop the session` with a yellow border, so operators are not led to believe the agent itself failed.
 - Returns exit code `130` (the standard `128 + SIGINT(2)` shell convention).
-- Surfaces a `LoopInterrupted` error in the in-process [`LoopExecutionResult`](../../../lib/src/composition/loop_engine.rs) for programmatic callers, but does **not** print a redundant red `Error:` line — the INFO status is the only user-facing announcement.
+- Surfaces a `LoopInterrupted` error in the in-process [`LoopExecutionResult`](../../../lib/src/composition/looping/engine.rs) for programmatic callers, but does **not** print a redundant red `Error:` line — the INFO status is the only user-facing announcement.
 
 Implementation notes:
 
@@ -323,6 +365,10 @@ claudine compose loop_example.md iteration=1 --claude
 | `InvalidAction at iteration N, action M of K: '<prop>' is reserved` | An action tried to write to `loop`, `replace`, or any `_loop_*` ambient name.                                         |
 | `LoopLimitExceeded`                                                 | The cap was reached and the condition would still continue.                                                           |
 | `LoopInterrupted`                                                   | The user pressed Ctrl+C; the loop halted between iterations and exited with code `130`.                               |
+
+## Implementation note
+
+`claudine compose` and `claudine inline-compose` drive loops through `execute_loop_with_lifecycle` in [`looping/engine.rs`](../../../lib/src/composition/looping/engine.rs), and that is the engine this page describes. The same file still holds `execute_loop` and `execute_loop_with_config`, an older engine that checks the condition **before** each iteration and so can run zero times. No command uses it, only library tests call it, and it is scheduled for deletion by the fix `2026-09-20-lifecycle-handoff-gaps` (R7). Do not call it; this note goes away with it.
 
 ## See also
 

@@ -1,5 +1,14 @@
 {
   "accepted_evidence": [],
+  "archive_guard": {
+    "mode": "changed",
+    "paths": [
+      "alpha/src/lib.rs",
+      "beta/src/lib.rs"
+    ],
+    "reason": "this run carries a change inventory; 2 eligible source path(s) are in scope and untouched files are not rescanned",
+    "selected": true
+  },
   "areas": [
     {
       "area": "pkg",
@@ -169,6 +178,7 @@
       "source": 2,
       "total": 2
     },
+    "deleted": [],
     "diff_available": true,
     "paths": {
       "configuration": [],
@@ -295,7 +305,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 6,
+  "schema_version": 7,
   "skip_policy": {
     "content_hash": "aaaabbbbccccdddd",
     "entries": [],

@@ -10,7 +10,12 @@
 //! manifest source so a regression fails locally without a live GitHub Actions
 //! run.
 
-use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn repo_root() -> PathBuf {
     let manifest_dir = biscuit_test_harness::manifest_dir!();
@@ -3730,6 +3735,636 @@ fn the_workflow_contract_suite_is_owned_by_test_toolkit() {
     assert!(
         !manifest.contains("gates = false"),
         "test-toolkit owns a registered suite, so it cannot opt out of gating"
+    );
+}
+
+/// The archive-path guard's eligibility policy now exists twice — in
+/// [`test_toolkit::archive_guard`] and in the planner, which must select the
+/// guard from the same files the scanner will read. A path the planner selects
+/// and the scanner then refuses is a cell that ran nothing, and a directory one
+/// side skips and the other does not is a corpus nobody checks.
+///
+/// The two are compared as source text, the way
+/// `tooling_inputs_select_their_registered_suite_owner` compares the ownership
+/// table: this crate cannot import Python, and a test that re-stated either list
+/// would be a third copy to keep in step.
+#[test]
+fn the_guards_eligibility_policy_agrees_across_the_language_boundary() {
+    let policy = read("scripts/ci/affected_scope.py");
+
+    let skipped = policy
+        .split_once("ARCHIVE_GUARD_SKIPPED_DIRS = frozenset({")
+        .and_then(|(_, rest)| rest.split_once("})"))
+        .map(|(block, _)| block)
+        .expect("affected_scope.py must declare ARCHIVE_GUARD_SKIPPED_DIRS");
+    for (directory, _) in test_toolkit::archive_guard::SKIPPED_DIRS {
+        assert!(
+            skipped.contains(&format!("\"{directory}\"")),
+            "the scanner skips `{directory}` and the planner does not, so a change \
+             under it would select a scan that then refuses every file it was given; \
+             add it to ARCHIVE_GUARD_SKIPPED_DIRS in scripts/ci/affected_scope.py"
+        );
+    }
+    let declared = skipped.matches('"').count() / 2;
+    assert_eq!(
+        declared,
+        test_toolkit::archive_guard::SKIPPED_DIRS.len(),
+        "the planner skips {declared} director(ies) and the scanner skips {}; a \
+         directory only the planner skips is source nothing ever scans",
+        test_toolkit::archive_guard::SKIPPED_DIRS.len()
+    );
+
+    let owned = policy
+        .split_once("ARCHIVE_GUARD_OWN_INPUTS = frozenset({")
+        .and_then(|(_, rest)| rest.split_once("})"))
+        .map(|(block, _)| block)
+        .expect("affected_scope.py must declare ARCHIVE_GUARD_OWN_INPUTS");
+    for (source, _) in test_toolkit::archive_guard::GUARD_OWN_SOURCES {
+        assert!(
+            owned.contains(&format!("\"{source}\"")),
+            "`{source}` is excluded from the scan as one of the guard's own \
+             sources, so editing it would select the guard nowhere; add it to \
+             ARCHIVE_GUARD_OWN_INPUTS in scripts/ci/affected_scope.py"
+        );
+    }
+    // The recipe, the selection rule, the registry binding, the workflow
+    // holding the guard's execution controls, and the cell contract that
+    // carries `companions_only` are owned inputs the scanner has no opinion
+    // about, so they are named here rather than derived.
+    for extra in [
+        "tools/test-toolkit/justfile",
+        "scripts/ci/affected_scope.py",
+        "tools/test-toolkit/Cargo.toml",
+        ".github/workflows/_package-ci.yml",
+        "scripts/ci/cell_contract.py",
+    ] {
+        assert!(
+            owned.contains(&format!("\"{extra}\"")),
+            "changing `{extra}` changes what the guard runs or what selects it, \
+             and must therefore select it"
+        );
+    }
+
+    // Every entry names a file that is still there. An owned input is a path
+    // literal on the Python side and nothing on that side resolves it, so a
+    // rename turns the entry into a rule that matches no change — the guard
+    // stops being selected by the very input it is supposed to watch, and no
+    // gate goes red. The count is compared too, so an entry added to the
+    // frozenset and not to this test's reasoning cannot pass unexamined.
+    let root = repo_root();
+    let entries: Vec<&str> = owned
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|entry| !entry.trim().is_empty())
+        .collect();
+    assert_eq!(
+        8,
+        entries.len(),
+        "ARCHIVE_GUARD_OWN_INPUTS declares {} entr(ies); update this contract \
+         and `.github/ci/README.md` alongside the policy: {entries:?}",
+        entries.len()
+    );
+    for entry in entries {
+        assert!(
+            root.join(entry).exists(),
+            "ARCHIVE_GUARD_OWN_INPUTS names `{entry}`, which no longer exists; a \
+             renamed owned input is a selection rule that matches nothing and \
+             silently stops scheduling the guard"
+        );
+    }
+}
+
+/// `python3` where it exists, `python` where only that name is installed, and
+/// `None` on a host with neither.
+///
+/// Windows ships an App Execution Alias named `python3` that exits non-zero
+/// into the Store, so only a successful `--version` counts as an interpreter.
+fn python_interpreter() -> Option<&'static str> {
+    ["python3", "python"].into_iter().find(|candidate| {
+        Command::new(candidate)
+            .arg("--version")
+            .output()
+            .is_ok_and(|probe| probe.status.success())
+    })
+}
+
+/// End to end across the boundary the two halves of the deletion contract meet
+/// at: the shipped planner writes the scope, and the guard's own reader
+/// consumes it.
+///
+/// Each half passes its own fixtures. Only this one can fail when the planner
+/// starts listing a deleted path again, or when the reader starts tolerating a
+/// listed path that is not there — the fail-open pair review 3 found. Skipped
+/// where no Python interpreter exists, the way
+/// `scripts/ci-rollup-tests.rs::the_real_planners_plan_rolls_up` is: the Rust
+/// suite must still run on a host without one.
+#[test]
+fn the_shipped_planner_omits_deletions_and_the_reader_refuses_an_unexpected_absence() {
+    use test_toolkit::archive_guard::{GuardError, GuardPlan, ScanMode, scan};
+
+    /// Eligible, present, and owned by a package the planner schedules.
+    const MODIFIED: &str = "claudine/lib/src/lib.rs";
+    /// Eligible and gone: the diff recorded it as removed.
+    const DELETED: &str = "claudine/lib/src/removed_by_this_change.rs";
+
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the planner-to-reader fixture");
+        return;
+    };
+    let root = repo_root();
+    let output = Command::new(python)
+        .current_dir(&root)
+        .args([
+            "scripts/ci/affected_scope.py",
+            "--resolved-plan",
+            "--deleted",
+            DELETED,
+            "--",
+            MODIFIED,
+            DELETED,
+        ])
+        .output()
+        .expect("the probed interpreter must still be runnable");
+    assert!(
+        output.status.success(),
+        "the planner must resolve a plan: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let resolved = String::from_utf8(output.stdout).expect("the resolved plan is UTF-8");
+
+    let plan = GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolved)
+        .expect("the guard must read the planner's own document");
+    assert!(plan.selected, "an eligible source change selects the guard");
+    let ScanMode::Changed(listed) = &plan.mode else {
+        panic!(
+            "a change inventory resolves a changed scan, got {:?}",
+            plan.mode
+        );
+    };
+    assert!(
+        listed.iter().any(|path| path == MODIFIED),
+        "the modified file is what the scan exists to read: {listed:?}"
+    );
+    assert!(
+        !listed.iter().any(|path| path == DELETED),
+        "a path the diff reported as deleted must never be listed for scanning: {listed:?}"
+    );
+
+    // An empty tree stands in for the checkout losing a listed path between
+    // planning and the scan — the one way a listed path can now be absent.
+    let tree = tempfile::TempDir::new().expect("temp tree");
+    let err = scan(tree.path(), &plan.mode)
+        .expect_err("a listed path that is not there must not be skipped");
+
+    assert!(matches!(err, GuardError::MissingListedPath { .. }), "{err}");
+    assert!(err.to_string().contains(MODIFIED), "{err}");
+}
+
+/// The guard reader's closed field set against the frozen cross-language
+/// contract `scripts/ci/schema.py::ARCHIVE_GUARD_FIELDS` is dumped into.
+///
+/// Both sides refuse a field outside the set, so a field added to one alone
+/// would have the planner emit a scope its own consumer rejects — or, worse,
+/// have the consumer ignore a renamed scope field and pass under semantics the
+/// producer never asked for.
+#[test]
+fn the_guard_scope_field_set_matches_the_frozen_contract() {
+    let text = read(".github/ci/schemas/contract.json");
+    let contract: serde_json::Value =
+        serde_json::from_str(&text).expect("the frozen contract parses");
+
+    let mut shipped: Vec<&str> = contract["resolved_plan"]["archive_guard"]
+        .as_object()
+        .expect("the frozen contract describes the guard scope's fields")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    shipped.sort_unstable();
+
+    assert_eq!(
+        shipped,
+        test_toolkit::archive_guard::PLAN_SCOPE_FIELDS,
+        "the guard's reader and the Python validator no longer close the \
+         `archive_guard` field set over the same names"
+    );
+}
+
+/// The shared accept/reject corpus, read by the guard's own plan reader.
+///
+/// `.github/ci/schemas/archive_guard_cases.json` is the one table
+/// `scripts/ci/test_schema.py::ArchiveGuardSharedCorpusTests` reads too, so a
+/// shape added there fails both suites until both readers agree on it. This
+/// half fixes only the verdict; the wording each side produces stays in that
+/// side's own tests.
+#[test]
+fn the_guards_reader_agrees_with_the_shared_scope_corpus() {
+    use test_toolkit::archive_guard::{GuardError, GuardPlan, PLAN_SCHEMA_VERSION};
+
+    let text = read(".github/ci/schemas/archive_guard_cases.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(&text).expect("the shared guard corpus parses");
+    let cases = corpus["cases"]
+        .as_array()
+        .expect("the corpus is a list of cases");
+    assert!(!cases.is_empty(), "an empty table synchronizes nothing");
+
+    for case in cases {
+        let name = case["name"].as_str().expect("every case is named");
+        let rule = case["rule"].as_str().expect("every case states its rule");
+        let valid = case["valid"].as_bool().expect("every case states its verdict");
+        let document = serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "archive_guard": case["archive_guard"],
+        });
+
+        let outcome =
+            GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &document.to_string());
+
+        match (valid, outcome) {
+            (true, Ok(_)) => {}
+            (false, Err(GuardError::MalformedPlan { .. })) => {}
+            (true, Err(error)) => panic!("`{name}` must be accepted — {rule}: {error}"),
+            (false, Ok(plan)) => {
+                panic!("`{name}` must be refused — {rule}; the reader accepted {plan:?}")
+            }
+            (false, Err(error)) => {
+                panic!("`{name}` must be refused as a malformed plan — {rule}: {error}")
+            }
+        }
+    }
+}
+
+/// The guard's plan-schema constant against the frozen cross-language contract
+/// the Python validator is written to.
+///
+/// A passive corpus test over the shipped document, and the mechanism that
+/// keeps the two languages in step: the Rust reader now refuses a plan from any
+/// other generation, so bumping the version on one side alone would make the
+/// planner emit a document its own consumer rejects. Iteration 1 of
+/// `2026-09-19-less-brittle` stranded the pre-push fixtures exactly that way.
+#[test]
+fn the_plan_schema_version_matches_the_frozen_contract() {
+    let text = read(".github/ci/schemas/contract.json");
+    let contract: serde_json::Value =
+        serde_json::from_str(&text).expect("the frozen contract parses");
+
+    assert_eq!(
+        contract["resolved_plan"]["schema_version"].as_u64(),
+        Some(test_toolkit::archive_guard::PLAN_SCHEMA_VERSION),
+        "the archive-path guard reads a plan generation the contract no longer describes"
+    );
+}
+
+/// Every `archive_guard` shape the shipped planner emits, read back by the
+/// guard's own contract-enforcing reader.
+///
+/// The reader validates the whole resolved-plan contract, so it can now reject
+/// a document the planner considers valid. Only a fixture that feeds it the
+/// real emitter's output catches that divergence; hand-written fixtures agree
+/// with whichever side wrote them. Skipped where no Python interpreter exists,
+/// as its sibling above is.
+#[test]
+fn the_shipped_planner_emits_plans_the_guards_reader_accepts() {
+    use test_toolkit::archive_guard::{GuardPlan, ScanMode};
+
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the shipped-plan fixture");
+        return;
+    };
+    let root = repo_root();
+
+    let resolve = |arguments: &[&str]| -> String {
+        let output = Command::new(python)
+            .current_dir(&root)
+            .args(["scripts/ci/affected_scope.py", "--resolved-plan"])
+            .args(arguments)
+            .output()
+            .expect("the probed interpreter must still be runnable");
+        assert!(
+            output.status.success(),
+            "the planner must resolve a plan for {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("the resolved plan is UTF-8")
+    };
+
+    let read_back = |arguments: &[&str]| -> GuardPlan {
+        GuardPlan::from_plan_json(Path::new("resolved-plan.json"), &resolve(arguments))
+            .unwrap_or_else(|err| panic!("the guard must read the planner's own document: {err}"))
+    };
+
+    let documentation = read_back(&["--", "README.md"]);
+    assert!(
+        !documentation.selected,
+        "a documentation-only change selects no scan"
+    );
+    assert!(
+        !documentation.reason.trim().is_empty(),
+        "an unselected plan still says why"
+    );
+
+    let full = read_back(&["--all"]);
+    assert!(full.selected, "an explicit full-scope request selects the guard");
+    assert_eq!(full.mode, ScanMode::FullTree);
+
+    let changed = read_back(&["--", "tools/test-toolkit/src/archive_guard.rs"]);
+    let ScanMode::Changed(listed) = &changed.mode else {
+        panic!("a change inventory resolves a changed scan, got {:?}", changed.mode);
+    };
+    assert!(
+        listed.windows(2).all(|pair| pair[0] < pair[1]),
+        "the planner's own list must satisfy the sorted, unique rule the reader enforces: {listed:?}"
+    );
+}
+
+/// The `archive-path-guard` block of `SUITE_REGISTRY`, as source text.
+fn archive_guard_registry_entry() -> String {
+    let policy = read("scripts/ci/affected_scope.py");
+    policy
+        .split_once("\n    \"archive-path-guard\": {")
+        .and_then(|(_, rest)| rest.split_once("\n    },"))
+        .map(|(block, _)| block.to_owned())
+        .expect("affected_scope.py must register the archive-path-guard suite")
+}
+
+/// `2026-09-19-less-brittle`: a failing guard blocks a merge through the
+/// existing fold and adds nothing to the graph.
+///
+/// The guard is a companion of an ordinary `lint` cell of an ordinary package,
+/// so its failure travels `lint` -> `_package-ci.yml` -> `_area-ci.yml`'s
+/// `package-ci` -> `ci.yml`'s `area-ci` -> `ci-gate`, which folds
+/// `needs.*.result` and applies no policy. The only way that chain breaks is a
+/// seventh top-level job, and [`TARGET_CI_JOBS`] and [`GATED_JOBS`] are exactly
+/// what catches one — hence the length assertions the specification's "keep one
+/// scheduler" decision requires.
+#[test]
+fn a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold() {
+    assert_eq!(
+        8,
+        TARGET_CI_JOBS.len(),
+        "the guard must add NO top-level job; ci.yml now declares {TARGET_CI_JOBS:?}"
+    );
+    assert_eq!(
+        6,
+        GATED_JOBS.len(),
+        "the guard reaches ci-gate through `area-ci` and adds nothing to its \
+         fold; ci-gate now folds {GATED_JOBS:?}"
+    );
+    assert!(
+        GATED_JOBS.contains(&"area-ci"),
+        "the whole chain hangs off `area-ci` being folded"
+    );
+
+    // The chain itself, one link per assertion.
+    assert!(
+        job_block("ci.yml", "  area-ci:").contains("uses: ./.github/workflows/_area-ci.yml"),
+        "`area-ci` must call the area workflow"
+    );
+    assert!(
+        job_block("_area-ci.yml", "  package-ci:")
+            .contains("uses: ./.github/workflows/_package-ci.yml"),
+        "the area's package fan-out must call the package workflow"
+    );
+
+    let lint = job_block("_package-ci.yml", "  lint:");
+    assert!(
+        !lint.contains("\n    continue-on-error:"),
+        "a lint job that swallowed its own failure would hand `area-ci` a \
+         success and the guard could never block"
+    );
+    // The companions-only fold: the companion's outcome IS the cell's, and
+    // only `success` passes. Anything weaker lets a red guard merge.
+    assert!(
+        lint.contains(r#"if [ "$COMPANIONS_ONLY" = "true" ]; then"#)
+            && lint.contains(r#"if [ "$result" = "success" ] && [ "$COMPANION" != "success" ]; then"#),
+        "the lint producer must fail a companions-only cell whose companion did \
+         not SUCCEED; `!= failure` would pass a companion that never ran"
+    );
+}
+
+/// The other half of the specification's integration requirement: a guard-only
+/// selection must neither invoke unrelated suites nor manufacture full-tree
+/// evidence.
+#[test]
+fn a_guard_only_selection_runs_the_guard_and_nothing_else() {
+    // The registry half. A `recipe` would attach the guard to the owner's L1
+    // cell as well, which would run the same scan twice on Linux under two
+    // different sets of evidence rules.
+    let entry = archive_guard_registry_entry();
+    assert!(
+        entry.contains(r#""lint_recipe": "cd tools/test-toolkit && just archive-path-guard","#),
+        "the guard's lint half must name the canonical recipe: {entry}"
+    );
+    assert!(
+        !entry.contains(r#""recipe":"#),
+        "the guard must declare NO test half; with one it would also run as an \
+         L1 companion: {entry}"
+    );
+
+    // The workflow half. Clippy is `if`-gated rather than deleted, so an
+    // ordinary lint cell — every other cell — is untouched. The flag is the
+    // plan cell's own, resolved through `cell_contract.py` like every other
+    // execution input; no workflow input carries it.
+    let lint = job_block("_package-ci.yml", "  lint:");
+    assert!(
+        lint.contains(
+            "      - name: Lint\n        id: clippy\n        if: ${{ steps.cell.outputs.companions_only != 'true' }}\n"
+        ),
+        "the clippy step must be skipped on a companions-only cell, and only there"
+    );
+    assert!(
+        lint.contains("COMPANIONS_ONLY: ${{ steps.cell.outputs.companions_only }}"),
+        "the status fold must read the same cell output the clippy gate reads"
+    );
+    assert!(
+        read("scripts/ci/cell_contract.py")
+            .contains(r#""companions_only": "true" if cell.get("companions_only") else "","#),
+        "the cell contract must carry the planner's field to the lint job"
+    );
+    for name in ["_area-ci.yml", "_package-ci.yml"] {
+        assert!(
+            !read(&format!(".github/workflows/{name}")).contains("lint-companions-only"),
+            "{name} must not reintroduce a workflow input for a cell field"
+        );
+    }
+
+    // The evidence half. The scan scope is the plan's, so a run that lost its
+    // plan must fail rather than scan the full tree and record that as this
+    // cell's result.
+    assert!(
+        lint.contains("BISCUIT_ARCHIVE_GUARD_PLAN: ${{ github.workspace }}/ci-artifacts/ci-resolved-plan/resolved-plan.json"),
+        "the lint job must hand the guard the run's ONE resolved plan, by \
+         absolute path — the recipe and nextest both leave the workspace"
+    );
+    let download = lint
+        .split_once("      - name: Download the resolved execution plan\n")
+        .map(|(_, rest)| rest.split("\n      - name: ").next().unwrap_or("").to_owned())
+        .expect("the lint job must download the plan it points the guard at");
+    assert!(
+        download.contains("name: ci-resolved-plan")
+            && download.contains("path: ci-artifacts/ci-resolved-plan"),
+        "the download must land the run's one plan artifact where the guard \
+         variable points: {download}"
+    );
+    assert!(
+        !download.contains("continue-on-error") && !download.contains("if:"),
+        "a lost plan artifact must FAIL this job. Tolerating or skipping it \
+         would leave BISCUIT_ARCHIVE_GUARD_PLAN naming a file that does not \
+         exist, and that scan's result would be recorded as this cell's \
+         evidence: {download}"
+    );
+    assert_eq!(
+        1,
+        lint.matches("      - name: Download the resolved execution plan\n").count(),
+        "the cell contract and the guard read the same downloaded plan"
+    );
+}
+
+/// The specification's "one scheduler", as a negative: no consumer on the
+/// guard's execution path derives a source scope of its own.
+///
+/// A second `git diff` would be silently wrong rather than loudly wrong. It
+/// would produce a plausible file list against a base the planner never used,
+/// the scan would pass, and the cell would record that pass as its evidence —
+/// so nothing downstream could tell it apart from the planned scan.
+#[test]
+fn no_guard_consumer_derives_its_own_source_scope() {
+    // The planner's own diff is the only one. `ci.yml`'s scope job takes it
+    // and every consumer reads the plan that job publishes.
+    let mut deriving: Vec<String> = Vec::new();
+    let workflows = repo_root().join(".github/workflows");
+    let mut entries: Vec<PathBuf> = fs::read_dir(&workflows)
+        .expect("the workflow directory must be readable")
+        .map(|entry| entry.expect("workflow directory entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yml"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("workflow file names are UTF-8")
+            .to_owned();
+        for job in jobs(&workflow(&name)) {
+            if job.contains("git diff --name-") {
+                let header = job.lines().next().unwrap_or("").trim().to_owned();
+                deriving.push(format!("{name}:{}", header.trim_end_matches(':')));
+            }
+        }
+    }
+    assert_eq!(
+        vec!["ci.yml:scope".to_string()],
+        deriving,
+        "exactly one job may take a source diff — the one that resolves the plan"
+    );
+
+    // The recipe. A `git` call here would reach the standalone path too, where
+    // there is no plan at all and the full tree is the documented answer.
+    let recipe = read("tools/test-toolkit/justfile")
+        .split_once("\narchive-path-guard:\n")
+        .map(|(_, rest)| {
+            rest.split("\n\n")
+                .next()
+                .expect("the recipe has a body")
+                .to_owned()
+        })
+        .expect("tools/test-toolkit/justfile must define the guard recipe");
+    assert!(
+        !recipe.contains("git "),
+        "the canonical recipe must take its scope from the plan, not a diff: {recipe}"
+    );
+
+    // The lint job and the local runner, which are the two callers of that
+    // recipe. Each hands the guard a plan document and nothing else.
+    let lint = job_block("_package-ci.yml", "  lint:");
+    assert!(
+        !lint.contains("git diff") && !lint.contains("--name-only"),
+        "the lint job must not re-derive the scan scope it was handed"
+    );
+    let local = read("just/ci-local.just")
+        .split_once("        guard_planned=false\n")
+        .map(|(_, rest)| {
+            rest.split("\n        if (( run_test")
+                .next()
+                .expect("the guard block is followed by the test block")
+                .to_owned()
+        })
+        .expect("just/ci-local.just must run the planned guard");
+    assert!(
+        local.contains(r#"BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}""#),
+        "the local run must hand the guard the plan it just resolved: {local}"
+    );
+    assert!(
+        !local.contains("git diff"),
+        "the local run must not re-derive the scan scope either: {local}"
+    );
+}
+
+/// Every selection boundary takes the deletion status from its one diff and
+/// declares it to the planner.
+///
+/// `--name-only` prints a removed path and a modified path identically, so the
+/// planner's `--deleted` argument existed with no caller able to reach it,
+/// `change_inventory.deleted` was empty on every hosted and local run, and the
+/// guard had to read an absent file as "probably a deletion". Source contracts
+/// here; `scripts/ci/test_ci_local.py`, `scripts/ci/test_affected_scope.py`,
+/// and `.githooks/tests/test-pre-push.sh` run the three boundaries against
+/// real repositories that delete and rename.
+#[test]
+fn every_selection_boundary_declares_its_deletions_to_the_planner() {
+    let boundaries = [
+        (".github/workflows/ci.yml", job_block("ci.yml", "  scope:")),
+        ("just/ci-local.just", read("just/ci-local.just")),
+        (".githooks/pre-push", read(".githooks/pre-push")),
+    ];
+    for (name, source) in &boundaries {
+        assert!(
+            source.contains("git diff --name-status -z"),
+            "{name} must take the deletion status from its diff, not `--name-only`"
+        );
+        assert!(
+            !source.contains("git diff --name-only"),
+            "{name} must not keep a second, status-blind diff"
+        );
+        assert!(
+            source.contains("scripts/ci/diff_scope.py"),
+            "{name} must render its diff through the one shared parser, which is \
+             what emits `--deleted`"
+        );
+    }
+
+    // And the parser is the only thing that emits the argument, so a fourth
+    // boundary cannot hand-roll a list that drifts from these three.
+    let parser = read("scripts/ci/diff_scope.py");
+    assert!(
+        parser.contains(r#"parts.extend((b"--deleted", path))"#),
+        "scripts/ci/diff_scope.py must emit the planner's repeatable --deleted argument"
+    );
+}
+
+/// The registry's `lint_recipe` and its `just` tuple are two spellings of one
+/// recipe. `validate_package_ci` already proves the TUPLE names a recipe the
+/// justfile defines; what it cannot see is the two drifting apart, which would
+/// leave the tuple's check green while the lint cell shelled out to something
+/// else.
+#[test]
+fn the_guards_lint_recipe_and_its_just_tuple_name_the_same_recipe() {
+    let entry = archive_guard_registry_entry();
+    assert!(
+        entry.contains(r#""just": (("tools/test-toolkit", "archive-path-guard"),),"#),
+        "the registry must declare the guard's recipe as a `just` tuple so \
+         `validate_package_ci` checks it exists: {entry}"
+    );
+    assert!(
+        entry.contains(r#""lint_recipe": "cd tools/test-toolkit && just archive-path-guard","#),
+        "the lint recipe must be the same directory and recipe as that tuple: {entry}"
+    );
+    // And the definition itself, because a contract that only compared the two
+    // strings would stay green while both named a recipe nobody defines.
+    assert!(
+        read("tools/test-toolkit/justfile").contains("\narchive-path-guard:\n"),
+        "tools/test-toolkit/justfile must define the `archive-path-guard` recipe"
     );
 }
 

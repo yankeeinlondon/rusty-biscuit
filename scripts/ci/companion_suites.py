@@ -111,8 +111,16 @@ def run_one(record: dict[str, Any], root: Path, scratch: Path) -> dict[str, Any]
     if folding:
         print(f"::group::companion suite {record['name']}", flush=True)
     print(f"$ {command}", flush=True)
+    # A recipe may open with a relative `cd` (`cd tools/test-toolkit && …`). With
+    # `CDPATH` set and no `.` entry in it, a POSIX shell resolves that against
+    # `CDPATH` *before* the working directory, so from a worktree the recipe runs
+    # in whichever other checkout `CDPATH` names. `cwd=root` is the contract;
+    # the caller's interactive search path must not be able to override it.
+    environment = {key: value for key, value in os.environ.items() if key != "CDPATH"}
     started = time.monotonic()
-    completed = subprocess.run(command, shell=True, cwd=root, check=False)
+    completed = subprocess.run(
+        command, shell=True, cwd=root, env=environment, check=False
+    )
     duration = time.monotonic() - started
     if folding:
         print("::endgroup::", flush=True)

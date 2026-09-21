@@ -259,6 +259,11 @@ def contract(plan: dict[str, Any], row: dict[str, str], head: str) -> dict[str, 
         "backends": json.dumps(cell.get("backends", [])),
         "declared_backends": json.dumps(package["l2_backends"]),
         "companion_suites": json.dumps(companions),
+        # A lint cell the planner created for a companion suite alone (the
+        # archive-path guard). Its required work IS the companions, so the lint
+        # job stands the package's Clippy down and folds the companions'
+        # verdict into the cell's.
+        "companions_only": "true" if cell.get("companions_only") else "",
         # The dependency closure's prerequisites for THIS environment, already
         # narrowed. A WSL2 guest is Linux and consumes the `ubuntu-latest`
         # list, which is what `native_key` on the environment record says.

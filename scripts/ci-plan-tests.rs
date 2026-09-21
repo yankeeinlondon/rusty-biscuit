@@ -22,7 +22,7 @@ fn plan_json(prohibited: bool) -> String {
     };
     format!(
         r#"{{
-        "schema_version":6,"base":"{a}","head":"{b}","change_class":"package",
+        "schema_version":7,"base":"{a}","head":"{b}","change_class":"package",
         "full_scope":false,"full_scope_gates":[],
         "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"],
             "execution_path":"rows"}}],
@@ -281,6 +281,44 @@ fn a_plan_written_before_the_inventory_existed_still_renders() {
     .expect("a schema-2 plan parses");
     assert!(plan.change_inventory.plain_entries().is_empty());
     assert!(render(&plan, &Terminal::new()).contains("no diff was consulted"));
+}
+
+/// A reviewer must be able to tell a full-tree scan from a changed-file one
+/// before triggering, because both report zero violations when they pass.
+#[test]
+fn the_archive_guards_mode_and_file_count_are_rendered() {
+    fn rendered(scope: &str) -> String {
+        let plan: Plan = serde_json::from_str(&format!(
+            r#"{{"base":"{a}","head":"{b}","change_class":"package","areas":[],
+            "archive_guard":{scope},
+            "cells":[],"prohibited_cells":[],"job_estimate":0}}"#,
+            a = "a".repeat(40),
+            b = "b".repeat(40)
+        ))
+        .expect("a plan carrying a guard scope parses");
+        render(&plan, &Terminal::new())
+    }
+
+    let changed = rendered(
+        r#"{"selected":true,"mode":"changed","paths":["a/b.rs","c/d.rs"],
+            "reason":"pull request inventory"}"#,
+    );
+    assert!(changed.contains("changed-file scan of 2 file(s)"), "{changed}");
+
+    let full = rendered(r#"{"selected":true,"mode":"full","reason":"a push"}"#);
+    assert!(full.contains("full-tree scan"), "{full}");
+
+    let unselected = rendered(r#"{"selected":false,"reason":"documentation only"}"#);
+    assert!(unselected.contains("not selected"), "{unselected}");
+    assert!(unselected.contains("documentation only"), "{unselected}");
+
+    // An empty changed-file scan is a real state and must not read as a
+    // full-tree pass.
+    let empty = rendered(
+        r#"{"selected":true,"mode":"changed","paths":[],"reason":"nothing eligible"}"#,
+    );
+    assert!(empty.contains("changed-file scan of 0 file(s)"), "{empty}");
+    assert!(!empty.contains("full-tree"), "{empty}");
 }
 
 #[test]

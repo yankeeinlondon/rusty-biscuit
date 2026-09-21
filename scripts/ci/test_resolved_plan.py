@@ -10,6 +10,7 @@ Baseline for these numbers: `fixes/2026-09-11-cicd-cleanup/baseline-2026-09-11.m
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import re
@@ -207,8 +208,14 @@ class SelectionTests(PlannerFixture):
     """AC1: only impacted areas are selected, and nothing else appears."""
 
     def test_claudine_and_playa_source_selects_only_those_packages(self) -> None:
+        # `test-toolkit` is the third name because a Rust file is source the
+        # archive-path guard scans, and the guard is selected by what it
+        # checks. That selection is lint-only and is pinned in
+        # `test_affected_scope.py::ArchiveGuardOnlyCellTests`.
         plan = self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs")
-        self.assertEqual(["claudine", "playa"], self.job_packages(plan))
+        self.assertEqual(
+            ["claudine", "playa", "test-toolkit"], self.job_packages(plan)
+        )
 
     def test_claudine_and_playa_source_selects_those_two_as_source(self) -> None:
         # Non-pending: the half of AC1 that already holds. Guards against a
@@ -248,9 +255,11 @@ class SelectionTests(PlannerFixture):
     def test_ci_tooling_change_schedules_its_owner_and_nothing_else(self) -> None:
         # Until `scripts/` joined the root workspace these suites ran in a job
         # no plan selected. `repo-deps` owns them now, so the change reaches CI
-        # as an ordinary package job — and still only that one.
+        # as an ordinary package job. `affected_scope.py` is ALSO a declared
+        # input of the archive-path guard — it is where the guard's selection
+        # rule lives — so it selects that guard's lint-only owner beside it.
         plan = self.plan("scripts/ci/affected_scope.py")
-        self.assertEqual(["repo-deps"], self.job_packages(plan))
+        self.assertEqual(["repo-deps", "test-toolkit"], self.job_packages(plan))
         record = self.package_record(plan, "repo-deps")
         self.assertEqual("root", record["area"])
         self.assertEqual("package", plan["change_class"])
@@ -411,12 +420,16 @@ class AreaGroupingTests(PlannerFixture):
     """AC2 and AC15: area is derived from the manifest directory."""
 
     def test_claudine_and_playa_select_their_two_areas(self) -> None:
+        # `tools` rides along on every Rust change: it holds the archive-path
+        # guard's lint-only owner. Area derivation is what is under test here.
         plan = self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs")
-        self.assertEqual(["claudine", "playa"], self.selected_areas(plan))
+        self.assertEqual(["claudine", "playa", "tools"], self.selected_areas(plan))
 
     def test_a_nested_area_is_its_own_area_not_its_parent(self) -> None:
         plan = self.plan("claudine/rendezvous/core/src/lib.rs")
-        self.assertEqual(["claudine/rendezvous"], self.selected_areas(plan))
+        self.assertEqual(
+            ["claudine/rendezvous", "tools"], self.selected_areas(plan)
+        )
 
     def test_the_dmls_crate_belongs_to_the_darkmatter_area(self) -> None:
         # Measured, not assumed: `sniff repo package-area` run from
@@ -426,9 +439,9 @@ class AreaGroupingTests(PlannerFixture):
         # the `dmls` crate itself. AC15 makes sniff the authority, so the
         # planner must reproduce this rather than the intuitive grouping.
         plan = self.plan("darkmatter/dmls/src/lib.rs")
-        self.assertEqual(["darkmatter"], self.selected_areas(plan))
+        self.assertEqual(["darkmatter", "tools"], self.selected_areas(plan))
         zed = self.plan("darkmatter/dmls/zed-dmls-cli/src/main.rs")
-        self.assertEqual(["darkmatter/dmls"], self.selected_areas(zed))
+        self.assertEqual(["darkmatter/dmls", "tools"], self.selected_areas(zed))
 
     def test_the_planners_area_matches_sniff_for_every_layout_the_repo_uses(
         self,
@@ -747,6 +760,41 @@ class PlanDocumentTests(PlannerFixture):
         self.assertLess(plan["job_estimate"], 1000)
 
 
+class StoredPlanDocumentTests(unittest.TestCase):
+    """Resolved plans that live outside `scripts/ci` move with the schema.
+
+    The pre-push hook's five fixtures and its stub planner are resolved plans
+    no planner run produces, so a schema bump cannot break them where the
+    author would see it. It broke them silently once: version 5 landed while
+    all six stayed on version 4, and 22 hook tests failed with
+    `unknown-schema-version` in a suite the schema's author had no reason to
+    run (`fixes/2026-09-19-less-brittle`). Reading them from the schema's own
+    suite is what makes the next bump fail at its source.
+    """
+
+    HOOK_FIXTURES = ROOT / ".githooks" / "tests" / "fixtures"
+
+    def test_every_stored_hook_plan_validates(self) -> None:
+        stored = sorted(self.HOOK_FIXTURES.glob("plan-*.json"))
+        self.assertNotEqual(
+            [], stored, f"no plan fixture under {self.HOOK_FIXTURES}"
+        )
+        for path in stored:
+            with self.subTest(fixture=path.name):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual([], schema.validate_resolved_plan(document))
+
+    def test_the_hook_stub_planner_emits_valid_plans(self) -> None:
+        source = self.HOOK_FIXTURES / "affected_scope_stub.py"
+        spec = importlib.util.spec_from_file_location("affected_scope_stub", source)
+        stub = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stub)
+        for name in ("fixed_plan", "empty_plan"):
+            with self.subTest(plan=name):
+                plan = getattr(stub, name)("a" * 40, "b" * 40)
+                self.assertEqual([], schema.validate_resolved_plan(plan))
+
+
 class ClosurePathTests(PlannerFixture):
     """AC7: the plan carries the paths a cell's gate-input identity covers."""
 
@@ -938,7 +986,11 @@ class ResultCompletenessTests(PlannerFixture):
             if cell["area"] == "playa" and cell["gate"] != "lint"
         }
         self.assertEqual({"reused"}, states, "the fixture must reuse every test cell")
-        lint = [cell for cell in self.cells(reused) if cell["gate"] == "lint"]
+        lint = [
+            cell
+            for cell in self.cells(reused)
+            if cell["gate"] == "lint" and cell["area"] == "playa"
+        ]
         self.assertEqual(1, len(lint))
         self.assertEqual("pending", lint[0]["state"])
         self.assertEqual("ci", lint[0]["origin"])
@@ -2223,6 +2275,64 @@ class CellContractTests(PlannerFixture):
         second = self.run_tool(plan, row)
         self.assertEqual(first[0], second[0])
         self.assertEqual(first[1], second[1])
+
+
+class ArchiveGuardCorpusTests(PlannerFixture):
+    """The guard's scope against the shipped workspace and registry.
+
+    `test_affected_scope.py` pins the trigger table and the guard-only cell.
+    These are the cases only the real checkout can answer: that the registered
+    suite has the owner it claims, that the real recipe it names exists, and
+    that a plan resolved over the real workspace still validates.
+    """
+
+    def test_the_registered_guard_is_owned_and_declared_by_test_toolkit(self) -> None:
+        entry = affected_scope.SUITE_REGISTRY[affected_scope.ARCHIVE_GUARD_SUITE]
+        self.assertEqual("test-toolkit", entry["owner"])
+        self.assertEqual(
+            [],
+            affected_scope.validate_suite_registry(
+                {affected_scope.ARCHIVE_GUARD_SUITE: entry},
+                {"test-toolkit": [affected_scope.ARCHIVE_GUARD_SUITE]},
+            ),
+        )
+        self.assertIn(
+            affected_scope.ARCHIVE_GUARD_SUITE,
+            self.policy["test-toolkit"]["companion_suites"],
+            "the owner's manifest must claim the suite, or nothing schedules it",
+        )
+
+    def test_the_guard_recipe_the_registry_names_exists(self) -> None:
+        # `validate_package_ci` already enforces this for every declared suite;
+        # naming it here is what makes a renamed recipe fail as a guard defect
+        # rather than as an unattributed manifest error.
+        for directory, recipe in affected_scope.SUITE_REGISTRY[
+            affected_scope.ARCHIVE_GUARD_SUITE
+        ]["just"]:
+            with self.subTest(recipe=recipe):
+                justfile = (ROOT / directory / "justfile").read_text(encoding="utf-8")
+                self.assertRegex(justfile, rf"(?m)^{recipe}(?::|\s)")
+
+    def test_the_real_workspace_plan_carries_a_valid_guard_scope(self) -> None:
+        plan = self.plan("claudine/lib/src/lib.rs")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        guard = plan["archive_guard"]
+        self.assertTrue(guard["selected"])
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual(["claudine/lib/src/lib.rs"], guard["paths"])
+
+    def test_the_guard_scope_survives_a_persist_read_persist_cycle(self) -> None:
+        # The scope describes what will be scanned, which applying evidence
+        # cannot alter, so it must reach the fan-out byte-identical.
+        first = schema.canonical(self.plan("claudine/lib/src/lib.rs"))
+        applied = apply_accepted_cells(json.loads(first), [], [])
+        second = schema.canonical(applied)
+        self.assertEqual(
+            json.loads(first)["archive_guard"], json.loads(second)["archive_guard"]
+        )
+        self.assertEqual(
+            second, schema.canonical(apply_accepted_cells(json.loads(second), [], []))
+        )
 
 
 if __name__ == "__main__":

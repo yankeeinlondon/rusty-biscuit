@@ -1,100 +1,162 @@
 # Shell Expansion
 
-We allow the output of shell commands to be injected into a Markdown page using the syntax:
+A `::shell` line runs a command while the document is being composed and replaces itself with the command's output.
 
 ```md
-::shell <command> <params>
+This repository is on:
+
+::shell git branch --show-current
 ```
 
-## Pre-Flight Approval
+composes to:
 
-All shell commands must pass through Darkmatter's pre-flight security check before execution. This covers blacklist validation, whitelist lookup, and interactive approval. See [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) for the full policy, blacklisted commands list, whitelist/blacklist file locations, and interactive approval options.
+```md
+This repository is on:
 
-## Execution Behavior
+main
+```
 
-When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will iterate over all `::shell` lines and:
+Use it to put facts into a document that would otherwise go stale: a version, a file list, the state of a working tree. For several commands in a row, use a [shell block](./shell-blocks.md). To store a command's output in a frontmatter property instead of the body, use [frontmatter shell expansion](./fm-shell-expansion.md).
 
-- if the command does not exist on the host system we exit the pipeline in error
-    - `<red><b>ERROR:</b></red> the shell command '{command}' does not exist on this host but was referenced in a shell expansion operation during the <b>compose</b> pipeline in <blue>{file}</blue>!`
-- if the command matches the blacklisted commands and syntax we exit in error
-    - `<red><b>ERROR:</b></red> the shell command '{command}' is not allowed as a shell expansion command in Darkmatter's compose pipeline! This command is considered a globally blacklisted command.`
-- if the command does not exist in the repo's (or user's) whitelist file the user will be asked to approve this command (see [Pre-Flight Shell Approval](../topics/pre-flight-checks.md))
-- if the command _does_ exist in the whitelist then we execute the command and both STDOUT and STDERR are captured and added to the Markdown document in place of the `::shell` instruction.
+Every command must be approved before it runs. See [Pre-Flight Shell Approval](./preflight-checks.md).
 
-    - If a command does not complete in 10 seconds (by default) then we will exit with an error
-        - `<red><b>ERROR:</b></red> the shell command '{command}' in {file} took too long to complete (10 seconds) and was terminated. The Darkmatter pipeline has exited.`
-    - The timeout can be changed with `--timeout <seconds>` in the CLI or `ComposeOptions::with_shell_timeout()` in the library.
-    - If timeout fallback is enabled via `--allow-shell-timeout` or `ComposeOptions::with_allow_shell_timeout(true)`, a timed out command is replaced with an empty string and compose emits a warning instead of failing.
-    - If the command outputs nothing in STDOUT or STDERR while returning a 0 exit code (aka, no error) then we simply remove the `::shell` instruction line.
-    - If the shell command's exit code is _not_ 0 (aka, there was an error when running the command) then we will exit the pipeline with an error:
-        - `<red><b>ERROR:</b></red> the shell command '{command}' in {file} exited with an error code of {error_code}. The Darkmatter pipeline has exited.\n\n<b>STDOUT:</b> {stdout}\n\n<b>STDERR:</b>{stderr}`
+## What gets inserted
 
-## Frontmatter Variant
+- **Both output streams.** Standard output and standard error are captured together and inserted in place of the `::shell` line.
+- **Nothing, if the command prints nothing.** A command that succeeds silently removes its line and leaves no gap.
+- **Markdown, not a code block.** The output is spliced in as ordinary document text. Lines that follow one another become one paragraph when the document is rendered, and any Markdown in the output is live. Put a blank line above and below the directive, or the output joins the neighboring paragraph. A directive inside a fenced code block is not run; it is shown as written.
+- **At the directive's indentation.** A directive inside a list item keeps the output inside that item:
 
-Darkmatter also supports shell expansion in top-level frontmatter string values using `$(...)`.
+```md
+- Untracked files:
 
-- Documentation: [Frontmatter Shell Expansion](./fm-shell-expansion.md)
-- Frontmatter shell expansion stores trimmed `stdout` only
-- Body `::shell` expansion stores combined `stdout` + `stderr`
-- Both variants share the same policy, whitelist/blacklist, approval, and timeout infrastructure
+    ::shell git ls-files --others --exclude-standard
+
+- Next item
+```
+
+## Using document values in the command
+
+The command is interpolated before it runs, so it can use frontmatter and context values:
+
+```md
+---
+base: main
+---
+
+::shell git log --oneline origin/{{ base }}..HEAD
+```
+
+The command that is approved is the command after interpolation. A value that changes from run to run therefore produces a command that needs approving again, unless a whitelist entry covers it by prefix.
+
+## When a command fails
+
+By default, a command that exits non-zero stops the composition:
+
+```text
+Error: Shell command failed (exit 1) at line 12: 'git log -1 v9.9.9'
+```
+
+That is the right default for a fact the document cannot do without. For a fact that may legitimately be absent, tell the directive what to insert instead. The options go between `::shell` and the command:
+
+| Option | Inserts the text when… | Example |
+|---|---|---|
+| `--when-error <text>` | the command fails for any reason | `::shell --when-error "(not tagged yet)" git describe --tags` |
+| `--when-exit-code <n> <text>` | it exits with exactly `n` | `::shell --when-exit-code 1 "(no matches)" git grep -n TODO` |
+| `--except-exit-code <n> <text>` | it fails with any code *other than* `n` | `::shell --except-exit-code 2 "(unavailable)" just lint` |
+| `--stderr-contains <find> <text>` | it fails and standard error contains `find` | `::shell --stderr-contains "unknown revision" "(no such ref)" git log -1 {{ ref }}` |
+| `--stderr-lacks <find> <text>` | it fails and standard error does *not* contain `find` | `::shell --stderr-lacks "fatal" "(failed, but not fatally)" just check` |
+
+Two more options leave the failure in place and improve its message, which helps whoever has to fix it:
+
+| Option | Adds the text to the error… | Example |
+|---|---|---|
+| `--enrich-error <text>` | always | `::shell --enrich-error "Is the Rust toolchain installed?" cargo --version` |
+| `--enrich-error-on <n> <text>` | only for exit code `n` | `::shell --enrich-error-on 2 "Exit 2 from rg means a bad pattern or an unreadable file." rg -c TODO src` |
+
+```text
+Error: Shell command failed (exit 1) at line 1: 'cargo --version'
+Is the Rust toolchain installed?
+```
+
+**Put the options first.** Darkmatter recognizes them anywhere on the line, including after the command. `::shell false --when-error "x"` behaves the same as `::shell --when-error "x" false`, so an option placed last is taken by Darkmatter and never reaches the command.
+
+## Combining commands
+
+`&&` and `||` work as they do in a shell. The output of every command that ran is inserted, in order:
+
+```md
+::shell git describe --tags 2>/dev/null || echo "(not tagged yet)"
+```
+
+Darkmatter parses the line and starts each program itself; it does not hand the line to `sh` or `cmd`. The line therefore behaves the same on every operating system, and only a deliberate subset of shell syntax is accepted:
+
+| Allowed | Meaning |
+|---|---|
+| `a && b` | run `b` only if `a` succeeded |
+| `a \|\| b` | run `b` only if `a` failed |
+| `2>&1` | merge standard error into standard output, in the order the program wrote them |
+| `2>/dev/null`, `>/dev/null` | discard a stream |
+
+| Rejected when the document is parsed | Message |
+|---|---|
+| a pipe, `a \| b` | `Shell pipes are not allowed` |
+| a sequence, `a ; b` | `Command chaining (;) is not allowed` |
+| a redirect to a file, `a > out.txt` | `Output redirection to arbitrary files is not allowed` |
+
+To filter one command's output with another, do the filtering in the program itself (`git log --grep`, `rg` reading a file) or move the work into a script and run the script.
+
+## Timeouts
+
+A command has 10 seconds. One that runs longer stops the composition:
+
+```text
+Error: Shell command timed out after 10s at line 4: 'just ci-local --plan'
+```
+
+- `md compose --timeout <seconds>` changes the limit for every command in the run. In the library, use `ComposeOptions::with_shell_timeout()`.
+- `md compose --allow-shell-timeout` turns a timeout into an empty insertion and a warning instead of an error. In the library, use `ComposeOptions::with_allow_shell_timeout(true)`.
+- A single `::shell` line cannot set its own limit. A [shell block](./shell-blocks.md) can (`timeout=60`), and so can a [frontmatter expression](./fm-shell-expansion.md) (`::timeout:60`).
 
 ## Caching
 
-Identical commands (same normalized command string) execute **once per compose
-run** by default; the result is memoized and reused at every other call site,
-including across recursive transclusion. Caching is the default because the
-destructive, non-idempotent commands are already blacklisted, while the common
-multi-reference commands (`git rev-parse HEAD`, `cat VERSION`, …) are pure and
-benefit from one consistent value across the document.
+A command that appears more than once runs **once per composition**, and every occurrence gets the same output. That holds across transcluded files. It keeps a document consistent with itself (`git rev-parse HEAD` cannot change halfway down the page) and avoids repeated work.
 
-The residual risk is read-only-but-non-deterministic commands (`uuidgen`,
-`date`, `openssl rand`). Opt those out with a full cache **bypass** — the
-directive then neither reads nor writes the cache and executes fresh at each
-occurrence, in document order:
+It is the wrong behavior for a command whose output is supposed to differ each time. Opt out with `--no-cache`, which neither reads nor writes the cache:
 
 ```md
-::shell uuidgen                 # cached (default)
-::shell --no-cache uuidgen      # fresh each occurrence
+::shell uuidgen                 # the same value at every occurrence
+::shell --no-cache uuidgen      # a fresh value at each occurrence
 ```
 
-The opt-out spelling follows each directive family:
+When a cached command is one that is known to vary (`uuidgen`, `date`, `openssl`), composition prints a one-time warning suggesting `--no-cache`.
 
-- Body `::shell` — the `--no-cache` flag.
-- Frontmatter `$(...)` — the `::no-cache` suffix (see
-  [Frontmatter Shell Expansion](./fm-shell-expansion.md)).
-- `::shell-block` — the `no_cache=true` key-value parameter (`--no-cache` is a
-  parse error there).
+The opt-out is spelled to suit each directive: `--no-cache` here, `::no-cache` in a frontmatter expression, and `no_cache=true` on a shell block.
 
-### Discoverability warning
+## Approval
 
-When the cache collapses a repeated command whose executable is on the built-in
-volatile allowlist (`uuidgen`, `date`, `openssl`), compose emits a one-time
-warning suggesting `--no-cache` for a fresh value each time. This keeps the
-convenient default while catching the foot-gun.
+A command runs only if it is approved: whitelisted, or approved interactively when the composition starts. A few commands can never be approved. Both checks happen before anything runs, and both cover every `::shell` line in the document and in every file it transcludes, including lines inside a `::block` whose condition is false.
 
+```text
+Error: Blocked command at line 3: 'rm -rf build'
+Reason: 'rm' is a dangerous command
+```
 
-## Handling Error Exit Codes
+```text
+Error: Approval required for 'just ci-local --plan'.
+To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
+  exact just ci-local --plan
+```
 
-Sometimes we'll want to run a shell expansion command that _can_ return an error code. We do that in several distinct ways:
+An approved program that is not installed is reported separately, so the two are easy to tell apart:
 
-1. Default Error handler(`--when-error <string>`)
+```text
+Error: Command not found: 'ripgrep' (line 7)
+Ensure 'ripgrep' is installed and available on your PATH.
+```
 
-    - this manner of handling will ensure all error exit codes will not result in an error but instead with the text in the parameter provided by this switch
+A misspelled program name usually shows up as the *approval* message instead, because the misspelling has never been approved. The full policy, the blacklist, and the whitelist file format are in [Pre-Flight Shell Approval](./preflight-checks.md).
 
-2. Handle Specific Error Codes(`--when-exit-code <#> <string>`, `--except-exit-code <#> <string>`)
-
-    - Allows you to respond to only a specific error code `--when-exit-code`, or
-    - Respond to all exit code except one `--except-exit-code`
-
-3. Handle Based on STDERR(`--stderr-contains <string:find> <string:replace>`, `--stderr-lacks <string:find> <string:replace>`)
-
-    - Allows you to to handle errors based on the content found in STDERR
-
-4. Enrich Error Message (`--enrich-error <string>`, `--enrich-error-on <#> <string>`)
-
-    - Allows you to enrich the error message which will be presented to the user if this command fails
-    - The string provided will be passed through the `Prose` struct to allow users to use terminal escape code easily
-
---- 
+---
 
 > Return to [Darkmatter Pipeline](../darkmatter-compose-pipeline.md)
