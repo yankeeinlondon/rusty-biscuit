@@ -3324,7 +3324,9 @@ class ApplyFixture(unittest.TestCase):
 
     A `check` cell satisfied only by its package's L1 pass, a companion-suite L1 on the Node host
     (never reusable), a governed gap (never reusable), a prohibited cell that
-    evidence satisfies, and one that nothing satisfies.
+    evidence satisfies, and one that nothing satisfies. `alpha-core` declares
+    a backend no environment hosts beside one two of them do, so its L2 cells
+    there execute with a `backends` list narrower than the declaration.
     """
 
     CONSTRAINT = {
@@ -3348,7 +3350,7 @@ class ApplyFixture(unittest.TestCase):
                 self.root,
                 "alpha-core",
                 "alpha/lib/Cargo.toml",
-                ci=ci_policy(tests={"tiers": ["L1", "L2"], "l2-backends": ["tmux"]}),
+                ci=ci_policy(tests={"tiers": ["L1", "L2"], "l2-backends": ["tmux", "wezterm"]}),
                 targets=["lib", "example"],
             ),
             package(
@@ -3484,6 +3486,82 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         other = {**self.accepted[0], "origin": "prior-local", "evidence": {"ref": "elsewhere"}}
         second = apply_accepted_cells(first, [other], [])
         self.assertEqual(schema.canonical(first), schema.canonical(second))
+
+    # A HOSTABLE L2 cell: macOS hosts tmux, so the cell executes and carries
+    # `backends` until evidence arrives. A cell whose backend no environment
+    # hosts is a gap from the start and never reaches the reuse transition.
+    L2_EVIDENCE = {
+        "package": "alpha-core",
+        "environment": "macos-latest",
+        "gate": "L2",
+        "origin": "local",
+        "outcome": "pass",
+        "evidence": {"ref": "refs/notes/ci-local/macos-latest"},
+    }
+
+    @staticmethod
+    def l2_cell(plan: dict[str, object], environment: str) -> dict[str, object]:
+        return next(
+            cell for cell in plan["cells"]  # type: ignore[union-attr]
+            if (cell["package"], cell["environment"], cell["gate"]) == ("alpha-core", environment, "L2")
+        )
+
+    def assert_macos_l2_is_reused_and_valid(self, plan: dict[str, object]) -> None:
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        cell = self.l2_cell(plan, "macos-latest")
+        self.assertEqual(("reuse", "reused"), (cell["execution"], cell["state"]))
+        self.assertEqual(self.L2_EVIDENCE, cell["evidence"])
+        self.assertNotIn("backends", cell)
+        self.assertNotIn(("macos-latest", "L2"), dispatched(plan, "alpha-core"))
+        self.assertNotIn(
+            {"environment": "macos-latest", "gate": "L2"},
+            [
+                consumer
+                for build in plan["builds"]  # type: ignore[union-attr]
+                if build["package"] == "alpha-core"
+                for consumer in build["consumers"]
+            ],
+        )
+        # The cell evidence did not reach still owes its proof.
+        self.assertEqual(["tmux"], self.l2_cell(plan, "ubuntu-latest")["backends"])
+        self.assertIn(("ubuntu-latest", "L2"), dispatched(plan, "alpha-core"))
+
+    def test_resolving_with_l2_evidence_reuses_a_hostable_cell_as_a_valid_plan(self) -> None:
+        self.assert_macos_l2_is_reused_and_valid(self.plan(accepted_cells=[self.L2_EVIDENCE]))
+
+    def test_applying_l2_evidence_to_an_executing_hostable_cell_yields_a_valid_plan(self) -> None:
+        carried = self.plan()
+        executing = self.l2_cell(carried, "macos-latest")
+        self.assertEqual(("execute", ["tmux"]), (executing["execution"], executing["backends"]))
+        self.assertIn(("macos-latest", "L2"), dispatched(carried, "alpha-core"))
+
+        applied = apply_accepted_cells(carried, [self.L2_EVIDENCE], [])
+        self.assert_macos_l2_is_reused_and_valid(applied)
+        self.assertEqual(
+            schema.canonical(self.plan(accepted_cells=[self.L2_EVIDENCE])),
+            schema.canonical(applied),
+        )
+
+    def test_a_prohibited_hostable_l2_cell_is_a_valid_plan(self) -> None:
+        plan = calculate_scope(
+            self.FILES,
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            prohibitions={"macos-latest": self.CONSTRAINT},
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        cell = self.l2_cell(plan, "macos-latest")
+        self.assertEqual(("omit", "prohibited"), (cell["execution"], cell["state"]))
+        self.assertNotIn("backends", cell)
+        self.assertNotIn(("macos-latest", "L2"), dispatched(plan, "alpha-core"))
+
+        applied = apply_accepted_cells(plan, [self.L2_EVIDENCE], [])
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        reused = self.l2_cell(applied, "macos-latest")
+        self.assertEqual(("reuse", "reused"), (reused["execution"], reused["state"]))
+        self.assertNotIn("backends", reused)
 
     def test_a_plan_of_another_generation_is_refused(self) -> None:
         stale = {**self.plan(), "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION - 1}

@@ -166,8 +166,9 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   Node and pnpm. An executing L2 cell also carries `backends` (version 6): the
   sorted subset of the package's `l2_backends` its environment can host, which
   is what the producer sets `BISCUIT_TEST_REQUIRED_BACKENDS` to and what
-  `completion.py` demands a `backend-proofs.json` entry for. A gap cell
-  carries none; the GUI backends stay in the package record only.
+  `completion.py` demands a `backend-proofs.json` entry for. A gap, reused, or
+  prohibited cell carries none; the GUI backends stay in the package record
+  only.
 - `skip_policy` — the snapshot of [`ci-baseline.toml`](../ci-baseline.toml)'s
   approved exact-skip budget: `source` and `content_hash` say which file was
   read and what it hashed to, and `entries[]` carries the approvals that apply

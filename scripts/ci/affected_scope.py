@@ -2479,10 +2479,11 @@ def mark_reused(cell: dict[str, Any], evidence: dict[str, Any]) -> None:
     cell["evidence"] = evidence
     cell.pop("prohibition", None)
     # The execution inputs go with the execution, exactly as the build
-    # reference does: a cell nothing will run selects no nextest profile and
-    # provisions no Node.
+    # reference does: a cell nothing will run selects no nextest profile,
+    # provisions no Node, and has no producer to prove a backend.
     cell.pop("profile", None)
     cell.pop("requires_node", None)
+    cell.pop("backends", None)
 
 
 def companion_records(
@@ -2608,12 +2609,6 @@ def package_cells(
             cell["dependents"] = list(compiled_dependents)
         if companions:
             cell["companions"] = list(companions)
-        # The backends THIS cell must prove, not the package's declaration:
-        # `completion.py` compares the producer's `BISCUIT_TEST_REQUIRED_BACKENDS`
-        # against this list, and a gap cell requires nothing because it runs
-        # nothing.
-        if backends and gap is None:
-            cell["backends"] = sorted(backends)
         if gap is not None:
             cell["execution"] = "omit"
             cell["origin"] = "none"
@@ -2642,6 +2637,12 @@ def package_cells(
             cell["profile"] = schema.CI_PROFILE
             if needs_node(environment):
                 cell["requires_node"] = True
+        # The backends THIS cell must prove, not the package's declaration:
+        # `completion.py` compares the producer's `BISCUIT_TEST_REQUIRED_BACKENDS`
+        # against this list. A gap, reused, or prohibited cell requires nothing
+        # because it runs nothing, and the schema refuses the field there.
+        if cell["execution"] == "execute" and backends:
+            cell["backends"] = sorted(backends)
         cells.append(cell)
 
     # Lint, like check, lives on one environment; a plan that does not carry
