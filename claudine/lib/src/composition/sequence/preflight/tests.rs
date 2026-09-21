@@ -1533,6 +1533,9 @@ mod lifecycle_literals {
         .with_repository_root(root.clone())
         .with_package_area(package.clone())
         .add_magic_path(magic.clone(), biscuit_file::PathPosition::Start);
+        // One capture for all six spellings: a full capture probes the host,
+        // and the context is not what varies between the cases.
+        let context = darkmatter::markdown::compose::ComposeContext::capture();
 
         for (reference, dir, file) in cases {
             write_source(dir, file, &[("success", success.clone())], "Prompt.\n");
@@ -1553,7 +1556,7 @@ mod lifecycle_literals {
             let graph = build_preflight_graph_with_context_and_resolution(
                 &plan,
                 &resolved,
-                darkmatter::markdown::compose::ComposeContext::capture(),
+                context.clone(),
                 Some(&snapshot),
             )
             .unwrap_or_else(|error| panic!("{reference}: graph failed: {error}"));
