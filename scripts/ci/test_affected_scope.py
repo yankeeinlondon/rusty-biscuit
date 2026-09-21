@@ -5129,6 +5129,34 @@ class CompanionRunnerTests(unittest.TestCase):
                 self.assertEqual(self.COUNTS, results[name]["counts"])
                 self.assertGreaterEqual(results[name]["duration_s"], 0)
 
+    def test_a_recipes_relative_cd_ignores_the_callers_cdpath(self) -> None:
+        # Regression: pushed from a worktree, by a shell whose `CDPATH` named the
+        # main checkout, `cd tools/test-toolkit && just archive-path-guard` ran
+        # in the main checkout and failed with "justfile does not contain
+        # recipe". `--root` decides where a recipe runs; `CDPATH` must not.
+        (self.root / "area").mkdir()
+        decoy = self.root / "elsewhere"
+        (decoy / "area").mkdir(parents=True)
+        marker = self.root / "ran-in.txt"
+        script = self.root / "where.py"
+        script.write_text(
+            "import json, os, sys\n"
+            f"open({str(marker)!r}, 'w', encoding='utf-8').write(os.getcwd())\n"
+            f"json.dump({self.COUNTS!r}, open(sys.argv[1], 'w'))\n",
+            encoding="utf-8",
+        )
+        registry = self.registry(
+            guarded=self.companion(recipe=f'cd area && "{sys.executable}" "{script}"')
+        )
+        with unittest.mock.patch.dict(os.environ, {"CDPATH": str(decoy)}):
+            code, results = self.run_suites(registry, ["guarded"])
+        self.assertEqual(0, code)
+        self.assertEqual("success", results["guarded"]["outcome"])
+        self.assertEqual(
+            (self.root / "area").resolve(),
+            Path(marker.read_text(encoding="utf-8")).resolve(),
+        )
+
     def test_one_suites_failure_does_not_stop_or_cover_the_others(self) -> None:
         registry = self.registry(
             broken=self.companion(recipe=self.fake_suite("broken", counts=True, exit_code=1)),
