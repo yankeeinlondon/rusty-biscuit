@@ -20,7 +20,7 @@ const LIFECYCLE_EVENT_KEYS: &[&str] =
 const SHIPPED_SPEC_NAME: &str = "`{{spec_name}}` spec";
 
 fn checkout() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(Path::parent)
         .expect("the darkmatter library lives two levels below the repository root")

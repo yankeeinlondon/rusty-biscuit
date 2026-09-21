@@ -67,7 +67,8 @@ const ALLOWLIST: &[(&str, usize)] = &[
 ];
 
 fn workspace_root() -> PathBuf {
-    let mut dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest_dir = biscuit_test_harness::manifest_dir!();
+    let mut dir = manifest_dir.as_path();
     loop {
         let manifest = dir.join("Cargo.toml");
         if std::fs::read_to_string(&manifest).is_ok_and(|text| text.contains("[workspace]")) {

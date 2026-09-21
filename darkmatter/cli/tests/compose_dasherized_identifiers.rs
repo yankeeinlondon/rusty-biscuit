@@ -48,7 +48,7 @@ fn compose_set_overrides_a_kebab_key_for_every_spelling() {
 /// Copies the shipped `review-findings-plan.md` prompt into a fixture
 /// repository with a spec that records two review iterations.
 fn shipped_review_plan_repository(process: &CliProcessFixture) -> PathBuf {
-    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let checkout = biscuit_test_harness::manifest_dir!()
         .parent()
         .and_then(Path::parent)
         .expect("darkmatter CLI crate should live two levels below the repository root")

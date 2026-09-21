@@ -99,7 +99,7 @@ const CONDITION_KEYS: [&str; 3] = ["when", "while", "until"];
 
 fn repo_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is `<repo>/darkmatter/lib`.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .ancestors()
         .nth(2)
         .expect("repository root is two levels above darkmatter/lib")

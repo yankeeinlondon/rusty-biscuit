@@ -505,7 +505,7 @@ fn level2_ac28_lazy_roots_refresh_between_lifecycle_events() {
 }
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("claudine/cli parent")
         .parent()

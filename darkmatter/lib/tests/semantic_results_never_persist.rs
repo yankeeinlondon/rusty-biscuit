@@ -311,7 +311,7 @@ fn all_problems(src: &Path, allowlist: &[(&str, usize)]) -> Vec<String> {
 
 #[test]
 fn semantic_results_have_no_path_to_disk() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src = biscuit_test_harness::manifest_dir!().join("src");
     let problems = all_problems(&src, FILE_STORE_ALLOWLIST);
     assert!(problems.is_empty(), "semantic-result persistence guard:\n  {}", problems.join("\n  "));
 }
