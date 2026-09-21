@@ -20,6 +20,7 @@ reviewed_by: codex/gpt-5.6-sol
 created: "2026-09-20T21:21:14-07:00"
 spec: 2026-09-19-direct-cell-execution/spec.md
 implemented: true
+next: 2026-09-19-direct-cell-execution/review-2.md
 description: "A **feature** review of `2026-09-19-direct-cell-execution/spec.md`"
 feature: 2026-09-19-direct-cell-execution/review-1.md
 log: features/2026-09-19-direct-cell-execution/implementation-log.md

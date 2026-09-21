@@ -32,8 +32,9 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-19
-review_iterations: 1
+review_iterations: 3
 implemented: true
+completed: true
 human_review: true
 human_review_items:
   - |-
