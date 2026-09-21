@@ -398,7 +398,7 @@ mod tests {
         let lan = interface("en0", 4, &["192.168.1.20"], &["fe80::1c"]);
         let tailscale = interface("utun4", 21, &["100.101.102.103"], &["fd7a:115c:a1e0::1"]);
 
-        assert!(!contains_cgnat_address(&host_addresses(&[lan.clone()])));
+        assert!(!contains_cgnat_address(&host_addresses(std::slice::from_ref(&lan))));
         assert!(contains_cgnat_address(&host_addresses(&[lan, tailscale])));
         assert!(!contains_cgnat_address(&host_addresses(&[])));
     }
