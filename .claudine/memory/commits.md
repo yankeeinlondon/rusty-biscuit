@@ -126,6 +126,20 @@ belong here.
   `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_
   that_enforces_it` test pins both directions: a guard whose variable no
   job sets, and a variable no guard reads.
+- A companion-suite install step is coupled to the recipe the suite declares:
+  if a suite's `*_recipe` is `cargo nextest run …`, the job that runs it must
+  have installed cargo-nextest, even when the job is not a test job (e.g. the
+  lint job in `.github/workflows/_package-ci.yml` runs companion suites whose
+  recipes are nextest-driven). Gate the install on
+  `contains(inputs.companion-suites, '<suite-token>')` so a lint cell whose
+  attached suites don't need that tool doesn't pay the install cost, and so
+  the install only fires when the suite that needs it is actually attached.
+  The local pre-push hook cannot surface a missing-install on a non-test job:
+  every developer host already has nextest, so `just ci-local --plan` reports
+  the ubuntu-latest execution as `outstanding` instead of red, and the gap
+  only shows up on the fresh runner image that first tries to run the suite.
+  See PR 90 `fix(ci): install cargo-nextest in the lint job when the
+  archive-path guard is attached` (3e968a04d) for the canonical pattern.
 
 ## Path-Limited Commits
 
