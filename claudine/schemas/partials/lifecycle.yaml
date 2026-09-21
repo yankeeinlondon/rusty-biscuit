@@ -1,0 +1,8 @@
+# THIS IS A PLACEHOLDER
+kind: schema
+description: New Lifecycle Events which Claudine registers with Darkmatter
+types:
+    # this is a renaming of Darkmatter's `completed` event
+    success: object
+    failure: object
+    finalize: object

@@ -1,0 +1,705 @@
+kind: schema
+types:
+    set: |-
+        function(
+            parameters(key: string, value: any);
+            returns(object);
+            category(Frontmatter);
+            fallible;
+        ) -> Sets a top-level key in the `doc` namespace; no external mutation
+    is_string: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is a string.
+    is_number: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is a number.
+    is_array: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is an array.
+    is_null: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is null.
+    is_object: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is an object.
+    is_empty: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is null, empty string, empty array, or empty object.
+    is_positive: |-
+        function(
+            parameters(val: any);
+            returns(boolean);
+            category(Type Predicates);
+            fallible;
+        ) -> Returns `true` when the coerced value is greater than zero.
+    is_negative: |-
+        function(
+            parameters(val: any);
+            returns(boolean);
+            category(Type Predicates);
+            fallible;
+        ) -> Returns `true` when the coerced value is less than zero.
+    is_integer: |-
+        function(
+            parameters(val: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Returns `true` when the value is a JSON number with no fractional component.
+    min: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+            fallible;
+        ) -> Returns the smaller of two numbers.
+    max: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+            fallible;
+        ) -> Returns the larger of two numbers.
+    abs: |-
+        function(
+            parameters(x: number);
+            returns(number);
+            category(Math);
+            fallible;
+        ) -> Returns the absolute value of a number.
+    round: |-
+        function(
+            parameters(x: number, default: number(optional));
+            returns(number);
+            category(Math);
+        ) -> Rounds a value to the nearest integer, with an optional default.
+    first: |-
+        function(
+            parameters(x: any[]);
+            returns(any);
+            category(Collection);
+            fallible;
+        ) -> Returns the first element of an array, or null when empty.
+    last: |-
+        function(
+            parameters(x: any[]);
+            returns(any);
+            category(Collection);
+            fallible;
+        ) -> Returns the last element of an array, or null when empty.
+    has_key: |-
+        function(
+            parameters(obj: object, key: string);
+            returns(boolean);
+            category(Collection);
+            fallible;
+        ) -> Returns true when the object contains the given key.
+    contains: |-
+        function(
+            parameters(haystack: any, needle: any);
+            returns(boolean);
+            category(Collection);
+            fallible;
+        ) -> Returns true when haystack contains needle (array, object, or string).
+    length: |-
+        function(
+            parameters(x: string | number | any[]);
+            returns(number);
+            category(Collection);
+            fallible;
+        ) -> Returns the length of a string, array, or object.
+    number: |-
+        function(
+            parameters(x: any, def_val?: number);
+            returns(number);
+            category(Type Conversion);
+            fallible;
+        ) -> Converts a value to a number, with an optional default. Is _fallible_ if no default value is provided.
+    starts_with: |-
+        function(
+            parameters(x: string, find: string);
+            returns(boolean);
+            category(String Predicates);
+        ) -> Returns true when the string starts with the given prefix (case-sensitive).
+    ends_with: |-
+        function(
+            parameters(x: string, find: string);
+            returns(boolean);
+            category(String Predicates);
+        ) -> Returns true when the string ends with the given suffix (case-sensitive).
+    lower: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+        ) -> Converts a string to a _lowercase_ variant.
+    upper: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+        ) -> Converts a string to uppercase.
+    capitalize: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Capitalizes the first character of a string.
+    kebab_case: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Converts a string to kebab-case.
+    snake_case: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Converts a string to snake_case.
+    camel_case: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Converts a string to camelCase.
+    pascal_case: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Converts a string to PascalCase.
+    title_case: |-
+        function(
+            parameters(x: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Converts a string to Title Case.
+    without_date: |-
+        function(
+            parameters(string: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.
+    ensure_leading: |-
+        function(
+            parameters(var: any, prefix: any);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Ensures the string form of a value starts with a prefix.
+    ensure_trailing: |-
+        function(
+            parameters(var: any, postfix: any);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Ensures the string form of a value ends with a postfix.
+    replace: |-
+        function(
+            parameters(x: string, find: string, replacement: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Replaces every literal occurrence of a substring; empty find is a no-op.
+    replace_first: |-
+        function(
+            parameters(x: string, find: string, replacement: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Replaces the first literal occurrence of a substring; empty find is a no-op.
+    replace_last: |-
+        function(
+            parameters(x: string, find: string, replacement: string);
+            returns(string);
+            category(String Mutations);
+            fallible;
+        ) -> Replaces the last literal occurrence of a substring; empty find is a no-op.
+    terminal: |-
+        function(
+            parameters(content: string);
+            returns(string);
+            category(Rendering);
+            fallible;
+        ) -> Converts Prose markup content to a terminal string with ANSI SGR sequences, OSC8 links, etc.
+    date: |-
+        function(
+            parameters(iso: string, fmt: string);
+            returns(string);
+            category(Date Formatting);
+            fallible;
+        ) -> Reformats an ISO date/datetime string into a named human format.
+    is_date: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the string is a valid ISO date (YYYY-MM-DD).
+    is_date_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Same as is_date (the format itself is timezone-agnostic).
+    is_date_time: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns `true` when the string is a valid ISO datetime.
+    is_date_time_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Same parse contract as is_date_time.
+    is_today: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns `true` when the date/datetime is today (_local time_).
+    is_today_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns `true` when the date/datetime is today (_in UTC_).
+    is_yesterday: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is yesterday (local).
+    is_yesterday_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is yesterday (UTC).
+    is_tomorrow: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is tomorrow (local).
+    is_tomorrow_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is tomorrow (UTC).
+    is_this_month: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is in the current month (local).
+    is_this_month_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is in the current month (UTC).
+    is_this_year: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is in the current year (local).
+    is_this_year_utc: |-
+        function(
+            parameters(x: any);
+            returns(boolean);
+            category(Date Validators);
+        ) -> Returns true when the date/datetime is in the current year (UTC).
+    date_delta: |-
+        function(
+            parameters(date1: string, date2: string, diff: string);
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+        ) -> Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour).
+    older_than: |-
+        function(
+            parameters(date1: string, date2: string, diff: string);
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+        ) -> Returns true when date1 is at least the given duration older (earlier) than date2.
+    newer_than: |-
+        function(
+            parameters(date1: string, date2: string, diff: string);
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+        ) -> Returns true when date1 is at least the given duration newer (later) than date2.
+    and: |-
+        function(
+            parameters(...values: any);
+            returns(boolean);
+            category(Logical);
+        ) -> Logical AND of all arguments. Short-circuits on first falsy value.
+    or: |-
+        function(
+            parameters(...values: any);
+            returns(boolean);
+            category(Logical);
+        ) -> Logical OR of all arguments. Short-circuits on first truthy value.
+    absolute: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Resolves a file path to an absolute path.
+    relative: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Returns a best-effort relative path from the document base directory.
+    file_exists: |-
+        function(
+            parameters(file: file);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+        ) -> Returns true when the file exists (local or remote URL).
+    frontmatter:
+        - |-
+            function(
+                parameters(file: file);
+                returns(object);
+                category(Filesystem);
+                fallible;
+            ) -> Reads the frontmatter of a Markdown file as an object.
+        - |-
+            function(
+                parameters(file: file, prop: string);
+                returns(any);
+                category(Filesystem);
+                fallible;
+            ) -> Reads a single property from the frontmatter of a Markdown file.
+    markdown_body_empty: |-
+        function(
+            parameters(file: file);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+        ) -> Returns true when the Markdown body has only whitespace.
+    markdown_title: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the title from frontmatter or the first H1 heading.
+    validate_schema:
+        - |-
+            function(
+                parameters(file: file);
+                returns(boolean);
+                category(Filesystem);
+                fallible;
+            ) -> Validates a Markdown document against its declared schema.
+        - |-
+            function(
+                parameters(file: file, obj: object);
+                returns(boolean);
+                category(Filesystem);
+                fallible;
+            ) -> Validates a Markdown document against its declared schema.
+    is_indexed_file: |-
+        function(
+            parameters(file: file);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+        ) -> Returns true when the filename stem matches the indexed grammar (base-NNN).
+    file_index: |-
+        function(
+            parameters(file: file);
+            returns(number);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the parsed index suffix, or -1 when non-indexed.
+    increment_file_index: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Increments the numeric index suffix, preserving zero-padding width.
+    decrement_file_index: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Decrements the numeric index suffix, clamped at 0.
+    find_first_index: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member.
+    find_last_index: |-
+        function(
+            parameters(file: file);
+            returns(file);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member.
+    basename: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the final path component including extension.
+    basename_without_index: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the basename with any indexed suffix removed from the stem.
+    dirname: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the directory portion of the display path.
+    ext: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the final extension without the leading dot.
+    parent_dir: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the directory segment immediately above the basename.
+    file_trailing: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the last directory segment plus the basename.
+    dir_leading: |-
+        function(
+            parameters(file: file);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing).
+    join: |-
+        function(
+            parameters(left: string, right: string);
+            returns(string);
+            category(Filesystem);
+            fallible;
+        ) -> Joins two path strings with normalized separators.
+    link:
+        - |-
+            function(
+                parameters(file: file);
+                returns(string);
+                category(Filesystem);
+                fallible;
+            ) -> Creates a Markdown link to a local file, using its relative path as the link text.
+        - |-
+            function(
+                parameters(target: file, desc: string);
+                returns(string);
+                category(Filesystem);
+                fallible;
+            ) -> Creates a Markdown link to a local file or HTTP(S) URL with the given link text.
+    has_command: |-
+        function(
+            parameters(cmd: string);
+            returns(boolean);
+            category(Filesystem);
+        ) -> Returns true when the command is found on PATH or is an existing executable absolute path.
+    has_skill: |-
+        function(
+            parameters(name: string);
+            returns(boolean);
+            category(Context);
+        ) -> Returns true when a skill directory exists in a user-scoped or local-scoped skill root.
+    has_local_skill: |-
+        function(
+            parameters(name: string);
+            returns(boolean);
+            category(Context);
+        ) -> Returns true when a skill directory exists in a local-scoped skill root.
+    as_line_separated: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Joins a list into a newline-separated string, one element per line.
+    as_csv: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Joins a list into a comma-separated string.
+    as_tsv: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Joins a list into a tab-separated string.
+    as_space_separated: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Joins a list into a space-separated string.
+    as_unordered_list: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
+    as_ordered_list: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
+    as_json: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`.
+    as_json5: |-
+        function(
+            parameters(list: any[]);
+            returns(string);
+            category(List Formatting);
+            fallible;
+        ) -> Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`.
+    predict_conflicts: |-
+        function(
+            parameters(branch: string);
+            returns(string[]);
+            category(Git);
+            fallible;
+        ) -> Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch.
+    branch_exists_on_remote:
+        - |-
+            function(
+                parameters();
+                returns(boolean);
+                category(Git);
+                fallible;
+            ) -> Returns whether the current branch exists in the preferred remote's live ref advertisement or authoritative provider API.
+        - |-
+            function(
+                parameters(branch: string);
+                returns(boolean);
+                category(Git);
+                fallible;
+            ) -> Returns whether an exact branch exists in the preferred remote's live ref advertisement or authoritative provider API.
+        - |-
+            function(
+                parameters(branch: string, remote: string);
+                returns(boolean);
+                category(Git);
+                fallible;
+            ) -> Returns whether an exact branch exists in the named remote's live ref advertisement or authoritative provider API.
+    remote_vendor: |-
+        function(
+            parameters(remote: string(optional));
+            returns(enum("", github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut));
+            category(Git);
+            fallible;
+        ) -> Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.
+    pr: |-
+        function(
+            parameters(id: any);
+            returns(string);
+            category(Pull Requests);
+            fallible;
+        ) -> Returns one provider pull or merge request in canonical Markdown form.
+    pr_list:
+        - |-
+            function(
+                parameters(query: object);
+                returns(string[]);
+                category(Pull Requests);
+                fallible;
+            ) -> Queries pull or merge requests with the canonical bounded filter vocabulary. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
+        - |-
+            function(
+                parameters(count: number(integer));
+                returns(string[]);
+                category(Pull Requests);
+                fallible;
+            ) -> Returns the newest `count` open pull or merge requests.
+    cicd: |-
+        function(
+            parameters(id: any);
+            returns(string);
+            category(CI/CD);
+            fallible;
+        ) -> Returns one provider-addressable CI/CD job in canonical Markdown form.
+    cicd_list:
+        - |-
+            function(
+                parameters(query: object);
+                returns(string[]);
+                category(CI/CD);
+                fallible;
+            ) -> Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
+        - |-
+            function(
+                parameters(count: number(integer));
+                returns(string[]);
+                category(CI/CD);
+                fallible;
+            ) -> Returns the newest `count` CI/CD jobs of any status.

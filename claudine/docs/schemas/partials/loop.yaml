@@ -1,0 +1,6 @@
+kind: schema
+description: Schema for Loop Lifecycle Hook
+typed:
+    conditional:
+        - while: expression
+        - until: expression

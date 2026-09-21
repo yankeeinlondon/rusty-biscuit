@@ -1,0 +1,28 @@
+kind: schema
+description: a schema to model side effects in Lifecycle events
+types:
+    # Lifecycle side-effects in object notation
+    side_effect:
+        set: object -> Sets a top-level key in the `doc` namespace; no external mutation
+        set_frontmatter: |-
+            file: file(required)
+            prop: string(required)
+            value: any(required)
+            $description: Sets a frontmatter property on a local file. Only files in the repo (or file tree if not in a repo) are accessible
+            $fallible: true
+        merge_frontmatter: |-
+            file: file(required)
+            prop: string(required)
+            value: any(required)
+            $description: Sets a frontmatter property on a local file. Only files in the repo (or file tree if not in a repo) are accessible
+            $fallible: true
+        delete_frontmatter: null
+        increment_frontmatter: null
+        decrement_frontmatter: null
+        append_frontmatter: null
+        prepend_frontmatter: null
+        ensure_file: null
+        ensure_dir: null
+        append_line: null
+        append_jsonl: null
+        http_post: null
