@@ -1,7 +1,7 @@
 ---
 title: Direct cell execution — hosted matrices built from the plan's cells
 created: 2026-09-19
-phase: 8
+phase: 9
 total_phases: 9
 agent: claude/opus
 yolo: true
@@ -162,6 +162,76 @@ skills_files_updated_during_phase_8:
   - .claude/skills/rust-devops/ci-cd.md
   - .claude/skills/os/wsl.md
   - .claude/skills/os/SKILL.md
+source_files_during_phase_9:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_9:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - features/2026-09-19-direct-cell-execution/spec.md
+docs_created_during_phase_9:
+  - features/2026-09-19-direct-cell-execution/acceptance.md
+skills_files_updated_during_phase_9:
+  - .claude/skills/rust-devops/ci-cd.md
+source_code:
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_runner_loss.py
+  - scripts/ci/affected_scope.py
+  - scripts/Cargo.toml
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - just/ci-local.just
+  - .githooks/tests/test-pre-push.sh
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/schema.py
+  - scripts/ci/plan_fixtures.py
+  - scripts/ci/test_cross_check.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_local_evidence.py
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-rollup.rs
+  - .github/ci/schemas/contract.json
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - .githooks/tests/fixtures/plan-macos-executing.json
+  - .githooks/tests/fixtures/plan-macos-two-packages.json
+  - .githooks/tests/fixtures/plan-wsl-absent.json
+  - .githooks/tests/fixtures/plan-wsl-executing.json
+  - .githooks/tests/fixtures/plan-wsl-reused.json
+  - features/2026-09-19-direct-cell-execution/spikes/row-equality.py
+  - scripts/ci/completion.py
+  - just/devops.just
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - .github/workflows/ci.yml
+  - scripts/ci/cell_contract.py
+  - scripts/ci/runner_loss.py
+  - .github/ci/ci-baseline.toml
+  - features/2026-09-19-direct-cell-execution/spikes/capacity.py
+documentation:
+  - features/2026-09-19-direct-cell-execution/spec.md
+  - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
+  - .github/ci/schemas/README.md
+  - .github/ci/README.md
+  - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
+  - docs/topics/ci-cd.md
+  - CLAUDE.md
+  - features/2026-09-19-direct-cell-execution/rulings.md
+  - features/2026-09-19-direct-cell-execution/spikes/s1-labels.md
+  - features/2026-09-19-direct-cell-execution/spikes/s2-nextest-list.md
+  - features/2026-09-19-direct-cell-execution/spikes/plans/README.md
+  - features/2026-09-19-direct-cell-execution/spikes/s4-row-equality.md
+  - features/2026-09-19-direct-cell-execution/acceptance.md
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-runners.md
+  - .claude/skills/os/wsl.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/SKILL.md
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Plan — Direct Cell Execution
@@ -1029,23 +1099,31 @@ each deletion removes a fallback.
 
 ## Phase 9 — Acceptance Evidence and Handoff
 
-- [ ] **AC-by-AC evidence table** in
+- [x] **AC-by-AC evidence table** in
       `features/2026-09-19-direct-cell-execution/acceptance.md`: each of the eight
       criteria, the named fixture or artifact that demonstrates it, and the exact
       command that reproduces it.
-- [ ] **Full validation sweep**, reported with real output: all thirteen
+      *(Done: 167 cited test names checked mechanically against the suites.)*
+- [x] **Full validation sweep**, reported with real output: all thirteen
       `scripts/ci/test_*.py` suites; `just _test repo-deps`;
       `just _test test-toolkit`; `just _lint repo-deps`; `just _lint test-toolkit`;
       `.githooks/tests/test-pre-push.sh`; `actionlint` on `ci.yml`,
       `_area-ci.yml`, `_package-ci.yml`, `_wsl-ci.yml`; `just ci-local --plan` on
       this tree.
-- [ ] **State the gaps plainly.** Anything requiring a push or a hosted run
+      *(Done, all green: 905 Python tests, 445 + 228 Rust, lints clean, hook
+      67/67, actionlint clean, 9 rows. See `acceptance.md` § "Validation
+      sweep".)*
+- [x] **State the gaps plainly.** Anything requiring a push or a hosted run
       (S1, the Phase 7 trial, the observed-cells comparison) is listed as blocked
       with the command that closes it. Do not report a hosted claim this session
       did not make.
-- [ ] **Terminal state is "implementation complete, ready for review."** Do not
+      *(Done: `acceptance.md` § "What is not proven". S1 questions 1–2 close
+      with the trial; question 3 needs an executing WSL2 row, which this
+      branch does not have.)*
+- [x] **Terminal state is "implementation complete, ready for review."** Do not
       run `just complete`; do not move this feature to `_completed`; do not
       commit unless the prompt asks for it.
+      *(Nothing committed, completed, or moved.)*
 
 ## Concurrency Map
 

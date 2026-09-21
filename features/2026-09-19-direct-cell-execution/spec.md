@@ -2,7 +2,7 @@
 kind: feature
 name: direct-cell-execution
 date: 2026-09-19
-status: planned
+status: implemented
 supersedes:
   - 2026-09-12-better-cicd-flow
 related:
@@ -32,94 +32,81 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-19
-review_iterations: 0
+review_iterations: 1
+implemented: true
 human_review: true
 human_review_items:
   - |-
-    **Please confirm the "all areas at once, rollback by revert" approach,
-    and run one real CI trial before this is merged.**
+    **Please confirm the "all areas at once, undo by revert" approach, and
+    run one real CI trial before this is merged.**
 
     *Background.* This feature changes how CI decides what to run. The old
-    way gave each package a list of operating systems to test on. The new
-    way gives each workflow one row per unit of work, taken straight from
-    the plan. Phase 5 moved every workflow to the new way. After Phase 5 you
-    were asked whether to keep a way to move package areas back one at a
-    time (option B) or to move everything together and undo by reverting
-    (option A). No answer had arrived when Phases 7 and 8 ran. Those phases
-    run without a person, so they went ahead with the recommended option A.
+    design gave each package a list of operating systems to test on. The new
+    design gives each workflow one row per unit of work, taken directly from
+    the plan. All nine phases are built. Every local check passes, and
+    `acceptance.md` in this feature's folder maps each acceptance criterion
+    to the tests that prove it. No hosted CI run has happened yet, because
+    none of the implementing sessions was allowed to push.
 
-    *What Phase 8 did.* Phase 8 removed the last pieces of the old way: the
-    per-package operating-system lists in the scope document, and the
-    function that built them. The local tools that still read those lists
-    (`just ci-local` and a pre-push hook test helper) now read the plan
-    directly. Nothing was committed or pushed, and the whole phase reverts
-    as one unit. The plan asked for a real CI trial before this phase. That
-    trial needs a push, so it still has not run. This phase went ahead
-    because hosted CI stopped using the removed lists in Phase 5; only local
-    tools still read them.
-
-    *Why decide before merging.* Every local check passes, but no hosted run
-    has yet shown the rows, the per-cell completion records, and the area
-    audits working together. The trial is also more useful now, on the
-    final code, than it would have been before Phase 8.
+    *Why decide before merging.* Local tests cannot show the real job names
+    on GitHub, the per-cell completion files uploaded by real runners, or the
+    area audits reading them. One ordinary pull-request run shows all three.
+    If that run is skipped, the first real run happens on `main`, where a
+    problem would affect everyone until a revert lands.
 
     * **A — Accept as built, and merge after one watched CI run.** Push the
       branch, watch one ordinary pull-request run, and compare it with the
-      plan. The exact commands and pass criteria are in the implementation
-      log under Phase 7, "The hosted trial". Revert if they disagree.
+      plan. The commands and pass conditions are in `acceptance.md` under
+      "What is not proven", item 1. Revert if they disagree.
       *Pros:* matches what is built. Real evidence before merge. One way of
       deciding what runs.
       *Cons:* needs a push and a few hours of CI. This branch has no WSL2
-      work to run, so WSL2 is proven only by the next change that has some.
+      work to run, so the WSL2 job name and completion file are proven only
+      by the next change that has some.
     * **B — Restore a per-area switch first.** Bring back the old
-      operating-system lists beside the rows so areas can move one at a
+      operating-system lists beside the rows, so areas can move one at a
       time.
       *Pros:* a gradual rollout.
-      *Cons:* rebuilds what Phases 5–8 removed, and keeps two descriptions
-      of what CI runs that can drift apart while both look green. That drift
-      is exactly the problem this feature exists to fix.
+      *Cons:* rebuilds what Phases 5–8 removed. It also keeps two
+      descriptions of what CI runs, which can drift apart while both look
+      green. That drift is the problem this feature exists to fix.
     * **C — Accept as built and merge without a trial.**
       *Pros:* fastest.
-      *Cons:* the first real run is on the main branch, where a problem
-      affects everyone until the revert lands.
+      *Cons:* the first real run is on `main`.
 
-    **Recommendation: A.** It is what is built and tested. It adds the one
-    piece of evidence no local test can give, before anyone else depends on
+    **Recommendation: A.** It is what is built and tested, and it adds the
+    one piece of evidence no local test can give before anyone depends on
     it.
 message_to_agent: |-
-    Phase 8 is done offline. Read the "## Phase 8" section of
-    `features/2026-09-19-direct-cell-execution/implementation-log.md` first.
+    All nine phases are implemented; the state is "implementation complete,
+    ready for review". Start with `acceptance.md` in this folder, then the
+    "## Phase 9" section of `implementation-log.md`.
 
-    1. **The hosted trial has still not run**, and Phase 8 went ahead without
-       it (the reasons are in the log). Phase 9 must list it as blocked, with
-       the commands from the Phase 7 log section "The hosted trial". Do not
-       claim it.
-    2. **`execution_path` was deliberately kept.** It is redundant with one
-       admitted value (`rows`), but removing it is a plan-schema bump from
-       v5 to v6 for no behavior change. Record it as an optional follow-up
-       rather than doing it in Phase 9.
-    3. **New helpers for acceptance evidence.** `test_affected_scope.py` has
-       `gates_by_package`, `dispatched`, `producer_contracts`, and
-       `resolved_contracts`. `test_resolved_plan.py` has `dispatched_rows` and
-       `producer_contracts`. They resolve cells through the real
-       `cell_contract.contract` over the real rows, and are the natural
-       fixtures to cite for acceptance criteria 1, 2, and 4.
-    4. **Two new Rust contracts cite acceptance criterion 2 directly**:
-       `the_reusable_workflows_accept_only_rows_and_run_scalars` and
-       `no_shipped_reader_consumes_a_retired_environment_list_projection`.
-    5. **Pre-existing documentation drift not fixed** (outside this feature's
-       scope): three documents say `ci.yml` has "exactly six top-level jobs",
-       but it has eight (`build` and `area-drift` are missing), and one
-       contract requires that phrase. `.github/ci/README.md` also still
-       mentions a retired "CI tooling" contract-test leg. List these as
-       known gaps, or fix them with the contract in the same change.
-    6. **Run the hook suite with `env -u CDPATH`.**
+    1. **No hosted claim has been made.** The Phase 7 trial, S1's label
+       questions, and the WSL2 guest's completion record are all unproven on
+       GitHub. `acceptance.md` § "What is not proven" has the commands. The
+       one unchecked plan box (Phase 7, Wave 3, "One ordinary affected-area
+       CI run") is unchecked on purpose. Check it only with a real run's
+       evidence.
+    2. **S1 question 3 cannot close on this branch.** Both WSL2 cells here
+       are accepted gaps, so no WSL2 row runs under any label. It closes on
+       the first later change that touches a package with an executing WSL2
+       cell. Record the answer in `spikes/s1-labels.md`.
+    3. **Phase 9 fixed one pre-existing drift.** The docs said `ci.yml` has
+       six top-level jobs; it has eight (`build`, `area-drift`). The fix is
+       pinned by `the_ci_documentation_states_the_implemented_behavior`.
+    4. **Optional follow-ups, not defects:** retire the redundant
+       `execution_path` field (plan schema v5 → v6); the `local_evidence.py`
+       version-1 `scope["matrix"]` read; the unreachable `package_cells`
+       `KeyError`. See `acceptance.md` § "Known gaps and follow-ups".
+    5. **Run the hook suite with `env -u CDPATH`** on the development Mac.
+    6. **Do not move this feature to `_completed`** and do not run
+       `just complete`; the author does that after review.
 
-    Green on this tree (macOS): 13/13 Python suites, `just _test repo-deps`
-    (445), `just _test test-toolkit` (228), both lints, `actionlint` on the
-    four workflows, the hook suite (67/67), `just ci-local --plan`, and
-    `just ci-local` (13/13 gates). The Phase 8 log records the Linux
-    cross-check of `repo-deps`.
+    Green on this tree (macOS, 2026-09-20): 13/13 Python suites (905 tests),
+    `just _test repo-deps` (445), `just _test test-toolkit` (228), both
+    lints, the hook suite (67/67), `actionlint` on the four workflows, and
+    `just ci-local --plan` (9 rows).
 ---
 
 # Direct cell execution: hosted matrices built from the plan's cells

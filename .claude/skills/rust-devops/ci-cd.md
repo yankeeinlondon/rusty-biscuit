@@ -5,11 +5,11 @@ repository's CI, pre-push hook, or release automation. The live authorities are
 `docs/topics/ci-cd.md`, `.github/ci/README.md`, package
 `[package.metadata.ci]`, and `.github/ci/environments.json`.
 
-## The six jobs of `ci.yml`
+## The eight jobs of `ci.yml`
 
-`ci.yml` defines exactly six top-level jobs and a contract test pins the set:
-`validation`, `scope`, `preflight`, `area-ci`, `ci-gate`, `ci-reporting`. The
-first five block; `ci-reporting` is advisory and carries
+`ci.yml` defines exactly eight top-level jobs and a contract test pins the set:
+`validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`, `ci-gate`,
+`ci-reporting`. The first seven block; `ci-reporting` is advisory and carries
 `continue-on-error: true`.
 
 **No job owns a test suite on CI's behalf.** `preflight` is bootstrap

@@ -160,6 +160,77 @@ skills_files_updated_during_phase_8:
   - .claude/skills/rust-devops/ci-cd.md
   - .claude/skills/os/wsl.md
   - .claude/skills/os/SKILL.md
+source_files_during_phase_9:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_9:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - features/2026-09-19-direct-cell-execution/spec.md
+docs_created_during_phase_9:
+  - features/2026-09-19-direct-cell-execution/acceptance.md
+skills_files_updated_during_phase_9:
+  - .claude/skills/rust-devops/ci-cd.md
+source_code:
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_runner_loss.py
+  - scripts/ci/affected_scope.py
+  - scripts/Cargo.toml
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - just/ci-local.just
+  - .githooks/tests/test-pre-push.sh
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/schema.py
+  - scripts/ci/plan_fixtures.py
+  - scripts/ci/test_cross_check.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_local_evidence.py
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-rollup.rs
+  - .github/ci/schemas/contract.json
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - .githooks/tests/fixtures/plan-macos-executing.json
+  - .githooks/tests/fixtures/plan-macos-two-packages.json
+  - .githooks/tests/fixtures/plan-wsl-absent.json
+  - .githooks/tests/fixtures/plan-wsl-executing.json
+  - .githooks/tests/fixtures/plan-wsl-reused.json
+  - features/2026-09-19-direct-cell-execution/spikes/row-equality.py
+  - scripts/ci/completion.py
+  - just/devops.just
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - .github/workflows/ci.yml
+  - scripts/ci/cell_contract.py
+  - scripts/ci/runner_loss.py
+  - .github/ci/ci-baseline.toml
+  - features/2026-09-19-direct-cell-execution/spikes/capacity.py
+documentation:
+  - features/2026-09-19-direct-cell-execution/spec.md
+  - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
+  - .github/ci/schemas/README.md
+  - .github/ci/README.md
+  - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
+  - docs/topics/ci-cd.md
+  - CLAUDE.md
+  - features/2026-09-19-direct-cell-execution/rulings.md
+  - features/2026-09-19-direct-cell-execution/spikes/s1-labels.md
+  - features/2026-09-19-direct-cell-execution/spikes/s2-nextest-list.md
+  - features/2026-09-19-direct-cell-execution/spikes/plans/README.md
+  - features/2026-09-19-direct-cell-execution/spikes/plans/*.json
+  - features/2026-09-19-direct-cell-execution/spikes/s4-row-equality.md
+  - features/2026-09-19-direct-cell-execution/acceptance.md
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-runners.md
+  - .claude/skills/os/wsl.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/SKILL.md
+completed_phase: 9
+implemented: true
 implementation_1: "2026-09-21T08:05:10-07:00"
 ---
 
@@ -1808,6 +1879,140 @@ was told to implement Phase 8, so it went ahead, on this reasoning:
   `legacy_scope_document` paths into `local_evidence.py main`
   (`scope-verify`), which `WorkflowScopeStepTests` and
   `test_local_evidence.py` exercise end to end.
+
+### OS considerations
+
+- **What is OS-sensitive in this phase:** only the recipe's new `jq` forms in
+  `just/ci-local.just` (`any(gen; cond)`, here-strings into `jq`). They run
+  under bash on the developer host. Everything else is Python on the planner
+  side, `ci.yml` (Linux-only `scope` job), and Rust string contracts.
+- **`just cross-check repo-deps --os linux` did not run.** build-linux is held
+  by another job's lock: `nightly-reward-spike`, owner
+  `reward-20260914-c3e60d0`, branch `feat-nightly-perf`, taken
+  `2026-09-14T18:25:30Z`, six days old and possibly stale. The recipe waited
+  25 minutes and was stopped by my timeout. The lock is not this session's,
+  so it was left alone. **Someone should check whether that lock is stale.**
+- **Linux evidence from Docker instead** (the `os` skill's sanctioned route
+  on this Mac): `rust:1` (Debian, aarch64), bash 5.2.37, jq 1.7, Python
+  3.13.5, source rsynced to `~/.cache/rb-linux/src`. All 13
+  `scripts/ci/test_*.py` suites ran. Twelve are green, including
+  `test_ci_local.py` 92/92, which drives the real migrated recipe through
+  Linux bash and jq. `test_completion.py` had failures with environmental
+  causes, not Phase 8 ones:
+  - Debian's packaged `just 1.40.0` rejects `[arg(...)]` in
+    `just/spec.just`, which caused 4 errors. With `just 1.58.0` from
+    `cargo install`, those 4 pass.
+  - The remaining failure is
+    `ShippedRecipeEndToEndTests::test_the_shipped_recipe_emits_a_manifest_the_validator_accepts`:
+    the container has no `cargo-nextest`, and the recipe refuses an
+    unlabeled listing. That suite is 49/49 on macOS, where nextest is
+    installed, and CI provisions both tools.
+- Windows and WSL2 were not exercised. The migrated recipe is the developer
+  gate loop, and on Windows it runs under Git Bash with the same jq the
+  recipe already relies on for `.cells[]` reads in the same loop. No new tool
+  or syntax class was introduced.
+
+## Phase 9
+
+Phase 9 is acceptance evidence and handoff. It adds no feature behavior. It
+produced `acceptance.md`, ran the full validation sweep, stated the hosted
+gaps, and fixed one pre-existing documentation drift that Phase 8 flagged.
+
+### What was done
+
+1. **`acceptance.md` (new).** One section per acceptance criterion (AC1–AC8).
+   Each section quotes the criterion and lists the claims, the named tests or
+   artifacts that demonstrate each, and a command that reproduces it. It
+   finishes with the validation sweep, "What is not proven", and "Known gaps
+   and follow-ups".
+   - **Every cited name was checked mechanically.** A script pulled the 167
+     test, class, and function names out of the document and searched for
+     each as a `def`, `fn`, or `class` in the 13 Python suites,
+     `scripts/ci-rollup-tests.rs`, and `ci_workflow_contracts.rs`. The only
+     tokens it did not match are file names and nextest filter prefixes, which
+     is expected.
+   - **One shorthand was wrong on the first draft and was corrected.** The
+     rollup tests are a `#[path]` module inside the `ci-rollup` binary, not a
+     test target. The shorthand is therefore
+     `cargo nextest run -p repo-deps --bin ci-rollup -E 'test(<name>)'`. It
+     was checked by running one test through it, and the `contracts` and
+     `py <suite> <Class>` shorthands were checked the same way.
+2. **The documentation drift (Phase 8's `message_to_agent` item 5), fixed
+   with its contract.** `.github/ci/README.md`, `docs/topics/ci-cd.md`, and
+   `.claude/skills/rust-devops/ci-cd.md` all said `ci.yml` has "exactly six
+   top-level jobs". It has eight (`build` and `area-drift` were missing), and
+   both the README table and the topic page described `ci-gate` as folding
+   "the four above" when it folds six. The README also still said CI tooling
+   "has its own small contract-test leg", which retired into `repo-deps` and
+   `test-toolkit`.
+   - **Test first.** `the_ci_documentation_states_the_implemented_behavior`
+     was changed first. It now lists the three stale phrases and the "four"
+     fold in `RETIRED`, and requires "exactly eight top-level jobs" in all
+     three documents instead of "six" in one. It went red on the unfixed
+     README (`.github/ci/README.md still claims "exactly six top-level
+     jobs"`). After the three documents were fixed, all 149 contracts passed.
+   - The docs now match `TARGET_CI_JOBS` (8) and `GATED_JOBS` (6) in the same
+     contract file. The README table gains `build` and `area-drift` rows, and
+     the skill's heading is now "The eight jobs of `ci.yml`". Nothing linked to
+     the old heading's anchor (checked with a grep).
+   - Per the drift rule, the code was treated as correct and the documents as
+     wrong.
+3. **The gaps are stated plainly** in `acceptance.md` § "What is not proven":
+   the hosted trial (with the Phase 7 commands and acceptance conditions), S1
+   (questions 1–2 close with the trial, but question 3 needs an **executing**
+   WSL2 row, which this branch does not have), the hosted observed-cells
+   comparison, the WSL2 guest's completion record on a real guest, and the
+   Windows and WSL2 local runs.
+4. **Terminal state.** Implementation complete, ready for review. Nothing
+   was committed, `just complete` was not run, and the feature was not moved.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) | Seen red first? |
+|---|---|---|
+| Docs state `ci.yml`'s real job count (8) in all three reader-facing places | `ci_workflow_contracts.rs::the_ci_documentation_states_the_implemented_behavior` (`REQUIRED` × 3) | yes: the README still said six |
+| No doc claims six jobs, a four-job fold, or a CI-tooling leg | same test (`RETIRED`, 6 new entries) | yes |
+| Every acceptance-table citation names a real test | one-off script (described above); not a shipped test because `acceptance.md` is a point-in-time record, not a maintained contract | — |
+
+### Validation sweep (macOS, this host, 2026-09-20)
+
+- 13/13 `scripts/ci/test_*.py` suites, 905 tests, all `OK`:
+  `test_affected_scope` 282, `test_schema` 133, `test_resolved_plan` 96,
+  `test_ci_local` 92, `test_evidence_reuse` 76, `test_runner_loss` 50,
+  `test_completion` 49, `test_constraints` 39, `test_local_evidence` 23,
+  `test_reuse_validation` 21, `test_publish_gaps` 19, `test_cross_check` 13,
+  `test_build_key` 12.
+- `just _test repo-deps`: 445 passed, 1 skipped (pre-existing).
+- `just _test test-toolkit`: 228 passed, 2 skipped (pre-existing);
+  `ci_workflow_contracts` 149/149.
+- `just _lint repo-deps`, `just _lint test-toolkit`: clean, 0 warnings.
+- `env -u CDPATH .githooks/tests/test-pre-push.sh`: 67 passed, 0 failed.
+- `actionlint` on `ci.yml`, `_area-ci.yml`, `_package-ci.yml`,
+  `_wsl-ci.yml`: clean.
+- `just ci-local --plan`: 9 dispatch rows across `root` and `tools` (6 test,
+  1 check, 2 lint), both WSL2 cells `omit`/`accepted-gap`, 6
+  build records on 3 native owners, 0 approved skips.
+- GitNexus `detect-changes --scope unstaged`: 7 files, 5 symbols, risk
+  **low**, 0 affected processes.
+- Not re-run: `just ci-local` (full gate run). It was 13/13 in Phase 8, and
+  Phase 9 changed no code it exercises.
+
+### OS considerations
+
+The only code Phase 9 changed is a Rust contract that string-matches
+single-line phrases in Markdown, so it is platform-neutral. A CRLF checkout
+cannot split any of the phrases. No `just cross-check` was run, and none was
+warranted. Linux, Windows, and WSL2 evidence for the feature as a whole is
+summarized in `acceptance.md` § "What is not proven", item 5, and in each
+phase's own OS notes.
+
+### Pre-existing items carried forward (not fixed here)
+
+- `execution_path` redundancy (plan-schema v6 follow-up), the
+  `local_evidence.py` version-1 `scope["matrix"]` read, and the unreachable
+  `package_cells` `KeyError`. All three are listed in `acceptance.md` §
+  "Known gaps and follow-ups".
+- The build-linux lock from Phase 8 was not re-checked in this phase.
 
 ## Implementation of Review Findings #1
 
