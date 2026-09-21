@@ -64,6 +64,49 @@ Notes for the Phase 5 label work:
 - `build` labels use the producer environment (`build (ubuntu-latest)`);
   `BUILD_JOB_SEGMENT` parses them; a build owns no result cell.
 
+### 1a. The labels Phase 5 shipped (captured 2026-09-20, after the rewrite)
+
+Every producer now expands an `include:` matrix of dispatch rows, so GitHub
+builds each label from the row's four values in the planner's order
+(`package, gate, environment, runner` — ruling R1). The area calls the
+execution workflow **once**, so `package-ci` is a static segment and the
+package lives in the parenthetical instead.
+
+| Workflow | Job id | Label when it runs | Label when skipped whole | Cell it owns |
+|---|---|---|---|---|
+| ci.yml | `area-ci` | `area-ci (claudine)` | `area-ci` | none (scheduling) |
+| _area-ci.yml | `package-ci` | `package-ci` | `package-ci` | none (delegation) |
+| _area-ci.yml | `accepted-gaps` | `accepted-gaps` | `accepted-gaps` | none |
+| _area-ci.yml | `coverage-audit` | `coverage-audit` | `coverage-audit` | none (verdict) |
+| _package-ci.yml | `check` | `check (sniff, check, windows-latest, windows-latest)` | `check` | check cell |
+| _package-ci.yml | `test` | `test (sniff, L1, macos-latest, macos-latest)`; `test (dmls, L2, ubuntu-latest, ubuntu-latest)`; `test (darkmatter, browser, ubuntu-latest, ubuntu-latest)` | `test` | L1 / L2 / browser cell |
+| _package-ci.yml | `lint` | `lint (sniff, lint, ubuntu-latest, ubuntu-latest)` | `lint` | lint cell |
+| _package-ci.yml | `wsl2` | `wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest)` | `wsl2` | none (delegation) |
+| _wsl-ci.yml | `wsl` | `test (wsl2-ubuntu)` (static `name:`) | — | wsl2-ubuntu L1 cell |
+
+Composite examples, and the cell each parses to
+(`scripts/ci/runner_loss.py::parse_job_name`, pinned by
+`test_runner_loss.py::JobNameCorpusTests`):
+
+```
+area-ci (playa) / package-ci / test (playa-cli, L1, windows-latest, windows-latest)
+    -> playa-cli / windows-latest / L1   -> status-playa-cli-L1-windows-latest
+area-ci (playa) / package-ci / wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)
+    -> playa-cli / wsl2-ubuntu  / L1     -> status-playa-cli-L1-wsl2-ubuntu
+area-ci (playa) / package-ci / lint (playa-cli, lint, ubuntu-latest, ubuntu-latest)
+    -> playa-cli / (no environment) / lint -> status-playa-cli-lint
+```
+
+The last two lines are the pair the whole "environment is not a runner label"
+rule exists for: **one package, one runner label, two distinct cells.** The
+delegated guest job keeps a STATIC name (a called workflow's job name is
+rendered raw when its caller skips), so the row rides on the delegating
+`wsl2 (...)` segment one level out, and the parser reads it from there.
+
+The three-token pre-row form (`test (ubuntu-latest)`) is still parsed, so
+reversing R1 would be a label-format change rather than a silent attribution
+loss, and a retry decision taken over an older run still resolves.
+
 ## 2. The contract-test edit set (Phase 2 oracles / Phase 5 promotion)
 
 From `tools/test-toolkit/tests/ci_workflow_contracts.rs`, the tests that

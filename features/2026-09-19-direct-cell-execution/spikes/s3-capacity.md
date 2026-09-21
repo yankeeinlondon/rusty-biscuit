@@ -140,3 +140,105 @@ The planner fails with a named error before emitting a plan that exceeds
 either budget; it never truncates or silently splits an area (R7). At current
 measurements no area is within an order of magnitude of any budget, so no
 partitioning design is warranted.
+
+## Phase 7 re-measurement (shipped adapter)
+
+Re-measured on 2026-09-20 from the shipped planner, row adapter, scope
+projection, and workflows (working tree on `888c19872` plus the uncommitted
+Phases 3–7), offline, with
+`python3 features/2026-09-19-direct-cell-execution/spikes/capacity.py`. No
+hosted run produced any number below. Test gates for these shapes are pinned by
+`scripts/ci/test_affected_scope.py::CapacityGuardTests`.
+
+### Matrix cardinality and output sizes
+
+Sizes are the `jq -c` form `ci.yml` writes to `$GITHUB_OUTPUT`.
+
+| Plan | Executing cells | `area-ci` matrix | Largest row set | `build` matrix | `preflight` matrix | Largest area's rows | All `area_rows` | Scope document |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| `--all` (no event) | 374 | 29 | 21 (homelab, test) | 3 | 3 | 3,625 B (homelab) | 39,911 B | 364,106 B |
+| `--all --event push` | 308 | 29 | 21 (homelab, test) | 3 | 3 | 2,935 B (homelab) | 33,748 B | 346,987 B |
+| `--all --event workflow_dispatch` | 374 | 29 | 21 (homelab, test) | 3 | 3 | 3,625 B (homelab) | 39,911 B | 364,106 B |
+| `--all --event schedule` (nightly) | 66 | 29 | 7 (homelab, wsl) | 1 | 2 | 819 B (homelab) | 10,618 B | 171,233 B |
+
+Row counts by set, full workspace: test 228, check 12, lint 68, wsl 66.
+Push to `main` (no WSL2): the same minus the 66 wsl rows. Nightly: wsl 66 only.
+
+**Correction to the Phase 1 model.** The shipped row is an object
+(`{"package", "gate", "environment", "runner"}`, key order kept for R1's
+labels), and each area document carries four `has_*_rows` flags. S3 modeled
+bare arrays, so the real payloads are ~1.8× the Phase 1 figures (homelab
+3,625 B, not 2,140 B; all areas 39,911 B, not 21,783 B). Every size and count ceiling still
+has more than 4× headroom.
+
+**Phase 8 re-measurement (2026-09-20, same script and tree plus Phase 8).**
+Retiring `matrix` and `area_matrix` changes no row, count, or job: every column
+above except the last is identical. The scope document shrinks to 204,970 B
+(`--all` and `workflow_dispatch`), 193,263 B (push), and 77,421 B (nightly),
+about 44% smaller on the full workspace. The largest remaining `scope`-job
+output is `area_rows` at 39,911 B.
+
+### Against the ceilings
+
+| Ceiling | Enforced by | Worst measured | Headroom |
+|---|---|---:|---:|
+| 256 jobs per matrix (GitHub) | `MATRIX_LIMIT`, every row set and the package list | 29 (`area-ci`), 21 (a row set) | 8.8× |
+| 16 KB per area's rows | `AREA_ROW_SET_BUDGET` | 3,625 B | 4.5× |
+| 512 KB for all areas' rows together | `TOTAL_ROW_SET_BUDGET` (**new in Phase 7**) | 39,911 B | 13× |
+| 1 MB per job output (GitHub) | the two budgets above, for `area_rows` | 39,911 B (`area_rows`; `area_matrix`'s 79,950 B retired in Phase 8) | 26× |
+| Reusable-workflow depth | `the_reusable_workflow_chain_stays_within_githubs_four_levels` | 4 (`ci.yml` → `_area-ci.yml` → `_package-ci.yml` → `_wsl-ci.yml`) | 0 under a 4-level reading |
+| Unique reusable workflows per caller | — (3 of 50) | 3 | 16× |
+
+The aggregate budget was recorded in the Phase 1 table above but never
+implemented; Phase 3 enforced only the per-area one. It matters because
+`ci.yml` carries every area's rows as **one** output (`area_rows`) that each
+`area-ci` leg indexes, so the sum, not any one area, is what meets GitHub's
+per-output ceiling.
+
+**Depth is the only ceiling without headroom.** The repository's contract and
+the `_area-ci.yml` header treat four levels as GitHub's maximum; the Phase 1
+table above cites ten. The chain satisfies both readings, but nothing may be
+inserted into it under the stricter one, and this re-measurement does not
+settle which one is current.
+
+### Job estimate, including area overhead
+
+Runner jobs occupy a hosted runner. Call jobs (`uses:`) do not. S3's ≈600
+double-counted the WSL2 leg: `_package-ci.yml`'s `wsl2` job is a call into
+`_wsl-ci.yml`, and only the guest job it calls occupies a runner.
+
+| Component | `--all` | push | nightly |
+|---|---:|---:|---:|
+| `validation`, `scope`, `ci-gate`, `ci-reporting` | 4 | 4 | 4 |
+| `preflight` | 3 | 3 | 2 |
+| `build` owners | 3 | 3 | 1 |
+| `area-drift` (only when flagged) | 0 | 0 | 0 |
+| `coverage-audit` (one per scheduled area) | 29 | 29 | 29 |
+| `accepted-gaps` (areas with a governed gap) | 11 | 9 | 11 |
+| producer rows (one runner job per executing cell) | 374 | 308 | 66 |
+| **runner jobs** | **424** | **356** | **113** |
+| call jobs: `area-ci` / `package-ci` / `wsl2` | 29 / 29 / 66 | 29 / 29 / 0 | 29 / 28 / 66 |
+
+The plan's own `job_estimate` (440 / 308 / 132) counts producer work only, with
+a WSL2 cell as two jobs. It is a scheduling hint, not this table.
+
+### Peak concurrency (ruling R3)
+
+L2 and browser rows now start beside L1 instead of staging behind it. The
+largest per-area rise is **5 runners** (darkmatter's L2 and browser rows on a
+full-workspace plan). Nightly has none. This is well inside the per-matrix
+ceiling, so R3's fallback (a second `needs:`-ordered job) is not warranted on
+these numbers. Queue time on a real run is the evidence that would change that.
+
+### The guard, proven
+
+- Unit: `test_an_over_limit_row_set_fails_planning_with_a_named_error`,
+  `test_an_oversized_area_payload_fails_planning_with_a_named_error` (Phase 3),
+  and `CapacityGuardTests::test_the_combined_scope_output_budget_refuses_many_small_areas`
+  (Phase 7). The last one also pins the boundary: one area fewer passes.
+- Through the normal invocation path:
+  `CapacityGuardTests::test_an_over_budget_area_fails_before_dispatch_and_emits_nothing`
+  runs `affected_scope.main()` over the real workspace with `--all --plan-out`
+  and only the per-area budget lowered to 256 B. The planner exits non-zero,
+  names the area and the budget, prints no scope document, and writes no plan
+  file. The same invocation at the shipped budget emits both.
