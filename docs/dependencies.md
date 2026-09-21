@@ -92,7 +92,11 @@
   `clap`/`sysinfo`: it resolves to `rustix`/`windows-sys`, which every
   dev-dependent already builds. Its adopters — `playa-cli`, `biscuit-speaks/lib`,
   `claudine/lib`, and `claudine-cli` — dropped their own `fs4` dev dependencies
-  and their divergent local copies of the guard.
+  and their divergent local copies of the guard. `serde_json` moved from a
+  development dependency to a regular one for `archive_guard`, which reads the
+  CI planner's canonical resolved plan from library code; the crate's existing
+  `biscuit-test-harness` dependency already builds it, so the graph is
+  unchanged.
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
   executables when cooperative cleanup times out.
@@ -118,6 +122,10 @@
   `research` also enables the library's existing optional `sniff` dependency
   (already used by `desktop`), whose Git work-tree discovery lets `prepare`
   refuse a research root below the Git top level; no crate was added.
+- `messenger/lib` also uses the workspace `biscuit-test-harness` as a
+  development dependency for `manifest_dir!()`, so its research fixture tests
+  resolve the corpus at run time and still find it on the WSL2 nextest-archive
+  leg. No new external crate was added.
 - `messenger/cli` enables `messenger`'s `research` feature unconditionally for
   the `messenger research` maintenance commands, so the `messenger` binary
   carries those four crates; the library's send-only builds are unchanged. Its

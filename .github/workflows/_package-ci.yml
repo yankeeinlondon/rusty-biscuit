@@ -112,6 +112,10 @@ on:
         description: "JSON array of environments whose test cell runs at least one of this package's declared companion suites. Derived from the registry's per-suite environment (R7)."
         type: string
         default: '[]'
+      lint-companions-only:
+        description: "The lint cell's required work is its companion suites rather than this package's own Clippy, because the planner selected a suite and not the package. Defaults false, which is every ordinary lint cell."
+        type: boolean
+        default: false
       node-environments:
         description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite that needs them. Empty when the package declares none."
         type: string
@@ -960,8 +964,17 @@ jobs:
       # this step cannot take is an unavailable MEASUREMENT, and an empty
       # `duration_s` is exactly how the status step spells that. Clippy's own
       # result is what the exit status carries either way.
+      #
+      # SKIPPED on a companions-only cell, and only there. The planner creates
+      # that cell for a companion suite the change selected, not for the
+      # package, so linting the package would be work no change asked for. The
+      # step is `if`-gated rather than deleted: every ordinary lint cell — the
+      # default — still runs it exactly as before, and a skipped clippy leaves
+      # NO measurement, which the status step below reads as absent rather
+      # than as a pass.
       - name: Lint
         id: clippy
+        if: ${{ !inputs.lint-companions-only }}
         env:
           # COMMAND-SCOPED. Clippy is a different compiler DRIVER with its own
           # flags (this job's `RUSTFLAGS: -D warnings` among them), so it can
@@ -1028,6 +1041,36 @@ jobs:
         if: ${{ !cancelled() && contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
         shell: bash
         run: cd darkmatter && just zed-verify
+      # The archive-path guard reads its scan scope from the run's ONE resolved
+      # plan, so the lint job needs that document whenever it runs a companion.
+      # Gated on the same condition as the companion step: a lint cell with no
+      # companion never reads the plan and does not pay the transfer for it.
+      #
+      # A MISSING PLAN IS AN ERROR, deliberately, and on both halves of the
+      # path. `download-artifact` fails this step when `ci-resolved-plan` is
+      # absent, and `BISCUIT_ARCHIVE_GUARD_PLAN` below is exported
+      # unconditionally, so a file that arrived unreadable makes the guard hard
+      # error instead of quietly scanning the full tree. The alternative —
+      # exporting the variable only when the file exists — would turn a lost
+      # artifact into a full-tree scan recorded as this cell's evidence, and a
+      # full-tree result attributed to a run that never had a plan is exactly
+      # the false evidence this cell exists to prevent.
+      - name: Download the resolved execution plan
+        if: ${{ !cancelled() && inputs.companion-suites != '[]' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      # The archive-path guard's recipe is `cargo nextest run …`, and this is the
+      # one job that runs a nextest-driven suite without being a test job, so it
+      # is the one job that never installed nextest. Without this step the guard
+      # fails on the runner with "no such command: `nextest`" — and only there:
+      # every developer host has nextest, so the local hook cannot catch it and
+      # reports the ubuntu-latest execution as outstanding instead. Gated on the
+      # guard being attached, so a lint cell without it does not pay the install.
+      - name: Install cargo-nextest (archive-path guard)
+        if: ${{ !cancelled() && contains(inputs.companion-suites, 'archive-path-guard') }}
+        uses: taiki-e/install-action@nextest
       # The lint half of this package's companion suites — only the suites that
       # declare a `lint_recipe` in the registry, which is why a package whose
       # companions are test-only leaves this step with nothing to run instead
@@ -1038,6 +1081,18 @@ jobs:
         shell: bash
         env:
           COMPANION_SUITES: ${{ inputs.companion-suites }}
+          # `companion_suites.py` runs every attached suite in ONE process and
+          # each recipe inherits this environment, so the variable reaches the
+          # other lint companions too. That is inert today and checked: the only
+          # other lint-half suite is `homelab-frontend`, whose `lint-frontend`
+          # recipe never reads it. A future lint companion that wants its own
+          # scan scope needs a per-suite environment in the registry rather than
+          # a second variable here.
+          #
+          # ABSOLUTE. The guard opens this path verbatim, and neither the
+          # recipe (`cd tools/test-toolkit && …`) nor nextest's test binary
+          # runs in the workspace directory the artifact landed in.
+          BISCUIT_ARCHIVE_GUARD_PLAN: ${{ github.workspace }}/ci-artifacts/ci-resolved-plan/resolved-plan.json
         run: |
           set -euo pipefail
           python3 scripts/ci/companion_suites.py \
@@ -1060,13 +1115,31 @@ jobs:
           GATE_DURATION: ${{ steps.clippy.outputs.duration_s }}
           ZED: ${{ steps.zed.outcome }}
           COMPANION: ${{ steps.companion.outcome }}
+          COMPANIONS_ONLY: ${{ inputs.lint-companions-only }}
           COMPANIONS_FILE: ${{ runner.temp }}/companions.json
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
           # `result` is the CELL's conclusion, not the job's (see the header).
+          #
+          # INVARIANT, companions-only cell: its required work IS its companion
+          # suites, so the companion step's outcome is the cell's outcome and
+          # ONLY `success` passes. Clippy was `if`-gated off above, so its
+          # `skipped` outcome carries no information — reading it as a failure
+          # would block every pull request that touches a Rust file, and
+          # reading it as a pass would let a cell that ran NOTHING go green,
+          # which is the false full-tree evidence this cell exists to prevent.
+          # The ordinary branch is untouched: there `skipped` still means "not
+          # this cell's work" and only an explicit `failure` downgrades.
+          companion_uncovered=""
           result="$JOB_STATUS"
-          if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$ZED" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
+          if [ "$COMPANIONS_ONLY" = "true" ]; then
+            if [ "$result" = "success" ] && [ "$COMPANION" != "success" ]; then
+              result=failure
+              companion_uncovered=1
+              echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::companion lint: ${COMPANION}. This cell runs no clippy of its own, so a companion that did not succeed leaves it with no evidence."
+            fi
+          elif [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$ZED" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
             result=failure
             echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::clippy: ${GATE}; Zed extension: ${ZED}; companion lint: ${COMPANION}."
           fi
@@ -1075,15 +1148,22 @@ jobs:
             companions="$(cat "$COMPANIONS_FILE")"
           fi
           detail=""
-          if [ "$COMPANION" = "failure" ]; then
+          if [ "$COMPANION" = "failure" ] || [ -n "$companion_uncovered" ]; then
             failed="$(jq -r '[to_entries[] | select(.value.outcome != "success") | .key] | join(", ")' <<<"$companions")"
-            detail="companion suite(s) ${failed:-unreported} lint FAILED; clippy's result does not cover them"
+            if [ -n "$companion_uncovered" ]; then
+              detail="companion suite(s) ${failed:-unreported} lint produced no success evidence; this cell lints nothing of its own, so nothing else covers them"
+            else
+              detail="companion suite(s) ${failed:-unreported} lint FAILED; clippy's result does not cover them"
+            fi
           fi
           # An unmeasured duration is ABSENT: the lint step never ran (a
-          # cancelled job) and inventing a measurement for it would be a
-          # fabrication (AC13). A RECORDED duration is emitted exactly as the
-          # step measured it, fraction included — `0.4` is a fast clippy run,
-          # and only the absent field means "not recorded".
+          # cancelled job, or a companions-only cell that skips clippy on
+          # purpose) and inventing a measurement for it would be a fabrication
+          # (AC13). Nothing downstream divides by it — the empty string is
+          # dropped from the document here rather than coerced to a number. A
+          # RECORDED duration is emitted exactly as the step measured it,
+          # fraction included — `0.4` is a fast clippy run, and only the absent
+          # field means "not recorded".
           jq -nc \
             --arg package "$PACKAGE" \
             --arg job "$JOB" \

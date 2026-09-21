@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import change_inventory, legacy_scope_document
 from local_evidence import (  # noqa: E402
@@ -156,6 +157,7 @@ class ScopeReceiptTests(RepositoryFixture):
             # The real producer, so a fixture plan cannot describe a shape the
             # planner no longer emits.
             "change_inventory": change_inventory(["alpha/src/lib.rs"], False),
+            "archive_guard": plan_fixtures.archive_guard(["alpha/src/lib.rs"]),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [{"area": "pkg", "selection_reason": "source change", "packages": ["alpha"]}],

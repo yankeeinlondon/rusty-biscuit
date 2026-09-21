@@ -616,6 +616,10 @@ loop:
 
 Loop execution runs `initialize` once at the start, then re-enters each iteration at `start` without re-running `initialize`, schema validation, or shell pre-flight. `success`, `failure`, and `finalize` fire once per iteration. The loop condition is evaluated **after** lifecycle concerns and **before** per-iteration mutations are applied.
 
+The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](flow-control/looping.md#iteration-semantics) for the full counting table.
+
+The `loop:` block's own fields can read ordinary frontmatter, which is how the example above would report progress. They cannot currently read the `_loop_*` ambient values: referencing one there fails the run with an "unknown root" error (F8 in the fix `2026-09-20-lifecycle-handoff-gaps`). `start`, `success`, `failure`, and `finalize` can read them.
+
 ## Examples
 
 ### Minimal: terminal status only
@@ -706,14 +710,16 @@ start:
 iteration: 1
 max_iterations: 3
 loop:
-  while: "iteration <= max_iterations"
+  while: "iteration < max_iterations"
   actions:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: { info: "iteration {{_loop_count}}" }
+    - action: { info: "finished iteration {{iteration}} of {{max_iterations}}" }
 ---
 ```
+
+This runs three times. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads the document's own `iteration` counter because the `loop:` block cannot currently read `_loop_count` (see [Loop Gate Concerns](#loop-gate-concerns)).
 
 ### Recover from a usage cap by switching providers
 

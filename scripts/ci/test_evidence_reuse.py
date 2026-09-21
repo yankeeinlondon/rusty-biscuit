@@ -172,6 +172,9 @@ class EvidenceFixture(unittest.TestCase):
             "change_inventory": change_inventory(
                 ["alpha/src/lib.rs", "beta/src/lib.rs"], False
             ),
+            "archive_guard": plan_fixtures.archive_guard(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"]
+            ),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [

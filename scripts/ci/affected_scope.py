@@ -241,6 +241,23 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_schema.py",
         )
     },
+    # Lint-only on purpose, and the one entry with no `recipe`: a source-policy
+    # scan has no test half to attach to an L1 cell. Without that omission the
+    # guard would run twice on Linux — once as `test-toolkit`'s L1 companion and
+    # once in its lint cell — and its changed-file scope would be applied to a
+    # cell whose evidence rules are the package's, not the scan's.
+    "archive-path-guard": {
+        "owner": "test-toolkit",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "lint_recipe": "cd tools/test-toolkit && just archive-path-guard",
+        "just": (("tools/test-toolkit", "archive-path-guard"),),
+        "counts": None,
+        "counts_reason": (
+            "the guard answers a source-policy question over files, not a test "
+            "cardinality; its two driver assertions are not the measurement"
+        ),
+    },
     # The build owner's artifact publisher: no Cargo package and no pnpm
     # workspace entry selects it, so this registration is the only thing that
     # schedules its suite. The glob stays quoted -- given a bare directory
@@ -278,6 +295,16 @@ SUITE_OWNER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tools/test-audit/", ("test-toolkit",)),
 )
 SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
+    # Cross-language by construction: `test_schema.py` and
+    # `tools/test-toolkit/tests/ci_workflow_contracts.rs` read the same bytes,
+    # which is the only reason these two documents are shipped at all. A change
+    # that selected the Python half alone would let the two readers disagree
+    # unobserved. Named one by one, not by a `schemas/` prefix: that directory
+    # also holds documentation and is where an unrelated future schema would
+    # land, and neither is an input the Rust suite reads. Those keep the
+    # `.github/ci/` prefix's `repo-deps` selection.
+    ".github/ci/schemas/archive_guard_cases.json": ("repo-deps", "test-toolkit"),
+    ".github/ci/schemas/contract.json": ("repo-deps", "test-toolkit"),
     "pnpm-lock.yaml": ("test-toolkit",),
     "pnpm-workspace.yaml": ("test-toolkit",),
     "scripts/Cargo.toml": ("repo-deps",),
@@ -313,6 +340,79 @@ AREA_DRIFT_PATHS = {
 # dependency was bumped" either. The over-approximation costs one parallel job
 # that `ci-gate` folds; the miss it prevents is silent.
 AREA_DRIFT_MANIFEST = "Cargo.toml"
+
+# The archive-path guard (fixes/2026-09-19-less-brittle). It scans repository
+# source for compile-time paths that do not survive an archived run, so the
+# files it checks are almost never its owner's: package ownership selects it
+# nowhere, and violations accumulated until an unrelated change happened to
+# select `test-toolkit`. Selection follows the scanned source instead.
+ARCHIVE_GUARD_SUITE = "archive-path-guard"
+
+# Mirrors `test_toolkit::archive_guard::SKIPPED_DIRS`. The two are one policy —
+# a path the planner selects and the scanner then refuses is a cell that ran
+# nothing — and `tools/test-toolkit/tests/ci_workflow_contracts.rs` asserts the
+# agreement across the language boundary. Matched against any path component,
+# so `examples` excludes every package's.
+ARCHIVE_GUARD_SKIPPED_DIRS = frozenset({
+    "target", ".git", "node_modules", ".gitnexus", "scripts", "examples", "fuzz",
+})
+
+# The guard's own inputs, by exact path: the matcher, its fixture corpus, the
+# driver, the exemption list, the canonical recipe, this selection rule, and
+# the registry and execution configuration that decide whether the scan runs
+# and under which scope.
+#
+# The admission rule is ownership, not topic: a file belongs here when it
+# carries configuration whose ONLY consumer is this guard, so a change to it
+# can silently alter whether the guard runs or what it scans while every other
+# check stays green. That is what keeps this a narrow list rather than a rule
+# that every workflow, manifest, or lockfile edit selects the guard.
+#
+# - `archive_guard.rs` (which also holds `ALLOWED`), `matcher_tests.rs`, and
+#   `archive_path_guard.rs` are excluded from SCANNING by `GUARD_OWN_SOURCES`
+#   — they must be free to spell the forbidden forms — and are owned here.
+# - `affected_scope.py` needs its own entry because `scripts/` is a skipped
+#   scan directory.
+# - `tools/test-toolkit/Cargo.toml` is the REGISTRY BINDING: its
+#   `[package.metadata.ci.tests] companion-suites` is the only declaration that
+#   attaches `archive-path-guard` to an owner. Drop the entry and every other
+#   gate stays green while the scan never runs again.
+# - `_package-ci.yml` holds the guard's two execution controls — the
+#   `BISCUIT_ARCHIVE_GUARD_PLAN` export, whose only reader is the guard, and
+#   the companions-only status fold that makes a guard-only cell's verdict its
+#   companion's. `_area-ci.yml` is the sole conduit for `lint-companions-only`.
+#   Both already select `test-toolkit` through `SUITE_OWNER_PREFIXES`, so its
+#   lint cell and the attached companion exist either way; what these entries
+#   buy is a plan that says the scan was selected and under which mode, instead
+#   of an empty unselected scan running incidentally.
+#
+# Deliberately NOT owned inputs:
+#
+# - `.github/workflows/ci.yml` carries no guard-specific configuration. The
+#   resolved-plan artifact it uploads is read by the coverage audits, the gap
+#   publisher, and every area, so losing it is loud and general rather than a
+#   guard-shaped silence.
+# - `.github/ci/environments.json` decides whether Linux is scheduled at all.
+#   When it is not, the guard cannot run anywhere, so selecting it from that
+#   change would schedule nothing.
+# - `scripts/ci/schema.py` and its generated `contract.json` VALIDATE the
+#   `archive_guard` block; the emitter is `archive_guard_scope` in this file,
+#   already owned. A validator-only change the emitter does not follow fails
+#   the planner and `test_schema.py` / `test_resolved_plan.py`, which
+#   `scripts/` ownership already selects.
+# - `just/ci-local.just` drives the guard locally. No CI guard execution runs
+#   it, so scheduling one answers nothing about it; `ci_workflow_contracts` and
+#   `test_ci_local.py` are what cover that path.
+ARCHIVE_GUARD_OWN_INPUTS = frozenset({
+    ".github/workflows/_area-ci.yml",
+    ".github/workflows/_package-ci.yml",
+    "scripts/ci/affected_scope.py",
+    "tools/test-toolkit/Cargo.toml",
+    "tools/test-toolkit/justfile",
+    "tools/test-toolkit/src/archive_guard.rs",
+    "tools/test-toolkit/src/archive_guard/matcher_tests.rs",
+    "tools/test-toolkit/tests/archive_path_guard.rs",
+})
 
 # Bootstrap-preflight breadth (D3). A full-scope run validates every runner OS
 # the plan's environments land on before fan-out; a package-local change
@@ -999,7 +1099,13 @@ def validate_suite_registry(
             )
         if not str(entry.get("owner", "")).strip():
             problems.append(f"suite '{name}' declares no owning package")
-        if not str(entry.get("recipe", "")).strip():
+        # A LINT-ONLY companion is a deliberate shape, not a missing recipe: a
+        # source-policy scan has no test half, and giving it one would attach it
+        # to its owner's L1 cell as well. Either half satisfies the rule this
+        # check exists for — that no suite is registered and silently never run.
+        if not str(entry.get("recipe", "")).strip() and not str(
+            entry.get("lint_recipe", "")
+        ).strip():
             problems.append(
                 f"suite '{name}' declares no canonical recipe, so it would be "
                 "registered and silently never run"
@@ -2592,6 +2698,7 @@ def matrix_record(
     gates: set[str] | frozenset[str] = frozenset(GATES),
     executing: set[tuple[str, str]] | None = None,
     builds: Sequence[dict[str, Any]] = (),
+    lint_companions_only: bool = False,
 ) -> dict[str, Any]:
     """The workflow-facing shape of one gating package's plan record.
 
@@ -2606,10 +2713,21 @@ def matrix_record(
     `record` is the plan's package record and `environments` the plan's own
     table: the projection reads nothing the plan does not carry, which is what
     lets CI project a carried receipt without consulting the checkout.
+
+    `lint_companions_only` is the lint cell's own field: the cell's required
+    work is its companions rather than the package's Clippy. It reaches the
+    workflow so a guard-only cell does not lint a package no change selected.
     """
     testing = "test" in gates
     tiers = record["tiers"] if testing else []
-    companion_suites = record["companion_suites"] if testing else []
+    # A companions-only selection has no test gate, so `testing` is false — but
+    # its required work IS the lint half of its companions. Dropping them here
+    # would hand the workflow a cell with Clippy skipped and nothing to run in
+    # its place, which is the green-cell-that-ran-nothing shape the plan exists
+    # to make unrepresentable.
+    companion_suites = (
+        record["companion_suites"] if testing or lint_companions_only else []
+    )
 
     def runs(environment: str, gate: str) -> bool:
         return executing is None or (environment, gate) in executing
@@ -2628,6 +2746,7 @@ def matrix_record(
         "l2_backends": record["l2_backends"],
         "runner_tools": record["runner_tools"],
         "companion_suites": companion_suites,
+        "lint_companions_only": lint_companions_only,
         # The environments whose test cell runs at least one of them. The
         # companion step is skipped everywhere else rather than started and
         # resolved to nothing, so a runner without the suites' interpreter
@@ -3208,6 +3327,7 @@ def calculate_scope(
     event: str | None = None,
     all_environments: bool = False,
     proven_event: str | None = None,
+    deleted: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -3232,6 +3352,12 @@ def calculate_scope(
     (the `ci:all-os` label). `proven_event` names an event whose run already
     validated this tree, so its environments are listed in
     `proven_environments` and planned nowhere. See `schedule_environments`.
+
+    `deleted` is the subset of `files` the diff reports as removed. It is a
+    separate input because a name-only diff cannot distinguish a deletion from
+    a missing file; the change inventory and the archive-path guard's scope
+    both read it, the guard because a removed Rust file triggers exemption
+    maintenance and has nothing left to scan.
     """
     packages = workspace_packages(metadata)
     table = environments
@@ -3373,6 +3499,47 @@ def calculate_scope(
             package_record["dependent_seam"] = seam
         package_records.append(package_record)
 
+    inventory = change_inventory(files, full_scope, deleted)
+    guard = archive_guard_scope(
+        files,
+        full_scope,
+        deleted,
+        {environment["name"] for environment in cell_environments},
+        event,
+        inventory["diff_available"],
+    )
+    guard_owner = SUITE_REGISTRY[ARCHIVE_GUARD_SUITE]["owner"]
+    # Already-selected is the other half of the contract and needs no code: the
+    # owner's ordinary lint cell carries the guard because its manifest declares
+    # the suite, so nothing new is scheduled and `companions_only` stays absent.
+    # A workspace without the owner (a fixture) schedules nothing; a real one
+    # that lost it is caught by `validate_suite_registry`, which is where an
+    # unclaimed suite belongs.
+    if (
+        guard["selected"]
+        and guard_owner not in set(impacted)
+        and policy.get(guard_owner, {}).get("gates")
+    ):
+        owner_id = packages_by_name[guard_owner]["id"]
+        scanned = guard.get("paths") or []
+        trigger = f"changed path {scanned[0]}" if scanned else guard["reason"]
+        record, owned = archive_guard_only_selection(
+            policy[guard_owner],
+            package_area(manifest_directory(root, packages[owner_id])),
+            cell_environments,
+            prohibitions,
+            f"archive-path guard selected by {trigger}; this lint cell runs the "
+            f"guard alone and no other {guard_owner} work",
+            native_closure(owner_id, metadata, packages, policy),
+            closure_directories(owner_id, root, metadata, packages),
+        )
+        if owned:
+            package_records.append(record)
+            cells.extend(owned)
+            # The area's selection reason must not claim a source change it
+            # never saw: what selected the guard was source in another area.
+            suite_ids = suite_ids | {owner_id}
+
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
         raise RuntimeError(
@@ -3411,7 +3578,8 @@ def calculate_scope(
         "base": base,
         "head": head,
         "change_class": outcomes["change_class"],
-        "change_inventory": change_inventory(files, full_scope),
+        "change_inventory": inventory,
+        "archive_guard": guard,
         "full_scope": full_scope,
         "full_scope_gates": sorted(full_gates, key=GATES.index),
         "areas": area_records(
@@ -3723,7 +3891,9 @@ def change_bucket(path: str) -> str:
     return "other"
 
 
-def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
+def change_inventory(
+    files: Sequence[str], full_scope: bool, deleted: Sequence[str] = ()
+) -> dict[str, Any]:
     """What changed, classified once, for every reader of the plan.
 
     R8: computed from the changed paths alone and deliberately independent of
@@ -3734,8 +3904,14 @@ def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
     its path is plainly `configuration`.
 
     A manual full-scope run consulted no diff, so it records that fact rather
-    than empty buckets a reader would take for "nothing changed": `paths` and
-    `counts` are present exactly when `diff_available` is true.
+    than empty buckets a reader would take for "nothing changed": `paths`,
+    `counts`, and `deleted` are present exactly when `diff_available` is true.
+
+    `deleted` is the subset of `files` the diff reports as removed. It is a
+    separate input because `git diff --name-only` cannot distinguish a deletion
+    from a path that is simply missing, and a consumer that treated every
+    missing path as a deletion would silently stop checking a file the diff
+    named. A deleted path still appears in its bucket: it changed.
     """
     if full_scope:
         return {
@@ -3755,7 +3931,207 @@ def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
     paths = {bucket: sorted(buckets[bucket]) for bucket in schema.CHANGE_BUCKETS}
     counts = {bucket: len(entries) for bucket, entries in paths.items()}
     counts["total"] = sum(counts.values())
-    return {"diff_available": True, "paths": paths, "counts": counts}
+    return {
+        "diff_available": True,
+        "paths": paths,
+        "counts": counts,
+        "deleted": normalized_paths(deleted),
+    }
+
+
+def normalized_paths(raw_files: Sequence[str]) -> list[str]:
+    """One normalized, sorted, de-duplicated spelling per non-empty path."""
+    return sorted({normalized_path(raw).strip() for raw in raw_files} - {""})
+
+
+def archive_guard_eligible(path: str) -> bool:
+    """Whether a normalized path is in the archive-path guard's scan domain.
+
+    The selection half of the one policy the scanner also applies
+    (`test_toolkit::archive_guard::is_eligible`). A build script is excluded
+    because it runs on the producer, where the compile-time value is the only
+    correct answer.
+
+    The guard's own three sources are deliberately NOT excluded here. The
+    scanner refuses them and reports them as ineligible, which is visible; a
+    second exclusion list on this side would be a second thing to keep in step.
+    """
+    if not path.endswith(".rs"):
+        return False
+    if path.rsplit("/", 1)[-1] == "build.rs":
+        return False
+    return not (set(path.split("/")) & ARCHIVE_GUARD_SKIPPED_DIRS)
+
+
+def archive_guard_triggered(path: str) -> bool:
+    """Whether one normalized changed path selects the guard.
+
+    Two reasons and no others: the path is source the guard would scan, or it
+    is one of the guard's own declared inputs. Documentation, lockfiles, and
+    the manifests and workflow files outside [`ARCHIVE_GUARD_OWN_INPUTS`]
+    select no guard.
+    """
+    return archive_guard_eligible(path) or path in ARCHIVE_GUARD_OWN_INPUTS
+
+
+def archive_guard_scope(
+    files: Sequence[str],
+    full_scope: bool,
+    deleted: Sequence[str],
+    scheduled: set[str],
+    event: str | None,
+    diff_available: bool,
+) -> dict[str, Any]:
+    """The archive-path guard's scan scope for one event.
+
+    The plan's one answer to "does the guard run, and over what". Exactly one
+    of three shapes, each carrying a non-empty `reason`:
+
+    - `{"selected": false, "reason": …}`
+    - `{"selected": true, "mode": "full", "reason": …}`
+    - `{"selected": true, "mode": "changed", "paths": [...], "reason": …}`
+
+    `paths` is present exactly in `changed` mode, and an explicitly empty list
+    is a real state — nothing eligible changed — that is never upgraded to a
+    full scan. Deleted paths still TRIGGER, because exemption maintenance has
+    to run when an exempted file disappears, but they are not listed for
+    scanning: there is nothing left to read.
+
+    The environment check comes before every mode decision. The guard is
+    Linux-only and must not force Linux into an event that excludes it; under
+    the current table a `schedule` run schedules WSL2 alone, so the nightly
+    records `selected: false` rather than adding a runner to it.
+    """
+    changed = normalized_paths(files)
+    removed = normalized_paths(deleted)
+    triggers = [path for path in changed + removed if archive_guard_triggered(path)]
+
+    # A full-workspace request selects every package, so it selects the guard
+    # too — there is no diff for a trigger to match against.
+    if not full_scope and not triggers:
+        return {
+            "selected": False,
+            "reason": (
+                "no scanned source and no owned guard input changed; a "
+                "documentation or unrelated configuration change selects no scan"
+            ),
+        }
+
+    if LINT_ENVIRONMENT not in scheduled:
+        occasion = f"the {event} event" if event else "this run"
+        return {
+            "selected": False,
+            "reason": (
+                f"{occasion} schedules no {LINT_ENVIRONMENT} cell; the guard is "
+                f"hosted there alone and does not force it into an event that "
+                f"excludes it"
+            ),
+        }
+
+    if full_scope:
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "explicit full-scope request; the whole eligible corpus is scanned"
+            ),
+        }
+    if not diff_available:
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "no change inventory is available, so the eligible corpus cannot "
+                "be narrowed and is scanned whole"
+            ),
+        }
+    if event == "push":
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "a push scans the whole eligible corpus; changed-file evidence "
+                "from a pull request proves nothing about the files it omitted"
+            ),
+        }
+
+    scanned = [
+        path
+        for path in changed
+        if archive_guard_eligible(path) and path not in set(removed)
+    ]
+    occasion = f"the {event} event" if event else "this run"
+    return {
+        "selected": True,
+        "mode": "changed",
+        "paths": scanned,
+        "reason": (
+            f"{occasion} carries a change inventory; {len(scanned)} eligible "
+            f"source path(s) are in scope and untouched files are not rescanned"
+        ),
+    }
+
+
+def archive_guard_only_selection(
+    record: dict[str, Any],
+    area: str,
+    environments: list[dict[str, Any]],
+    prohibitions: dict[str, dict[str, Any]] | None,
+    reason: str,
+    native: dict[str, list[str]],
+    input_paths: list[str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The guard owner's lint-only package record and its single cell.
+
+    Selecting the owner the ordinary way would schedule its L1 on four
+    environments, its Node companions, and the reverse-dependency seam its
+    public API carries — work a Rust file in another area says nothing about.
+    So `package_cells` is handed a policy with no tier and no target kind,
+    which is what makes exactly one cell exist: `{owner, ubuntu-latest, lint}`.
+
+    `companions_only` marks that cell's required work as its companions rather
+    than the package's own Clippy, which this selection did not ask for.
+
+    Lint cells are already non-reusable, which is what the specification's
+    "initially prefer non-reusable guard execution" asks for: a changed-file
+    pull request scan must never be presented as a completed full-tree push
+    scan, and no evidence identity here can represent a scan's inputs.
+    """
+    lint_only = {**record, "tiers": [], "companion_suites": [ARCHIVE_GUARD_SUITE]}
+    cells = package_cells(
+        lint_only,
+        area,
+        [],
+        environments,
+        {},
+        prohibitions=prohibitions,
+    )
+    for cell in cells:
+        cell["selection_reason"] = reason
+        cell["companions_only"] = True
+
+    package_record = {
+        "package": record["package"],
+        "area": area,
+        "selection_reason": reason,
+        "gates": [
+            gate for gate in schema.GATES if any(cell["gate"] == gate for cell in cells)
+        ],
+        "targets": [],
+        "tiers": [],
+        "test_args": "",
+        "check_args": check_arguments(record["package"], [], ""),
+        "l2_backends": record["l2_backends"],
+        "runner_tools": record["runner_tools"],
+        "companion_suites": [ARCHIVE_GUARD_SUITE],
+        "archive_includes": record["archive_includes"],
+        "sidecars": record["sidecars"],
+        "l1_include_slow": record["l1_include_slow"],
+        "requires_toolchain": record["requires_toolchain"],
+        "native": native,
+        "input_paths": input_paths,
+    }
+    return package_record, cells
 
 
 def classify_preflight(
@@ -3843,11 +4219,14 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
     """
     environments = plan["environments"]
     executing: dict[str, set[tuple[str, str]]] = {}
+    companions_only: set[str] = set()
     for cell in plan["cells"]:
         if cell["execution"] == "execute":
             executing.setdefault(cell["package"], set()).add(
                 (cell["environment"], cell["gate"])
             )
+        if cell.get("companions_only"):
+            companions_only.add(cell["package"])
 
     # A package's matrix entry is what tells `_package-ci.yml` which build each
     # of its environments consumes; naming a record no owner job will produce
@@ -3869,6 +4248,7 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
                 gates,
                 executing=executing.get(entry["package"], set()),
                 builds=builds_by_package.get(entry["package"], ()),
+                lint_companions_only=entry["package"] in companions_only,
             )
         )
 
@@ -3990,16 +4370,27 @@ def parse_args() -> argparse.Namespace:
             "are listed as proven and planned nowhere"
         ),
     )
+    parser.add_argument(
+        "--deleted",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "a path the diff reports as removed; repeatable. A name-only diff "
+            "cannot tell a deletion from a missing file, so the distinction is "
+            "declared rather than guessed"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args()
     if args.apply_to and (
-        args.all or args.files or args.constraints
+        args.all or args.files or args.constraints or args.deleted
         or args.event or args.all_environments or args.proven_event
     ):
         parser.error(
             "--apply-to applies evidence to a carried plan and performs no "
             "selection: it cannot be combined with --all, --constraints, --event, "
-            "--all-environments, --proven-event, or a file list"
+            "--all-environments, --proven-event, --deleted, or a file list"
         )
     return args
 
@@ -4094,6 +4485,7 @@ def main() -> None:
             event=args.event,
             all_environments=args.all_environments,
             proven_event=args.proven_event,
+            deleted=args.deleted,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")
