@@ -1,45 +1,59 @@
 name: package-ci
 
-# Reusable CI building block for a single Cargo package.
+# One package AREA's execution workflow: it expands the dispatch rows the
+# planner derived for that area, one hosted job per executing cell.
 #
-# `_area-ci.yml` calls this via `workflow_call`, once per gating impacted
-# package in its area, so platform behavior stays uniform across the
-# monorepo. The package is the unit of selection, execution, and result
-# identity: no result-producing job here covers more than one Cargo package.
+# THE FILENAME IS HISTORICAL (ruling R5). This workflow is called once per
+# AREA, not once per package, but it is named in `GLOBAL_PATHS_ALL_GATES` and
+# `ORCHESTRATION_PATHS` — the pairing that keeps a workflow edit from
+# invalidating every published local cell — and in `runner_loss.py`, the
+# four-level depth contract, the CI README, and two skills. Renaming it would
+# move all of that for a cosmetic gain.
+#
+# THE ROW IS THE ONLY INPUT THAT VARIES
+#
+# A row carries dispatch identity alone — `{package, gate, environment,
+# runner}` — because GitHub builds a matrix job's label from every value in it
+# (ruling R1), so `test (homelab-server, L1, ubuntu-latest, ubuntu-latest)` is
+# a readable label AND the whole key. Everything else each job needs it
+# resolves from the run's `ci-resolved-plan` artifact through
+# `scripts/ci/cell_contract.py`, which refuses an unknown, duplicated,
+# non-executing, or mismatched row with a coded reason before anything runs.
+# No job here reads `.github/ci/environments.json`, a Cargo manifest, or a
+# package policy block: the plan is the one document that decides what runs,
+# and a run that carried a scope receipt has no checkout to re-derive it from.
 #
 # `environment` is NOT `os`. Windows, macOS, and Linux are operating systems;
 # WSL2 is a distinct supported Linux environment that a Windows runner HOSTS.
-# Every result identity — artifact name, JUnit manifest record, rollup cell — is
-# keyed by {package, environment, tier}. Only `runs-on` and the native-package
-# lookup are keyed by runner OS. `native-environments` may therefore be fed
-# straight into a `runs-on` matrix (those three environment names ARE runner
-# labels); `wsl2-ubuntu` is hoisted into the separate `_wsl-ci.yml` reusable
-# workflow precisely so it can never reach that matrix and silently take the
-# Windows branch for dependency installation, paths, shells, caching, or
-# artifact collection.
+# Every result identity — artifact name, JUnit manifest record, rollup cell —
+# is keyed by {package, environment, gate}. Only `runs-on` reads the row's
+# `runner`, and the WSL2 rows are dispatched through `_wsl-ci.yml` precisely so
+# they can never take a `runner.os == 'Windows'` branch for dependency
+# installation, paths, shells, caching, or artifact collection.
 #
 # Policy this encodes: the canonical per-package recipes (`_test`, `_test_l2`,
-# `_test_browser`, `_lint`) on every applicable environment; `check`, `lint`,
-# and `test` are independent gates with `test-l2`/`test-browser` staged behind
-# `test`; no sharding anywhere (compilation is ~85% of a shard and every shard pays it
-# in full — see fixes/2026-08-06-cicd/spec.md § Sharding). Cargo artifacts are
-# cached by `Swatinem/rust-cache` only, keyed per package — see
-# docs/kache-strategy.md for why the kache rustc-wrapper was removed from CI.
-# Only `check` and `lint` have a cache here: a test tier consumes a verified
-# archive, so it installs no toolchain and has nothing to cache.
+# `_test_browser`, `_lint`) on exactly the cells the plan resolved to hosted
+# execution; `check`, `lint`, and `test` are independent gates and NO test job
+# waits on another (ruling R3 — the old `needs: test` staging was resource
+# ordering, and the specification forbids an L1 prerequisite that can suppress
+# required L2 or browser work); no sharding anywhere (compilation is ~85% of a
+# shard and every shard pays it in full — see fixes/2026-08-06-cicd/spec.md
+# § Sharding). Cargo artifacts are cached by `Swatinem/rust-cache` only, keyed
+# per package — see docs/kache-strategy.md for why the kache rustc-wrapper was
+# removed from CI. Only `check` and `lint` have a cache here: a test tier
+# consumes a verified archive, so it installs no toolchain and has nothing to
+# cache.
 #
-# Every job first runs `just _ensure-native-libs <packages...>` — the
-# same recipe `just init` runs on a developer host — with the union of the
-# `native` requirements across this package's dependency closure, as computed
-# by the scope job from `[package.metadata.ci.native]` declarations.
-#
-# A FAILED GATE COMMAND FAILS ITS PRODUCER JOB. The command keeps an `id:` so
-# `Record producer status` can publish the cell outcome even after failure;
-# JUnit/status uploads use explicit status predicates for the same reason.
-# Every matrix has `fail-fast: false`, so a red producer does not cancel the
-# other OS cells that still lack qualifying evidence. The area's rollup still
-# owns missing-cell, skip-budget, and governed-gap policy, while `ci-gate`
-# truthfully sees a producer failure through the reusable workflow result.
+# A PRODUCER PROVES ITSELF. A failed gate command fails its job, and so does a
+# producer that ran fewer tests than it expected to: `_expected_manifest` lists
+# what this cell must produce before the gate runs, `completion.py` compares
+# that listing against the staged reports as identities afterwards, and the
+# completion record is written and uploaded ONLY when every check holds (ruling
+# R10). A green status whose completion artifact is absent is an audit failure.
+# The gate command keeps an `id:` so `Record producer status` can publish the
+# cell outcome even after failure; JUnit/status uploads use explicit status
+# predicates for the same reason. Every matrix has `fail-fast: false`, so a red
+# producer does not cancel the other cells that still lack qualifying evidence.
 
 on:
   workflow_call:
@@ -48,88 +62,20 @@ on:
         description: "The resolved plan's `head`: the one revision this whole run tests, and the only checkout `ci-build` will produce or verify an archive against. Required, and never recomputed here — see the `env:` comment in `ci.yml`."
         type: string
         required: true
-      package:
-        description: "Cargo package name; the unit of selection, execution, and result identity (e.g. darkmatter-cli)."
-        type: string
-        required: true
-      check-args:
-        description: "Args for the compile-check `cargo check`: the package selector, an explicit selector for each declared target kind no test gate compiles (`--examples`, `--benches`), and the declared features (e.g. '-p sniff --examples --benches --features remote'). Never `--all-targets`."
-        type: string
-        required: true
-      dependents-check-args:
-        description: "Args for the `cargo check` of this package's UNCHANGED direct reverse dependencies, compiled inside its own check cell on ubuntu-latest only (Open Question 1, Option B): one `-p` per dependent plus the explicit `--lib`/`--bins`/`--tests` selectors their declared kinds need (e.g. '-p dmls -p darkmatter-cli --lib --bins --tests'). Empty when the planner attributed none, which skips the step."
-        type: string
-        required: true
-      dependents-native:
-        description: "JSON array of Ubuntu prerequisites for the dependent build closures, installed only in the owning Ubuntu check."
-        type: string
-        required: true
-      dependents:
-        description: "JSON array of the dependents `dependents-check-args` compiles, by package name, recorded in the check cell's status so the rollup can render them. Empty when `dependents-check-args` is."
-        type: string
-        required: true
-      test-args:
-        description: "Extra args forwarded to the canonical tier recipes (the package's declared feature flags, e.g. '--features remote' or '--all-features')."
-        type: string
-        default: ""
-      gates:
-        description: "JSON array of the gates this run selected the package for, from the closed set lint, check, test. A gate absent here schedules no job: the scope calculator narrows a package reached only through a gate-scoped global input (clippy.toml, the `_lint` recipe, nextest.toml, ...) to that gate alone."
-        type: string
-        default: '["lint", "check", "test"]'
-      l1-include-slow:
-        description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract)."
-        type: boolean
-        default: false
-      native-environments:
-        description: "JSON array of NATIVE environments that run the full L1 suite. Each value is also its own runner label; wsl2-ubuntu is deliberately excluded."
-        type: string
-        default: '["ubuntu-latest", "windows-latest", "macos-latest"]'
-      check-os:
-        description: "JSON array of native runner OSes whose `check` cell the planner resolved to hosted execution. Every native OS for a package declaring an `example` or `bench` target; `ubuntu-latest` alone when only unchanged dependents give it a check cell; empty otherwise."
-        type: string
-        default: '["ubuntu-latest", "windows-latest", "macos-latest"]'
-      l2-environments:
-        description: "JSON array of environments where an L2 backend is provisioned. Empty when the package owns no L2 tests."
+      test-rows:
+        description: "JSON array of this area's NATIVE test rows (L1, L2, and browser cells on a runner that is its own environment). Each row is `{package, gate, environment, runner}`; the job resolves the rest from the plan."
         type: string
         default: '[]'
-      browser-environments:
-        description: "JSON array of environments where a headless browser is provisioned. Empty when the package owns no browser tests."
+      check-rows:
+        description: "JSON array of this area's `check` rows. Each row is `{package, gate, environment, runner}`."
         type: string
         default: '[]'
-      backends:
-        description: "JSON array of L2 terminal backends this package's tests declare, used to report per-backend coverage."
+      lint-rows:
+        description: "JSON array of this area's `lint` rows. Each row is `{package, gate, environment, runner}`."
         type: string
         default: '[]'
-      runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim, zed-extension."
-        type: string
-        default: '[]'
-      companion-suites:
-        description: "JSON array of non-Cargo suites this package owns. The closed vocabulary is SUITE_REGISTRY in scripts/ci/affected_scope.py, which also owns each suite's recipe, environment, and counts strategy."
-        type: string
-        default: '[]'
-      companion-environments:
-        description: "JSON array of environments whose test cell runs at least one of this package's declared companion suites. Derived from the registry's per-suite environment (R7)."
-        type: string
-        default: '[]'
-      node-environments:
-        description: "JSON array of environments where Node + pnpm are provisioned for a declared companion suite that needs them. Empty when the package declares none."
-        type: string
-        default: '[]'
-      toolchain-environments:
-        description: "JSON array of environments whose L1 cell provisions the pinned Rust toolchain before running, because the package declares `requires-toolchain` and the environment claims `cargo_toolchain`. Empty for every package whose suite never shells out to cargo or rustc."
-        type: string
-        default: '[]'
-      native:
-        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure."
-        type: string
-        default: '{}'
-      wsl:
-        description: "Run the canonical L1 suite inside a WSL2 Ubuntu guest (environment `wsl2-ubuntu`)."
-        type: boolean
-        default: false
-      builds:
-        description: "JSON array of this package's build records from the resolved plan, each `{key, producer, artifact, consumers}`. A tier whose `{environment, gate}` appears in a record's consumers downloads and verifies that archive and compiles nothing; one that appears in none compiles in place exactly as before. Empty when nothing this package schedules consumes an archive."
+      wsl-rows:
+        description: "JSON array of this area's `wsl2-ubuntu` rows, each delegated whole to `_wsl-ci.yml`. Kept apart from `test-rows` so a guest cell can never reach a `runs-on` matrix."
         type: string
         default: '[]'
       measure-compiler-work:
@@ -155,20 +101,20 @@ env:
   COLORTERM: truecolor
   # Explicitly select the CI nextest profile (D6) — every `cargo nextest` in the
   # canonical recipes honors this and logs "nextest profile: ci". No reliance on
-  # implicit environment detection.
+  # implicit environment detection. The plan carries the same value on every
+  # executing test cell, and `completion.py` refuses a disagreement.
   NEXTEST_PROFILE: ci
 
 jobs:
   # Compile gate for the target kinds no test gate builds, and for the seam
   # with the package's unchanged direct reverse dependencies. The test leg
   # compiles only lib/bins/tests, so the planner credits L1 with those kinds
-  # and schedules this job on every native environment for a package
+  # and gives this gate a row on every native environment for a package
   # declaring `example` or `bench` targets, and on `ubuntu-latest` alone for a
-  # package whose only reason is its dependents — `check-os` is empty
-  # otherwise. `check-args` carries the explicit `--examples`/`--benches`
-  # selectors; the command adds no target flag of its own, so a blanket
-  # `--all-targets` would recompile what L1 already covered and mislabel the
-  # cell's coverage.
+  # package whose only reason is its dependents. `check_args` carries the
+  # explicit `--examples`/`--benches` selectors; the command adds no target
+  # flag of its own, so a blanket `--all-targets` would recompile what L1
+  # already covered and mislabel the cell's coverage.
   #
   # It deliberately does NOT carry `RUSTFLAGS: -D warnings`. This gate answers
   # "does it COMPILE on this environment", and promoting warnings destroyed that
@@ -185,22 +131,30 @@ jobs:
   # `lint` still denies warnings, through clippy inside `_lint`, so `just lint`
   # enforces the same bar off CI.
   #
-  # No `name:`, here and in every other job below that can be skipped as a
-  # whole. GitHub labels an EXPANDED matrix job from its matrix values
-  # (`check (windows-latest)`) but never evaluates the matrix context for a job
-  # it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
-  # Checks tab as raw expression text — 63 such labels in run 34638047631. The
-  # default label degrades to the static, human-readable job id instead (AC10).
-  # The package half of the identity comes from the caller: a called workflow's
-  # jobs render as `<caller job name> / <called job name>`, so this reads
-  # `area-ci (claudine) / claudine-cli / check (windows-latest)`.
+  # No `name:`, here and in every other job below. GitHub labels an EXPANDED
+  # matrix job from its matrix values (`check (sniff, check, windows-latest,
+  # windows-latest)`) but never evaluates the matrix context for a job it
+  # SKIPS, so a declared `name:` carrying `${{ matrix.* }}` reaches the Checks
+  # tab as raw expression text — 63 such labels in run 34638047631. The default
+  # label degrades to the static, human-readable job id instead (AC10). The
+  # area half of the identity comes from the caller: a called workflow's jobs
+  # render as `<caller job name> / <called job name>`, so this reads
+  # `area-ci (sniff) / package-ci / check (sniff, check, windows-latest,
+  # windows-latest)`.
+  #
+  # The guard is a SCALAR comparison of the input, read before matrix
+  # expansion: an area with no check rows resolves this job immediately instead
+  # of expanding an empty matrix, which is a strategy-evaluation error.
   check:
-    if: ${{ inputs.check-os != '[]' && contains(fromJSON(inputs.gates), 'check') }}
+    if: ${{ inputs.check-rows != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.check-os) }}
-    runs-on: ${{ matrix.os }}
+        # `include:` and nothing else, so each row's four values become the
+        # job's matrix context AND its label, in the order the planner emitted
+        # them (ruling R1).
+        include: ${{ fromJSON(inputs.check-rows) }}
+    runs-on: ${{ matrix.runner }}
     # 45, not 30 — shared by `check`, `test`, and `lint` below.
     #
     # Measured on run 30562649123: completing cells for the heaviest packages
@@ -221,19 +175,43 @@ jobs:
           ref: ${{ inputs.tested-revision }}
       - name: Install just
         uses: extractions/setup-just@v4
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Resolve this cell's execution contract
+        id: cell
+        shell: bash
+        env:
+          ROW: ${{ toJSON(matrix) }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/cell_contract.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --row "$ROW" \
+            --head '${{ inputs.tested-revision }}' \
+            --github-output "$GITHUB_OUTPUT"
       - name: Install native prerequisites
         shell: bash
         env:
-          NATIVE: ${{ inputs.native }}
-          RUNNER_KEY: ${{ matrix.os }}
-          DEPENDENTS_NATIVE: ${{ inputs.dependents-native }}
+          NATIVE: ${{ steps.cell.outputs.native_packages }}
+          DEPENDENTS_NATIVE: ${{ steps.cell.outputs.dependents_native }}
+          ENVIRONMENT: ${{ matrix.environment }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" --argjson dependents "$DEPENDENTS_NATIVE" '((.[$k] // []) + (if $k == "ubuntu-latest" then $dependents else [] end)) | unique | .[]' <<<"$NATIVE")"
+          # The dependent closure's prerequisites are installed only in the one
+          # cell that compiles it (Linux, below), and the union is deduplicated
+          # before it reaches the recipe.
+          dependents='[]'
+          if [ "${ENVIRONMENT:-}" = "ubuntu-latest" ]; then
+            dependents="${DEPENDENTS_NATIVE:-[]}"
+          fi
           native_args=()
           while IFS= read -r package; do
             if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
+          done < <(jq -r -n --argjson native "${NATIVE:-[]}" --argjson dependents "$dependents" \
+            '($native + $dependents) | unique | .[]')
           if [ ${#native_args[@]} -gt 0 ]; then
             just _ensure-native-libs "${native_args[@]}"
           fi
@@ -242,14 +220,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: package-ci-${{ inputs.package }}-check-${{ matrix.os }}
+          shared-key: package-ci-${{ matrix.package }}-check-${{ matrix.environment }}
       - name: Prepare the compiler-work counter
         id: counter
         if: ${{ inputs.measure-compiler-work }}
         shell: bash
         run: |
           set -euo pipefail
-          just _ci_build_counter "check ${{ matrix.os }}"
+          just _ci_build_counter "check ${{ matrix.environment }}"
       # Gate command. Its outcome is both the producer and cell outcome.
       - name: cargo check (declared example/bench kinds)
         id: check
@@ -263,9 +241,9 @@ jobs:
           RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
           BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
           BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: check ${{ matrix.os }}
-        run: cargo check ${{ inputs.check-args }}
+          BISCUIT_CI_BUILD_PACKAGE: ${{ matrix.package }}
+          BISCUIT_CI_BUILD_CONFIGURATION: check ${{ matrix.environment }}
+        run: cargo check ${{ steps.cell.outputs.check_args }}
       # The second half of the same cell: this package's UNCHANGED direct
       # reverse dependencies, compiled against its new public API (Open
       # Question 1, ruled Option B 2026-09-12). Linux only, and inside THIS
@@ -277,16 +255,16 @@ jobs:
       # its `skipped` outcome folds as a pass below.
       - name: Compile unchanged dependents
         id: dependents
-        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && inputs.dependents-check-args != '' }}
+        if: ${{ !cancelled() && matrix.environment == 'ubuntu-latest' && steps.cell.outputs.dependents_check_args != '' }}
         env:
           # The other half of the same cell, and of the same configuration: one
           # `check <environment>` count covers both `cargo check` invocations.
           RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
           BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
           BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: check ${{ matrix.os }}
-        run: cargo check ${{ inputs.dependents-check-args }}
+          BISCUIT_CI_BUILD_PACKAGE: ${{ matrix.package }}
+          BISCUIT_CI_BUILD_CONFIGURATION: check ${{ matrix.environment }}
+        run: cargo check ${{ steps.cell.outputs.dependents_check_args }}
       # ADVISORY, and structurally so: `continue-on-error` keeps a broken
       # measurement out of `ci-gate`'s fold of this job's result.
       - name: Report compiler work
@@ -303,13 +281,13 @@ jobs:
             "${{ steps.counter.outputs.wrapper }}" \
             "${{ steps.counter.outputs.counter_dir }}" \
             "$RUNNER_TEMP/measurement/measurement.json" \
-            "${{ inputs.package }}" "${{ matrix.os }}" check
+            "${{ matrix.package }}" "${{ matrix.environment }}" check
       - name: Upload the compiler-work measurement
         if: ${{ !cancelled() && inputs.measure-compiler-work }}
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: measurement-${{ inputs.package }}-check-${{ matrix.os }}
+          name: measurement-${{ matrix.package }}-check-${{ matrix.environment }}
           path: ${{ runner.temp }}/measurement
           if-no-files-found: ignore
       # Producer status. This job stages no JUnit, so the status artifact is
@@ -324,13 +302,13 @@ jobs:
         if: ${{ always() }}
         shell: bash
         env:
-          PACKAGE: ${{ inputs.package }}
+          PACKAGE: ${{ matrix.package }}
           JOB: check
-          ENVIRONMENT: ${{ matrix.os }}
+          ENVIRONMENT: ${{ matrix.environment }}
           JOB_STATUS: ${{ job.status }}
           GATE: ${{ steps.check.outcome }}
           DEPENDENTS_GATE: ${{ steps.dependents.outcome }}
-          DEPENDENTS: ${{ inputs.dependents }}
+          DEPENDENTS: ${{ steps.cell.outputs.dependents }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -354,7 +332,7 @@ jobs:
           # JSON array, and `detail` is present only when there is one.
           jq -cn \
             --arg package "$PACKAGE" --arg job "$JOB" --arg environment "$ENVIRONMENT" \
-            --arg result "$result" --arg detail "$detail" --argjson dependents "$DEPENDENTS" \
+            --arg result "$result" --arg detail "$detail" --argjson dependents "${DEPENDENTS:-[]}" \
             '{package: $package, job: $job, environment: $environment, result: $result, dependents: $dependents}
              + (if $detail == "" then {} else {detail: $detail} end)' \
             >"$RUNNER_TEMP/status/status.json"
@@ -362,45 +340,67 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
-          name: status-${{ inputs.package }}-check-${{ matrix.os }}
+          name: ${{ steps.cell.outputs.status_artifact }}
           path: ${{ runner.temp }}/status
+      # A check cell drives no nextest, so it publishes no expected listing;
+      # `completion.py` certifies it on the gate's own outcome and the cell's
+      # binding instead. Required, and after the status upload: the record is
+      # this cell's proof, and a green status without one is an audit failure.
+      - name: Certify this cell's completeness
+        id: completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/completion.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --cell '${{ steps.cell.outputs.cell }}' \
+            --artifacts ci-artifacts \
+            --target '${{ steps.cell.outputs.target }}' \
+            --run "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/completion/completion.json"
+      - name: Upload this cell's completion record
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.cell.outputs.completion_artifact }}
+          path: ${{ runner.temp }}/completion
 
-  # Full L1 suite for one package on every native environment. No sharding:
-  # compiling the test binaries is ~85% of a shard and every shard pays it in
-  # full, so partitioning cost ~3.2x the compute to save ~2.4 minutes
-  # (fixes/2026-08-06-cicd/spec.md § Sharding).
+  # Every NATIVE test row of this area — L1, L2, and browser — in one job.
+  #
+  # One job, not three: the row is the unit of dispatch, and three jobs over
+  # the same row set would have to partition it a second time. The tiers branch
+  # only where execution genuinely differs (backend provisioning and proof,
+  # browser requirement, toolchain and Node provisioning, and the canonical
+  # recipe), and NOTHING here waits on another test job — ruling R3. The old
+  # `needs: test` ordering was resource staging, and a red L1 used to suppress
+  # the L2 and browser legs entirely, so the rollup recorded MISSING and one
+  # failure erased the whole tier's evidence.
+  #
+  # No sharding: compiling the test binaries is ~85% of a shard and every shard
+  # pays it in full, so partitioning cost ~3.2x the compute to save ~2.4
+  # minutes (fixes/2026-08-06-cicd/spec.md § Sharding).
   test:
-    if: ${{ inputs.native-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
-    # Deliberately depends on nothing. Lint is a parallel gate, not a
-    # prerequisite: a clippy hint in one package must not delete another
-    # package's L1 evidence. Nor does this job export RUSTFLAGS=-D warnings,
-    # which re-coupled them through the back door by failing the test build on
-    # any plain rustc warning. Every leg is blocking — a red one is a red run.
+    if: ${{ inputs.test-rows != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        # Sound ONLY because every native environment name is also its own runner
-        # label. `wsl2-ubuntu` is not, and never enters this matrix — it has its
-        # own workflow (see the `wsl2` job below).
-        environment: ${{ fromJSON(inputs.native-environments) }}
-    runs-on: ${{ matrix.environment }}
-    timeout-minutes: 45
+        # Sound ONLY because a native environment name is also its own runner
+        # label and the planner put the runner in the row. `wsl2-ubuntu` never
+        # enters this set — it has its own row set and its own workflow.
+        include: ${{ fromJSON(inputs.test-rows) }}
+    runs-on: ${{ matrix.runner }}
+    # L1 keeps the 45-minute ceiling measured for the heaviest packages; the
+    # expensive tiers keep the 30 they have always had.
+    timeout-minutes: ${{ matrix.gate == 'L1' && 45 || 30 }}
     env:
       # Result identity. The shared `just` recipes stamp this into the
       # per-invocation JUnit manifest so a rollup cell traces back to
-      # {package, environment, tier} without parsing a display name — which
-      # for a skipped matrix leg is not merely unstable but unresolvable. The
-      # package half of the identity is the recipe argument itself.
+      # {package, environment, gate} without parsing a display name — which
+      # for a skipped matrix leg is not merely unstable but unresolvable.
       BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
-      # The package's declared L1 contract (`l1-include-slow` in
-      # `[package.metadata.ci.tests]`); `_tier_filter` owns the filter strings.
-      BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
-      # A PROVISIONED capability hard-fails when missing, an INAPPLICABLE one
-      # skips cleanly. Set only on the legs that provision pnpm, so on those
-      # legs a missing pnpm is a provisioning failure the recipe must not
-      # swallow, while every other leg (and every developer host) skips loudly
-      # and exits 0.
-      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}
+      # A browser cell requires a real browser: a self-skip there would render
+      # a green 0-run cell for work nothing performed.
+      BISCUIT_BROWSER_REQUIRED: ${{ matrix.gate == 'browser' && '1' || '' }}
     steps:
       # Phase 1 measurement only: the reference point for `setup_seconds`. It
       # runs before checkout so setup — checkout, toolchain, native
@@ -421,60 +421,220 @@ jobs:
           # failing, not by being handed history nothing asks for.
       - name: Install just
         uses: extractions/setup-just@v4
-      # Which build record this cell consumes. Every executing L1/L2/browser
-      # cell references exactly one, so this either names it or refuses: a
-      # consumer restores no Cargo cache and has no compiler to fall back to.
-      # The one toolchain it may hold is the step below, and that is for the
-      # SUITE to drive, never for the recipe to compile a replacement with.
-      - name: Resolve this cell's build record
-        id: build
-        shell: bash
-        run: just _ci_build_consumer '${{ inputs.builds }}' '${{ matrix.environment }}' L1
-      # A `requires-toolchain` package's tests shell out to `cargo` and `rustc`
-      # themselves (`cargo metadata`, fixture builds, `rustc -vV`). The archive
-      # brings no toolchain, and a hosted runner's rustup proxy would otherwise
-      # install the pinned one on first use — from inside however many tests
-      # reach it at once, which corrupted rustup's download directory on run
-      # 35326800778. Install it once, up front, on the environments the
-      # planner derived from `requires-toolchain` × `cargo_toolchain`. Every
-      # other package's cell stays toolchain-free.
-      - name: Set up the pinned Rust toolchain
-        if: ${{ contains(fromJSON(inputs.toolchain-environments), matrix.environment) }}
-        run: rustup show
-      - name: Install native prerequisites
-        shell: bash
-        env:
-          NATIVE: ${{ inputs.native }}
-          RUNNER_KEY: ${{ matrix.environment }}
-        run: |
-          set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
-          native_args=()
-          while IFS= read -r package; do
-            if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
-          if [ ${#native_args[@]} -gt 0 ]; then
-            just _ensure-native-libs "${native_args[@]}"
-          fi
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
       - name: Download the resolved execution plan
         uses: actions/download-artifact@v7
         with:
           name: ci-resolved-plan
           path: ci-artifacts/ci-resolved-plan
+      # The one reader. It names this cell's build record or refuses: a
+      # consumer restores no Cargo cache and has no compiler to fall back to.
+      # The one toolchain it may hold is the step below, and that is for the
+      # SUITE to drive, never for the recipe to compile a replacement with.
+      - name: Resolve this cell's execution contract
+        id: cell
+        shell: bash
+        env:
+          ROW: ${{ toJSON(matrix) }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/cell_contract.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --row "$ROW" \
+            --head '${{ inputs.tested-revision }}' \
+            --github-output "$GITHUB_OUTPUT"
+      # A `requires-toolchain` package's tests shell out to `cargo` and `rustc`
+      # themselves (`cargo metadata`, fixture builds, `rustc -vV`). The archive
+      # brings no toolchain, and a hosted runner's rustup proxy would otherwise
+      # install the pinned one on first use — from inside however many tests
+      # reach it at once, which corrupted rustup's download directory on run
+      # 35326800778. Install it once, up front, where the plan says the package
+      # declares `requires-toolchain` AND the environment claims
+      # `cargo_toolchain`. Every other cell stays toolchain-free.
+      - name: Set up the pinned Rust toolchain
+        if: ${{ steps.cell.outputs.requires_toolchain == 'true' }}
+        run: rustup show
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ steps.cell.outputs.native_packages }}
+        run: |
+          set -euo pipefail
+          native_args=()
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then native_args+=("$package"); fi
+          done < <(jq -r '.[]?' <<<"${NATIVE:-[]}")
+          if [ ${#native_args[@]} -gt 0 ]; then
+            just _ensure-native-libs "${native_args[@]}"
+          fi
+      # L2 ONLY. tmux/PTY is the only backend headless CI can host (D8) and it
+      # installs on BOTH Linux (apt) and macOS (brew). WezTerm/Kitty/Apple
+      # Terminal require running INSIDE that GUI, so those tests skip cleanly
+      # here via require_level!; the coverage report below makes that skip
+      # VISIBLE rather than silent. Windows and wsl2-ubuntu never carry an L2
+      # row: the planner records those as POLICY GAPS instead.
+      - name: Provision and verify the tmux backend
+        if: ${{ matrix.gate == 'L2' }}
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            ubuntu-latest)
+              sudo apt-get update && sudo apt-get install -y tmux
+              ;;
+            macos-latest)
+              brew list tmux >/dev/null 2>&1 || brew install tmux
+              ;;
+            *)
+              echo "no tmux provisioning path for environment '$ENVIRONMENT'" >&2
+              exit 1
+              ;;
+          esac
+          # Verify runtime reachability (D8): a broken tmux fails this named
+          # provisioning step — the hard-require for the one L2 backend CI hosts.
+          # `tmux -V` needs no server, no display, and no pane, so it takes no
+          # focus. CI must never steal focus.
+          tmux -V
+      # `neovim` runner tool: dmls's L2 suite runs a real Neovim (headless and
+      # inside tmux). Without the binary every gate skips, and backend-proof
+      # then rightly fails the tier for producing no tmux evidence.
+      - name: Provision neovim
+        if: ${{ matrix.gate == 'L2' && contains(fromJSON(steps.cell.outputs.runner_tools), 'neovim') }}
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            ubuntu-latest)
+              sudo apt-get update && sudo apt-get install -y neovim
+              ;;
+            macos-latest)
+              brew list neovim >/dev/null 2>&1 || brew install neovim
+              ;;
+            *)
+              echo "no neovim provisioning path for environment '$ENVIRONMENT'" >&2
+              exit 1
+              ;;
+          esac
+          nvim --version | head -1
+      - name: Report L2 backend coverage
+        if: ${{ matrix.gate == 'L2' }}
+        shell: bash
+        env:
+          PACKAGE: ${{ matrix.package }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+        run: |
+          set -euo pipefail
+          # A backend that cannot exist here skips silently inside require_level!.
+          # Naming every declared backend and its status turns "0 run / N skipped"
+          # from an invisible non-event into a readable row.
+          {
+            echo "### L2 backends — ${PACKAGE} on ${ENVIRONMENT}"
+            echo ""
+            echo "| backend | status |"
+            echo "|---|---|"
+            while IFS= read -r backend; do
+              [ -n "$backend" ] || continue
+              if [ "$backend" = "tmux" ]; then
+                echo "| tmux | provisioned — its tests MUST execute |"
+              elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
+                echo "| apple-terminal | unavailable — \`available()\` returns false when CI is truthy; its tests skip |"
+              else
+                echo "| ${backend} | unavailable — needs a live GUI session; its tests skip |"
+              fi
+            done < <(printf '%s' "$DECLARED_BACKENDS" | jq -r '.[]?')
+          } >>"$GITHUB_STEP_SUMMARY"
+      # Runner tools are a CLOSED vocabulary, implemented here — not an
+      # arbitrary command surface. Each entry preserves a package-specific
+      # behavior that used to be embedded in an area-level recipe.
+      - name: Install AI-provider CLI stubs
+        if: ${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'ai-provider-stubs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubdir="$RUNNER_TEMP/ai-cli-stubs"
+          mkdir -p "$stubdir"
+          for bin in claude opencode roo gemini aider codex goose kimi qwen; do
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              printf '@echo off\r\nexit /b 0\r\n' >"$stubdir/$bin.cmd"
+            else
+              printf '#!/usr/bin/env sh\nexit 0\n' >"$stubdir/$bin"
+              chmod +x "$stubdir/$bin"
+            fi
+          done
+          echo "$stubdir" >>"$GITHUB_PATH"
+      # Node + pnpm for a package that declares a JavaScript companion suite
+      # (`homelab-frontend`, `test-audit-*`). Until this provisioning existed,
+      # `pnpm: command not found` killed the suite on EVERY runner while the
+      # rollup — which parses Rust JUnit only — rendered the area PASS
+      # 222/0/0 on three environments (measured, run 30427703024).
+      #
+      # Which cells qualify is DERIVED by `affected_scope.py` from the
+      # environment capability table crossed with the suites that declare
+      # `node`, and carried on the cell as `requires_node`; nothing here
+      # decides it, and a package whose companions are Python contract suites
+      # provisions nothing.
+      #
+      # A PROVISIONED capability hard-fails when missing, an INAPPLICABLE one
+      # skips cleanly, which is what `BISCUIT_FRONTEND_REQUIRED` spells below.
+      - name: Set up pnpm
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+      - name: Set up Node
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      # Runtime reachability, mirroring the L2 tier's `tmux -V`: a capability
+      # the package DECLARED must fail its own named provisioning step when it
+      # is not actually usable, rather than surface minutes later as a suite
+      # that "skipped" under a green cell.
+      - name: Verify the pnpm toolchain
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
+      # Workspace dependencies, from the ROOT lockfile that owns both members
+      # (`homelab/server/frontend`, `tools/test-audit`). A toolchain on PATH is
+      # not a runnable suite: `tsc` and `vitest` resolve through
+      # `node_modules`, so without this the first companion dies on a missing
+      # binary. The job that used to own these suites paired the install with
+      # the command in one step; moving them onto the registry carried the
+      # suites over but not the install, and `test-audit-typecheck` failed on
+      # ubuntu-latest for that reason alone.
+      #
+      # Not every node companion needs it — `homelab`'s frontend recipes
+      # install their own subtree — but a suite whose recipe calls `pnpm`
+      # directly has nowhere else to get its dependencies.
+      - name: Install workspace Node dependencies
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
       # Transfer clock. An artifact download is an action, not a command, so
       # its cost can only be observed between two steps; the verifier closes the
       # window and reports `download_seconds`. Transfer is reported apart from
       # test time, never folded into it.
       - name: Mark the build transfer start
         id: transfer
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
         shell: bash
         run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
       - name: Download this cell's build
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
         uses: actions/download-artifact@v7
         with:
-          name: ${{ steps.build.outputs.artifact }}
+          name: ${{ steps.cell.outputs.build_artifact }}
           path: ${{ runner.temp }}/build
       # Strict, and BEFORE extraction: plan key, realized digest, source
       # identity, producer/execution compatibility, archive and sidecar
@@ -483,13 +643,14 @@ jobs:
       # replacement.
       - name: Verify this cell's build
         id: verified
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
         shell: bash
         env:
           BISCUIT_CI_TRANSFER_STARTED_EPOCH: ${{ steps.transfer.outputs.epoch }}
         run: |
           just _ci_build_verify \
             "$RUNNER_TEMP/build" \
-            '${{ steps.build.outputs.artifact }}' \
+            '${{ steps.cell.outputs.build_artifact }}' \
             '${{ matrix.environment }}' \
             ci-artifacts/ci-resolved-plan/resolved-plan.json
       # Every compile-time tool the package declared as a build sidecar arrives
@@ -516,84 +677,60 @@ jobs:
               echo "BISCUIT_BACKEND_PROOF_BIN=$proof" >>"$GITHUB_ENV"
             fi
           done
-      # Runner tools are a CLOSED vocabulary, implemented here — not an
-      # arbitrary command surface. Each entry preserves a package-specific
-      # behavior that used to be embedded in an area-level recipe.
-      - name: Install AI-provider CLI stubs
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'ai-provider-stubs') }}
+      # THE EXPECTED SET, BEFORE THE GATE AND AFTER EVERY PROVISIONING STEP.
+      #
+      # `nextest list` RUNS each test binary to enumerate it, so it fails for
+      # the same reasons the gate would — an unprovisioned native library, a
+      # missing sidecar or backend, an absent pinned toolchain. Listing here
+      # therefore turns those into a fast, named failure instead of a 40-minute
+      # suite followed by an unexplainable comparison. It is derived from
+      # `_tier_filter`, the same expression the gate recipe reads, which is the
+      # whole point: expected and observed come from ONE selection.
+      - name: List this cell's expected tests
+        id: expected
         shell: bash
+        env:
+          BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
+          BISCUIT_L1_INCLUDE_SLOW: ${{ steps.cell.outputs.l1_include_slow }}
+          BISCUIT_CI_COMPANION_SUITES: ${{ steps.cell.outputs.companion_suites }}
+          ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
+          ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
+          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+          GATE: ${{ matrix.gate }}
         run: |
           set -euo pipefail
-          stubdir="$RUNNER_TEMP/ai-cli-stubs"
-          mkdir -p "$stubdir"
-          for bin in claude opencode roo gemini aider codex goose kimi qwen; do
-            if [ "${{ runner.os }}" = "Windows" ]; then
-              printf '@echo off\r\nexit /b 0\r\n' >"$stubdir/$bin.cmd"
-            else
-              printf '#!/usr/bin/env sh\nexit 0\n' >"$stubdir/$bin"
-              chmod +x "$stubdir/$bin"
+          # The plan's declared suites and required backends, in the spelling
+          # the recipe records them as provenance. `completion.py` refuses a
+          # disagreement between these and the plan rather than preferring one.
+          suites="$(jq -r 'join(",")' <<<"${BISCUIT_CI_COMPANION_SUITES:-[]}")"
+          export BISCUIT_CI_COMPANION_SUITES="$suites"
+          if [ "$GATE" = "L2" ]; then
+            required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
+            if [ -n "$required" ]; then
+              export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
             fi
-          done
-          echo "$stubdir" >>"$GITHUB_PATH"
-      # Node + pnpm for a package that declares a JavaScript companion suite
-      # (`homelab-frontend`, `test-audit-*`). Until this provisioning existed,
-      # `pnpm: command not found` killed the suite on EVERY runner while the
-      # rollup — which parses Rust JUnit only — rendered the area PASS
-      # 222/0/0 on three environments (measured, run 30427703024).
-      #
-      # Which environments qualify is DERIVED by `affected_scope.py` from the
-      # environment capability table crossed with the suites that declare
-      # `node`; nothing here decides it, and a package whose companions are
-      # Python contract suites provisions nothing.
-      - name: Set up pnpm
-        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        uses: pnpm/action-setup@v5
-        with:
-          version: 10
-      - name: Set up Node
-        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-      # Runtime reachability, mirroring the L2 tier's `tmux -V`: a capability
-      # the package DECLARED must fail its own named provisioning step when it
-      # is not actually usable, rather than surface minutes later as a suite
-      # that "skipped" under a green cell.
-      - name: Verify the pnpm toolchain
-        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --version
-          pnpm --version
-      # Workspace dependencies, from the ROOT lockfile that owns both members
-      # (`homelab/server/frontend`, `tools/test-audit`). A toolchain on PATH is
-      # not a runnable suite: `tsc` and `vitest` resolve through
-      # `node_modules`, so without this the first companion dies on a missing
-      # binary. The job that used to own these suites paired the install with
-      # the command in one step; moving them onto the registry carried the
-      # suites over but not the install, and `test-audit-typecheck` failed on
-      # ubuntu-latest for that reason alone.
-      #
-      # Not every node companion needs it — `homelab`'s frontend recipes
-      # install their own subtree — but a suite whose recipe calls `pnpm`
-      # directly has nowhere else to get its dependencies.
-      - name: Install workspace Node dependencies
-        if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
+          fi
+          archive_args=()
+          if [ -n "${ARCHIVE_FILE:-}" ]; then
+            archive_args=(--archive-file "$ARCHIVE_FILE" --workspace-remap "$ARCHIVE_WORKSPACE")
+            export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
+            export BISCUIT_JUNIT_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
+            export BISCUIT_JUNIT_TARGET_DIR="$ARCHIVE_WORKSPACE/target"
+          fi
+          just _expected_manifest "$GATE" "${{ matrix.package }}" \
+            ${archive_args[@]+"${archive_args[@]}"} ${{ steps.cell.outputs.test_args }}
       - name: Prepare the compiler-work counter
         id: counter
         if: ${{ inputs.measure-compiler-work }}
         shell: bash
         run: |
           set -euo pipefail
-          just _ci_build_counter "L1 ${{ matrix.environment }}"
-      # Gate command. Its outcome is both the producer and cell outcome.
-      - name: L1 tests
-        id: l1
+          just _ci_build_counter "${{ matrix.gate }} ${{ matrix.environment }}"
+      # Gate command. Its outcome is both the producer and cell outcome. The
+      # recipe comes from the cell contract, so the gate-to-recipe mapping
+      # lives in one place rather than in three near-identical jobs.
+      - name: Tests
+        id: gate
         shell: bash
         env:
           # COMMAND-SCOPED. The wrapper is bound to this step alone and to no
@@ -603,8 +740,8 @@ jobs:
           RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
           BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
           BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: L1 ${{ matrix.environment }}
+          BISCUIT_CI_BUILD_PACKAGE: ${{ matrix.package }}
+          BISCUIT_CI_BUILD_CONFIGURATION: ${{ matrix.gate }} ${{ matrix.environment }}
           JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
           ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
           # This checkout in the HOST's own spelling. Git Bash reports
@@ -612,8 +749,42 @@ jobs:
           # native program: nextest's remap, insta's workspace root, and the
           # JUnit staging root. `_ci_build_verify` computes it once.
           ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
+          GATE: ${{ matrix.gate }}
+          RECIPE: ${{ steps.cell.outputs.recipe }}
+          RUNNER_TOOLS: ${{ steps.cell.outputs.runner_tools }}
+          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+          BISCUIT_L1_INCLUDE_SLOW: ${{ steps.cell.outputs.l1_include_slow }}
+          # A PROVISIONED capability hard-fails when missing; every other cell
+          # (and every developer host) skips loudly and exits 0.
+          BISCUIT_FRONTEND_REQUIRED: ${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
+          tier_args=()
+          case "$GATE" in
+            L1)
+              # --no-fail-fast: run ALL of the package's tests so one slow or
+              # failing test cannot suppress the rest of the suite's evidence.
+              tier_args=(--no-fail-fast)
+              ;;
+            L2)
+              # Execution proof, not just availability: require exactly the
+              # declared backends this leg actually provisioned (tmux is the
+              # only CI-hostable one). With BISCUIT_TEST_REQUIRED_BACKENDS set,
+              # `_test_l2`'s backend-proof bracket fails the tier when a
+              # required backend produced zero executed tests — an installed
+              # tmux plus a suite that skipped everywhere must not render a
+              # green cell.
+              required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
+              if [ -n "$required" ]; then
+                export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
+              fi
+              # Only declared self-isolating suites can use the shared worker
+              # budget; suites using a shared pane must remain serial.
+              if [ "$(jq -r 'contains(["l2-parallel-self-spawn"])' <<<"$RUNNER_TOOLS")" = "true" ]; then
+                export BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
+              fi
+              ;;
+          esac
           # Archive mode passes the verified archive and remaps the workspace to
           # this checkout; the declared feature flags are already baked in and
           # `_archive_drop_build_flags` removes them. Nothing here is a Cargo
@@ -633,10 +804,9 @@ jobs:
           fi
           started="$(date +%s)"
           status=0
-          # --no-fail-fast: run ALL of the package's tests so one slow or
-          # failing test cannot suppress the rest of the suite's evidence.
-          just _test "${{ inputs.package }}" --no-fail-fast \
-            ${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }} || status=$?
+          just "$RECIPE" "${{ matrix.package }}" \
+            ${tier_args[@]+"${tier_args[@]}"} \
+            ${archive_args[@]+"${archive_args[@]}"} ${{ steps.cell.outputs.test_args }} || status=$?
           # The gate's own duration, recorded whether it passed or failed. In
           # the pre-cutover schedule this window contains BOTH the compile and
           # the test run — they are one Nextest invocation — which is why the
@@ -657,21 +827,21 @@ jobs:
           BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
           BISCUIT_CI_STAGE_SECONDS: >-
             {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }},
-             "gate_seconds":${{ steps.l1.outputs.seconds || 0 }},
-             "setup_seconds":${{ steps.l1.outputs.setup_seconds || 0 }}}
+             "gate_seconds":${{ steps.gate.outputs.seconds || 0 }},
+             "setup_seconds":${{ steps.gate.outputs.setup_seconds || 0 }}}
         run: |
           set -euo pipefail
           just _ci_build_report \
             "${{ steps.counter.outputs.wrapper }}" \
             "${{ steps.counter.outputs.counter_dir }}" \
             "$RUNNER_TEMP/measurement/measurement.json" \
-            "${{ inputs.package }}" "${{ matrix.environment }}" L1
+            "${{ matrix.package }}" "${{ matrix.environment }}" "${{ matrix.gate }}"
       - name: Upload the compiler-work measurement
         if: ${{ !cancelled() && inputs.measure-compiler-work }}
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: measurement-${{ inputs.package }}-L1-${{ matrix.environment }}
+          name: measurement-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}
           path: ${{ runner.temp }}/measurement
           if-no-files-found: ignore
       # Companion suites are non-Cargo suites OWNED by this package. The step
@@ -680,23 +850,29 @@ jobs:
       # and its outcome reaches the producer status below, so a green Rust
       # JUnit report can never hide a failed or skipped companion suite.
       #
-      # Which suites run here is the registry's answer, not this file's: the
-      # runner resolves the package's declared names against
-      # `scripts/ci/affected_scope.py`'s `SUITE_REGISTRY` and runs the ones
-      # this cell's environment hosts. On every other environment it resolves
-      # to nothing and succeeds. It records one outcome, one count, and one
-      # command duration PER SUITE, so one suite's success can never stand in
-      # for a suite that never ran.
+      # Which suites run here is the PLAN's answer: `affected_scope.py`'s
+      # `SUITE_REGISTRY` resolved each package's declared names against this
+      # cell's environment at planning time and put the result on the cell. It
+      # records one outcome, one count, and one command duration PER SUITE, so
+      # one suite's success can never stand in for a suite that never ran.
       - name: Companion suites
         id: companion
-        if: ${{ !cancelled() && contains(fromJSON(inputs.companion-environments), matrix.environment) }}
+        if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
         env:
-          COMPANION_SUITES: ${{ inputs.companion-suites }}
+          COMPANION_SUITES: ${{ steps.cell.outputs.companion_suites }}
           ENVIRONMENT: ${{ matrix.environment }}
+          GATE: ${{ matrix.gate }}
+          # A PROVISIONED capability hard-fails when missing; an INAPPLICABLE
+          # one skips cleanly. The frontend suite is a COMPANION, so this has
+          # to reach this step — the Rust gate above never runs it. It was a
+          # job-level value before the row layout, which cannot read the cell
+          # contract; declaring it twice is the price of resolving the cell in
+          # a step.
+          BISCUIT_FRONTEND_REQUIRED: ${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}
           # The host tools this step provisions, declared so a guard that
           # cannot find one FAILS here instead of skipping green. `just` is
-          # installed above; `jq`, Bash >= 4.4, and a Cargo the L1 command
+          # installed above; `jq`, Bash >= 4.4, and a Cargo the gate command
           # already ran come with the environments the registry attaches these
           # suites to. Declared on the step, not the job: a declaration set
           # anywhere else never reaches the suite's process.
@@ -709,9 +885,9 @@ jobs:
           python3 scripts/ci/companion_suites.py \
             --suites "$COMPANION_SUITES" \
             --environment "$ENVIRONMENT" \
-            --gate L1 \
+            --gate "$GATE" \
             --out "$RUNNER_TEMP/companions.json"
-      # Per-package/environment JUnit. The artifact name carries the
+      # Per-package/environment/gate JUnit. The artifact name carries the
       # ENVIRONMENT, not the runner label, so a WSL leg (which runs on
       # windows-latest) can never collide with, or be merged into, the native
       # Windows leg.
@@ -720,32 +896,32 @@ jobs:
       # that single path is overwritten by every nextest invocation. The
       # staging tree carries one XML per invocation plus `manifest.jsonl`, and
       # the manifest — not this artifact's name — is what gives each record
-      # its {package, environment, tier} identity.
-      - name: Upload L1 JUnit
+      # its {package, environment, gate} identity. It also carries this cell's
+      # `expected-<gate>.json`, which is what `completion.py` compares against.
+      - name: Upload JUnit
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
-          name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}
+          name: ${{ steps.cell.outputs.junit_artifact }}
           path: target/nextest/ci-reports
           if-no-files-found: ignore
-      # `L1`, not `test`: `ci-rollup` keys a status by TIER. A status naming a
-      # test tier explains a MISSING cell downstream of it; a status naming
-      # anything else becomes a cell in its own right. `test` would manufacture
-      # a phantom `<package>/<env>/test` cell beside the real L1 one and
-      # double-count the same failure.
+      # The gate spelling is the TIER (`L1`, `L2`, `browser`), never `test`:
+      # `ci-rollup` keys a status by gate, and a status naming anything else
+      # would manufacture a phantom cell beside the real one and double-count
+      # the same failure.
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
         env:
-          PACKAGE: ${{ inputs.package }}
-          JOB: L1
+          PACKAGE: ${{ matrix.package }}
+          JOB: ${{ matrix.gate }}
           ENVIRONMENT: ${{ matrix.environment }}
           JOB_STATUS: ${{ job.status }}
-          GATE: ${{ steps.l1.outcome }}
+          GATE: ${{ steps.gate.outcome }}
           COMPANION: ${{ steps.companion.outcome }}
           COMPANIONS_FILE: ${{ runner.temp }}/companions.json
-          BUILD_KEY: ${{ steps.build.outputs.key }}
-          BUILD_PRODUCER: ${{ steps.build.outputs.producer }}
+          BUILD_KEY: ${{ steps.cell.outputs.build_key }}
+          BUILD_PRODUCER: ${{ steps.cell.outputs.build_producer }}
           BUILD_DIGEST: ${{ steps.verified.outputs.digest }}
           # This consumer's stages, each measured where it actually happened:
           # the transfer between two steps, the verifier's own window and the
@@ -756,7 +932,7 @@ jobs:
             {"download_seconds":${{ steps.verified.outputs.download_seconds || 0 }},
              "verify_seconds":${{ steps.verified.outputs.verify_seconds || 0 }},
              "extract_ms":${{ steps.verified.outputs.extract_ms || 0 }},
-             "execute_seconds":${{ steps.l1.outputs.seconds || 0 }}}
+             "execute_seconds":${{ steps.gate.outputs.seconds || 0 }}}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/status"
@@ -773,7 +949,7 @@ jobs:
           result="$JOB_STATUS"
           if [ "$result" = "success" ] && { [ "$GATE" = "failure" ] || [ "$COMPANION" = "failure" ]; }; then
             result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::L1 tests: ${GATE}; companion suites: ${COMPANION}."
+            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::${JOB} tests: ${GATE}; companion suites: ${COMPANION}."
           fi
           # Every DECLARED companion suite records its own outcome, counts, and
           # command duration, not only on failure: a SKIPPED companion leaves no
@@ -813,26 +989,56 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
-          name: status-${{ inputs.package }}-L1-${{ matrix.environment }}
+          name: ${{ steps.cell.outputs.status_artifact }}
           path: ${{ runner.temp }}/status
+      # WHAT THE CELL WAS ASKED TO PROVE, COMPARED AGAINST WHAT IT REPORTED.
+      #
+      # A green JUnit report says what ran; only this says what SHOULD have
+      # run. It compares identities — not counts — between the listing above
+      # and the staged reports, refuses a missing test that no skip approval
+      # may excuse, and writes the completion record only when every check
+      # holds. It runs after the diagnostic uploads so a refusal still leaves
+      # the JUnit and status artifacts behind to read.
+      - name: Certify this cell's completeness
+        id: completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/completion.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --cell '${{ steps.cell.outputs.cell }}' \
+            --expected-manifest "target/nextest/ci-reports/expected-${{ matrix.gate }}.json" \
+            --artifacts target/nextest/ci-reports \
+            --companions "$RUNNER_TEMP/companions.json" \
+            --target '${{ steps.cell.outputs.target }}' \
+            --run "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/completion/completion.json"
+      # REQUIRED, and deliberately not `continue-on-error`: `complete: true`
+      # that never reaches the audit is the same as no proof at all, so a
+      # failed upload here fails the producer (R10).
+      - name: Upload this cell's completion record
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.cell.outputs.completion_artifact }}
+          path: ${{ runner.temp }}/completion
 
-  # This job has no matrix, so a static name is the only label it can have —
-  # and AC10 requires lint to say which environment produced its result, which
-  # the bare job id would not.
+  # This area's lint rows. `lint` runs on exactly one environment per package,
+  # so the row set is one row per package — but it is still a row set, because
+  # the alternative is a second way of deciding what runs.
   lint:
-    name: lint (ubuntu-latest)
-    if: ${{ contains(fromJSON(inputs.gates), 'lint') }}
-    runs-on: ubuntu-latest
+    if: ${{ inputs.lint-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.lint-rows) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
       # `just/devops.just`'s `_lint` already passes `-D warnings` to clippy;
       # this keeps the package's workspace dependencies held to the same bar
       # while they are compiled for that clippy run.
       RUSTFLAGS: "-D warnings"
-      # Same contract the `test` job carries, for the same capability: on the
-      # leg that provisions pnpm, a missing pnpm is a PROVISIONING FAILURE and
-      # `lint-frontend` must fail rather than self-skip.
-      BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') && '1' || '' }}
     steps:
       - name: Mark the job start
         id: job_start
@@ -844,18 +1050,33 @@ jobs:
           ref: ${{ inputs.tested-revision }}
       - name: Install just
         uses: extractions/setup-just@v4
+      - name: Download the resolved execution plan
+        uses: actions/download-artifact@v7
+        with:
+          name: ci-resolved-plan
+          path: ci-artifacts/ci-resolved-plan
+      - name: Resolve this cell's execution contract
+        id: cell
+        shell: bash
+        env:
+          ROW: ${{ toJSON(matrix) }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/cell_contract.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --row "$ROW" \
+            --head '${{ inputs.tested-revision }}' \
+            --github-output "$GITHUB_OUTPUT"
       - name: Install native prerequisites
         shell: bash
         env:
-          NATIVE: ${{ inputs.native }}
-          RUNNER_KEY: ubuntu-latest
+          NATIVE: ${{ steps.cell.outputs.native_packages }}
         run: |
           set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
           native_args=()
           while IFS= read -r package; do
             if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
+          done < <(jq -r '.[]?' <<<"${NATIVE:-[]}")
           if [ ${#native_args[@]} -gt 0 ]; then
             just _ensure-native-libs "${native_args[@]}"
           fi
@@ -863,7 +1084,7 @@ jobs:
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Read the pinned Zed extension packager record
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        if: ${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}
         id: zed-extension-pin
         shell: bash
         run: |
@@ -875,13 +1096,13 @@ jobs:
             printf '%s=%s\n' "$field" "$value" >>"$GITHUB_OUTPUT"
           done
       - name: Cache the pinned Zed extension packager
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        if: ${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}
         uses: actions/cache@v5
         with:
           path: ${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension
           key: zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
       - name: Provision the Zed extension verification toolchain
-        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        if: ${{ contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}
         shell: bash
         env:
           ZED_EXTENSION_SHA: ${{ steps.zed-extension-pin.outputs.zed_commit }}
@@ -903,22 +1124,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: package-ci-${{ inputs.package }}-lint-ubuntu-latest
+          shared-key: package-ci-${{ matrix.package }}-lint-${{ matrix.environment }}
       # A declared companion suite lints too (the homelab area recipe's `lint`
       # ran `lint-frontend` after clippy), so this job needs the same toolchain
       # the `test` job gets.
       - name: Set up pnpm
-        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
         uses: pnpm/action-setup@v5
         with:
           version: 10
       - name: Set up Node
-        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Verify the pnpm toolchain
-        if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
+        if: ${{ steps.cell.outputs.requires_node == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -930,7 +1151,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          just _ci_build_counter "lint ubuntu-latest"
+          just _ci_build_counter "lint ${{ matrix.environment }}"
       # Gate commands. Their outcomes are both producer and cell outcomes.
       #
       # The COMMAND is timed, not the job: the job also carries checkout,
@@ -972,18 +1193,22 @@ jobs:
           RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
           BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
           BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: lint ubuntu-latest
+          BISCUIT_CI_BUILD_PACKAGE: ${{ matrix.package }}
+          BISCUIT_CI_BUILD_CONFIGURATION: lint ${{ matrix.environment }}
+          # Same contract the `test` job carries, for the same capability: on
+          # the cell that provisions pnpm, a missing pnpm is a PROVISIONING
+          # FAILURE and `lint-frontend` must fail rather than self-skip.
+          BISCUIT_FRONTEND_REQUIRED: ${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}
         shell: bash
         run: |
           set -euo pipefail
           if ! command -v python3 >/dev/null 2>&1; then
             status=0
-            just _lint "${{ inputs.package }}" || status=$?
+            just _lint "${{ matrix.package }}" || status=$?
             echo "duration_s=" >>"$GITHUB_OUTPUT"
             exit "$status"
           fi
-          python3 - "${{ inputs.package }}" <<'PY'
+          python3 - "${{ matrix.package }}" <<'PY'
           import os
           import subprocess
           import sys
@@ -1014,18 +1239,18 @@ jobs:
             "${{ steps.counter.outputs.wrapper }}" \
             "${{ steps.counter.outputs.counter_dir }}" \
             "$RUNNER_TEMP/measurement/measurement.json" \
-            "${{ inputs.package }}" "ubuntu-latest" lint
+            "${{ matrix.package }}" "${{ matrix.environment }}" lint
       - name: Upload the compiler-work measurement
         if: ${{ !cancelled() && inputs.measure-compiler-work }}
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: measurement-${{ inputs.package }}-lint-ubuntu-latest
+          name: measurement-${{ matrix.package }}-lint-${{ matrix.environment }}
           path: ${{ runner.temp }}/measurement
           if-no-files-found: ignore
       - name: Verify the Zed extension package
         id: zed
-        if: ${{ !cancelled() && contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        if: ${{ !cancelled() && contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension') }}
         shell: bash
         run: cd darkmatter && just zed-verify
       # The lint half of this package's companion suites — only the suites that
@@ -1034,27 +1259,32 @@ jobs:
       # of a lint cell expecting evidence nobody produces.
       - name: Companion suites (lint)
         id: companion
-        if: ${{ !cancelled() && inputs.companion-suites != '[]' }}
+        if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
         env:
-          COMPANION_SUITES: ${{ inputs.companion-suites }}
+          COMPANION_SUITES: ${{ steps.cell.outputs.companion_suites }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          # The lint half of the same capability: `lint-frontend` must fail
+          # rather than self-skip on the cell that provisioned pnpm.
+          BISCUIT_FRONTEND_REQUIRED: ${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
           python3 scripts/ci/companion_suites.py \
             --suites "$COMPANION_SUITES" \
-            --environment ubuntu-latest \
+            --environment "$ENVIRONMENT" \
             --gate lint \
             --out "$RUNNER_TEMP/companions.json"
       # `lint` emits no JUnit, so this artifact is the sole basis for its
       # rollup cell — and the reason `ci-baseline.toml` can carry
-      # `tier = "lint"` entries at all.
+      # `tier = "lint"` entries at all. The name carries no environment: lint
+      # runs on exactly one, and the rollup has always keyed it that way.
       - name: Record producer status
         if: ${{ always() }}
         shell: bash
         env:
-          PACKAGE: ${{ inputs.package }}
+          PACKAGE: ${{ matrix.package }}
           JOB: lint
-          ENVIRONMENT: ubuntu-latest
+          ENVIRONMENT: ${{ matrix.environment }}
           JOB_STATUS: ${{ job.status }}
           GATE: ${{ steps.clippy.outcome }}
           GATE_DURATION: ${{ steps.clippy.outputs.duration_s }}
@@ -1101,610 +1331,60 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
-          name: status-${{ inputs.package }}-lint
+          name: ${{ steps.cell.outputs.status_artifact }}
           path: ${{ runner.temp }}/status
+      # A lint cell drives no nextest, so it publishes no expected listing and
+      # `completion.py` certifies it on the gate's own outcome, its companions,
+      # and the cell's binding.
+      - name: Certify this cell's completeness
+        id: completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/completion.py \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --cell '${{ steps.cell.outputs.cell }}' \
+            --artifacts ci-artifacts \
+            --companions "$RUNNER_TEMP/companions.json" \
+            --target '${{ steps.cell.outputs.target }}' \
+            --run "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --out "$RUNNER_TEMP/completion/completion.json"
+      - name: Upload this cell's completion record
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.cell.outputs.completion_artifact }}
+          path: ${{ runner.temp }}/completion
 
-  # L2 (real terminal), one leg per environment where a backend is provisioned.
-  # tmux/PTY is the ONLY backend headless CI can host (D8) and it installs on
-  # BOTH Linux (apt) and macOS (brew), so this is a matrix rather than a
-  # hardcoded ubuntu leg. WezTerm/Kitty/Apple Terminal require running INSIDE
-  # that GUI, so those tests skip cleanly here via require_level!. The "Report
-  # L2 backend coverage" step makes that skip VISIBLE rather than silent.
+  # WSL2 is a supported Linux environment, not a runner label. Delegating one
+  # row at a time to a dedicated reusable workflow is the whole point: that job
+  # runs on `windows-latest` and executes through `wsl-bash`, so if it shared
+  # the `test` matrix above, every `runner.os == 'Windows'` branch — native
+  # package installation, path handling, shell selection, cache keys, artifact
+  # names — would silently apply to a Linux guest.
   #
-  # We hard-require the provisioned backend by VERIFYING tmux is reachable
-  # rather than setting a global BISCUIT_TEST_LEVEL_REQUIRED, which would panic
-  # the GUI-backed tests this runner cannot host.
-  #
-  # Windows and wsl2-ubuntu are absent by construction: `l2-environments` is
-  # derived from package policy crossed with the environment capability table,
-  # so an L2 tier there is recorded as a POLICY GAP in the rollup instead of
-  # appearing as a green 0-run cell.
-  test-l2:
-    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
-    # require L1 to have passed. A red L1 used to suppress this leg entirely,
-    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
-    # evidence. Absence of evidence must never be a side effect of a failure
-    # elsewhere.
-    needs: test
-    if: ${{ !cancelled() && inputs.l2-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: ${{ fromJSON(inputs.l2-environments) }}
-    runs-on: ${{ matrix.environment }}
-    timeout-minutes: 30
-    env:
-      BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
-    steps:
-      # Phase 1 measurement only: the reference point for `setup_seconds`. It
-      # runs before checkout so setup — checkout, toolchain, native
-      # prerequisites, cache restore — falls inside the measured window.
-      - name: Mark the job start
-        id: job_start
-        if: ${{ inputs.measure-compiler-work }}
-        shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tested-revision }}
-      - name: Install just
-        uses: extractions/setup-just@v4
-      - name: Resolve this cell's build record
-        id: build
-        shell: bash
-        run: just _ci_build_consumer '${{ inputs.builds }}' '${{ matrix.environment }}' L2
-      - name: Install native prerequisites
-        shell: bash
-        env:
-          NATIVE: ${{ inputs.native }}
-          RUNNER_KEY: ${{ matrix.environment }}
-        run: |
-          set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
-          native_args=()
-          while IFS= read -r package; do
-            if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
-          if [ ${#native_args[@]} -gt 0 ]; then
-            just _ensure-native-libs "${native_args[@]}"
-          fi
-      - name: Provision and verify the tmux backend
-        shell: bash
-        env:
-          ENVIRONMENT: ${{ matrix.environment }}
-        run: |
-          set -euo pipefail
-          case "$ENVIRONMENT" in
-            ubuntu-latest)
-              sudo apt-get update && sudo apt-get install -y tmux
-              ;;
-            macos-latest)
-              brew list tmux >/dev/null 2>&1 || brew install tmux
-              ;;
-            *)
-              echo "no tmux provisioning path for environment '$ENVIRONMENT'" >&2
-              exit 1
-              ;;
-          esac
-          # Verify runtime reachability (D8): a broken tmux fails this named
-          # provisioning step — the hard-require for the one L2 backend CI hosts.
-          # `tmux -V` needs no server, no display, and no pane, so it takes no
-          # focus. CI must never steal focus.
-          tmux -V
-      # `neovim` runner tool: dmls's L2 suite runs a real Neovim (headless and
-      # inside tmux). Without the binary every gate skips, and backend-proof
-      # then rightly fails the tier for producing no tmux evidence.
-      - name: Provision neovim
-        if: contains(fromJSON(inputs.runner-tools), 'neovim')
-        shell: bash
-        env:
-          ENVIRONMENT: ${{ matrix.environment }}
-        run: |
-          set -euo pipefail
-          case "$ENVIRONMENT" in
-            ubuntu-latest)
-              sudo apt-get update && sudo apt-get install -y neovim
-              ;;
-            macos-latest)
-              brew list neovim >/dev/null 2>&1 || brew install neovim
-              ;;
-            *)
-              echo "no neovim provisioning path for environment '$ENVIRONMENT'" >&2
-              exit 1
-              ;;
-          esac
-          nvim --version | head -1
-      - name: Report L2 backend coverage
-        shell: bash
-        env:
-          PACKAGE: ${{ inputs.package }}
-          ENVIRONMENT: ${{ matrix.environment }}
-          DECLARED_BACKENDS: ${{ inputs.backends }}
-        run: |
-          set -euo pipefail
-          # A backend that cannot exist here skips silently inside require_level!.
-          # Naming every declared backend and its status turns "0 run / N skipped"
-          # from an invisible non-event into a readable row.
-          {
-            echo "### L2 backends — ${PACKAGE} on ${ENVIRONMENT}"
-            echo ""
-            echo "| backend | status |"
-            echo "|---|---|"
-            while IFS= read -r backend; do
-              [ -n "$backend" ] || continue
-              if [ "$backend" = "tmux" ]; then
-                echo "| tmux | provisioned — its tests MUST execute |"
-              elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
-                echo "| apple-terminal | unavailable — \`available()\` returns false when CI is truthy; its tests skip |"
-              else
-                echo "| ${backend} | unavailable — needs a live GUI session; its tests skip |"
-              fi
-            done < <(printf '%s' "$DECLARED_BACKENDS" | jq -r '.[]?')
-          } >>"$GITHUB_STEP_SUMMARY"
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-      - name: Download the resolved execution plan
-        uses: actions/download-artifact@v7
-        with:
-          name: ci-resolved-plan
-          path: ci-artifacts/ci-resolved-plan
-      # Transfer clock. An artifact download is an action, not a command, so
-      # its cost can only be observed between two steps; the verifier closes the
-      # window and reports `download_seconds`. Transfer is reported apart from
-      # test time, never folded into it.
-      - name: Mark the build transfer start
-        id: transfer
-        shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
-      - name: Download this cell's build
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ steps.build.outputs.artifact }}
-          path: ${{ runner.temp }}/build
-      - name: Verify this cell's build
-        id: verified
-        shell: bash
-        env:
-          BISCUIT_CI_TRANSFER_STARTED_EPOCH: ${{ steps.transfer.outputs.epoch }}
-        run: |
-          just _ci_build_verify \
-            "$RUNNER_TEMP/build" \
-            '${{ steps.build.outputs.artifact }}' \
-            '${{ matrix.environment }}' \
-            ci-artifacts/ci-resolved-plan/resolved-plan.json
-      # The L2 tier's compile-time tools: the harness broker a consumer with no
-      # Cargo cannot build, and any other sidecar the package declared.
-      - name: Provision the verified build sidecars
-        shell: bash
-        run: |
-          set -euo pipefail
-          sidecars='${{ steps.verified.outputs.sidecar_dir }}'
-          [ -d "$sidecars" ] || exit 0
-          echo "$sidecars" >>"$GITHUB_PATH"
-          if [ -x "$sidecars/stub_dunstify" ] || [ -x "$sidecars/stub_dunstify.exe" ]; then
-            echo "MESSENGER_STUB_BIN_DIR=$sidecars" >>"$GITHUB_ENV"
-          fi
-          for broker in "$sidecars/biscuit-harness-broker" "$sidecars/biscuit-harness-broker.exe"; do
-            if [ -x "$broker" ]; then
-              echo "BISCUIT_HARNESS_BROKER_BIN=$broker" >>"$GITHUB_ENV"
-            fi
-          done
-          for proof in "$sidecars/backend-proof" "$sidecars/backend-proof.exe"; do
-            if [ -x "$proof" ]; then
-              echo "BISCUIT_BACKEND_PROOF_BIN=$proof" >>"$GITHUB_ENV"
-            fi
-          done
-      - name: Prepare the compiler-work counter
-        id: counter
-        if: ${{ inputs.measure-compiler-work }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          just _ci_build_counter "L2 ${{ matrix.environment }}"
-      # Gate command. Its outcome is both the producer and cell outcome.
-      - name: L2 tests
-        id: l2
-        shell: bash
-        env:
-          RUNNER_TOOLS: ${{ inputs.runner-tools }}
-          DECLARED_BACKENDS: ${{ inputs.backends }}
-          # COMMAND-SCOPED, exactly as in the L1 gate: this tier recompiles the
-          # same test programs today, and the count is what proves it.
-          RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
-          BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
-          BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: L2 ${{ matrix.environment }}
-          JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
-          ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
-          # This checkout in the HOST's own spelling. Git Bash reports
-          # `/d/a/repo` for `$PWD`, and every consumer of this value is a
-          # native program: nextest's remap, insta's workspace root, and the
-          # JUnit staging root. `_ci_build_verify` computes it once.
-          ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
-        run: |
-          set -euo pipefail
-          # Execution proof, not just availability: require exactly the
-          # declared backends this leg actually provisioned (tmux is the only
-          # CI-hostable one). With BISCUIT_TEST_REQUIRED_BACKENDS set,
-          # `_test_l2`'s backend-proof bracket fails the tier when a required
-          # backend produced zero executed tests — an installed tmux plus a
-          # suite that skipped everywhere must not render a green cell.
-          required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
-          if [ -n "$required" ]; then
-            export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
-          fi
-          # Only declared self-isolating suites can use the shared worker
-          # budget; suites using a shared pane must remain serial.
-          if [ "$(jq -r 'contains(["l2-parallel-self-spawn"])' <<<"$RUNNER_TOOLS")" = "true" ]; then
-            export BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
-          fi
-          archive_args=()
-          if [ -n "${ARCHIVE_FILE:-}" ]; then
-            archive_args=(--archive-file "$ARCHIVE_FILE" --workspace-remap "$ARCHIVE_WORKSPACE")
-            export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
-            export BISCUIT_JUNIT_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
-            export BISCUIT_JUNIT_TARGET_DIR="$ARCHIVE_WORKSPACE/target"
-            export INSTA_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
-          fi
-          started="$(date +%s)"
-          status=0
-          just _test_l2 "${{ inputs.package }}" \
-            ${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }} || status=$?
-          echo "seconds=$(( $(date +%s) - started ))" >>"$GITHUB_OUTPUT"
-          if [ -n "${JOB_STARTED_EPOCH:-}" ]; then
-            echo "setup_seconds=$(( started - JOB_STARTED_EPOCH ))" >>"$GITHUB_OUTPUT"
-          fi
-          exit "$status"
-      # ADVISORY (see the L1 twin): `continue-on-error` keeps a broken
-      # measurement out of `ci-gate`'s fold.
-      - name: Report compiler work
-        if: ${{ !cancelled() && inputs.measure-compiler-work }}
-        continue-on-error: true
-        shell: bash
-        env:
-          BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
-          BISCUIT_CI_STAGE_SECONDS: >-
-            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }},
-             "gate_seconds":${{ steps.l2.outputs.seconds || 0 }},
-             "setup_seconds":${{ steps.l2.outputs.setup_seconds || 0 }}}
-        run: |
-          set -euo pipefail
-          just _ci_build_report \
-            "${{ steps.counter.outputs.wrapper }}" \
-            "${{ steps.counter.outputs.counter_dir }}" \
-            "$RUNNER_TEMP/measurement/measurement.json" \
-            "${{ inputs.package }}" "${{ matrix.environment }}" L2
-      - name: Upload the compiler-work measurement
-        if: ${{ !cancelled() && inputs.measure-compiler-work }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: measurement-${{ inputs.package }}-L2-${{ matrix.environment }}
-          path: ${{ runner.temp }}/measurement
-          if-no-files-found: ignore
-      # The staging directory, so the manifest travels with the reports. See
-      # the L1 upload for why the single overwritten file is not enough.
-      - name: Upload L2 JUnit
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: junit-${{ inputs.package }}-L2-${{ matrix.environment }}
-          path: target/nextest/ci-reports
-          if-no-files-found: ignore
-      - name: Record producer status
-        if: ${{ always() }}
-        shell: bash
-        env:
-          PACKAGE: ${{ inputs.package }}
-          JOB: L2
-          ENVIRONMENT: ${{ matrix.environment }}
-          JOB_STATUS: ${{ job.status }}
-          GATE: ${{ steps.l2.outcome }}
-          BUILD_KEY: ${{ steps.build.outputs.key }}
-          BUILD_PRODUCER: ${{ steps.build.outputs.producer }}
-          BUILD_DIGEST: ${{ steps.verified.outputs.digest }}
-          # This consumer's stages, each measured where it actually happened:
-          # the transfer between two steps, the verifier's own window and the
-          # extraction inside it, and the gate command. Reporting only — the
-          # cell's identity stays {package, environment, gate} and the rollup
-          # keys nothing on a duration.
-          TIMINGS: >-
-            {"download_seconds":${{ steps.verified.outputs.download_seconds || 0 }},
-             "verify_seconds":${{ steps.verified.outputs.verify_seconds || 0 }},
-             "extract_ms":${{ steps.verified.outputs.extract_ms || 0 }},
-             "execute_seconds":${{ steps.l2.outputs.seconds || 0 }}}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/status"
-          # An unmeasured stage is absent, never zero: a job that reported no
-          # timings at all must not read as one whose transfer was instant. A
-          # malformed measurement is treated the same way — this step runs under
-          # `always()` and is the cell's only evidence, so instrumentation must
-          # not be able to lose it.
-          timings="${TIMINGS:-}"
-          if ! printf '%s' "$timings" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            timings='{}'
-          fi
-          # `result` is the CELL's conclusion, not the job's (see the header).
-          result="$JOB_STATUS"
-          if [ "$result" = "success" ] && [ "$GATE" = "failure" ]; then
-            result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the L2 tests failed."
-          fi
-          jq -cn \
-            --arg package "$PACKAGE" --arg job "$JOB" --arg environment "$ENVIRONMENT" \
-            --arg result "$result" --arg key "${BUILD_KEY:-}" \
-            --arg producer "${BUILD_PRODUCER:-}" --arg digest "${BUILD_DIGEST:-}" \
-            --argjson timings "$timings" \
-            '{package: $package, job: $job, environment: $environment, result: $result}
-             + (if $key == "" then {}
-                else {build: {key: $key, producer: $producer, digest: $digest}} end)
-             + (if $timings == {} then {} else {timings: $timings} end)' \
-            >"$RUNNER_TEMP/status/status.json"
-      - name: Upload producer status
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: status-${{ inputs.package }}-L2-${{ matrix.environment }}
-          path: ${{ runner.temp }}/status
-
-  test-browser:
-    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
-    # require L1 to have passed. A red L1 used to suppress this leg entirely,
-    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
-    # evidence. Absence of evidence must never be a side effect of a failure
-    # elsewhere.
-    needs: test
-    if: ${{ !cancelled() && inputs.browser-environments != '[]' && contains(fromJSON(inputs.gates), 'test') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: ${{ fromJSON(inputs.browser-environments) }}
-    runs-on: ${{ matrix.environment }}
-    timeout-minutes: 30
-    env:
-      BISCUIT_BROWSER_REQUIRED: "1"
-      BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
-    steps:
-      # Phase 1 measurement only: the reference point for `setup_seconds`. It
-      # runs before checkout so setup — checkout, toolchain, native
-      # prerequisites, cache restore — falls inside the measured window.
-      - name: Mark the job start
-        id: job_start
-        if: ${{ inputs.measure-compiler-work }}
-        shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tested-revision }}
-      - name: Install just
-        uses: extractions/setup-just@v4
-      - name: Resolve this cell's build record
-        id: build
-        shell: bash
-        run: just _ci_build_consumer '${{ inputs.builds }}' '${{ matrix.environment }}' browser
-      - name: Install native prerequisites
-        shell: bash
-        env:
-          NATIVE: ${{ inputs.native }}
-          RUNNER_KEY: ${{ matrix.environment }}
-        run: |
-          set -euo pipefail
-          packages="$(jq -r --arg k "$RUNNER_KEY" '.[$k] // [] | .[]' <<<"$NATIVE")"
-          native_args=()
-          while IFS= read -r package; do
-            if [ -n "$package" ]; then native_args+=("$package"); fi
-          done <<<"$packages"
-          if [ ${#native_args[@]} -gt 0 ]; then
-            just _ensure-native-libs "${native_args[@]}"
-          fi
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-      - name: Download the resolved execution plan
-        uses: actions/download-artifact@v7
-        with:
-          name: ci-resolved-plan
-          path: ci-artifacts/ci-resolved-plan
-      # Transfer clock. An artifact download is an action, not a command, so
-      # its cost can only be observed between two steps; the verifier closes the
-      # window and reports `download_seconds`. Transfer is reported apart from
-      # test time, never folded into it.
-      - name: Mark the build transfer start
-        id: transfer
-        shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
-      - name: Download this cell's build
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ steps.build.outputs.artifact }}
-          path: ${{ runner.temp }}/build
-      - name: Verify this cell's build
-        id: verified
-        shell: bash
-        env:
-          BISCUIT_CI_TRANSFER_STARTED_EPOCH: ${{ steps.transfer.outputs.epoch }}
-        run: |
-          just _ci_build_verify \
-            "$RUNNER_TEMP/build" \
-            '${{ steps.build.outputs.artifact }}' \
-            '${{ matrix.environment }}' \
-            ci-artifacts/ci-resolved-plan/resolved-plan.json
-      - name: Provision the verified build sidecars
-        shell: bash
-        run: |
-          set -euo pipefail
-          sidecars='${{ steps.verified.outputs.sidecar_dir }}'
-          [ -d "$sidecars" ] || exit 0
-          echo "$sidecars" >>"$GITHUB_PATH"
-      - name: Prepare the compiler-work counter
-        id: counter
-        if: ${{ inputs.measure-compiler-work }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          just _ci_build_counter "browser ${{ matrix.environment }}"
-      # Gate command. Its outcome is both the producer and cell outcome.
-      - name: Browser tests
-        id: browser
-        shell: bash
-        env:
-          # COMMAND-SCOPED, exactly as in the L1 and L2 gates.
-          RUSTC_WRAPPER: ${{ steps.counter.outputs.wrapper }}
-          BISCUIT_CI_BUILD_WRAP: ${{ steps.counter.outputs.wrap }}
-          BISCUIT_CI_BUILD_COUNTER_DIR: ${{ steps.counter.outputs.counter_dir }}
-          BISCUIT_CI_BUILD_PACKAGE: ${{ inputs.package }}
-          BISCUIT_CI_BUILD_CONFIGURATION: browser ${{ matrix.environment }}
-          JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
-          ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
-          # This checkout in the HOST's own spelling. Git Bash reports
-          # `/d/a/repo` for `$PWD`, and every consumer of this value is a
-          # native program: nextest's remap, insta's workspace root, and the
-          # JUnit staging root. `_ci_build_verify` computes it once.
-          ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
-        run: |
-          set -euo pipefail
-          archive_args=()
-          if [ -n "${ARCHIVE_FILE:-}" ]; then
-            archive_args=(--archive-file "$ARCHIVE_FILE" --workspace-remap "$ARCHIVE_WORKSPACE")
-            export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
-            export BISCUIT_JUNIT_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
-            export BISCUIT_JUNIT_TARGET_DIR="$ARCHIVE_WORKSPACE/target"
-            export INSTA_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
-          fi
-          started="$(date +%s)"
-          status=0
-          just _test_browser "${{ inputs.package }}" \
-            ${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }} || status=$?
-          echo "seconds=$(( $(date +%s) - started ))" >>"$GITHUB_OUTPUT"
-          if [ -n "${JOB_STARTED_EPOCH:-}" ]; then
-            echo "setup_seconds=$(( started - JOB_STARTED_EPOCH ))" >>"$GITHUB_OUTPUT"
-          fi
-          exit "$status"
-      # ADVISORY (see the L1 twin): `continue-on-error` keeps a broken
-      # measurement out of `ci-gate`'s fold.
-      - name: Report compiler work
-        if: ${{ !cancelled() && inputs.measure-compiler-work }}
-        continue-on-error: true
-        shell: bash
-        env:
-          BISCUIT_CI_JOB_STARTED_EPOCH: ${{ steps.job_start.outputs.epoch }}
-          BISCUIT_CI_STAGE_SECONDS: >-
-            {"counter_setup_seconds":${{ steps.counter.outputs.setup_seconds || 0 }},
-             "gate_seconds":${{ steps.browser.outputs.seconds || 0 }},
-             "setup_seconds":${{ steps.browser.outputs.setup_seconds || 0 }}}
-        run: |
-          set -euo pipefail
-          just _ci_build_report \
-            "${{ steps.counter.outputs.wrapper }}" \
-            "${{ steps.counter.outputs.counter_dir }}" \
-            "$RUNNER_TEMP/measurement/measurement.json" \
-            "${{ inputs.package }}" "${{ matrix.environment }}" browser
-      - name: Upload the compiler-work measurement
-        if: ${{ !cancelled() && inputs.measure-compiler-work }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: measurement-${{ inputs.package }}-browser-${{ matrix.environment }}
-          path: ${{ runner.temp }}/measurement
-          if-no-files-found: ignore
-      # The staging directory, so the manifest travels with the reports. See
-      # the L1 upload for why the single overwritten file is not enough.
-      - name: Upload browser JUnit
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: junit-${{ inputs.package }}-browser-${{ matrix.environment }}
-          path: target/nextest/ci-reports
-          if-no-files-found: ignore
-      - name: Record producer status
-        if: ${{ always() }}
-        shell: bash
-        env:
-          PACKAGE: ${{ inputs.package }}
-          JOB: browser
-          ENVIRONMENT: ${{ matrix.environment }}
-          JOB_STATUS: ${{ job.status }}
-          GATE: ${{ steps.browser.outcome }}
-          BUILD_KEY: ${{ steps.build.outputs.key }}
-          BUILD_PRODUCER: ${{ steps.build.outputs.producer }}
-          BUILD_DIGEST: ${{ steps.verified.outputs.digest }}
-          # This consumer's stages, each measured where it actually happened:
-          # the transfer between two steps, the verifier's own window and the
-          # extraction inside it, and the gate command. Reporting only — the
-          # cell's identity stays {package, environment, gate} and the rollup
-          # keys nothing on a duration.
-          TIMINGS: >-
-            {"download_seconds":${{ steps.verified.outputs.download_seconds || 0 }},
-             "verify_seconds":${{ steps.verified.outputs.verify_seconds || 0 }},
-             "extract_ms":${{ steps.verified.outputs.extract_ms || 0 }},
-             "execute_seconds":${{ steps.browser.outputs.seconds || 0 }}}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/status"
-          # An unmeasured stage is absent, never zero: a job that reported no
-          # timings at all must not read as one whose transfer was instant. A
-          # malformed measurement is treated the same way — this step runs under
-          # `always()` and is the cell's only evidence, so instrumentation must
-          # not be able to lose it.
-          timings="${TIMINGS:-}"
-          if ! printf '%s' "$timings" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            timings='{}'
-          fi
-          # `result` is the CELL's conclusion, not the job's (see the header).
-          result="$JOB_STATUS"
-          if [ "$result" = "success" ] && [ "$GATE" = "failure" ]; then
-            result=failure
-            echo "::error title=${PACKAGE} ${JOB} (${ENVIRONMENT}) failed::the browser tests failed."
-          fi
-          jq -cn \
-            --arg package "$PACKAGE" --arg job "$JOB" --arg environment "$ENVIRONMENT" \
-            --arg result "$result" --arg key "${BUILD_KEY:-}" \
-            --arg producer "${BUILD_PRODUCER:-}" --arg digest "${BUILD_DIGEST:-}" \
-            --argjson timings "$timings" \
-            '{package: $package, job: $job, environment: $environment, result: $result}
-             + (if $key == "" then {}
-                else {build: {key: $key, producer: $producer, digest: $digest}} end)
-             + (if $timings == {} then {} else {timings: $timings} end)' \
-            >"$RUNNER_TEMP/status/status.json"
-      - name: Upload producer status
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: status-${{ inputs.package }}-browser-${{ matrix.environment }}
-          path: ${{ runner.temp }}/status
-
-  # WSL2 is a supported Linux environment, not a runner label. Delegating to a
-  # dedicated reusable workflow is the whole point: that job runs on
-  # `windows-latest` and executes through `wsl-bash`, so if it shared the
-  # matrix above, every `runner.os == 'Windows'` branch — native package
-  # installation, path handling, shell selection, cache keys, artifact names —
-  # would silently apply to a Linux guest.
+  # It waits on NOTHING (ruling R3): a red native L1 used to suppress this leg
+  # entirely, so the rollup recorded MISSING and one failure erased the guest's
+  # evidence. Absence of evidence must never be a side effect of a failure
+  # elsewhere.
   wsl2:
-    # Ordering only: this tier runs AFTER L1 for resource staging, but does not
-    # require L1 to have passed. A red L1 used to suppress this leg entirely,
-    # so the rollup recorded MISSING and one L1 failure erased the whole tier's
-    # evidence. Absence of evidence must never be a side effect of a failure
-    # elsewhere.
-    needs: test
-    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.wsl }}
+    if: ${{ inputs.wsl-rows != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.wsl-rows) }}
     uses: ./.github/workflows/_wsl-ci.yml
     with:
       tested-revision: ${{ inputs.tested-revision }}
-      package: ${{ inputs.package }}
-      # The guest is a pure consumer: it downloads the SAME artifact the native
-      # Linux tiers do, verifies it, and runs it. There is no archive-args input
-      # any more because there is no package-local archive job to feed.
-      builds: ${{ inputs.builds }}
-      test-args: ${{ inputs.test-args }}
-      l1-include-slow: ${{ inputs.l1-include-slow }}
-      runner-tools: ${{ inputs.runner-tools }}
-      native: ${{ inputs.native }}
+      # The whole row. The guest resolves its own execution contract from the
+      # plan exactly as a native job does; there is no second input surface,
+      # and no environment list reaches this level at all.
+      row: ${{ toJSON(matrix) }}
     secrets: inherit
 
   # THERE IS NO `classify` JOB HERE ANY MORE (retired D15 — judgement lives in
-  # `_area-ci.yml`'s per-area `rollup`; ci.yml's `ci-gate` only folds job
+  # `_area-ci.yml`'s per-area coverage audit; ci.yml's `ci-gate` only folds job
   # results). Every producer job uploads an explicit
-  # `status-<package>-<job>` artifact, which carries the same fact per
-  # {package, environment, tier} — including a failed gate command, which the
-  # job's own conclusion no longer carries (see the header).
+  # `status-<package>-<gate>[-<environment>]` artifact and a validated
+  # `completion-<package>-<gate>-<environment>` record, which together carry
+  # what the job's own conclusion cannot (see the header).

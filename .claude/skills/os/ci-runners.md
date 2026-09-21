@@ -85,6 +85,28 @@ none are recorded here (see "Noise" below).
 
 ## Cross-cutting
 
+- **The Python floor is 3.9 for anything a workflow step runs, and 3.11 only
+  for the planner.** `scripts/ci/companion_suites.py` runs in `_package-ci.yml`
+  on all three native environments and `import`s `affected_scope`, so a
+  module-level import of a 3.11-only stdlib module in the planner would break
+  the companion step on a runner whose `python3` is older (macOS ships CPython
+  3.9 at `/usr/bin/python3`, and that interpreter has already broken a shipped
+  `time.monotonic` regression here). The *planner itself* runs only on the
+  scope job's `ubuntu-latest` and on developer hosts, and the thirteen
+  `scripts/ci/test_*.py` suites are all registered in `SUITE_REGISTRY` with
+  `environment: ubuntu-latest`. So: `affected_scope.py` imports `tomllib`
+  defensively (`except ModuleNotFoundError: tomllib = None`) and refuses by
+  name in `load_skip_policy` when a non-empty `.github/ci/ci-baseline.toml`
+  meets an interpreter that has none. Check a new import against
+  `ast.parse(source, feature_version=(3, 9))` over `scripts/ci/*.py` — it
+  catches grammar, not stdlib, so a new module import needs the same judgement
+  by hand (2026-09-20).
+
+- **The working tree is LF on every OS**, so hashing a tracked file's bytes
+  gives the same digest on Windows as on Linux. `.gitattributes` sets
+  `* text=auto eol=lf`, overriding `core.autocrlf`. The plan's `skip_policy`
+  content hash relies on this.
+
 - **Test worker budgets follow the shared policy.** `_test_threads` in
   `just/devops.just` uses `max(1, logical_cores - 2)` locally; CI uses all cores
   through four and subtracts two above four. CI means `CI=true`,

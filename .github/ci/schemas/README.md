@@ -1,14 +1,19 @@
 # CI contract schemas
 
-Three documents carry every decision this repository's CI makes. All are
+Five documents carry every decision this repository's CI makes. All are
 defined once in [`scripts/ci/schema.py`](../../../scripts/ci/schema.py), which
 is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 4 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 5 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
+| Expected manifest | 2 | `just _expected_manifest`, on the execution target | `scripts/ci/completion.py` |
+| Completion record | 1 | `scripts/ci/completion.py`, on success only | the area's `ci-rollup verdict` |
+
+The first three describe what CI will do; the last two are how a producer job
+proves it did it.
 
 `contract.json` in this directory is the field contract dumped from that module
 so Rust tooling can assert against it without running Python. Regenerate it with
@@ -22,21 +27,22 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > still reads the legacy *policy* document for the governance of a
 > `gates = false` package, which owns no cells at all.
 >
-> **The legacy `scope.json` projection is still live.** `ci.yml` and
-> `just/ci-local.just` read it, and `affected_scope.py::legacy_scope_document`
-> projects it from the same cells — a projection, not a second calculation, so
-> the two documents cannot disagree about what CI will run. It carries the
-> area fan-out (`scheduled_areas`, `area_matrix`, `area_slugs`) and the build
-> owner fan-out (`build_owners`). `build_slices`, `build_artifacts`, and
-> `build_runners` retain the package-keyed artifact inventory for diagnostics;
-> they do not determine the job matrix.
-> Deleting it means moving those consumers onto `cells[]` first; the governance
-> metadata of a non-gating package has to move into the plan before the policy
-> half can go.
+> **The `scope.json` projection is still live.** `ci.yml` publishes its
+> outputs, and `affected_scope.py::legacy_scope_document` projects it from the
+> same plan — a projection, not a second calculation, so the two documents
+> cannot disagree about what CI will run. It carries the area fan-out
+> (`scheduled_areas`, `area_slugs`, `area_rows`) and the build owner fan-out
+> (`build_owners`). `build_slices`, `build_artifacts`, and `build_runners`
+> retain the package-keyed artifact inventory for diagnostics; they do not
+> determine the job matrix. It carries no per-package environment list: the
+> `matrix` and `area_matrix` projections were retired in
+> `2026-09-19-direct-cell-execution`, and `just/ci-local.just` reads the
+> plan's package records and cells instead. The governance metadata of a
+> non-gating package has to move into the plan before the policy half can go.
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
-> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 4`,
-> versioned independently of the plan's 4, the receipt's 2, and the baseline's
+> it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 5`,
+> versioned independently of the plan's 5, the receipt's 2, and the baseline's
 > 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
@@ -79,6 +85,15 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 > scope receipt misses once as `scope-schema` for the same reason a version-1
 > one did; validation receipts are untouched, so their version stays at 2 and
 > nothing already-recorded is invalidated.
+>
+> Version 5 is `features/2026-09-19-direct-cell-execution`. The hosted
+> workflows stop receiving environment lists and expand one matrix row per
+> executing cell, so every input a downstream job used to be handed has to be
+> answerable from the plan alone: the plan-level `skip_policy` snapshot of
+> `ci-baseline.toml`, the area-level `execution_path`, and the per-cell
+> `profile` and `requires_node`. A version-4 scope receipt misses once as
+> `scope-schema`; the receipt version stays at 2, because a change in how work
+> is dispatched is not a reason to invalidate a cell that was validated.
 
 ## Resolved plan
 
@@ -94,7 +109,8 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
 
 - `event`, `deferred_environments`, `proven_environments` — optional, absent
   rather than empty, so a plan resolved without an event is byte-identical to
-  one from before they existed and the version stays at 4 (R9). `event` is
+  one from before they existed and the version does not move for them (R9).
+  `event` is
   the GitHub event the plan was resolved for; `deferred_environments` lists
   the table's environments that event does not schedule, each with the
   `events` that do; `proven_environments` lists the environments an earlier
@@ -111,8 +127,10 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   from the gating packages a change selects, so a change to a `gates = false`
   package's Rust source correctly reports `change_class: documentation` beside
   a `source` bucket.
-- `areas[]` — one entry per selected area, with the reason it was selected and
-  the packages contributing to it. Nested areas such as `claudine/rendezvous`
+- `areas[]` — one entry per selected area, with the reason it was selected, the
+  packages contributing to it, and the `execution_path` that area dispatches
+  through — always `rows`, the only form a shipped workflow implements; the
+  environment-list form is refused. Nested areas such as `claudine/rendezvous`
   are their own entries, never folded into a parent.
 - `packages[]` — the package records: gates, explicit Cargo `targets`, tiers,
   features, backends, native dependencies, and an optional `dependent_seam`
@@ -142,7 +160,24 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   `state` (what is true now), `reusable` (whether any local receipt may ever
   satisfy it — false for `check` and for the L1 host a companion suite needs),
   the target kinds covered, which gate supplied the compile coverage, and a
-  selection reason.
+  selection reason. An executing test cell also carries the `profile` its
+  nextest selection runs under — the same answer its expected-test listing and
+  its gate command both read — and `requires_node` where that cell provisions
+  Node and pnpm.
+- `skip_policy` — the snapshot of [`ci-baseline.toml`](../ci-baseline.toml)'s
+  approved exact-skip budget: `source` and `content_hash` say which file was
+  read and what it hashed to, and `entries[]` carries the approvals that apply
+  to this plan's cells, each with its owner, reason, source run, optional
+  `backend` and `expiry`, and the exact test identities it covers. Producers
+  and the area audit read this and never the file, so a run cannot be judged
+  against a policy different from the one it was planned with. An expired
+  approval, or one naming a cell the plan does not carry, is refused here.
+- `rows` — the dispatch rows derived from the executing cells: per area, the
+  `test`, `check`, `lint`, and `wsl` sets plus a scalar `has_*_rows` guard for
+  each. A row carries dispatch identity alone — `{package, gate, environment,
+  runner}` — and the four sets partition that area's executing cells with no
+  duplicate key. Optional and derived: `affected_scope.row_sets` computes it,
+  and every consumer re-derives rather than trusting a carried copy.
 - `builds[]` — the run-scoped build records the executing test cells consume
   (see below). Empty when nothing executes.
 - `accepted_evidence[]`, `policy_gaps[]`, `prohibited_cells[]` — the three
@@ -292,6 +327,69 @@ none. Its miss codes are `SCOPE_REJECTIONS`
 from the cell rejections below because they refuse a whole document rather
 than one outcome.
 
+## Expected manifest and completion record
+
+The two documents a producer job proves itself with, added by
+`features/2026-09-19-direct-cell-execution`. They version independently of the
+plan and the receipts: how a job proves its cell is not a reason to invalidate
+a resolved plan, and the reverse.
+
+**The expected manifest** (version 2) is what `cargo nextest list` found on the
+execution target, written by `just _expected_manifest` from the same
+`_tier_filter` expression the gate ran with, in the same job, with the same
+nextest binary. Per package it carries three disjoint identity sets — `tests`
+(must report a result), `ignored` (`#[ignore]` excused it), and `excluded` (the
+tier expression did not select it) — plus the provenance without which a
+listing proves nothing about a report: `environment`, `tier`, `target`,
+`nextest_version`, `from_archive`, and the `selection` (`filter`, `profile`,
+`test_args`) it applied. Optional `backends` and `companion_suites` record what
+the job was *told* to require; they are cross-checked against the plan rather
+than trusted.
+
+A test compiled out by `cfg` on this target appears in none of the three sets:
+it does not exist here. That is why a manifest listed on another target is
+refused for the comparison outright rather than diffed, and in archive mode the
+recorded target is the **producer's** — `cfg` was evaluated when the archive was
+built.
+
+Version 1 recorded only the selected identities, so an identity absent from the
+report could be a `cfg`-absent test, an ignored one, another tier's, or a lost
+one — four verdicts wearing the same silence.
+
+**The completion record** (version 1) is `scripts/ci/completion.py`'s output,
+keyed `{package, environment, gate}` like every other stored result. It binds
+the tested revision, the run and attempt, the resolved nextest version, the
+report inventory the comparison read, and — where the cell has them — the build
+key, the gate inputs, the companion suites, and the backends. It is written
+**only after validation succeeds** (ruling R10), so `complete: true` cannot
+exist without the evidence behind it, and a refusal removes any record an
+earlier validation left at the same path. It ships as its own
+`completion-<package>-<gate>-<environment>` artifact, separate from the
+`always()` status artifact that stays the failure-path diagnostic.
+
+> **The tightened rule.** A missing result is a failure even when its identity
+> appears in a skip approval. An *observed* `<skipped/>` may be excused by an
+> unexpired entry in the plan's `skip_policy`; silence may not be excused by
+> anything. An entry naming no `tests` approves any observed skip in its cell.
+
+**How the audit reads it.** `ci-rollup rollup` attaches a `completion` to every
+cell the plan executes — check and lint included — and to no other. It finds
+the record by the artifact name `scripts/ci/cell_contract.py` derives, then
+requires that the record name that cell, claim `complete`, name the plan's
+`head` and the cell's planned `build`, name this run when `--run-id` is given,
+and declare exactly the reports uploaded for the cell. It recomputes no expected
+identity and no skip: the producer did both before writing the record.
+`ci-rollup verdict` blocks an otherwise-green cell whose record fails any of
+that (`completion-unproven`), and refuses a record for a cell the plan did not
+execute (`completion-unplanned`). Any attempt's record is accepted, so a rerun
+of other jobs keeps a passing cell's earlier proof.
+
+A cell with no `completion` — reused, governed, prohibited, or rolled up
+without a plan — is the **legacy path**: `--expected-manifest` (version 1 only)
+and the exact skip budget apply to it as before, and `skip_evidence_degraded`
+is set only there. A version-4 result document carries no `completion` at all,
+so it is refused rather than read as a legacy slice.
+
 ## Rejection vocabulary
 
 Every refusal to accept evidence names one code from `schema.REJECTIONS`, so the
@@ -326,3 +424,32 @@ something a consumer may repair by compiling a replacement**. `ci-build`'s own
 | `build-sidecar-missing` / `build-sidecar-corrupt` | the same, for a declared sidecar |
 | `build-asset-missing` | a declared `archive-includes` entry never reached the manifest |
 | `build-inventory-incomplete` / `build-inventory-unexpected` | the archive contains fewer, or more, test binaries than the manifest declares |
+
+### Completion rejections
+
+`schema.COMPLETION_REJECTIONS` is a fourth vocabulary, and the only one decided
+**on the producer**, before any artifact is published. Each code means "this job
+did not prove what it was asked to prove" — never "a test failed" and never "an
+input was unreadable by the audit". `scripts/ci/completion.py` exits `1` for a
+cell that did not prove itself and `2` when it could not read its own inputs,
+so an unreadable input is never reported as an invented test failure.
+
+| Code | Refuses |
+|---|---|
+| `completion-plan-unreadable` | the plan is absent, malformed, or carries no record for this package |
+| `completion-cell-unknown` | the plan carries no such cell, or carries it twice |
+| `completion-cell-not-executing` | the cell is reused, governed, or prohibited; nothing ran here |
+| `completion-manifest-missing` | a test gate with no expected-test listing to compare against |
+| `completion-manifest-schema` | a listing from another manifest generation |
+| `completion-manifest-provenance` | the listing cannot say which environment, tier, nextest, or package it describes |
+| `completion-manifest-target` | listed on a target other than the one that executed |
+| `completion-manifest-selection` | selected with something no tier expression uses, another profile, `--run-ignored`, or backends/suites the plan does not declare |
+| `completion-report-missing` / `completion-report-malformed` | a staged report was never written, or does not parse |
+| `completion-report-duplicate` | one result staged twice, or one identity reported by two selections |
+| `completion-test-missing` | an expected identity that no report mentions |
+| `completion-test-unexpected` | a reported identity the listing did not expect |
+| `completion-test-failed` | the final attempt failed |
+| `completion-skip-unapproved` | an observed skip with no unexpired approval |
+| `completion-expected-empty` | nothing expected and no plan-recorded reason |
+| `completion-companion-incomplete` / `completion-companion-failed` | a declared suite did not complete, or failed |
+| `completion-backend-unproven` | a declared L2 backend that nothing proves drove a test |

@@ -61,21 +61,36 @@ use change_inventory::{ChangeInventory, NO_PACKAGE_TESTS};
 /// carries the accepted evidence the run was scheduled against. Version 4 makes
 /// `counts` an optional measurement alongside `duration_s`, so a cell nobody
 /// measured omits the field rather than serializing a zero that reads as a
-/// suite which found nothing. A consumer that reads a higher version must
+/// suite which found nothing. Version 5 adds each executing cell's
+/// `completion`, and with it a change of meaning: an executing cell's skip set
+/// is only what its reports observed, because its producer already compared
+/// them with the expected listing. A consumer that reads a higher version must
 /// refuse to interpret it.
-const RESULT_SCHEMA_VERSION: u32 = 4;
+const RESULT_SCHEMA_VERSION: u32 = 5;
 
 /// Version of `.github/ci/ci-baseline.toml`. Version 3 removed known-failure
 /// entries: producer jobs now fail visibly, so a downstream rollup cannot
 /// consistently pardon them. The remaining skip budget stays package-keyed.
 const BASELINE_SCHEMA_VERSION: u32 = 3;
 
-/// Version of an expected-test manifest (`just/devops.just::_expected_manifest`).
+/// The highest expected-test manifest generation THIS tool reads.
+///
+/// The legacy path only. A cell the plan executes is judged by its completion
+/// record, whose producer already compared its reports with the version-2
+/// listing `just/devops.just::_expected_manifest` writes, so a manifest here
+/// never applies to one. Version 2 is refused rather than read: its identity
+/// sets belong to `scripts/ci/completion.py`, and a second comparison here is
+/// the recomputation the completion contract removed.
 const EXPECTED_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+/// The completion record generation this tool reads
+/// (`scripts/ci/schema.py::COMPLETION_RECORD_SCHEMA_VERSION`). A record of any
+/// other generation proves nothing here: it is reported, never interpreted.
+const COMPLETION_RECORD_SCHEMA_VERSION: u64 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 4;
+const PLAN_SCHEMA_VERSION: u32 = 5;
 
 /// Version of `.github/ci/environments.json`
 /// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2
@@ -369,6 +384,11 @@ struct RunRecord {
     /// result", and a pass is a result.
     #[serde(skip)]
     passed_identities: Vec<String>,
+    /// The staged report's path relative to its artifact, as the manifest
+    /// spelled it, when the manifest recorded one. The completion inventory is
+    /// compared against these.
+    #[serde(skip)]
+    report: Option<String>,
 }
 
 impl RunRecord {
@@ -527,16 +547,24 @@ struct Cell {
     evidence: Option<Evidence>,
     /// Whether policy scheduled this cell for this run.
     scheduled: bool,
-    /// Exact identities of every test observed as skipped, plus (when an
-    /// expected-test manifest was supplied) every expected test absent from the
-    /// report.
+    /// Exact identities of every test observed as skipped, plus — on a legacy
+    /// cell only, when an expected-test manifest was supplied — every expected
+    /// test absent from the report. An executing cell's absent test is its
+    /// producer's `completion-test-missing`, never a skip.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     skipped_tests: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     failed_tests: Vec<String>,
-    /// True when the skip set could not be completed because no expected-test
-    /// manifest was supplied for this environment and tier.
+    /// True when a legacy cell's skip set could not be completed because no
+    /// expected-test manifest was supplied for this environment and tier.
+    /// Always false on a cell with a `completion`.
     skip_evidence_degraded: bool,
+    /// Whether this cell's producer certified it, present exactly on a cell
+    /// the plan executed. `None` is the legacy path — a reused, gap,
+    /// prohibited, or unplanned cell, or any cell read without a plan — which
+    /// keeps the expected-manifest and skip-budget checks it always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completion: Option<Completion>,
     /// The capability-table gap covering this cell, when one is governed.
     /// `None` on a `POLICY GAP` cell means the gap is *ungoverned* — the
     /// capability is recorded as plain absent — which the verdict must never
@@ -561,6 +589,32 @@ struct Cell {
     /// Indices into [`Rollup::records`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     records: Vec<usize>,
+}
+
+/// What the audit found when it held an executing cell's completion record
+/// against the plan and the artifacts (`scripts/ci/completion.py`, ruling R10).
+///
+/// Observation only: the rollup never changes a cell's state for it, and
+/// `verdict` decides what an unproven cell costs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Completion {
+    /// The artifact the record was read from; `""` when none was uploaded.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    artifact: String,
+    /// The run attempt that wrote the record. A rerun of other jobs keeps a
+    /// passing cell's record from an earlier attempt, so this is reported,
+    /// never required to be the latest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attempt: Option<u64>,
+    /// Every reason the record does not certify this cell; empty when it does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    problems: Vec<String>,
+}
+
+impl Completion {
+    fn proven(&self) -> bool {
+        self.problems.is_empty()
+    }
 }
 
 /// What one executing cell ran, and what reaching it cost.
@@ -698,6 +752,10 @@ struct Rollup {
     /// block through its own `{package, environment, tier}` identity.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     builds: Vec<BuildReport>,
+    /// Completion records no executing cell owns. Unplanned evidence, which
+    /// the verdict refuses exactly as it refuses a report nothing scheduled.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unplanned_completions: Vec<UnplannedCompletion>,
     records: Vec<RunRecord>,
     cells: Vec<Cell>,
 }
@@ -799,6 +857,22 @@ impl Rollup {
                 .builds
                 .iter()
                 .filter(|build| packages.contains(&build.package))
+                .cloned()
+                .collect(),
+            // A record naming no package is attributed by its artifact name,
+            // which starts with the package the producer resolved.
+            unplanned_completions: self
+                .unplanned_completions
+                .iter()
+                .filter(|entry| {
+                    if entry.package.is_empty() {
+                        packages.iter().any(|package| {
+                            entry.artifact.starts_with(&format!("completion-{package}-"))
+                        })
+                    } else {
+                        packages.contains(&entry.package)
+                    }
+                })
                 .cloned()
                 .collect(),
             records: self.records.clone(),
@@ -1008,10 +1082,11 @@ struct CompanionOutcome {
 /// Tests the target environment actually compiled, generated *on* that
 /// environment (`cargo nextest list`). Without it, a test absent from a JUnit
 /// report is ambiguous between `#[cfg]`-absent (N/A) and skipped-at-runtime.
+///
+/// Version 1, read for legacy cells only; `load_expected_manifests` checks the
+/// generation before this shape is read.
 #[derive(Clone, Debug, Deserialize)]
 struct ExpectedManifest {
-    #[serde(default)]
-    schema_version: u32,
     environment: String,
     tier: Tier,
     /// package name → fully-qualified test identities (`<suite>::<test>`).
@@ -1222,6 +1297,10 @@ struct ExpectedCell {
     /// record is plumbing, never a cell: this is here so a cell whose archive
     /// never arrived can name what blocked it.
     build: Option<String>,
+    /// True when the plan executes this cell, which is what makes its
+    /// producer's completion record required. Never set on the legacy policy
+    /// path.
+    executes: bool,
 }
 
 impl ExpectedCell {
@@ -1240,6 +1319,7 @@ impl ExpectedCell {
             target_kinds: Vec::new(),
             compile_coverage_from: String::new(),
             build: None,
+            executes: false,
         }
     }
 }
@@ -1418,6 +1498,9 @@ fn expected_cells(
 #[derive(Clone, Debug, Deserialize)]
 struct ResolvedPlan {
     schema_version: u32,
+    /// The one revision this run tests. A completion record must name it.
+    #[serde(default)]
+    head: String,
     cells: Vec<PlanCell>,
     packages: Vec<PlanPackage>,
     /// What changed, classified once by the planner. Read by `summarize` only;
@@ -1641,6 +1724,7 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
         // that was never going to run.
         if cell.execution == "execute" {
             expectation.build = cell.build.clone();
+            expectation.executes = true;
         }
         expectation.companion_suites = cell
             .companions
@@ -2015,6 +2099,7 @@ fn records_from_artifact(dir: &ArtifactDir) -> Result<Vec<RunRecord>> {
             skipped_tests: outcome.report.skipped_tests,
             parse_error: outcome.parse_error,
             passed_identities: outcome.report.passed_tests,
+            report: entry.report_present.then_some(relative),
         });
     }
 
@@ -2108,6 +2193,283 @@ fn read_producer_statuses(root: &Path) -> Result<Vec<ProducerStatus>> {
         statuses.push(status);
     }
     Ok(statuses)
+}
+
+// ---------------------------------------------------------------------------
+// Producer completion records
+// ---------------------------------------------------------------------------
+
+/// One downloaded `completion-*` artifact, parsed no further than JSON.
+///
+/// Held as a value rather than a typed record: a record that lacks a field or
+/// comes from another generation is a finding about ITS cell, while a whole
+/// audit that could not read its inputs is an infrastructure failure. Typed
+/// deserialization would turn the first into the second.
+#[derive(Clone, Debug)]
+struct CompletionArtifact {
+    artifact: String,
+    document: serde_json::Value,
+}
+
+/// A completion artifact no executing cell owns — unplanned evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct UnplannedCompletion {
+    artifact: String,
+    /// The package the record names, `""` when it names none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    package: String,
+}
+
+/// Every `completion-*/completion.json` under the artifacts root. An artifact
+/// directory with no record in it reads as `null`, which no cell accepts.
+///
+/// ## Errors
+///
+/// A record that is not JSON at all. An unreadable audit input is an
+/// infrastructure failure (exit 1), never an invented test failure.
+fn read_completion_records(root: &Path) -> Result<Vec<CompletionArtifact>> {
+    let mut records = Vec::new();
+    for dir in list_artifact_dirs(root)? {
+        if !dir.name.starts_with("completion-") {
+            continue;
+        }
+        let path = dir.path.join("completion.json");
+        let document = if path.is_file() {
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            serde_json::from_str(&text)
+                .with_context(|| format!("malformed completion record {}", path.display()))?
+        } else {
+            serde_json::Value::Null
+        };
+        records.push(CompletionArtifact {
+            artifact: dir.name,
+            document,
+        });
+    }
+    Ok(records)
+}
+
+/// The artifact an executing cell's producer uploads its record as. Must spell
+/// what `scripts/ci/cell_contract.py` derives as `completion_artifact`.
+fn completion_artifact_name(key: &CellKey) -> String {
+    format!("completion-{}-{}-{}", key.package, key.tier, key.environment)
+}
+
+/// A report path as both the manifest and the record spell it, so `./L1/x.xml`
+/// and `L1\x.xml` compare equal to `L1/x.xml`.
+fn normalized_report(path: &str) -> String {
+    path.replace('\\', "/").trim_start_matches("./").to_owned()
+}
+
+/// Hold every executing cell's completion record against the plan and the
+/// artifacts, and return the completion artifacts no executing cell owns.
+///
+/// `executing` maps each cell the plan executes to its planned build key.
+///
+/// ## Notes
+///
+/// A record is found by the name its cell's contract derives and must then
+/// NAME that cell, so a record uploaded under another cell's name is refused
+/// rather than moved. Nothing here reads a skip, an expected identity, or a
+/// count: the producer compared those before it wrote the record, and this
+/// only asks whether the record exists, is bound to this run's plan, and is
+/// supported by what was uploaded.
+fn attach_completions(
+    cells: &mut [Cell],
+    executing: &BTreeMap<CellKey, Option<String>>,
+    records: &[RunRecord],
+    completions: &[CompletionArtifact],
+    head: &str,
+    run_id: Option<&str>,
+) -> Vec<UnplannedCompletion> {
+    let mut owned: BTreeSet<&str> = BTreeSet::new();
+    for cell in cells.iter_mut() {
+        let Some(build) = executing.get(&cell.key) else {
+            continue;
+        };
+        let name = completion_artifact_name(&cell.key);
+        let found = completions.iter().find(|entry| entry.artifact == name);
+        let staged: BTreeSet<String> = records
+            .iter()
+            .filter(|record| record.cell_key() == cell.key)
+            .filter_map(|record| record.report.as_deref().map(normalized_report))
+            .collect();
+        cell.completion = Some(match found {
+            Some(found) => {
+                owned.insert(found.artifact.as_str());
+                check_completion(&cell.key, build.as_deref(), found, &staged, head, run_id)
+            }
+            None => Completion {
+                problems: vec![format!(
+                    "no completion record: nothing uploaded `{name}`, so nothing \
+                     certifies that this cell ran every test its listing expected"
+                )],
+                ..Completion::default()
+            },
+        });
+    }
+
+    completions
+        .iter()
+        .filter(|entry| !owned.contains(entry.artifact.as_str()))
+        .map(|entry| UnplannedCompletion {
+            artifact: entry.artifact.clone(),
+            package: entry
+                .document
+                .get("package")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+        .collect()
+}
+
+/// Every reason one completion record fails to certify its cell.
+fn check_completion(
+    key: &CellKey,
+    build: Option<&str>,
+    found: &CompletionArtifact,
+    staged: &BTreeSet<String>,
+    head: &str,
+    run_id: Option<&str>,
+) -> Completion {
+    use serde_json::Value;
+
+    let document = &found.document;
+    let mut completion = Completion {
+        artifact: found.artifact.clone(),
+        ..Completion::default()
+    };
+    let problems = &mut completion.problems;
+
+    let Some(fields) = document.as_object() else {
+        problems.push(format!(
+            "the completion record in `{}` is not a JSON object",
+            found.artifact
+        ));
+        return completion;
+    };
+    let version = fields.get("schema_version").and_then(Value::as_u64);
+    if version != Some(COMPLETION_RECORD_SCHEMA_VERSION) {
+        problems.push(format!(
+            "the completion record is schema_version {}, and this audit reads \
+             {COMPLETION_RECORD_SCHEMA_VERSION}; a record it cannot interpret proves nothing",
+            fields
+                .get("schema_version")
+                .map_or_else(|| "absent".to_owned(), Value::to_string)
+        ));
+        return completion;
+    }
+    for field in [
+        "package", "environment", "gate", "complete", "head", "run", "attempt", "reports",
+    ] {
+        if !fields.contains_key(field) {
+            problems.push(format!("the completion record lacks `{field}`"));
+        }
+    }
+
+    let text = |field: &str| fields.get(field).and_then(Value::as_str);
+    let names_this_cell = text("package") == Some(key.package.as_str())
+        && text("environment") == Some(key.environment.as_str())
+        && text("gate").map(Tier::parse).as_ref() == Some(&key.tier);
+    if !names_this_cell {
+        problems.push(format!(
+            "the completion record names {}/{}/{}, not this cell",
+            text("package").unwrap_or("?"),
+            text("environment").unwrap_or("?"),
+            text("gate").unwrap_or("?"),
+        ));
+    }
+
+    if fields.get("complete") != Some(&Value::Bool(true)) {
+        problems.push(
+            "the completion record does not claim completeness; only a producer \
+             whose validation succeeded writes one, so it certifies nothing"
+                .to_owned(),
+        );
+    }
+
+    match text("head") {
+        _ if head.is_empty() => problems.push(
+            "the plan names no tested revision, so no completion record can be \
+             bound to one"
+                .to_owned(),
+        ),
+        Some(recorded) if recorded == head => {}
+        recorded => problems.push(format!(
+            "the completion record names revision {} but this run tests {head}; \
+             it is evidence about a different tree",
+            recorded.unwrap_or("none")
+        )),
+    }
+
+    match (text("build"), build) {
+        (recorded, planned) if recorded == planned => {}
+        (Some(recorded), Some(planned)) => problems.push(format!(
+            "the completion record names build {recorded} but the plan resolved \
+             {planned}; it is evidence from a different compile"
+        )),
+        (None, Some(planned)) => problems.push(format!(
+            "the completion record names no build but the plan resolved {planned}"
+        )),
+        (Some(recorded), None) => problems.push(format!(
+            "the completion record names build {recorded} but the plan's cell \
+             consumes none"
+        )),
+        (None, None) => {}
+    }
+
+    if let Some(run_id) = run_id {
+        let recorded = match fields.get("run") {
+            Some(Value::String(run)) => Some(run.clone()),
+            Some(Value::Number(run)) => Some(run.to_string()),
+            _ => None,
+        };
+        if recorded.as_deref() != Some(run_id) {
+            problems.push(format!(
+                "the completion record was written by run {}, not this run \
+                 ({run_id}); hosted evidence is never carried across runs",
+                recorded.as_deref().unwrap_or("none")
+            ));
+        }
+    }
+
+    completion.attempt = fields.get("attempt").and_then(Value::as_u64).filter(|n| *n > 0);
+    if completion.attempt.is_none() {
+        problems.push("the completion record's `attempt` is not a positive integer".to_owned());
+    }
+
+    let declared: Option<BTreeSet<String>> = fields
+        .get("reports")
+        .and_then(Value::as_array)
+        .and_then(|reports| {
+            reports
+                .iter()
+                .map(|report| report.as_str().map(normalized_report))
+                .collect()
+        });
+    match declared {
+        None => problems.push(
+            "the completion record's `reports` is not a list of report paths".to_owned(),
+        ),
+        Some(declared) => {
+            for report in declared.difference(staged) {
+                problems.push(format!(
+                    "the completion record declares report `{report}`, which no \
+                     uploaded artifact carries for this cell"
+                ));
+            }
+            for report in staged.difference(&declared) {
+                problems.push(format!(
+                    "the artifacts carry report `{report}` for this cell, which the \
+                     completion record does not certify"
+                ));
+            }
+        }
+    }
+
+    completion
 }
 
 // ---------------------------------------------------------------------------
@@ -2217,10 +2579,16 @@ fn classify_one(
     let exclusion = expectation.and_then(|cell| cell.exclusion.clone());
     let scheduled = expectation.is_some() && exclusion.is_none();
 
+    // An executing cell's producer already compared its reports with the
+    // listing taken on its own target, and refuses to certify an absent test;
+    // recomputing that here is the second answer the completion contract
+    // removed. The manifest diff survives for legacy cells only.
+    let executes = expectation.is_some_and(|cell| cell.executes);
     let expected_for_cell = inputs
         .expected_tests
-        .get(&(key.environment.clone(), key.tier.clone()));
-    let skip_evidence_degraded = expected_for_cell.is_none();
+        .get(&(key.environment.clone(), key.tier.clone()))
+        .filter(|_| !executes);
+    let skip_evidence_degraded = !executes && expected_for_cell.is_none();
     let mut absent_skips = BTreeSet::new();
 
     if let Some(by_package) = expected_for_cell {
@@ -2498,6 +2866,8 @@ fn classify_one(
         skipped_tests: all_skips.into_iter().collect(),
         failed_tests: failed_tests.into_iter().collect(),
         skip_evidence_degraded,
+        // Filled in by `attach_completions` once every cell exists.
+        completion: None,
         declared_gap,
         reasons,
         build: own_status.and_then(|status| {
@@ -2952,6 +3322,7 @@ fn blank_cell(key: CellKey) -> Cell {
         skipped_tests: Vec::new(),
         failed_tests: Vec::new(),
         skip_evidence_degraded: false,
+        completion: None,
         declared_gap: None,
         dependents: Vec::new(),
         companions: Vec::new(),
@@ -3184,8 +3555,81 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
         ));
     }
 
+    findings.extend(completion_findings(rollup));
     findings.extend(skip_findings(rollup, baseline, &scope));
     findings
+}
+
+/// The completion contract, judged: every executing cell that otherwise reads
+/// green must carry a record that certifies it, and no record may exist for a
+/// cell the plan did not execute.
+///
+/// ## Notes
+///
+/// A cell that already blocks — FAIL, MISSING — gets no second row here. Its
+/// producer refuses to write a record for a failure, so the absence is the
+/// failure's consequence, and one problem is one row. A green status or a green
+/// report without its record is the case this exists for: nothing proves the
+/// cell ran what its listing expected.
+fn completion_findings(rollup: &Rollup) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for cell in &rollup.cells {
+        let Some(completion) = &cell.completion else {
+            continue;
+        };
+        if completion.proven() || cell.state.blocks() {
+            continue;
+        }
+        findings.push(Finding::block(
+            "completion-unproven",
+            cell.key.to_string(),
+            format!(
+                "{} with no valid completion record: {}",
+                cell.state,
+                completion.problems.join("; ")
+            ),
+        ));
+    }
+    for entry in &rollup.unplanned_completions {
+        findings.push(Finding::block(
+            "completion-unplanned",
+            entry.artifact.clone(),
+            "a completion record for a cell the plan did not execute; unplanned \
+             evidence is refused rather than attached to a cell it does not describe",
+        ));
+    }
+    findings
+}
+
+/// Whether the area's producer call ran when the plan required it.
+///
+/// `producers` is the area's `needs.package-ci.result`. A skipped call is
+/// correct exactly when the area has no executing cell — an all-reused or
+/// gap-only area — and such an area is still judged by everything else. A
+/// skipped call over executing cells is missing coverage, never permission to
+/// skip the audit.
+fn producer_findings(rollup: &Rollup, producers: Option<&str>) -> Vec<Finding> {
+    if producers != Some("skipped") {
+        return Vec::new();
+    }
+    let executing: Vec<String> = rollup
+        .cells
+        .iter()
+        .filter(|cell| cell.completion.is_some())
+        .map(|cell| cell.key.to_string())
+        .collect();
+    if executing.is_empty() {
+        return Vec::new();
+    }
+    vec![Finding::block(
+        "producers-skipped",
+        format!("{} executing cell(s)", executing.len()),
+        format!(
+            "the producer call was skipped although the plan executes {}; no \
+             runner was started for work the plan required",
+            executing.join(", ")
+        ),
+    )]
 }
 
 /// Decide, for every gap cell — `POLICY GAP` and `ACCEPTED GAP` alike — whether
@@ -3378,7 +3822,28 @@ fn skip_findings(
         let bucket = approved.get(&cell.key).unwrap_or(&empty);
         let observed: BTreeSet<&String> = cell.skipped_tests.iter().collect();
 
-        for test in &observed {
+        // An executing cell's skips were approved or refused by its producer,
+        // against the plan's skip snapshot, before it wrote its record: an
+        // unapproved skip is `completion-skip-unapproved` and leaves no record.
+        // A certified cell's observed skips are therefore reported, not
+        // re-judged, and an uncertified one is already blocked by
+        // `completion_findings`. Retiring a stale approval is still this
+        // audit's, because only a certified cell's observation is trustworthy
+        // enough to say an approved skip stopped happening.
+        if let Some(completion) = &cell.completion {
+            if !completion.proven() {
+                continue;
+            }
+            for test in &observed {
+                findings.push(Finding::note(
+                    "skip-certified",
+                    format!("{} :: {test}", cell.key),
+                    "observed skip its producer found approved by the plan's skip policy",
+                ));
+            }
+        }
+
+        for test in observed.iter().filter(|_| cell.completion.is_none()) {
             match bucket.get(*test) {
                 None => findings.push(Finding::block(
                     "skip-new",
@@ -3642,6 +4107,44 @@ fn render_grid(rollup: &Rollup) -> String {
                 cell.state.label(),
                 cell.dependents.len(),
                 cell_text(&cell.dependents.join(", ")),
+            ));
+        }
+        out.push('\n');
+    }
+
+    // Green-reading cells the verdict will refuse for want of their producer's
+    // proof. Their state is still what the evidence showed, so without this
+    // table the grid would read clean over a blocked area.
+    let unproven: Vec<&Cell> = rollup
+        .cells
+        .iter()
+        .filter(|cell| !cell.state.blocks())
+        .filter(|cell| cell.completion.as_ref().is_some_and(|completion| !completion.proven()))
+        .collect();
+    if !unproven.is_empty() || !rollup.unplanned_completions.is_empty() {
+        out.push_str(
+            "### Unproven executions\n\nThe producer's completion record is absent, \
+             invalid, or does not match this run's plan and artifacts, so nothing \
+             certifies that these cells ran what their listing expected.\n\n\
+             | cell | state | why |\n| --- | --- | --- |\n",
+        );
+        for cell in unproven {
+            let problems = cell
+                .completion
+                .as_ref()
+                .map(|completion| completion.problems.join("; "))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "| `{}` | {} | {} |\n",
+                cell_text(&cell.key.to_string()),
+                cell.state.label(),
+                cell_text(&problems)
+            ));
+        }
+        for entry in &rollup.unplanned_completions {
+            out.push_str(&format!(
+                "| `{}` | — | a completion record for a cell the plan did not execute |\n",
+                cell_text(&entry.artifact)
             ));
         }
         out.push('\n');
@@ -4147,11 +4650,14 @@ ROLLUP OPTIONS:
   --area <a,b>                   emit only these areas' slice; repeatable. Each area
                                  then applies its own baseline, gaps, and missing-cell
                                  rule and nobody else's
-  --expected-manifest <file>     expected-test manifest generated ON the target
-                                 environment; repeatable
+  --expected-manifest <file>     version-1 expected-test manifest generated ON the
+                                 target environment; repeatable. Legacy cells
+                                 only: an executing cell is judged by its
+                                 producer's completion record
   --out <file>                   write the machine-readable result document
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
-  --run-id <id>                  record the producing CI run
+  --run-id <id>                  record the producing CI run; every completion
+                                 record must name it
 
 VERDICT OPTIONS:
   --results <file>               a result document written by `rollup --out`
@@ -4159,6 +4665,9 @@ VERDICT OPTIONS:
   --area <a,b>                   judge only these areas; repeatable
   --summary <file>               append Markdown (default $GITHUB_STEP_SUMMARY)
   --today <YYYY-MM-DD>           override today's date for expiry evaluation
+  --producers <success|skipped>  the area's producer-call result. `skipped` is
+                                 correct only for an area with no executing
+                                 cell; over executing cells it blocks
 
 SUMMARIZE OPTIONS:
   --plan <file>                  the scope job's resolved execution plan, for the
@@ -4337,6 +4846,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
     }
     let statuses = read_producer_statuses(&artifacts)?;
     let build_statuses = read_build_statuses(&artifacts)?;
+    let completions = read_completion_records(&artifacts)?;
 
     let explicit_scope = args.list("scope");
     // The plan names every package it selected, so a run with a plan is never
@@ -4400,6 +4910,23 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
     ));
     cells.sort_by(|left, right| left.key.cmp(&right.key));
 
+    // Only a plan says which cells execute, so the legacy policy path has no
+    // executing cell and owes no completion record anywhere.
+    let executing: BTreeMap<CellKey, Option<String>> = expected
+        .iter()
+        .chain(planned_gates.iter())
+        .filter(|cell| cell.executes)
+        .map(|cell| (cell.key.clone(), cell.build.clone()))
+        .collect();
+    let unplanned_completions = attach_completions(
+        &mut cells,
+        &executing,
+        &records,
+        &completions,
+        plan.as_ref().map_or("", |plan| plan.head.as_str()),
+        args.one("run-id"),
+    );
+
     let accepted_evidence = accepted_evidence(&cells);
     let mut scheduled: Vec<CellKey> = expected.iter().map(|cell| cell.key.clone()).collect();
     scheduled.extend(planned_gates.iter().map(|cell| cell.key.clone()));
@@ -4414,6 +4941,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         scope_degraded,
         scheduled: Some(scheduled),
         builds: build_reports(&build_statuses),
+        unplanned_completions,
         records,
         cells,
     };
@@ -4519,7 +5047,18 @@ fn cmd_verdict(args: &Args) -> Result<i32> {
 
     let baseline = load_baseline(&baseline_path)?;
     let today = args.one("today").map(str::to_owned).or_else(today_utc);
-    let findings = verdict(&rollup, &baseline, today.as_deref());
+    let producers = args.one("producers");
+    if let Some(value) = producers {
+        if !["success", "skipped"].contains(&value) {
+            bail!(
+                "`--producers {value}` is not judged: only `success` and `skipped` \
+                 producer calls are enforced, because a failed or cancelled one \
+                 already blocks through its own job result"
+            );
+        }
+    }
+    let mut findings = verdict(&rollup, &baseline, today.as_deref());
+    findings.extend(producer_findings(&rollup, producers));
     let blocked = findings
         .iter()
         .any(|finding| finding.severity == Severity::Block);
@@ -4970,6 +5509,7 @@ fn load_rollups(paths: &[String], flag: &str) -> Result<Rollup> {
         }
         folded.scope.extend(slice.scope);
         folded.accepted_evidence.extend(slice.accepted_evidence);
+        folded.unplanned_completions.extend(slice.unplanned_completions);
         folded.records.extend(slice.records);
     }
     folded.areas = derived_areas(&folded.cells);
@@ -5013,7 +5553,8 @@ fn parse_rollup(text: &str, path: &Path) -> Result<Rollup> {
 ///
 /// Every generation redefined what a cell means — version 1 was area-keyed,
 /// version 2 moved identity onto the package, version 3 added the area-owned
-/// result model, version 4 made `counts` an optional measurement — so reading
+/// result model, version 4 made `counts` an optional measurement, version 5
+/// added the completion contract — so reading
 /// one as another mis-keys or mis-reads cells instead of failing loudly. The
 /// error names the migration that actually applies, and a generation with no
 /// named migration says so rather than claiming someone else's.
@@ -5037,6 +5578,9 @@ fn reject_old_schema(version: u32, path: &Path) -> Result<()> {
         3 => "schema_version 4 makes each cell's counts an optional measurement, so a cell \
               nobody measured carries no count instead of a zero — see \
               fixes/2026-09-13-cicd-redundancies/spec.md",
+        4 => "schema_version 5 judges each executing cell by its producer's completion \
+              record, and a version-4 cell carries none, so reading one here would \
+              certify it without its proof — see 2026-09-19-direct-cell-execution",
         _ => "its cell contract is not the one this tool reads",
     };
     bail!(
@@ -5055,16 +5599,29 @@ fn load_expected_manifests(args: &Args) -> Result<ExpectedTests> {
         let path = PathBuf::from(raw);
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let manifest: ExpectedManifest = serde_json::from_str(&text)
+        // The generation outranks the shape, as for a result document: a
+        // version-2 manifest's per-package value is an object, and a reader
+        // that deserialized first would report a field error instead of the
+        // manifest's actual problem.
+        #[derive(Deserialize)]
+        struct VersionProbe {
+            #[serde(default)]
+            schema_version: u32,
+        }
+        let probe: VersionProbe = serde_json::from_str(&text)
             .with_context(|| format!("invalid expected-test manifest {}", path.display()))?;
-        if manifest.schema_version > EXPECTED_MANIFEST_SCHEMA_VERSION {
+        if probe.schema_version > EXPECTED_MANIFEST_SCHEMA_VERSION {
             bail!(
                 "expected-test manifest {} has schema_version {} (max \
-                 {EXPECTED_MANIFEST_SCHEMA_VERSION})",
+                 {EXPECTED_MANIFEST_SCHEMA_VERSION}); a version-2 listing is its \
+                 producer's, compared by scripts/ci/completion.py before the \
+                 completion record is written, and this audit reads the record instead",
                 path.display(),
-                manifest.schema_version
+                probe.schema_version
             );
         }
+        let manifest: ExpectedManifest = serde_json::from_str(&text)
+            .with_context(|| format!("invalid expected-test manifest {}", path.display()))?;
         let bucket = expected
             .entry((manifest.environment.clone(), manifest.tier.clone()))
             .or_default();

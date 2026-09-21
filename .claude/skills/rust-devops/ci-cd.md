@@ -65,8 +65,9 @@ local and hosted runs. Its package policy is deliberately narrow:
   receipt with no test counts; a version-1 whole-environment note never
   satisfies it, and the cell that compiles unchanged dependents is never
   reusable.
-  `_wsl-ci.yml` declares no archive selector at all — the guest is handed the
-  plan's build records and downloads one — so a check selector has nowhere to
+  `_wsl-ci.yml` declares no archive selector at all — it takes one row and
+  resolves that cell's build record from the plan through `cell_contract.py` —
+  so a check selector has nowhere to
   leak into. Every cell records `target_kinds` and `compile_coverage_from`, and
   an archive-only environment names the runner that built its archive rather
   than claiming to have compiled anything.
@@ -117,13 +118,81 @@ computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
 committed mapping file.
 
-`RESOLVED_PLAN_SCHEMA_VERSION` is **4**. Two changes each called themselves
-version 3 on separate branches — build records, and the `change_inventory`
-below — so "3" named two incompatible shapes and a document from either branch
-was refused for a *missing field* rather than a version skew. 4 names the union.
-The validator now checks the version before the field set for that reason: an
-older document usually differs in both, and the field complaint sends the reader
-after a corrupt document.
+`RESOLVED_PLAN_SCHEMA_VERSION` is **5**. Version 5 is the direct-cell-execution
+work — live in the workflows since Phase 5: a hosted job expands one matrix row
+per executing cell and answers every execution question from the plan, so the
+document gained the plan-level
+`skip_policy` snapshot of `.github/ci/ci-baseline.toml`, the area-level
+`execution_path` (only `rows` is admitted — every area switched together,
+and rollback is a revert, not a per-area allowlist), the per-cell `profile`
+and `requires_node`, and the derived `rows` the matrices expand. The planner
+refuses, before emitting anything, a row set over 256, an area's rows over
+16 KB, or all areas' rows over 512 KB (they travel as one `area_rows` job
+output); the `2026-09-19-direct-cell-execution` feature's `spikes/capacity.py`
+re-measures the full-workspace and nightly plans against those ceilings.
+
+`scope.json` carries **no per-package environment list**: `matrix` and
+`area_matrix` were retired in that feature's Phase 8. A package fact (gates,
+test or check arguments, backends, runner tools) comes from the plan's
+`packages[]`, and whether a cell runs comes from `cells[]`. `just ci-local`
+reads `--plan-out`'s plan, and producers read `cell_contract.py`. Do not
+reintroduce a scope-side lookup: `jq` returns `null` for a missing key, which
+iterates to nothing, so the gate loop would run no gate and still report green.
+`no_shipped_reader_consumes_a_retired_environment_list_projection` sweeps for
+that. A scope receipt written before the retirement still validates, because
+the receipt check requires keys and ignores extras, and CI re-projects from
+the carried plan.
+
+The same work adds **two producer-side documents on their own version lines**,
+so how a job proves its cell never invalidates a resolved plan. The
+expected-test manifest (`just _expected_manifest`) is at **2**: it records
+`tests`, `ignored`, and `excluded` identities separately plus the listing's
+provenance — environment, tier, target triple, resolved nextest version,
+archive mode, and the selection applied. The completion record
+(`scripts/ci/completion.py`) is at **1**: a producer writes it only after the
+observed identities satisfy the expected ones, so an absent record and a
+`complete: false` one are the same verdict. Its refusals are a fourth
+vocabulary, `schema.COMPLETION_REJECTIONS`, all prefixed `completion-`; the
+tool exits `1` for a cell that did not prove itself and `2` when it could not
+read its own inputs.
+
+**Proving the cell is the producer's job.** Every executing test job runs
+`_expected_manifest` after provisioning (listing executes the binaries) and
+before the gate, runs the gate, then runs `completion.py` and uploads
+`completion-<package>-<gate>-<environment>` with no `continue-on-error`, so a
+producer that cannot publish its proof fails. Check and lint jobs call
+`completion.py` with no manifest. The WSL2 guest does all three itself, because
+its reports, listing, and plan are on guest ext4 (the `os` skill's `wsl.md`).
+
+**The audit reads the record, not the tests** (result document **5**). Every
+cell the plan executes — check and lint included — carries a `completion`:
+`ci-rollup rollup` finds `completion-<package>-<gate>-<environment>`, requires
+it to name that cell, claim `complete`, name the plan's `head` and the cell's
+planned `build`, name `--run-id`'s run (any attempt), and declare exactly the
+reports uploaded for the cell. It never changes the cell's state for it;
+`verdict` blocks an otherwise-green unproven cell (`completion-unproven`) and a
+record for a non-executing cell (`completion-unplanned`). An executing cell's
+skip set is its observed `<skipped/>` only — its producer already refused an
+absent test and an unapproved skip — so the audit reports those skips
+(`skip-certified`) and still retires a stale approval (`skip-resolved`).
+**The skip rule is deliberately tighter than it was:** only an explicitly
+ignored test or an observed, approved skip passes. An expected test with no
+report is `completion-test-missing` even when an unexpired, exact-cell approval
+names it — the old baseline let such a test count as a skip, and that reading
+is gone. Do not reintroduce it to quiet a red cell; `#[ignore]` the test or fix
+the report. The
+version-1 `--expected-manifest` diff and `skip_evidence_degraded` survive for
+**legacy cells only** (reused, gap, or rolled up without a plan); a version-2
+manifest handed to `ci-rollup` is refused with `completion.py` named as its
+reader. The whole chain runs end to end in
+`test_completion.py::AuditEndToEndTests` against the real binary.
+
+4 named the union of two changes that each called themselves version 3 on
+separate branches — build records, and the `change_inventory` below — so "3"
+named two incompatible shapes and a document from either branch was refused for
+a *missing field* rather than a version skew. The validator checks the version
+before the field set for that reason: an older document usually differs in
+both, and the field complaint sends the reader after a corrupt document.
 
 Version 3 added the required
 `change_inventory`: the calculator's own input paths, normalized to one
@@ -136,10 +205,10 @@ still returns `change_class`, and that is still what sets preflight breadth.
 Both readers consume the one field and neither re-derives it: `ci-plan` in the
 terminal, `ci-reporting` in GitHub Markdown.
 
-Only the plan version moved. `SCOPE_RECEIPT_SCHEMA_VERSION` stays 1 — its
-embedded `plan_schema_version` check is what refuses a version-2 receipt once
-with the existing `scope-schema` reason, forcing one fresh calculation rather
-than an in-place upgrade. `RECEIPT_SCHEMA_VERSION` and
+Only the plan version moved, both times. `SCOPE_RECEIPT_SCHEMA_VERSION` stays
+1 — its embedded `plan_schema_version` check is what refuses a
+previous-generation receipt once with the existing `scope-schema` reason,
+forcing one fresh calculation rather than an in-place upgrade. `RECEIPT_SCHEMA_VERSION` and
 `LEGACY_RECEIPT_SCHEMA_VERSION` are unchanged, so validation receipts stay
 reusable wherever their cell and gate-input checks still qualify.
 
@@ -195,7 +264,7 @@ semantics:
   Validation evidence never reopens selection: on a hit with accepted cells,
   `affected_scope.py --apply-to` overlays them on the carried plan and
   re-projects `scope.json` from it, reading nothing from the checkout. The
-  plan is schema version 3 so that it can — it carries its `environments`
+  plan has been self-contained since schema version 3 so that it can — it carries its `environments`
   table, per-package `l1_include_slow`/`exclusion`, per-cell `reusable`, and
   (since version 3) its `builds[]` records; an older receipt misses as
   `scope-schema` rather than being partially upgraded. The overlay derives no
@@ -244,9 +313,9 @@ new run replace the cells it actually reran.
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
 local-origin result with its counts, duration, and the notes ref behind it —
-not as `MISSING`. Result documents are `schema_version: 4` — version 4 made a
+not as `MISSING`. Result documents are `schema_version: 5` — version 4 made a
 cell's `counts` an optional measurement, so an unmeasured cell omits it instead
-of reporting zero — and a document from another generation is refused by its
+of reporting zero, and version 5 added `completion` (above) — and a document from another generation is refused by its
 version before any cell is interpreted, naming the migration and telling the
 reader to re-run the rollup. The skip-only baseline keeps its own version 3. `--area` on `rollup`
 and `verdict` narrows a document to one area's slice (cells, scope, scheduled
@@ -265,24 +334,56 @@ Two cases worth knowing before reading a result:
   statuses.
 
 `ci.yml` fans out one caller identity per selected AREA (`area-ci`, over the
-planner's `scheduled_areas`) into `_area-ci.yml`, which fans out the area's
-packages into `_package-ci.yml`, which delegates the WSL2 cell to
-`_wsl-ci.yml` — four levels including the caller, GitHub's maximum, with no
-margin for another. Each area's `coverage-audit` job runs `if: always()` behind
+planner's `scheduled_areas`) into `_area-ci.yml`, which calls
+`_package-ci.yml` **once for the whole area**, which delegates each WSL2 row
+to `_wsl-ci.yml` — four levels including the caller. GitHub documents ten, but
+`ci_workflow_contracts` holds the chain at four; adding a fifth level is a
+design decision, not an edit.
+
+**The unit of dispatch is a plan CELL, not a package.** `_area-ci.yml` passes
+the four disjoint row sets `affected_scope.row_sets` derived — `test` (native
+L1/L2/browser), `check`, `lint`, `wsl` — and skips the execution call entirely
+when all four are empty, which is what makes an all-reused or gap-only area
+schedule nothing while keeping its audit, its slice, and its gap publisher.
+`_package-ci.yml` expands each set as an `include:` matrix behind a scalar
+`inputs.<set>-rows != '[]'` guard. A row is `{package, gate, environment,
+runner}` and nothing else; every other value the job needs comes from
+`scripts/ci/cell_contract.py`, the one reader, which joins the row back to its
+cell in `ci-resolved-plan` and refuses an unknown, duplicated, non-executing,
+or mismatched row with a `cell-contract-*` code before anything runs. **No job
+reads `environments.json`, a Cargo manifest, or a package policy block**, and
+no reader-facing workflow declares an environment-list input any more.
+
+Two consequences worth knowing. **Job labels carry the whole cell**: GitHub
+builds a matrix job's label from every value in its row, in key order, so a
+producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+macos-latest, macos-latest)`. The order `package, gate, environment, runner`
+is the label contract (ruling R1 of `2026-09-19-direct-cell-execution`, which
+accepted the duplicated runner token rather than keep a second runner-lookup
+document aligned with the rows): reordering the row, or dropping `runner`, is a
+label-format change for `runner_loss.py`, which parses both that four-token
+form and the older three-token one. A WSL2 row rides on the delegating
+`wsl2 (…)` segment, because `_wsl-ci.yml`'s own job name is static. And **no test job waits on another** (ruling R3): the
+`needs: test` staging that used to order L2 and browser behind L1 is gone,
+because a red L1 must never erase a required tier's evidence. Each area's `coverage-audit` job runs `if: always()` behind
 its producers, renders the result slice, and narrows runner-loss attribution to
-that area's packages. It runs `verdict --area` only when every producer
-succeeded: an ordinary producer failure already reaches `ci-gate`, while the
-audit remains fail-closed for missing or unscheduled evidence, invalid gaps,
-and exact-skip violations. This avoids two red checks for one test failure.
+that area's packages. It runs `verdict --area --producers <result>` when the
+area's producer call **succeeded or was skipped**: an ordinary producer failure
+already reaches `ci-gate`, which avoids two red checks for one test failure. A
+skipped call is how an all-reused or gap-only area is still judged, and over
+executing cells it blocks as `producers-skipped` — never a silent pass. When it
+enforces, the audit is fail-closed for missing, unproven, or unscheduled
+evidence, invalid gaps, and legacy exact-skip violations.
 Area remains a grouping, not an identity; only the per-area slice artifact name
 contains it (`ci-results-<slug>`, with `/` spelled `--`).
 
 **An all-reused area must still fan out.** If a receipt covers every cell an
 area owns and the area then dropped out of `scheduled_areas`, no
 `ci-results-<slug>` slice would be written and that area's local-origin results
-would be reported nowhere. The planner builds the matrix from each package's
-*declared* gates rather than its executing cells, which is what gets this
-right; nothing turns red when it breaks, so it is pinned by a fixture.
+would be reported nowhere. The planner derives `scheduled_areas` from each
+package's *declared* gates rather than its executing cells, and the audit reads
+package membership from the plan rather than from the rows, which is what gets
+this right; nothing turns red when it breaks, so it is pinned by a fixture.
 
 Two rules the presentation depends on, both cheap to break:
 
@@ -293,8 +394,10 @@ Two rules the presentation depends on, both cheap to break:
   runs. The package half of the identity comes from the caller, because a
   called workflow's jobs render as `<caller job name> / <called job name>`.
   That composite label is a **parsed contract**, not just presentation:
-  `runner_loss.py` reads `area-ci (<area>) / <package> / <gate> (<env>)` from
-  the tail to attribute a dead runner's cell. Phase 6's renaming broke all six
+  `runner_loss.py` reads the row parenthetical
+  `<job> (<package>, <gate>, <environment>, <runner>)` from the tail (for
+  WSL2, from the delegating `wsl2 (…)` segment) to attribute a dead runner's
+  cell, and still accepts the pre-row `<package> / <gate> (<env>)` form. Phase 6's renaming broke all six
   producer labels at once and nothing turned red, because every fixture spelled
   the names by hand. `test_runner_loss.py` now derives them from the shipped
   workflows instead, and runs in `just ci-local`'s self-test loop.
@@ -759,8 +862,9 @@ identity, while an edit to `_test` or `_tier_filter` moves every test-tier
 cell (fixes/2026-09-19-just-recipe-identity; before it, any edit under
 `just/` invalidated every published cell). Verification recomputes that over
 both trees rather than trusting the identity the receipt stored. The planner's orchestration files
-(`ORCHESTRATION_PATHS`: `ci.yml`, `_package-ci.yml`, `_wsl-ci.yml`,
-`environments.json`, `affected_scope.py`, `.github/actions/`) are **not**
+(`ORCHESTRATION_PATHS`: `ci.yml`, `_area-ci.yml`, `_package-ci.yml`,
+`_wsl-ci.yml`, `environments.json`, `affected_scope.py`, `.github/actions/`)
+are **not**
 gate inputs: they decide what CI runs, never what a local gate produces, so a
 workflow edit leaves every published cell reusable. Before that rule one such
 edit invalidated 38 cells and cost a 45-minute pre-push. `schema_version: 1` notes are exact-tree,

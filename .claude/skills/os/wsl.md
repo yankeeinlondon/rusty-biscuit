@@ -126,6 +126,25 @@ wsl2-ubuntu` artifact from the run (`gh run download <run-id> -n <artifact>`)
 and read the `<failure>` element in `L1/<pkg>.xml`; it carries the panic
 message and the source line.
 
+The leg's label is `area-ci (<area>) / package-ci / wsl2 (<pkg>, L1,
+wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)`: the cell rides on the
+delegating `wsl2 (…)` segment because the guest job's own name is static.
+Which step went red tells you what failed:
+
+- **"Resolve this cell's execution contract"** — a `cell-contract-*` refusal on
+  the Windows host. The row does not match the plan (unknown, duplicated,
+  non-executing, or a dangling build record). No guest was provisioned; this is
+  a planner or workflow defect, never a test failure.
+- **"List this cell's expected tests"** — the listing runs each archived
+  binary, so it fails for the same reasons the gate would (a missing native
+  library, a sidecar, a baked builder path), minutes earlier.
+- **"Certify this cell's completeness"** with the tests green — `completion.py`
+  refused the cell, and stderr names each `completion-*` reason. The usual one
+  is `completion-test-missing`: an expected test left no report. A skip
+  approval in `ci-baseline.toml` cannot excuse that; only an observed
+  `<skipped/>` can be approved. The same JUnit artifact also carries
+  `expected-L1.json`, the listing the reports were compared with.
+
 ## Guest provisioning 403 (fixed, do not re-diagnose)
 
 The guest once produced no test report at all, intermittently, with a `403`
@@ -168,6 +187,49 @@ What this means when reading a red WSL leg:
   first apt run. The job's step list (`gh api .../actions/jobs/<id>`, which
   survives a lost runner) names the phase, which is the one measurement the
   loss leaves behind. When the next loss lands, record its step here.
+
+## What the hosted guest is provisioned with, and why each entry is there
+
+`_wsl-ci.yml`'s "Install guest packages" step is the whole apt set, and it is
+deliberately thin — the guest RUNS prebuilt archived binaries and compiles
+nothing, so it installs no rustup and no toolchain:
+
+```
+ca-certificates curl git xz-utils jq python3
+```
+
+Two of those are load-bearing in ways a reader would not guess:
+
+- **`jq`** parses the scope-computed native-prerequisite list, in the step
+  BEFORE any recipe that could bootstrap it. Without it the guest cannot
+  install the libraries its archived binaries dynamically link.
+- **`python3`** runs `scripts/ci/completion.py`, the producer-completeness
+  validator, INSIDE the guest (added 2026-09-20 by
+  `2026-09-19-direct-cell-execution`, ruling R2). It runs there rather than on
+  the Windows host because the reports, the expected-test listing, and the plan
+  are all on guest ext4, which the host cannot read. The validator is stdlib
+  Python precisely because there is no compiler here to build an alternative
+  with.
+
+Both are proved reachable (`jq --version`, `python3 --version`) in the SAME
+step that installs them. A package apt installed but cannot execute is a
+provisioning failure; discovering it forty minutes later, after the suite ran,
+reads as a validator defect instead.
+
+The guest also receives one **dispatch row** — `{package, gate, environment,
+runner}` — instead of a package plus environment lists, and resolves the rest
+(test arguments, the slow-test contract, native prerequisites, the build
+record it downloads) from the run's `ci-resolved-plan` through
+`scripts/ci/cell_contract.py`. That resolution happens on the WINDOWS HOST,
+before provisioning: a row the plan does not schedule must be refused before a
+runner spends ten minutes building a guest for it.
+
+`nextest list` runs before the gate, in the guest, as the unprivileged
+`biscuit` user. Two reasons it is not root: the staging directory it creates
+is the one the gate writes into, and root-owned would make the unprivileged
+suite unable to stage anything. The two extractions this implies are
+sequential, not concurrent, so peak VHDX growth is unchanged — which matters,
+because peak is what exhausted the Windows host's disk in run 30605643702.
 
 ## Level 2 on WSL
 

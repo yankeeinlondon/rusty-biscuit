@@ -34,8 +34,8 @@ on:
         description: "The area name spelled for artifact names (`/` -> `--`). Presentation only; `--area` still receives the real name."
         type: string
         required: true
-      packages:
-        description: "This area's package matrix as a JSON `{\"include\": [...]}` document, produced by `affected_scope.py`."
+      rows:
+        description: "This area's dispatch row document, produced by `affected_scope.row_sets`: `{test, check, lint, wsl}` — four disjoint sets that together partition the area's executing cells — plus the scalar `has_*_rows` flags this workflow guards on. A row is `{package, gate, environment, runner}` and nothing else."
         type: string
         required: true
       accepted-gaps:
@@ -55,65 +55,49 @@ env:
   RUSTC_WRAPPER: ""
 
 jobs:
-  # No `name:` and no `if:`/`needs:`: the caller only calls this workflow for
-  # areas that have packages, so this job always expands and GitHub labels each
-  # leg from the matrix. `name: ${{ matrix.package }}` keeps the package — the
-  # result identity — as the label a reader sees under the area.
+  # ONE call per area, not one per package. The row sets partition this area's
+  # executing cells, so the execution workflow expands exactly them; a second
+  # fan-out here would be a second place deciding what runs, which is the class
+  # of defect this design removes.
+  #
+  # The guard is the planner's own scalar flags. An all-reused or gap-only area
+  # makes NO call at all — and still publishes its gap checks, its slice, and a
+  # blocking coverage audit below, because none of those depend on a producer
+  # having run.
+  #
+  # No `name:`: the job is skippable, and GitHub never evaluates a skipped
+  # job's contexts. The default label is the job id, and the area comes from
+  # `ci.yml`'s own matrix, so a producer reads
+  # `area-ci (claudine) / package-ci / test (claudine-cli, L1, macos-latest,
+  # macos-latest)`.
   #
   # This job's result is what `ci.yml`'s `area-ci` — and so `ci-gate` — sees
   # of the producers. A failed gate command therefore fails visibly here too.
-  # Every matrix keeps `fail-fast: false`, and the coverage audit below runs under
-  # `always()`, so one red cell does not cancel the remaining unevidenced OS
-  # cells or suppress the area's final evidence grid.
   package-ci:
-    name: ${{ matrix.package }}
+    if: >-
+      fromJSON(inputs.rows).has_test_rows ||
+      fromJSON(inputs.rows).has_check_rows ||
+      fromJSON(inputs.rows).has_lint_rows ||
+      fromJSON(inputs.rows).has_wsl_rows
     # A `uses:` job accepts `permissions`, and this one CONFINES the token:
     # `ci.yml`'s `area-ci` had to widen to `checks: write` for the publisher
     # below (a called workflow's token is capped by its caller's), so the
-    # package fan-out is pinned to read-only here or it would inherit that
+    # execution call is pinned to read-only here or it would inherit that
     # grant. Neither `_package-ci.yml` nor `_wsl-ci.yml` uses the token.
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(inputs.packages) }}
     uses: ./.github/workflows/_package-ci.yml
     with:
       tested-revision: ${{ inputs.tested-revision }}
-      package: ${{ matrix.package }}
-      check-args: ${{ matrix.check_args }}
-      # The unchanged direct dependents the planner attributed to this package,
-      # compiled inside its own Linux check cell (Open Question 1, Option B).
-      dependents-check-args: ${{ matrix.dependents_check_args }}
-      dependents-native: ${{ toJSON(matrix.dependents_native) }}
-      dependents: ${{ toJSON(matrix.dependents) }}
-      test-args: ${{ matrix.test_args }}
-      gates: ${{ toJSON(matrix.gates) }}
-      l1-include-slow: ${{ matrix.l1_include_slow }}
-      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
-      # `affected_scope.py` from package policy crossed with the environment
-      # capability table, and narrowed to the cells the plan resolved to hosted
-      # EXECUTION. A cell a verified receipt already satisfied is absent from
-      # these lists — no runner is scheduled for it — while staying a cell in
-      # the plan, so the audit below reports its local-origin result instead of
-      # MISSING. That difference is the PR #76 regression.
-      native-environments: ${{ toJSON(matrix.native_environments) }}
-      check-os: ${{ toJSON(matrix.check_os) }}
-      l2-environments: ${{ toJSON(matrix.l2_environments) }}
-      browser-environments: ${{ toJSON(matrix.browser_environments) }}
-      node-environments: ${{ toJSON(matrix.node_environments) }}
-      toolchain-environments: ${{ toJSON(matrix.toolchain_environments) }}
-      backends: ${{ toJSON(matrix.l2_backends) }}
-      runner-tools: ${{ toJSON(matrix.runner_tools) }}
-      companion-suites: ${{ toJSON(matrix.companion_suites) }}
-      companion-environments: ${{ toJSON(matrix.companion_environments) }}
-      native: ${{ toJSON(matrix.native) }}
-      wsl: ${{ matrix.wsl }}
-      # The build records this package's executing cells consume, narrowed by
-      # the planner to the producers whose consumers read an archive. A tier
-      # whose environment appears in a record's `consumers` runs from that
-      # archive and compiles nothing; one that does not is unchanged.
-      builds: ${{ toJSON(matrix.builds) }}
+      # The four disjoint sets, passed through verbatim. A cell a verified
+      # receipt already satisfied is in none of them — no runner is scheduled
+      # for it — while staying a cell in the plan, so the audit below reports
+      # its local-origin result instead of MISSING. That difference is the
+      # PR #76 regression.
+      test-rows: ${{ toJSON(fromJSON(inputs.rows).test) }}
+      check-rows: ${{ toJSON(fromJSON(inputs.rows).check) }}
+      lint-rows: ${{ toJSON(fromJSON(inputs.rows).lint) }}
+      wsl-rows: ${{ toJSON(fromJSON(inputs.rows).wsl) }}
       measure-compiler-work: ${{ inputs.measure-compiler-work }}
     secrets: inherit
 
@@ -184,8 +168,9 @@ jobs:
   # it: `--area` narrows the cells, the scope, the scheduled set, and the
   # accepted evidence together. Failed producers are visibly red and reach
   # `ci-gate` through this reusable workflow. This audit adds the authoritative
-  # package/environment/gate diagnosis and blocks only when otherwise-green
-  # producers left incomplete or policy-invalid coverage.
+  # package/environment/gate diagnosis and blocks only when otherwise-green —
+  # or never-called — producers left incomplete, unproven, or policy-invalid
+  # coverage.
   #
   # `if: always()` for the same reason `ci-gate` has it: a producer that
   # failed or was cancelled must not skip the job that reports it. `needs:` is
@@ -208,14 +193,6 @@ jobs:
           ref: ${{ inputs.tested-revision }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Resolve this area's packages
-        id: area
-        shell: bash
-        env:
-          PACKAGES: ${{ inputs.packages }}
-        run: |
-          set -euo pipefail
-          echo "packages=$(jq -r '[.include[].package] | join(",")' <<<"$PACKAGES")" >>"$GITHUB_OUTPUT"
       # A named lookup does not share the paginated bulk listing, so the policy
       # and the plan stay available while a high-fan-out run is still making
       # older artifacts visible through that listing.
@@ -235,21 +212,38 @@ jobs:
           run-id: ${{ github.run_id }}
       # The in-run artifact service sees the current attempt atomically; the
       # run-wide overlay then lets a current result win when a rerun produced
-      # the same artifact name twice.
+      # the same artifact name twice. `completion-*` is each executing cell's
+      # proof: without it every executing cell reads as unproven.
       - name: Download current-attempt result and status artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: '{junit-*,status-*,build-status-*}'
+          pattern: '{junit-*,status-*,build-status-*,completion-*}'
           path: ci-artifacts
           merge-multiple: false
       - name: Overlay newest run-wide result and status artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: '{junit-*,status-*,build-status-*}'
+          pattern: '{junit-*,status-*,build-status-*,completion-*}'
           path: ci-artifacts
           merge-multiple: false
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
+      # This area's scheduled packages, read from the PLAN rather than from the
+      # execution rows: an all-reused or gap-only area dispatches no row and
+      # still owns every package whose cells the audit must account for. A
+      # `gates = false` package has a record and an empty gate list, which is
+      # what separates "selected" from "scheduled".
+      - name: Resolve this area's packages
+        id: area
+        shell: bash
+        env:
+          AREA: ${{ inputs.area }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r --arg area "$AREA" \
+            '[.packages[] | select(.area == $area and (.gates | length) > 0) | .package] | join(",")' \
+            ci-artifacts/ci-resolved-plan/resolved-plan.json)"
+          echo "packages=$packages" >>"$GITHUB_OUTPUT"
       # A producer whose hosted runner died never reached its status step, so
       # it uploaded nothing and the rollup could only say "produced no report
       # at all". `--package` keeps the synthesis inside this area: a job name
@@ -311,19 +305,25 @@ jobs:
           name: ci-results-${{ inputs.slug }}
           path: ci-results-${{ inputs.slug }}.json
           if-no-files-found: ignore
-      # The audit blocks only when the producers themselves were green. A red
-      # producer has already reached `ci-gate`; judging its parsed FAILURE again
-      # would create a second red check for one problem. With green producers,
-      # exit 2 means missing/unscheduled evidence, an invalid policy gap, or an
-      # exact-skip violation; exit 1 means the audit could not read its inputs.
-      # Both fail closed because no producer failure already represents them.
+      # The audit is enforced when the producers were green OR when no producer
+      # call was made. A red or cancelled producer has already reached
+      # `ci-gate`; judging its parsed FAILURE again would create a second red
+      # check for one problem. A skipped call is correct for an all-reused or
+      # gap-only area, which must still be judged, and is missing coverage over
+      # executing cells — `--producers` lets the verdict tell the two apart.
+      # Exit 2 means missing, unproven, or unscheduled evidence, an invalid
+      # policy gap, or an exact-skip violation; exit 1 means the audit could
+      # not read its inputs. Both fail closed because no producer failure
+      # already represents them.
       - name: Enforce coverage completeness and exceptions
-        if: needs.package-ci.result == 'success'
+        if: needs.package-ci.result == 'success' || needs.package-ci.result == 'skipped'
         shell: bash
         env:
           AREA: ${{ inputs.area }}
+          PRODUCERS: ${{ needs.package-ci.result }}
         run: |
           ./target/release/ci-rollup verdict \
             --results "ci-results-${{ inputs.slug }}.json" \
             --area "$AREA" \
+            --producers "$PRODUCERS" \
             --baseline .github/ci/ci-baseline.toml
