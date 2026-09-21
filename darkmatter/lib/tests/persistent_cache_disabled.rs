@@ -55,19 +55,33 @@ fn compose(root: &Path, options: ComposeOptions) -> String {
 /// Acceptance criterion 2: cold and warm runs recompose under every remaining
 /// cache control — each `CacheAccessMode`, with no cache root, a cache root,
 /// and a namespaced cache root — and nothing is written under the root.
-#[test]
-fn a_warm_cache_root_never_replays_composed_local_output() {
-    let access_modes = [
-        CacheAccessMode::Off,
-        CacheAccessMode::ReadOnly,
-        CacheAccessMode::ReadWrite,
-        CacheAccessMode::Refresh,
-    ];
-    for access_mode in access_modes {
-        for root_variant in ["no root", "root", "namespaced root"] {
-            assert_warm_run_recomposes(access_mode, root_variant);
-        }
+///
+/// One test per access mode: every compose pays a repository discovery at the
+/// process CWD, so the whole matrix in one test exceeds the slow-test budget.
+fn assert_warm_runs_recompose_under(access_mode: CacheAccessMode) {
+    for root_variant in ["no root", "root", "namespaced root"] {
+        assert_warm_run_recomposes(access_mode, root_variant);
     }
+}
+
+#[test]
+fn a_warm_cache_root_never_replays_composed_local_output_with_access_off() {
+    assert_warm_runs_recompose_under(CacheAccessMode::Off);
+}
+
+#[test]
+fn a_warm_cache_root_never_replays_composed_local_output_with_access_read_only() {
+    assert_warm_runs_recompose_under(CacheAccessMode::ReadOnly);
+}
+
+#[test]
+fn a_warm_cache_root_never_replays_composed_local_output_with_access_read_write() {
+    assert_warm_runs_recompose_under(CacheAccessMode::ReadWrite);
+}
+
+#[test]
+fn a_warm_cache_root_never_replays_composed_local_output_with_access_refresh() {
+    assert_warm_runs_recompose_under(CacheAccessMode::Refresh);
 }
 
 fn assert_warm_run_recomposes(access_mode: CacheAccessMode, root_variant: &str) {
@@ -240,41 +254,50 @@ fn a_nonexistent_cache_root_is_never_created_by_local_only_work() {
 /// Acceptance criterion 1: an existing cache root — empty, partially
 /// populated, or holding another run's remote entry — keeps the same entries
 /// and bytes after a local-only compose.
-#[test]
-fn an_existing_cache_root_is_left_byte_identical_by_local_only_work() {
+///
+/// One test per seed, for the same budget reason as the warm-run matrix above.
+fn assert_seeded_cache_root_is_unchanged(seed: &str, files: &[(&str, &str)]) {
     let directory = tempfile::tempdir().unwrap();
     let root = write_graph(directory.path());
 
-    let seeds: [(&str, &[(&str, &str)]); 3] = [
-        ("empty", &[]),
-        (
-            "sentinels",
-            &[("sentinel.txt", "keep me\n"), ("nested/deeper/note.md", "# Note\n")],
-        ),
-        (
-            "partial store",
-            &[
-                (".darkmatter/cache/v1/manifests/remote/ab/cd/abcd000000000000.json", "{}"),
-                (".darkmatter/cache/v1/branch/README", "namespace sentinel\n"),
-            ],
-        ),
-    ];
-    for (seed, files) in seeds {
-        for variant in CACHE_ROOT_VARIANTS {
-            let cache = tempfile::tempdir().unwrap();
-            for (relative, content) in files {
-                let path = cache.path().join(relative);
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(path, content).unwrap();
-            }
-            let before = snapshot_tree(cache.path());
-            let label = format!("{seed} / {variant}");
-
-            assert_local_only_compose(&root, cache_root_options(variant, cache.path()), &label);
-
-            assert_eq!(snapshot_tree(cache.path()), before, "{label}: the cache root changed");
+    for variant in CACHE_ROOT_VARIANTS {
+        let cache = tempfile::tempdir().unwrap();
+        for (relative, content) in files {
+            let path = cache.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
         }
+        let before = snapshot_tree(cache.path());
+        let label = format!("{seed} / {variant}");
+
+        assert_local_only_compose(&root, cache_root_options(variant, cache.path()), &label);
+
+        assert_eq!(snapshot_tree(cache.path()), before, "{label}: the cache root changed");
     }
+}
+
+#[test]
+fn an_existing_empty_cache_root_is_left_byte_identical_by_local_only_work() {
+    assert_seeded_cache_root_is_unchanged("empty", &[]);
+}
+
+#[test]
+fn an_existing_cache_root_holding_sentinels_is_left_byte_identical_by_local_only_work() {
+    assert_seeded_cache_root_is_unchanged(
+        "sentinels",
+        &[("sentinel.txt", "keep me\n"), ("nested/deeper/note.md", "# Note\n")],
+    );
+}
+
+#[test]
+fn an_existing_cache_root_holding_a_partial_store_is_left_byte_identical_by_local_only_work() {
+    assert_seeded_cache_root_is_unchanged(
+        "partial store",
+        &[
+            (".darkmatter/cache/v1/manifests/remote/ab/cd/abcd000000000000.json", "{}"),
+            (".darkmatter/cache/v1/branch/README", "namespace sentinel\n"),
+        ],
+    );
 }
 
 /// A cache root that names a regular file is not an error for local-only work,
