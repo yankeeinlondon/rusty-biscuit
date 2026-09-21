@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 import unittest.mock
 
 import affected_scope
+import cell_contract
 import companion_suites
 import schema
 from tool_guard import require_tools
@@ -32,7 +33,6 @@ from affected_scope import (
     parse_just_recipes,
     lockfile_impacted_names,
     parse_lockfile,
-    matrix_record,
     package_cells,
     check_arguments,
     dependent_seam,
@@ -113,16 +113,42 @@ def scope_document(
     force_all: bool = False,
     **kwargs: object,
 ) -> dict[str, object]:
-    """The legacy `scope.json` shape the workflow still reads.
-
-    `calculate_scope` now returns the resolved plan; the cases below that
-    assert the package matrix and the rollup policy list go through this
-    projection until Phases 5 and 6 move their consumers onto cells.
-    """
+    """The `scope.json` projection `ci.yml` publishes, for cases asserting it."""
     plan = calculate_scope(
         files, root, metadata, environments, policy, force_all, **kwargs  # type: ignore[arg-type]
     )
     return legacy_scope_document(plan)
+
+
+def gates_by_package(plan: dict) -> dict[str, list[str]]:
+    """Each gating package's plan gates: the packages the fan-out reaches."""
+    return {entry["package"]: entry["gates"] for entry in plan["packages"] if entry["gates"]}
+
+
+def dispatched(plan: dict, package: str) -> set[tuple[str, str]]:
+    """`(environment, gate)` of every dispatch row `ci.yml` hands out for `package`."""
+    return {
+        (row["environment"], row["gate"])
+        for document in affected_scope.row_sets(plan).values()
+        for name in schema.ROW_SET_NAMES
+        for row in document[name]
+        if row["package"] == package
+    }
+
+
+def producer_contracts(plan: dict, package: str) -> dict[tuple[str, str], dict[str, str]]:
+    """What each of `package`'s producer jobs resolves, by `(environment, gate)`.
+
+    The real resolver on the real rows: a job reads this instead of the
+    per-package environment lists the retired matrix carried.
+    """
+    return {
+        (row["environment"], row["gate"]): cell_contract.contract(plan, row, "")
+        for document in affected_scope.row_sets(plan).values()
+        for name in schema.ROW_SET_NAMES
+        for row in document[name]
+        if row["package"] == package
+    }
 
 
 def package(
@@ -195,6 +221,16 @@ class AffectedScopeTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
+    def plan(self, files: list[str], **kwargs: object) -> dict:
+        return calculate_scope(
+            files,
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
     def test_source_change_selects_the_source_package_alone(self) -> None:
         # AC1: an unchanged direct reverse dependent is reported and selected
         # nowhere. It used to receive a compile-check entry, which presented an
@@ -206,12 +242,14 @@ class AffectedScopeTests(unittest.TestCase):
         # already compiles (spec section 1.7), so its `check` gate exists for
         # beta-app's seam alone: one Linux cell owned by alpha-core (Open
         # Question 1, Option B), never a job for beta-app.
-        gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
+        plan = self.plan(["alpha/lib/src/lib.rs"])
+        gates = gates_by_package(plan)
+        self.assertEqual(["lint", "check", "L1"], gates["alpha-core"])
         self.assertNotIn("beta-app", gates)
-        alpha = next(entry for entry in scope["matrix"] if entry["package"] == "alpha-core")
-        self.assertEqual([DEPENDENTS_ENVIRONMENT], alpha["check_os"])
-        self.assertEqual(["beta-app"], alpha["dependents"])
+        checks = {cell for cell in dispatched(plan, "alpha-core") if cell[1] == "check"}
+        self.assertEqual({(DEPENDENTS_ENVIRONMENT, "check")}, checks)
+        contract = producer_contracts(plan, "alpha-core")[(DEPENDENTS_ENVIRONMENT, "check")]
+        self.assertEqual(["beta-app"], json.loads(contract["dependents"]))
 
     def test_an_unchanged_reverse_dependent_gets_no_area_job_or_cell(self) -> None:
         plan = calculate_scope(
@@ -239,7 +277,8 @@ class AffectedScopeTests(unittest.TestCase):
     def test_unrelated_documentation_change_has_empty_scope(self) -> None:
         scope = self.scope(["docs/architecture.md"])
         self.assertEqual([], scope["packages"])
-        self.assertEqual([], scope["matrix"])
+        self.assertEqual([], scope["scheduled_areas"])
+        self.assertEqual({}, scope["area_rows"])
 
     def test_package_documentation_and_manifest_changes_have_empty_scope(self) -> None:
         scope = self.scope(["alpha/lib/README.md", "alpha/lib/Cargo.toml"])
@@ -300,9 +339,8 @@ class AffectedScopeTests(unittest.TestCase):
             "the plan must carry the evidence it scheduled against, so the "
             "rollup expects the same set it consumed",
         )
-        scope = legacy_scope_document(plan)
-        records = {entry["package"]: entry for entry in scope["matrix"]}
-        self.assertNotIn("macos-latest", records["alpha-core"]["native_environments"])
+        self.assertNotIn(("macos-latest", "L1"), dispatched(plan, "alpha-core"))
+        self.assertIn(("ubuntu-latest", "L1"), dispatched(plan, "alpha-core"))
 
     def test_evidence_from_two_environments_combines(self) -> None:
         # AC5: the retired single `excluded_environment` could express one host.
@@ -356,7 +394,7 @@ class AffectedScopeTests(unittest.TestCase):
         scope = self.scope([".config/nextest.toml"])
         self.assertFalse(scope["full_scope"])
         self.assertEqual([], scope["packages"])
-        self.assertEqual([], scope["matrix"])
+        self.assertEqual([], scope["scheduled_areas"])
 
     def test_wsl_workflow_change_selects_no_packages(self) -> None:
         scope = self.scope([".github/workflows/_wsl-ci.yml"])
@@ -375,14 +413,14 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertEqual([], scope["packages"])
 
     def test_non_source_input_does_not_widen_a_source_change(self) -> None:
-        scope = self.scope(["clippy.toml", "alpha/lib/src/lib.rs"])
-        gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
-        unwidened = {
-            entry["package"]: entry["gates"]
-            for entry in self.scope(["alpha/lib/src/lib.rs"])["matrix"]
-        }
-        self.assertEqual(unwidened, gates)
-        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
+        plan = self.plan(["clippy.toml", "alpha/lib/src/lib.rs"])
+        gates = gates_by_package(plan)
+        unwidened = self.plan(["alpha/lib/src/lib.rs"])
+        self.assertEqual(gates_by_package(unwidened), gates)
+        self.assertEqual(
+            affected_scope.row_sets(unwidened), affected_scope.row_sets(plan)
+        )
+        self.assertEqual(["lint", "check", "L1"], gates["alpha-core"])
         self.assertNotIn("beta-app", gates)
         self.assertNotIn("shared-tests", gates)
 
@@ -727,19 +765,24 @@ class NativeClosureTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_a_dependent_job_receives_its_dependencies_native(self) -> None:
-        scope = scope_document(
+        plan = calculate_scope(
             ["consumer/src/lib.rs"],
             self.root,
             self.metadata,
             environments_for_tests(),
             self.policy,
         )
-        matrix = {entry["package"]: entry for entry in scope["matrix"]}
-        self.assertIn("consumer", matrix)
+        contracts = producer_contracts(plan, "consumer")
         self.assertEqual(
-            matrix["consumer"]["native"],
-            {"ubuntu-latest": ["libasound2-dev"]},
+            ["libasound2-dev"],
+            json.loads(contracts[("ubuntu-latest", "L1")]["native_packages"]),
         )
+        # The guest is Linux and installs the same closure; macOS needs none.
+        self.assertEqual(
+            ["libasound2-dev"],
+            json.loads(contracts[("wsl2-ubuntu", "L1")]["native_packages"]),
+        )
+        self.assertEqual([], json.loads(contracts[("macos-latest", "L1")]["native_packages"]))
 
 
 class PackagePolicyTests(unittest.TestCase):
@@ -978,7 +1021,53 @@ class PackagePolicyTests(unittest.TestCase):
             )
 
 
-class MatrixRecordTests(unittest.TestCase):
+def resolved_contracts(
+    record: dict,
+    environments: list[dict] | None = None,
+    accepted: dict | None = None,
+    **cell_options: object,
+) -> dict[tuple[str, str], dict[str, str]]:
+    """`record`'s executing cells, each resolved by the real `cell_contract`.
+
+    The cells come from `package_cells` and the contract from the plan it
+    would travel in, so this is exactly what each producer job is handed.
+    """
+    environments = environments if environments is not None else environments_for_tests()
+    cells = package_cells(
+        {"features": [], "all_features": False} | record,
+        area=record["area"],
+        target_kinds=record["targets"],
+        environments=environments,
+        accepted=accepted or {},
+        **cell_options,  # type: ignore[arg-type]
+    )
+    plan = {
+        "head": "",
+        "environments": environments,
+        "packages": [record],
+        "cells": cells,
+        "builds": [],
+    }
+    runners = {environment["name"]: environment["runner"] for environment in environments}
+    return {
+        (cell["environment"], cell["gate"]): cell_contract.contract(
+            plan,
+            {
+                "package": cell["package"],
+                "gate": cell["gate"],
+                "environment": cell["environment"],
+                "runner": runners[cell["environment"]],
+            },
+            "",
+        )
+        for cell in cells
+        if cell["execution"] == "execute"
+    }
+
+
+class PackageExecutionTests(unittest.TestCase):
+    """What a producer is handed for one package, resolved per executing cell."""
+
     def test_features_become_qualified_check_and_test_args(self) -> None:
         policy = {"features": ["test-fixtures"], "all_features": False}
         features = feature_args(policy, "sniff-cli")
@@ -986,23 +1075,26 @@ class MatrixRecordTests(unittest.TestCase):
         self.assertEqual(
             check_arguments("sniff-cli", ["lib"], features), "-p sniff-cli --features test-fixtures"
         )
-        record = matrix_record(
+        contracts = resolved_contracts(
             plan_package(
                 package="sniff-cli",
                 tiers=["L1", "L2"],
                 l2_backends=["tmux"],
                 test_args=features,
                 check_args=check_arguments("sniff-cli", ["lib"], features),
-            ),
-            environments=environments_for_tests(),
+            )
         )
-        # The matrix forwards the plan's feature contract; it never re-derives it.
-        self.assertEqual(record["check_args"], "-p sniff-cli --features test-fixtures")
-        self.assertEqual(record["test_args"], "--features test-fixtures")
-        self.assertEqual(record["l2_environments"], ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(record["browser_environments"], [])
-        self.assertEqual(record["node_environments"], [])
-        self.assertTrue(record["wsl"])
+        # Every producer is handed the plan's feature contract; none re-derives it.
+        for cell, contract in contracts.items():
+            self.assertEqual("-p sniff-cli --features test-fixtures", contract["check_args"], cell)
+            self.assertEqual("--features test-fixtures", contract["test_args"], cell)
+            self.assertEqual("", contract["requires_node"], cell)
+        self.assertEqual(
+            {"ubuntu-latest", "macos-latest"},
+            {environment for environment, gate in contracts if gate == "L2"},
+        )
+        self.assertEqual(set(), {cell for cell in contracts if cell[1] == "browser"})
+        self.assertIn(("wsl2-ubuntu", "L1"), contracts)
 
     def test_all_features_propagates_consistently(self) -> None:
         features = feature_args({"features": [], "all_features": True}, "biscuit-hash")
@@ -1012,23 +1104,30 @@ class MatrixRecordTests(unittest.TestCase):
         )
 
     def test_browser_and_node_environments_are_capability_derived(self) -> None:
-        record = matrix_record(
+        contracts = resolved_contracts(
             plan_package(
                 package="biscuit-terminal", tiers=["L1", "L2", "browser"], l2_backends=["tmux"]
-            ),
-            environments=environments_for_tests(),
+            )
         )
-        self.assertEqual(record["browser_environments"], ["ubuntu-latest"])
+        self.assertEqual(
+            {"ubuntu-latest"}, {environment for environment, gate in contracts if gate == "browser"}
+        )
 
-        record = matrix_record(
+        contracts = resolved_contracts(
             plan_package(
                 package="homelab-server",
                 runner_tools=["node-22", "pnpm-10"],
                 companion_suites=["homelab-frontend"],
-            ),
-            environments=environments_for_tests(),
+            )
         )
-        self.assertEqual(record["node_environments"], ["ubuntu-latest"])
+        self.assertEqual(
+            {"ubuntu-latest"},
+            {
+                environment
+                for (environment, _), contract in contracts.items()
+                if contract["requires_node"] == "true"
+            },
+        )
 
     def test_toolchain_environments_follow_the_declaration_and_the_capability(self) -> None:
         # Run 35326800778: `repo-deps` and `test-toolkit` shell out to cargo
@@ -1037,45 +1136,50 @@ class MatrixRecordTests(unittest.TestCase):
         # The consumer provisions the pin once, on exactly the L1 hosts the
         # declaration reaches; the WSL2 guest stays a governed gap instead.
         environments = environments_for_tests()
-        record = matrix_record(
-            plan_package(package="repo-deps", requires_toolchain=True),
-            environments=environments,
-        )
+
+        def provisioned(contracts: dict) -> set[str]:
+            # `_package-ci.yml` reads `requires_toolchain` in its test job only.
+            return {
+                environment
+                for (environment, gate), contract in contracts.items()
+                if gate in ("L1", "L2", "browser") and contract["requires_toolchain"] == "true"
+            }
+
+        declared = plan_package(package="repo-deps", requires_toolchain=True)
+        contracts = resolved_contracts(declared, environments)
         self.assertEqual(
-            record["toolchain_environments"],
-            [
+            {
                 environment["name"]
                 for environment in environments
                 if not capability(environment, "archive_only")
                 and capability(environment, "cargo_toolchain")
-            ],
+            },
+            provisioned(contracts),
         )
-        self.assertNotIn("wsl2-ubuntu", record["toolchain_environments"])
+        self.assertNotIn(("wsl2-ubuntu", "L1"), contracts, "the guest is a gap, not a producer")
 
         # Narrowed to hosted execution: a cell a receipt already satisfied
         # schedules no runner and so provisions nothing.
-        narrowed = matrix_record(
-            plan_package(package="repo-deps", requires_toolchain=True),
-            environments=environments,
-            executing={("ubuntu-latest", "L1")},
+        reused = {
+            ("repo-deps", environment, "L1"): {"evidence": "note"}
+            for environment in ("macos-latest", "windows-latest")
+        }
+        self.assertEqual(
+            {"ubuntu-latest"}, provisioned(resolved_contracts(declared, environments, reused))
         )
-        self.assertEqual(narrowed["toolchain_environments"], ["ubuntu-latest"])
 
         # A package that never shells out provisions nothing anywhere, and a
         # declaration without a test gate (check-only) provisions nothing.
+        self.assertEqual(set(), provisioned(resolved_contracts(plan_package(package="a"))))
         self.assertEqual(
-            matrix_record(plan_package(package="a"), environments=environments)[
-                "toolchain_environments"
-            ],
-            [],
-        )
-        self.assertEqual(
-            matrix_record(
-                plan_package(package="repo-deps", requires_toolchain=True, gates=["check"]),
-                environments=environments,
-                gates={"check"},
-            )["toolchain_environments"],
-            [],
+            set(),
+            provisioned(
+                resolved_contracts(
+                    plan_package(
+                        package="repo-deps", requires_toolchain=True, gates=["check"], tiers=[]
+                    )
+                )
+            ),
         )
 
     def test_a_companion_suite_host_is_never_satisfied_by_local_evidence(self) -> None:
@@ -1781,7 +1885,7 @@ class GatesFalseScopeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_excluded_from_the_matrix_but_present_in_policy(self) -> None:
+    def test_excluded_from_the_fan_out_but_present_in_policy(self) -> None:
         scope = scope_document(
             ["excluded/src/lib.rs"],
             self.root,
@@ -1792,7 +1896,16 @@ class GatesFalseScopeTests(unittest.TestCase):
         # Still SELECTED (coverage and the reverse-dependency closure see it)...
         self.assertEqual(["excluded"], scope["packages"])
         # ...but it launches no jobs...
-        self.assertEqual([], scope["matrix"])
+        self.assertEqual([], scope["scheduled_areas"])
+        self.assertEqual(
+            [],
+            [
+                row
+                for document in scope["area_rows"].values()
+                for name in schema.ROW_SET_NAMES
+                for row in document[name]
+            ],
+        )
         # ...while the rollup still learns its governance, so the cell renders
         # NOT SCHEDULED rather than vanishing.
         policy = {entry["package"]: entry for entry in scope["policy"]}
@@ -1854,23 +1967,26 @@ class NonPropagationTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_a_dependent_keeps_its_own_tiers_tools_and_companions(self) -> None:
-        scope = scope_document(
+        plan = calculate_scope(
             ["consumer/src/lib.rs"],
             self.root,
             self.metadata,
             environments_for_tests(),
             self.policy,
         )
-        matrix = {entry["package"]: entry for entry in scope["matrix"]}
-        consumer = matrix["consumer"]
+        consumer = next(entry for entry in plan["packages"] if entry["package"] == "consumer")
         # Only `native` unions over the closure. The dependency's L2 tier,
         # runner tools, and companion suites describe ITS tests, not the
         # packages that compile it.
         self.assertEqual(consumer["tiers"], ["L1"])
-        self.assertEqual(consumer["l2_environments"], [])
         self.assertEqual(consumer["runner_tools"], [])
         self.assertEqual(consumer["companion_suites"], [])
-        self.assertEqual(consumer["node_environments"], [])
+        contracts = producer_contracts(plan, "consumer")
+        self.assertEqual(set(), {cell for cell in contracts if cell[1] != "L1" and cell[1] not in ("lint", "check")})
+        for cell, contract in contracts.items():
+            self.assertEqual("[]", contract["runner_tools"], cell)
+            self.assertEqual("[]", contract["companion_suites"], cell)
+            self.assertEqual("", contract["requires_node"], cell)
 
 
 class BuildClosureEdgeTests(unittest.TestCase):
@@ -2054,12 +2170,12 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
 
 
 class AreaFanOutTests(unittest.TestCase):
-    """AC2: `ci.yml` fans out per AREA, from a matrix the planner produced.
+    """AC2: `ci.yml` fans out per AREA, from lists the planner produced.
 
-    The area fan-out is a regrouping of the package matrix, never a second
-    selection. Every assertion below is about the relationship between
-    `matrix`, `area_matrix`, `scheduled_areas`, and `area_slugs` — the four
-    fields the workflow reads together.
+    The area fan-out is a regrouping of the plan's gating packages and their
+    dispatch rows, never a second selection. Every assertion below is about the
+    relationship between `scheduled_areas`, `area_slugs`, and `area_rows` — the
+    three fields the workflow reads together.
     """
 
     def setUp(self) -> None:
@@ -2103,45 +2219,51 @@ class AreaFanOutTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
-    def test_every_matrix_entry_appears_under_exactly_one_area(self) -> None:
-        scope = self.scope()
-        grouped = [
-            entry["package"]
-            for slice_ in scope["area_matrix"].values()
-            for entry in slice_["include"]
-        ]
-        self.assertEqual(
-            sorted(entry["package"] for entry in scope["matrix"]),
-            sorted(grouped),
-            "the area fan-out must regroup the package matrix, not re-select it",
+    def area_packages(self, scope: dict, area: str) -> set[str]:
+        return {
+            row["package"]
+            for name in schema.ROW_SET_NAMES
+            for row in scope["area_rows"][area][name]
+        }
+
+    def test_every_gating_package_dispatches_under_exactly_its_own_area(self) -> None:
+        plan = calculate_scope(
+            [], self.root, self.metadata, environments_for_tests(), self.policy, force_all=True
         )
-        self.assertEqual(len(grouped), len(set(grouped)), "no package may fan out twice")
+        scope = legacy_scope_document(plan)
+        areas = {entry["package"]: entry["area"] for entry in plan["packages"]}
+        dispatched_under = {
+            package: sorted(area for area in scope["area_rows"] if package in self.area_packages(scope, area))
+            for package in gates_by_package(plan)
+        }
+        self.assertEqual(
+            {package: [areas[package]] for package in gates_by_package(plan)},
+            dispatched_under,
+            "the area fan-out must regroup the plan's packages, not re-select them",
+        )
 
     def test_areas_group_their_packages_and_are_sorted(self) -> None:
         scope = self.scope()
         self.assertEqual(
             ["alpha", "alpha/nested", "beta", "root"], scope["scheduled_areas"]
         )
+        self.assertEqual({"alpha-cli", "alpha-core"}, self.area_packages(scope, "alpha"))
         self.assertEqual(
-            ["alpha-cli", "alpha-core"],
-            sorted(
-                entry["package"] for entry in scope["area_matrix"]["alpha"]["include"]
-            ),
-        )
-        self.assertEqual(
-            ["nested-core"],
-            [entry["package"] for entry in scope["area_matrix"]["alpha/nested"]["include"]],
+            {"nested-core"},
+            self.area_packages(scope, "alpha/nested"),
             "a nested area is its own entry, never folded into its parent",
         )
 
-    def test_the_area_slice_is_a_ready_made_github_matrix(self) -> None:
-        # `strategy.matrix: ${{ fromJSON(...) }}` requires exactly this shape.
+    def test_every_scheduled_area_is_handed_rows_of_its_own(self) -> None:
+        # `_area-ci.yml` receives `fromJSON(area_rows)[area]`; a scheduled area
+        # without an entry would reach the producers as `null`.
         scope = self.scope()
-        for area, slice_ in scope["area_matrix"].items():
-            self.assertEqual(["include"], list(slice_), f"{area} must be an include matrix")
-            self.assertTrue(slice_["include"], f"{area} must not fan out an empty matrix")
-            for entry in slice_["include"]:
-                self.assertEqual(area, entry["area"])
+        for area in scope["scheduled_areas"]:
+            document = scope["area_rows"][area]
+            self.assertTrue(
+                any(document[f"has_{name}_rows"] for name in schema.ROW_SET_NAMES),
+                f"{area} executes cells here and must dispatch rows",
+            )
 
     def test_a_nested_area_slug_is_a_legal_artifact_name(self) -> None:
         scope = self.scope()
@@ -2162,9 +2284,9 @@ class AreaFanOutTests(unittest.TestCase):
         for slug in scope["area_slugs"].values():
             self.assertNotIn("/", slug)
 
-    def test_every_scheduled_area_has_a_slug_and_a_matrix(self) -> None:
+    def test_every_scheduled_area_has_a_slug_and_a_row_document(self) -> None:
         scope = self.scope()
-        self.assertEqual(scope["scheduled_areas"], sorted(scope["area_matrix"]))
+        self.assertLessEqual(set(scope["scheduled_areas"]), set(scope["area_rows"]))
         self.assertEqual(scope["scheduled_areas"], sorted(scope["area_slugs"]))
 
     def test_a_gates_false_package_gets_no_area_fan_out(self) -> None:
@@ -2190,7 +2312,9 @@ class AreaFanOutTests(unittest.TestCase):
         )
         self.assertIn("beta-app", scope["packages"])
         self.assertNotIn("beta", scope["scheduled_areas"])
-        self.assertNotIn("beta", scope["area_matrix"])
+        self.assertNotIn("beta", scope["area_slugs"])
+        if "beta" in scope["area_rows"]:
+            self.assertEqual(set(), self.area_packages(scope, "beta"))
 
 
 class AllReusedAreaFanOutTests(unittest.TestCase):
@@ -2261,18 +2385,18 @@ class AllReusedAreaFanOutTests(unittest.TestCase):
 
         scope = legacy_scope_document(plan)
         self.assertIn("alpha", scope["scheduled_areas"])
-        self.assertIn("alpha", scope["area_matrix"])
         self.assertEqual("alpha", scope["area_slugs"]["alpha"])
+        rows = scope["area_rows"]["alpha"]
         self.assertEqual(
-            ["alpha-core"],
-            [entry["package"] for entry in scope["area_matrix"]["alpha"]["include"]],
+            {"alpha-core"}, {row["package"] for name in schema.ROW_SET_NAMES for row in rows[name]}
         )
         self.assertEqual(
             [],
-            scope["area_matrix"]["alpha"]["include"][0]["native_environments"],
+            rows["test"],
             "no test leg is scheduled, yet the area still fans out so its "
             "coverage audit publishes the reused cells' slice",
         )
+        self.assertFalse(rows["has_test_rows"])
 
 
 class MatrixLimitTests(unittest.TestCase):
@@ -2440,11 +2564,7 @@ class CheckCellTests(unittest.TestCase):
 
     def test_l1_only_kinds_get_no_check_cell_and_no_selector(self) -> None:
         self.assertEqual([], self.check_cells(["lib", "bin", "test"]))
-        record = matrix_record(
-            plan_package(package="a", targets=["lib", "bin", "test"]),
-            environments=environments_for_tests(),
-        )
-        self.assertEqual("-p a", record["check_args"])
+        self.assertEqual("-p a", check_arguments("a", ["lib", "bin", "test"], ""))
 
     def test_a_reused_linux_l1_reuses_the_check_and_another_host_reuses_nothing(self) -> None:
         evidence = {"origin": "local", "evidence": "refs/notes/ci-local/ubuntu-latest"}
@@ -2519,24 +2639,6 @@ class CheckCellTests(unittest.TestCase):
                 ["lib", "bench"], prohibitions={"windows-latest": self.CONSTRAINT}
             )],
         )
-
-    def test_check_os_lists_every_executing_check_environment(self) -> None:
-        def record(executing: set[tuple[str, str]]) -> dict[str, object]:
-            return matrix_record(
-                plan_package(
-                    package="a", targets=["lib", "example"], check_args="-p a --examples"
-                ),
-                environments=environments_for_tests(),
-                executing=executing,
-            )
-
-        every = {(environment, "check") for environment in self.NATIVE}
-        self.assertEqual(self.NATIVE, record(every)["check_os"])
-        self.assertEqual(
-            ["ubuntu-latest", "macos-latest"],
-            record(every - {("windows-latest", "check")})["check_os"],
-        )
-        self.assertEqual([], record(set())["check_os"])
 
 
 class EventSchedulingTests(unittest.TestCase):
@@ -2679,10 +2781,11 @@ class EventSchedulingTests(unittest.TestCase):
         self.assertIn("ubuntu-latest", plan["preflight_os"])
         self.assertIn("windows-latest", plan["preflight_os"])
         # And the workflow-facing projection schedules no Linux cell either.
-        matrix = {entry["package"]: entry for entry in legacy_scope_document(plan)["matrix"]}
-        self.assertEqual([], matrix["alpha-core"]["native_environments"])
-        self.assertEqual([], matrix["alpha-core"]["check_os"])
-        self.assertTrue(matrix["alpha-core"]["wsl"])
+        self.assertEqual({("wsl2-ubuntu", "L1")}, dispatched(plan, "alpha-core"))
+        self.assertEqual(
+            ["alpha-core"],
+            [row["package"] for document in row_sets_of(plan).values() for row in document["wsl"]],
+        )
         owners = legacy_scope_document(plan)["build_owners"]
         self.assertEqual(["ubuntu-latest"], [owner["environment"] for owner in owners])
 
@@ -2744,8 +2847,11 @@ class EventSchedulingTests(unittest.TestCase):
         self.assertEqual({"ubuntu-latest", "macos-latest"}, cell_environments)
         self.assertEqual({"ubuntu-latest", "macos-latest"}, {build["producer"] for build in plan["builds"]})
         self.assertEqual(["macos-latest", "ubuntu-latest"], plan["preflight_os"])
-        matrix = legacy_scope_document(plan)["matrix"]
-        self.assertFalse(matrix[0]["wsl"], "no WSL2 leg on a pull request")
+        self.assertEqual(
+            [],
+            [row for document in row_sets_of(plan).values() for row in document["wsl"]],
+            "no WSL2 leg on a pull request",
+        )
 
     def test_a_plan_without_an_event_is_byte_identical_to_before(self) -> None:
         plan = self.plan()
@@ -2867,21 +2973,22 @@ class CheckCellScopeTests(unittest.TestCase):
         self.assertEqual("-p beta-app", records["beta-app"]["check_args"])
         self.assertNotIn("check", records["beta-app"]["gates"])
 
-    def test_the_matrix_projects_the_executing_check_environments(self) -> None:
+    def test_only_the_executing_check_environments_dispatch(self) -> None:
         evidence = {"origin": "local", "evidence": "refs/notes/ci-local/macos-latest"}
         plan = self.plan(
             accepted_cells=[{"package": "alpha-core", "environment": "macos-latest", "gate": "L1", **evidence}],
             prohibitions={"windows-latest": CheckCellTests.CONSTRAINT},
         )
-        matrix = {
-            entry["package"]: entry
-            for entry in legacy_scope_document(plan)["matrix"]
-        }
-        self.assertEqual("-p alpha-core --examples", matrix["alpha-core"]["check_args"])
+        contracts = producer_contracts(plan, "alpha-core")
         # macOS L1 reused and Windows prohibited: neither hosts a check, so
-        # the one check environment is the whole projection.
-        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
-        self.assertEqual([], matrix["beta-app"]["check_os"])
+        # the one check environment is the whole dispatch.
+        self.assertEqual(
+            {(CHECK_ENVIRONMENT, "check")}, {cell for cell in contracts if cell[1] == "check"}
+        )
+        self.assertEqual(
+            "-p alpha-core --examples", contracts[(CHECK_ENVIRONMENT, "check")]["check_args"]
+        )
+        self.assertEqual(set(), {cell for cell in dispatched(plan, "beta-app") if cell[1] == "check"})
 
 
 class DependentSeamTests(unittest.TestCase):
@@ -3003,9 +3110,13 @@ class DependentSeamTests(unittest.TestCase):
         expected = ["libalpha-dev", "libconsumer-dev", "libtransitive-dev"]
         self.assertEqual(expected, record["dependent_seam"]["native"])
         self.assertEqual({"ubuntu-latest": ["libalpha-dev"]}, record["native"])
-        projection = legacy_scope_document(plan)["matrix"][0]
-        self.assertEqual(expected, projection["dependents_native"])
-        self.assertEqual(record["native"], projection["native"])
+        contracts = producer_contracts(plan, "alpha-core")
+        self.assertEqual(
+            expected, json.loads(contracts[(DEPENDENTS_ENVIRONMENT, "check")]["dependents_native"])
+        )
+        self.assertEqual(
+            ["libalpha-dev"], json.loads(contracts[("ubuntu-latest", "L1")]["native_packages"])
+        )
         self.assertEqual(["ubuntu-latest"], sorted(self.check_cells(plan, "alpha-core")))
         del record["dependent_seam"]["native"]
         self.assertTrue(any("native" in error for error in schema.validate_resolved_plan(plan)))
@@ -3069,23 +3180,23 @@ class DependentSeamTests(unittest.TestCase):
         )
         self.assertEqual([], plan["reverse_dependencies"])
 
-    def test_the_matrix_carries_the_dependents_and_their_arguments(self) -> None:
-        matrix = {
-            entry["package"]: entry
-            for entry in legacy_scope_document(self.plan("alpha/lib/src/lib.rs"))["matrix"]
-        }
-        self.assertEqual(["alpha-core"], sorted(matrix))
-        self.assertEqual(["beta-app", "gamma-lib"], matrix["alpha-core"]["dependents"])
+    def test_the_check_producer_is_handed_the_dependents_and_their_arguments(self) -> None:
+        plan = self.plan("alpha/lib/src/lib.rs")
+        self.assertEqual(["alpha-core"], sorted(gates_by_package(plan)))
+        contracts = producer_contracts(plan, "alpha-core")
         self.assertEqual(
-            "-p beta-app -p gamma-lib --lib --bins --tests",
-            matrix["alpha-core"]["dependents_check_args"],
+            {(DEPENDENTS_ENVIRONMENT, "check")}, {cell for cell in contracts if cell[1] == "check"}
         )
-        self.assertEqual("-p alpha-core", matrix["alpha-core"]["check_args"])
-        self.assertEqual([DEPENDENTS_ENVIRONMENT], matrix["alpha-core"]["check_os"])
-        # A record with no seam projects empty fields, never a missing key.
-        without = matrix_record(plan_package(package="x"), environments_for_tests())
-        self.assertEqual([], without["dependents"])
-        self.assertEqual("", without["dependents_check_args"])
+        check = contracts[(DEPENDENTS_ENVIRONMENT, "check")]
+        self.assertEqual(["beta-app", "gamma-lib"], json.loads(check["dependents"]))
+        self.assertEqual(
+            "-p beta-app -p gamma-lib --lib --bins --tests", check["dependents_check_args"]
+        )
+        self.assertEqual("-p alpha-core", check["check_args"])
+        # A record with no seam resolves empty fields, never a missing key.
+        for cell, contract in resolved_contracts(plan_package(package="x")).items():
+            self.assertEqual("[]", contract["dependents"], cell)
+            self.assertEqual("", contract["dependents_check_args"], cell)
 
     def test_the_seam_arguments_select_by_declared_kinds_and_never_all_targets(self) -> None:
         by_name = {entry["name"]: entry for entry in self.metadata["packages"]}  # type: ignore[union-attr]
@@ -3385,10 +3496,19 @@ class ApplyAcceptedCellsTests(ApplyFixture):
         # from that text alone: no policy, no environment table.
         plan = json.loads(schema.canonical(self.plan(accepted_cells=self.accepted)))
         projection = legacy_scope_document(plan)
-        matrix = {entry["package"]: entry for entry in projection["matrix"]}
-        self.assertNotIn("macos-latest", matrix["alpha-core"]["native_environments"])
-        self.assertEqual([CHECK_ENVIRONMENT], matrix["alpha-core"]["check_os"])
-        self.assertEqual(["ubuntu-latest"], matrix["web-server"]["node_environments"])
+        self.assertNotIn(("macos-latest", "L1"), dispatched(plan, "alpha-core"))
+        self.assertEqual(
+            {(CHECK_ENVIRONMENT, "check")},
+            {cell for cell in dispatched(plan, "alpha-core") if cell[1] == "check"},
+        )
+        self.assertEqual(
+            {"ubuntu-latest"},
+            {
+                environment
+                for (environment, _), contract in producer_contracts(plan, "web-server").items()
+                if contract["requires_node"] == "true"
+            },
+        )
         policy = {entry["package"]: entry for entry in projection["policy"]}
         self.assertFalse(policy["excluded"]["gates"])
         self.assertEqual("promotion-pending", policy["excluded"]["exclusion"]["exclusion_class"])
@@ -4398,41 +4518,48 @@ class CompanionAttachmentTests(unittest.TestCase):
         )
         self.assertEqual(["homelab-frontend"], record["lint_companion_suites"])
 
-    def test_the_matrix_names_the_environments_that_run_a_companion(self) -> None:
+    def test_only_the_cells_that_run_a_companion_are_handed_one(self) -> None:
         # The companion step is skipped where nothing is attached, rather than
         # started and resolved to an empty set: a runner without the suites'
         # interpreter must not be able to fail a cell that was never asked to
         # run them.
-        record = matrix_record(
-            plan_package(
-                package="homelab-server", companion_suites=["homelab-frontend"]
-            ),
-            environments=environments_for_tests(),
-        )
-        self.assertEqual(["ubuntu-latest"], record["companion_environments"])
+        def companion_hosts(record: dict) -> set[str]:
+            return {
+                environment
+                for (environment, _), contract in resolved_contracts(record).items()
+                if json.loads(contract["companion_suites"])
+            }
+
         self.assertEqual(
-            [],
-            matrix_record(
-                plan_package(package="alpha"), environments=environments_for_tests()
-            )["companion_environments"],
+            {"ubuntu-latest"},
+            companion_hosts(
+                plan_package(package="homelab-server", companion_suites=["homelab-frontend"])
+            ),
         )
+        self.assertEqual(set(), companion_hosts(plan_package(package="alpha")))
 
     def test_node_provisioning_follows_the_suites_that_need_it(self) -> None:
         # A Python-only owner must not install pnpm on every capable runner.
-        python_only = matrix_record(
-            plan_package(package="repo-deps", companion_suites=["test_schema.py"]),
-            environments=environments_for_tests(),
-        )
-        self.assertEqual([], python_only["node_environments"])
+        def node_hosts(record: dict) -> set[str]:
+            return {
+                environment
+                for (environment, _), contract in resolved_contracts(record).items()
+                if contract["requires_node"] == "true"
+            }
 
-        javascript = matrix_record(
-            plan_package(
-                package="test-toolkit",
-                companion_suites=["test-audit-typecheck", "test-audit-vitest"],
-            ),
-            environments=environments_for_tests(),
+        self.assertEqual(
+            set(),
+            node_hosts(plan_package(package="repo-deps", companion_suites=["test_schema.py"])),
         )
-        self.assertEqual(["ubuntu-latest"], javascript["node_environments"])
+        self.assertEqual(
+            {"ubuntu-latest"},
+            node_hosts(
+                plan_package(
+                    package="test-toolkit",
+                    companion_suites=["test-audit-typecheck", "test-audit-vitest"],
+                )
+            ),
+        )
 
 
 class CompanionRunnerTests(unittest.TestCase):
@@ -4642,24 +4769,30 @@ class CompanionRunnerTests(unittest.TestCase):
 
 
 class L2BackendAxisTests(unittest.TestCase):
-    """`l2_environments` follows every declared backend, not only tmux."""
+    """L2 cells execute where any declared backend is hostable, not only tmux."""
 
     def test_a_non_tmux_backend_gets_an_environment_axis(self) -> None:
         environments = environments_for_tests()
         for environment in environments:
             environment["capabilities"]["wezterm"] = environment["name"] == "macos-latest"
-        record = matrix_record(
+        contracts = resolved_contracts(
             plan_package(package="a", tiers=["L1", "L2"], l2_backends=["wezterm"]),
-            environments=environments,
+            environments,
         )
-        self.assertEqual(record["l2_environments"], ["macos-latest"])
+        self.assertEqual({("macos-latest", "L2")}, {cell for cell in contracts if cell[1] == "L2"})
+        self.assertEqual('["wezterm"]', contracts[("macos-latest", "L2")]["backends"])
 
-    def test_a_backend_with_no_capability_entry_is_hostable_nowhere(self) -> None:
-        record = matrix_record(
-            plan_package(package="a", tiers=["L1", "L2"], l2_backends=["kitty"]),
-            environments=environments_for_tests(),
+    def test_a_backend_no_environment_hosts_executes_nowhere(self) -> None:
+        # `load_environments` refuses a table missing any known capability, so
+        # "no entry" is unrepresentable; "no environment hosts it" is the case.
+        environments = environments_for_tests()
+        for environment in environments:
+            environment["capabilities"]["kitty"] = False
+        contracts = resolved_contracts(
+            plan_package(package="a", tiers=["L1", "L2"], l2_backends=["kitty"]), environments
         )
-        self.assertEqual(record["l2_environments"], [])
+        self.assertEqual(set(), {cell for cell in contracts if cell[1] == "L2"})
+        self.assertTrue(contracts, "the package's other cells still execute")
 
 
 class RealWorkspaceNativeGuardTests(unittest.TestCase):
@@ -4724,12 +4857,13 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
             f"the area fan-out is a matrix too: {len(areas)} areas exceed "
             f"GitHub's {MATRIX_LIMIT}-entry ceiling",
         )
-        for area, slice_ in self.full["area_matrix"].items():
-            self.assertLessEqual(
-                len(slice_["include"]),
-                MATRIX_LIMIT,
-                f"area {area} fans out {len(slice_['include'])} packages",
-            )
+        for area, document in self.full["area_rows"].items():
+            for name in schema.ROW_SET_NAMES:
+                self.assertLessEqual(
+                    len(document[name]),
+                    MATRIX_LIMIT,
+                    f"area {area} dispatches {len(document[name])} {name} rows",
+                )
         # `job_estimate` counts executing cells, not the scheduling scaffolding.
         # The area restructure adds two jobs per area — the caller identity and
         # the area's own rollup — so the ceiling is checked against the total.
@@ -4758,11 +4892,17 @@ class RealWorkspaceAreaFanOutTests(unittest.TestCase):
     def test_a_nested_area_fans_out_beside_its_parent_never_inside_it(self) -> None:
         # Design Decision 2, on the real workspace: `claudine/rendezvous` is a
         # distinct area, so a change to it must not appear under `claudine`.
-        areas = self.full["area_matrix"]
-        self.assertIn("claudine", areas)
-        self.assertIn("claudine/rendezvous", areas)
-        parent = {entry["package"] for entry in areas["claudine"]["include"]}
-        nested = {entry["package"] for entry in areas["claudine/rendezvous"]["include"]}
+        areas = self.full["area_rows"]
+        self.assertIn("claudine", self.full["scheduled_areas"])
+        self.assertIn("claudine/rendezvous", self.full["scheduled_areas"])
+
+        def packages(area: str) -> set[str]:
+            return {
+                row["package"] for name in schema.ROW_SET_NAMES for row in areas[area][name]
+            }
+
+        parent = packages("claudine")
+        nested = packages("claudine/rendezvous")
         self.assertTrue(nested)
         self.assertEqual(set(), parent & nested)
 
@@ -4854,15 +4994,12 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
 
     def scope(self, path: str) -> dict[str, object]:
-        return scope_document(
-            [path],
-            ROOT,
-            self.metadata,
-            self.environments,
-            self.policy,
-        )
+        return legacy_scope_document(self.plan(path))
 
-    def test_messenger_policy_and_matrix_contract_are_promoted(self) -> None:
+    def plan(self, path: str) -> dict:
+        return calculate_scope([path], ROOT, self.metadata, self.environments, self.policy)
+
+    def test_messenger_policy_and_cell_contract_are_promoted(self) -> None:
         messenger = self.policy["messenger"]
         missing: list[str] = []
         if not messenger["gates"]:
@@ -4876,61 +5013,55 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         if messenger["sidecars"] != ["messenger-desktop-stubs"]:
             missing.append("messenger-desktop-stubs build sidecar")
 
-        scope = self.scope("messenger/lib/src/lib.rs")
-        record = next(
-            (
-                entry
-                for entry in scope["matrix"]
-                if entry["package"] == "messenger"
-            ),
-            None,
-        )
-        if record is None:
-            missing.append("ordinary messenger package matrix cell")
+        contracts = producer_contracts(self.plan("messenger/lib/src/lib.rs"), "messenger")
+        if not contracts:
+            missing.append("ordinary messenger package cells")
         else:
-            if record["check_args"] != "-p messenger --all-features":
+            if {contract["check_args"] for contract in contracts.values()} != {
+                "-p messenger --all-features"
+            }:
                 missing.append("all-feature check arguments")
-            if record["test_args"] != "--all-features":
+            if {contract["test_args"] for contract in contracts.values()} != {"--all-features"}:
                 missing.append("all-feature native/WSL2 L1 arguments")
-            if record["native_environments"] != [
+            if {environment for environment, gate in contracts if gate == "L1"} != {
                 "ubuntu-latest",
                 "windows-latest",
                 "macos-latest",
-            ]:
-                missing.append("three native L1 environments")
-            if not record["wsl"]:
-                missing.append("WSL2 archive cell")
+                "wsl2-ubuntu",
+            }:
+                missing.append("three native L1 environments and the WSL2 archive cell")
 
-        # The per-package `with:` block moved down a level when `ci.yml` began
-        # fanning out per AREA; `_area-ci.yml` is where a package's matrix
-        # entry now becomes reusable-workflow inputs.
         area_ci = (ROOT / ".github/workflows/_area-ci.yml").read_text()
         package_ci = (ROOT / ".github/workflows/_package-ci.yml").read_text()
         wsl_ci = (ROOT / ".github/workflows/_wsl-ci.yml").read_text()
+        # Every declared argument now reaches its job through the plan, by the
+        # cell key the dispatch row names — so what this pins is that each
+        # value is still APPLIED where it was, not which input carries it.
         forwarding_contract = [
-            "check-args: ${{ matrix.check_args }}" in area_ci,
-            "test-args: ${{ matrix.test_args }}" in area_ci,
-            "cargo check ${{ inputs.check-args }}" in package_ci,
+            "cargo check ${{ steps.cell.outputs.check_args }}" in package_ci,
             # The declared features still reach the canonical recipe; archive
             # mode only adds the verified archive and this checkout ahead of
             # them, and `_archive_drop_build_flags` drops what nextest refuses.
-            'just _test "${{ inputs.package }}" --no-fail-fast' in package_ci,
-            '${archive_args[@]+"${archive_args[@]}"} ${{ inputs.test-args }}'
+            'just "$RECIPE" "${{ matrix.package }}"' in package_ci,
+            '${archive_args[@]+"${archive_args[@]}"} ${{ steps.cell.outputs.test_args }}'
             in package_ci,
-            # The guest is a pure consumer: it is handed the plan's build
-            # records and downloads one, so no archive selector exists for a
-            # check argument to leak into.
-            "builds: ${{ inputs.builds }}" in package_ci,
-            "test-args: ${{ inputs.test-args }}" in package_ci,
-            "${{ inputs.builds }}" in wsl_ci,
-            "${{ inputs.check-args }}" not in wsl_ci,
-            "${{ inputs.test-args }}" in wsl_ci,
-            # Per-gate selection: the matrix's `gates` reaches every job that
-            # can be skipped by it.
-            "gates: ${{ toJSON(matrix.gates) }}" in area_ci,
-            package_ci.count("contains(fromJSON(inputs.gates), 'test')") == 4,
-            "contains(fromJSON(inputs.gates), 'lint')" in package_ci,
-            "contains(fromJSON(inputs.gates), 'check')" in package_ci,
+            # The guest is a pure consumer: it resolves the plan's build record
+            # for its own cell, so no archive selector exists for a check
+            # argument to leak into.
+            "row: ${{ toJSON(matrix) }}" in package_ci,
+            "${{ steps.cell.outputs.build_artifact }}" in wsl_ci,
+            "check_args" not in wsl_ci,
+            "${{ steps.cell.outputs.test_args }}" in wsl_ci,
+            # Per-gate selection: a gate a package was not selected for gets no
+            # row, so no job expands for it and nothing has to be skipped.
+            all(
+                f"include: ${{{{ fromJSON(inputs.{name}-rows) }}}}" in package_ci
+                for name in ("test", "check", "lint", "wsl")
+            ),
+            all(
+                f"if: ${{{{ inputs.{name}-rows != '[]' }}}}" in package_ci
+                for name in ("test", "check", "lint", "wsl")
+            ),
         ]
         if not all(forwarding_contract):
             missing.append("check/native-L1/WSL2 feature-argument forwarding")
@@ -4942,30 +5073,27 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
 
     def test_messenger_cli_change_selects_its_normal_package_cell(self) -> None:
-        scope = self.scope("messenger/cli/src/lib.rs")
-        self.assertEqual(["messenger-cli"], scope["packages"])
-        self.assertEqual(
-            ["messenger-cli"],
-            [entry["package"] for entry in scope["matrix"]],
-        )
+        plan = self.plan("messenger/cli/src/lib.rs")
+        self.assertEqual(["messenger-cli"], legacy_scope_document(plan)["packages"])
+        self.assertEqual(["messenger-cli"], sorted(gates_by_package(plan)))
 
     def test_workspace_excluded_zed_extension_selects_dmls_companion(self) -> None:
-        scope = self.scope("darkmatter/dmls/zed-dmls/src/lib.rs")
-        self.assertEqual(["dmls"], scope["packages"])
-        self.assertEqual(["dmls"], [entry["package"] for entry in scope["matrix"]])
-        self.assertEqual(
-            ["neovim", "zed-extension"],
-            scope["matrix"][0]["runner_tools"],
-        )
+        plan = self.plan("darkmatter/dmls/zed-dmls/src/lib.rs")
+        self.assertEqual(["dmls"], legacy_scope_document(plan)["packages"])
+        self.assertEqual(["dmls"], sorted(gates_by_package(plan)))
+        contracts = producer_contracts(plan, "dmls")
+        self.assertTrue(contracts)
+        for cell, contract in contracts.items():
+            self.assertEqual(["neovim", "zed-extension"], json.loads(contract["runner_tools"]), cell)
 
         package_ci = (ROOT / ".github/workflows/_package-ci.yml").read_text()
         self.assertIn(
-            "contains(fromJSON(inputs.runner-tools), 'zed-extension')",
+            "contains(fromJSON(steps.cell.outputs.runner_tools), 'zed-extension')",
             package_ci,
         )
         self.assertIn("just zed-verify", package_ci)
 
-        lint_job = package_ci.split("  lint:", 1)[1].split("  # L2", 1)[0]
+        lint_job = package_ci.split("\n  lint:", 1)[1].split("\n  # WSL2 is", 1)[0]
         self.assertIn("Read the pinned Zed extension packager record", lint_job)
         self.assertIn("rustup target add wasm32-wasip2", lint_job)
         self.assertIn("sha256sum --check --strict", lint_job)
@@ -5066,17 +5194,21 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("github-token:", current)
         # Build statuses ride in the same union: a cell blocked by a named
         # build record is only explicable if that record's account arrives too.
-        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", current)
+        # Completion records ride in it too: an executing cell with a green
+        # status and no record is unproven, so an audit that never downloaded
+        # the records would refuse every executing cell.
+        pattern = "pattern: '{junit-*,status-*,build-status-*,completion-*}'"
+        self.assertIn(pattern, current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn("pattern: '{junit-*,status-*,build-status-*}'", newest)
+        self.assertIn(pattern, newest)
 
 
 # --- helpers ---------------------------------------------------------------
 
 
 def plan_package(**overrides: object) -> dict[str, object]:
-    """A plan package record, the shape `matrix_record` projects from."""
+    """A plan package record, the shape `cell_contract` resolves a cell against."""
     record: dict[str, object] = {
         "package": "a",
         "area": "a",
@@ -5386,12 +5518,6 @@ class DirectExecutionOracleTests(ApplyFixture):
             "and a carried scope receipt has no checkout to read"
         )
 
-    @pending(
-        "row-adapter",
-        "affected_scope defines no row adapter, so a carried-receipt plan "
-        "cannot be shown to schedule without a checkout",
-        oracle=ROW_ADAPTER_ORACLE,
-    )
     def test_the_row_adapter_reads_nothing_but_the_plan(self) -> None:
         import pathlib
 
@@ -5411,54 +5537,17 @@ class DirectExecutionOracleTests(ApplyFixture):
             rows = row_sets_of(applied)
         self.assertTrue(rows, "the adapter answered with an empty document")
 
-    @pending(
-        "row-adapter",
-        "affected_scope defines no row adapter, so its agreement with the "
-        "legacy projection cannot be shown",
-        oracle=ROW_ADAPTER_ORACLE,
-    )
     def test_selection_outputs_are_unchanged_when_rows_land(self) -> None:
         plan = self.plan()
         rows = row_sets_of(plan)
-        document = legacy_scope_document(plan)
-        record = next(
-            entry
-            for entry in document["matrix"]
-            if entry["package"] == "alpha-core"
-        )
         executing = {
             (cell["environment"], cell["gate"])
             for cell in plan["cells"]
             if cell["package"] == "alpha-core" and cell["execution"] == "execute"
         }
-        # The projection and the rows describe ONE plan: every environment
-        # list the workflow receives today is the same executing-cell set the
-        # rows dispatch, so the adapter is a second rendering rather than a
-        # second selection.
-        self.assertEqual(
-            sorted(
-                environment
-                for environment, gate in executing
-                if gate == "L1" and environment != "wsl2-ubuntu"
-            ),
-            record["native_environments"],
-        )
-        self.assertEqual(
-            sorted(
-                environment
-                for environment, gate in executing
-                if gate == "check"
-            ),
-            record["check_os"],
-        )
-        self.assertEqual(
-            sorted(
-                environment
-                for environment, gate in executing
-                if gate == "L2"
-            ),
-            record["l2_environments"],
-        )
+        # The rows are a second rendering of the plan's executing cells, never
+        # a second selection. (Until Phase 8 this also compared them against
+        # the per-package environment lists; those are retired.)
         dispatched = {
             (row["package"], row["environment"], row["gate"])
             for area in rows.values()
@@ -5482,12 +5571,6 @@ class DirectExecutionOracleTests(ApplyFixture):
         ).get("dependent_seam")
         self.assertIsNone(seam, "this workspace has no seam; the fixture below has")
 
-    @pending(
-        "row-adapter",
-        "affected_scope defines no row adapter, so the real-workspace PR "
-        "shape cannot be compared against the Phase 1 corpus",
-        oracle=ROW_ADAPTER_ORACLE,
-    )
     def test_the_real_pr_shape_selects_what_the_phase_1_corpus_recorded(self) -> None:
         if not (CORPUS_PLANS / "pr.json").is_file():
             self.skipTest("the Phase 1 plan corpus is not present")
@@ -5507,6 +5590,11 @@ class DirectExecutionOracleTests(ApplyFixture):
             metadata,
             environments,
             policy,
+            # The corpus's `pr.json` was resolved for a pull request
+            # (`spikes/plans/README.md`), which schedules Linux and macOS
+            # alone; planning it for no event would compare a four-cell
+            # document against a six-cell one.
+            event="pull_request",
         )
         rows = row_sets_of(plan)
         self.assertTrue(rows)
@@ -5537,12 +5625,6 @@ class DirectExecutionOracleTests(ApplyFixture):
             sorted(entry["name"] for entry in plan["deferred_environments"]),
         )
 
-    @pending(
-        "capacity-guard",
-        "no output budget guard exists: an over-limit row set cannot fail "
-        "planning because nothing computes one",
-        oracle="no output budget guard",
-    )
     def test_an_over_limit_row_set_fails_planning_with_a_named_error(self) -> None:
         guard = getattr(affected_scope, "enforce_output_budgets", None)
         if guard is None:
@@ -5578,12 +5660,6 @@ class DirectExecutionOracleTests(ApplyFixture):
         # caller's copy still carries every row it tried to schedule.
         self.assertEqual(MATRIX_LIMIT + 1, len(rows["huge"]["test"]))
 
-    @pending(
-        "capacity-guard",
-        "no output budget guard exists: a serialized payload cannot exceed a "
-        "budget nobody declared",
-        oracle="no output budget guard",
-    )
     def test_an_oversized_area_payload_fails_planning_with_a_named_error(self) -> None:
         guard = getattr(affected_scope, "enforce_output_budgets", None)
         budget = getattr(affected_scope, "AREA_ROW_SET_BUDGET", None)
@@ -5616,6 +5692,621 @@ class DirectExecutionOracleTests(ApplyFixture):
         with self.assertRaises(RuntimeError) as raised:
             guard(rows)
         self.assertIn("budget", str(raised.exception).lower())
+
+
+class CapacityGuardTests(unittest.TestCase):
+    """Phase 7's capacity validation (ruling R7), against the shipped planner.
+
+    The measured numbers live in `spikes/s3-capacity.md`; these pin the two
+    halves that must stay true as the workspace grows. The real full-workspace
+    and nightly plans fit every ceiling, and a plan that does not fit is
+    refused before anything is emitted, with nothing truncated.
+    """
+
+    PLANNER = ROOT / "scripts" / "ci" / "affected_scope.py"
+
+    @staticmethod
+    def rows_for(areas: int, bytes_per_area: int) -> dict[str, dict[str, object]]:
+        # Each area stays under the per-area budget and the matrix ceiling;
+        # only the sum is over.
+        name = "p" * bytes_per_area
+        return {
+            f"area-{index:03}": {
+                "test": [
+                    {
+                        "package": name,
+                        "gate": "L1",
+                        "environment": "ubuntu-latest",
+                        "runner": "ubuntu-latest",
+                    }
+                ],
+                "check": [],
+                "lint": [],
+                "wsl": [],
+            }
+            for index in range(areas)
+        }
+
+    def test_the_combined_scope_output_budget_refuses_many_small_areas(self) -> None:
+        per_area = affected_scope.AREA_ROW_SET_BUDGET - 1024
+        # The smallest area count whose rows no longer fit together, so the
+        # count one below it is the boundary that must still pass.
+        areas = 1
+        while len(schema.canonical(self.rows_for(areas, per_area))) <= (
+            affected_scope.TOTAL_ROW_SET_BUDGET
+        ):
+            areas += 1
+        fitting = self.rows_for(areas - 1, per_area)
+        self.assertIsNone(affected_scope.enforce_output_budgets(fitting))
+
+        rows = self.rows_for(areas, per_area)
+        for document in rows.values():
+            self.assertLess(
+                len(schema.canonical(document)), affected_scope.AREA_ROW_SET_BUDGET
+            )
+        with self.assertRaises(RuntimeError) as raised:
+            affected_scope.enforce_output_budgets(rows)
+        message = str(raised.exception)
+        self.assertIn(f"{affected_scope.TOTAL_ROW_SET_BUDGET}-byte", message)
+        self.assertIn(f"{areas} areas", message)
+        self.assertIn("refused whole rather than truncated", message)
+        self.assertEqual(areas, len(rows), "the guard must not drop an area")
+
+    def run_planner(self, budget: int, out: Path) -> subprocess.CompletedProcess[str]:
+        # The normal invocation path — `main()` over the real workspace, as
+        # `ci.yml`'s scope step runs it — with only the per-area budget
+        # lowered, so the real homelab area is the synthetic over-budget one.
+        program = (
+            "import sys, affected_scope\n"
+            f"affected_scope.AREA_ROW_SET_BUDGET = {budget}\n"
+            f"sys.argv = ['affected_scope.py', '--all', '--plan-out', {str(out)!r}]\n"
+            "affected_scope.main()\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=self.PLANNER.parent,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def test_an_over_budget_area_fails_before_dispatch_and_emits_nothing(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "plan.json"
+            refused = self.run_planner(256, out)
+            self.assertNotEqual(0, refused.returncode, refused.stdout[:400])
+            self.assertIn("256-byte per-area output budget", refused.stderr)
+            self.assertIn("refused whole rather than truncated", refused.stderr)
+            self.assertIn("area '", refused.stderr, "the refusal names the area")
+            # Pre-dispatch: no scope document for `ci.yml` to write to its
+            # outputs, and no resolved plan for the audit to read.
+            self.assertEqual("", refused.stdout)
+            self.assertFalse(out.exists())
+
+            # The same invocation under the shipped budget emits both.
+            accepted = self.run_planner(affected_scope.AREA_ROW_SET_BUDGET, out)
+            self.assertEqual(0, accepted.returncode, accepted.stderr[-800:])
+            self.assertTrue(out.exists())
+            self.assertIn("area_rows", json.loads(accepted.stdout))
+
+    def test_the_real_full_workspace_and_nightly_plans_fit_every_ceiling(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        metadata = load_metadata(ROOT)
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=date.today())
+        policy = package_ci_policy(
+            workspace_packages(metadata),
+            runner_labels={environment["runner"] for environment in environments},
+            root=ROOT,
+            today=date.today(),
+        )
+        for event in (None, "push", "schedule"):
+            with self.subTest(event=event):
+                plan = calculate_scope(
+                    [], ROOT, metadata, environments, policy, True, event=event
+                )
+                scope = legacy_scope_document(plan)
+                row_matrices = {
+                    f"{area} {name} rows": len(document[name])
+                    for area, document in scope["area_rows"].items()
+                    for name in schema.ROW_SET_NAMES
+                }
+                self.assertTrue(
+                    any(row_matrices.values()), "a full-workspace plan dispatches no row"
+                )
+                matrices = {
+                    "ci.yml area-ci": len(scope["scheduled_areas"]),
+                    "ci.yml build": len(scope["build_owners"]),
+                    "ci.yml preflight": len(scope["preflight_os"]),
+                    **row_matrices,
+                }
+                for matrix, count in matrices.items():
+                    self.assertLessEqual(count, MATRIX_LIMIT, matrix)
+                self.assertIsNone(affected_scope.enforce_output_budgets(scope["area_rows"]))
+
+
+
+
+class SkipPolicySnapshotTests(unittest.TestCase):
+    """What the planner snapshots from the hand-edited baseline (ruling R8).
+
+    `.github/ci/ci-baseline.toml` stays the source of truth; the plan carries
+    what the planner read, so a producer and the area audit apply the policy
+    the run was PLANNED with. These pin the reading, not the applying — the
+    validator's half is `test_completion.py`'s.
+    """
+
+    ENTRY = """
+schema_version = 3
+
+[[skip]]
+package = "alpha-core"
+environment = "ubuntu-latest"
+tier = "L2"
+backend = "tmux"
+tests = ["alpha-core::level2_renders"]
+owner = "@ken"
+reason = "no tmux socket on a headless runner"
+source_run = "30791562395"
+expiry = "2027-10-31"
+"""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        (self.root / ".github" / "ci").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def write(self, text: str) -> None:
+        (self.root / affected_scope.BASELINE_POLICY_PATH).write_text(
+            text, encoding="utf-8"
+        )
+
+    def test_an_absent_file_and_an_empty_one_snapshot_identically(self) -> None:
+        # Both approve nothing, and both hash the empty byte string: a missing
+        # policy file is not a different policy from an empty one.
+        absent = affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.write("")
+        empty = affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertEqual(absent, empty)
+        self.assertEqual([], absent["entries"])
+        self.assertEqual(affected_scope.BASELINE_POLICY_PATH, absent["source"])
+        self.assertRegex(absent["content_hash"], r"^[0-9a-f]{16}$")
+
+    def test_an_entry_is_carried_with_its_governance_and_the_plans_vocabulary(self) -> None:
+        self.write(self.ENTRY)
+        policy = affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertEqual(
+            [
+                {
+                    "package": "alpha-core",
+                    "environment": "ubuntu-latest",
+                    # The file says `tier`; the plan says `gate`. One word in
+                    # the document a reader consults.
+                    "gate": "L2",
+                    "owner": "@ken",
+                    "reason": "no tmux socket on a headless runner",
+                    "source_run": "30791562395",
+                    "tests": ["alpha-core::level2_renders"],
+                    "backend": "tmux",
+                    "expiry": "2027-10-31",
+                }
+            ],
+            policy["entries"],
+        )
+
+    def test_the_content_hash_tracks_the_file_and_is_stable(self) -> None:
+        self.write(self.ENTRY)
+        first = affected_scope.load_skip_policy(self.root, today=TODAY)
+        again = affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertEqual(first["content_hash"], again["content_hash"])
+        # A comment-only edit still changes the hash: provenance names the
+        # bytes that were read, not a normalization of them.
+        self.write(self.ENTRY + "\n# a later owner explains themselves\n")
+        edited = affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertNotEqual(first["content_hash"], edited["content_hash"])
+
+    def test_an_expired_approval_fails_planning_rather_than_a_producer(self) -> None:
+        self.write(self.ENTRY.replace("2027-10-31", "2026-01-31"))
+        with self.assertRaises(RuntimeError) as raised:
+            affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertIn("expiry", str(raised.exception))
+
+    def test_a_malformed_or_ungoverned_entry_is_refused_by_name(self) -> None:
+        cases = {
+            "owner": self.ENTRY.replace('owner = "@ken"', 'owner = ""'),
+            "source_run": self.ENTRY.replace('source_run = "30791562395"', ""),
+            "environment": self.ENTRY.replace(
+                'environment = "ubuntu-latest"', 'environment = "ubuntu-24.04"'
+            ),
+            "tier": self.ENTRY.replace('tier = "L2"', 'tier = "L4"'),
+            "schema_version": self.ENTRY.replace(
+                "schema_version = 3", "schema_version = 2"
+            ),
+        }
+        for field, text in cases.items():
+            with self.subTest(field=field):
+                self.write(text)
+                with self.assertRaises(RuntimeError) as raised:
+                    affected_scope.load_skip_policy(self.root, today=TODAY)
+                self.assertIn(field, str(raised.exception))
+
+    def test_unparseable_toml_is_refused_rather_than_read_as_empty(self) -> None:
+        # An empty policy and an unreadable one are opposite facts: reading the
+        # second as the first would silently drop every approval in the file.
+        self.write("schema_version = 3\n[[skip]\n")
+        with self.assertRaises(RuntimeError) as raised:
+            affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertIn("cannot be parsed", str(raised.exception))
+
+    def test_the_snapshot_is_narrowed_to_the_cells_the_plan_carries(self) -> None:
+        self.write(self.ENTRY)
+        policy = affected_scope.load_skip_policy(self.root, today=TODAY)
+        carried = affected_scope.applicable_skip_entries(
+            policy,
+            [{"package": "alpha-core", "environment": "ubuntu-latest", "gate": "L2"}],
+        )
+        self.assertEqual(1, len(carried["entries"]))
+        # A plan that selects another package binds nothing, and says so by
+        # carrying no entry rather than by failing to resolve.
+        elsewhere = affected_scope.applicable_skip_entries(
+            policy,
+            [{"package": "web-server", "environment": "ubuntu-latest", "gate": "L1"}],
+        )
+        self.assertEqual([], elsewhere["entries"])
+        # Provenance survives the narrowing: the plan still names the whole
+        # file it read and what that file hashed to.
+        for document in (carried, elsewhere):
+            self.assertEqual(policy["source"], document["source"])
+            self.assertEqual(policy["content_hash"], document["content_hash"])
+
+    def test_an_interpreter_without_tomllib_still_imports_and_says_why(self) -> None:
+        # `companion_suites.py` imports this module and runs on all three native
+        # environments, where `python3` can be a 3.9 interpreter; the planner
+        # runs only where a 3.11+ one does. So importing must never need
+        # `tomllib`, an empty budget must still snapshot, and a policy this
+        # interpreter cannot read must fail by name rather than read as empty.
+        with unittest.mock.patch.object(affected_scope, "tomllib", None):
+            self.assertEqual(
+                [], affected_scope.load_skip_policy(self.root, today=TODAY)["entries"]
+            )
+            self.write(self.ENTRY)
+            with self.assertRaises(RuntimeError) as raised:
+                affected_scope.load_skip_policy(self.root, today=TODAY)
+        self.assertIn("tomllib", str(raised.exception))
+        self.assertIn("3.11", str(raised.exception))
+
+    def test_the_shipped_baseline_snapshots_into_a_valid_plan_field(self) -> None:
+        # The passive corpus check: the real shipped artifact, read by the real
+        # loader, must be something `validate_resolved_plan` accepts. It is
+        # empty today, and an empty budget is a fact rather than an absence.
+        policy = affected_scope.load_skip_policy(ROOT)
+        self.assertEqual(affected_scope.BASELINE_POLICY_PATH, policy["source"])
+        self.assertEqual(
+            [],
+            schema._skip_policy(policy, set(), TODAY),
+            "the shipped baseline's snapshot must satisfy the plan contract",
+        )
+
+
+class ExecutionPathTests(unittest.TestCase):
+    """Exactly one dispatch path per area (ruling R9, amended in Phase 7).
+
+    The per-area allowlist was retired before it shipped: the workflows carry
+    only the row interface, so every area the planner selects must say so, and
+    nothing on disk can move an area onto a path no workflow implements.
+    """
+
+    def real_plan(self, files: list[str], **options: object) -> dict:
+        metadata = load_metadata(ROOT)
+        environments = load_environments(ENVIRONMENTS_CONFIG, today=date.today())
+        policy = package_ci_policy(
+            workspace_packages(metadata),
+            runner_labels={environment["runner"] for environment in environments},
+            root=ROOT,
+            today=date.today(),
+        )
+        return calculate_scope(files, ROOT, metadata, environments, policy, **options)
+
+    def test_every_area_record_states_the_row_path(self) -> None:
+        records = affected_scope.area_records(
+            [
+                {"package": "alpha-core", "area": "alpha"},
+                {"package": "web-server", "area": "web"},
+            ],
+            False,
+            set(),
+        )
+        self.assertEqual(
+            {"alpha": "rows", "web": "rows"},
+            {entry["area"]: entry["execution_path"] for entry in records},
+        )
+
+    def test_the_retired_allowlist_file_is_not_consulted(self) -> None:
+        # A stray `.github/ci/direct-execution.json` from the retired design
+        # must not move an area: the planner no longer reads it, so an area
+        # it omits stays on rows exactly like one it names.
+        self.assertFalse((ROOT / ".github" / "ci" / "direct-execution.json").exists())
+        self.assertFalse(hasattr(affected_scope, "load_direct_execution"))
+        self.assertFalse(hasattr(affected_scope, "DEFAULT_EXECUTION_PATH"))
+
+    def test_no_area_emits_both_row_sets_and_environment_lists(self) -> None:
+        # End to end through the real workspace and the normal invocation
+        # path: a one-file change and the full workspace. Each selected area
+        # states the row path, owns exactly one row document, and its only
+        # dispatch surface is that document — the scope projection carries no
+        # environment list for a workflow to read beside it.
+        cases = {
+            "one area": (["biscuit-hash/lib/src/lib.rs"], {}),
+            "full workspace": ([], {"force_all": True}),
+        }
+        for label, (files, options) in cases.items():
+            with self.subTest(label):
+                plan = self.real_plan(files, **options)
+                areas = [entry["area"] for entry in plan["areas"]]
+                self.assertTrue(areas, "the fixture change selects no area")
+                self.assertEqual(
+                    {area: "rows" for area in areas},
+                    {entry["area"]: entry["execution_path"] for entry in plan["areas"]},
+                )
+                self.assertEqual(sorted(areas), sorted(plan["rows"]))
+                for area in areas:
+                    self.assertEqual(
+                        set(schema.ROW_SET_NAMES)
+                        | {f"has_{name}_rows" for name in schema.ROW_SET_NAMES},
+                        set(plan["rows"][area]),
+                        f"{area}: a row document carries only row sets",
+                    )
+                self.assertEqual([], schema.validate_resolved_plan(plan))
+                scope = legacy_scope_document(plan)
+                self.assertEqual(plan["rows"], scope["area_rows"])
+
+
+class RowEmissionTests(ApplyFixture):
+    """What the emitted rows are, beyond the partition the oracles pin."""
+
+    def test_rows_are_emitted_into_the_plan_and_projected_into_the_scope(self) -> None:
+        plan = self.plan()
+        self.assertEqual(affected_scope.row_sets(plan), plan["rows"])
+        self.assertEqual(plan["rows"], legacy_scope_document(plan)["area_rows"])
+        self.assertEqual([], schema.validate_resolved_plan(plan, today=TODAY))
+
+    def test_a_persisted_plan_round_trips_to_the_same_rows(self) -> None:
+        # The plan is persisted to a scope receipt and read back by CI, so the
+        # rows must survive the canonical form rather than only the in-memory
+        # document. Canonicalization sorts keys, which is why validation checks
+        # the key set and the adapter owns the order.
+        plan = self.plan()
+        first = schema.canonical(plan)
+        parsed = json.loads(first)
+        self.assertEqual([], schema.validate_resolved_plan(parsed, today=TODAY))
+        self.assertEqual(plan["rows"], parsed["rows"])
+        self.assertEqual(affected_scope.row_sets(parsed), parsed["rows"])
+        self.assertEqual(first, schema.canonical(parsed))
+        for area in affected_scope.row_sets(plan).values():
+            for name in schema.ROW_SET_NAMES:
+                for row in area[name]:
+                    self.assertEqual(list(schema.ROW_FIELDS), list(row))
+
+    def test_applying_evidence_withdraws_the_rows_it_satisfied(self) -> None:
+        plan = self.plan()
+        before = affected_scope.row_sets(plan)["alpha"]["test"]
+        satisfied = ("alpha-core", "macos-latest", "L1")
+        self.assertIn(
+            satisfied,
+            [(row["package"], row["environment"], row["gate"]) for row in before],
+        )
+        applied = apply_accepted_cells(plan, self.accepted, [])
+        after = [
+            (row["package"], row["environment"], row["gate"])
+            for row in applied["rows"]["alpha"]["test"]
+        ]
+        self.assertNotIn(satisfied, after, "a reused cell still dispatched a row")
+        self.assertEqual(applied["rows"], affected_scope.row_sets(applied))
+        self.assertEqual([], schema.validate_resolved_plan(applied, today=TODAY))
+
+    def test_a_within_budget_plan_passes_the_guard_unchanged(self) -> None:
+        # The refusals are pinned by the oracles; this is the other half, so a
+        # guard that refused everything could not pass this suite.
+        rows = affected_scope.row_sets(self.plan())
+        self.assertIsNone(affected_scope.enforce_output_budgets(rows))
+        for document in rows.values():
+            self.assertLess(
+                len(schema.canonical(document)), affected_scope.AREA_ROW_SET_BUDGET
+            )
+
+    def test_the_execution_inputs_belong_to_the_cells_that_run(self) -> None:
+        plan = self.plan()
+        for cell in plan["cells"]:
+            runs_nextest = (
+                cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES
+            )
+            self.assertEqual(
+                runs_nextest,
+                "profile" in cell,
+                f"{cell['package']}/{cell['environment']}/{cell['gate']}",
+            )
+            if runs_nextest:
+                self.assertEqual(schema.CI_PROFILE, cell["profile"])
+            else:
+                self.assertNotIn("requires_node", cell)
+
+    def test_node_provisioning_is_resolved_per_cell_from_the_package_and_the_host(self) -> None:
+        # `web-server` declares a Node companion suite; only an executing cell
+        # on an environment that can host Node provisions it.
+        plan = self.plan()
+        provisioning = {
+            (cell["environment"], cell["gate"])
+            for cell in plan["cells"]
+            if cell["package"] == "web-server" and cell.get("requires_node")
+        }
+        node_hosts = {
+            environment["name"]
+            for environment in plan["environments"]
+            if capability(environment, "node_pnpm")
+        }
+        self.assertTrue(provisioning, "the fixture declares no Node suite")
+        self.assertEqual(
+            {
+                (cell["environment"], "L1")
+                for cell in plan["cells"]
+                if cell["package"] == "web-server"
+                and cell["gate"] == "L1"
+                and cell["execution"] == "execute"
+                and cell["environment"] in node_hosts
+            },
+            provisioning,
+        )
+        self.assertEqual(
+            {
+                environment
+                for (environment, _), contract in producer_contracts(plan, "web-server").items()
+                if contract["requires_node"] == "true"
+            },
+            {environment for environment, _ in provisioning},
+        )
+        # A package with no Node suite never provisions one.
+        self.assertEqual(
+            [],
+            [
+                cell
+                for cell in plan["cells"]
+                if cell["package"] == "alpha-core" and cell.get("requires_node")
+            ],
+        )
+
+
+class SelectionEntryPairingTests(unittest.TestCase):
+    """Rulings R11 and R12: a path or recipe that DECIDES what CI runs.
+
+    Both rulings are one rule seen twice. A file that schedules work must force
+    workspace scope, or an edit to it selects the wrong packages; and — when it
+    is a workflow, which decides what runs and never what a local gate
+    PRODUCES — it must also stay out of every cell's gate-input identity, or
+    the same edit invalidates every published local cell. Spelling one without
+    the other is the failure mode; the pairing is asserted here so it cannot be
+    half-landed.
+    """
+
+    def devops_text(self) -> str:
+        return (ROOT / "just" / "devops.just").read_text(encoding="utf-8")
+
+    def recipes(self) -> dict:
+        parsed, _ = parse_just_recipes(self.devops_text())
+        return parsed
+
+    def test_the_expected_manifest_recipe_is_a_test_gate_entry(self) -> None:
+        self.assertIn(
+            "_expected_manifest",
+            affected_scope.CI_RECIPES_BY_GATE["test"],
+            "every test producer calls `_expected_manifest` and completion.py "
+            "refuses the cell when its answer disagrees with the reports, so "
+            "it decides what the test gate PROVES (ruling R12)",
+        )
+        for gate in ("lint", "check"):
+            self.assertNotIn(
+                "_expected_manifest",
+                affected_scope.CI_RECIPES_BY_GATE[gate],
+                f"a {gate} gate lists no tests",
+            )
+
+    def test_an_edit_to_the_expected_manifest_recipe_selects_the_test_gate(self) -> None:
+        # The real shipped recipe, read from the tree, with one command line
+        # changed on the BASE side: `just_change_gates` compares recipe bodies,
+        # so this is exactly the diff an ordinary edit produces.
+        current = self.devops_text()
+        self.assertIn("_expected_manifest tier specs", current)
+        before = current.replace(
+            'echo "_expected_manifest: jq is required." >&2',
+            'echo "_expected_manifest: jq must be installed." >&2',
+        )
+        self.assertNotEqual(current, before, "the fixture edited nothing")
+        gates = affected_scope.just_change_gates(
+            "just/devops.just",
+            "base",
+            ROOT,
+            reader=lambda ref, path: before,
+        )
+        self.assertEqual(
+            {"test"},
+            gates,
+            "an edit to the expected-set logic selects the test gate and "
+            "nothing else",
+        )
+
+    def test_the_expected_manifest_recipe_is_inside_the_test_gates_closure(self) -> None:
+        # `local_evidence.just_gate_inputs` builds a gate's identity from this
+        # closure, so membership here is what moves the test cells' gate-input
+        # identity when the recipe changes.
+        recipes = self.recipes()
+        test_closure = just_recipe_closure(
+            recipes,
+            (
+                *affected_scope.CI_RECIPES_ALL_GATES,
+                *affected_scope.CI_RECIPES_BY_GATE["test"],
+            ),
+        )
+        lint_closure = just_recipe_closure(
+            recipes,
+            (
+                *affected_scope.CI_RECIPES_ALL_GATES,
+                *affected_scope.CI_RECIPES_BY_GATE["lint"],
+            ),
+        )
+        self.assertIn("_expected_manifest", test_closure)
+        self.assertNotIn("_expected_manifest", lint_closure)
+
+    def test_an_edit_to_the_recipe_changes_the_test_gates_input_text(self) -> None:
+        # The identity is over the recipe's LINES, in order. Changing one of
+        # them must change what `just_gate_inputs` would hash; comparing the
+        # line lists is that check without needing a second Git revision.
+        recipes = self.recipes()
+        before = list(recipes["_expected_manifest"]["lines"])
+        edited, _ = parse_just_recipes(
+            self.devops_text().replace(
+                'echo "_expected_manifest: jq is required." >&2',
+                'echo "_expected_manifest: jq must be installed." >&2',
+            )
+        )
+        self.assertNotEqual(before, edited["_expected_manifest"]["lines"])
+
+    def test_the_area_workflow_forces_workspace_scope_and_leaves_identity_alone(
+        self,
+    ) -> None:
+        path = ".github/workflows/_area-ci.yml"
+        self.assertTrue((ROOT / path).is_file(), f"{path} is shipped")
+        self.assertIn(
+            path,
+            affected_scope.GLOBAL_PATHS_ALL_GATES,
+            "the area workflow carries the row sets, so it decides what runs "
+            "and an edit to it must select the whole workspace (ruling R11)",
+        )
+        self.assertIn(
+            path,
+            affected_scope.ORCHESTRATION_PATHS,
+            "and it must stay out of every cell's gate-input identity, or the "
+            "same edit invalidates every published local cell",
+        )
+
+    def test_every_scheduling_path_is_paired_in_both_tables(self) -> None:
+        # The pairing rule itself, over the whole table rather than one entry:
+        # a workflow that forces workspace scope decides what RUNS, never what
+        # a local gate PRODUCES.
+        scheduling = {
+            path
+            for path in affected_scope.GLOBAL_PATHS_ALL_GATES
+            if path.startswith(".github/workflows/")
+        }
+        self.assertTrue(scheduling, "the table names at least one workflow")
+        self.assertEqual(
+            set(),
+            scheduling - set(affected_scope.ORCHESTRATION_PATHS),
+            "a workflow that forces workspace scope must also be excluded from "
+            "gate-input identity; spelling one table without the other costs "
+            "either a needless full-workspace pre-push or every published cell",
+        )
 
 
 if __name__ == "__main__":

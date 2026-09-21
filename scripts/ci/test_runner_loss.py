@@ -22,7 +22,7 @@ from runner_loss import (
     synthesize_build_status,
     synthesize_status,
 )
-from pending_contracts import pending
+import cell_contract
 from workflow_reading import job_blocks
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
@@ -428,24 +428,46 @@ def resolve(text: str, package: str, environment: str) -> str:
     )
 
 
-def job_label(job_id: str, block: str, package: str, environment: str) -> str:
-    """The label GitHub gives a job: its `name:`, else the id plus its matrix."""
+def declared_name(block: str) -> str | None:
+    """A job's own `name:`, when it declares one."""
     declared = re.search(r"^    name: (.+)$", block, re.M)
-    if declared:
-        return resolve(declared.group(1).strip(), package, environment)
-    matrix = re.search(
-        r"^      matrix:\n(?:[ \t]*#.*\n)*[ \t]+([A-Za-z0-9_-]+):", block, re.M
+    return declared.group(1).strip() if declared else None
+
+
+def row_set_input(block: str) -> str | None:
+    """The row-set input a job's `include:` matrix expands, if it has one."""
+    matched = re.search(
+        r"^        include: \$\{\{ fromJSON\(inputs\.([a-z-]+)\) \}\}$", block, re.M
     )
-    if matrix is None:
+    return matched.group(1) if matched else None
+
+
+def job_label(job_id: str, block: str, row: dict[str, str]) -> str:
+    """The label GitHub gives a job, derived from what the file declares.
+
+    A declared `name:` wins. Otherwise the id, plus — for a matrix job — every
+    value of the expanded row, in the order the planner emitted them. That
+    ordering is the contract: GitHub renders a matrix job's label from the
+    row's values, which is why `runner` is in the row at all (ruling R1).
+    """
+    declared = declared_name(block)
+    if declared:
+        return resolve(declared, row["package"], row["environment"])
+    if row_set_input(block) is None:
         return job_id
-    return f"{job_id} ({environment})"
+    values = ", ".join(row[field] for field in ("package", "gate", "environment", "runner"))
+    return f"{job_id} ({values})"
 
 
-def status_artifact(block: str, package: str, environment: str) -> str | None:
-    declared = re.search(r"^          name: (status-.+)$", block, re.M)
-    if declared is None:
-        return None
-    return resolve(declared.group(1).strip(), package, environment)
+def uploads_cell_status(block: str) -> bool:
+    """Whether a job uploads its cell's status artifact.
+
+    The NAME is not spelled in the workflow any more: it comes from
+    `cell_contract.py`, the one reader that derives every result identity. What
+    the workflow declares is that it publishes that output, which is what this
+    recognizes.
+    """
+    return "name: ${{ steps.cell.outputs.status_artifact }}" in block
 
 
 class JobNameCorpusTests(unittest.TestCase):
@@ -454,70 +476,164 @@ class JobNameCorpusTests(unittest.TestCase):
     The unit fixtures above spell job names by hand, which is how they stayed
     green while the area restructure renamed every one of them. This walks
     `_package-ci.yml` and `_wsl-ci.yml` instead, builds each producer's
-    composite label from the caller chain those files actually declare, and
-    requires the parser to land on the `status-…` artifact that same job
-    uploads — so a rename on either side fails here.
+    composite label from the caller chain and the row shape those files
+    actually declare, and requires the parser to land on the `status-…`
+    directory `cell_contract.py` gives that same row — so a rename on either
+    side fails here.
     """
 
     AREA = "playa"
     PACKAGE = "playa-cli"
-    ENVIRONMENT = "windows-latest"
+    RUNNER = "windows-latest"
+
+    def row(self, gate: str, environment: str, runner: str | None = None) -> dict[str, str]:
+        return {
+            "package": self.PACKAGE,
+            "gate": gate,
+            "environment": environment,
+            "runner": runner or environment,
+        }
+
+    def expected_status(self, row: dict[str, str]) -> str:
+        """The status directory the shipped cell reader derives for this row."""
+        return cell_contract.contract(
+            {
+                "head": "",
+                "cells": [
+                    {
+                        "package": row["package"],
+                        "area": self.AREA,
+                        "environment": row["environment"],
+                        "gate": row["gate"],
+                        "execution": "execute",
+                        "state": "pending",
+                        "target_kinds": [],
+                    }
+                ],
+                "packages": [
+                    {
+                        "package": row["package"],
+                        "test_args": "",
+                        "check_args": "",
+                        "l1_include_slow": False,
+                        "runner_tools": [],
+                        "l2_backends": [],
+                        "native": {},
+                    }
+                ],
+                "environments": [
+                    {
+                        "name": row["environment"],
+                        "runner": row["runner"],
+                        "native_key": row["environment"],
+                        "capabilities": {},
+                        "build": {},
+                    }
+                ],
+                "builds": [],
+            },
+            row,
+            "",
+        )["status_artifact"]
 
     def area_prefix(self) -> str:
-        """`area-ci (<area>) / <package> / `, derived, not assumed."""
+        """`area-ci (<area>) / package-ci / `, derived, not assumed."""
         area_ci = jobs_in("ci.yml")["area-ci"]
         self.assertIsNone(
-            re.search(r"^    name:", area_ci, re.M),
+            declared_name(area_ci),
             "ci.yml's area-ci must stay unnamed so GitHub labels it from the matrix",
         )
-        caller = job_label("area-ci", area_ci, self.PACKAGE, self.AREA)
-        package_ci = jobs_in("_area-ci.yml")["package-ci"]
-        package = job_label("package-ci", package_ci, self.PACKAGE, self.ENVIRONMENT)
-        self.assertEqual(
-            self.PACKAGE, package, "the area must label each leg with its package"
+        caller = f"area-ci ({self.AREA})"
+        execution = jobs_in("_area-ci.yml")["package-ci"]
+        self.assertIsNone(
+            declared_name(execution),
+            "the area's execution call is skippable, so it must carry no name "
+            "expression GitHub would render raw",
         )
-        return f"{caller} / {package} / "
+        return f"{caller} / package-ci / "
 
-    def producers(self) -> dict[str, tuple[str, str]]:
-        """Composite label -> (job id, status artifact) for every producer."""
+    def producers(self) -> dict[str, tuple[str, str, dict[str, str]]]:
+        """Composite label -> (job id, status directory, row) per producer."""
         prefix = self.area_prefix()
-        wsl2 = jobs_in("_package-ci.yml")["wsl2"]
+        package_ci = jobs_in("_package-ci.yml")
+        wsl2 = package_ci["wsl2"]
         self.assertIn(
             "uses: ./.github/workflows/_wsl-ci.yml",
             wsl2,
-            "the WSL2 delegation the parser skips must still be the `wsl2` job",
+            "the WSL2 delegation the parser reads the row from must still be "
+            "the `wsl2` job",
         )
-        found: dict[str, tuple[str, str]] = {}
-        for workflow, chain in (
-            ("_package-ci.yml", prefix),
-            ("_wsl-ci.yml", prefix + job_label("wsl2", wsl2, self.PACKAGE, self.ENVIRONMENT) + " / "),
-        ):
-            for job_id, block in jobs_in(workflow).items():
-                status = status_artifact(block, self.PACKAGE, self.ENVIRONMENT)
-                if status is None:
-                    continue
-                label = job_label(job_id, block, self.PACKAGE, self.ENVIRONMENT)
-                found[chain + label] = (job_id, status)
+        # One representative row per row-expanding job. The gate is what the
+        # planner would put in the row: the test set carries the tiers, and
+        # `check`/`lint` name themselves.
+        rows_by_input = {
+            "test-rows": [
+                self.row("L1", "ubuntu-latest"),
+                self.row("L2", "macos-latest"),
+                self.row("browser", "ubuntu-latest"),
+            ],
+            "check-rows": [self.row("check", "windows-latest")],
+            "lint-rows": [self.row("lint", "ubuntu-latest")],
+            "wsl-rows": [self.row("L1", "wsl2-ubuntu", self.RUNNER)],
+        }
+        found: dict[str, tuple[str, str, dict[str, str]]] = {}
+        for job_id, block in package_ci.items():
+            row_input = row_set_input(block)
+            if row_input is None:
+                continue
+            for row in rows_by_input[row_input]:
+                label = prefix + job_label(job_id, block, row)
+                if row_input == "wsl-rows":
+                    # The delegated workflow's job is statically named, so the
+                    # row rides on the delegating label one segment out.
+                    guest = jobs_in("_wsl-ci.yml")["wsl"]
+                    self.assertTrue(
+                        uploads_cell_status(guest),
+                        "the guest job is the producer of the wsl2-ubuntu cell",
+                    )
+                    label = f"{label} / {job_label('wsl', guest, row)}"
+                    owner = "wsl"
+                else:
+                    self.assertTrue(
+                        uploads_cell_status(block),
+                        f"{job_id} expands rows but uploads no cell status",
+                    )
+                    owner = job_id
+                found[label] = (owner, self.expected_status(row), row)
         return found
 
     def test_every_producer_job_parses_to_the_status_it_uploads(self) -> None:
-        for label, (job_id, status) in self.producers().items():
+        producers = self.producers()
+        self.assertTrue(producers, "the walk found no producer at all")
+        for label, (job_id, status, row) in producers.items():
             cell = parse_job_name(label)
             self.assertIsNotNone(cell, f"{job_id}: {label} parses to no cell")
             self.assertEqual(self.PACKAGE, cell["package"], label)
+            self.assertEqual(row["gate"], cell["job"], label)
             self.assertEqual(status, status_directory(cell), label)
 
     def test_every_status_uploading_job_is_covered(self) -> None:
         # Non-vacuity: the walk must find the whole gate set, not an empty one.
-        found = {job_id for job_id, _ in self.producers().values()}
-        self.assertEqual(
-            {"check", "test", "lint", "test-l2", "test-browser", "wsl"}, found
-        )
+        found = {job_id for job_id, _, _ in self.producers().values()}
+        self.assertEqual({"check", "test", "lint", "wsl"}, found)
+
+    def test_a_native_and_a_guest_row_of_one_package_are_two_cells(self) -> None:
+        # The pair the whole environment-is-not-a-runner rule exists for: both
+        # rows name `playa-cli`, one runs on `windows-latest` natively and the
+        # other runs a Linux guest hosted by it, and they must not merge.
+        labels = list(self.producers())
+        native = [
+            label for label in labels if "windows-latest, windows-latest" in label
+        ]
+        guest = [label for label in labels if "wsl2-ubuntu" in label]
+        self.assertTrue(native and guest, labels)
+        cells = {status_directory(parse_job_name(label)) for label in native + guest}
+        self.assertEqual(len(native) + len(guest), len(cells), cells)
 
     def test_the_areas_coverage_audit_is_not_a_cell_but_can_veto_retry(self) -> None:
         audit = jobs_in("_area-ci.yml")["coverage-audit"]
         label = self.area_prefix().split(" / ")[0] + " / " + job_label(
-            "coverage-audit", audit, self.PACKAGE, self.ENVIRONMENT
+            "coverage-audit", audit, self.row("L1", "ubuntu-latest")
         )
         self.assertFalse(is_non_producer(label), label)
         self.assertIsNone(parse_job_name(label), label)
@@ -527,7 +643,7 @@ class JobNameCorpusTests(unittest.TestCase):
 
     def test_the_advisory_report_is_recognized_as_a_judge(self) -> None:
         report = jobs_in("ci.yml")["ci-reporting"]
-        label = job_label("ci-reporting", report, self.PACKAGE, self.ENVIRONMENT)
+        label = job_label("ci-reporting", report, self.row("L1", "ubuntu-latest"))
         self.assertIn("continue-on-error: true", report)
         self.assertTrue(is_non_producer(label), label)
 
@@ -705,8 +821,8 @@ class BuildOwnerAttributionTests(unittest.TestCase):
         self.assertIn("PRODUCER: ${{ matrix.build }}", ci)
 
 
-class DirectExecutionAttributionOracleTests(unittest.TestCase):
-    """Pending contracts for the row-driven labels (Phase 5 implements).
+class DirectExecutionAttributionTests(unittest.TestCase):
+    """The row-driven labels, in both forms ruling R1 requires.
 
     Ruling R1 keeps `runner` in the row, so a row-expanding matrix job renders
     a FOUR-token gate segment — `test (homelab-server, L1, ubuntu-latest,
@@ -717,15 +833,6 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
     loss.
     """
 
-    ROW_LABEL_ORACLE = "the row-driven job label is not implemented"
-
-    @pending(
-        "attribution",
-        "parse_job_name reads the parenthetical as one environment token, so "
-        "a four-token row label resolves to no cell; Phase 5's row-driven "
-        "matrices emit it and Phase 5 teaches the parser to read it",
-        oracle="the row-driven job label is not implemented",
-    )
     def test_a_four_token_native_row_label_resolves_to_exactly_one_cell(self):
         cell = parse_job_name(
             "area-ci (homelab) / homelab-server / test "
@@ -733,8 +840,8 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
         )
         self.assertIsNotNone(
             cell,
-            "the four-token row label must parse; the row-driven job label is "
-            "not implemented until Phase 5 emits it",
+            "the four-token row label must parse: it is the only place a "
+            "row-driven producer's cell identity appears",
         )
         self.assertEqual(
             {"package": "homelab-server", "job": "L1", "environment": "ubuntu-latest"},
@@ -748,12 +855,6 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
             "the row label resolves to the one status the dead producer owes",
         )
 
-    @pending(
-        "attribution",
-        "parse_job_name reads the parenthetical as one environment token, so "
-        "a four-token WSL2 row label resolves to no cell",
-        oracle="the row-driven job label is not implemented",
-    )
     def test_a_four_token_wsl2_row_label_resolves_to_exactly_one_cell(self):
         cell = parse_job_name(
             "area-ci (playa) / playa-cli / wsl2 / test "
@@ -761,8 +862,8 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
         )
         self.assertIsNotNone(
             cell,
-            "the four-token WSL2 row label must parse; the row-driven job label "
-            "is not implemented until Phase 5 emits it",
+            "the four-token WSL2 row label must parse: it is the only place "
+            "the guest cell's identity appears",
         )
         self.assertEqual(
             {"package": "playa-cli", "job": "L1", "environment": "wsl2-ubuntu"},
@@ -776,12 +877,29 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
             status_directory(cell),
         )
 
-    @pending(
-        "attribution",
-        "the shipped workflows declare no row-set inputs, so no row-driven "
-        "label can be derived from them",
-        oracle="the row-driven job label is not implemented",
-    )
+    def test_the_three_token_form_still_resolves(self) -> None:
+        # R1's reversal safety: dropping `runner` from the row is a label
+        # format change, and it must never become a silent attribution loss.
+        cell = parse_job_name("area-ci (playa) / playa-cli / test (ubuntu-latest)")
+        self.assertEqual(
+            {"package": "playa-cli", "job": "L1", "environment": "ubuntu-latest"},
+            cell,
+        )
+        self.assertEqual(
+            {"package": "playa-cli", "job": "L1", "environment": "wsl2-ubuntu"},
+            parse_job_name("area-ci (playa) / playa-cli / wsl2 / test (wsl2-ubuntu)"),
+        )
+
+    def test_a_row_naming_a_gate_the_plan_does_not_spell_is_refused(self) -> None:
+        # `test` is a JOB id, never a gate. A status under that name would
+        # manufacture a phantom cell beside the real L1 one.
+        self.assertIsNone(
+            parse_job_name(
+                "area-ci (playa) / package-ci / test "
+                "(playa-cli, test, ubuntu-latest, ubuntu-latest)"
+            )
+        )
+
     def test_the_shipped_workflows_declare_the_row_set_inputs(self):
         source = (WORKFLOWS / "_package-ci.yml").read_text(encoding="utf-8")
         declared = [
@@ -792,10 +910,8 @@ class DirectExecutionAttributionOracleTests(unittest.TestCase):
         self.assertEqual(
             ["check-rows", "lint-rows", "test-rows", "wsl-rows"],
             sorted(declared),
-            "the execution workflow must declare the four row-set inputs the "
-            "area call passes; the row-driven job label is not implemented "
-            "until they exist, and JobNameCorpusTests derives its labels from "
-            "them",
+            "the execution workflow declares the four row-set inputs the area "
+            "call passes; JobNameCorpusTests derives every label from them",
         )
 
 

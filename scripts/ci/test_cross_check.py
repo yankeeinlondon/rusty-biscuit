@@ -110,7 +110,7 @@ def planner_stub(package: str) -> str:
         }
         for environment in schema.ENVIRONMENTS
     ]
-    plan = plan_fixtures.attach_builds(
+    plan = plan_fixtures.finalize_plan(
         {
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,

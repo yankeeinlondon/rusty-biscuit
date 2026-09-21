@@ -93,11 +93,52 @@ class PrePushEvidenceContractTests(unittest.TestCase):
         self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
+def gate_loop_package(name: str, **overrides: object) -> dict:
+    """A plan package record carrying the fields the gate loop reads."""
+    return {
+        "package": name,
+        "area": name,
+        "gates": ["lint", "check", "L1", "L2"],
+        "tiers": ["L1", "L2"],
+        "test_args": "--features terminal-tests,daemon-tests",
+        "check_args": f"-p {name}",
+        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+        "l2_backends": ["tmux"],
+    } | overrides
+
+
+def gate_loop_cells(name: str, l2: str = "execute") -> list[dict]:
+    """`name`'s L1 and L2 cells on the fixture's host, `macos-latest`."""
+    return [
+        {"package": name, "environment": "macos-latest", "gate": "L1", "execution": "execute"},
+        {"package": name, "environment": "macos-latest", "gate": "L2", "execution": l2},
+    ]
+
+
 @requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class CiLocalTests(unittest.TestCase):
+    """The gate loop, fed the planner's two documents as they ship.
+
+    The scope document carries no package matrix (Phase 8 of
+    `2026-09-19-direct-cell-execution` retired it), so every per-package fact
+    the loop acts on must come from the plan `--plan-out` writes.
+    """
+
     def run_recipe(
-        self, threads: str | None = None, cores: int = 16, reports: dict | None = None
+        self,
+        threads: str | None = None,
+        cores: int = 16,
+        reports: dict | None = None,
+        packages: list[dict] | None = None,
+        cells: list[dict] | None = None,
+        arguments: Sequence[str] = ("--all", "--l2"),
+        expect_success: bool = True,
+        output: dict | None = None,
     ) -> list[dict]:
+        if packages is None:
+            packages = [gate_loop_package(name) for name in ("parallel", "serial")]
+        if cells is None:
+            cells = [cell for record in packages for cell in gate_loop_cells(record["package"])]
         with tempfile.TemporaryDirectory(prefix="ci-local-test-") as temporary:
             root = Path(temporary)
             bin_dir = root / "bin"
@@ -111,28 +152,23 @@ class CiLocalTests(unittest.TestCase):
                 encoding="utf-8",
             )
             scope = {
-                "packages": ["parallel", "serial"],
+                "packages": [record["package"] for record in packages],
                 "full_scope": False,
                 "change_class": "package",
                 "full_scope_gates": [],
-                "matrix": [
-                    {
-                        "package": name,
-                        "gates": ["lint", "check", "test"],
-                        "tiers": ["L1", "L2"],
-                        "test_args": "--features terminal-tests,daemon-tests",
-                        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
-                        "archive_includes": [],
-                        "sidecars": [],
-                        "l2_environments": ["macos-latest"],
-                        "l2_backends": ["tmux"],
-                    }
-                    for name in ("parallel", "serial")
-                ],
             }
             (root / "scope.json").write_text(json.dumps(scope), encoding="utf-8")
+            (root / "plan.json").write_text(
+                json.dumps({"packages": packages, "cells": cells}), encoding="utf-8"
+            )
             (scripts / "affected_scope.py").write_text(
-                'from pathlib import Path\nprint(Path("scope.json").read_text())\n',
+                "import sys\n"
+                "from pathlib import Path\n"
+                "arguments = sys.argv[1:]\n"
+                "if '--plan-out' in arguments:\n"
+                "    Path(arguments[arguments.index('--plan-out') + 1]).write_text(\n"
+                "        Path('plan.json').read_text())\n"
+                "print(Path('scope.json').read_text())\n",
                 encoding="utf-8",
             )
             shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
@@ -176,7 +212,15 @@ class CiLocalTests(unittest.TestCase):
                     "'nextest_profile': os.environ.get('NEXTEST_PROFILE')}) + '\\n')\n"
                 ),
                 "tmux": "raise SystemExit('tmux must only be detected, never started')\n",
-                "cargo": "raise SystemExit('Rust builds are forbidden in this test')\n",
+                # `cargo check` is logged, never run: the check-only branch is
+                # asserted by the arguments it passes, and no build happens.
+                "cargo": (
+                    "import json, os, sys\n"
+                    "if sys.argv[1:2] != ['check']:\n"
+                    "    raise SystemExit('Rust builds are forbidden in this test')\n"
+                    "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
+                    "    log.write(json.dumps({'args': ['cargo', *sys.argv[1:]]}) + '\\n')\n"
+                ),
             }
             for name, body in stubs.items():
                 path = bin_dir / name
@@ -206,14 +250,19 @@ class CiLocalTests(unittest.TestCase):
             if reports is not None:
                 environment["BISCUIT_CI_REPORTS_OUT"] = str(root / "reports")
             result = subprocess.run(
-                [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--l2"],
+                [JUST, "--justfile", str(root / "justfile"), "ci-local", *arguments],
                 cwd=root,
                 env=environment,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            if expect_success:
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            else:
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            if output is not None:
+                output["stdout"] = result.stdout
             if reports is not None:
                 staged = root / "reports" / "gate-backends.jsonl"
                 reports["gate_backends"] = (
@@ -221,7 +270,10 @@ class CiLocalTests(unittest.TestCase):
                     if staged.is_file()
                     else []
                 )
-            return [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+            log = root / "calls.jsonl"
+            if not log.is_file():
+                return []
+            return [json.loads(line) for line in log.read_text().splitlines()]
 
     def test_gates_use_local_evidence_profile_and_an_unwrapped_reserved_target(self) -> None:
         calls = self.run_recipe()
@@ -273,6 +325,73 @@ class CiLocalTests(unittest.TestCase):
         calls = self.run_recipe(cores=3)
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
+
+    def test_each_plan_gate_vocabulary_reaches_the_legacy_gate_it_folds_into(self) -> None:
+        # The plan spells test gates by tier (`L1`, `L2`, `browser`); the loop
+        # runs `lint`, `check`-only, `test`, and `L2`. A package the scope
+        # names but the plan does not carry, and one with `gates = false`,
+        # run nothing — the same answer the retired matrix gave by omission.
+        packages = [
+            gate_loop_package("lint-and-l1", gates=["lint", "L1"], tiers=["L1"]),
+            gate_loop_package("browser-only", gates=["lint", "browser"], tiers=["browser"]),
+            gate_loop_package("check-only", gates=["check"], tiers=[]),
+            gate_loop_package("gates-false", gates=[], tiers=[]),
+        ]
+        cells = [
+            cell
+            for name in ("lint-and-l1", "browser-only")
+            for cell in gate_loop_cells(name)
+        ]
+        calls = self.run_recipe(packages=packages, cells=cells)
+        self.assertEqual(
+            [
+                ["_lint", "lint-and-l1"],
+                ["_test", "lint-and-l1", "--no-fail-fast", "--features", "terminal-tests,daemon-tests"],
+                ["_lint", "browser-only"],
+                ["_test", "browser-only", "--no-fail-fast", "--features", "terminal-tests,daemon-tests"],
+                ["cargo", "check", "-p", "check-only"],
+            ],
+            [call["args"] for call in calls],
+        )
+
+    def test_a_package_the_plan_does_not_carry_runs_nothing(self) -> None:
+        calls = self.run_recipe(
+            packages=[gate_loop_package("parallel")],
+            cells=gate_loop_cells("parallel"),
+            arguments=("--all",),
+        )
+        self.assertEqual(
+            {"parallel"}, {call["args"][1] for call in calls}, "only the planned package runs"
+        )
+
+    def test_an_unhostable_l2_cell_fails_only_where_the_plan_executes_it(self) -> None:
+        # No non-focusing backend is available: `wezterm` needs a socket this
+        # environment does not carry. Whether that is a failure is the plan's
+        # call — its L2 cell on this host executes, or it is a governed gap.
+        for execution, expect_success in (("execute", False), ("omit", True), ("reuse", True)):
+            with self.subTest(execution=execution):
+                output: dict = {}
+                calls = self.run_recipe(
+                    packages=[gate_loop_package("serial", l2_backends=["wezterm"])],
+                    cells=gate_loop_cells("serial", l2=execution),
+                    expect_success=expect_success,
+                    output=output,
+                )
+                self.assertNotIn("_test_l2", [call["args"][0] for call in calls])
+                self.assertEqual(
+                    not expect_success,
+                    "L2 serial (no non-focusing backend available)" in output["stdout"],
+                    output["stdout"],
+                )
+
+    def test_a_dry_run_lists_the_plans_test_arguments_and_runs_nothing(self) -> None:
+        output: dict = {}
+        calls = self.run_recipe(arguments=("--all", "--dry-run"), output=output)
+        self.assertEqual([], calls)
+        self.assertIn(
+            "  parallel  (test: --features terminal-tests,daemon-tests)", output["stdout"]
+        )
+        self.assertIn("  serial  (test: --features terminal-tests,daemon-tests)", output["stdout"])
 
 
 @requires_tools("just", "jq", enforced_by=CI_TOOLING)
@@ -446,7 +565,7 @@ class PlanSurfaceTests(unittest.TestCase):
         state that no package test is required, as an affirmative scheduling
         decision rather than a warning.
         """
-        return {
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -472,7 +591,7 @@ class PlanSurfaceTests(unittest.TestCase):
             "preflight_os": [],
             "preflight_reason": "no gating package; preflight establishes nothing",
             "flags": {},
-        }
+        })
 
     def resolved_plan(self, prohibited_is_covered: bool) -> dict:
         cells = [
@@ -550,7 +669,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 ),
             },
         ]
-        return plan_fixtures.attach_builds({
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -920,7 +1039,7 @@ class PlanFedRunTests(unittest.TestCase):
             cell("beta", "ubuntu-latest", "lint"),
             cell("beta", "macos-latest", "L1"),
         ]
-        return plan_fixtures.attach_builds({
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -1771,9 +1890,8 @@ class WorkflowScopeStepTests(unittest.TestCase):
     def test_scope_hit_projects_the_plan_instead_of_stale_legacy_scheduling(self) -> None:
         def stale_projection(root: Path, base: str, head: str) -> str:
             document = json.loads(self.local_scope_receipt(root, base, head))
-            document["scope"]["matrix"] = []
             document["scope"]["scheduled_areas"] = []
-            document["scope"]["area_matrix"] = {}
+            document["scope"]["area_rows"] = {}
             return schema.canonical(document)
 
         run = self.run_step("pull_request", scope_receipt=stale_projection)
@@ -1781,8 +1899,25 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual([], run.planner_calls)
         self.assertEqual([], run.rustup_calls)
         self.assertEqual(legacy_scope_document(run.plan), run.scope)
-        self.assertTrue(run.scope["matrix"])
+        self.assertTrue(run.scope["area_rows"])
         self.assertTrue(run.scope["scheduled_areas"])
+
+    def test_a_receipt_from_before_the_environment_lists_retired_still_hits(self) -> None:
+        # Same plan version, plus the two projections Phase 8 retired: the
+        # step must reuse the carried plan and publish a projection without them.
+        def pre_retirement(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["scope"]["matrix"] = [{"package": "biscuit-hash", "native_environments": []}]
+            document["scope"]["area_matrix"] = {"biscuit-hash": {"include": []}}
+            return schema.canonical(document)
+
+        run = self.run_step("pull_request", scope_receipt=pre_retirement)
+        self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+        self.assertEqual([], run.planner_calls, "a matching receipt is never re-selected")
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+        self.assertNotIn("matrix", run.scope)
+        self.assertNotIn("area_matrix", run.scope)
+        self.assertEqual("true", run.outputs["has_packages"])
 
     def test_malformed_scope_notes_recalculate_through_the_real_step(self) -> None:
         for malformed in ("{broken json", "[]"):
@@ -1811,9 +1946,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
         # whose last consumer is satisfied is removed. The overlay derives no
         # key — it only drops demand the carried plan already computed.
         "builds",
+        # For the same reason: a cell that will not run dispatches no row.
+        "rows",
     )
     EVIDENCE_CELL_FIELDS = (
         "execution", "origin", "state", "evidence", "prohibition", "build",
+        # The execution inputs go with the execution: a reused cell selects no
+        # nextest profile and provisions no Node.
+        "profile", "requires_node",
     )
 
     @classmethod
@@ -1871,8 +2011,19 @@ class WorkflowScopeStepTests(unittest.TestCase):
     def test_the_projection_on_an_evidence_hit_is_derived_from_the_written_plan(self) -> None:
         run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
         self.assertEqual(legacy_scope_document(run.plan), run.scope)
-        entry = next(item for item in run.scope["matrix"] if item["package"] == "biscuit-hash")
-        self.assertNotIn("macos-latest", entry["native_environments"], "the reused cell must leave the fan-out")
+        hash_rows = [
+            row
+            for document in run.scope["area_rows"].values()
+            for name in schema.ROW_SET_NAMES
+            for row in document[name]
+            if row["package"] == "biscuit-hash"
+        ]
+        self.assertTrue(hash_rows, "the package's other cells still fan out")
+        self.assertNotIn(
+            "macos-latest",
+            {row["environment"] for row in hash_rows},
+            "the reused cell must leave the fan-out",
+        )
         self.assertEqual(run.scope["job_estimate"], run.plan["job_estimate"])
         self.assertEqual(str(run.plan["job_estimate"]), run.outputs["job_estimate"])
 
@@ -1892,7 +2043,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
     #: Every matrix output the fan-out reads. A step that died before writing
     #: them would lose the run's package work, which is the defect.
     MATRIX_OUTPUTS = (
-        "scheduled_areas", "area_matrix", "area_slugs", "gap_areas", "packages",
+        "scheduled_areas", "area_rows", "area_slugs", "gap_areas", "packages",
         "package_names", "has_packages", "full_scope", "sniff",
         "job_estimate", "preflight_os", "preflight_reason", "change_class",
     )
@@ -2220,6 +2371,12 @@ class ToolGuardTests(unittest.TestCase):
 @requires_tools("bash", "jq", enforced_by=CI_TOOLING)
 class NativeProvisioningTests(unittest.TestCase):
     def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
+        """The step's real script, given what `cell_contract.py` would publish.
+
+        `native` is still spelled as the planner's runner-keyed map so the
+        fixtures read the same; the cell reader narrows it to one environment's
+        list before the job ever sees it, which is what this mirrors.
+        """
         step = next(
             step for step in job_run_steps(ROOT / ".github/workflows" / workflow, job)
             if step.name == "Install native prerequisites"
@@ -2228,7 +2385,7 @@ class NativeProvisioningTests(unittest.TestCase):
             output = Path(temporary) / "arguments"
             environment = os.environ.copy()
             environment.update(
-                NATIVE=json.dumps(native), RUNNER_KEY=runner,
+                NATIVE=json.dumps(native.get(runner, [])), ENVIRONMENT=runner,
                 DEPENDENTS_NATIVE=json.dumps(dependents), NATIVE_OUTPUT=str(output),
             )
             result = subprocess.run(
@@ -2249,7 +2406,7 @@ class NativeProvisioningTests(unittest.TestCase):
             ["_ensure-native-libs", "own-macos"],
             self.provision("_package-ci.yml", "check", "macos-latest", native, dependents),
         )
-        for job in ["test", "lint", "test-l2", "test-browser"]:
+        for job in ["test", "lint"]:
             with self.subTest(job=job):
                 self.assertEqual(
                     ["_ensure-native-libs", "own-dev"],
@@ -2257,7 +2414,7 @@ class NativeProvisioningTests(unittest.TestCase):
                 )
 
     def test_empty_native_lists_never_invoke_the_whole_workspace_installer(self) -> None:
-        for job in ["check", "test", "lint", "test-l2", "test-browser"]:
+        for job in ["check", "test", "lint"]:
             with self.subTest(job=job):
                 self.assertEqual([], self.provision("_package-ci.yml", job, "ubuntu-latest", {}, []))
 

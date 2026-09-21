@@ -228,7 +228,7 @@ class EvidenceFixture(unittest.TestCase):
             "preflight_reason": "package-local change",
             "flags": {},
         }
-        return plan_fixtures.attach_builds(document)
+        return plan_fixtures.finalize_plan(document)
 
     def plan_cell(self, package: str, environment: str, gate: str) -> dict:
         return {
@@ -1306,7 +1306,7 @@ class BackendProofTests(EvidenceFixture):
         plan["job_estimate"] = len(plan["cells"])
         # The added L2 cell executes, so it owes a build: the macOS record it
         # shares with alpha's own L1 cell on that producer.
-        plan_fixtures.attach_builds(plan)
+        plan_fixtures.finalize_plan(plan)
         self.assertEqual([], schema.validate_resolved_plan(plan))
         self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
 
