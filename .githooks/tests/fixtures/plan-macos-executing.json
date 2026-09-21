@@ -1,5 +1,9 @@
 {
   "accepted_evidence": [],
+  "archive_guard": {
+    "reason": "this run schedules no ubuntu-latest cell; the guard is hosted there alone and does not force it into an event that excludes it",
+    "selected": false
+  },
   "areas": [
     {
       "area": "pkg",
@@ -78,6 +82,7 @@
       "source": 1,
       "total": 1
     },
+    "deleted": [],
     "diff_available": true,
     "paths": {
       "configuration": [],
@@ -174,7 +179,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 4,
+  "schema_version": 5,
   "source_packages": [
     "alpha"
   ]

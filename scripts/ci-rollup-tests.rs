@@ -3582,6 +3582,140 @@ fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
     assert_eq!(cells[0].origin, Origin::Unproduced);
 }
 
+/// The archive-path guard's cell as `affected_scope.archive_guard_only_selection`
+/// emits it: one Linux lint cell whose required work is the guard companion and
+/// whose producer skips clippy entirely.
+fn companions_only_lint_cell_json() -> serde_json::Value {
+    let mut cell = plan_cell_json("test-toolkit", "ubuntu-latest", "lint", false);
+    cell["area"] = serde_json::json!("tools");
+    cell["companions_only"] = serde_json::json!(true);
+    cell["companions"] = serde_json::json!([{"name": "archive-path-guard"}]);
+    cell
+}
+
+/// `2026-09-19-less-brittle`: the owning area's coverage audit is what detects a
+/// planned guard that did not run. The guard adds no top-level job, so a run
+/// that never started its lint cell has nothing else to notice — MISSING here is
+/// the whole enforcement.
+#[test]
+fn a_planned_guard_only_lint_cell_that_never_ran_is_missing_and_blocks() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let cell = only_cell(status_cells(
+        &[],
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.key.tier, Tier::parse("lint"));
+    assert_eq!(cell.state, CellState::Missing);
+    assert_eq!(cell.origin, Origin::Unproduced);
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["test-toolkit"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"));
+}
+
+/// R12 on the cell that has nothing else: the producer skips clippy, so a
+/// companions-only cell whose sole companion went unreported evidenced NOTHING.
+/// Reading its green job status as a pass is exactly the "partial scan labelled
+/// a complete full-tree pass" the specification forbids.
+#[test]
+fn a_guard_only_lint_cell_with_no_companion_result_fails_rather_than_passes() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    // Exactly what the producer writes when clippy is `if`-gated off and the
+    // companion step did not succeed: a green JOB, no per-suite record.
+    let statuses = vec![ProducerStatus {
+        package: "test-toolkit".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: Some("skipped".to_owned()),
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("archive-path-guard")
+            && reason.contains("evidenced nothing at all")),
+        "the reason must say the cell proved nothing, not merely that a \
+         companion was uncovered: {:?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["test-toolkit"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+}
+
+/// The same cell with its companion evidenced is a pass, and its clippy
+/// duration stays ABSENT: the step never ran, and inventing `0` for it would
+/// read as a measurement.
+#[test]
+fn a_guard_only_lint_cell_passes_on_its_companion_alone() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let statuses = vec![ProducerStatus {
+        package: "test-toolkit".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: Some("success".to_owned()),
+        companions: BTreeMap::from([(
+            "archive-path-guard".to_owned(),
+            CompanionOutcome {
+                outcome: "success".to_owned(),
+                counts: None,
+                reason: Some("a lint gate reports no test counts".to_owned()),
+                duration_s: Some(31.5),
+            },
+        )]),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Pass, "{:?}", cell.reasons);
+    assert_eq!(cell.duration_s, None);
+    assert_eq!(
+        cell.companions.iter().map(|c| c.suite.as_str()).collect::<Vec<_>>(),
+        vec!["archive-path-guard"]
+    );
+}
+
 #[test]
 fn a_check_the_plan_reused_through_its_l1_receipt_expects_no_producer_status() {
     // PR #84: the pushing host's L1 satisfied both areas' macOS check cells
@@ -4773,9 +4907,14 @@ fn the_real_planners_plan_rolls_up() {
         !expected.is_empty(),
         "a source change in claudine must schedule cells"
     );
+    // `tools` is the archive-path guard's lint-only owner, selected by the
+    // Rust file this change touches rather than by anything under `tools/`.
+    // It owns no test tier here, so it drops out of the classification below.
     assert!(
-        expected.iter().all(|cell| cell.area == "claudine"),
-        "every cell of this plan belongs to the claudine area"
+        expected
+            .iter()
+            .all(|cell| cell.area == "claudine" || cell.area == "tools"),
+        "every cell of this plan belongs to the claudine area or to the guard's owner"
     );
 
     let cells = classify_simple(

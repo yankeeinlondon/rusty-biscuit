@@ -43,7 +43,15 @@
 //! appended to a JSON Lines file (see [`evidence`]) and the `backend-proof`
 //! binary asserts after the run that each required backend produced at least
 //! one executed test.
+//!
+//! ## Corpus policy
+//!
+//! [`archive_guard`] is the other half of the archived-run contract: a
+//! token-aware scan of the repository's Rust source for compile-time paths that
+//! do not survive relocation. `tests/archive_path_guard.rs` drives it against
+//! the real checkout.
 
+pub mod archive_guard;
 pub mod backend;
 pub mod evidence;
 pub mod spool;

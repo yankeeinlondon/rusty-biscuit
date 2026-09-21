@@ -11,6 +11,10 @@ This derives them from the cells instead, the same way `affected_scope` does,
 and is deliberately a plain fixture helper: the real derivation reads the
 environment table's build contracts and digests through `ci-build`, neither of
 which a document fixture has or needs.
+
+[`archive_guard`] is here for the same reason: version 5 made the guard's scan
+scope a required field, and it is a selection decision no post-planning fixture
+makes.
 """
 
 from __future__ import annotations
@@ -51,6 +55,26 @@ CONTRACTS: dict[str, dict[str, Any]] = {
         "executes": ["windows-latest"],
     },
 }
+
+
+def archive_guard(paths: list[str] | None = None) -> dict[str, Any]:
+    """The archive-path guard scope a hand-written plan must carry.
+
+    The default is the honest one for a fixture that performed no selection:
+    the guard was not selected, so it describes no scope. Pass `paths` where a
+    fixture needs a changed-file scan to be present.
+    """
+    if paths is None:
+        return {
+            "selected": False,
+            "reason": "fixture plan; no scan scope was selected",
+        }
+    return {
+        "selected": True,
+        "mode": "changed",
+        "paths": sorted(set(paths)),
+        "reason": "fixture plan; changed-file scan",
+    }
 
 
 def _key(package: str, producer: str) -> str:
