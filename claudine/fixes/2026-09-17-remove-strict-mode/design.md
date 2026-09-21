@@ -1,14 +1,18 @@
 # Remove Strict Mode: Technical Design
 
-Status: **technical design in progress; not ready for implementation planning**.
+Status: **design rulings resolved; ready for independent review;
+not yet approved for implementation planning**.
 Last updated: 2026-09-19.
 
 ## Relationship to the specification
 
 [spec.md](spec.md) is authoritative for behavior, scope, ownership, and acceptance
-criteria. This document records technical decisions only after explicit human
-agreement. Open decisions below must be resolved here before implementation
-planning; they are not delegated to a future plan. The human-requested
+criteria. D1–D20 below record human decisions. The requested design completion
+work is in [design-contracts.md](design-contracts.md) and
+[migration-inventory.md](migration-inventory.md): concrete engineering proposals
+are distinguished from confirmed rulings. Open decisions must be resolved before
+implementation planning; they are not delegated to a future plan. The old
+[plan.md](plan.md) is explicitly superseded. The human-requested
 [provenance and editor-recovery spikes](spike-results.md) were run on 2026-09-19.
 Their test-only prototypes and current-behavior characterizations inform the
 remaining interfaces; they do not approve a production implementation.
@@ -35,7 +39,17 @@ These are existing requirements, not decisions reopened by this design.
 Authoritative lifecycle schemas belong in `claudine/schemas`; generated runtime
 definitions and editor consumption must derive from that source. Generation
 integration and artifact layout are confirmed in D9. D6 fixes the descriptor
-envelope; its remaining payload details are still open.
+envelope; C3 and C5 in the companion contracts now specify its proposed payload.
+
+The historical decision entries retain their checkpoint wording. Statements
+that an interface is still open are updated by the completion matrix at the end
+of this document, not evidence of additional unlisted decisions. The final discussion
+resolved host ownership of globals and the initial time-refresh policy; see
+D21–D22 below. The human
+reaffirmed that layering is already settled by
+[Schema Layering](../../../darkmatter/docs/topics/schemas/authoring-schemas.md#schema-layering)
+and D20. The later proposal to restrict root-union sources is withdrawn; C7 is
+an implementation model to review against those existing rules.
 
 ## Current architecture and evidence quality
 
@@ -77,8 +91,11 @@ Direct source inspection following those unsuccessful graph queries established:
   Claudine library or CLI. D9 selects it for generation. Darkmatter's current
   `include_str!` embedding is not code generation.
 
-The investigation documents contain the detailed source references. No current
-impact result or completed migration inventory is claimed by this draft.
+The investigation documents contain the detailed source references. The
+2026-09-19 completion pass adds a source-verified 21-implementation inventory
+and records a current HIGH-risk lookup impact in
+[migration-inventory.md](migration-inventory.md#evidence-and-risk). Malformed
+graph records still prevent a complete graph-based caller/process claim.
 
 ## D1 — Add a richer method to the existing lookup interface
 
@@ -154,39 +171,24 @@ runtime values. DMLS consumes the declarative form without depending on Claudine
 The declaration serialization/distribution format remains open.
 
 This decision does not choose exact Rust type or method names, final error
-variants, or the prepared-expression API. It also does not settle the
-`current`/`current_env` projection or change when context and environment are
-observed. D3 supplies that scope ruling. Lazy materialization and observation
+variants, or the prepared-expression API. D3 supplies the global schema and direct `current` shape ruling without
+changing when context and environment are observed. Lazy materialization and observation
 timing remain distinct; the more-context feature's future per-key freshness
 and memoization contracts are not decided by D2.
 
-## D3 — Keep the coherent live-global migration in more-context
+## D3 — Unified global schemas and direct current context
 
-**Human decision:** confirmed 2026-09-18, option **A**. This fix retains the
-existing event-captured `current.ctx.*` and `current.env.*` representation and
-introduces no independent `current_env` global. The
-[more-context specification](../../../../darkmatter/features/2026-09-09-more-context/spec.md)
-owns the coherent future migration to Darkmatter built-ins, direct mirrors
-across expression surfaces, and reference-time freshness.
+The later human ruling supersedes the original decision to retain nested
+`current.ctx` and `current.env`. The single entry point is now
+`darkmatter/schemas/darkmatter.yaml`, with `doc` and every other global declared
+under its `$schema`. `ctx` and `current` use the same context type. There is no
+`current_env` binding and no compatibility alias for the old nested shape.
 
-**Recommendation presented:** option A, preserving this fix's scope and capture
-timing without reversing the separately agreed more-context destination.
-
-| Material alternative | Benefit | Cost |
-| --- | --- | --- |
-| A: Retain current snapshots here; more-context owns the migration **(confirmed)** | Keeps the binding fix focused and preserves current observation timing. | This fix continues to expose the existing nested lifecycle representation until the separate migration. |
-| B: Bring the coherent live-global migration into this fix | Delivers the future public representation together with the binding changes. | Broadens scope to every expression surface and requires new provider, invocation-evidence, per-key freshness, and memoization rulings. |
-
-The existing lazy `current` provider materializes an already-captured event
-snapshot; it does not observe fresh environment or context on reference. This
-fix must keep that distinction across its consumers and descriptors. No interim
-direct-mirror alias or lifecycle-only `current_env` is introduced. Future
-built-ins will supersede the lifecycle injection under the separate feature.
-
-The human also authorized the narrow, dated clarification in this fix's
-specification: remove `current_env` from its catalog examples, record retained
-snapshot behavior and future ownership, and align the technical checkpoint with
-that boundary. No other functional requirements or review metadata change.
+This fix includes shared schema management and DMLS support for `err`, `tracking`,
+and `current`. Claudine continues to provide event availability and runtime values;
+moving lifecycle execution into Darkmatter remains separate work. Preserve current
+event capture timing; lazy materialization does not imply fresh observation.
+See the unified global entry point contract in [spec.md](spec.md).
 
 ## D4 — Share an immutable prepared representation
 
@@ -391,7 +393,7 @@ The confirmed `err` availability is:
 | `finalize`, task teardown | Available, with the error value when present or an explicit eager `null` when no error exists. |
 
 An unavailable `err` never falls back to a same-named document property;
-`doc.err` remains explicit document access. A missing required `err`, `timing`,
+`doc.err` remains explicit document access. A missing required `err`, `tracking`,
 or `current` entry is a configuration error, not automatic null inference.
 The caller must intentionally supply the available-null case where allowed.
 
@@ -542,9 +544,9 @@ pending; this decision does not select aliases, versioning, or a compatibility
 mechanism.
 
 The user identified
-[authoring-schemas.md](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md),
-[schema-targeting.md](../../../../darkmatter/docs/topics/schemas/schema-targeting.md),
-and [schema-target.yaml](../../../../darkmatter/docs/schema-drafts/schema-target.yaml)
+[authoring-schemas.md](../../../darkmatter/docs/topics/schemas/authoring-schemas.md),
+[schema-targeting.md](../../../darkmatter/docs/topics/schemas/schema-targeting.md),
+and [schema-target.yaml](../../../darkmatter/docs/schemas/schema-target.yaml)
 as target intent, not evidence of implemented support. Where those documents
 use `schema-target`, the separately confirmed `schema-trigger` name takes
 precedence. Their other proposals are not confirmed by D11. D12 separately
@@ -854,40 +856,93 @@ This rule concerns competing property definitions. Exported root-union support
 and assembly remain **unconfirmed**; neither a union restriction nor silent
 flattening/dropping of existing unions is authorized.
 
-## Remaining decisions and design completion work
+## D21 — Globals belong to the host, not Markdown authors
 
-The priority below reflects architectural dependencies, not implementation
-sequencing.
+**Human clarification:** confirmed 2026-09-19. User-authored values are
+frontmatter properties accessed directly or through `doc`. Global names,
+runtime values and event availability are not definable in Markdown. Nested
+conditional expressions retain their enclosing event's bindings.
 
-| Priority | Open subject | Consequence to resolve before planning |
+This supersedes the proposed author-selectable `binding-scope` constraint and
+nested event-scope replacement rule. External host catalog metadata can describe
+which bindings apply at known document properties for passive validation;
+it does not authorize Markdown to register globals or change event selection.
+Claudine chooses its actual event and supplies runtime registrations. Existing
+feature restrictions remain non-relaxable. C3 records the corrected interface.
+
+## D22 — Refresh time-dependent activation without waiting for edits
+
+**Human decision:** confirmed 2026-09-19. DMLS should update schema activation
+at the next relevant time boundary while a document remains open, including
+when no edits occur, and recheck after sleep or clock changes. CLI evaluates
+activation once per invocation.
+
+The human accepted this as a starting policy and explicitly allowed later
+performance tuning to adjust scheduling. This does not ratify a particular
+polling interval, numeric latency target or performance budget. C6 records the
+implementation proposal; lasting documentation lives in
+[Schema Activation](../../../darkmatter/docs/topics/schemas/schema-activation.md#refreshing-time-based-conditions).
+
+## Design completion checkpoint — 2026-09-19
+
+The human confirmed the inline review's trigger grammar correction: groups use
+explicit `group:` mappings, never anonymous nested lists. The change from
+`trigger-schema` to `schema-trigger` is the grammar boundary; reject the old
+kind with migration guidance and explicitly migrate its rules. Do not guess
+whether a canonical-kind list was intended as legacy OR. This completes the
+earlier Boolean decision's concrete encoding and supersedes its pending
+legacy-form discussion.
+
+During the subsequent inline-review discussion, the human replaced the obsolete
+meta-schema pointer in `err.yaml` with an exported `err` property and local field
+types. Preserve that authored export; the file is no longer classified as a
+types-only library. The human requested bare local type references alongside
+explicit `@this`. The specification's “Schema Exports and Local Type Names”
+section and the companion semantic-bundle contract record the addition. The
+[lasting type-reference documentation](../../../darkmatter/docs/topics/schemas/local-type-references.md)
+defines local resolution and built-in-name handling. The human additionally
+identified the stripping of a named type's `required`/`generated` constraints as
+a bug and explicitly included its correction in this fix. Preserve constraints
+on bare, `@this`, and cross-file references; callers must not repeat them to
+recover the original definition. The human confirmed that inherited and
+use-site constraints merge: different constraints apply together, repeated
+bounds keep the stricter value, and contradictory constraints are schema errors.
+This differs from whole-property schema-layer precedence and does not alter
+validation-phase semantics. Parser and resolver support remain implementation work.
+
+The human requested completion steps 1–3 and reserved step 4, independent review,
+for another agent. No review agent was run as part of this completion pass.
+
+| Subject | Concrete review artifact | Status |
 | --- | --- | --- |
-| 1 | Binding interface details | Specify the richer result, passive descriptor API, structured reason/error shapes, and remaining checked-association invariants within D1, D2, and D7. |
-| 2 | Prepared interface details | Make D4's inputs, outputs, source provenance, schema-generation association, and typed error boundaries concrete without adding runtime observations to preparation. |
-| 3 | Lifecycle catalog details | Complete D6's event/scope matrix and nested use-site syntax/conflict rules within D3's capture timing, D7's `err` mapping, and D8's sequence-approval restriction. |
-| 4 | Provenance interface and transfer inventory | Specify D5's envelope operations and enumerate every executable transfer, including any required internal serialization boundary. |
-| 5 | Shared semantic bundle details | Complete the shared definition fields and portable origin representation needed by D9, alongside D6's still-open binding payload details. |
-| 6 | Generic activation and source assembly | Complete D11 parser/legacy migration and D13 root-union/import contracts; define D14 predicate details within D15–D18, missing-editor-anchor behavior and time/refresh/failures; make D20 shared ordering interfaces concrete. |
-| 7 | Refresh, isolation, and recovery | Define current-generation dependency/failure states and shared suppression of dependent diagnostics, hover, and completion; cover missing dependencies and newly created sources. |
-| 8 | Typed error transport and ownership audit | Specify owned causes through lifecycle/recovery/proxy paths and complete the state/context/binding/evaluation/validation/error DRY audit, including reasons for retained duplication. |
+| Rich resolver, provider-free descriptors, complete association, formatting and typed errors | Contracts C1–C2 | Drafted within D1/D2/D7; includes envelope-preserving structural results. |
+| Immutable preparation and runtime/schema identity | Contracts C2 | Drafted; preserves observation timing and existing interpolation passes. |
+| Lifecycle catalog and all event/task/preflight scopes | Contracts C3; D21 | Host-owned descriptors and runtime selection; Markdown scope switching withdrawn. |
+| Sparse envelope operations, stage retention and every executable transfer | Contracts C4; migration transfer table | Drafted with the provenance spike's completion/atomicity findings. |
+| Semantic bundle and generated artifact | Contracts C5 | Drafted; portable origins and semantic equivalence cover editor/runtime metadata. |
+| Full activation family, parser migration, observations and failures | Contracts C6; D22 | Initial automatic time-boundary refresh confirmed; scheduling remains tunable. |
+| Tier ordering, deduplication, imported/exported union behavior | Contracts C7 | Apply the existing human layering rules; review the assembly algorithm without introducing a one-union authoring restriction. |
+| Recovery/publication identity and all editor surfaces | Contracts C8 | Drafted with per-dependency tickets and shared semantic authority from the recovery spike. |
+| End-to-end flows, lookup inventory, DRY audit and acceptance coverage | Contracts C9; migration inventory | Drafted; 21 actual implementations plus two rustdoc examples; all 22 AC mapped. |
+| Old implementation plan | `plan.md` | Marked superseded; no replacement sequencing or implementation approval implied. |
 
-Before completion, the design also needs a current lookup-by-lookup migration
-inventory, concrete preparation/evaluation/editor-refresh flows, and a mapping
-from the agreed contracts to the specification's acceptance tests. Cross-platform
-path and watcher behavior must cover macOS, Linux, native Windows, and WSL2.
-Responsiveness verification remains qualitative; no numeric threshold is added.
+The final discussion resolved the remaining topics in D21–D22. Layering was
+incorrectly brought back as a human ruling despite the existing documented
+rules; that redundant request and its one-union restriction remain withdrawn.
+No further human ruling is pending from this design-completion pass. Independent
+review and final human design approval are still outstanding.
 
-The [initial independent review](design-review-1.md) found D1 and D2 faithful to
-the confirmed choices and requested the cache-boundary and graph-evidence
-clarifications incorporated above. It was not approval for planning. Independent
-review of the completed design remains pending. The
-[second review](design-review-2.md) prompted two incorporated clarifications:
-D5 selection/movement materializes inherited ancestor metadata, and D7 names
-the `loop` event distinctly from task `setup`. Concrete envelope operations,
-scope composition, and remaining checked-association contracts are still open.
-An independent schema-agent review of D11–D13, R12, and the corresponding
-documentation changes found no blockers in that checkpoint. The documentation
-marks the desired contract as not implemented. That review does not resolve
-union-export assembly or the pending binding grammar and is not approval of the
-unfinished overall design. Open rulings,
-unresolved graph evidence, and the incomplete migration inventory prevent a
-claim that this design is ready for implementation planning.
+The independent reviewer should examine all three current artifacts together,
+including the declared activation `ctx`/`env` boundary, same-location binding
+conflicts, union policy enforcement, envelope preservation through direct
+evaluation, and the complete approval-artifact transfer. The separate draft
+[Darkmatter lifecycle extraction](../../../darkmatter/features/2026-09-22-lifecycle-events/spec.md)
+overlaps interfaces but does not replace this fix's ownership or add its
+`composed` alias. Repository content also includes an unfinished memory trigger;
+the inventory records its cleanup prerequisite without inventing its policy.
+
+The [first](design-review-1.md) and [second](design-review-2.md) independent
+reviews, and the D11–D13 schema checkpoint review, remain historical checkpoint
+evidence. They did not review these completion artifacts and do not approve
+implementation planning. Final design approval remains with the human after
+the new independent review.
