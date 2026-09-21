@@ -3,6 +3,7 @@
   "areas": [
     {
       "area": "pkg",
+      "execution_path": "rows",
       "packages": [
         "alpha"
       ],
@@ -61,6 +62,7 @@
       "gate": "L1",
       "origin": "ci",
       "package": "alpha",
+      "profile": "ci",
       "reusable": true,
       "selection_reason": "no evidence for this environment",
       "state": "pending",
@@ -175,7 +177,12 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 4,
+  "schema_version": 5,
+  "skip_policy": {
+    "content_hash": "aaaabbbbccccdddd",
+    "entries": [],
+    "source": ".github/ci/ci-baseline.toml"
+  },
   "source_packages": [
     "alpha"
   ]

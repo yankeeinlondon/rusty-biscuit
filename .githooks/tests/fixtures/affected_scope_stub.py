@@ -89,7 +89,7 @@ def fixed_plan(base: str, head: str) -> dict:
         "native": {},
     }
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "base": base,
         "head": head,
         "change_class": "package",
@@ -114,7 +114,14 @@ def fixed_plan(base: str, head: str) -> dict:
         },
         "full_scope": False,
         "full_scope_gates": [],
-        "areas": [{"area": "pkg", "selection_reason": "source change", "packages": ["alpha"]}],
+        "areas": [
+            {
+                "area": "pkg",
+                "selection_reason": "source change",
+                "packages": ["alpha"],
+                "execution_path": "rows",
+            }
+        ],
         "packages": [package],
         "source_packages": ["alpha"],
         "reverse_dependencies": [],
@@ -145,6 +152,7 @@ def fixed_plan(base: str, head: str) -> dict:
                 "compile_coverage_from": "L1",
                 "selection_reason": "no evidence for this environment",
                 "build": FIXED_BUILD_KEY,
+                "profile": "ci",
             }
         ],
         "builds": [
@@ -180,6 +188,14 @@ def fixed_plan(base: str, head: str) -> dict:
             }
         ],
         "accepted_evidence": [],
+        # The real planner snapshots `.github/ci/ci-baseline.toml`; no fixture
+        # repository holds one, so the honest snapshot here is the empty budget
+        # the shipped file carries.
+        "skip_policy": {
+            "source": ".github/ci/ci-baseline.toml",
+            "content_hash": "aaaabbbbccccdddd",
+            "entries": [],
+        },
         "policy_gaps": [],
         "prohibited_cells": [],
         "job_estimate": 1,
@@ -215,19 +231,19 @@ def empty_plan(base: str, head: str) -> dict:
 
 def projection(plan: dict) -> dict:
     packages = [entry["package"] for entry in plan["packages"]]
+    scheduled = sorted({entry["area"] for entry in plan["packages"] if entry["gates"]})
     owners = build_owners(plan)
     slices = build_slices(owners)
     return {
         "packages": packages,
         "areas": plan["areas"],
-        "scheduled_areas": [area["area"] for area in plan["areas"]],
-        "area_matrix": {
-            area["area"]: {
-                "include": [p for p in plan["packages"] if p["area"] == area["area"]]
-            }
-            for area in plan["areas"]
-        },
-        "area_slugs": {area["area"]: area["area"] for area in plan["areas"]},
+        "scheduled_areas": scheduled,
+        # The dispatch rows `ci.yml` fans each area out from. Derived here the
+        # same way the planner derives them — one row per executing cell,
+        # partitioned into the four disjoint sets — so the stub's projection
+        # has the shape a receipt reader validates against.
+        "area_rows": row_sets(plan),
+        "area_slugs": {area: area for area in scheduled},
         "source_packages": plan["source_packages"],
         "reverse_dependencies": plan["reverse_dependencies"],
         "full_scope": plan["full_scope"],
@@ -235,7 +251,6 @@ def projection(plan: dict) -> dict:
         "change_class": plan["change_class"],
         "preflight_os": plan["preflight_os"],
         "preflight_reason": plan["preflight_reason"],
-        "matrix": plan["packages"],
         "policy": [],
         "build_owners": owners,
         "build_slices": slices,
@@ -244,6 +259,46 @@ def projection(plan: dict) -> dict:
         "job_estimate": plan["job_estimate"],
         "flags": plan["flags"],
     }
+
+
+def row_sets(plan: dict) -> dict:
+    """`{area: {test, check, lint, wsl, has_*_rows}}`, as the planner emits it."""
+    runners = {entry["name"]: entry["runner"] for entry in plan["environments"]}
+    names = ("test", "check", "lint", "wsl")
+    areas = {
+        entry["area"]: {
+            **{name: [] for name in names},
+            **{f"has_{name}_rows": False for name in names},
+        }
+        for entry in plan["areas"]
+    }
+    for cell in plan["cells"]:
+        if cell["execution"] != "execute":
+            continue
+        document = areas.get(cell["area"])
+        if document is None:
+            continue
+        if cell["environment"] == "wsl2-ubuntu":
+            name = "wsl"
+        elif cell["gate"] in ("check", "lint"):
+            name = cell["gate"]
+        else:
+            name = "test"
+        document[name].append(
+            {
+                "package": cell["package"],
+                "gate": cell["gate"],
+                "environment": cell["environment"],
+                "runner": runners.get(cell["environment"], cell["environment"]),
+            }
+        )
+    for document in areas.values():
+        for name in names:
+            document[name].sort(
+                key=lambda row: (row["package"], row["gate"], row["environment"])
+            )
+            document[f"has_{name}_rows"] = bool(document[name])
+    return areas
 
 
 def build_owners(plan: dict) -> list:
@@ -299,6 +354,7 @@ def prune_builds(plan: dict) -> None:
             )
         else:
             cell.pop("build", None)
+            cell.pop("profile", None)
     plan["builds"] = [
         {**record, "consumers": sorted(
             demanded[record["key"]], key=lambda item: (item["environment"], item["gate"])
