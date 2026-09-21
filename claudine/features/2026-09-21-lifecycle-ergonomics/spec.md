@@ -1,7 +1,6 @@
 ---
 reviewed: false
 ---
-
 # Lifecycle Ergonomics
 
 When we first created lifecycle events in Claudine we just provided a dictionary of methods for _communicating_ the event to callers. Later we added the stack based approach which allowed for far greater range in terms of what could be done at these events as well introduce the ability to make the actions we take _conditional_.
@@ -28,8 +27,7 @@ start:
     - shell: "git status"
 ```
 
-It should be obvious from this simple example that configuration has gotten _easier_. It is a single flat array surface
-instead of a nested structure. There is no need to explicitly state `stack` anywhere.
+It should be obvious from this simple example that configuration has gotten _easier_. It is a single flat array surface instead of a nested structure. There is no need to explicitly state `stack` anywhere.
 
 - although the example didn't illustrate it, every _step_ in the stack can add a conditional `when` clause just like we can today.
 - similarly, the available _actions_ are unchanged from what is available in the stack now it's just that there is no need to express `action` explicitly.
@@ -43,6 +41,7 @@ Today the "stack" is an explicit element but because the stack is all we have in
     - the provided side-effects Darkmatter provides
     - shell commands (_bespoke_)
     - flow control operations (retry, resume, proxy, ...)
+
 - (no change from current) the late binding variables like `err`, `current`, and `timing` are still available in exactly the same way
 - (no change from current) when a flow control action is encountered that becomes the last item in the stack that is executed (remaining items are ignored)
     - if a flow control action is wrapped in a conditional block then it's completely normal for other actions to follow because the flow control action may or may not happen
@@ -57,13 +56,13 @@ success:
     - shell: "git status"
 ```
 
-But if you want to add conditional's we still provide the `when` property and we add the `else` property. The `when` property behaves in exactly the same fashion as it did before
-except that it uses `then` instead of `action` as the aggregation point for the actions which are are being wrapped in that conditional block:
+But if you want to add conditional's we still provide the `when` property and we add the `else` property. The `when` property behaves in exactly the same fashion as it did before except that it uses `then` instead of `action` as the aggregation point for the actions which are are being wrapped in that conditional block:
 
 ```yaml
 start:
     - when: "ctx.season == 'summer'"
       then: 
+
           - info: "it is summer!"
           - message: "we're starting something in the summer"
           - shell: "run-summer-program"
@@ -76,8 +75,7 @@ This is the normal mode of defining a conditional block but there are two other 
 
 ### Dictionary Grammar
 
-The backbone of the stack is an array which preserves a discrete order which is important
-for the effective operation of the stack. However, there are _leaf_ nodes of the stack which can opt to use a key/value shape defining their actions. As an example:
+The backbone of the stack is an array which preserves a discrete order which is important for the effective operation of the stack. However, there are _leaf_ nodes of the stack which can opt to use a key/value shape defining their actions. As an example:
 
 ```yaml
 start:
@@ -87,12 +85,13 @@ start:
       say: "do you have any water?"
 ```
 
-In this example the `when`, `message`, and `say` properties are bundled into group and if `when` is one of the member's it is always going to be evaluated first and if it returns true then all other actions in the dictionary will be executed. 
+In this example the `when`, `message`, and `say` properties are bundled into group and if `when` is one of the member's it is always going to be evaluated first and if it returns true then all other actions in the dictionary will be executed.
 
 This grammar is compact but has some limitations:
 
 - the user can not specify the ordering of operations
     - Claudine will simply run them all concurrently
+
 - each action can only be used once (aka,  you can't call `say` twice because there's only one `say` key)
 - no long form actions are allowed
 
@@ -107,9 +106,9 @@ start:
 
 In this example all three actions will be executed by Claudine concurrently and when the last action completes the lifecycle event is over.
 
-> **Note:** 
->
-> - the one exception to concurrency is in the case that one of the keys is a flow-control event. 
+> **Note:**
+> 
+> - the one exception to concurrency is in the case that one of the keys is a flow-control event.
 > - any more than one flow-control action in this structure is an immediate error, but a single flow control action is allowed.
 > - when a single flow-control event is included as part of the key/values then all the non-flow-control actions are run concurrently and as soon as the final action completes in that group, the flow control event determines where execution goes next
 
@@ -120,7 +119,7 @@ This is not a real change in behavior, the current implementation already suppor
 A good example of this is that all flow control directives provide an optional `use` parameter that allows for the Frontmatter state to be better prepared for the next flow state.
 
 - the default behavior for flow-state transitions is to move the current state exactly to the new flow-state (which might be the same prompt, a different one, or a sequence)
-- the default behavior is good for a lot of flow-state transitions but it is very common that a caller will want to mutate state slightly for the next flow state. 
+- the default behavior is good for a lot of flow-state transitions but it is very common that a caller will want to mutate state slightly for the next flow state.
 - an example of this is when an agent hit's an error of some sort on a prompt and you want to **retry** the action but you want the prompt to know that it's not the first time this has been tried and what the error was last time it happened:
 
 ```yaml
@@ -145,10 +144,7 @@ By contrast, the long form allows us far greater expression and control:
 - in our example we again set the maximum retries to 3
 - but then we also set the `reason` frontmatter state to the _reason_ why the prior run failed allowing the conditional blocks and interpolation on the page to respond appropriately when the reason property is populated.
 
-
 ### Else Block
-
-> DESIGN DECISION: should `else` be a property of `when` or be a peer of `when`?
 
 In this feature we will introduce an `else` block that is similar to a `when` conditional but matches on any state that _does not_ match any of the `when` conditions. This allows simple if/else logic that is fairly common for lifecycle events:
 
@@ -156,10 +152,13 @@ In this feature we will introduce an `else` block that is similar to a `when` co
 start:
     - when: "ctx.season == 'summer'"
       then:
+
         - info: "it is summer!"
         - message: "we're starting something in the summer"
         - shell: "run-summer-program"
-    - else:
+
+      else:
+
         - info: "it is not summer"
 ```
 
@@ -169,16 +168,19 @@ But let's explore a slightly a config with a wrinkle:
 start:
     - when: "ctx.season == 'summer'"
       then:
+
         - info: "it is summer!"
         - message: "we're starting something in the summer"
         - shell: "run-summer-program"
-    - else:
+
+      else:
+
         - info: "it is not summer"
+
     - message: "all is well that ends well"
 ```
 
 In this example either the `then` or `else` block will be executed but in BOTH cases the final `message` will be executed because it is not conditional and not contained by either block of the conditional blocks.
-
 
 ### Conditional Nesting
 
@@ -194,8 +196,10 @@ The syntax for nesting is keeping in line with the normal grammar; an example wo
 start:
     - when: "ctx.season == 'summer'"
       then:
+
           - when: "ctx.month == 'July'"
             message: "damn it is hot!"
+
     - else:
         - message: "damn it is hot; at least it is not July!"
 ```
@@ -211,23 +215,22 @@ Darkmatter provides both inline schema definitions via the `$schema` property of
 - the `$schema` property can be defined inline to a Markdown document or can be pointed at an external file.
     - when pointed to an external file that file must be both a YAML document _and_ conform to the `schema` _kinded_ format
     - alternatively you can point to a local JSON Schema definition though this is not generally recommended (as the `SimplifiedSchema` is both more ergonomic and able to express more semantically than JSON schema)
+
 - underneath the direct attribution of schema with the `$schema` property is the idea of a base schema which Darkmatter leverages to define the variables which have special semantic meaning
 
 ### Claudine Schema Structure
 
-There are some important **schemas** and **schema-triggers** that need to be defined so that the stack is able to be supported in DMLS. 
+There are some important **schemas** and **schema-triggers** that need to be defined so that the stack is able to be supported in DMLS.
 
-| file path      | type   | description |
-| ---------      | ----   | ----------- |
-| action.yaml    | schema | defines the `action` enumeration which enumerates all of the possible actions a user can take and includes both short and long form shapes |
-| lifecycle.yaml | schema | uses the `action` definition as a building block to describe the full shape of a lifecycle event |
-| inline-compose.yaml | schema-trigger | defines the shape and trigger pattern of an inline-compose document | 
-| sequence.yaml | schema-trigger | defines the shape and trigger pattern of a sequence |
-| claudine.yaml  | schema | defines all Frontmatter properties that are common to 
+| file path           | type           | description                                                                                                                                |
+|---------------------|----------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| action.yaml         | schema         | defines the `action` enumeration which enumerates all of the possible actions a user can take and includes both short and long form shapes |
+| lifecycle.yaml      | schema         | uses the `action` definition as a building block to describe the full shape of a lifecycle event                                           |
+| inline-compose.yaml | schema-trigger | defines the shape and trigger pattern of an inline-compose document                                                                        |
+| sequence.yaml       | schema-trigger | defines the shape and trigger pattern of a sequence                                                                                        |
+| claudine.yaml       | schema         | defines all Frontmatter properties that are common to                                                                                      |
 
-> Note: all schema files should be saved to @claudine/docs/schemas where they can serve as both documentation _and_ be incorporated into typed metadata for Claudine during code generation stage.
-
-
+> Note: all schema files should be saved to @claudine/schemas where Darkmatter and DMLS will pick them up
 
 ## Background Audio
 
@@ -237,6 +240,7 @@ Today we have both TTS and sound effects which are played through the hosts audi
 - In addition to the awkwardness of this API, was the fact that:
     - TTS expressions almost always have a certain delay before they're ready to be spoken
         - some of the TTS providers have an intermediary step of producing an audio file and then Claudine (via Playa) will use the hosts audio API's to play this file
+
     - Sound effects and TTS expressions take many seconds in the best of conditions to emit and so things like `warn`, `info`, `stderr`, and `stdout` messages were noticeably delayed until after all audio had completed fully
 
 To move away from this awkwardness, this feature will provide the following things:
@@ -245,9 +249,11 @@ To move away from this awkwardness, this feature will provide the following thin
     - when a page first loads it will create a concurrent thread that evaluates all of the TTS (e.g., `say`/`speak` actions) events the page defines
         - the evaluation is to determine if the phrase that the user will speak is based on "late binding" variables
             - if it is then we can **not** pre-compile the audio
+
         - if the phrase is either just static text or static text interpolated with normal state variables (ctx, doc global variables or Frontmatter variables) then we **can** pre-compile
             - for the TTS solutions which produce a cached file as an intermediary product (in the OS's temp directory) we simply produce that file as soon as we realize that it might be needed so that _if_ it's needed there will be almost no latency in having the TTS played
             - for TTS solutions like macOS's `say`, there is not -- at least transparently -- an audio file produced as an intermediary. If this is the configured TTS we're using then we need to research and decide whether pre-computing the TTS phrase makes sense.
+
 - removal of the `say_first` action
     - to really understand `say_first` the user is required to know too much about how Claudine and Playa are ordering things
     - if you care about order then you should simply order using the array as the regulator
@@ -255,7 +261,6 @@ To move away from this awkwardness, this feature will provide the following thin
         - that means if you first have a `effect` action defined, then a `message` action, and finally a `say` action:
             - the `effect` and `say` are placed onto the audio thread and executed serially
             - meanwhile the non-audio work -- in this example that's just the `message` -- will be executed serially as well (but concurrently to the audio thread)
-
 
 ## Loop Lifecycle
 
