@@ -43,13 +43,20 @@ static CLEANUP_ONCE: Once = Once::new();
 /// Wall-clock budget for the reachability probe inside
 /// [`WezTermHarness::available`].
 ///
-/// Deliberately much shorter than [`QUERY_TIMEOUT`] (10 s): the probe
-/// exists to fail fast when the GUI is hung or the socket is stale, so
-/// the broker / spawn paths skip cleanly instead of burning the full
-/// 15 s [`SPAWN_TIMEOUT`] in [`spawn_shell`](TerminalHarness::spawn_shell)
-/// before erroring. 1.5 s is well above the ~50 ms a healthy WezTerm
-/// takes to answer `wezterm cli list --format json` on a quiet host.
-const AVAILABLE_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+/// The probe exists to tell a *hung* GUI (or a stale socket) from a
+/// reachable one, so the broker / spawn paths skip cleanly instead of
+/// burning the full 15 s [`SPAWN_TIMEOUT`] in
+/// [`spawn_shell`](TerminalHarness::spawn_shell) before erroring. A hung
+/// GUI never answers; a busy one answers late. This was 1.5 s, sized to the
+/// ~50 ms a healthy WezTerm takes on a quiet host — and on a host at load
+/// average ~72 (four agent sessions plus a cold cargo rebuild, 2026-09-21)
+/// a healthy GUI took longer than that, so `available()` reported the daily
+/// driver as absent and a `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` run
+/// failed outright. 5 s keeps the probe well under the 15 s
+/// [`SPAWN_TIMEOUT`] it exists to pre-empt while tolerating a busy host; a
+/// dead socket still fails inside it, because `wezterm cli` gives up on
+/// its own after ~4.8 s of connect retries.
+const AVAILABLE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Geometry returned by [`WezTermHarness::pane_size`].
 ///
@@ -211,7 +218,7 @@ impl WezTermHarness {
     ///    means the suite is not running inside WezTerm.
     /// 2. `wezterm` binary is on `$PATH`.
     /// 3. A live `wezterm cli list --format json` round-trip succeeds
-    ///    within [`AVAILABLE_PROBE_TIMEOUT`] (1.5 s).
+    ///    within [`AVAILABLE_PROBE_TIMEOUT`].
     ///
     /// ## Why the probe is necessary
     ///
@@ -226,11 +233,11 @@ impl WezTermHarness {
     /// ## Why a separate timeout budget
     ///
     /// [`QUERY_TIMEOUT`] (10 s) is sized for `wezterm cli list` against
-    /// a *healthy* GUI on a loaded CI host. Reusing it here would
-    /// re-introduce the stall: an unreachable GUI would burn 10 s per
-    /// probe before the gate tripped. [`AVAILABLE_PROBE_TIMEOUT`] (1.5 s)
-    /// is bounded by what a *responsive* GUI answers in, plus generous
-    /// slack — see the constant's own doc for the rationale.
+    /// a *healthy* GUI on a loaded host; reusing it here would let an
+    /// unreachable GUI burn 10 s per probe. [`AVAILABLE_PROBE_TIMEOUT`]
+    /// (5 s) sits between that and the 1.5 s first tried, which
+    /// misreported a healthy GUI as absent under ordinary agent load — see
+    /// the constant's own doc for the numbers.
     ///
     /// ## Caching
     ///
@@ -1231,12 +1238,12 @@ mod tests {
             !avail,
             "available() must return false when WEZTERM_UNIX_SOCKET points at a non-existent socket",
         );
-        // 3 s upper bound: ~2× the probe timeout (1.5 s) so a clean
-        // timeout still fits; well below the 15 s spawn timeout that
+        // 10 s upper bound: 2× the probe timeout (5 s) so a clean
+        // timeout still fits; below the 15 s spawn timeout that
         // previously fired on every test in this state.
         assert!(
-            elapsed <= Duration::from_secs(3),
-            "available() took {elapsed:?} — must fail fast (<=3s) on an unreachable GUI",
+            elapsed <= Duration::from_secs(10),
+            "available() took {elapsed:?} — must fail fast (<=10s) on an unreachable GUI",
         );
     }
 
