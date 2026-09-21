@@ -20,9 +20,9 @@ checks four things and prints one line per shape:
 4. **Area membership** — every row is dispatched inside its package's area, and
    every selected area has a row document whether or not it executes anything.
 
-Run from the repository root:
-
-    python3 features/2026-09-19-direct-cell-execution/spikes/row-equality.py
+Run from the repository root, against this spec's `spikes/` directory
+wherever its lifecycle currently places it (`features/` or
+`features/_completed/`). It refuses to run once the list projection is gone.
 """
 
 from __future__ import annotations
@@ -31,7 +31,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+# Found by walking up, not by a fixed depth: closing a spec moves it between
+# lifecycle directories, and a counted `parents[n]` then names the wrong root.
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "scripts" / "ci" / "affected_scope.py").is_file()
+)
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 import affected_scope  # noqa: E402
@@ -162,6 +168,19 @@ def check(name: str, document: dict, lists_track_cells: bool = True) -> list[str
 
 
 def main() -> int:
+    # Phase 8 retired the environment-list projection this proof compares
+    # against, so the migration step it evidences can no longer be re-run. The
+    # properties it proved about the rows are asserted continuously by
+    # `scripts/ci/test_resolved_plan.py::RowAdapterOracleTests`.
+    if "matrix" not in legacy_scope_document(plan([], force_all=True)):
+        print(
+            "row-equality: the environment-list projection was retired in Phase 8; "
+            "this spike records Migration step 1 and cannot be re-run. "
+            "RowAdapterOracleTests in scripts/ci/test_resolved_plan.py carries "
+            "its row properties forward.",
+            file=sys.stderr,
+        )
+        return 2
     everything = plan([], force_all=True)
     executing_cells = [
         cell for cell in everything["cells"] if cell["execution"] == "execute"

@@ -6211,13 +6211,20 @@ class ArchiveInventoryClosureTests(unittest.TestCase):
 
 
 #: The Phase 1 plan corpus this feature's oracles compare against
-#: (`spikes/plans/README.md` records how each file was produced).
-CORPUS_PLANS = (
-    ROOT
-    / "features"
-    / "2026-09-19-direct-cell-execution"
-    / "spikes"
-    / "plans"
+#: (`spikes/plans/README.md` records how each file was produced). Found by the
+#: spec's `{date}-{name}` alone: closing a spec moves it between lifecycle
+#: directories, and a path spelling one out went stale — and silently skipped
+#: the oracle — the moment this one was closed.
+CORPUS_PLANS = next(
+    (
+        candidate
+        for lifecycle in ("", "_completed", "_unscheduled")
+        for candidate in (
+            ROOT / "features" / lifecycle / "2026-09-19-direct-cell-execution" / "spikes" / "plans",
+        )
+        if candidate.is_dir()
+    ),
+    None,
 )
 
 #: Oracle for every fixture that reaches for the area-local row adapter.
@@ -6313,8 +6320,13 @@ class DirectExecutionOracleTests(ApplyFixture):
         self.assertIsNone(seam, "this workspace has no seam; the fixture below has")
 
     def test_the_real_pr_shape_selects_what_the_phase_1_corpus_recorded(self) -> None:
-        if not (CORPUS_PLANS / "pr.json").is_file():
-            self.skipTest("the Phase 1 plan corpus is not present")
+        # A failure, not a skip: the corpus is committed, so its absence means
+        # it moved or was deleted, and a skip would retire this oracle unseen.
+        self.assertIsNotNone(
+            CORPUS_PLANS,
+            "the Phase 1 plan corpus of 2026-09-19-direct-cell-execution was not "
+            "found in any features/ lifecycle directory",
+        )
         corpus = json.loads((CORPUS_PLANS / "pr.json").read_text(encoding="utf-8"))
         metadata = load_metadata(ROOT)
         packages = workspace_packages(metadata)
@@ -6352,14 +6364,31 @@ class DirectExecutionOracleTests(ApplyFixture):
                 for cell in document["cells"]
             ]
 
-        # Selection is byte-identical to the corpus the Phase 1 baseline
-        # froze: same cells, same packages, same deferred environments. The
-        # volatile facets (head, build keys, job estimate) are deliberately
-        # not compared.
-        self.assertEqual(cells_of(corpus), cells_of(plan))
+        # The corpus predates `2026-09-19-less-brittle`, which selects the
+        # archive-path guard on every Rust change: one guard-only lint cell
+        # for its owner, and that owner's package record. That addition is
+        # named exactly here and set aside, so it cannot hide any other drift.
+        guard_only = [cell for cell in plan["cells"] if cell.get("companions_only")]
+        self.assertEqual(
+            [("test-toolkit", "ubuntu-latest", "lint", "execute", "pending")],
+            cells_of({"cells": guard_only}),
+        )
+        guard_owners = {cell["package"] for cell in guard_only}
+        selected = {
+            "cells": [cell for cell in plan["cells"] if not cell.get("companions_only")],
+            "packages": [
+                entry for entry in plan["packages"] if entry["package"] not in guard_owners
+            ],
+        }
+
+        # Otherwise selection is byte-identical to the corpus the Phase 1
+        # baseline froze: same cells, same packages, same deferred
+        # environments. The volatile facets (head, build keys, job estimate)
+        # are deliberately not compared.
+        self.assertEqual(cells_of(corpus), cells_of(selected))
         self.assertEqual(
             [entry["package"] for entry in corpus["packages"]],
-            [entry["package"] for entry in plan["packages"]],
+            [entry["package"] for entry in selected["packages"]],
         )
         self.assertEqual(
             sorted(entry["name"] for entry in corpus["deferred_environments"]),

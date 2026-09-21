@@ -14,9 +14,9 @@ workflow call depth and the unique reusable-workflow count, read from the
 shipped YAML. It exits non-zero if the planner's own guard would refuse any of
 these plans.
 
-Run from the repository root:
-
-    python3 features/2026-09-19-direct-cell-execution/spikes/capacity.py
+Run from the repository root, against this spec's `spikes/` directory
+wherever its lifecycle currently places it (`features/` or
+`features/_completed/`); the script finds the repository root itself.
 """
 
 from __future__ import annotations
@@ -27,7 +27,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+# Found by walking up, not by a fixed depth: closing a spec moves it between
+# lifecycle directories, and a counted `parents[n]` then names the wrong root.
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "scripts" / "ci" / "affected_scope.py").is_file()
+)
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 import affected_scope  # noqa: E402
