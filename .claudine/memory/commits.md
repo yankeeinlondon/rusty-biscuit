@@ -748,3 +748,23 @@ belong here.
   the CLI test file reveals which library symbols the tests reference,
   and any of those symbols' defining file belongs with the CLI commit
   rather than the library one.
+- A pre-implementation spec review — flipping `reviewed: false` to `true`
+  on a still-`draft-spec` fix without adding a `review-N.md` file or
+  bumping `review_iterations` past 0 — is a separate shape from the
+  cycle-close entries above. The spec is being *refined* by the author
+  in response to review feedback, not closing an implementation cycle;
+  the body changes are author rulings recorded inline at the requirement
+  they govern, a "Review Boundaries and Existing Contracts" section
+  that names which contracts were checked, and a rebuilt Open Questions
+  block listing the resolved rulings. Subject shape is still
+  `planning(<area>): record review findings for <fix>` (or
+  `... record review 1 findings ...` when the spec is being reviewed for
+  the first time), but the body's tone is "the author ruled on the
+  reviewer's findings" rather than "cycle N is closed". `status` stays
+  `draft-spec`, `implemented` stays `false`, and `review_iterations`
+  does NOT bump — the bump arrives when the implementation lands and a
+  real `review-N.md` flips `implemented: true`. Mixing this with a
+  cycle-close body overstates the work; splitting it from the eventual
+  cycle-close is correct because the cycle close carries
+  `implemented: true` and an `next:` pointer, which the spec-only
+  review does not yet have.
