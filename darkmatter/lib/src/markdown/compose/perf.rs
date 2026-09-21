@@ -480,10 +480,8 @@ pub struct ComposePerfReport {
 
 /// Named compose pipeline stages for type-safe metric identification.
 ///
-/// Variants are listed in pipeline execution order, matching
-/// `ComposeOperation::default_order()`. The listing is for readers only: the
-/// order of metrics in a report comes from `PerfMetricKind`, which indexes the
-/// collector, not from this enum.
+/// Variants are listed in pipeline execution order so reports have
+/// a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
     FrontmatterInterpolation,
@@ -495,14 +493,14 @@ pub enum ComposeStage {
     Interpolation,
     ShellExpansion,
     ShellBlocks,
-    LinkResolve,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
     TransclusionApply,
+    LinkResolve,
+    LinkNormalization,
     Cleanup,
     Normalization,
-    LinkNormalization,
 }
 
 impl std::fmt::Display for ComposeStage {
@@ -517,14 +515,14 @@ impl std::fmt::Display for ComposeStage {
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
             Self::ShellBlocks => "shell blocks",
-            Self::LinkResolve => "link resolve",
             Self::TransclusionParse => "transclusion parse",
             Self::TransclusionPrepare => "transclusion prepare",
             Self::TransclusionResolve => "transclusion resolve",
             Self::TransclusionApply => "transclusion apply",
+            Self::LinkResolve => "link resolve",
+            Self::LinkNormalization => "link normalization",
             Self::Cleanup => "cleanup",
             Self::Normalization => "normalization",
-            Self::LinkNormalization => "link normalization",
         })
     }
 }
