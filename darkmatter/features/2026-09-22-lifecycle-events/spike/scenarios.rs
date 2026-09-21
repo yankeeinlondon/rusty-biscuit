@@ -255,3 +255,22 @@ fn blocked_explicit_downgrade_in_normal_recovery_allows_retry() {
     assert_eq!(engine.pending().request, Request::Recover(Control::Retry));
     assert!(!engine.finalized());
 }
+
+#[test]
+fn publisher_failure_uses_registered_error_and_cleanup_roles() {
+    let mut engine = Engine::new(publisher()).unwrap();
+    event(&mut engine, Role::Before, Outcome::default());
+    event(&mut engine, Role::Initialize, Outcome::default());
+    answer(&mut engine, Reply::Prepared(Ok(())));
+    event(&mut engine, Role::Composed, Outcome::default());
+    event(&mut engine, Role::After, Outcome::default());
+    work(&mut engine, WorkResult::Failed(61), false);
+    assert_eq!(engine.profile().name(Role::Failure), "publisher.rejected");
+    assert_eq!(engine.error(), Some(61));
+    event(&mut engine, Role::Failure, Outcome::default());
+    assert_eq!(engine.profile().name(Role::Finalize), "publisher.closed");
+    assert_eq!(engine.error(), Some(61));
+    event(&mut engine, Role::Finalize, Outcome::default());
+    assert_eq!(engine.pending().request, Request::Done);
+    assert_eq!(engine.error(), Some(61));
+}

@@ -93,8 +93,9 @@ identity reset; they are not equivalence evidence for all refusal routes.
 
 The publisher runs through the same engine with `publisher.published`,
 `publisher.rejected`, and `publisher.closed` mapped to outcome/cleanup roles.
-Before/after ordinary events do not acquire terminal privileges from their
-names. This demonstrates a non-agent use of the protocol, though not yet a
+Both successful publication and a typed publication failure reach the registered
+outcome and cleanup roles. Before/after ordinary events do not acquire terminal
+privileges from their names. This demonstrates a non-agent use of the protocol, though not yet a
 complete publishing integration or reusable parser/effect boundary.
 
 The aliases `start` and `composed` resolve to the same role. Registered names
@@ -166,10 +167,11 @@ Executed on macOS using nextest through package-area recipes:
 | Working directory | Command | Result |
 |---|---|---|
 | `claudine/` | `just test-library --test lifecycle_control_flow_spike` | 4 passed, 0 skipped |
-| `darkmatter/` | `just test --test lifecycle_control_flow_spike` | 14 passed, 0 skipped |
+| `darkmatter/` | `just test --test lifecycle_control_flow_spike` | 15 passed, 0 skipped |
 | `claudine/` | `just test-cli --bin claudine harness_orch::loop_control::tests` | 118 passed; 1,663 unrelated tests filtered out |
-| `darkmatter/` | `just lint` | Pending |
-| `claudine/` | `just lint` | Pending |
+| `darkmatter/` | `just lint` | Four Rust package lint checks passed; Zed WASM check blocked by missing `wasm32-wasip2` target |
+| `darkmatter/` | `just _lint darkmatter` | Passed after the final publisher failure scenario was added |
+| `claudine/` | `just lint` | Passed, including 8 error-transport guards |
 
 The catch comparison checks **24,192 input combinations**; control admission
 checks **160 combinations**. These are assertions within tests, not thousands
@@ -180,7 +182,8 @@ passes in this checkout; they do not run against the prototype.
 All new scenarios are silent L1 tests: no shell, network, audio, provider,
 terminal-window, or browser work. The existing CLI test binary emitted a macOS
 linker warning about the size of its unwind table; its tests passed. No other
-OS execution evidence was collected in this spike.
+OS execution evidence was collected in this spike. The Zed extension target is
+unrelated to the changed test-only protocol; it was not installed for this work.
 
 ## Limits and next implementation gate
 
