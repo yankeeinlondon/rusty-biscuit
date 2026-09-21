@@ -2513,18 +2513,19 @@ _status_recent scope="area":
     def age(mtime):
         secs = max(0, int(now - mtime))
         if secs < 3600:
-            return str(max(1, secs // 60)) + "m ago"
+            return str(max(1, secs // 60)) + "m"
         if secs < 86400:
-            return str(secs // 3600) + "h ago"
-        return str(secs // 86400) + "d ago"
+            return str(secs // 3600) + "h"
+        return str(secs // 86400) + "d"
 
     def hyperlink(path, label):
         target = "file://" + os.path.abspath(path)
         return "\033]8;;" + target + "\033\\" + label + "\033]8;;\033\\"
 
-    def meta_of(row):
-        unit = " file" if row[3] == 1 else " files"
-        return str(row[3]) + unit + " · " + age(row[4])
+    # Every cell is padded on its own so `·` and `ago` line up down the whole
+    # report, not just within one heading: (name, count, unit, age).
+    def cells(row):
+        return (row[1], str(row[3]), "file" if row[3] == 1 else "files", age(row[4]))
 
     def scan(area_dir):
         rows = []
@@ -2561,9 +2562,11 @@ _status_recent scope="area":
         rows.sort(key=lambda row: row[4], reverse=True)
         return rows
 
-    def block(rows, indent, heading_style, spaced):
-        name_w = max(len(row[1]) for row in rows)
-        meta_w = max(len(meta_of(row)) for row in rows)
+    def widths(rows):
+        return [max(len(cells(row)[i]) for row in rows) for i in range(4)]
+
+    def block(rows, widths, indent, heading_style, spaced):
+        name_w, count_w, unit_w, age_w = widths
         for kind, label in (("features", "Features"), ("fixes", "Fixes")):
             group = [row for row in rows if row[0] == kind]
             if not group:
@@ -2572,9 +2575,16 @@ _status_recent scope="area":
             if spaced:
                 print()
             for row in group:
-                name = hyperlink(row[2], row[1]) + " " * (name_w - len(row[1]))
-                trail = DIM + meta_of(row).ljust(meta_w) + "   " + row[5] + RESET
-                print(indent + "  " + name + "   " + trail)
+                name, count, unit, since = cells(row)
+                meta = (
+                    count.rjust(count_w) + " " + unit.ljust(unit_w)
+                    + " · " + since.rjust(age_w) + " ago"
+                )
+                print(
+                    indent + "  "
+                    + hyperlink(row[2], name) + " " * (name_w - len(name))
+                    + "   " + DIM + meta + "   " + row[5] + RESET
+                )
             if spaced:
                 print()
 
@@ -2587,14 +2597,17 @@ _status_recent scope="area":
         )
         print()
 
+    def nothing_recent(indent):
+        print(indent + DIM + ITALIC + "nothing touched in the " + window + RESET)
+        print()
+
     if SCOPE == "area":
         rows = scan(os.getcwd())
         title(sniff("area") or os.path.basename(os.getcwd()))
         if rows:
-            block(rows, "  ", BOLD + BLUE + UNDERLINE, True)
+            block(rows, widths(rows), "  ", BOLD + BLUE + UNDERLINE, True)
         else:
-            print("  " + DIM + ITALIC + "nothing touched in the " + window + RESET)
-            print()
+            nothing_recent("  ")
         sys.exit(0)
 
     if SCOPE != "all":
@@ -2606,31 +2619,32 @@ _status_recent scope="area":
     if not areas:
         print("_status_recent: `sniff repo package-areas` found none", file=sys.stderr)
         sys.exit(1)
-    title("all package areas")
 
-    listings = 0
-    shown = 0
+    # Scanned in full before anything prints: the columns are sized across
+    # every area so one heading's long name does not shift its neighbours.
+    found = []
     for area in areas:
-        area_dir = root if area == "root" else os.path.join(root, area)
-        rows = scan(area_dir)
-        if not rows:
-            continue
-        if shown:
-            print()
-        shown += 1
-        listings += len(rows)
-        print("  " + BOLD + CYAN + "▌ " + area + RESET)
-        block(rows, "    ", BOLD + BLUE, False)
+        rows = scan(root if area == "root" else os.path.join(root, area))
+        if rows:
+            found.append((area, rows))
 
+    title("all package areas")
+    if not found:
+        nothing_recent("  ")
+        sys.exit(0)
+
+    shared = widths([row for _, rows in found for row in rows])
+    for index, pair in enumerate(found):
+        if index:
+            print()
+        print("  " + BOLD + CYAN + "▌ " + pair[0] + RESET)
+        block(pair[1], shared, "    ", BOLD + BLUE, False)
+
+    listings = sum(len(rows) for _, rows in found)
+    noun = " listing across " if listings == 1 else " listings across "
+    areas_noun = " package area" if len(found) == 1 else " package areas"
     print()
-    if shown:
-        noun = " listing across " if listings == 1 else " listings across "
-        areas_noun = " package area" if shown == 1 else " package areas"
-        print(
-            "  " + DIM + str(listings) + noun + str(shown) + areas_noun + RESET
-        )
-    else:
-        print("  " + DIM + ITALIC + "nothing touched in the " + window + RESET)
+    print("  " + DIM + str(listings) + noun + str(len(found)) + areas_noun + RESET)
     print()
 
 # show the directory structure of the given directory
