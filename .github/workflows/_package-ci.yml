@@ -1061,6 +1061,16 @@ jobs:
         with:
           name: ci-resolved-plan
           path: ci-artifacts/ci-resolved-plan
+      # The archive-path guard's recipe is `cargo nextest run …`, and this is the
+      # one job that runs a nextest-driven suite without being a test job, so it
+      # is the one job that never installed nextest. Without this step the guard
+      # fails on the runner with "no such command: `nextest`" — and only there:
+      # every developer host has nextest, so the local hook cannot catch it and
+      # reports the ubuntu-latest execution as outstanding instead. Gated on the
+      # guard being attached, so a lint cell without it does not pay the install.
+      - name: Install cargo-nextest (archive-path guard)
+        if: ${{ !cancelled() && contains(inputs.companion-suites, 'archive-path-guard') }}
+        uses: taiki-e/install-action@nextest
       # The lint half of this package's companion suites — only the suites that
       # declare a `lint_recipe` in the registry, which is why a package whose
       # companions are test-only leaves this step with nothing to run instead
