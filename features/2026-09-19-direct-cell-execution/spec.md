@@ -96,7 +96,7 @@ message_to_agent: |-
        six top-level jobs; it has eight (`build`, `area-drift`). The fix is
        pinned by `the_ci_documentation_states_the_implemented_behavior`.
     4. **Optional follow-ups, not defects:** retire the redundant
-       `execution_path` field (plan schema v5 → v6); the `local_evidence.py`
+       `execution_path` field (plan schema v6 → v7); the `local_evidence.py`
        version-1 `scope["matrix"]` read; the unreachable `package_cells`
        `KeyError`. See `acceptance.md` § "Known gaps and follow-ups".
     5. **Run the hook suite with `env -u CDPATH`** on the development Mac.

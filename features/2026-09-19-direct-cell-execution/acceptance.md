@@ -260,7 +260,7 @@ hosted run, which the implementing sessions were not allowed to make.
 ## Known gaps and follow-ups (not blocking)
 
 - **`execution_path` is redundant.** It admits only `rows`. Removing it bumps
-  the plan schema from v5 to v6 for no behavior change, so it was left for an
+  the plan schema from v6 to v7 for no behavior change, so it was left for an
   optional follow-up (Phase 8 log, "Decisions worth reading").
 - **`local_evidence.py`'s version-1 path still reads `scope["matrix"]`.** It
   verifies version-1 notes already in the wild, from a caller-supplied legacy
