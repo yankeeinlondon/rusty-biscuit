@@ -2,7 +2,10 @@
 created: 2026-09-20
 status: draft-spec
 clarified: false
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6-astra
+reviewed_on: 2026-09-20
+review_iterations: 0
 needs_rulings: false
 implemented: false
 $schema:
@@ -85,12 +88,32 @@ or hands off through, the active-document coordinator, and each is measured
 against the equivalence contract in `docs/topics/composition.md` ("a document
 reached through a proxy behaves like the same document invoked directly").
 
+## Review Boundaries and Existing Contracts
+
+This remains a draft specification, not an implementation report. Preserve the
+author's decisions about per-composition context, post-checked loops, and result
+suffixes. The four interactions the review raised have since been ruled on by
+the author; see **Open Questions** for the index.
+
+The main contracts checked during this review are:
+
+- Claudine's [composition contract](../../docs/topics/composition.md), including
+  launch-anchored context, target identity, sequence ownership, and dry runs.
+- Claudine's [lifecycle contract](../../docs/topics/lifecycle.md), including
+  shell-free initialization, early approval, and atomic mapping assignments.
+- Darkmatter's [frontmatter shell expansion contract](../../../darkmatter/docs/inline/fm-shell-expansion.md),
+  including whole-value parsing, conditional expressions, and cache behavior.
+
+Source paths beginning with `lib/`, `cli/`, or `docs/` below are relative to
+the Claudine package area; other unlinked paths are repository-relative.
+
 ## Reported Failures
 
-Every reproduction below was run against a stub provider (an executable named
-`claude` that prints one line and exits `0`), so no model was involved and the
-results are deterministic. Each is small enough to become a test fixture as
-written.
+The draft author reports that every reproduction below was run against a stub
+provider (an executable named `claude` that prints one line and exits `0`), so no model was involved and the
+results do not depend on model behavior. This specification review checked the
+contracts and source; it did not independently rerun those probes. Turn each
+reproduction into an isolated fixture rather than running it in this checkout.
 
 ### F1. `ctx` is not re-evaluated for each composition run
 
@@ -366,9 +389,10 @@ for three runs, and gets four. This spec's first draft made that mistake. The
 page's own running example, `until: "_loop_count > 3"` above a body reading
 "Iteration N of 3", runs four times.
 
-`looping.md` was rewritten to the post-checked design alongside this draft, so
-and `composition.md` and `lifecycle.md` were given the same rule. What remains
-is deleting the unused engine and the characterization test (R7).
+`looping.md` was rewritten to the post-checked design alongside this draft, and
+`composition.md` and `lifecycle.md` were given the same rule. What remains
+is deleting the unused engine and adding the characterization test described
+in “One loop engine, one description of its timing” below.
 
 ### F7. A `proxy` inside a sequence `prompt:` task is refused
 
@@ -466,7 +490,8 @@ Every composition run in the F1 table observes its volatile `ctx` properties at
 the start of that run, once, and holds them stable for that run's body,
 frontmatter, schema evaluation, shell preflight, and lifecycle events.
 
-- **Volatile** means evidence the run itself can change: git working state
+- **Volatile** means evidence that can change between runs, including changes
+  made by another process: git working state
   (`file_changes`, and whatever backs `ctx.branch` and `ctx.worktree`, since a
   stage can create a branch). These move from invocation lifetime to
   composition-run lifetime.
@@ -481,6 +506,38 @@ frontmatter, schema evaluation, shell preflight, and lifecycle events.
 - **Sequence groups** (author's ruling, 2026-09-20): a serial group evaluates
   `ctx` once per task, like any other step. A **parallel** group evaluates it
   once for the group, so concurrent siblings share one view of the working tree.
+- **A parallel group shares at launch and refreshes on re-entry** (author's
+  ruling, 2026-09-20). Before any sibling starts, collect the `ctx` properties
+  mentioned by every task the group launches and capture that combined set once;
+  all siblings begin from it. A sibling that later retries, resumes, proxies, or
+  begins another loop iteration is a new composition run and captures its own
+  fresh evidence, exactly as it would outside a group. Siblings therefore stop
+  sharing one snapshot once one of them re-enters, which is intended: a recovery
+  path must see the working tree as it is, including what its siblings changed.
+- **Target identity stays task-specific.** Sharing repository evidence must not
+  share `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` across siblings
+  that choose different providers. Each task layers its resolved identity over
+  the shared evidence, as the existing composition contract requires.
+- **Requirements are read from the root page before `initialize`** (author's
+  ruling, 2026-09-20). A document that declares `initialize` starts in stages and
+  does not discover its body's includes until `initialize` has run. Before it
+  runs, scan the root document's own text, frontmatter, lifecycle blocks, and
+  body alike, for `ctx` mentions and capture those evidence groups then. That is
+  within the staged-boot contract, which permits "parsing the root document and
+  capturing its request context" before initialization and forbids only
+  following a body include. The scan reads text; it composes nothing, follows no
+  `::file`, and runs no shell.
+- **Same-run extension is not a refresh.** The post-`initialize` reread remains
+  in the same composition run. Collect the stabilized transclusion tree's
+  requirements without replacing already observed values. A property from a group
+  that was already observed is derived from that retained observation, not from a
+  second working-tree scan.
+- **The one exception is an include.** A transcluded file cannot be read before
+  `initialize`, which may be what creates it. If such a file is the first thing
+  in the run to mention a volatile group, that group is captured on first demand,
+  after `initialize`, and held for the rest of the run. State this exception in
+  the reference and pin it with a regression test, so it stays an exception and
+  does not become the general rule again.
 - **`current` refreshes once per event** (author's ruling, 2026-09-20): every
   read of `current` within one event's notification fields and stack sees the
   same value, and the next event sees a fresh one. That is today's behavior.
@@ -507,7 +564,13 @@ document ends the loop and returns the handoff to the coordinator, per
   untouched, so that a later legitimate request cannot be rejected against it.
 
 The last point is a separate invariant and should be asserted separately: the
-ledger records committed handoffs, never requests.
+ledger records committed handoffs, never requests. A commit means the coordinator
+has resolved the target and accepted its cycle/hop checks, then atomically
+adopted it. It does not mean the target eventually succeeds: an adopted target
+that fails initialization or validation remains in the chain. Resolution,
+overlay-evaluation, cycle, and hop-limit refusals do not append an entry.
+A handoff from `success` or `failure` skips the source's ordinary `finalize`;
+a handoff from `finalize` does not run that event again.
 
 ### R3. Shell discovery and execution resolve the same command bytes
 
@@ -520,7 +583,16 @@ an overlaid target.
 
 `NotPreApproved` must remain a bug sentinel. It must not become a soft warning
 that lets the run continue with a fact silently missing, which is what happens
-today when the block carries `when_error`.
+today when the block carries `when_error`. Neither `when_error` nor lifecycle
+`no_error` may suppress a pre-approval invariant failure. Ordinary command
+failures retain their documented recovery behavior.
+
+Use the existing state-precedence rules, including target defaults, inherited
+state, immediate proxy overlays, explicit caller overrides, reserved sequence
+inputs, and transclusion-local `set.*`. Discovery must use the same resolver and
+source-relative base directory as execution. Discover commands in untaken
+branches without executing them. A fresh target still receives its full audit;
+reusing an approval never authorizes newly changed command bytes.
 
 ### R4. A lifecycle downgrade reaches the process outcome
 
@@ -535,6 +607,11 @@ action takes it, the run:
   `fail_fast` rules, and a loop iteration counts as a failed iteration.
 
 This holds on a first attempt and on a retried or resumed attempt alike.
+Preserve already emitted success communications, the existing failure/finalize
+event order, and recovery budgets. A successful retry, resume, or proxy recovery
+reports its eventual outcome rather than a stale error from the abandoned
+attempt. “Once” means one canonical diagnostic, not suppression of an author's
+explicit `warn` or failure notification.
 
 ### R5. `ctx` requirements are collected across the transclusion tree
 
@@ -544,6 +621,17 @@ recursively, including a file chosen by an interpolated `::file` reference. A
 transclusion tree is one composition run with one `ctx` (F1), so a partial and
 its parent observe the same value. "Only what is found on the page" continues to
 hold, with "the page" meaning the composed tree.
+
+Use the composition parser's rules for executable spans: fenced examples and
+interpolation literals must not trigger context discovery, and raw code
+inclusions must not be scanned as executable Markdown. Preserve transclusion
+conditions, per-file overrides, file-resolution policy, and existing cycle and
+depth limits. Discovery itself must not execute shell commands or side effects.
+Resolve context-dependent include paths in stages using already captured
+requirements; if expansion cannot finish safely before execution, return a
+source-attributed preparation error rather than silently supplying empty values.
+The scan must include lifecycle expressions and included frontmatter, not only
+rendered body text.
 
 ### R6. Remove the workarounds from the shipped PR prompts
 
@@ -603,9 +691,16 @@ engine is deleted, remove the "Implementation note" from `looping.md`.
 A `proxy` raised by a `prompt:` task's document is adopted within that step, as
 the reference describes: the target runs, the step's result is the final
 target's, the step does not advance early or restart, and the hop joins that
-step's chain. If a task is deliberately unable to host a handoff, correct the
-reference instead and make the refusal name the sequence, not a provider
-wrapper.
+step's chain. Implement that documented behavior; changing the reference to
+permit refusal does not satisfy this fix.
+
+Preserve task inputs, task identity, timing, output attribution, setup/teardown,
+and budget accounting across the handoff. Setup and teardown still run once per
+task. Commit the final target's result to the sequence output once. A failed
+target follows the existing `fail_fast` policy. Parallel siblings have independent
+handoff chains, so two siblings may legitimately adopt the same target; cycle
+and hop checks still apply within each chain. Direct provider wrappers continue
+to reject proxy requests because they do not own a document coordinator.
 
 ### R9. A lifecycle step can read a command's result
 
@@ -637,13 +732,13 @@ value:
 | Suffix | Value | Reads as |
 |---|---|---|
 | `::ok` | boolean: the command exited `0` | `when: "tree_is_clean"` |
-| `::exit-code` | number: the exit status | `when: "lint == 2"` |
-| `::result` | object: `{ ok, code, stdout, stderr }` | `when: "push.ok"`, `{{ push.stderr }}` |
+| `::exit-code` | number, or null for an allowed timeout: the exit status | `when: "lint == 2"` |
+| `::result` | object: `{ ok, code, stdout, stderr }` | `when: "diff.ok"`, `{{ diff.stderr }}` |
 
 ```yaml
 tree_is_clean: "$(git diff --quiet)::ok"
 lint:          "$(just lint)::exit-code::timeout:120"
-push:          "$(git push --dry-run origin HEAD)::result"
+diff:          "$(git diff --quiet)::result"
 ```
 
 Rules:
@@ -653,8 +748,8 @@ Rules:
   order.
 - **No suffix means what it means today**: the value is trimmed stdout, and a
   non-zero exit fails the composition.
-- **The command text is untouched.** What is discovered, approved, and executed
-  is exactly what is inside the parentheses. A suffix is never part of the
+- **The command text is untouched.** Discovery and execution use the same early-resolved command bytes
+  after argument interpolation and existing command parsing. A suffix is never part of the
   approved bytes, so approving `$(cmd)` covers `$(cmd)::ok`.
 - **Only an exit status is forgiven.** A command that is not on the host, is
   blacklisted, or is denied still fails as it does today. A timeout still fails
@@ -664,44 +759,114 @@ Rules:
 - **Values are typed.** They follow the whole-value rule, so `::ok` is a real
   boolean and `::result` a real object whose members are reachable with dotted
   access. `stdout` and `stderr` are trimmed the way plain stdout is today.
-- **The cache stores the whole outcome.** The per-compose command cache is keyed
-  on the command, so `$(cmd)` and `$(cmd)::result` in one document run the
+- **The cache stores the whole outcome, not a suffix-specific value.** Within
+  one execution context and timeout, the per-compose cache is keyed on the command, so `$(cmd)` and `$(cmd)::result` in one document run the
   command once. The cached entry therefore has to hold status, stdout, and
-  stderr, not just the text.
+  stderr, not just the text. Reuse is valid only under equivalent execution
+  context and timeout; a timeout override cannot silently reuse an outcome
+  obtained with a different deadline. Concurrent identical requests must share
+  one execution. `::no-cache` neither reads nor populates this cache. An unsuffixed
+  reader of a cached non-zero result still fails.
 - **`$schema` sees the expanded value.** A property declared `boolean` validates
-  against what `::ok` produced. Validation of a value still holding `$(…)` is
-  already deferred until after expansion; nothing changes there.
-- **They work wherever `$(…)` works**: a top-level frontmatter value, and the
-  lifecycle `set` form above. The body's `::shell` directives splice text and
-  are not affected.
+  against what `::ok` produced. Existing validation defers values still holding
+  `$(…)`; require a concrete post-expansion validation test, including a type
+  mismatch, rather than assuming deferral alone validates the new result types.
+- **Supported locations** are a top-level frontmatter value and the lifecycle
+  `set` form above. The body's `::shell` directives splice text and are not
+  affected.
+
+**A result suffix applies to every shape a `$()` can take** (author's ruling,
+2026-09-20). Darkmatter parses the expression and launches each executable
+itself, so these rules do not depend on the host's shell. The shapes are a single
+command, an `&&`/`||` chain, and a ternary; `|` and `;` are rejected at parse
+time today ("Shell pipes are not allowed", "Command chaining (;) is not
+allowed") and stay rejected.
+
+| Shape | `code` | `stdout` / `stderr` |
+|---|---|---|
+| single command | its exit status | its streams |
+| `a && b`, `a \|\| b`, longer chains | the status of the **last command that actually ran**, which is what `$?` would hold | the streams of every command that ran, in execution order, joined as an unsuffixed chain joins stdout today |
+| ternary, selected branch is a command or chain | as the rows above | as the rows above |
+| ternary, selected branch is a **literal** | `0` | `stdout` is the literal's text; `stderr` is empty |
+
+`ok` is `code == 0` in every row.
+
+The literal row is deliberate. The ternary is what ran: its condition was
+evaluated, it selected a branch, and nothing failed, so `0` is the truthful
+status and the selected text is its output. `$( has_command('just') ? just lint
+: 'skipped' )::result` is `{ ok: true, code: 0, stdout: "skipped", stderr: "" }`
+on a host without `just`.
+
+So `$(git diff --quiet ref || echo handled)::ok` is `true` when the fallback
+ran, exactly as the unsuffixed form yields `handled` today. An author who needs
+to know *which* command in a chain failed gives each its own property.
+
+Three things are never turned into a value. A ternary whose **condition**
+raises is an expression error, as today. A command ended by a **signal** has no
+exit status and stays an execution failure; no number is invented for it. A
+**user interruption** keeps its cancellation outcome and must never surface as a
+recoverable `ok: false`. The existing rule that a `$()` must contain at least one
+real command in an executed position is unchanged.
 
 This lives in Darkmatter's frontmatter shell expansion. Update
 `darkmatter/docs/inline/fm-shell-expansion.md` and the suffix handling in the
 language server (completion, hover, and the unrecognized-suffix diagnostic,
 which should now list all five).
 
-A named result on the lifecycle `shell` action is the companion for a command
-whose output *and* status are both wanted, and is worth deciding at the same
-time:
+**Lifecycle execution boundary.** Expand only whole-value shell expressions
+in mapping-based `set` assignments when that action actually executes, after
+its guard passes. They are discovered but never executed during preflight or a
+lifecycle-free dry run. A `set` in `start` is legal even when the document has
+`initialize`; a top-level bootstrap shell value in such a document remains
+forbidden. Reject shell-bearing assignments in `initialize`, including dead
+branches and catches, and retain the runtime prohibition in early
+blocked/failure/finalize routes before shell approval.
 
-```yaml
-- action: shell
-  command: "git diff --quiet"
-  capture: tree          # then: tree.code, tree.stdout, tree.stderr
-  no_error: true
-```
+Resolve command arguments at preflight using early-binding values and retain
+those approved bytes. Do not re-interpolate them against later runtime writes.
+All mapping values read the existing pre-write state, and no destination is
+updated unless every value succeeds. Executed external effects cannot be rolled
+back; document that limitation. A later action may read the typed result after
+the complete mapping commits. Nested objects and arrays are not a new recursive
+shell-execution surface.
+
+Each executed lifecycle assignment gets a fresh result-cache scope; duplicate
+commands within that assignment can share work. A command observed in `start`
+and again in `success` must execute again, since the agent may have changed its
+answer. Approval reuse and result reuse are separate lifetimes.
+
+**Reader's note:** the earlier `git push --dry-run` example conflicted with the
+unchanged blacklist. A read-only `git diff` example demonstrates result capture
+without suggesting that suffixes grant permission to run a blocked command.
+**`capture:` on the lifecycle `shell` action is deferred** (author's ruling,
+2026-09-20). `set: { tree: "$(cmd)::result" }` is the one way a lifecycle step
+reads a command's result in this fix. A `capture:` option would be a second
+state-write contract needing rules of its own (destination collisions, reserved
+names, value lifetime, timeout contents, and its relationship to `no_error`,
+which forgives a non-zero exit where `capture` would report one). It is additive
+and can be specified when a real prompt reads awkwardly without it.
 
 ### R10. The prompt-authoring guide reads this spec's state
 
 `prompts/_prompt.md` warns agents about each open defect here, and gates every
-warning on this file: a warning renders only while this spec is still at its
-active path and its finding id is absent from `fixed:` in the frontmatter above.
+warning on this specification's state. References identify it by
+`2026-09-20-lifecycle-handoff-gaps`, independently of its lifecycle directory.
+A warning renders while its finding id is absent from `fixed:` and the
+specification has not reached `completed`. Replace the guide's current literal
+active-path dependency as part of this requirement; resolve the directory
+identity through the existing file-resolution facilities. A missing or ambiguous
+specification must be reported, not treated as proof every defect was fixed.
 
 - When a requirement lands, add its finding id to `fixed:` in the same change.
   That is the whole maintenance step; the guide needs no edit.
-- When this spec is closed and moved, the guide's defect section disappears by
-  itself. Delete the then-dead section from `prompts/_prompt.md` afterward.
-- D1 and D2 are recorded the same way as the F findings.
+- Only the author closes the review cycle and moves this specification. After
+  completion, remove the obsolete guide section as documentation maintenance;
+  an implementation agent leaves the specification ready for review.
+- D1 and D2 are recorded the same way as the F findings. The guide currently
+  lacks warnings for the loop-engine documentation discrepancy and terminal
+  rendering defect; add relevant outstanding warnings or explicitly document
+  why they do not affect prompt authoring. Do not claim every defect is gated
+  unless the guide actually covers it.
 
 ### R11. The loop gate's lifecycle concerns see the loop's ambient values
 
@@ -752,26 +917,40 @@ workspace walks of 20–77 s per test on WSL2, so that host decides the answer:
 1. a 10-iteration loop whose body mentions `ctx.dirty_files`, before and after;
 2. a 5-hop proxy chain in which every page mentions a git-state property;
 3. a 10-step sequence with a parallel group of 4;
-4. a run that mentions **no** git-state property, which must not get slower at
-   all, since "only the properties found on the page" is the rule;
+4. a run that mentions **no** git-state property, which must incur no additional
+   git-state requests and no statistically meaningful regression, since only
+   properties found on the page should be evaluated;
 5. a prompt that transcludes ten partials, for R5.
 
 Report each as wall time and as counter deltas. The outcome is either "within
 noise on every host, proceed", or a named budget (for example, "a composition
 run's context capture stays under N ms on WSL2") that the plan carries as an
-acceptance criterion. If per-run capture is too costly somewhere, the fallback
-to evaluate is refreshing volatile evidence only when the previous run executed a
-`shell` action, a side effect, or an agent, rather than unconditionally.
+acceptance criterion. Use repeated warm and cold runs and record host, sample
+count, and variance;
+a single wall-clock sample is not a budget. Optimize discovery and evidence reuse
+within a run if capture is costly. Do not refresh only when Claudine knows it
+performed a mutation: another process can change the working tree, so that
+optimization would violate the required freshness contract.
 
 ## Open Questions
 
-None. Rulings made while drafting are recorded where they apply: F1 and R1
-(`ctx` per composition run, sequence groups, `current` per event), R7 (one
-post-checked loop engine, deleted without deprecation), and R9 (result
-suffixes). Two spellings considered for the exit status and not adopted were
-`$(cmd > $?)`, which the parser rejects as output redirection and which would
-put non-command text inside the approved bytes, and `$(cmd) > $?`, which borrows
-redirection for something that is not redirection.
+None. Every question raised while drafting and during review has an author's
+ruling dated 2026-09-20, recorded in the requirement it governs:
+
+| Ruling | Where |
+|---|---|
+| `ctx` is evaluated once for each composition run | F1, R1 |
+| a serial group evaluates once per task; a parallel group shares at launch and refreshes on re-entry | R1 |
+| `ctx` requirements are read from the root page before `initialize`; a transcluded file is the one exception | R1 |
+| `current` refreshes once per event; revisit when `prep` lands | R1 |
+| one post-checked loop engine; the pre-checked one is deleted without a deprecation period | R7 |
+| result suffixes `::ok`, `::exit-code`, `::result`, on every `$()` shape, a literal branch yielding `code: 0` | R9 |
+| `capture:` on the lifecycle `shell` action is deferred | R9 |
+
+Two spellings considered for the exit status and not adopted were `$(cmd > $?)`,
+which the parser rejects as output redirection and which would put non-command
+text inside the approved bytes, and `$(cmd) > $?`, which borrows redirection for
+something that is not redirection.
 
 ## Verification
 
@@ -783,8 +962,9 @@ reproduction above is already a minimal fixture.
   Run the `proxy` row both ways — with and without the source mentioning the
   property — and assert the same value, which pins first-mention independence.
   Assert a stable property (`ctx.cwd`, `ctx.repo_root`) is identical across the
-  same hop, and that `launch_context_constructions` and the sniff work counters
-  show no repeated identity, topology, or host discovery. Add a transclusion row
+  same hop. Require one prepared-context construction per new run and no
+  repeated identity, topology, or host discovery; volatile observations may
+  increase once per requested evidence group per run. Add a transclusion row
   asserting a `::file`d partial shares its parent's value.
 - **R2:** a looping source that proxies from `success`. Assert one iteration,
   the target's `initialize` fired, and the chain has exactly two entries. Add a
@@ -809,12 +989,15 @@ reproduction above is already a minimal fixture.
 - **R9:** table-driven, in Darkmatter: each suffix against a command that exits
   `0`, one that exits non-zero, and one that times out with and without
   `--allow-shell-timeout`, asserting value and type; two result suffixes on one
-  expression fail to parse; a suffix combined with `::timeout` and `::no-cache`
+  expression fail to parse; one row per shape in the R9 table, including an
+  `||` fallback that runs and a ternary selecting a literal branch; a suffix
+  combined with `::timeout` and `::no-cache`
   in both orders; `$(cmd)` and `$(cmd)::result` in one document execute once. In
   Claudine: a `start` stack that assigns with `set` and gates its next item on
   the value; a row proving the command was approved in preflight under its bare
   text; a row proving the same assignment in `initialize` is still rejected; the
-  `capture:` form exposing `code`, `stdout`, and `stderr` to a later `when:`.
+  typed `::result` assignment exposing `ok`, `code`, `stdout`, and `stderr`
+  to a later `when:`.
 - **R11:** the F8 document, asserting the gate message renders the iteration
   number on every pass, including the pass that ends the loop.
 - **R12:** a file containing only a literal, composed directly and transcluded,
@@ -831,6 +1014,41 @@ reproduction above is already a minimal fixture.
   a blocked push under each of `on_failure=ask`, `fix`, and `stop`; a fix that
   verifies on a later attempt; a fix that never verifies.
   `shipped_prompt_contract` stays green.
+
+Additional acceptance coverage:
+
+- Context: serial tasks observe earlier mutations; parallel tasks share initial
+  repository evidence but retain their own provider identity. Add recovery rows
+  for the parallel-group ruling (a sibling's retry sees its siblings' changes), a
+  branch change, a body-only property captured before `initialize`, and the
+  include exception captured after it. Count volatile observations separately from stable
+  discovery rather than requiring every sniff counter to remain unchanged.
+- Handoffs: refused resolution and cycle checks leave the chain unchanged;
+  an adopted target that fails still remains recorded. Sequence task teardown
+  and output publication happen once, including failure with `fail_fast: false`.
+- Shell results: failed mappings leave all destinations unchanged; false guards
+  and dry runs execute no lifecycle assignment; successive events recapture a
+  command's changed result. Test missing executables, denial, blacklist,
+  cancellation, timeout policy, concurrent cache reuse, and post-expansion type
+  errors. Approved bytes remain unchanged after an intervening runtime `set`.
+- Transclusion: local overlays, conditional and nested includes, cycles, fenced
+  examples, literal spans, and requirements used only in included lifecycle
+  frontmatter retain their existing parsing and policy boundaries.
+- Guide: test relocation by directory identity, completed status, and missing
+  or ambiguous lookup, using temporary copies rather than changing this spec's
+  `fixed:` list. Rendering: assert preserved text after stripping terminal
+  styling, at narrow widths and with color disabled, not exact ANSI sequences.
+
+Use canonical `just test`/`just test-l2` recipes and nextest for affected package
+areas. L1 CLI fixtures use Claudine CLI’s
+[`CliProcessFixture`](../../cli/tests/common/mod.rs), which isolates spawned
+commands from the developer’s environment, plus private repositories and audio
+spools, fake providers, and no real network or messaging. Real-terminal tests
+must not gain focus. Include macOS, Linux, native Windows, and WSL2 evidence;
+use portable test helpers for exit codes and timeouts instead of assuming POSIX
+shell commands work on Windows. Use only disposable local repositories for commit or push rehearsals; no real
+provider, remote push, or audible notification is needed. This review itself changes only the
+specification, so implementation tests are acceptance work, not review evidence.
 
 ## Out of Scope
 
