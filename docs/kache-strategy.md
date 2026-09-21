@@ -260,10 +260,8 @@ fails in ways that read as a missing key or a missing mount point.
 ## Low-space maxsize: **120GB**
 
 - `cargo-sweep`'s size unit is **decimal** and defaults to MB unsuffixed → 120GB = **111.8 GiB**.
-- Reference: a clean full workspace build+test (`just test`, 72 packages) = **71 G**, measured when
-  workspace members still used `debug = "line-tables-only"`. So ~41 GiB of headroom above a
-  legitimate pre-release run — now a conservative figure, since `debug = 0` (below) both shrinks
-  the artifacts and stops the unpacked `.o` files that accumulated alongside them.
+- Reference: a clean full workspace build+test (`just test`, 72 packages) = **71 G**, already with
+  `debug = "line-tables-only"`. So ~41 GiB of headroom above a legitimate pre-release run.
 - Sized from the sweep log, not a guess: single-target reclaims have hit 107 GiB, and live targets
   were observed at 222 G (`darkmatter`) and 135 G (`claudine`).
 - **Do not size a cap from a partial build.** My first estimate of 20GB came from `sniff` (one
@@ -278,22 +276,13 @@ to 150–200GB. If nothing ever approaches 120GB, it can come down.
 
 ## Other settings, deliberately unchanged
 
+- `[profile.dev] debug = "line-tables-only"` — already committed workspace-wide (`43056c8bc`).
+  Nothing to do.
 - `local_max_size` stays at 100GiB pending real post-purge usage data.
-- `[profile.dev] debug = 0`, workspace-wide. It was `"line-tables-only"` for
-  workspace members (`43056c8bc`) until 2026-09-19, when the macOS cost of that
-  setting came due: the dev default `split-debuginfo = "unpacked"` keeps each
-  codegen unit's `.o` alive in `target/debug/deps` to hold the DWARF, Cargo never
-  garbage-collects that directory, and every rebuild adds a generation. One
-  worktree reached **1,064,306 `.o` files in four days** — 98% of its `deps/`
-  entries, and enough that anything walking the directory stalled. Purging them
-  took it from 1,085,717 entries to 22,171. `split-debuginfo = "packed"` also
-  fixes the count but pays `dsymutil` on every link, which this workspace's
-  ~100 test binaries cannot absorb. Panic sites still report `file:line`
-  (`#[track_caller]` embeds it); only intermediate backtrace frames lose their
-  source locations. Set `debug = "line-tables-only"` locally when you need them.
-- The wildcard `[profile.dev.package."*"] debug = 0` is gone, now redundant under
-  the parent. It was enabled after dependency PDBs reached
-  34 GiB on the constrained Windows host. Independently measured on build-linux
+- `[profile.dev.package."*"] debug = 0` — enabled after dependency PDBs reached
+  34 GiB on the constrained Windows host. Cargo excludes workspace members
+  from this wildcard, so their backtraces retain line tables; dependency
+  frames lose source locations. Independently measured on build-linux
   (2026-08-01, 93% full) at ~45 G reclaimable against its `deps/`: DWARF
   compresses 1.97x versus 2.79x for code, so debug info is 58% of logical
   bytes but 67% of on-disk bytes, and third-party crates are 82% of `deps/`

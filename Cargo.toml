@@ -78,23 +78,15 @@ members = [
 exclude = ["schematic/schema", "darkmatter/dmls/zed-dmls"]
 
 [profile.dev]
-# No debug info, for anyone in the build. On macOS the dev default is
-# `split-debuginfo = "unpacked"`, which keeps every codegen unit's `.o` alive in
-# `target/debug/deps` to hold the DWARF, and Cargo never garbage-collects that directory:
-# each rebuild adds a generation rather than replacing one. Under `line-tables-only` it
-# reached 1.06M objects in four days here, which is slow enough to matter to anything that
-# walks the directory. Panic sites still report `file:line` (`#[track_caller]` embeds it);
-# only intermediate backtrace frames lose their source locations. Set
-# `debug = "line-tables-only"`, or `true` for a step-debugger, locally when you need them.
-debug = 0
-
-# Build scripts, proc macros, and their dependencies keep line tables. Not a preference:
-# under `debug = 0` the macOS linker emits a large proc-macro dylib whose LINKEDIT string
-# pool is mis-aligned, and `dlopen` then rejects it -- `sqlx-macros` (~10 MB) fails to load
-# and `sqlx` cannot compile. Reproduced deterministically both ways on aarch64-apple-darwin.
-# This scope is ~700 objects, against the ~1M that `[profile.dev]` itself produced.
-[profile.dev.build-override]
+# Keep panic/backtrace line numbers but drop full DWARF (variables/types) -- the bulk of
+# debug-build artifact size. Shrinks target/ substantially and speeds linking. Switch to
+# `debug = true` if you need a step-debugger (lldb/gdb) with variable inspection.
 debug = "line-tables-only"
+
+# Dependency frames do not need source locations in workspace backtraces.
+# Workspace members retain the line tables configured above.
+[profile.dev.package."*"]
+debug = 0
 
 [profile.profiling]
 inherits = "release"
