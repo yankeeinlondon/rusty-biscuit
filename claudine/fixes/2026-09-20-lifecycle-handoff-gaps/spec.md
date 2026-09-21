@@ -659,8 +659,7 @@ users, so there is no deprecation period.
 
 **Delete** `execute_loop` and `execute_loop_with_config` from
 `lib/src/composition/looping/engine.rs`, together with whatever only they use
-(`compute_is_last` is one candidate; confirm before removing). Both functions
-carry a "Scheduled for deletion" note naming this requirement. The sites to
+(`compute_is_last` is one candidate; confirm before removing). The sites to
 clear, from a whole-workspace search:
 
 | Site | What to do |
