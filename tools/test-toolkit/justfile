@@ -1,5 +1,28 @@
 # test-toolkit justfile
 
+# Scan repository source for compile-time paths that no archived run resolves
+#
+# One plain line on purpose: a `#!/usr/bin/env bash` body needs bash on PATH,
+# which native Windows does not guarantee, and this recipe has to work on
+# macOS, Linux, native Windows, and WSL2. It computes no diff of its own — the
+# scan scope is the CI planner's, read from the resolved plan that
+# BISCUIT_ARCHIVE_GUARD_PLAN names and inherited from the caller's environment.
+# With that variable unset the scan covers the full eligible tree, which is what
+# a standalone invocation means; set but unreadable is a hard error, never a
+# fallback to the full tree. `--no-capture` is load-bearing: the printed
+# mode and file count are the only thing separating an empty changed-file scan
+# from full-tree validation, and nextest hides a passing test's output.
+#
+# This is the ONE canonical spelling. `SUITE_REGISTRY`'s `archive-path-guard`
+# entry names it as that suite's `lint_recipe`, `_package-ci.yml`'s lint job
+# and `just ci-local` both reach it through `scripts/ci/companion_suites.py`,
+# and `ci_workflow_contracts` fails when the registry and this file disagree.
+# The scan skips `target`, `.git`, `node_modules`, `.gitnexus`, `examples`,
+# `fuzz`, and `scripts` — a documented limitation with a reason per entry in
+# `src/archive_guard.rs`, not a claim that those trees are never executed.
+archive-path-guard:
+    cargo nextest run -p test-toolkit --test archive_path_guard --no-capture
+
 # Verify that nextest slow-timeout configuration is honored
 verify-nextest-config:
     #!/usr/bin/env bash

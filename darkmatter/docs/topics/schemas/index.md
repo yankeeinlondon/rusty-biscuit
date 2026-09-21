@@ -32,6 +32,9 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
         - describes the grammar primitives (types, constraints, )
         - shows how to _define_ useful schemas in your project in Markdown and YAML
         - describes what a `schema-trigger` is and how to leverage them to activate schemas dynamically
+    - [Schema Definition](./definition.md)
+        - the complete grammar reference: every type, every constraint, and the full JSON Schema mapping
+        - also covers the `DarkmatterSchemas` library API and its entry points
     - [Schema Validation](./schema-validation.md)
         - shows how Darkmatter provides _schema validation_
         - describes how this can be utilized  

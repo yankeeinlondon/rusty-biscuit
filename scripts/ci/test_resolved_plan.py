@@ -10,10 +10,13 @@ Baseline for these numbers: `fixes/2026-09-11-cicd-cleanup/baseline-2026-09-11.m
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -23,8 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected_scope  # noqa: E402
 import build_key  # noqa: E402
+import cell_contract  # noqa: E402
 import schema  # noqa: E402
 from tool_guard import require_tools  # noqa: E402
+from pending_contracts import pending  # noqa: E402
 from affected_scope import (  # noqa: E402
     ENVIRONMENTS_CONFIG,
     ROOT,
@@ -42,6 +47,29 @@ from affected_scope import (  # noqa: E402
 )
 
 TODAY = date(2026, 7, 27)
+
+
+def dispatched_rows(plan: dict, package: str) -> list[dict]:
+    """Every dispatch row `ci.yml` hands out for `package`, across row sets."""
+    return [
+        row
+        for document in affected_scope.row_sets(plan).values()
+        for name in schema.ROW_SET_NAMES
+        for row in document[name]
+        if row["package"] == package
+    ]
+
+
+def producer_contracts(plan: dict, package: str) -> dict[tuple[str, str], dict[str, str]]:
+    """What each of `package`'s producer jobs resolves, by `(environment, gate)`.
+
+    The real resolver on the real rows: this is what a job reads instead of a
+    per-package environment list.
+    """
+    return {
+        (row["environment"], row["gate"]): cell_contract.contract(plan, row, "")
+        for row in dispatched_rows(plan, package)
+    }
 
 #: The one workspace member where `sniff repo package-area` disagrees with
 #: sniff's own area universe, measured 2026-09-11 over all 73 members and
@@ -180,8 +208,14 @@ class SelectionTests(PlannerFixture):
     """AC1: only impacted areas are selected, and nothing else appears."""
 
     def test_claudine_and_playa_source_selects_only_those_packages(self) -> None:
+        # `test-toolkit` is the third name because a Rust file is source the
+        # archive-path guard scans, and the guard is selected by what it
+        # checks. That selection is lint-only and is pinned in
+        # `test_affected_scope.py::ArchiveGuardOnlyCellTests`.
         plan = self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs")
-        self.assertEqual(["claudine", "playa"], self.job_packages(plan))
+        self.assertEqual(
+            ["claudine", "playa", "test-toolkit"], self.job_packages(plan)
+        )
 
     def test_claudine_and_playa_source_selects_those_two_as_source(self) -> None:
         # Non-pending: the half of AC1 that already holds. Guards against a
@@ -221,9 +255,11 @@ class SelectionTests(PlannerFixture):
     def test_ci_tooling_change_schedules_its_owner_and_nothing_else(self) -> None:
         # Until `scripts/` joined the root workspace these suites ran in a job
         # no plan selected. `repo-deps` owns them now, so the change reaches CI
-        # as an ordinary package job — and still only that one.
+        # as an ordinary package job. `affected_scope.py` is ALSO a declared
+        # input of the archive-path guard — it is where the guard's selection
+        # rule lives — so it selects that guard's lint-only owner beside it.
         plan = self.plan("scripts/ci/affected_scope.py")
-        self.assertEqual(["repo-deps"], self.job_packages(plan))
+        self.assertEqual(["repo-deps", "test-toolkit"], self.job_packages(plan))
         record = self.package_record(plan, "repo-deps")
         self.assertEqual("root", record["area"])
         self.assertEqual("package", plan["change_class"])
@@ -368,9 +404,10 @@ class DependentSeamTests(PlannerFixture):
         for environment, cell in checks.items():
             if environment != "ubuntu-latest":
                 self.assertNotIn("dependents", cell)
-        matrix = {entry["package"]: entry for entry in legacy_scope_document(plan)["matrix"]}
+        # The Linux check producer is handed the seam's arguments.
+        contract = producer_contracts(plan, "darkmatter")[("ubuntu-latest", "check")]
         self.assertEqual(
-            record["dependent_seam"]["check_args"], matrix["darkmatter"]["dependents_check_args"]
+            record["dependent_seam"]["check_args"], contract["dependents_check_args"]
         )
 
     def test_a_full_scope_run_attributes_no_dependents(self) -> None:
@@ -383,12 +420,16 @@ class AreaGroupingTests(PlannerFixture):
     """AC2 and AC15: area is derived from the manifest directory."""
 
     def test_claudine_and_playa_select_their_two_areas(self) -> None:
+        # `tools` rides along on every Rust change: it holds the archive-path
+        # guard's lint-only owner. Area derivation is what is under test here.
         plan = self.plan("claudine/lib/src/lib.rs", "playa/lib/src/lib.rs")
-        self.assertEqual(["claudine", "playa"], self.selected_areas(plan))
+        self.assertEqual(["claudine", "playa", "tools"], self.selected_areas(plan))
 
     def test_a_nested_area_is_its_own_area_not_its_parent(self) -> None:
         plan = self.plan("claudine/rendezvous/core/src/lib.rs")
-        self.assertEqual(["claudine/rendezvous"], self.selected_areas(plan))
+        self.assertEqual(
+            ["claudine/rendezvous", "tools"], self.selected_areas(plan)
+        )
 
     def test_the_dmls_crate_belongs_to_the_darkmatter_area(self) -> None:
         # Measured, not assumed: `sniff repo package-area` run from
@@ -398,9 +439,9 @@ class AreaGroupingTests(PlannerFixture):
         # the `dmls` crate itself. AC15 makes sniff the authority, so the
         # planner must reproduce this rather than the intuitive grouping.
         plan = self.plan("darkmatter/dmls/src/lib.rs")
-        self.assertEqual(["darkmatter"], self.selected_areas(plan))
+        self.assertEqual(["darkmatter", "tools"], self.selected_areas(plan))
         zed = self.plan("darkmatter/dmls/zed-dmls-cli/src/main.rs")
-        self.assertEqual(["darkmatter/dmls"], self.selected_areas(zed))
+        self.assertEqual(["darkmatter/dmls", "tools"], self.selected_areas(zed))
 
     def test_the_planners_area_matches_sniff_for_every_layout_the_repo_uses(
         self,
@@ -517,14 +558,13 @@ class TargetCoverageTests(PlannerFixture):
         ]
         self.assertEqual([], uncredited)
 
-    def test_no_matrix_entry_asks_for_every_target_by_flag(self) -> None:
+    def test_no_package_record_asks_for_every_target_by_flag(self) -> None:
         # Non-pending: `--all-targets` must never be smuggled through the
-        # planner's argument strings, whichever shape the plan takes.
+        # planner's argument strings.
         plan = self.plan(force_all=True)
-        entries = plan["packages"] if plan.get("schema_version") else plan["matrix"]
         offenders = [
             entry["package"]
-            for entry in entries
+            for entry in plan["packages"]
             if "--all-targets" in f"{entry['check_args']} {entry['test_args']}"
         ]
         self.assertEqual([], offenders)
@@ -617,10 +657,12 @@ class TargetCoverageTests(PlannerFixture):
         )
         self.assertFalse(seam["reusable"])
         self.assertIn("claudine", seam["dependents"])
-        matrix = legacy_scope_document(plan)["area_matrix"]["biscuit-speaks"]["include"]
-        entry = next(item for item in matrix if item["package"] == "biscuit-speaks")
-        self.assertEqual([check], entry["check_os"])
-        self.assertNotIn(check, entry["native_environments"])
+        rows = {
+            (row["environment"], row["gate"])
+            for row in dispatched_rows(plan, "biscuit-speaks")
+        }
+        self.assertEqual({(check, "check")}, {cell for cell in rows if cell[1] == "check"})
+        self.assertNotIn((check, "L1"), rows, "the reused L1 cell dispatches no row")
         # A macOS pass stands in for no check: there is no macOS check cell.
         plan = self.plan("biscuit-speaks/lib/src/lib.rs", accepted_cells=accepted("macos-latest"))
         macos = states(plan)
@@ -637,10 +679,14 @@ class TargetCoverageTests(PlannerFixture):
             for line in package_ci.splitlines()
             if line.strip().startswith("run: cargo check ")
         )
-        self.assertEqual("run: cargo check ${{ inputs.check-args }}", template)
+        self.assertEqual(
+            "run: cargo check ${{ steps.cell.outputs.check_args }}", template
+        )
         plan = self.plan("biscuit-speaks/lib/src/lib.rs")
         record = self.package_record(plan, "biscuit-speaks")
-        command = template.removeprefix("run: ").replace("${{ inputs.check-args }}", record["check_args"])
+        command = template.removeprefix("run: ").replace(
+            "${{ steps.cell.outputs.check_args }}", record["check_args"]
+        )
         self.assertTrue(
             command.startswith("cargo check -p biscuit-speaks --examples"), command
         )
@@ -650,7 +696,7 @@ class TargetCoverageTests(PlannerFixture):
         # The guest consumes a build record rather than an archive argument
         # list, so there is no selector for a check flag to leak into. Comments
         # explain what was removed; only executable YAML can violate it.
-        self.assertIn("builds: ${{ inputs.builds }}", package_ci)
+        self.assertIn("row: ${{ toJSON(matrix) }}", package_ci)
         executable = "\n".join(
             line for line in package_ci.splitlines() if not line.lstrip().startswith("#")
         )
@@ -712,6 +758,41 @@ class PlanDocumentTests(PlannerFixture):
         # Non-pending: the ceiling holds today and Phase 6 must not breach it.
         plan = self.plan(force_all=True)
         self.assertLess(plan["job_estimate"], 1000)
+
+
+class StoredPlanDocumentTests(unittest.TestCase):
+    """Resolved plans that live outside `scripts/ci` move with the schema.
+
+    The pre-push hook's five fixtures and its stub planner are resolved plans
+    no planner run produces, so a schema bump cannot break them where the
+    author would see it. It broke them silently once: version 5 landed while
+    all six stayed on version 4, and 22 hook tests failed with
+    `unknown-schema-version` in a suite the schema's author had no reason to
+    run (`fixes/2026-09-19-less-brittle`). Reading them from the schema's own
+    suite is what makes the next bump fail at its source.
+    """
+
+    HOOK_FIXTURES = ROOT / ".githooks" / "tests" / "fixtures"
+
+    def test_every_stored_hook_plan_validates(self) -> None:
+        stored = sorted(self.HOOK_FIXTURES.glob("plan-*.json"))
+        self.assertNotEqual(
+            [], stored, f"no plan fixture under {self.HOOK_FIXTURES}"
+        )
+        for path in stored:
+            with self.subTest(fixture=path.name):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual([], schema.validate_resolved_plan(document))
+
+    def test_the_hook_stub_planner_emits_valid_plans(self) -> None:
+        source = self.HOOK_FIXTURES / "affected_scope_stub.py"
+        spec = importlib.util.spec_from_file_location("affected_scope_stub", source)
+        stub = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stub)
+        for name in ("fixed_plan", "empty_plan"):
+            with self.subTest(plan=name):
+                plan = getattr(stub, name)("a" * 40, "b" * 40)
+                self.assertEqual([], schema.validate_resolved_plan(plan))
 
 
 class ClosurePathTests(PlannerFixture):
@@ -905,7 +986,11 @@ class ResultCompletenessTests(PlannerFixture):
             if cell["area"] == "playa" and cell["gate"] != "lint"
         }
         self.assertEqual({"reused"}, states, "the fixture must reuse every test cell")
-        lint = [cell for cell in self.cells(reused) if cell["gate"] == "lint"]
+        lint = [
+            cell
+            for cell in self.cells(reused)
+            if cell["gate"] == "lint" and cell["area"] == "playa"
+        ]
         self.assertEqual(1, len(lint))
         self.assertEqual("pending", lint[0]["state"])
         self.assertEqual("ci", lint[0]["origin"])
@@ -917,20 +1002,11 @@ class ResultCompletenessTests(PlannerFixture):
             scheduled["scheduled_areas"],
             "an area with reused tests must still fan out, or its results reach no slice",
         )
-        matrix = scheduled["area_matrix"]["playa"]["include"]
-        self.assertTrue(matrix, "the area must still carry its package matrix")
-        for entry in matrix:
-            for field in (
-                "native_environments",
-                "check_os",
-                "l2_environments",
-                "browser_environments",
-            ):
-                self.assertEqual(
-                    [],
-                    entry[field],
-                    f"{entry['package']}: no runner may be scheduled for a reused cell",
-                )
+        rows = scheduled["area_rows"]["playa"]
+        self.assertTrue(rows["lint"], "the area's lint cell still dispatches")
+        for name in ("test", "check", "wsl"):
+            self.assertEqual([], rows[name], f"no {name} runner may be scheduled for a reused cell")
+            self.assertFalse(rows[f"has_{name}_rows"])
 
     def test_every_scheduled_area_has_an_artifact_safe_slice_name(self) -> None:
         # The slice artifact is `ci-results-<slug>`; a nested area name is not
@@ -1225,24 +1301,19 @@ class BuildOwnershipTests(PlannerFixture):
         self.assertEqual("windows-latest", owners["windows-latest"]["runner"])
 
         records = self.builds_of(plan, self.THREE_TIER_PACKAGE)
-        entry = next(
-            item
-            for item in legacy_scope_document(plan)["matrix"]
-            if item["package"] == self.THREE_TIER_PACKAGE
-        )
+        contracts = producer_contracts(plan, self.THREE_TIER_PACKAGE)
         self.assertEqual(
             sorted(record["key"] for record in records.values()),
-            sorted(item["key"] for item in entry["builds"]),
+            sorted({contract["build_key"] for contract in contracts.values()} - {""}),
             "every producer's record now reaches its package's consumers",
         )
         # The one pairing that must stay structurally impossible, restated where
         # the workflow reads it: the Windows consumer's artifact is the Windows
         # owner's, never the Linux one the WSL2 guest shares.
-        windows = next(
-            item for item in entry["builds"] if item["producer"] == "windows-latest"
-        )
-        self.assertEqual(records["windows-latest"]["artifact"], windows["artifact"])
-        self.assertNotEqual(records["ubuntu-latest"]["artifact"], windows["artifact"])
+        windows = contracts[("windows-latest", "L1")]
+        self.assertEqual("windows-latest", windows["build_producer"])
+        self.assertEqual(records["windows-latest"]["artifact"], windows["build_artifact"])
+        self.assertNotEqual(records["ubuntu-latest"]["artifact"], windows["build_artifact"])
         self.assertEqual(
             [{"environment": "windows-latest", "gate": "L1"}],
             records["windows-latest"]["consumers"],
@@ -1257,16 +1328,11 @@ class BuildOwnershipTests(PlannerFixture):
         owners = {owner["environment"] for owner in build_owner_matrix(plan)}
         self.assertNotIn("wsl2-ubuntu", owners)
         self.assertEqual(owners, self.cutover(plan))
-        scoped = legacy_scope_document(plan)
-        entry = next(
-            item
-            for item in scoped["matrix"]
-            if item["package"] == self.THREE_TIER_PACKAGE
-        )
+        contracts = producer_contracts(plan, self.THREE_TIER_PACKAGE)
         self.assertEqual(
             set(),
-            {item["producer"] for item in entry["builds"]} - owners,
-            "a package's matrix entry names only archives an owner will produce",
+            {contract["build_producer"] for contract in contracts.values()} - owners - {""},
+            "a producer is handed only archives an owner will produce",
         )
         # And the guest's cells are still served: by the Linux record, as one of
         # its consumers.
@@ -1281,28 +1347,23 @@ class BuildOwnershipTests(PlannerFixture):
             {consumer["environment"] for consumer in linux["consumers"]},
         )
 
-    def test_the_package_matrix_carries_its_own_build_references(self) -> None:
+    def test_each_producer_is_handed_its_own_build_reference(self) -> None:
         plan = self.plan(self.THREE_TIER_SOURCE)
         cutover = self.cutover(plan)
         scheduled = [
-            record for record in plan["builds"] if record["producer"] in cutover
+            record
+            for record in plan["builds"]
+            if record["producer"] in cutover and record["package"] == self.THREE_TIER_PACKAGE
         ]
         self.assertTrue(scheduled)
-        scoped = legacy_scope_document(plan)
-        entry = next(
-            item
-            for item in scoped["matrix"]
-            if item["package"] == self.THREE_TIER_PACKAGE
-        )
-        self.assertEqual(
-            sorted(record["key"] for record in scheduled),
-            sorted(item["key"] for item in entry["builds"]),
-        )
-        self.assertEqual(
-            sorted(record["artifact"] for record in scheduled),
-            sorted(item["artifact"] for item in entry["builds"]),
-        )
-        self.assertEqual(scoped["build_owners"], build_owner_matrix(plan))
+        contracts = producer_contracts(plan, self.THREE_TIER_PACKAGE)
+        for record in scheduled:
+            for consumer in record["consumers"]:
+                contract = contracts[(consumer["environment"], consumer["gate"])]
+                self.assertEqual(record["key"], contract["build_key"], consumer)
+                self.assertEqual(record["artifact"], contract["build_artifact"], consumer)
+                self.assertEqual("true", contract["consumes_archive"], consumer)
+        self.assertEqual(legacy_scope_document(plan)["build_owners"], build_owner_matrix(plan))
 
     def test_the_owner_slices_flatten_to_the_workflow_matrix(self) -> None:
         plan = self.plan(self.THREE_TIER_SOURCE)
@@ -1370,14 +1431,9 @@ class BuildOwnershipTests(PlannerFixture):
         # The two environments reach the SAME artifact through the workflow
         # projections, and remain two distinct result cells.
         scoped = legacy_scope_document(plan)
-        entry = next(
-            item
-            for item in scoped["matrix"]
-            if item["package"] == self.THREE_TIER_PACKAGE
-        )
-        linux = [item for item in entry["builds"] if item["producer"] == "ubuntu-latest"]
-        self.assertEqual(1, len(linux))
-        self.assertEqual(record["artifact"], linux[0]["artifact"])
+        contracts = producer_contracts(plan, self.THREE_TIER_PACKAGE)
+        for cell in (("ubuntu-latest", "L1"), ("wsl2-ubuntu", "L1")):
+            self.assertEqual(record["artifact"], contracts[cell]["build_artifact"], cell)
         self.assertEqual(
             [record["artifact"]],
             [
@@ -1540,6 +1596,743 @@ class ChangeInventoryEndToEndTests(PlannerFixture):
             ["Cargo.lock"], plan["change_inventory"]["paths"]["configuration"]
         )
         self.assertEqual([], plan["change_inventory"]["paths"]["documentation"])
+
+
+class RowAdapterOracleTests(PlannerFixture):
+    """Pending contracts for the area-local row adapter (Phase 3 implements).
+
+    The adapter the direct-cell-execution feature adds is a pure function
+    `affected_scope.row_sets(plan) -> {area: {test: [...], check: [...],
+    lint: [...], wsl: [...], has_test_rows: bool, has_check_rows: bool,
+    has_lint_rows: bool, has_wsl_rows: bool}}`, derived only from the final
+    resolved plan. A row is `{package, gate, environment, runner}` in exactly
+    that key order (ruling R1) and nothing else. An executing cell's row goes
+    to `wsl` when its environment is `wsl2-ubuntu`, to `check` or `lint` by its
+    gate, and to `test` otherwise (native L1/L2/browser). Every fixture below
+    fails today because no such function exists; each recorded reason is the
+    oracle Phase 3 implements.
+    """
+
+    ROW_ORACLE = "the plan carries no row adapter"
+    ROW_SETS = ("test", "check", "lint", "wsl")
+    ROW_KEYS = ["package", "gate", "environment", "runner"]
+
+    def row_sets(self, plan: dict) -> dict:
+        adapter = getattr(affected_scope, "row_sets", None)
+        if adapter is None:
+            raise AssertionError(
+                f"{self.ROW_ORACLE}: `affected_scope.row_sets` is not defined, "
+                "so no matrix row can be derived from the plan's cells and "
+                "the workflows must keep reading environment lists"
+            )
+        rows = adapter(plan)
+        self.assertIsInstance(rows, dict)
+        return rows
+
+    def row_key(self, row: dict) -> tuple[str, str, str]:
+        return (row["package"], row["environment"], row["gate"])
+
+    def expected_set(self, cell: dict) -> str:
+        if cell["environment"] == "wsl2-ubuntu":
+            return "wsl"
+        if cell["gate"] in ("check", "lint"):
+            return cell["gate"]
+        return "test"
+
+    def corpus(self) -> dict[str, dict]:
+        """The Phase 1 corpus shapes (spikes/plans/README.md), planned live.
+
+        Produced by the real planner on the real workspace rather than loaded
+        from the frozen files, so the oracles stay meaningful after the schema
+        moves to version 5 and the frozen files become the previous
+        generation.
+        """
+        everything = self.plan(force_all=True)
+        executing = [
+            cell for cell in everything["cells"] if cell["execution"] == "execute"
+        ]
+
+        def accepted(cells: list[dict]) -> list[dict]:
+            return [
+                {
+                    "package": cell["package"],
+                    "environment": cell["environment"],
+                    "gate": cell["gate"],
+                    "origin": "local",
+                    "outcome": "pass",
+                    "evidence": {
+                        "ref": f"refs/notes/ci-local/{cell['environment']}"
+                    },
+                }
+                for cell in cells
+            ]
+
+        return {
+            "pr": self.plan("biscuit-hash/lib/src/lib.rs"),
+            "all": everything,
+            "all-reused": self.plan(
+                force_all=True, accepted_cells=accepted(executing)
+            ),
+            "mixed": self.plan(
+                force_all=True,
+                accepted_cells=accepted(
+                    cell
+                    for cell in executing
+                    if cell["environment"] == "wsl2-ubuntu" and cell["gate"] == "L1"
+                ),
+            ),
+            "nightly": self.plan(force_all=True, event="schedule"),
+            "prohibited": self.plan(
+                force_all=True,
+                prohibitions={
+                    "wsl2-ubuntu": {
+                        "owner": "ken",
+                        "reason": "spike: prohibit the WSL2 leg to shape the corpus",
+                        "expiry": "2027-12-31",
+                        "source": "current.json",
+                    }
+                },
+            ),
+        }
+
+    def assert_partitions_executing_cells(self, plan: dict) -> None:
+        rows = self.row_sets(plan)
+        environments = {
+            entry["name"]: entry for entry in plan["environments"]
+        }
+        packages = {entry["package"]: entry for entry in plan["packages"]}
+        executing = {
+            (cell["package"], cell["environment"], cell["gate"]): cell
+            for cell in plan["cells"]
+            if cell["execution"] == "execute"
+        }
+
+        self.assertEqual(
+            sorted({entry["area"] for entry in plan["areas"]}),
+            sorted(rows),
+            "every selected area appears in the row document, executing or not",
+        )
+        observed: dict[tuple[str, str, str], str] = {}
+        for area, document in sorted(rows.items()):
+            for name in self.ROW_SETS:
+                self.assertIn(name, document, f"area {area} lacks its {name} row set")
+                flag = document.get(f"has_{name}_rows")
+                self.assertIsInstance(
+                    flag,
+                    bool,
+                    f"area {area} lacks its scalar has_{name}_rows guard",
+                )
+                self.assertEqual(
+                    bool(document[name]),
+                    flag,
+                    f"area {area} has_{name}_rows is true exactly when the "
+                    f"{name} row set is nonempty",
+                )
+                for row in document[name]:
+                    self.assertEqual(
+                        self.ROW_KEYS,
+                        list(row),
+                        f"a row carries exactly the dispatch keys, in R1's "
+                        f"order: {row}",
+                    )
+                    key = self.row_key(row)
+                    self.assertNotIn(
+                        key,
+                        observed,
+                        f"row key {key} appears in both {observed.get(key)} and "
+                        f"{area}/{name}; one executing cell is exactly one row",
+                    )
+                    observed[key] = f"{area}/{name}"
+                    self.assertIn(
+                        key,
+                        executing,
+                        f"{area}/{name} carries a row no executing cell backs: "
+                        f"{row}",
+                    )
+                    self.assertEqual(
+                        area,
+                        packages[row["package"]]["area"],
+                        "a row is dispatched inside its package's area",
+                    )
+                    self.assertEqual(
+                        environments[row["environment"]]["runner"],
+                        row["runner"],
+                        "the runner comes from the plan's environment table",
+                    )
+                    self.assertEqual(
+                        name,
+                        self.expected_set(executing[key]),
+                        f"{key} landed in {name} but belongs in "
+                        f"{self.expected_set(executing[key])}",
+                    )
+
+        self.assertEqual(
+            sorted(executing),
+            sorted(observed),
+            "the four row sets partition the plan's executing cells exactly",
+        )
+        # Reused, accepted-gap, prohibited, and deferred work produces no row:
+        # everything not executing is absent, not merely outnumbered.
+        for cell in plan["cells"]:
+            if cell["execution"] != "execute":
+                self.assertNotIn(
+                    (cell["package"], cell["environment"], cell["gate"]),
+                    observed,
+                    f"a {cell['execution']}/{cell['state']} cell created a row",
+                )
+
+    def test_the_four_row_sets_partition_the_executing_cells_for_each_corpus_shape(
+        self,
+    ) -> None:
+        # Not `subTest`: its failures are recorded by the harness rather than
+        # raised, so the pending wrapper could not see them. Every failing
+        # shape is named in one raised assertion instead.
+        problems = []
+        for name, plan in self.corpus().items():
+            try:
+                self.assert_partitions_executing_cells(plan)
+            except AssertionError as failure:
+                problems.append(f"{name}: {failure}")
+        if problems:
+            raise AssertionError("\n".join(problems))
+
+    def test_a_wsl2_row_never_appears_in_the_native_test_set(self) -> None:
+        for name, plan in self.corpus().items():
+            rows = self.row_sets(plan)
+            for area, document in rows.items():
+                for row in document["test"]:
+                    self.assertNotEqual(
+                        "wsl2-ubuntu",
+                        row["environment"],
+                        f"{area}'s native test set carries the WSL2 row {row}; "
+                        "the guest is dispatched through the wsl set alone",
+                    )
+                for row in document["wsl"]:
+                    self.assertEqual(
+                        "wsl2-ubuntu",
+                        row["environment"],
+                        f"{area}'s wsl set carries the native row {row}",
+                    )
+
+    def test_an_area_with_zero_executing_cells_still_appears(self) -> None:
+        # The gap-only shape from the Phase 1 corpus: derived, as
+        # `spikes/plans/README.md` records, by keeping only the accepted-gap
+        # cells, the areas and packages that own them, and no builds. No real
+        # plan is gap-only today (lint never reuses), so the shape is
+        # synthesized on purpose: it is the all-reused-or-gap area whose audit,
+        # slice, and publisher must survive with no execution call at all.
+        everything = self.plan(force_all=True)
+        gap_cells = [
+            cell for cell in everything["cells"] if cell["state"] == "accepted-gap"
+        ]
+        gap_packages = sorted({cell["package"] for cell in gap_cells})
+        document = {
+            **everything,
+            "cells": gap_cells,
+            "packages": [
+                entry
+                for entry in everything["packages"]
+                if entry["package"] in gap_packages
+            ],
+            "builds": [],
+            "job_estimate": 0,
+        }
+        self.assertEqual(
+            [],
+            schema.validate_resolved_plan(document),
+            "the gap-only trim must stay a valid plan, or the fixture is "
+            "testing a document the planner would never write",
+        )
+        self.assertTrue(gap_cells, "the full-workspace plan carries no gap cells")
+
+        rows = self.row_sets(document)
+        scheduled = legacy_scope_document(document)["scheduled_areas"]
+        for area in scheduled:
+            self.assertIn(area, rows, "a gap-only area keeps its row document")
+            for name in self.ROW_SETS:
+                self.assertEqual(
+                    [], rows[area][name], f"a gap-only area schedules no {name} rows"
+                )
+                self.assertIs(False, rows[area][f"has_{name}_rows"])
+
+
+class RowSetBoundaryTests(PlannerFixture):
+    """The four inputs one area hands its execution call partition its cells.
+
+    The boundary, not the adapter: `RowAdapterOracleTests` proves `row_sets`
+    itself, and this proves that what `_area-ci.yml` actually FORWARDS is the
+    same four sets — read out of the shipped YAML rather than restated here, so
+    a forwarding expression that started naming the wrong key fails.
+    """
+
+    AREA_WORKFLOW = ROOT / ".github" / "workflows" / "_area-ci.yml"
+    EXECUTION_WORKFLOW = ROOT / ".github" / "workflows" / "_package-ci.yml"
+
+    def forwarded_sets(self) -> dict[str, str]:
+        """`{input name: row-set key}`, read from the area workflow's `with:`."""
+        source = self.AREA_WORKFLOW.read_text(encoding="utf-8")
+        forwarded = {}
+        for match in re.finditer(
+            r"^      ([a-z]+)-rows: \$\{\{ toJSON\(fromJSON\(inputs\.rows\)\.([a-z]+)\) \}\}$",
+            source,
+            re.M,
+        ):
+            forwarded[f"{match.group(1)}-rows"] = match.group(2)
+        return forwarded
+
+    def expanded_inputs(self) -> dict[str, str]:
+        """`{input name: matrix key}` for each row set the execution workflow expands."""
+        source = self.EXECUTION_WORKFLOW.read_text(encoding="utf-8")
+        return {
+            match.group(1): match.group(1)
+            for match in re.finditer(
+                r"^        include: \$\{\{ fromJSON\(inputs\.([a-z-]+)\) \}\}$",
+                source,
+                re.M,
+            )
+        }
+
+    def test_the_area_forwards_exactly_the_four_sets_the_execution_workflow_expands(
+        self,
+    ) -> None:
+        forwarded = self.forwarded_sets()
+        self.assertEqual(
+            {"test-rows", "check-rows", "lint-rows", "wsl-rows"},
+            set(forwarded),
+            "the area must forward one input per row set and no others",
+        )
+        self.assertEqual(
+            set(forwarded),
+            set(self.expanded_inputs()),
+            "every forwarded row set must be expanded, and every expanded one "
+            "must be forwarded; a set nobody expands is work nothing dispatches",
+        )
+        self.assertEqual(
+            sorted(schema.ROW_SET_NAMES),
+            sorted(forwarded.values()),
+            "the forwarded keys must be the planner's own row-set names",
+        )
+
+    def test_the_forwarded_inputs_partition_the_areas_executing_cells(self) -> None:
+        # Read from the PLAN, as the workflow does: the rows are serialized
+        # into `scope.json`, expanded by GitHub, and each row is then joined
+        # back to a cell. Nothing recomputes the partition downstream.
+        plan = self.plan(force_all=True)
+        rows = affected_scope.row_sets(plan)
+        forwarded = self.forwarded_sets()
+        executing: dict[str, set] = {}
+        for cell in plan["cells"]:
+            if cell["execution"] == "execute":
+                executing.setdefault(cell["area"], set()).add(
+                    (cell["package"], cell["environment"], cell["gate"])
+                )
+        self.assertTrue(executing, "the full-workspace plan executes nothing")
+
+        for area, document in sorted(rows.items()):
+            dispatched: list[tuple[str, str, str]] = []
+            for key in forwarded.values():
+                dispatched.extend(
+                    (row["package"], row["environment"], row["gate"])
+                    for row in document[key]
+                )
+            self.assertEqual(
+                len(dispatched),
+                len(set(dispatched)),
+                f"area {area} dispatches a duplicate cell key across its four inputs",
+            )
+            self.assertEqual(
+                executing.get(area, set()),
+                set(dispatched),
+                f"area {area}: the four forwarded inputs must equal its "
+                "executing cells exactly — no dropped, invented, or altered row",
+            )
+
+    def test_a_dropped_row_set_is_visible_as_missing_coverage(self) -> None:
+        # Non-vacuity: the partition check above must be able to fail. Dropping
+        # one forwarded input is exactly the PR #76 defect this feature exists
+        # to remove.
+        plan = self.plan(force_all=True)
+        rows = affected_scope.row_sets(plan)
+        area = next(
+            area
+            for area, document in rows.items()
+            if document["test"] and document["lint"]
+        )
+        without_lint = [
+            (row["package"], row["environment"], row["gate"])
+            for key in ("test", "check", "wsl")
+            for row in rows[area][key]
+        ]
+        executing = {
+            (cell["package"], cell["environment"], cell["gate"])
+            for cell in plan["cells"]
+            if cell["execution"] == "execute" and cell["area"] == area
+        }
+        self.assertNotEqual(executing, set(without_lint))
+
+
+class CellContractTests(PlannerFixture):
+    """`scripts/ci/cell_contract.py`: the one reader every producer job uses.
+
+    Driven as a SUBPROCESS, never as a module: the tool crosses a CLI boundary
+    (exit status, stderr, an appended `$GITHUB_OUTPUT` file) and that boundary
+    is what the workflow depends on. Every plan here is real planner output.
+    """
+
+    TOOL = ROOT / "scripts" / "ci" / "cell_contract.py"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.workspace_plan = cls().plan(force_all=True)
+
+    def run_tool(
+        self, plan: dict, row: dict | str, head: str | None = None
+    ) -> tuple[int, dict[str, str], str]:
+        """Run the shipped tool and read back what it published."""
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        plan_path = directory / "resolved-plan.json"
+        plan_path.write_text(schema.canonical(plan), encoding="utf-8")
+        output = directory / "github-output"
+        output.touch()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(self.TOOL),
+                "--plan",
+                str(plan_path),
+                "--row",
+                row if isinstance(row, str) else json.dumps(row),
+                "--head",
+                plan["head"] if head is None else head,
+                "--github-output",
+                str(output),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        published = {}
+        for line in output.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            published[key] = value
+        return completed.returncode, published, completed.stderr
+
+    def a_row(self, plan: dict, name: str) -> dict:
+        """One dispatch row of the given set, from the real adapter."""
+        for _, document in sorted(affected_scope.row_sets(plan).items()):
+            if document[name]:
+                return document[name][0]
+        raise AssertionError(f"the full-workspace plan dispatches no {name} rows")
+
+    def assert_refused(self, code: str, stderr: str, published: dict) -> None:
+        self.assertIn(
+            code,
+            schema.CELL_CONTRACT_REJECTIONS,
+            "every refusal is a declared code, not free prose",
+        )
+        self.assertIn(code, stderr, stderr)
+        self.assertEqual(
+            {}, published, "a refused row publishes no contract at all"
+        )
+
+    def test_every_dispatched_row_resolves_to_its_own_cell(self) -> None:
+        plan = self.workspace_plan
+        rows = affected_scope.row_sets(plan)
+        # One representative per (set, gate) pair rather than all 374: the
+        # tool is a subprocess and the partition itself is proved above.
+        sampled: dict[tuple[str, str], dict] = {}
+        for document in rows.values():
+            for name in ("test", "check", "lint", "wsl"):
+                for row in document[name]:
+                    sampled.setdefault((name, row["gate"]), row)
+        self.assertTrue(sampled, "the full-workspace plan dispatches no rows")
+        for (name, gate), row in sorted(sampled.items()):
+            code, published, stderr = self.run_tool(plan, row)
+            self.assertEqual(0, code, f"{name}/{gate}: {stderr}")
+            self.assertEqual(
+                f"{row['package']}/{row['environment']}/{row['gate']}",
+                published["cell"],
+                "the contract names the cell the row dispatched",
+            )
+            for field in ("package", "gate", "environment", "runner"):
+                self.assertEqual(row[field], published[field])
+
+    def test_the_contract_carries_the_execution_inputs_the_job_needs(self) -> None:
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(0, code, stderr)
+        package = next(
+            entry for entry in plan["packages"] if entry["package"] == row["package"]
+        )
+        cell = next(
+            entry
+            for entry in plan["cells"]
+            if (entry["package"], entry["environment"], entry["gate"])
+            == (row["package"], row["environment"], row["gate"])
+        )
+        self.assertEqual(package["test_args"], published["test_args"])
+        self.assertEqual(package["check_args"], published["check_args"])
+        self.assertEqual(json.dumps(package["runner_tools"]), published["runner_tools"])
+        # `backends` is what THIS cell must prove (the plan's hostable subset);
+        # the package-wide declaration rides along for the coverage summary.
+        self.assertEqual(json.dumps(cell.get("backends", [])), published["backends"])
+        self.assertEqual(
+            json.dumps(package["l2_backends"]), published["declared_backends"]
+        )
+        self.assertEqual(cell["profile"], published["profile"])
+        self.assertEqual(
+            {"L1": "_test", "L2": "_test_l2", "browser": "_test_browser"}[row["gate"]],
+            published["recipe"],
+        )
+        self.assertEqual(cell["build"], published["build_key"])
+        self.assertTrue(published["build_artifact"])
+        self.assertEqual("true", published["consumes_archive"])
+
+    def test_the_result_artifact_names_are_derived_once(self) -> None:
+        plan = self.workspace_plan
+        for name in ("test", "check", "lint", "wsl"):
+            row = self.a_row(plan, name)
+            code, published, stderr = self.run_tool(plan, row)
+            self.assertEqual(0, code, stderr)
+            gate, package, environment = (
+                row["gate"],
+                row["package"],
+                row["environment"],
+            )
+            # `ci-rollup` keys a status by TIER, and the lint cell's status has
+            # never carried an environment — the one asymmetry in the names.
+            self.assertEqual(
+                f"status-{package}-lint"
+                if gate == "lint"
+                else f"status-{package}-{gate}-{environment}",
+                published["status_artifact"],
+            )
+            self.assertEqual(
+                f"junit-{package}-{gate}-{environment}", published["junit_artifact"]
+            )
+            self.assertEqual(
+                f"completion-{package}-{gate}-{environment}",
+                published["completion_artifact"],
+            )
+
+    def test_a_check_row_carries_its_dependent_seam_and_no_recipe(self) -> None:
+        # A PR-shaped plan, not the full workspace: the dependent seam exists
+        # only where a reverse dependency was NOT selected, which a
+        # force-everything plan never produces.
+        plan = self.plan("biscuit-hash/lib/src/lib.rs")
+        rows = affected_scope.row_sets(plan)
+        row = next(
+            row
+            for document in rows.values()
+            for row in document["check"]
+            if next(
+                entry
+                for entry in plan["packages"]
+                if entry["package"] == row["package"]
+            ).get("dependent_seam")
+        )
+        seam = next(
+            entry for entry in plan["packages"] if entry["package"] == row["package"]
+        )["dependent_seam"]
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(0, code, stderr)
+        self.assertEqual(seam["check_args"], published["dependents_check_args"])
+        self.assertEqual(json.dumps(seam["dependents"]), published["dependents"])
+        self.assertEqual(json.dumps(seam["native"]), published["dependents_native"])
+        self.assertEqual("", published["recipe"], "a check gate drives no nextest")
+        self.assertEqual("", published["profile"])
+        self.assertEqual("", published["build_key"], "check compiles in place")
+
+    def test_a_guest_row_takes_the_linux_native_prerequisites(self) -> None:
+        plan = self.workspace_plan
+        rows = affected_scope.row_sets(plan)
+        row = next(
+            row
+            for document in rows.values()
+            for row in document["wsl"]
+            if next(
+                entry
+                for entry in plan["packages"]
+                if entry["package"] == row["package"]
+            )["native"].get("ubuntu-latest")
+        )
+        expected = next(
+            entry for entry in plan["packages"] if entry["package"] == row["package"]
+        )["native"]["ubuntu-latest"]
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(0, code, stderr)
+        self.assertEqual("windows-latest", published["runner"])
+        self.assertEqual("wsl2-ubuntu", published["environment"])
+        self.assertEqual(
+            json.dumps(expected),
+            published["native_packages"],
+            "a WSL2 guest IS Linux and consumes the environment's native_key "
+            "list, never the Windows runner's — as a JSON array, because a "
+            "package name is an opaque literal and word-splitting one would "
+            "corrupt anything carrying a space or a glob character",
+        )
+        self.assertEqual(
+            "x86_64-unknown-linux-gnu",
+            published["target"],
+            "an archive-only environment declares no target of its own; the "
+            "binaries it runs were compiled for the producer's",
+        )
+
+    def test_a_native_row_reports_its_own_execution_target(self) -> None:
+        plan = self.workspace_plan
+        targets = {
+            entry["name"]: (entry.get("build") or {}).get("target")
+            for entry in plan["environments"]
+        }
+        for name in ("test", "check", "lint"):
+            row = self.a_row(plan, name)
+            code, published, stderr = self.run_tool(plan, row)
+            self.assertEqual(0, code, stderr)
+            self.assertEqual(targets[row["environment"]], published["target"])
+
+    def test_a_row_for_a_cell_the_plan_does_not_carry_is_refused(self) -> None:
+        plan = self.workspace_plan
+        row = dict(self.a_row(plan, "test"), package="no-such-package")
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-unknown", stderr, published)
+
+    def test_a_duplicated_cell_is_refused_rather_than_taking_the_first(self) -> None:
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        cell = next(
+            entry
+            for entry in plan["cells"]
+            if (entry["package"], entry["environment"], entry["gate"])
+            == (row["package"], row["environment"], row["gate"])
+        )
+        corrupted = {**plan, "cells": [*plan["cells"], copy.deepcopy(cell)]}
+        code, published, stderr = self.run_tool(corrupted, row)
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-duplicate", stderr, published)
+
+    def test_a_row_for_a_reused_cell_is_refused(self) -> None:
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        cells = []
+        for cell in plan["cells"]:
+            key = (cell["package"], cell["environment"], cell["gate"])
+            if key == (row["package"], row["environment"], row["gate"]):
+                cell = {**cell, "execution": "reuse", "state": "reused"}
+            cells.append(cell)
+        code, published, stderr = self.run_tool({**plan, "cells": cells}, row)
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-not-executing", stderr, published)
+
+    def test_a_row_dispatched_to_the_wrong_runner_is_refused(self) -> None:
+        plan = self.workspace_plan
+        row = dict(self.a_row(plan, "wsl"), runner="ubuntu-latest")
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-mismatch", stderr, published)
+
+    def test_a_row_naming_an_unknown_environment_is_refused(self) -> None:
+        plan = self.workspace_plan
+        row = dict(self.a_row(plan, "test"), environment="freebsd-latest")
+        code, published, stderr = self.run_tool(plan, row)
+        self.assertEqual(1, code)
+        # Unknown to the cells first: the message names the cell key, which is
+        # what a reader needs before the environment table is even consulted.
+        self.assert_refused("cell-contract-unknown", stderr, published)
+
+    def test_a_plan_resolved_for_another_revision_is_refused(self) -> None:
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        code, published, stderr = self.run_tool(plan, row, head="c0ffee" + "0" * 34)
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-head", stderr, published)
+
+    def test_a_malformed_row_is_refused_rather_than_defaulted(self) -> None:
+        plan = self.workspace_plan
+        for spelling in ("not json", "[]", '{"package": "repo-deps"}', "{}"):
+            code, published, stderr = self.run_tool(plan, spelling)
+            self.assertEqual(1, code, spelling)
+            self.assert_refused("cell-contract-row", stderr, published)
+
+    def test_a_dangling_build_reference_stops_the_job(self) -> None:
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        code, published, stderr = self.run_tool(
+            {**plan, "builds": []},
+            row,
+        )
+        self.assertEqual(1, code)
+        self.assert_refused("cell-contract-build", stderr, published)
+
+    def test_the_contract_is_appended_and_is_byte_identical_on_a_rerun(self) -> None:
+        # The tool appends to `$GITHUB_OUTPUT`, which a job may already have
+        # written to. Two runs of the same row must publish the same bytes, or
+        # a retried step would change the contract under the gate command.
+        plan = self.workspace_plan
+        row = self.a_row(plan, "test")
+        first = self.run_tool(plan, row)
+        second = self.run_tool(plan, row)
+        self.assertEqual(first[0], second[0])
+        self.assertEqual(first[1], second[1])
+
+
+class ArchiveGuardCorpusTests(PlannerFixture):
+    """The guard's scope against the shipped workspace and registry.
+
+    `test_affected_scope.py` pins the trigger table and the guard-only cell.
+    These are the cases only the real checkout can answer: that the registered
+    suite has the owner it claims, that the real recipe it names exists, and
+    that a plan resolved over the real workspace still validates.
+    """
+
+    def test_the_registered_guard_is_owned_and_declared_by_test_toolkit(self) -> None:
+        entry = affected_scope.SUITE_REGISTRY[affected_scope.ARCHIVE_GUARD_SUITE]
+        self.assertEqual("test-toolkit", entry["owner"])
+        self.assertEqual(
+            [],
+            affected_scope.validate_suite_registry(
+                {affected_scope.ARCHIVE_GUARD_SUITE: entry},
+                {"test-toolkit": [affected_scope.ARCHIVE_GUARD_SUITE]},
+            ),
+        )
+        self.assertIn(
+            affected_scope.ARCHIVE_GUARD_SUITE,
+            self.policy["test-toolkit"]["companion_suites"],
+            "the owner's manifest must claim the suite, or nothing schedules it",
+        )
+
+    def test_the_guard_recipe_the_registry_names_exists(self) -> None:
+        # `validate_package_ci` already enforces this for every declared suite;
+        # naming it here is what makes a renamed recipe fail as a guard defect
+        # rather than as an unattributed manifest error.
+        for directory, recipe in affected_scope.SUITE_REGISTRY[
+            affected_scope.ARCHIVE_GUARD_SUITE
+        ]["just"]:
+            with self.subTest(recipe=recipe):
+                justfile = (ROOT / directory / "justfile").read_text(encoding="utf-8")
+                self.assertRegex(justfile, rf"(?m)^{recipe}(?::|\s)")
+
+    def test_the_real_workspace_plan_carries_a_valid_guard_scope(self) -> None:
+        plan = self.plan("claudine/lib/src/lib.rs")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        guard = plan["archive_guard"]
+        self.assertTrue(guard["selected"])
+        self.assertEqual("changed", guard["mode"])
+        self.assertEqual(["claudine/lib/src/lib.rs"], guard["paths"])
+
+    def test_the_guard_scope_survives_a_persist_read_persist_cycle(self) -> None:
+        # The scope describes what will be scanned, which applying evidence
+        # cannot alter, so it must reach the fan-out byte-identical.
+        first = schema.canonical(self.plan("claudine/lib/src/lib.rs"))
+        applied = apply_accepted_cells(json.loads(first), [], [])
+        second = schema.canonical(applied)
+        self.assertEqual(
+            json.loads(first)["archive_guard"], json.loads(second)["archive_guard"]
+        )
+        self.assertEqual(
+            second, schema.canonical(apply_accepted_cells(json.loads(second), [], []))
+        )
 
 
 if __name__ == "__main__":

@@ -12,9 +12,8 @@ scope is emitted.
 `scripts/ci/schema.py` defines and validates. `apply_accepted_cells` overlays
 verified evidence on a plan that already exists — the operation CI performs on
 a matching scope receipt, which is never re-selected. `legacy_scope_document`
-projects a plan into the shape `ci.yml`, `just/ci-local.just`, and `ci-rollup`
-still read, and goes away with Phases 5 and 6 of
-`fixes/2026-09-11-cicd-cleanup/plan.md`.
+projects a plan into the `scope.json` outputs `ci.yml` publishes and the policy
+and build-owner lists `ci-rollup` reads.
 """
 
 from __future__ import annotations
@@ -34,6 +33,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_key  # noqa: E402  (needs the path insert above when run as a script)
 import schema  # noqa: E402
+
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:
+    # IMPORTING this module must not require 3.11. `companion_suites.py` imports
+    # it and runs on all three native environments, where `python3` can be a
+    # 3.9 interpreter (macOS ships one at `/usr/bin/python3`); the PLANNER runs
+    # only on the scope job's `ubuntu-latest` and on developer hosts. So the
+    # parser is optional here and `load_skip_policy` refuses by name when it is
+    # both absent and needed. The repository's Python helpers support 3.9.
+    tomllib = None  # type: ignore[assignment]
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +71,11 @@ GATES = ("lint", "check", "test")
 # scheduling itself is source-driven and does not consume global-input changes.
 GLOBAL_PATHS_ALL_GATES = {
     ".github/ci/environments.json",
+    # The area workflow carries the dispatch row sets, so it decides what runs
+    # (ruling R11). It is paired with `ORCHESTRATION_PATHS` below: adding it to
+    # one table alone costs either a needless full-workspace pre-push or every
+    # published local cell.
+    ".github/workflows/_area-ci.yml",
     ".github/workflows/_package-ci.yml",
     ".github/workflows/ci.yml",
     "Cargo.toml",
@@ -86,7 +101,12 @@ JUST_PREFIXES = ("just/",)
 CI_RECIPES_BY_GATE: dict[str, tuple[str, ...]] = {
     "lint": ("_lint",),
     "check": (),
-    "test": ("_test", "_test_l2", "_test_browser"),
+    # `_expected_manifest` is a CI ENTRY recipe, not a helper: every test
+    # producer calls it and `completion.py` refuses the cell when its answer
+    # and the staged reports disagree. Editing the expected-set logic therefore
+    # changes what a test gate PROVES, so it must select the test gate and move
+    # the test cells' gate-input identity like any other entry (ruling R12).
+    "test": ("_test", "_test_l2", "_test_browser", "_expected_manifest"),
 }
 CI_RECIPES_ALL_GATES = ("_ensure-native-libs",)
 
@@ -108,6 +128,7 @@ GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
 # selection above (fixes/2026-09-19-just-recipe-identity).
 ORCHESTRATION_PATHS = {
     ".github/ci/environments.json",
+    ".github/workflows/_area-ci.yml",
     ".github/workflows/_package-ci.yml",
     ".github/workflows/_wsl-ci.yml",
     ".github/workflows/ci.yml",
@@ -230,6 +251,7 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_affected_scope.py",
             "test_build_key.py",
             "test_ci_local.py",
+            "test_completion.py",
             "test_constraints.py",
             "test_cross_check.py",
             "test_evidence_reuse.py",
@@ -240,6 +262,23 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_runner_loss.py",
             "test_schema.py",
         )
+    },
+    # Lint-only on purpose, and the one entry with no `recipe`: a source-policy
+    # scan has no test half to attach to an L1 cell. Without that omission the
+    # guard would run twice on Linux — once as `test-toolkit`'s L1 companion and
+    # once in its lint cell — and its changed-file scope would be applied to a
+    # cell whose evidence rules are the package's, not the scan's.
+    "archive-path-guard": {
+        "owner": "test-toolkit",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "lint_recipe": "cd tools/test-toolkit && just archive-path-guard",
+        "just": (("tools/test-toolkit", "archive-path-guard"),),
+        "counts": None,
+        "counts_reason": (
+            "the guard answers a source-policy question over files, not a test "
+            "cardinality; its two driver assertions are not the measurement"
+        ),
     },
     # The build owner's artifact publisher: no Cargo package and no pnpm
     # workspace entry selects it, so this registration is the only thing that
@@ -278,6 +317,16 @@ SUITE_OWNER_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tools/test-audit/", ("test-toolkit",)),
 )
 SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
+    # Cross-language by construction: `test_schema.py` and
+    # `tools/test-toolkit/tests/ci_workflow_contracts.rs` read the same bytes,
+    # which is the only reason these two documents are shipped at all. A change
+    # that selected the Python half alone would let the two readers disagree
+    # unobserved. Named one by one, not by a `schemas/` prefix: that directory
+    # also holds documentation and is where an unrelated future schema would
+    # land, and neither is an input the Rust suite reads. Those keep the
+    # `.github/ci/` prefix's `repo-deps` selection.
+    ".github/ci/schemas/archive_guard_cases.json": ("repo-deps", "test-toolkit"),
+    ".github/ci/schemas/contract.json": ("repo-deps", "test-toolkit"),
     "pnpm-lock.yaml": ("test-toolkit",),
     "pnpm-workspace.yaml": ("test-toolkit",),
     "scripts/Cargo.toml": ("repo-deps",),
@@ -313,6 +362,82 @@ AREA_DRIFT_PATHS = {
 # dependency was bumped" either. The over-approximation costs one parallel job
 # that `ci-gate` folds; the miss it prevents is silent.
 AREA_DRIFT_MANIFEST = "Cargo.toml"
+
+# The archive-path guard (fixes/2026-09-19-less-brittle). It scans repository
+# source for compile-time paths that do not survive an archived run, so the
+# files it checks are almost never its owner's: package ownership selects it
+# nowhere, and violations accumulated until an unrelated change happened to
+# select `test-toolkit`. Selection follows the scanned source instead.
+ARCHIVE_GUARD_SUITE = "archive-path-guard"
+
+# Mirrors `test_toolkit::archive_guard::SKIPPED_DIRS`. The two are one policy —
+# a path the planner selects and the scanner then refuses is a cell that ran
+# nothing — and `tools/test-toolkit/tests/ci_workflow_contracts.rs` asserts the
+# agreement across the language boundary. Matched against any path component,
+# so `examples` excludes every package's.
+ARCHIVE_GUARD_SKIPPED_DIRS = frozenset({
+    "target", ".git", "node_modules", ".gitnexus", "scripts", "examples", "fuzz",
+})
+
+# The guard's own inputs, by exact path: the matcher, its fixture corpus, the
+# driver, the exemption list, the canonical recipe, this selection rule, and
+# the registry and execution configuration that decide whether the scan runs
+# and under which scope.
+#
+# The admission rule is ownership, not topic: a file belongs here when it
+# carries configuration whose ONLY consumer is this guard, so a change to it
+# can silently alter whether the guard runs or what it scans while every other
+# check stays green. That is what keeps this a narrow list rather than a rule
+# that every workflow, manifest, or lockfile edit selects the guard.
+#
+# - `archive_guard.rs` (which also holds `ALLOWED`), `matcher_tests.rs`, and
+#   `archive_path_guard.rs` are excluded from SCANNING by `GUARD_OWN_SOURCES`
+#   — they must be free to spell the forbidden forms — and are owned here.
+# - `affected_scope.py` needs its own entry because `scripts/` is a skipped
+#   scan directory.
+# - `tools/test-toolkit/Cargo.toml` is the REGISTRY BINDING: its
+#   `[package.metadata.ci.tests] companion-suites` is the only declaration that
+#   attaches `archive-path-guard` to an owner. Drop the entry and every other
+#   gate stays green while the scan never runs again.
+# - `_package-ci.yml` holds the guard's two execution controls — the
+#   `BISCUIT_ARCHIVE_GUARD_PLAN` export, whose only reader is the guard, and
+#   the companions-only status fold that makes a guard-only cell's verdict its
+#   companion's. It already selects `test-toolkit` through
+#   `SUITE_OWNER_PREFIXES`, so its lint cell and the attached companion exist
+#   either way; what the entry buys is a plan that says the scan was selected
+#   and under which mode, instead of an empty unselected scan running
+#   incidentally.
+# - `cell_contract.py` is the sole conduit for a cell's `companions_only`: the
+#   lint job reads it from `steps.cell.outputs`, never from a workflow input.
+#   Like `affected_scope.py` it lives under the skipped `scripts/` directory.
+#
+# Deliberately NOT owned inputs:
+#
+# - `.github/workflows/ci.yml` carries no guard-specific configuration. The
+#   resolved-plan artifact it uploads is read by the coverage audits, the gap
+#   publisher, and every area, so losing it is loud and general rather than a
+#   guard-shaped silence.
+# - `.github/ci/environments.json` decides whether Linux is scheduled at all.
+#   When it is not, the guard cannot run anywhere, so selecting it from that
+#   change would schedule nothing.
+# - `scripts/ci/schema.py` and its generated `contract.json` VALIDATE the
+#   `archive_guard` block; the emitter is `archive_guard_scope` in this file,
+#   already owned. A validator-only change the emitter does not follow fails
+#   the planner and `test_schema.py` / `test_resolved_plan.py`, which
+#   `scripts/` ownership already selects.
+# - `just/ci-local.just` drives the guard locally. No CI guard execution runs
+#   it, so scheduling one answers nothing about it; `ci_workflow_contracts` and
+#   `test_ci_local.py` are what cover that path.
+ARCHIVE_GUARD_OWN_INPUTS = frozenset({
+    ".github/workflows/_package-ci.yml",
+    "scripts/ci/affected_scope.py",
+    "scripts/ci/cell_contract.py",
+    "tools/test-toolkit/Cargo.toml",
+    "tools/test-toolkit/justfile",
+    "tools/test-toolkit/src/archive_guard.rs",
+    "tools/test-toolkit/src/archive_guard/matcher_tests.rs",
+    "tools/test-toolkit/tests/archive_path_guard.rs",
+})
 
 # Bootstrap-preflight breadth (D3). A full-scope run validates every runner OS
 # the plan's environments land on before fan-out; a package-local change
@@ -435,6 +560,31 @@ ROOT_AREA = "root"
 # package matrix must stay under it even on a full-scope run.
 MATRIX_LIMIT = 256
 
+#: Byte ceiling on one area's serialized row-set document. Row sets travel as
+#: `scope`-job outputs indexed per area, exactly as `area_matrix` does today,
+#: and a job output that outgrows GitHub's limit fails the run after the work
+#: was already planned. Measured headroom on this workspace: the largest area
+#: serializes to ~2.2 KB (`spikes/s3-capacity.md`), so 16 KB is a guard against
+#: future growth rather than a constraint on today's plan. Ruling R7: the
+#: planner is the only place this is enforced, and it refuses rather than
+#: truncating.
+AREA_ROW_SET_BUDGET = 16 * 1024
+
+#: Byte ceiling on every area's row sets together. `ci.yml`'s `scope` job
+#: carries them as ONE output (`area_rows`) that each area call indexes, and
+#: GitHub caps a single output at 1 MB; half that leaves the refusal here
+#: rather than at output time. The full-workspace plan's rows measure ~22 KB
+#: (`spikes/s3-capacity.md`).
+TOTAL_ROW_SET_BUDGET = 512 * 1024
+
+#: The hand-edited exact-skip policy, snapshotted into every plan (ruling R8).
+BASELINE_POLICY_PATH = ".github/ci/ci-baseline.toml"
+
+#: The only dispatch form the shipped workflows implement (ruling R9 as
+#: amended in Phase 7 of `2026-09-19-direct-cell-execution`: every area moved
+#: together, and rollback is a revert rather than a per-area allowlist).
+EXECUTION_PATH = "rows"
+
 # Package CI is source-driven. Configuration, documentation, generated reports,
 # fixtures, and CI plumbing validate through their own contract suites; they do
 # not make unchanged Cargo packages rebuild. Keep this vocabulary aligned with
@@ -544,6 +694,129 @@ RUNTIME_PREDICATE_FIELDS = {"arch", "abi", "libc", "native_libraries"}
 #: libc together are what make native Windows and WSL2 structurally unpairable
 #: even before the hosting rule below is applied.
 RUNTIME_EQUAL_PREDICATES = ("arch", "abi", "libc")
+
+
+#: Version of `.github/ci/ci-baseline.toml`, mirrored from
+#: `ci-rollup.rs::BASELINE_SCHEMA_VERSION`. The planner reads the same file the
+#: audit does and must refuse the same generations.
+BASELINE_SCHEMA_VERSION = 3
+
+
+def load_skip_policy(root: Path, today: date | None = None) -> dict[str, Any]:
+    """Snapshot the approved exact-skip budget for the plan (ruling R8).
+
+    `.github/ci/ci-baseline.toml` stays the hand-edited source of truth. The
+    planner reads it once and writes what it read — provenance plus the
+    entries — into the plan, so a producer and the area audit apply the policy
+    the run was PLANNED with rather than whatever the file says by the time
+    they read it. A missing file and an empty one snapshot identically: both
+    approve nothing, and both hash the empty byte string.
+
+    The returned entries are not yet bound to cells; `applicable_skip_entries`
+    narrows them to the plan's own cells once those exist.
+
+    ## Errors
+
+    Raises ``RuntimeError`` for an unreadable or unparseable file, a schema
+    generation this planner does not read, an entry missing its governance, or
+    an entry whose expiry has passed. An expired approval is a planning error
+    rather than a producer-time surprise, because the plan is the artifact a
+    carried scope receipt reuses.
+    """
+    today = today or date.today()
+    path = root / BASELINE_POLICY_PATH
+    try:
+        content = path.read_bytes()
+    except OSError:
+        content = b""
+    if content and tomllib is None:
+        raise RuntimeError(
+            f"{BASELINE_POLICY_PATH} carries policy but this interpreter has no "
+            f"`tomllib` (Python {sys.version_info.major}.{sys.version_info.minor}); "
+            "resolving a plan needs Python 3.11 or newer. There is deliberately no "
+            "second TOML reader to fall back to."
+        )
+    try:
+        document = tomllib.loads(content.decode("utf-8")) if content else {}
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError(f"{BASELINE_POLICY_PATH}: cannot be parsed: {error}") from error
+    if document and document.get("schema_version") != BASELINE_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"{BASELINE_POLICY_PATH}: schema_version must be "
+            f"{BASELINE_SCHEMA_VERSION}, got {document.get('schema_version')!r}"
+        )
+
+    entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(document.get("skip", [])):
+        label = f"{BASELINE_POLICY_PATH} [[skip]] #{index}"
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{label}: must be a table")
+        missing = [
+            field
+            for field in ("package", "environment", "tier", "owner", "reason", "source_run")
+            if not entry.get(field)
+        ]
+        if missing:
+            raise RuntimeError(f"{label}: missing {', '.join(missing)}")
+        if entry["environment"] not in ENVIRONMENTS:
+            raise RuntimeError(
+                f"{label}: names environment {entry['environment']!r}, which is not "
+                f"one of {list(ENVIRONMENTS)}"
+            )
+        if entry["tier"] not in schema.GATES:
+            raise RuntimeError(
+                f"{label}: names tier {entry['tier']!r}, which is not one of "
+                f"{list(schema.GATES)}"
+            )
+        if "expiry" in entry:
+            validate_expiry(label, "expiry", str(entry["expiry"]), today)
+        # `tier` is the file's spelling of the same dimension the plan calls
+        # `gate`; the snapshot uses the plan's word so a reader of the plan
+        # never has to learn both.
+        record = {
+            "package": str(entry["package"]),
+            "environment": str(entry["environment"]),
+            "gate": str(entry["tier"]),
+            "owner": str(entry["owner"]),
+            "reason": str(entry["reason"]),
+            "source_run": str(entry["source_run"]),
+        }
+        if entry.get("tests") is not None:
+            record["tests"] = [str(name) for name in entry["tests"]]
+        if entry.get("backend"):
+            record["backend"] = str(entry["backend"])
+        if entry.get("expiry"):
+            record["expiry"] = str(entry["expiry"])
+        entries.append(record)
+
+    return {
+        "source": BASELINE_POLICY_PATH,
+        "content_hash": build_key.planned_keys([content.decode("utf-8", "replace")])[0],
+        "entries": entries,
+    }
+
+
+def applicable_skip_entries(
+    policy: dict[str, Any], cells: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    """`policy` narrowed to the cells this plan carries.
+
+    Applicability is what makes the snapshot usable: a repository-wide policy
+    file names cells no single plan selects, and an approval a plan cannot bind
+    to a cell is one the audit would never apply. The provenance still names
+    the whole file and its hash, so narrowing is visible rather than silent.
+    """
+    keys = {
+        (cell["package"], cell["environment"], cell["gate"]) for cell in cells
+    }
+    return {
+        **policy,
+        "entries": [
+            entry
+            for entry in policy["entries"]
+            if (entry["package"], entry["environment"], entry["gate"]) in keys
+        ],
+    }
 
 
 def load_environments(path: Path, today: date | None = None) -> list[dict[str, Any]]:
@@ -999,7 +1272,13 @@ def validate_suite_registry(
             )
         if not str(entry.get("owner", "")).strip():
             problems.append(f"suite '{name}' declares no owning package")
-        if not str(entry.get("recipe", "")).strip():
+        # A LINT-ONLY companion is a deliberate shape, not a missing recipe: a
+        # source-policy scan has no test half, and giving it one would attach it
+        # to its owner's L1 cell as well. Either half satisfies the rule this
+        # check exists for — that no suite is registered and silently never run.
+        if not str(entry.get("recipe", "")).strip() and not str(
+            entry.get("lint_recipe", "")
+        ).strip():
             problems.append(
                 f"suite '{name}' declares no canonical recipe, so it would be "
                 "registered and silently never run"
@@ -2308,6 +2587,12 @@ def mark_reused(cell: dict[str, Any], evidence: dict[str, Any]) -> None:
     cell["state"] = "reused"
     cell["evidence"] = evidence
     cell.pop("prohibition", None)
+    # The execution inputs go with the execution, exactly as the build
+    # reference does: a cell nothing will run selects no nextest profile,
+    # provisions no Node, and has no producer to prove a backend.
+    cell.pop("profile", None)
+    cell.pop("requires_node", None)
+    cell.pop("backends", None)
 
 
 def companion_records(
@@ -2392,6 +2677,16 @@ def package_cells(
     """
     package = record["package"]
     cells: list[dict[str, Any]] = []
+    table = {entry["name"]: entry for entry in environments}
+    # Only the suites that actually need the Node toolchain provision one: a
+    # package whose companions are Python contract suites would otherwise
+    # install pnpm on every capable runner.
+    wants_node = any(
+        SUITE_REGISTRY.get(suite, {}).get("node") for suite in record["companion_suites"]
+    ) or bool({"node-22", "pnpm-10"} & set(record["runner_tools"]))
+
+    def needs_node(environment: str) -> bool:
+        return wants_node and capability(table[environment], "node_pnpm")
 
     def add(
         environment: str,
@@ -2404,6 +2699,7 @@ def package_cells(
         reusable: bool = True,
         compiled_dependents: Sequence[str] = (),
         companions: Sequence[dict[str, Any]] = (),
+        backends: Sequence[str] = (),
     ) -> None:
         cell: dict[str, Any] = {
             "package": package,
@@ -2442,6 +2738,20 @@ def package_cells(
             cell["origin"] = "none"
             cell["state"] = "prohibited"
             cell["prohibition"] = constraint
+        # The execution inputs, added after the execution decision and only to
+        # the cells that will run one: a reused or governed cell resolves no
+        # profile and provisions no toolchain, and saying otherwise would
+        # describe work nothing does.
+        if cell["execution"] == "execute" and gate in schema.BUILD_GATES:
+            cell["profile"] = schema.CI_PROFILE
+            if needs_node(environment):
+                cell["requires_node"] = True
+        # The backends THIS cell must prove, not the package's declaration:
+        # `completion.py` compares the producer's `BISCUIT_TEST_REQUIRED_BACKENDS`
+        # against this list. A gap, reused, or prohibited cell requires nothing
+        # because it runs nothing, and the schema refuses the field there.
+        if cell["execution"] == "execute" and backends:
+            cell["backends"] = sorted(backends)
         cells.append(cell)
 
     # Lint, like check, lives on one environment; a plan that does not carry
@@ -2560,9 +2870,10 @@ def package_cells(
                     gap=toolchain_gap,
                 )
             elif tier == "L2":
-                hostable = any(
-                    backend_hostable(environment, backend)
+                hostable = sorted(
+                    backend
                     for backend in record["l2_backends"]
+                    if backend_hostable(environment, backend)
                 )
                 add(
                     name,
@@ -2572,6 +2883,7 @@ def package_cells(
                     f"{package} declares the L2 tier with backend(s) "
                     f"{', '.join(record['l2_backends'])}",
                     gap=None if hostable else gap_record(environment, record["l2_backends"]),
+                    backends=hostable,
                 )
             elif tier == "browser":
                 hostable = capability(environment, "headless_browser")
@@ -2584,145 +2896,6 @@ def package_cells(
                     gap=None if hostable else gap_record(environment, ["headless_browser"]),
                 )
     return cells
-
-
-def matrix_record(
-    record: dict[str, Any],
-    environments: list[dict[str, Any]],
-    gates: set[str] | frozenset[str] = frozenset(GATES),
-    executing: set[tuple[str, str]] | None = None,
-    builds: Sequence[dict[str, Any]] = (),
-) -> dict[str, Any]:
-    """The workflow-facing shape of one gating package's plan record.
-
-    `executing` is the `{environment, gate}` set the canonical plan resolved
-    to hosted execution. This projection adapts those cells to workflow
-    inputs without selecting work again.
-
-    `builds` are the plan's build records for this package, already derived.
-    A consumer job reads the key and artifact from here rather than matching a
-    package against an owner matrix itself.
-
-    `record` is the plan's package record and `environments` the plan's own
-    table: the projection reads nothing the plan does not carry, which is what
-    lets CI project a carried receipt without consulting the checkout.
-    """
-    testing = "test" in gates
-    tiers = record["tiers"] if testing else []
-    companion_suites = record["companion_suites"] if testing else []
-
-    def runs(environment: str, gate: str) -> bool:
-        return executing is None or (environment, gate) in executing
-
-    return {
-        "package": record["package"],
-        "area": record["area"],
-        "gates": sorted(gates, key=GATES.index),
-        "check_args": record["check_args"],
-        "dependents": record.get("dependent_seam", {}).get("dependents", []),
-        "dependents_check_args": record.get("dependent_seam", {}).get("check_args", ""),
-        "dependents_native": record.get("dependent_seam", {}).get("native", []),
-        "test_args": record["test_args"],
-        "l1_include_slow": record["l1_include_slow"],
-        "tiers": tiers,
-        "l2_backends": record["l2_backends"],
-        "runner_tools": record["runner_tools"],
-        "companion_suites": companion_suites,
-        # The environments whose test cell runs at least one of them. The
-        # companion step is skipped everywhere else rather than started and
-        # resolved to nothing, so a runner without the suites' interpreter
-        # cannot fail a cell that was never asked to run them.
-        "companion_environments": sorted(
-            {
-                entry["environment"]
-                for suite in companion_suites
-                for entry in (SUITE_REGISTRY.get(suite, {}),)
-                if entry.get("kind") == "companion" and entry.get("recipe")
-            }
-        ),
-        "native": record["native"],
-        "native_environments": [
-            environment["name"]
-            for environment in native_environments(environments)
-            if testing and runs(environment["name"], "L1")
-        ],
-        "check_os": [
-            environment["name"]
-            for environment in native_environments(environments)
-            if "check" in gates and runs(environment["name"], "check")
-        ],
-        "l2_environments": (
-            [
-                environment["name"]
-                for environment in environments
-                if runs(environment["name"], "L2")
-                and any(
-                    backend_hostable(environment, backend)
-                    for backend in record["l2_backends"]
-                )
-            ]
-            if "L2" in tiers
-            else []
-        ),
-        "browser_environments": (
-            [
-                environment["name"]
-                for environment in environments
-                if capability(environment, "headless_browser")
-                and runs(environment["name"], "browser")
-            ]
-            if "browser" in tiers
-            else []
-        ),
-        # Only the suites that actually need the Node toolchain provision one.
-        # A package whose companions are Python contract suites would otherwise
-        # install pnpm on every capable runner, and declare a capability its
-        # recipes never touch.
-        "node_environments": (
-            [
-                environment["name"]
-                for environment in environments
-                if capability(environment, "node_pnpm")
-            ]
-            if any(
-                SUITE_REGISTRY.get(suite, {}).get("node") for suite in companion_suites
-            )
-            or (testing and {"node-22", "pnpm-10"} & set(record["runner_tools"]))
-            else []
-        ),
-        # A `requires-toolchain` suite drives `cargo`/`rustc` itself, and its
-        # binaries arrive in an archive that carries no toolchain. Where the
-        # environment claims `cargo_toolchain`, the consumer must provision the
-        # pinned toolchain once, before any test runs: a hosted runner's rustup
-        # proxy otherwise auto-installs the pin on first use, and concurrent
-        # tests racing that install corrupted rustup's download directory (run
-        # 35326800778, `repo-deps`, `test-toolkit`). Where the environment
-        # lacks the capability, the L1 cell is a governed gap instead.
-        "toolchain_environments": (
-            [
-                environment["name"]
-                for environment in native_environments(environments)
-                if capability(environment, "cargo_toolchain")
-                and runs(environment["name"], "L1")
-            ]
-            if testing and record.get("requires_toolchain", False)
-            else []
-        ),
-        "wsl": testing
-        and any(
-            capability(environment, "archive_only") and runs(environment["name"], "L1")
-            for environment in environments
-        ),
-        "builds": [
-            {
-                "key": build["key"],
-                "producer": build["producer"],
-                "artifact": build["artifact"],
-                "consumers": build["consumers"],
-            }
-            for build in builds
-        ],
-    }
 
 
 def estimate_jobs(
@@ -3208,6 +3381,7 @@ def calculate_scope(
     event: str | None = None,
     all_environments: bool = False,
     proven_event: str | None = None,
+    deleted: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -3232,6 +3406,12 @@ def calculate_scope(
     (the `ci:all-os` label). `proven_event` names an event whose run already
     validated this tree, so its environments are listed in
     `proven_environments` and planned nowhere. See `schedule_environments`.
+
+    `deleted` is the subset of `files` the diff reports as removed. It is a
+    separate input because a name-only diff cannot distinguish a deletion from
+    a missing file; the change inventory and the archive-path guard's scope
+    both read it, the guard because a removed Rust file triggers exemption
+    maintenance and has nothing left to scan.
     """
     packages = workspace_packages(metadata)
     table = environments
@@ -3373,10 +3553,51 @@ def calculate_scope(
             package_record["dependent_seam"] = seam
         package_records.append(package_record)
 
+    inventory = change_inventory(files, full_scope, deleted)
+    guard = archive_guard_scope(
+        files,
+        full_scope,
+        deleted,
+        {environment["name"] for environment in cell_environments},
+        event,
+        inventory["diff_available"],
+    )
+    guard_owner = SUITE_REGISTRY[ARCHIVE_GUARD_SUITE]["owner"]
+    # Already-selected is the other half of the contract and needs no code: the
+    # owner's ordinary lint cell carries the guard because its manifest declares
+    # the suite, so nothing new is scheduled and `companions_only` stays absent.
+    # A workspace without the owner (a fixture) schedules nothing; a real one
+    # that lost it is caught by `validate_suite_registry`, which is where an
+    # unclaimed suite belongs.
+    if (
+        guard["selected"]
+        and guard_owner not in set(impacted)
+        and policy.get(guard_owner, {}).get("gates")
+    ):
+        owner_id = packages_by_name[guard_owner]["id"]
+        scanned = guard.get("paths") or []
+        trigger = f"changed path {scanned[0]}" if scanned else guard["reason"]
+        record, owned = archive_guard_only_selection(
+            policy[guard_owner],
+            package_area(manifest_directory(root, packages[owner_id])),
+            cell_environments,
+            prohibitions,
+            f"archive-path guard selected by {trigger}; this lint cell runs the "
+            f"guard alone and no other {guard_owner} work",
+            native_closure(owner_id, metadata, packages, policy),
+            closure_directories(owner_id, root, metadata, packages),
+        )
+        if owned:
+            package_records.append(record)
+            cells.extend(owned)
+            # The area's selection reason must not claim a source change it
+            # never saw: what selected the guard was source in another area.
+            suite_ids = suite_ids | {owner_id}
+
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
         raise RuntimeError(
-            f"the package matrix has {len(gating)} entries, over GitHub's "
+            f"the plan gates {len(gating)} packages, over GitHub's "
             f"{MATRIX_LIMIT}-job matrix ceiling; the fan-out must be grouped"
         )
 
@@ -3411,7 +3632,8 @@ def calculate_scope(
         "base": base,
         "head": head,
         "change_class": outcomes["change_class"],
-        "change_inventory": change_inventory(files, full_scope),
+        "change_inventory": inventory,
+        "archive_guard": guard,
         "full_scope": full_scope,
         "full_scope_gates": sorted(full_gates, key=GATES.index),
         "areas": area_records(
@@ -3430,6 +3652,7 @@ def calculate_scope(
         "cells": cells,
         "builds": builds,
         "accepted_evidence": outcomes["accepted_evidence"],
+        "skip_policy": applicable_skip_entries(load_skip_policy(root), cells),
         "evidence_rejections": outcomes["evidence_rejections"],
         "policy_gaps": outcomes["policy_gaps"],
         "prohibited_cells": outcomes["prohibited_cells"],
@@ -3451,7 +3674,20 @@ def calculate_scope(
         plan["producing_environments"] = [
             {"name": environment["name"], "for": guests} for environment, guests in producing
         ]
+    plan["rows"] = attach_rows(plan)
     return plan
+
+
+def attach_rows(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The plan's dispatch rows, refused before emission if over budget.
+
+    One call site for the pairing so a plan can never carry rows that were
+    never checked: [`row_sets`] derives them and [`enforce_output_budgets`]
+    decides whether they can be carried at all (ruling R7).
+    """
+    rows = row_sets(plan)
+    enforce_output_budgets(rows)
+    return rows
 
 
 def outcome_fields(
@@ -3548,6 +3784,10 @@ def apply_accepted_cells(
         if evidence is not None:
             mark_reused(cell, evidence)
     applied["builds"] = prune_build_records(applied["builds"], applied["cells"])
+    # Re-derived, never carried forward: evidence applied here removes
+    # executions, and a row set describing the pre-overlay plan would dispatch
+    # work this document says is already satisfied.
+    applied["rows"] = attach_rows(applied)
     gating = [entry for entry in applied["packages"] if entry["gates"]]
     applied.update(
         outcome_fields(
@@ -3645,6 +3885,9 @@ def area_records(
     `suite_owners` names the packages selected because a registered suite they
     own verifies a changed input rather than because their own source changed;
     an area holding only those must not claim a source change it did not see.
+
+    Every area states [`EXECUTION_PATH`]: one path per area per run, stated on
+    the record itself (ruling R9).
     """
     owners = suite_owners or set()
     grouped: dict[str, list[str]] = {}
@@ -3664,6 +3907,7 @@ def area_records(
             "area": area,
             "selection_reason": reason(members),
             "packages": sorted(members),
+            "execution_path": EXECUTION_PATH,
         }
         for area, members in sorted(grouped.items())
     ]
@@ -3723,7 +3967,9 @@ def change_bucket(path: str) -> str:
     return "other"
 
 
-def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
+def change_inventory(
+    files: Sequence[str], full_scope: bool, deleted: Sequence[str] = ()
+) -> dict[str, Any]:
     """What changed, classified once, for every reader of the plan.
 
     R8: computed from the changed paths alone and deliberately independent of
@@ -3734,8 +3980,14 @@ def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
     its path is plainly `configuration`.
 
     A manual full-scope run consulted no diff, so it records that fact rather
-    than empty buckets a reader would take for "nothing changed": `paths` and
-    `counts` are present exactly when `diff_available` is true.
+    than empty buckets a reader would take for "nothing changed": `paths`,
+    `counts`, and `deleted` are present exactly when `diff_available` is true.
+
+    `deleted` is the subset of `files` the diff reports as removed. It is a
+    separate input because `git diff --name-only` cannot distinguish a deletion
+    from a path that is simply missing, and a consumer that treated every
+    missing path as a deletion would silently stop checking a file the diff
+    named. A deleted path still appears in its bucket: it changed.
     """
     if full_scope:
         return {
@@ -3755,7 +4007,207 @@ def change_inventory(files: Sequence[str], full_scope: bool) -> dict[str, Any]:
     paths = {bucket: sorted(buckets[bucket]) for bucket in schema.CHANGE_BUCKETS}
     counts = {bucket: len(entries) for bucket, entries in paths.items()}
     counts["total"] = sum(counts.values())
-    return {"diff_available": True, "paths": paths, "counts": counts}
+    return {
+        "diff_available": True,
+        "paths": paths,
+        "counts": counts,
+        "deleted": normalized_paths(deleted),
+    }
+
+
+def normalized_paths(raw_files: Sequence[str]) -> list[str]:
+    """One normalized, sorted, de-duplicated spelling per non-empty path."""
+    return sorted({normalized_path(raw).strip() for raw in raw_files} - {""})
+
+
+def archive_guard_eligible(path: str) -> bool:
+    """Whether a normalized path is in the archive-path guard's scan domain.
+
+    The selection half of the one policy the scanner also applies
+    (`test_toolkit::archive_guard::is_eligible`). A build script is excluded
+    because it runs on the producer, where the compile-time value is the only
+    correct answer.
+
+    The guard's own three sources are deliberately NOT excluded here. The
+    scanner refuses them and reports them as ineligible, which is visible; a
+    second exclusion list on this side would be a second thing to keep in step.
+    """
+    if not path.endswith(".rs"):
+        return False
+    if path.rsplit("/", 1)[-1] == "build.rs":
+        return False
+    return not (set(path.split("/")) & ARCHIVE_GUARD_SKIPPED_DIRS)
+
+
+def archive_guard_triggered(path: str) -> bool:
+    """Whether one normalized changed path selects the guard.
+
+    Two reasons and no others: the path is source the guard would scan, or it
+    is one of the guard's own declared inputs. Documentation, lockfiles, and
+    the manifests and workflow files outside [`ARCHIVE_GUARD_OWN_INPUTS`]
+    select no guard.
+    """
+    return archive_guard_eligible(path) or path in ARCHIVE_GUARD_OWN_INPUTS
+
+
+def archive_guard_scope(
+    files: Sequence[str],
+    full_scope: bool,
+    deleted: Sequence[str],
+    scheduled: set[str],
+    event: str | None,
+    diff_available: bool,
+) -> dict[str, Any]:
+    """The archive-path guard's scan scope for one event.
+
+    The plan's one answer to "does the guard run, and over what". Exactly one
+    of three shapes, each carrying a non-empty `reason`:
+
+    - `{"selected": false, "reason": …}`
+    - `{"selected": true, "mode": "full", "reason": …}`
+    - `{"selected": true, "mode": "changed", "paths": [...], "reason": …}`
+
+    `paths` is present exactly in `changed` mode, and an explicitly empty list
+    is a real state — nothing eligible changed — that is never upgraded to a
+    full scan. Deleted paths still TRIGGER, because exemption maintenance has
+    to run when an exempted file disappears, but they are not listed for
+    scanning: there is nothing left to read.
+
+    The environment check comes before every mode decision. The guard is
+    Linux-only and must not force Linux into an event that excludes it; under
+    the current table a `schedule` run schedules WSL2 alone, so the nightly
+    records `selected: false` rather than adding a runner to it.
+    """
+    changed = normalized_paths(files)
+    removed = normalized_paths(deleted)
+    triggers = [path for path in changed + removed if archive_guard_triggered(path)]
+
+    # A full-workspace request selects every package, so it selects the guard
+    # too — there is no diff for a trigger to match against.
+    if not full_scope and not triggers:
+        return {
+            "selected": False,
+            "reason": (
+                "no scanned source and no owned guard input changed; a "
+                "documentation or unrelated configuration change selects no scan"
+            ),
+        }
+
+    if LINT_ENVIRONMENT not in scheduled:
+        occasion = f"the {event} event" if event else "this run"
+        return {
+            "selected": False,
+            "reason": (
+                f"{occasion} schedules no {LINT_ENVIRONMENT} cell; the guard is "
+                f"hosted there alone and does not force it into an event that "
+                f"excludes it"
+            ),
+        }
+
+    if full_scope:
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "explicit full-scope request; the whole eligible corpus is scanned"
+            ),
+        }
+    if not diff_available:
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "no change inventory is available, so the eligible corpus cannot "
+                "be narrowed and is scanned whole"
+            ),
+        }
+    if event == "push":
+        return {
+            "selected": True,
+            "mode": "full",
+            "reason": (
+                "a push scans the whole eligible corpus; changed-file evidence "
+                "from a pull request proves nothing about the files it omitted"
+            ),
+        }
+
+    scanned = [
+        path
+        for path in changed
+        if archive_guard_eligible(path) and path not in set(removed)
+    ]
+    occasion = f"the {event} event" if event else "this run"
+    return {
+        "selected": True,
+        "mode": "changed",
+        "paths": scanned,
+        "reason": (
+            f"{occasion} carries a change inventory; {len(scanned)} eligible "
+            f"source path(s) are in scope and untouched files are not rescanned"
+        ),
+    }
+
+
+def archive_guard_only_selection(
+    record: dict[str, Any],
+    area: str,
+    environments: list[dict[str, Any]],
+    prohibitions: dict[str, dict[str, Any]] | None,
+    reason: str,
+    native: dict[str, list[str]],
+    input_paths: list[str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The guard owner's lint-only package record and its single cell.
+
+    Selecting the owner the ordinary way would schedule its L1 on four
+    environments, its Node companions, and the reverse-dependency seam its
+    public API carries — work a Rust file in another area says nothing about.
+    So `package_cells` is handed a policy with no tier and no target kind,
+    which is what makes exactly one cell exist: `{owner, ubuntu-latest, lint}`.
+
+    `companions_only` marks that cell's required work as its companions rather
+    than the package's own Clippy, which this selection did not ask for.
+
+    Lint cells are already non-reusable, which is what the specification's
+    "initially prefer non-reusable guard execution" asks for: a changed-file
+    pull request scan must never be presented as a completed full-tree push
+    scan, and no evidence identity here can represent a scan's inputs.
+    """
+    lint_only = {**record, "tiers": [], "companion_suites": [ARCHIVE_GUARD_SUITE]}
+    cells = package_cells(
+        lint_only,
+        area,
+        [],
+        environments,
+        {},
+        prohibitions=prohibitions,
+    )
+    for cell in cells:
+        cell["selection_reason"] = reason
+        cell["companions_only"] = True
+
+    package_record = {
+        "package": record["package"],
+        "area": area,
+        "selection_reason": reason,
+        "gates": [
+            gate for gate in schema.GATES if any(cell["gate"] == gate for cell in cells)
+        ],
+        "targets": [],
+        "tiers": [],
+        "test_args": "",
+        "check_args": check_arguments(record["package"], [], ""),
+        "l2_backends": record["l2_backends"],
+        "runner_tools": record["runner_tools"],
+        "companion_suites": [ARCHIVE_GUARD_SUITE],
+        "archive_includes": record["archive_includes"],
+        "sidecars": record["sidecars"],
+        "l1_include_slow": record["l1_include_slow"],
+        "requires_toolchain": record["requires_toolchain"],
+        "native": native,
+        "input_paths": input_paths,
+    }
+    return package_record, cells
 
 
 def classify_preflight(
@@ -3823,68 +4275,140 @@ def classify_preflight(
 # ---------------------------------------------------------------------------
 
 
-def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
-    """Today's `scope.json` shape, projected from the resolved plan.
+def row_sets(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The area-local dispatch rows the hosted matrices expand.
 
-    `ci.yml`, `just/ci-local.just`, and `ci-rollup` still read the package
-    matrix and the rollup policy list. Phases 5 and 6 of
-    `fixes/2026-09-11-cicd-cleanup/plan.md` move them onto `cells`, and this
-    function goes with them. It exists so the planner can change shape without
-    leaving the workflow reading a document that no longer exists.
+    One row per executing cell, partitioned into the four disjoint sets each
+    area dispatches: `wsl` takes every archive-only guest cell, `check` and
+    `lint` take their gates, and `test` takes the native test tiers. Reused,
+    accepted-gap, prohibited, and event-deferred work creates no row, because
+    none of them is an execution.
 
-    It is a projection, never a second calculation: every environment list
-    below is read back out of the plan's cells, and the plan is its only
-    input, so CI can project a carried receipt without touching the checkout.
+    A row carries dispatch identity alone — `{package, gate, environment,
+    runner}`, in that order (ruling R1) — and the job it expands into resolves
+    the rest of its execution contract from this same plan by the
+    `{package, environment, gate}` the row names. Every area the plan selects
+    appears here, executing or not: an all-reused or gap-only area still owns a
+    blocking audit, and an absent key would read as an absent area.
 
-    `area_matrix` groups the same package records by area, one ready-made
-    `{"include": [...]}` per area, so `ci.yml` fans out one caller identity per
-    selected area and `_area-ci.yml` fans out its packages underneath. Grouping
-    happens here rather than in workflow `jq` so the shape is testable.
+    Pure, and the plan is its only input: CI derives these from a carried scope
+    receipt, where there is no checkout to consult.
     """
-    environments = plan["environments"]
-    executing: dict[str, set[tuple[str, str]]] = {}
+    runners = {
+        entry["name"]: entry["runner"]
+        for entry in plan["environments"]
+        if isinstance(entry, dict)
+    }
+    areas = {
+        entry["area"]: {
+            **{name: [] for name in schema.ROW_SET_NAMES},
+            **{f"has_{name}_rows": False for name in schema.ROW_SET_NAMES},
+        }
+        for entry in plan["areas"]
+    }
+
     for cell in plan["cells"]:
-        if cell["execution"] == "execute":
-            executing.setdefault(cell["package"], set()).add(
-                (cell["environment"], cell["gate"])
-            )
-
-    # A package's matrix entry is what tells `_package-ci.yml` which build each
-    # of its environments consumes; naming a record no owner job will produce
-    # would send a consumer looking for an artifact that does not exist.
-    builds_by_package: dict[str, list[dict[str, Any]]] = {}
-    for record in archive_builds(plan):
-        builds_by_package.setdefault(record["package"], []).append(record)
-
-    matrix = []
-    for entry in plan["packages"]:
-        if not entry["gates"]:
+        if cell["execution"] != "execute":
             continue
-        # The legacy vocabulary folds every test tier into one `test` gate.
-        gates = {gate if gate in ("lint", "check") else "test" for gate in entry["gates"]}
-        matrix.append(
-            matrix_record(
-                entry,
-                environments,
-                gates,
-                executing=executing.get(entry["package"], set()),
-                builds=builds_by_package.get(entry["package"], ()),
-            )
+        document = areas.get(cell["area"])
+        if document is None:
+            # An area the plan does not list cannot be dispatched to: its
+            # caller identity is the area record. Skipping it here would hide
+            # that; `validate_resolved_plan` refuses the document instead.
+            continue
+        if cell["environment"] == "wsl2-ubuntu":
+            name = "wsl"
+        elif cell["gate"] in ("check", "lint"):
+            name = cell["gate"]
+        else:
+            name = "test"
+        document[name].append(
+            {
+                "package": cell["package"],
+                "gate": cell["gate"],
+                "environment": cell["environment"],
+                "runner": runners.get(cell["environment"], cell["environment"]),
+            }
         )
 
-    area_matrix: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for entry in matrix:
-        area_matrix.setdefault(entry["area"], {"include": []})["include"].append(entry)
+    for document in areas.values():
+        for name in schema.ROW_SET_NAMES:
+            document[name].sort(
+                key=lambda row: (row["package"], row["gate"], row["environment"])
+            )
+            document[f"has_{name}_rows"] = bool(document[name])
+    return areas
 
+
+def enforce_output_budgets(rows: dict[str, dict[str, Any]]) -> None:
+    """Refuse a plan whose dispatch rows cannot be carried (ruling R7).
+
+    The planner is the only place this is checked, and it refuses whole: a
+    truncated matrix is exactly the silently-dropped-cell defect this feature
+    exists to remove, and a downstream re-derivation would be a second budget
+    to keep aligned.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the ceiling that was exceeded — GitHub's
+    per-matrix job limit, [`AREA_ROW_SET_BUDGET`] with the area that exceeded
+    it, or [`TOTAL_ROW_SET_BUDGET`].
+    """
+    for area in sorted(rows):
+        document = rows[area]
+        for name in schema.ROW_SET_NAMES:
+            count = len(document.get(name, ()))
+            if count > MATRIX_LIMIT:
+                raise RuntimeError(
+                    f"area {area!r} dispatches {count} {name} rows, over GitHub's "
+                    f"{MATRIX_LIMIT}-job matrix ceiling; the area must be split "
+                    "before it can be scheduled"
+                )
+        size = len(schema.canonical(document))
+        if size > AREA_ROW_SET_BUDGET:
+            raise RuntimeError(
+                f"area {area!r} serializes {size} bytes of dispatch rows, over the "
+                f"{AREA_ROW_SET_BUDGET}-byte per-area output budget; the rows are "
+                "refused whole rather than truncated"
+            )
+    total = len(schema.canonical(rows))
+    if total > TOTAL_ROW_SET_BUDGET:
+        raise RuntimeError(
+            f"the plan serializes {total} bytes of dispatch rows across "
+            f"{len(rows)} areas, over the {TOTAL_ROW_SET_BUDGET}-byte scope output "
+            "budget; the rows are refused whole rather than truncated"
+        )
+
+
+def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
+    """The `scope.json` projection of the resolved plan.
+
+    It carries the scalars and per-area outputs `ci.yml`'s `scope` job
+    publishes, and the policy and build-owner projections `ci-rollup` and
+    `ci.yml`'s owner job read. It carries no per-package environment list:
+    producers resolve their contract from the plan by cell key, and
+    `just/ci-local.just` reads the plan's package records and cells.
+
+    It is a projection, never a second calculation: the plan is its only
+    input, so CI can project a carried receipt without touching the checkout.
+
+    `scheduled_areas` are the areas owning at least one gating package, each
+    one `_area-ci.yml` call. An area whose cells are all reused or accepted
+    gaps is still scheduled: it keeps its blocking audit and result slice.
+    """
+    scheduled = sorted({entry["area"] for entry in plan["packages"] if entry["gates"]})
     owners = build_owner_matrix(plan)
     slices = build_slices(owners)
 
     return {
         "packages": [entry["package"] for entry in plan["packages"]],
         "areas": plan["areas"],
-        "scheduled_areas": sorted(area_matrix),
-        "area_matrix": area_matrix,
-        "area_slugs": {area: area_slug(area) for area in sorted(area_matrix)},
+        "scheduled_areas": scheduled,
+        # Derived here rather than read from `plan["rows"]`: one function
+        # computes the rows, so the document a workflow expands and the
+        # document `ci-plan` renders cannot disagree about what will run.
+        "area_rows": row_sets(plan),
+        "area_slugs": {area: area_slug(area) for area in scheduled},
         "source_packages": plan["source_packages"],
         "reverse_dependencies": plan["reverse_dependencies"],
         "full_scope": plan["full_scope"],
@@ -3892,7 +4416,6 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
         "change_class": plan["change_class"],
         "preflight_os": plan["preflight_os"],
         "preflight_reason": plan["preflight_reason"],
-        "matrix": matrix,
         "policy": [
             policy_record(entry, {"test"} if entry["tiers"] else set())
             for entry in plan["packages"]
@@ -3990,16 +4513,27 @@ def parse_args() -> argparse.Namespace:
             "are listed as proven and planned nowhere"
         ),
     )
+    parser.add_argument(
+        "--deleted",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "a path the diff reports as removed; repeatable. A name-only diff "
+            "cannot tell a deletion from a missing file, so the distinction is "
+            "declared rather than guessed"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args()
     if args.apply_to and (
-        args.all or args.files or args.constraints
+        args.all or args.files or args.constraints or args.deleted
         or args.event or args.all_environments or args.proven_event
     ):
         parser.error(
             "--apply-to applies evidence to a carried plan and performs no "
             "selection: it cannot be combined with --all, --constraints, --event, "
-            "--all-environments, --proven-event, or a file list"
+            "--all-environments, --proven-event, --deleted, or a file list"
         )
     return args
 
@@ -4094,6 +4628,7 @@ def main() -> None:
             event=args.event,
             all_environments=args.all_environments,
             proven_event=args.proven_event,
+            deleted=args.deleted,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")

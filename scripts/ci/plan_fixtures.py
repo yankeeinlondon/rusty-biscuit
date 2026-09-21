@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Build records for the plan documents the CI suites write by hand.
+"""The derived halves of the plan documents the CI suites write by hand.
 
-`test_evidence_reuse`, `test_ci_local`, and the `just ci-local` stub planner all
-assemble a resolved plan literally, because what they test is what happens
-*after* planning. Since version 3 a valid plan also owns its build records, and
-hand-writing them in three places would guarantee they drift from the cells they
+`test_evidence_reuse`, `test_ci_local`, `test_local_evidence`, and the
+`just ci-local` stub planner all assemble a resolved plan literally, because
+what they test is what happens *after* planning. Every generation of the schema
+adds fields that follow mechanically from the cells — build records at version
+3, the nextest profile and the skip-policy snapshot at version 7 — and
+hand-writing them in four places would guarantee they drift from the cells they
 claim to serve.
 
-This derives them from the cells instead, the same way `affected_scope` does,
-and is deliberately a plain fixture helper: the real derivation reads the
-environment table's build contracts and digests through `ci-build`, neither of
-which a document fixture has or needs.
+[`finalize_plan`] derives all of them from the cells, the same way
+`affected_scope` does. It is deliberately a plain fixture helper: the real
+derivation reads the environment table's build contracts, the shipped baseline
+file, and digests through `ci-build`, none of which a document fixture has or
+needs.
+
+[`archive_guard`] is here for the same reason: the plan made the guard's scan
+scope a required field, and it is a selection decision no post-planning fixture
+makes.
 """
 
 from __future__ import annotations
@@ -53,6 +60,26 @@ CONTRACTS: dict[str, dict[str, Any]] = {
 }
 
 
+def archive_guard(paths: list[str] | None = None) -> dict[str, Any]:
+    """The archive-path guard scope a hand-written plan must carry.
+
+    The default is the honest one for a fixture that performed no selection:
+    the guard was not selected, so it describes no scope. Pass `paths` where a
+    fixture needs a changed-file scan to be present.
+    """
+    if paths is None:
+        return {
+            "selected": False,
+            "reason": "fixture plan; no scan scope was selected",
+        }
+    return {
+        "selected": True,
+        "mode": "changed",
+        "paths": sorted(set(paths)),
+        "reason": "fixture plan; changed-file scan",
+    }
+
+
 def _key(package: str, producer: str) -> str:
     """A stable stand-in for the digest `ci-build key` computes.
 
@@ -62,6 +89,39 @@ def _key(package: str, producer: str) -> str:
     """
     material = f"{package}\x1f{producer}".encode("utf-8")
     return f"{int.from_bytes(material[:8].ljust(8, b'0'), 'big') ^ len(material):016x}"
+
+
+#: The snapshot every fixture plan carries. The shipped `ci-baseline.toml` is
+#: empty, so the honest fixture approves nothing; a case that needs an approval
+#: replaces `entries` after calling [`finalize_plan`].
+EMPTY_SKIP_POLICY: dict[str, Any] = {
+    "source": ".github/ci/ci-baseline.toml",
+    "content_hash": "aaaabbbbccccdddd",
+    "entries": [],
+}
+
+
+def finalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Give `plan` every field a valid current-generation plan derives.
+
+    Build records and their per-cell references ([`attach_builds`]), the
+    nextest profile on exactly the cells that run one, the area-level
+    execution path, and the skip-policy snapshot. Mutates and returns `plan`,
+    and is idempotent: a fixture that resolves a cell to reuse or prohibition
+    calls it again and watches the cell's derived fields disappear with the
+    execution they described.
+    """
+    attach_builds(plan)
+    for cell in plan["cells"]:
+        if cell["execution"] == "execute" and cell["gate"] in schema.BUILD_GATES:
+            cell.setdefault("profile", schema.CI_PROFILE)
+        else:
+            cell.pop("profile", None)
+            cell.pop("requires_node", None)
+    for area in plan.get("areas", ()):
+        area.setdefault("execution_path", "rows")
+    plan.setdefault("skip_policy", dict(EMPTY_SKIP_POLICY))
+    return plan
 
 
 def attach_builds(plan: dict[str, Any]) -> dict[str, Any]:

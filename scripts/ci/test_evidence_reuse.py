@@ -172,6 +172,9 @@ class EvidenceFixture(unittest.TestCase):
             "change_inventory": change_inventory(
                 ["alpha/src/lib.rs", "beta/src/lib.rs"], False
             ),
+            "archive_guard": plan_fixtures.archive_guard(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"]
+            ),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -228,7 +231,7 @@ class EvidenceFixture(unittest.TestCase):
             "preflight_reason": "package-local change",
             "flags": {},
         }
-        return plan_fixtures.attach_builds(document)
+        return plan_fixtures.finalize_plan(document)
 
     def plan_cell(self, package: str, environment: str, gate: str) -> dict:
         return {
@@ -1297,7 +1300,9 @@ class BackendProofTests(EvidenceFixture):
 
     def l2_plan_cells(self) -> None:
         plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
-        plan["cells"].append(self.plan_cell("alpha", "macos-latest", "L2"))
+        # An executing L2 cell names the backends its producer must prove
+        # (plan schema 6): here the one tmux the package declares.
+        plan["cells"].append({**self.plan_cell("alpha", "macos-latest", "L2"), "backends": ["tmux"]})
         for entry in plan["packages"]:
             if entry["package"] == "alpha":
                 entry["gates"] = ["L1", "L2"]
@@ -1306,7 +1311,7 @@ class BackendProofTests(EvidenceFixture):
         plan["job_estimate"] = len(plan["cells"])
         # The added L2 cell executes, so it owes a build: the macOS record it
         # shares with alpha's own L1 cell on that producer.
-        plan_fixtures.attach_builds(plan)
+        plan_fixtures.finalize_plan(plan)
         self.assertEqual([], schema.validate_resolved_plan(plan))
         self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
 

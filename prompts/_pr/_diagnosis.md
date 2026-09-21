@@ -14,7 +14,7 @@ A list of red test names is not a diagnosis. Before you report anything, every f
 ### Where the evidence lives
 
 - The hook prints the gate summary and a line of the form `Reports retained under <home>/.rusty-biscuit/ci-evidence/<sha>/<environment>`. The `L1/` and `L2/` directories there hold one JUnit XML file per package; each `<testcase>` with a `<failure>` child carries the panic text and captured output. Parse these rather than scrolling the console log.
-- The hook log itself (the output you captured from `git push`) shows which gates ran, which were reused from prior evidence, and which failed.
+- The hook log itself (the output of `git push`, which the push stage captured to `{{log}}`) shows which gates ran, which were reused from prior evidence, and which failed. A gate that fails before any test runs, such as a compile error or a lint failure, appears only there.
 
 ### Establishing attribution
 
@@ -31,6 +31,14 @@ Reproducing on the base and bisecting cost build time. That cost is expected; an
 
 Several red tests frequently share one cause (for example two drift tests pinned to the same file). Explain the shared cause once and list every test it accounts for, so the caller sees the number of *problems*, not just the number of red tests.
 
+### Decide where each repair belongs
+
+The branch being proposed is not automatically the branch a repair belongs on. For every problem that needs a change to the repository, record a `fix_branch`:
+
+- `branch` and `working-tree` problems are repaired on `{{branch}}`.
+- A `base` problem is not this pull request's to repair. Its fix belongs on its own branch cut from `{{base}}`, so that it can merge ahead of this work; name that branch (for example `fix/<short-topic>`). Say plainly in `summary` that the pull request stays blocked until that fix reaches `{{base}}` and this branch picks it up.
+- An `environment` problem has no `fix_branch`. Say what the caller has to change on the host instead.
+
 ### Do not fix anything
 
 This stage diagnoses; it does not repair. Do not edit source, tests, fixtures, or prompts, do not refresh pinned hashes, and never bypass the hook (`--no-verify`, `RUSTY_BISCUIT_PRE_PUSH=warn|scope-only|off`). Whether to fix is the caller's decision, made in the next stage.
@@ -39,8 +47,8 @@ This stage diagnoses; it does not repair. Do not edit source, tests, fixtures, o
 
 `issue` is the entire briefing a fixing agent will receive, and that agent will not have your session. Make it self-contained:
 
-- the branch, `HEAD` SHA, and base
-- each distinct problem: the failing tests it accounts for, the root cause, the attribution with its evidence, and the introducing commit when known
+- the branch being proposed, its `HEAD` SHA, and the base
+- each distinct problem: the failing tests it accounts for, the root cause, the attribution with its evidence, the introducing commit when known, and the `fix_branch` the repair belongs on
 - the exact commands that reproduce each failure
 - anything you ruled out, so the fixing agent does not repeat it
 - constraints the fix must respect (for example "the fixture must be re-derived from the shipped prompt, keeping only the documented removals")

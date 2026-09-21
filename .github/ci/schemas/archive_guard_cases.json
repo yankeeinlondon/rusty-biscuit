@@ -1,0 +1,266 @@
+{
+  "note": "Hand-authored accept/reject corpus for the resolved plan's `archive_guard` scope, read by scripts/ci/test_schema.py and tools/test-toolkit/tests/ci_workflow_contracts.rs. Adding a case here fails both suites until both readers agree on it. Unlike contract.json this file is not generated: it states behavior schema.py's field table cannot.",
+  "cases": [
+    {
+      "name": "unselected-scope",
+      "valid": true,
+      "rule": "An unselected guard describes no scope and still says why.",
+      "archive_guard": {
+        "selected": false,
+        "reason": "documentation-only change"
+      }
+    },
+    {
+      "name": "full-scan",
+      "valid": true,
+      "rule": "A full scan names no paths.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "full",
+        "reason": "an explicit full-scope request"
+      }
+    },
+    {
+      "name": "changed-scan",
+      "valid": true,
+      "rule": "A changed scan names its sorted, unique, repository-relative paths.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["claudine/lib/src/lib.rs", "tools/test-toolkit/src/lib.rs"],
+        "reason": "the pull_request event carries a change inventory"
+      }
+    },
+    {
+      "name": "empty-changed-scan",
+      "valid": true,
+      "rule": "An explicitly empty list is the real \"nothing eligible changed\" state, never an implicit full scan.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": [],
+        "reason": "nothing eligible changed"
+      }
+    },
+    {
+      "name": "unknown-field",
+      "valid": false,
+      "rule": "The field set is closed; a scope field a reader does not know is one it cannot apply.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["a/b.rs"],
+        "files": ["a/b.rs"],
+        "reason": "a renamed scope field must not be silently ignored"
+      }
+    },
+    {
+      "name": "non-object-scope-array",
+      "valid": false,
+      "rule": "The scope is an object; a list carries no field to read.",
+      "archive_guard": []
+    },
+    {
+      "name": "non-object-scope-number",
+      "valid": false,
+      "rule": "The scope is an object; a number carries no field to read.",
+      "archive_guard": 7
+    },
+    {
+      "name": "missing-selected",
+      "valid": false,
+      "rule": "Every scope declares whether the guard was selected.",
+      "archive_guard": {
+        "reason": "a scope with no selection decides nothing"
+      }
+    },
+    {
+      "name": "non-boolean-selected",
+      "valid": false,
+      "rule": "`selected` is a boolean; a string is not a decision.",
+      "archive_guard": {
+        "selected": "true",
+        "mode": "full",
+        "reason": "a quoted boolean is a string"
+      }
+    },
+    {
+      "name": "unselected-carrying-mode",
+      "valid": false,
+      "rule": "Stale scope beside an unselected guard would scan as if it had been planned.",
+      "archive_guard": {
+        "selected": false,
+        "mode": "full",
+        "reason": "nothing selected it"
+      }
+    },
+    {
+      "name": "unselected-carrying-paths",
+      "valid": false,
+      "rule": "Stale scope beside an unselected guard would scan as if it had been planned.",
+      "archive_guard": {
+        "selected": false,
+        "paths": [],
+        "reason": "nothing selected it"
+      }
+    },
+    {
+      "name": "selected-without-mode",
+      "valid": false,
+      "rule": "A selected guard names the scan it was given.",
+      "archive_guard": {
+        "selected": true,
+        "reason": "selected with no scan named"
+      }
+    },
+    {
+      "name": "unknown-mode",
+      "valid": false,
+      "rule": "`full` and `changed` are the whole vocabulary; anything else has no defined scope.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "partial",
+        "paths": ["a/b.rs"],
+        "reason": "a partial scan is not a mode"
+      }
+    },
+    {
+      "name": "full-scan-carrying-paths",
+      "valid": false,
+      "rule": "A listed subset beside a full scan would read as the whole of what was checked.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "full",
+        "paths": ["a/b.rs"],
+        "reason": "a full scan takes no path list"
+      }
+    },
+    {
+      "name": "changed-scan-without-paths",
+      "valid": false,
+      "rule": "An empty scan is spelled as an explicit empty list, never as an absent one.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "reason": "a changed scan with no list"
+      }
+    },
+    {
+      "name": "changed-scan-with-non-array-paths",
+      "valid": false,
+      "rule": "`paths` is a list; one string is not a one-element scope.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": "a/b.rs",
+        "reason": "a bare string is not a path list"
+      }
+    },
+    {
+      "name": "changed-scan-with-non-string-path",
+      "valid": false,
+      "rule": "Every listed path is a string.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": [7],
+        "reason": "a number names no file"
+      }
+    },
+    {
+      "name": "unsorted-paths",
+      "valid": false,
+      "rule": "One order per scope, so two readers of one plan cannot disagree about it.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["b/second.rs", "a/first.rs"],
+        "reason": "an unsorted list"
+      }
+    },
+    {
+      "name": "duplicate-paths",
+      "valid": false,
+      "rule": "A scope names each path once.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["a/first.rs", "a/first.rs"],
+        "reason": "a repeated path"
+      }
+    },
+    {
+      "name": "windows-spelled-path",
+      "valid": false,
+      "rule": "One POSIX spelling per path, so a Windows-spelled diff resolves the same scope.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["a\\b.rs"],
+        "reason": "a backslash-spelled path"
+      }
+    },
+    {
+      "name": "escaping-path",
+      "valid": false,
+      "rule": "Every path is resolved against the checkout root; a `..` component walks out of it without ever looking absolute.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["../outside.rs"],
+        "reason": "a path that leaves the checkout"
+      }
+    },
+    {
+      "name": "absolute-path",
+      "valid": false,
+      "rule": "An absolute path discards the checkout root it is joined against.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["/etc/passwd.rs"],
+        "reason": "an absolute path"
+      }
+    },
+    {
+      "name": "drive-prefixed-path",
+      "valid": false,
+      "rule": "A Windows drive prefix discards the checkout root the same way an absolute path does.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "changed",
+        "paths": ["C:/windows/system32.rs"],
+        "reason": "a drive-prefixed path"
+      }
+    },
+    {
+      "name": "missing-reason",
+      "valid": false,
+      "rule": "Every scope states why it holds the scope it does.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "full"
+      }
+    },
+    {
+      "name": "blank-reason",
+      "valid": false,
+      "rule": "Whitespace explains nothing.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "full",
+        "reason": "  \t "
+      }
+    },
+    {
+      "name": "non-string-reason",
+      "valid": false,
+      "rule": "A reason is prose, not a number.",
+      "archive_guard": {
+        "selected": true,
+        "mode": "full",
+        "reason": 7
+      }
+    }
+  ]
+}

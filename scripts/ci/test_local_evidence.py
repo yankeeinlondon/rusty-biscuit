@@ -10,10 +10,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import affected_scope  # noqa: E402
+import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import change_inventory, legacy_scope_document
 from local_evidence import (  # noqa: E402
     NOTES_PREFIX,
+    gate_global_inputs,
     SCOPE_NOTES_REF,
     record,
     record_scope,
@@ -148,7 +151,7 @@ class ScopeReceiptTests(RepositoryFixture):
 
     def setUp(self) -> None:
         super().setUp()
-        self.plan = {
+        self.plan = plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": self.base,
             "head": self.head,
@@ -156,6 +159,7 @@ class ScopeReceiptTests(RepositoryFixture):
             # The real producer, so a fixture plan cannot describe a shape the
             # planner no longer emits.
             "change_inventory": change_inventory(["alpha/src/lib.rs"], False),
+            "archive_guard": plan_fixtures.archive_guard(["alpha/src/lib.rs"]),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [{"area": "pkg", "selection_reason": "source change", "packages": ["alpha"]}],
@@ -247,7 +251,7 @@ class ScopeReceiptTests(RepositoryFixture):
             "preflight_os": ["macos-latest"],
             "preflight_reason": "package-local change",
             "flags": {},
-        }
+        })
         self.projection = {
             name: [] for name in schema.SCOPE_PROJECTION_FIELDS
         } | {
@@ -403,6 +407,44 @@ class ScopeReceiptTests(RepositoryFixture):
         self.assertEqual(0, hit.returncode, hit.stderr)
         self.assertEqual(schema.canonical(self.plan), Path("plan-out.json").read_text(encoding="utf-8"))
         self.assertEqual(schema.canonical(legacy_scope_document(self.plan)), Path("scope-out.json").read_text(encoding="utf-8"))
+
+
+class OrchestrationExclusionTests(unittest.TestCase):
+    """Ruling R11's identity half, through the function that computes it.
+
+    A workflow that forces workspace scope decides what CI RUNS; it never
+    changes what a local gate PRODUCES. `gate_global_inputs` is where that
+    distinction is applied, so the exclusion is asserted there rather than
+    against the table it reads.
+    """
+
+    SCHEDULING = ".github/workflows/_area-ci.yml"
+
+    def test_no_gates_identity_includes_a_scheduling_workflow(self) -> None:
+        for gate in ("L1", "L2", "browser", "lint", "check"):
+            inputs = gate_global_inputs(gate)
+            for path in inputs:
+                self.assertFalse(
+                    path.startswith(".github/workflows/"),
+                    f"{gate} counts {path} as a gate input; editing a workflow "
+                    "would invalidate every published local cell for it",
+                )
+
+    def test_the_scheduling_workflow_still_forces_workspace_scope(self) -> None:
+        # The other half of the pairing, restated here so a reader of this file
+        # sees both: excluded from identity, and still global to selection.
+        self.assertIn(self.SCHEDULING, affected_scope.GLOBAL_PATHS_ALL_GATES)
+        self.assertIn(self.SCHEDULING, affected_scope.ORCHESTRATION_PATHS)
+
+    def test_the_toolchain_and_lockfile_inputs_are_not_swept_away_with_them(
+        self,
+    ) -> None:
+        # Non-vacuity: the exclusion is narrow. A real compile input must still
+        # be in every gate's identity.
+        for gate in ("L1", "lint"):
+            inputs = gate_global_inputs(gate)
+            self.assertIn("rust-toolchain.toml", inputs)
+            self.assertIn("Cargo.lock", inputs)
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ A **constraint** is the a way to further _constrain_ a base type. There are some
 - `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value)
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
-For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schemas/schema-constraints.md) but here's an update of our example that takes advantage of constraints:
+For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schema-constraints.md) but here's an update of our example that takes advantage of constraints:
 
 ```yaml
 $schema:

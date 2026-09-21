@@ -163,9 +163,10 @@ change a local host's budget. L1, sanity, and real-resource recipes export
 runs inherit `test-threads = -2` from `.config/nextest.toml`. Cargo build-job
 limits are unchanged.
 
-Existing CI-profile test groups remain narrower limits: Claudine L1 allows
-four concurrent tests, Claudine CLI L1 allows one, and Sniff L1 on Windows
-allows one. These caps still apply when the overall worker budget is larger.
+Resource-specific CI-profile test groups remain narrower limits: Claudine L1
+allows four concurrent tests and Sniff L1 on Windows allows one. Claudine CLI
+L1 inherits the OS-aware worker budget; a fixed package-wide cap would silently
+defeat the public runners' available concurrency.
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
 a fixed selection. Install the hook dispatcher with:
@@ -201,11 +202,12 @@ workspace. A push to `main` whose pull request
 validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
 environment for a pull request from its next push.
 
-`ci.yml` defines **exactly six top-level jobs**, and a contract test pins the set: `validation`
+`ci.yml` defines **exactly eight top-level jobs**, and a contract test pins the set: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
-(bootstrap prerequisites per selected OS — no test suite), `area-ci` (one caller identity per
-selected area), `ci-gate` (the required check, a policy-free fold of those four), and advisory
-`ci-reporting`. No job owns a test suite on CI's behalf: every suite belongs to a package and runs
+(bootstrap prerequisites per selected OS — no test suite), `build` (the native build owners),
+`area-ci` (one caller identity per selected area), `area-drift` (the planner's areas match
+`sniff`), `ci-gate` (the required check, a policy-free fold of the other six blocking jobs), and
+advisory `ci-reporting`. No job owns a test suite on CI's behalf: every suite belongs to a package and runs
 in that package's own cell, so the plan places it once and one owner answers for it.
 
 `preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan output read before
@@ -215,18 +217,32 @@ immediately after `scope` as a decision rather than as a property of GitHub's em
 handling.
 
 The tested half of a run is **one top-level entry per selected package area**. `ci.yml`'s
-`area-ci` job fans out over the planner's `scheduled_areas` and calls `_area-ci.yml`, which fans
-out over that area's package matrix and calls `_package-ci.yml`, which delegates the `wsl2-ubuntu`
-cell to `_wsl-ci.yml`. That is four levels including the caller — GitHub's maximum, with no margin
-for another. Both matrices come from the planner, not from workflow `jq`, so the grouping has test
-coverage.
+`area-ci` job fans out over the planner's `scheduled_areas`, hands each area its dispatch rows
+(`area_rows`), and calls `_area-ci.yml`, which calls `_package-ci.yml` **once for the whole
+area**, which delegates each `wsl2-ubuntu` row to `_wsl-ci.yml`. That is four levels including the
+caller; GitHub documents ten, and the repository's contracts hold the chain at four.
 
-A called workflow's jobs render as `<caller job name> / <called job name>`, so a compile cell
-reads `area-ci (claudine) / claudine-cli / check (windows-latest)`: area first, package under it,
-environment on the leaf. No display name is parsed for *identity* — that comes from each artifact's
+**The unit of dispatch is a plan cell.** The planner emits one row `{package, gate, environment,
+runner}` per *executing* cell — never for a reused, accepted-gap, prohibited, or event-deferred
+one — grouped per area into four disjoint sets (`test` for native L1/L2/browser, `check`, `lint`,
+`wsl`) with scalar `has_*_rows` flags. An area with no rows skips the execution call entirely yet
+keeps its audit; otherwise each set expands as a `fail-fast: false` matrix. No workflow accepts a
+list of environments. Each job resolves everything else from the plan through
+`scripts/ci/cell_contract.py`, which refuses a row the plan does not schedule before anything
+runs. Plan schema version 5 stamps every area `execution_path: "rows"`, the only admitted value;
+rollback is a revert, not a per-area switch. Version 6 gives every executing L2 cell `backends`, the
+hostable subset of the package's `l2_backends`: the producer requires exactly that list, `backend-proof
+verify` writes `backend-proofs.json` beside its evidence, and `completion.py` reads both from the same
+staging tree. The planner refuses, whole and before dispatch, a
+row set over 256 jobs, an area's rows over 16 KB, or all rows together over 512 KiB.
+
+A called workflow's jobs render as `<caller job name> / <called job name>`, and a matrix job's
+label carries every row value in key order, so a producer reads
+`area-ci (playa) / package-ci / test (playa-cli, L1, macos-latest, macos-latest)`: area first,
+then the whole cell. No display name is parsed for *identity* — that comes from each artifact's
 `manifest.jsonl` and `status.json` — but the composite label **is** parsed by
-`scripts/ci/runner_loss.py` to attribute a dead runner's cell, so renaming a producer job is a
-contract change.
+`scripts/ci/runner_loss.py` to attribute a dead runner's cell, so renaming a producer job or
+reordering a row is a contract change.
 
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
@@ -268,16 +284,15 @@ A trigger selection is narrower than a source change: the changed path says noth
 owner's public API, so it contributes no reverse dependencies and no dependent seam. No path here
 selects the full workspace.
 
-Only cells not already satisfied by verified evidence get a hosted runner: the environment lists
-the area hands each package are the plan's *executing* set. A reused cell is published straight
+Only cells not already satisfied by verified evidence get a hosted runner: the rows an area
+receives are the plan's *executing* set. A reused cell is published straight
 into its area's summary, where the grid's "Reused results" table names the receipt's evidence ref,
 counts, duration, and host — no setup, build, archive, or test step runs for it.
 
 Skippable jobs carry **no `name:`**. GitHub never evaluates the matrix context for a job it skips,
 so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as raw expression text
 (63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
-`job-id (matrix values)` when it runs. `lint` has no matrix, so it keeps a static
-`lint (ubuntu-latest)` — its environment has to be visible.
+`job-id (matrix values)` when it runs — which is also how `lint`'s environment stays visible.
 
 ### One native owner compiles, every tier consumes
 
@@ -310,18 +325,32 @@ provenance** in its area's summary. See
 
 ### Each area audits its planned coverage
 
+**Each producer proves its own cell first.** A test job lists its expected tests on its own
+target before the gate (`just _expected_manifest`, after provisioning, because listing runs the
+binaries); after the gate, `scripts/ci/completion.py` compares that listing with the job's reports
+as identities, not counts, and writes a completion record only when they agree. The job uploads it
+as `completion-<package>-<gate>-<environment>`, and a failed upload fails the job. Check and lint
+jobs write one too. A missing or malformed report, an absent expected test, an unexpected or
+duplicate identity, an unapproved skip, a failed companion suite, or an unproven required backend
+leaves no record.
+
 `_area-ci.yml`'s `coverage-audit` job runs `if: always()` behind that area's producers and always
-renders `ci-rollup rollup --area`. It runs `ci-rollup verdict --area` only when every producer
-succeeded. Producer failures already reach `ci-gate`; the audit therefore creates no second red
-check for the same failure. With green producers it fails closed on missing or unscheduled
-evidence, invalid governed gaps, and exact-skip violations, scoped to that area alone. It also
-narrows runner-loss attribution to its own packages, because a job name carries no area.
-`ci-rollup summarize --results <slice>…` folds the slices into one view and applies no policy at
-all.
+renders `ci-rollup rollup --area`. It runs `ci-rollup verdict --area --producers <result>` when
+the area's producer call succeeded **or was skipped**. Producer failures already reach `ci-gate`;
+the audit therefore creates no second red check for the same failure. A skipped call is how an
+all-reused or gap-only area is still judged, and over executing cells it blocks as
+`producers-skipped`. When it enforces, it fails closed on missing or unscheduled evidence, an
+executing cell without a valid completion record (`completion-unproven`), a record for a cell the
+plan did not execute (`completion-unplanned`), invalid governed gaps, and exact-skip violations on
+legacy cells (reused, or rolled up without a plan), scoped to that area alone. It recomputes no expected test and no skip for
+an executing cell: that cell's producer already did. It also narrows runner-loss attribution to its
+own packages, because a job name carries no area. `ci-rollup summarize --results <slice>…` folds
+the slices into one view and applies no policy at all.
 
 An area whose every cell is reused **still fans out**, so its local-origin results are still
-reported somewhere. The matrix is built from each package's declared gates rather than its
-executing cells, which is what gets this right.
+reported somewhere. `scheduled_areas` is derived from each package's declared gates rather than
+its executing cells, and the audit reads its package membership from the plan rather than from
+the rows, which is what gets this right.
 
 ### Governed policy gaps
 
@@ -360,19 +389,24 @@ Test, lint, and compile steps fail their producer jobs visibly. Their
 coverage audit, and every matrix uses `fail-fast: false`, so one failure does not
 cancel the remaining cells that lack qualifying local evidence. `ci-baseline.toml`
 is a skip budget only; failures cannot be pardoned downstream after the
-producer has truthfully reached the gate.
+producer has truthfully reached the gate. An approval excuses only an *observed* `<skipped/>`:
+an expected test that reported nothing fails its cell as `completion-test-missing` whatever the
+baseline says. The earlier reading, under which an expected-but-unreported test counted as a
+skip, was removed deliberately (`2026-09-19-direct-cell-execution`) — an observed skip is a
+decision, silence is a lost test.
 The `protect-your-bacon` ruleset (id 19747338) has required `ci-gate` since 2026-09-13. It named
 `ci-verdict` until then, and because that job no longer existed in `ci.yml`, every pull request sat
 on a `ci-verdict — Expected` check that could never arrive. The admin `pull_request` bypass actor
 on that ruleset was left untouched by the swap.
 
 `ci-results.json` and the skip-only baseline are independently versioned: the result document is
-at `schema_version: 4` and the baseline at 3. Identity is
+at `schema_version: 5` and the baseline at 3. Identity is
 still `{package, environment, tier}`; each cell also carries its derived `area`, its `origin`
 (`ci`, `local`, `prior-local`, or `none`), the `evidence` behind a reused result, its measured
 `duration_s`, and the `target_kinds` and `compile_coverage_from` the plan assigned it. Version 4
 made `counts` optional alongside `duration_s`, so a cell nobody measured omits the field rather
-than reporting a zero that reads as a suite which found nothing. The
+than reporting a zero that reads as a suite which found nothing. Version 5 adds `completion` to
+every cell the plan executed and `unplanned_completions` to the document. The
 document carries `accepted_evidence`, one entry per reused cell — the same set accepted for
 *scheduling*, so the scheduler and the report cannot disagree. A document from an earlier
 generation is refused by its version, before any cell is interpreted, with the migration that

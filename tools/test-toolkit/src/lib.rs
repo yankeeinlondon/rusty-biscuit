@@ -43,7 +43,15 @@
 //! appended to a JSON Lines file (see [`evidence`]) and the `backend-proof`
 //! binary asserts after the run that each required backend produced at least
 //! one executed test.
+//!
+//! ## Corpus policy
+//!
+//! [`archive_guard`] is the other half of the archived-run contract: a
+//! token-aware scan of the repository's Rust source for compile-time paths that
+//! do not survive relocation. `tests/archive_path_guard.rs` drives it against
+//! the real checkout.
 
+pub mod archive_guard;
 pub mod backend;
 pub mod evidence;
 pub mod spool;
@@ -55,9 +63,10 @@ pub use backend::{
     parse_required_backends, required_backends,
 };
 pub use evidence::{
-    BACKEND_EXECUTIONS_FILE, BISCUIT_JUNIT_STAGE_DIR, ExecutionDecision, ExecutionRecord,
-    append_backend_execution, backend_executions_path, decision_counts, read_backend_executions,
-    normalize_test_name, record_backend_execution, stage_dir, unproven_backends, workspace_root,
+    BACKEND_EXECUTIONS_FILE, BACKEND_PROOFS_FILE, BISCUIT_JUNIT_STAGE_DIR, ExecutionDecision,
+    ExecutionRecord, append_backend_execution, backend_executions_path, backend_proofs_json,
+    clear_backend_evidence, decision_counts, read_backend_executions, normalize_test_name,
+    record_backend_execution, stage_dir, unproven_backends, workspace_root, write_backend_proofs,
 };
 
 use std::env;

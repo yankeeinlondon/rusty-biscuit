@@ -709,6 +709,12 @@ BACKEND_PROVEN_GATES = ("L2",)
 #: `{backend, test, decision}` record per gate decision.
 BACKEND_EXECUTIONS_FILE = "backend-executions.jsonl"
 
+#: Written by `backend-proof verify` beside the execution log: `{backend:
+#: {"proven": bool, "executed": count}}` for every backend it was told to
+#: require. `completion.py --backend-proofs` reads it; the hook does not, since
+#: it derives the same verdict from the execution records above.
+BACKEND_PROOFS_FILE = "backend-proofs.json"
+
 #: Written by `just ci-local`: the backends it required for each invocation,
 #: which is the only per-cell attribution available — the execution records
 #: name a test, not a package.

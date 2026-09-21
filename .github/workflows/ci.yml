@@ -118,7 +118,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       scheduled_areas: ${{ steps.scope.outputs.scheduled_areas }}
-      area_matrix: ${{ steps.scope.outputs.area_matrix }}
+      area_rows: ${{ steps.scope.outputs.area_rows }}
       area_slugs: ${{ steps.scope.outputs.area_slugs }}
       gap_areas: ${{ steps.scope.outputs.gap_areas }}
       has_packages: ${{ steps.scope.outputs.has_packages }}
@@ -208,8 +208,17 @@ jobs:
             if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
               scope_args=(--all)
             else
-              mapfile -d '' changed_files < <(git diff --name-only -z "$base" "$head")
-              scope_args=(-- "${changed_files[@]}")
+              # One diff, two lists. `--name-status` is what separates a
+              # deletion from a path that is merely absent; `diff_scope.py`
+              # turns the stream into `--deleted <path>... -- <changed path>...`
+              # so the change inventory carries that identity and the
+              # archive-path guard never has to guess. The arguments land in a
+              # file rather than a process substitution: `pipefail` sees a
+              # failing diff or parse there, and would not see it there.
+              diff_arguments="$(mktemp)"
+              git diff --name-status -z "$base" "$head" | python3 scripts/ci/diff_scope.py > "$diff_arguments"
+              mapfile -d '' scope_args < "$diff_arguments"
+              rm -f "$diff_arguments"
             fi
           fi
 
@@ -335,16 +344,21 @@ jobs:
           # so each area's coverage audit sees exactly what this run scheduled.
           printf '%s' "$scope_json" > scope.json
 
-          # One caller identity per selected AREA, each carrying its own
-          # ready-made package matrix. Grouping happens in the planner, not
-          # here, so the shape has test coverage. There is no canary stage: the
+          # One caller identity per scheduled AREA, each carrying its own
+          # dispatch rows. Grouping happens in the planner, not here, so the
+          # shape has test coverage. There is no canary stage: the
           # compile check that gates each package's own tests is a cheaper and
           # strictly better predictor than a sample of two other packages, and
           # it cannot stall the fan-out because it runs inside it.
 
           {
             echo "scheduled_areas=$(jq -c '.scheduled_areas' <<<"$scope_json")"
-            echo "area_matrix=$(jq -c '.area_matrix' <<<"$scope_json")"
+            # The dispatch rows, one document per area. `jq -c` preserves key
+            # order, and it has to: GitHub renders a matrix job's label from
+            # the row's values in the order they appear (ruling R1), so a
+            # key-sorting serializer anywhere on this path degrades every
+            # producer label to `test (macos-latest, L1, pkg, macos-latest)`.
+            echo "area_rows=$(jq -c '.area_rows' <<<"$scope_json")"
             echo "area_slugs=$(jq -c '.area_slugs' <<<"$scope_json")"
             # The areas carrying an accepted policy gap, read from the PLAN
             # (the authority on cell state, receipt-carried or calculated)
@@ -354,12 +368,13 @@ jobs:
             echo "gap_areas=$(jq -c '[.cells[] | select(.state == "accepted-gap") | .area] | unique' resolved-plan.json)"
             echo "packages=$packages"
             echo "package_names=$(jq -c '.packages' <<<"$scope_json")"
-            # Derived from the MATRIX, not the impacted list: a change touching
-            # only `gates = false` packages impacts packages but schedules none,
-            # and an empty area matrix under `has_packages=true` fails the
-            # fan-out at strategy evaluation. `scheduled_areas` is a regrouping
-            # of the same matrix, so the two can never disagree.
-            echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
+            # Derived from the SCHEDULED AREAS, not the impacted list: a change
+            # touching only `gates = false` packages impacts packages but
+            # schedules none, and an empty area matrix under
+            # `has_packages=true` fails the fan-out at strategy evaluation.
+            # Reading the list the area matrix expands means the two can never
+            # disagree.
+            echo "has_packages=$(jq -r '.scheduled_areas | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
             echo "area_drift=$(jq -r '.flags.area_drift' <<<"$scope_json")"
@@ -436,7 +451,7 @@ jobs:
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
             echo "| source-changed packages | $(jq -rc '.source_packages | join(", ")' <<<"$scope_json") |"
             echo "| reported (unselected) reverse dependencies | $(jq -rc '.reverse_dependencies | join(", ")' <<<"$scope_json") |"
-            echo "| gating packages (matrix) | $(jq -r '.matrix | length' <<<"$scope_json") |"
+            echo "| gating packages | $(jq -r '[.packages[] | select(.gates | length > 0)] | length' resolved-plan.json) |"
             echo "| expanded job estimate | $(jq -r '.job_estimate' <<<"$scope_json") |"
             echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
           } >>"$GITHUB_STEP_SUMMARY"
@@ -746,7 +761,7 @@ jobs:
       tested-revision: ${{ needs.scope.outputs.head }}
       area: ${{ matrix.area }}
       slug: ${{ fromJSON(needs.scope.outputs.area_slugs)[matrix.area] }}
-      packages: ${{ toJSON(fromJSON(needs.scope.outputs.area_matrix)[matrix.area]) }}
+      rows: ${{ toJSON(fromJSON(needs.scope.outputs.area_rows)[matrix.area]) }}
       accepted-gaps: ${{ contains(fromJSON(needs.scope.outputs.gap_areas), matrix.area) }}
       # `inputs` is null on every event but `workflow_dispatch`, and
       # `null == true` is false — so this is `false` for a pull request and a

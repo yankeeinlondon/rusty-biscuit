@@ -28,9 +28,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 fn lib_dir() -> PathBuf {
-    std::env::var_os("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    biscuit_test_harness::manifest_dir!()
 }
 
 fn repo_root() -> PathBuf {

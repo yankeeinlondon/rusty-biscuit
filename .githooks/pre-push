@@ -159,6 +159,8 @@ PRIOR_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prior-receipt.XXX
 SCOPE_PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-plan.XXXXXX")"
 SCOPE_DOC_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-doc.XXXXXX")"
 SCOPE_RECEIPT_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-receipt.XXXXXX")"
+SCOPE_DIFF_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-diff.XXXXXX")"
+SCOPE_ARGS_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-scope-args.XXXXXX")"
 HEAD_PLAN_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-head-plan.XXXXXX")"
 HEAD_REVIEW_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-head-review.XXXXXX")"
 ACCEPTED_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-accepted.XXXXXX")"
@@ -168,7 +170,7 @@ PR_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs.XXXXXX")"
 PR_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-prs-err.XXXXXX")"
 TARGET_STATES_FILE="$(mktemp "${TMPDIR:-/tmp}/biscuit-pre-push-target.XXXXXX")"
 REPORTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/biscuit-pre-push-reports.XXXXXX")"
-TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $PRIOR_RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $HEAD_PLAN_FILE $HEAD_REVIEW_FILE $ACCEPTED_FILE $REJECTED_FILE $CONTEXTS_FILE $PR_LIST_FILE $PR_ERROR_FILE $TARGET_STATES_FILE"
+TEMP_FILES="$REF_UPDATES_FILE $SCOPE_FILE $PLAN_FILE $PLAN_REVIEW_FILE $RECEIPT_FILE $PRIOR_RECEIPT_FILE $SCOPE_PLAN_FILE $SCOPE_DOC_FILE $SCOPE_RECEIPT_FILE $SCOPE_DIFF_FILE $SCOPE_ARGS_FILE $HEAD_PLAN_FILE $HEAD_REVIEW_FILE $ACCEPTED_FILE $REJECTED_FILE $CONTEXTS_FILE $PR_LIST_FILE $PR_ERROR_FILE $TARGET_STATES_FILE"
 ZERO_OID="0000000000000000000000000000000000000000"
 TRIGGER_WORKTREE=""
 # Git feeds one `<local ref> <local sha> <remote ref> <remote sha>` line per
@@ -369,17 +371,24 @@ resolve_trigger_contexts() {
 # classification diffs the base against the tree it runs in, which is one
 # more reason that tree must be the committed one. An all-zero base has no
 # path set; CI plans `--all` for it.
+#
+# `--name-status` rather than `--name-only`, so a deletion reaches the planner
+# as one: `diff_scope.py` writes `--deleted <path>... -- <changed path>...`,
+# which is also why an empty diff needs no branch of its own here — the tail
+# is never empty, so `xargs` runs on every platform. This is POSIX `sh` and
+# cannot read NUL-delimited records, hence the two files rather than a
+# pipeline: each step's own failure is then visible without `pipefail`.
 plan_trigger_scope() {
     if is_zero_oid "$SCOPE_BASE"; then
         (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
             --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --all)
-    elif git diff --quiet "$SCOPE_BASE" "$TRIGGER_SHA" --; then
-        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
-            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
     else
-        git diff --name-only -z "$SCOPE_BASE" "$TRIGGER_SHA" \
-            | (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
-                --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" --)
+        git diff --name-status -z "$SCOPE_BASE" "$TRIGGER_SHA" -- >"$SCOPE_DIFF_FILE" || return 1
+        python3 "$TRIGGER_ROOT/scripts/ci/diff_scope.py" \
+            <"$SCOPE_DIFF_FILE" >"$SCOPE_ARGS_FILE" || return 1
+        (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
+            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA") \
+            <"$SCOPE_ARGS_FILE"
     fi
 }
 

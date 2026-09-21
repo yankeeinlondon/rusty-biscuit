@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import affected_scope  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 import tool_guard  # noqa: E402
@@ -93,11 +94,53 @@ class PrePushEvidenceContractTests(unittest.TestCase):
         self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
+def gate_loop_package(name: str, **overrides: object) -> dict:
+    """A plan package record carrying the fields the gate loop reads."""
+    return {
+        "package": name,
+        "area": name,
+        "gates": ["lint", "check", "L1", "L2"],
+        "tiers": ["L1", "L2"],
+        "test_args": "--features terminal-tests,daemon-tests",
+        "check_args": f"-p {name}",
+        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+        "l2_backends": ["tmux"],
+    } | overrides
+
+
+def gate_loop_cells(name: str, l2: str = "execute") -> list[dict]:
+    """`name`'s L1 and L2 cells on the fixture's host, `macos-latest`."""
+    return [
+        {"package": name, "environment": "macos-latest", "gate": "L1", "execution": "execute"},
+        {"package": name, "environment": "macos-latest", "gate": "L2", "execution": l2},
+    ]
+
+
 @requires_tools("just", "jq", enforced_by=CI_TOOLING)
 class CiLocalTests(unittest.TestCase):
+    """The gate loop, fed the planner's two documents as they ship.
+
+    The scope document carries no package matrix (Phase 8 of
+    `2026-09-19-direct-cell-execution` retired it), so every per-package fact
+    the loop acts on must come from the plan `--plan-out` writes.
+    """
+
     def run_recipe(
-        self, threads: str | None = None, cores: int = 16, reports: dict | None = None
+        self,
+        threads: str | None = None,
+        cores: int = 16,
+        reports: dict | None = None,
+        packages: list[dict] | None = None,
+        cells: list[dict] | None = None,
+        arguments: Sequence[str] = ("--all", "--l2"),
+        expect_success: bool = True,
+        output: dict | None = None,
+        plan_fields: dict | None = None,
     ) -> list[dict]:
+        if packages is None:
+            packages = [gate_loop_package(name) for name in ("parallel", "serial")]
+        if cells is None:
+            cells = [cell for record in packages for cell in gate_loop_cells(record["package"])]
         with tempfile.TemporaryDirectory(prefix="ci-local-test-") as temporary:
             root = Path(temporary)
             bin_dir = root / "bin"
@@ -111,28 +154,49 @@ class CiLocalTests(unittest.TestCase):
                 encoding="utf-8",
             )
             scope = {
-                "packages": ["parallel", "serial"],
+                "packages": [record["package"] for record in packages],
                 "full_scope": False,
                 "change_class": "package",
                 "full_scope_gates": [],
-                "matrix": [
-                    {
-                        "package": name,
-                        "gates": ["lint", "check", "test"],
-                        "tiers": ["L1", "L2"],
-                        "test_args": "--features terminal-tests,daemon-tests",
-                        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
-                        "archive_includes": [],
-                        "sidecars": [],
-                        "l2_environments": ["macos-latest"],
-                        "l2_backends": ["tmux"],
-                    }
-                    for name in ("parallel", "serial")
-                ],
             }
             (root / "scope.json").write_text(json.dumps(scope), encoding="utf-8")
+            # The recipe hands the planner `--plan-out`; the canonical plan it
+            # writes there is what the loop and the archive-path guard's scan
+            # scope come from, so the stub has to produce it rather than only
+            # stdout.
+            (root / "plan.json").write_text(
+                json.dumps({"packages": packages, "cells": cells, **(plan_fields or {})}),
+                encoding="utf-8",
+            )
             (scripts / "affected_scope.py").write_text(
-                'from pathlib import Path\nprint(Path("scope.json").read_text())\n',
+                "import sys\n"
+                "from pathlib import Path\n"
+                "arguments = sys.argv[1:]\n"
+                "if '--plan-out' in arguments:\n"
+                "    Path(arguments[arguments.index('--plan-out') + 1]).write_text(\n"
+                "        Path('plan.json').read_text())\n"
+                "print(Path('scope.json').read_text())\n",
+                encoding="utf-8",
+            )
+            # Records the invocation and the plan the recipe pointed it at.
+            # The RECIPE each suite runs is `companion_suites.py`'s to resolve
+            # from `SUITE_REGISTRY`, which
+            # `test_the_guard_runs_through_the_registrys_canonical_recipe`
+            # pins against the real module.
+            (scripts / "companion_suites.py").write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "argv = sys.argv[1:]\n"
+                "from pathlib import Path\n"
+                'named = os.environ.get("BISCUIT_ARCHIVE_GUARD_PLAN")\n'
+                "# Read here, not in the test: the recipe deletes its scratch\n"
+                "# plan on exit, and the contract is what the guard WOULD have\n"
+                "# scanned at the moment it was invoked.\n"
+                'plan = Path(named).read_text(encoding="utf-8") if named and Path(named).is_file() else None\n'
+                'with open(os.environ["TEST_COMPANION_LOG"], "a", encoding="utf-8") as log:\n'
+                '    log.write(json.dumps({"args": argv, "plan": named, "plan_text": plan}) + "\\n")\n'
+                'out = argv[argv.index("--out") + 1]\n'
+                'open(out, "w", encoding="utf-8").write("{}\\n")\n',
                 encoding="utf-8",
             )
             shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
@@ -143,6 +207,7 @@ class CiLocalTests(unittest.TestCase):
                 "test_affected_scope.py",
                 "test_resolved_plan.py",
                 "test_ci_local.py",
+                "test_completion.py",
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
@@ -175,7 +240,15 @@ class CiLocalTests(unittest.TestCase):
                     "'nextest_profile': os.environ.get('NEXTEST_PROFILE')}) + '\\n')\n"
                 ),
                 "tmux": "raise SystemExit('tmux must only be detected, never started')\n",
-                "cargo": "raise SystemExit('Rust builds are forbidden in this test')\n",
+                # `cargo check` is logged, never run: the check-only branch is
+                # asserted by the arguments it passes, and no build happens.
+                "cargo": (
+                    "import json, os, sys\n"
+                    "if sys.argv[1:2] != ['check']:\n"
+                    "    raise SystemExit('Rust builds are forbidden in this test')\n"
+                    "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
+                    "    log.write(json.dumps({'args': ['cargo', *sys.argv[1:]]}) + '\\n')\n"
+                ),
             }
             for name, body in stubs.items():
                 path = bin_dir / name
@@ -191,6 +264,7 @@ class CiLocalTests(unittest.TestCase):
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
+                "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
             # The hook exports these for the run it wraps, and this suite runs
             # inside that run's self-test loop; a fed plan would refuse `--all`.
@@ -205,14 +279,25 @@ class CiLocalTests(unittest.TestCase):
             if reports is not None:
                 environment["BISCUIT_CI_REPORTS_OUT"] = str(root / "reports")
             result = subprocess.run(
-                [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--l2"],
+                [JUST, "--justfile", str(root / "justfile"), "ci-local", *arguments],
                 cwd=root,
                 env=environment,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            if expect_success:
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            else:
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+            if output is not None:
+                output["stdout"] = result.stdout
+                companion_log = root / "companions.jsonl"
+                output["companions"] = (
+                    [json.loads(line) for line in companion_log.read_text().splitlines()]
+                    if companion_log.is_file()
+                    else []
+                )
             if reports is not None:
                 staged = root / "reports" / "gate-backends.jsonl"
                 reports["gate_backends"] = (
@@ -220,7 +305,10 @@ class CiLocalTests(unittest.TestCase):
                     if staged.is_file()
                     else []
                 )
-            return [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+            log = root / "calls.jsonl"
+            if not log.is_file():
+                return []
+            return [json.loads(line) for line in log.read_text().splitlines()]
 
     def test_gates_use_local_evidence_profile_and_an_unwrapped_reserved_target(self) -> None:
         calls = self.run_recipe()
@@ -273,8 +361,337 @@ class CiLocalTests(unittest.TestCase):
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
 
+    def test_each_plan_gate_vocabulary_reaches_the_legacy_gate_it_folds_into(self) -> None:
+        # The plan spells test gates by tier (`L1`, `L2`, `browser`); the loop
+        # runs `lint`, `check`-only, `test`, and `L2`. A package the scope
+        # names but the plan does not carry, and one with `gates = false`,
+        # run nothing — the same answer the retired matrix gave by omission.
+        packages = [
+            gate_loop_package("lint-and-l1", gates=["lint", "L1"], tiers=["L1"]),
+            gate_loop_package("browser-only", gates=["lint", "browser"], tiers=["browser"]),
+            gate_loop_package("check-only", gates=["check"], tiers=[]),
+            gate_loop_package("gates-false", gates=[], tiers=[]),
+        ]
+        cells = [
+            cell
+            for name in ("lint-and-l1", "browser-only")
+            for cell in gate_loop_cells(name)
+        ]
+        calls = self.run_recipe(packages=packages, cells=cells)
+        self.assertEqual(
+            [
+                ["_lint", "lint-and-l1"],
+                ["_test", "lint-and-l1", "--no-fail-fast", "--features", "terminal-tests,daemon-tests"],
+                ["_lint", "browser-only"],
+                ["_test", "browser-only", "--no-fail-fast", "--features", "terminal-tests,daemon-tests"],
+                ["cargo", "check", "-p", "check-only"],
+            ],
+            [call["args"] for call in calls],
+        )
+
+    def test_a_package_the_plan_does_not_carry_runs_nothing(self) -> None:
+        calls = self.run_recipe(
+            packages=[gate_loop_package("parallel")],
+            cells=gate_loop_cells("parallel"),
+            arguments=("--all",),
+        )
+        self.assertEqual(
+            {"parallel"}, {call["args"][1] for call in calls}, "only the planned package runs"
+        )
+
+    def test_an_unhostable_l2_cell_fails_only_where_the_plan_executes_it(self) -> None:
+        # No non-focusing backend is available: `wezterm` needs a socket this
+        # environment does not carry. Whether that is a failure is the plan's
+        # call — its L2 cell on this host executes, or it is a governed gap.
+        for execution, expect_success in (("execute", False), ("omit", True), ("reuse", True)):
+            with self.subTest(execution=execution):
+                output: dict = {}
+                calls = self.run_recipe(
+                    packages=[gate_loop_package("serial", l2_backends=["wezterm"])],
+                    cells=gate_loop_cells("serial", l2=execution),
+                    expect_success=expect_success,
+                    output=output,
+                )
+                self.assertNotIn("_test_l2", [call["args"][0] for call in calls])
+                self.assertEqual(
+                    not expect_success,
+                    "L2 serial (no non-focusing backend available)" in output["stdout"],
+                    output["stdout"],
+                )
+
+    def test_a_dry_run_lists_the_plans_test_arguments_and_runs_nothing(self) -> None:
+        output: dict = {}
+        calls = self.run_recipe(arguments=("--all", "--dry-run"), output=output)
+        self.assertEqual([], calls)
+        self.assertIn(
+            "  parallel  (test: --features terminal-tests,daemon-tests)", output["stdout"]
+        )
+        self.assertIn("  serial  (test: --features terminal-tests,daemon-tests)", output["stdout"])
+
+
+#: The guard owner's package record exactly as
+#: `affected_scope.archive_guard_only_selection` writes it: a lint gate, no
+#: tier. Its one cell, in `GUARD_PLAN`, carries the companions as the whole
+#: required work.
+GUARD_PACKAGE = {
+    "package": "test-toolkit",
+    "area": "tools",
+    "gates": ["lint"],
+    "tiers": [],
+    "test_args": "",
+    "check_args": "-p test-toolkit",
+    "runner_tools": [],
+    "l2_backends": [],
+}
+
+GUARD_PLAN = {
+    "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+    "cells": [
+        {
+            "package": "test-toolkit",
+            "area": "tools",
+            "environment": "ubuntu-latest",
+            "gate": "lint",
+            "execution": "execute",
+            "origin": "ci",
+            "state": "pending",
+            "reusable": False,
+            "companions_only": True,
+            "companions": [{"name": "archive-path-guard"}],
+        }
+    ],
+    "archive_guard": {
+        "selected": True,
+        "mode": "changed",
+        "paths": ["darkmatter/dmls/src/lib.rs"],
+        "reason": "this run carries a change inventory",
+    },
+}
+
 
 @requires_tools("just", "jq", enforced_by=CI_TOOLING)
+class ArchiveGuardLocalExecutionTests(unittest.TestCase):
+    """`2026-09-19-less-brittle`: local validation of a planned guard cell.
+
+    The specification allows a local run to execute the planned guard through
+    its canonical recipe OR to report that the Linux execution is outstanding.
+    The recipe does both, because a macOS run cannot manufacture Linux evidence
+    and a silent local pass would read as if it had.
+    """
+
+    def guard_run(self, capture: dict) -> list[dict]:
+        """One `ci-local --all --l2` over the ordinary fixture plus the guard cell."""
+        ordinary = [gate_loop_package(name) for name in ("parallel", "serial")]
+        return CiLocalTests.run_recipe(
+            self,
+            packages=[*ordinary, GUARD_PACKAGE],
+            cells=[
+                *(cell for record in ordinary for cell in gate_loop_cells(record["package"])),
+                *GUARD_PLAN["cells"],
+            ],
+            plan_fields={key: value for key, value in GUARD_PLAN.items() if key != "cells"},
+            output=capture,
+        )
+
+    def test_a_planned_guard_cell_runs_against_the_plan_this_run_resolved(self) -> None:
+        capture: dict = {}
+        self.guard_run(capture)
+
+        self.assertEqual(
+            1,
+            len(capture["companions"]),
+            f"the guard must run exactly once: {capture['companions']}",
+        )
+        invocation = capture["companions"][0]
+        arguments = dict(zip(invocation["args"][0::2], invocation["args"][1::2]))
+        self.assertEqual(["archive-path-guard"], json.loads(arguments["--suites"]))
+        self.assertEqual("ubuntu-latest", arguments["--environment"])
+        self.assertEqual("lint", arguments["--gate"])
+
+        # The scan scope is the plan this run just resolved, not a diff the
+        # guard re-derived: the file the variable names IS the plan document.
+        self.assertTrue(invocation["plan"], "BISCUIT_ARCHIVE_GUARD_PLAN must be set")
+        self.assertIsNotNone(
+            invocation["plan_text"],
+            f"the variable named {invocation['plan']}, which did not exist",
+        )
+        self.assertEqual(
+            GUARD_PLAN["archive_guard"],
+            json.loads(invocation["plan_text"])["archive_guard"],
+        )
+
+    def test_the_guard_runs_through_the_registrys_canonical_recipe(self) -> None:
+        # The recipe string itself is `companion_suites.py`'s to resolve, from
+        # the one registry CI reads. This is the other half of the proof above:
+        # the arguments the recipe passes select exactly this record, and the
+        # record names the canonical recipe.
+        records = affected_scope.companion_records(
+            ["archive-path-guard"], "ubuntu-latest", "lint"
+        )
+        self.assertEqual(
+            ["cd tools/test-toolkit && just archive-path-guard"],
+            [record["recipe"] for record in records],
+        )
+
+    def test_a_companions_only_cell_does_not_lint_its_package(self) -> None:
+        capture: dict = {}
+        calls = self.guard_run(capture)
+        self.assertEqual(
+            [],
+            [call for call in calls if call["args"][:2] == ["_lint", "test-toolkit"]],
+            "the planner selected the guard, not the package; clippy is CI's to "
+            "skip and must be skipped here too",
+        )
+
+    def test_a_non_linux_host_reports_the_linux_execution_as_outstanding(self) -> None:
+        # The stub host is macOS. A local pass on it proves the source policy
+        # holds in this tree; it is not the ubuntu-latest execution the plan
+        # scheduled, and the run must say so rather than let a green summary
+        # line imply otherwise.
+        capture: dict = {}
+        self.guard_run(capture)
+        self.assertIn("not ubuntu-latest", capture["stdout"])
+        self.assertIn(
+            "test-toolkit/ubuntu-latest/lint remains OUTSTANDING", capture["stdout"]
+        )
+
+    def test_a_guard_only_lint_cell_is_not_reusable(self) -> None:
+        # The recipe needs no machinery to withhold the local result: the
+        # planner already marks every lint cell non-reusable, which is the
+        # specification's "initially prefer non-reusable guard execution".
+        plan = json.loads(
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+                    "--resolved-plan",
+                    "darkmatter/dmls/src/lib.rs",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        guard_cells = [
+            cell
+            for cell in plan["cells"]
+            if cell["package"] == "test-toolkit" and cell["gate"] == "lint"
+        ]
+        self.assertEqual(1, len(guard_cells), guard_cells)
+        self.assertTrue(guard_cells[0]["companions_only"])
+        self.assertFalse(guard_cells[0]["reusable"])
+        self.assertEqual(
+            [affected_scope.ARCHIVE_GUARD_SUITE],
+            [companion["name"] for companion in guard_cells[0]["companions"]],
+        )
+
+
+@requires_tools("just", "jq", enforced_by=CI_TOOLING)
+class CiLocalDiffScopeTests(unittest.TestCase):
+    """`just ci-local`'s selection boundary, run over a real repository.
+
+    The third caller of the planner, and the only one whose changed set also
+    unions untracked files. It has to declare deletions exactly as CI's scope
+    step does, and an untracked file — which no diff reports and which can
+    never be a deletion — must not be dragged into that declaration.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        require_tools("just", "jq", "git", enforced_by=CI_TOOLING)
+
+    #: Enough of a legacy projection for the recipe to reach its `--dry-run`
+    #: exit: one package, so the zero-package branch (which reads the plan
+    #: through `jq`) is not taken.
+    SCOPE_DOCUMENT = {
+        "packages": ["alpha"],
+        "full_scope": False,
+        "change_class": "package",
+        "full_scope_gates": [],
+        "matrix": [{"package": "alpha", "gates": ["lint"], "tiers": ["L1"],
+                    "test_args": "", "runner_tools": [], "archive_includes": [],
+                    "sidecars": [], "l2_environments": [], "l2_backends": []}],
+    }
+
+    def planner_arguments(self) -> list[str]:
+        """Every argument `ci-local` handed the planner, for a fixture whose
+        `base..head` deletes one Rust file and renames another, and whose
+        working tree carries one untracked file."""
+        with tempfile.TemporaryDirectory(prefix="ci-local-scope-") as temporary:
+            root = Path(temporary).resolve()
+            scripts = root / "scripts" / "ci"
+            scripts.mkdir(parents=True)
+            shutil.copyfile(RECIPE, root / "ci-local.just")
+            (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
+            (root / "justfile").write_text(
+                'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
+                encoding="utf-8",
+            )
+            shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
+            # The parser is the boundary under test, so the shipped one runs.
+            shutil.copyfile(ROOT / "scripts" / "ci" / "diff_scope.py",
+                            scripts / "diff_scope.py")
+            (scripts / "affected_scope.py").write_text(
+                "import json, os, sys\n"
+                "with open(os.environ['TEST_PLANNER_LOG'], 'w', encoding='utf-8') as log:\n"
+                "    log.write(json.dumps(sys.argv[1:]))\n"
+                f"print(json.dumps({self.SCOPE_DOCUMENT!r}))\n",
+                encoding="utf-8",
+            )
+
+            for name, body in (
+                ("kept.rs", "pub fn kept() {}\n"),
+                ("gone.rs", "pub fn gone() {}\n"),
+                ("before.rs", "pub fn moved() {}\n"),
+            ):
+                (root / name).write_text(body, encoding="utf-8")
+            fixture_git(root, "init", "-q", "-b", "main")
+            fixture_git(root, "add", "-A")
+            fixture_git(root, "commit", "-q", "-m", "base")
+            base = fixture_git(root, "rev-parse", "HEAD")
+            (root / "kept.rs").write_text("pub fn kept() { let _ = 1; }\n", encoding="utf-8")
+            fixture_git(root, "rm", "-q", "gone.rs")
+            fixture_git(root, "mv", "before.rs", "after.rs")
+            fixture_git(root, "add", "-A")
+            fixture_git(root, "commit", "-q", "-m", "head")
+            (root / "untracked.rs").write_text("pub fn fresh() {}\n", encoding="utf-8")
+
+            environment = clean_policy_environment()
+            relocate_home(environment, root / "home")
+            environment.update({
+                "TEST_PLANNER_LOG": str(root / "planner.json"),
+                "CI_LOCAL_BASE": base,
+            })
+            for key in ("BISCUIT_CI_SCOPE_OUT", "BISCUIT_CI_PLAN_OUT",
+                        "BISCUIT_CI_PLAN_IN", "GIT_DIR", "GIT_WORK_TREE",
+                        "GIT_INDEX_FILE"):
+                environment.pop(key, None)
+            result = subprocess.run(
+                [JUST, "--justfile", str(root / "justfile"), "ci-local", "--dry-run"],
+                cwd=root, env=environment, capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            return json.loads((root / "planner.json").read_text(encoding="utf-8"))
+
+    def test_the_recipe_declares_its_deletion_and_lists_the_rename_destination(self) -> None:
+        arguments = self.planner_arguments()
+        separator = arguments.index("--")
+        options, changed = arguments[:separator], arguments[separator + 1:]
+        deleted = [
+            options[index + 1]
+            for index, option in enumerate(options)
+            if option == "--deleted"
+        ]
+        self.assertEqual(["gone.rs"], deleted)
+        # The deletion changed; its destination-less rename partner did not
+        # change under its old name, and the untracked file is neither.
+        self.assertEqual({"after.rs", "gone.rs", "kept.rs", "untracked.rs"}, set(changed))
+        self.assertNotIn("before.rs", changed)
+        self.assertNotIn("before.rs", deleted)
+        self.assertNotIn("untracked.rs", deleted)
+
+
 class ThreadPolicyTests(unittest.TestCase):
     def run_policy(self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False) -> str:
         with tempfile.TemporaryDirectory(prefix="test-thread-policy-") as temporary:
@@ -445,7 +862,7 @@ class PlanSurfaceTests(unittest.TestCase):
         state that no package test is required, as an affirmative scheduling
         decision rather than a warning.
         """
-        return {
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -453,6 +870,7 @@ class PlanSurfaceTests(unittest.TestCase):
             "change_inventory": change_inventory(
                 ["docs/topics/ci-cd.md", "alpha/README.md"], False
             ),
+            "archive_guard": plan_fixtures.archive_guard(),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [],
@@ -471,7 +889,7 @@ class PlanSurfaceTests(unittest.TestCase):
             "preflight_os": [],
             "preflight_reason": "no gating package; preflight establishes nothing",
             "flags": {},
-        }
+        })
 
     def resolved_plan(self, prohibited_is_covered: bool) -> dict:
         cells = [
@@ -549,7 +967,7 @@ class PlanSurfaceTests(unittest.TestCase):
                 ),
             },
         ]
-        return plan_fixtures.attach_builds({
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -557,6 +975,7 @@ class PlanSurfaceTests(unittest.TestCase):
             # The real producer, so a fixture plan cannot describe a shape the
             # planner no longer emits.
             "change_inventory": change_inventory(["alpha/src/lib.rs"], False),
+            "archive_guard": plan_fixtures.archive_guard(["alpha/src/lib.rs"]),
             "full_scope": False,
             "full_scope_gates": [],
             "areas": [
@@ -919,7 +1338,7 @@ class PlanFedRunTests(unittest.TestCase):
             cell("beta", "ubuntu-latest", "lint"),
             cell("beta", "macos-latest", "L1"),
         ]
-        return plan_fixtures.attach_builds({
+        return plan_fixtures.finalize_plan({
             "schema_version": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "base": "a" * 40,
             "head": "b" * 40,
@@ -928,6 +1347,9 @@ class PlanFedRunTests(unittest.TestCase):
             # planner no longer emits.
             "change_inventory": change_inventory(
                 ["alpha/src/lib.rs", "beta/src/lib.rs"], False
+            ),
+            "archive_guard": plan_fixtures.archive_guard(
+                ["alpha/src/lib.rs", "beta/src/lib.rs"]
             ),
             "full_scope": False,
             "full_scope_gates": [],
@@ -986,6 +1408,7 @@ class PlanFedRunTests(unittest.TestCase):
                 "test_affected_scope.py",
                 "test_resolved_plan.py",
                 "test_ci_local.py",
+                "test_completion.py",
                 "test_constraints.py",
                 "test_publish_gaps.py",
                 "test_runner_loss.py",
@@ -1206,6 +1629,10 @@ SCOPE_MARKER = "carried by the local scope receipt"
 #: A real workspace source path, so a fixture commit touching it selects a
 #: real package and the plan owns cells a validation receipt can satisfy.
 SOURCE_FILE = "biscuit-hash/lib/src/lib.rs"
+#: Three more paths in that same package, for the deletion-identity fixtures.
+DELETED_FILE = "biscuit-hash/lib/src/gone.rs"
+RENAMED_FROM = "biscuit-hash/lib/src/before.rs"
+RENAMED_TO = "biscuit-hash/lib/src/after.rs"
 
 
 def fixture_git(root: Path, *args: str) -> str:
@@ -1309,9 +1736,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
         expect_failure: bool = False,
         verifier_failure: str | None = None,
         overlay_failure: bool = False,
+        seed=None,
     ) -> StepRun:
         """The job's run steps through the scope step, for one event, over a
         fresh fixture repository.
+
+        `seed(root) -> (first, base, head)` builds that repository; the default
+        is `seed_repository`, and every receipt fixture depends on the paths it
+        commits, so a test needing other history supplies its own.
 
         `scope_receipt(root, base, head) -> str` is attached to `head` under
         `refs/notes/ci-local/scope` before the steps run; `validation_receipt`
@@ -1330,9 +1762,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory(prefix="ci-scope-step-") as temporary:
             root = Path(temporary).resolve()
-            first, base, head = self.seed_repository(root)
+            first, base, head = (seed or self.seed_repository)(root)
             scripts = root / "scripts" / "ci"
             scripts.mkdir(parents=True)
+            # The diff parser is a real file, not a trampoline: it is the
+            # boundary under test here, so the step must run the shipped one.
+            shutil.copyfile(
+                ROOT / "scripts" / "ci" / "diff_scope.py", scripts / "diff_scope.py"
+            )
             call_log = root / "tool-calls.log"
             for tool in ("affected_scope.py", "local_evidence.py"):
                 real = ROOT / "scripts" / "ci" / tool
@@ -1460,6 +1897,35 @@ class WorkflowScopeStepTests(unittest.TestCase):
         fixture_git(root, "commit", "-q", "-m", "head")
         return first, base, fixture_git(root, "rev-parse", "HEAD")
 
+    @staticmethod
+    def seed_deletion_and_rename(root: Path) -> tuple[str, str, str]:
+        """`base..head` deletes one Rust file and renames another.
+
+        The two shapes the boundary must keep apart. A deletion has to reach
+        the planner declared as one; a rename's SOURCE has to reach it as
+        nothing at all, because a changed path that does not exist and was
+        never reported deleted is precisely the ambiguity `--deleted` removes.
+        """
+        fixture_git(root, "init", "-q", "-b", "main")
+        (root / "README.md").write_text("zero\n", encoding="utf-8")
+        fixture_git(root, "add", "README.md")
+        fixture_git(root, "commit", "-q", "-m", "first")
+        first = fixture_git(root, "rev-parse", "HEAD")
+        source = root / SOURCE_FILE
+        source.parent.mkdir(parents=True)
+        source.write_text("pub fn fixture() {}\n", encoding="utf-8")
+        (root / DELETED_FILE).write_text("pub fn gone() {}\n", encoding="utf-8")
+        (root / RENAMED_FROM).write_text("pub fn moved() {}\n", encoding="utf-8")
+        fixture_git(root, "add", "-A")
+        fixture_git(root, "commit", "-q", "-m", "base")
+        base = fixture_git(root, "rev-parse", "HEAD")
+        source.write_text("pub fn fixture() { let _ = 1; }\n", encoding="utf-8")
+        fixture_git(root, "rm", "-q", DELETED_FILE)
+        fixture_git(root, "mv", RENAMED_FROM, RENAMED_TO)
+        fixture_git(root, "add", "-A")
+        fixture_git(root, "commit", "-q", "-m", "head")
+        return first, base, fixture_git(root, "rev-parse", "HEAD")
+
     # -- receipts ------------------------------------------------------------
 
     @staticmethod
@@ -1577,6 +2043,39 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual("false", run.outputs["full_scope"])
         self.assertNotEqual(NULL_OID, run.plan["base"])
 
+    def test_a_pull_request_declares_every_deletion_to_the_planner(self) -> None:
+        run = self.run_step("pull_request", seed=self.seed_deletion_and_rename)
+        self.assertTrue(
+            any("--deleted" in call for call in run.planner_calls),
+            f"the step never passed --deleted: {run.planner_calls}",
+        )
+        inventory = run.plan["change_inventory"]
+        self.assertTrue(inventory["diff_available"])
+        self.assertEqual([DELETED_FILE], inventory["deleted"])
+        changed = {path for paths in inventory["paths"].values() for path in paths}
+        # A deletion changed: it is in its bucket AND declared removed.
+        self.assertIn(DELETED_FILE, changed)
+        # The guard therefore scans the file that still exists and skips the
+        # one that does not, rather than reading both absences the same way.
+        guard = run.plan["archive_guard"]
+        self.assertEqual("changed", guard["mode"])
+        self.assertIn(RENAMED_TO, guard["paths"])
+        self.assertNotIn(DELETED_FILE, guard["paths"])
+
+    def test_a_renames_source_is_neither_changed_nor_deleted(self) -> None:
+        # The unexpectedly-missing path, produced the only way a real diff
+        # produces one: mis-stepping `--name-status -z`, whose rename record
+        # carries two paths for one status. The source exists nowhere at
+        # `head`, so listing it as changed would hand the guard an absence it
+        # could not explain — and listing it as deleted would claim the diff
+        # reported a removal it never reported.
+        run = self.run_step("pull_request", seed=self.seed_deletion_and_rename)
+        inventory = run.plan["change_inventory"]
+        changed = {path for paths in inventory["paths"].values() for path in paths}
+        self.assertIn(RENAMED_TO, changed)
+        self.assertNotIn(RENAMED_FROM, changed)
+        self.assertNotIn(RENAMED_FROM, inventory["deleted"])
+
     def test_a_branch_creating_push_runs_the_full_scope(self) -> None:
         run = self.run_step("push", push_base=NULL_OID)
         self.assertEqual("true", run.outputs["full_scope"])
@@ -1592,7 +2091,12 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual(f"local ({SCOPE_REF} @ {run.plan['head'][:9]})", run.scope_source())
         self.assertEqual(SCOPE_MARKER, run.outputs["preflight_reason"])
         self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
-        self.assertEqual(["biscuit-hash"], [entry["package"] for entry in run.plan["packages"]])
+        # `test-toolkit` rides along as the archive-path guard's lint-only
+        # owner: the changed file is Rust, which is source the guard scans.
+        self.assertEqual(
+            ["biscuit-hash", "test-toolkit"],
+            [entry["package"] for entry in run.plan["packages"]],
+        )
         self.assertEqual("true", run.outputs["has_packages"])
 
     def test_the_written_plan_is_byte_identical_to_the_receipts(self) -> None:
@@ -1769,9 +2273,8 @@ class WorkflowScopeStepTests(unittest.TestCase):
     def test_scope_hit_projects_the_plan_instead_of_stale_legacy_scheduling(self) -> None:
         def stale_projection(root: Path, base: str, head: str) -> str:
             document = json.loads(self.local_scope_receipt(root, base, head))
-            document["scope"]["matrix"] = []
             document["scope"]["scheduled_areas"] = []
-            document["scope"]["area_matrix"] = {}
+            document["scope"]["area_rows"] = {}
             return schema.canonical(document)
 
         run = self.run_step("pull_request", scope_receipt=stale_projection)
@@ -1779,8 +2282,25 @@ class WorkflowScopeStepTests(unittest.TestCase):
         self.assertEqual([], run.planner_calls)
         self.assertEqual([], run.rustup_calls)
         self.assertEqual(legacy_scope_document(run.plan), run.scope)
-        self.assertTrue(run.scope["matrix"])
+        self.assertTrue(run.scope["area_rows"])
         self.assertTrue(run.scope["scheduled_areas"])
+
+    def test_a_receipt_from_before_the_environment_lists_retired_still_hits(self) -> None:
+        # Same plan version, plus the two projections Phase 8 retired: the
+        # step must reuse the carried plan and publish a projection without them.
+        def pre_retirement(root: Path, base: str, head: str) -> str:
+            document = json.loads(self.local_scope_receipt(root, base, head))
+            document["scope"]["matrix"] = [{"package": "biscuit-hash", "native_environments": []}]
+            document["scope"]["area_matrix"] = {"biscuit-hash": {"include": []}}
+            return schema.canonical(document)
+
+        run = self.run_step("pull_request", scope_receipt=pre_retirement)
+        self.assertEqual(SCOPE_MARKER, run.plan["preflight_reason"])
+        self.assertEqual([], run.planner_calls, "a matching receipt is never re-selected")
+        self.assertEqual(legacy_scope_document(run.plan), run.scope)
+        self.assertNotIn("matrix", run.scope)
+        self.assertNotIn("area_matrix", run.scope)
+        self.assertEqual("true", run.outputs["has_packages"])
 
     def test_malformed_scope_notes_recalculate_through_the_real_step(self) -> None:
         for malformed in ("{broken json", "[]"):
@@ -1809,9 +2329,14 @@ class WorkflowScopeStepTests(unittest.TestCase):
         # whose last consumer is satisfied is removed. The overlay derives no
         # key — it only drops demand the carried plan already computed.
         "builds",
+        # For the same reason: a cell that will not run dispatches no row.
+        "rows",
     )
     EVIDENCE_CELL_FIELDS = (
         "execution", "origin", "state", "evidence", "prohibition", "build",
+        # The execution inputs go with the execution: a reused cell selects no
+        # nextest profile and provisions no Node.
+        "profile", "requires_node",
     )
 
     @classmethod
@@ -1869,8 +2394,19 @@ class WorkflowScopeStepTests(unittest.TestCase):
     def test_the_projection_on_an_evidence_hit_is_derived_from_the_written_plan(self) -> None:
         run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, validation_receipt=True)
         self.assertEqual(legacy_scope_document(run.plan), run.scope)
-        entry = next(item for item in run.scope["matrix"] if item["package"] == "biscuit-hash")
-        self.assertNotIn("macos-latest", entry["native_environments"], "the reused cell must leave the fan-out")
+        hash_rows = [
+            row
+            for document in run.scope["area_rows"].values()
+            for name in schema.ROW_SET_NAMES
+            for row in document[name]
+            if row["package"] == "biscuit-hash"
+        ]
+        self.assertTrue(hash_rows, "the package's other cells still fan out")
+        self.assertNotIn(
+            "macos-latest",
+            {row["environment"] for row in hash_rows},
+            "the reused cell must leave the fan-out",
+        )
         self.assertEqual(run.scope["job_estimate"], run.plan["job_estimate"])
         self.assertEqual(str(run.plan["job_estimate"]), run.outputs["job_estimate"])
 
@@ -1890,7 +2426,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
     #: Every matrix output the fan-out reads. A step that died before writing
     #: them would lose the run's package work, which is the defect.
     MATRIX_OUTPUTS = (
-        "scheduled_areas", "area_matrix", "area_slugs", "gap_areas", "packages",
+        "scheduled_areas", "area_rows", "area_slugs", "gap_areas", "packages",
         "package_names", "has_packages", "full_scope", "sniff",
         "job_estimate", "preflight_os", "preflight_reason", "change_class",
     )
@@ -2218,6 +2754,12 @@ class ToolGuardTests(unittest.TestCase):
 @requires_tools("bash", "jq", enforced_by=CI_TOOLING)
 class NativeProvisioningTests(unittest.TestCase):
     def provision(self, workflow: str, job: str, runner: str, native: dict, dependents: list) -> list[str]:
+        """The step's real script, given what `cell_contract.py` would publish.
+
+        `native` is still spelled as the planner's runner-keyed map so the
+        fixtures read the same; the cell reader narrows it to one environment's
+        list before the job ever sees it, which is what this mirrors.
+        """
         step = next(
             step for step in job_run_steps(ROOT / ".github/workflows" / workflow, job)
             if step.name == "Install native prerequisites"
@@ -2226,7 +2768,7 @@ class NativeProvisioningTests(unittest.TestCase):
             output = Path(temporary) / "arguments"
             environment = os.environ.copy()
             environment.update(
-                NATIVE=json.dumps(native), RUNNER_KEY=runner,
+                NATIVE=json.dumps(native.get(runner, [])), ENVIRONMENT=runner,
                 DEPENDENTS_NATIVE=json.dumps(dependents), NATIVE_OUTPUT=str(output),
             )
             result = subprocess.run(
@@ -2247,7 +2789,7 @@ class NativeProvisioningTests(unittest.TestCase):
             ["_ensure-native-libs", "own-macos"],
             self.provision("_package-ci.yml", "check", "macos-latest", native, dependents),
         )
-        for job in ["test", "lint", "test-l2", "test-browser"]:
+        for job in ["test", "lint"]:
             with self.subTest(job=job):
                 self.assertEqual(
                     ["_ensure-native-libs", "own-dev"],
@@ -2255,7 +2797,7 @@ class NativeProvisioningTests(unittest.TestCase):
                 )
 
     def test_empty_native_lists_never_invoke_the_whole_workspace_installer(self) -> None:
-        for job in ["check", "test", "lint", "test-l2", "test-browser"]:
+        for job in ["check", "test", "lint"]:
             with self.subTest(job=job):
                 self.assertEqual([], self.provision("_package-ci.yml", job, "ubuntu-latest", {}, []))
 

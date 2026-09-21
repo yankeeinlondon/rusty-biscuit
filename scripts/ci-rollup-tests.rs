@@ -53,6 +53,7 @@ fn record(package: &str, environment: &str, tier: Tier) -> RunRecord {
         skipped_tests: Vec::new(),
         parse_error: None,
         passed_identities: Vec::new(),
+        report: None,
     }
 }
 
@@ -250,6 +251,7 @@ fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
         scope_degraded: false,
         scheduled: None,
         builds: Vec::new(),
+        unplanned_completions: Vec::new(),
         records: Vec::new(),
         cells,
     }
@@ -2502,6 +2504,7 @@ fn compare_rollup(cells: Vec<Cell>) -> Rollup {
         scope_degraded: false,
         scheduled: None,
         builds: Vec::new(),
+        unplanned_completions: Vec::new(),
         records: Vec::new(),
         cells,
     }
@@ -3582,6 +3585,140 @@ fn a_scheduled_gate_that_uploaded_no_status_is_missing_not_absent() {
     assert_eq!(cells[0].origin, Origin::Unproduced);
 }
 
+/// The archive-path guard's cell as `affected_scope.archive_guard_only_selection`
+/// emits it: one Linux lint cell whose required work is the guard companion and
+/// whose producer skips clippy entirely.
+fn companions_only_lint_cell_json() -> serde_json::Value {
+    let mut cell = plan_cell_json("test-toolkit", "ubuntu-latest", "lint", false);
+    cell["area"] = serde_json::json!("tools");
+    cell["companions_only"] = serde_json::json!(true);
+    cell["companions"] = serde_json::json!([{"name": "archive-path-guard"}]);
+    cell
+}
+
+/// `2026-09-19-less-brittle`: the owning area's coverage audit is what detects a
+/// planned guard that did not run. The guard adds no top-level job, so a run
+/// that never started its lint cell has nothing else to notice — MISSING here is
+/// the whole enforcement.
+#[test]
+fn a_planned_guard_only_lint_cell_that_never_ran_is_missing_and_blocks() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+
+    let cell = only_cell(status_cells(
+        &[],
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.key.tier, Tier::parse("lint"));
+    assert_eq!(cell.state, CellState::Missing);
+    assert_eq!(cell.origin, Origin::Unproduced);
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["test-toolkit"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-missing"));
+}
+
+/// R12 on the cell that has nothing else: the producer skips clippy, so a
+/// companions-only cell whose sole companion went unreported evidenced NOTHING.
+/// Reading its green job status as a pass is exactly the "partial scan labelled
+/// a complete full-tree pass" the specification forbids.
+#[test]
+fn a_guard_only_lint_cell_with_no_companion_result_fails_rather_than_passes() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    // Exactly what the producer writes when clippy is `if`-gated off and the
+    // companion step did not succeed: a green JOB, no per-suite record.
+    let statuses = vec![ProducerStatus {
+        package: "test-toolkit".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: Some("skipped".to_owned()),
+        companions: BTreeMap::new(),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Fail);
+    assert!(
+        cell.reasons.iter().any(|reason| reason.contains("archive-path-guard")
+            && reason.contains("evidenced nothing at all")),
+        "the reason must say the cell proved nothing, not merely that a \
+         companion was uncovered: {:?}",
+        cell.reasons
+    );
+
+    let findings = verdict(
+        &rollup_of(vec![cell], &["test-toolkit"]),
+        &Baseline::default(),
+        None,
+    );
+    assert!(blocks_with_rule(&findings, "cell-failed"));
+}
+
+/// The same cell with its companion evidenced is a pass, and its clippy
+/// duration stays ABSENT: the step never ran, and inventing `0` for it would
+/// read as a measurement.
+#[test]
+fn a_guard_only_lint_cell_passes_on_its_companion_alone() {
+    let plan = plan_of(vec![companions_only_lint_cell_json()]);
+    let expected = plan_expected_cells(&plan).expect("the current plan generation");
+    let statuses = vec![ProducerStatus {
+        package: "test-toolkit".to_owned(),
+        job: "lint".to_owned(),
+        result: "success".to_owned(),
+        environment: Some("ubuntu-latest".to_owned()),
+        detail: None,
+        companion: Some("success".to_owned()),
+        companions: BTreeMap::from([(
+            "archive-path-guard".to_owned(),
+            CompanionOutcome {
+                outcome: "success".to_owned(),
+                counts: None,
+                reason: Some("a lint gate reports no test counts".to_owned()),
+                duration_s: Some(31.5),
+            },
+        )]),
+        duration_s: None,
+        dependents: Vec::new(),
+        build: None,
+        timings: None,
+    }];
+
+    let cell = only_cell(status_cells(
+        &statuses,
+        &scope_of(&["test-toolkit"]),
+        &[],
+        &[policy("test-toolkit")],
+        &expected,
+    ));
+
+    assert_eq!(cell.state, CellState::Pass, "{:?}", cell.reasons);
+    assert_eq!(cell.duration_s, None);
+    assert_eq!(
+        cell.companions.iter().map(|c| c.suite.as_str()).collect::<Vec<_>>(),
+        vec!["archive-path-guard"]
+    );
+}
+
 #[test]
 fn a_check_the_plan_reused_through_its_l1_receipt_expects_no_producer_status() {
     // PR #84: the pushing host's L1 satisfied both areas' macOS check cells
@@ -4529,7 +4666,7 @@ fn a_result_document_without_a_schema_version_is_refused_by_name() {
 #[test]
 fn the_result_and_baseline_schemas_version_independently() {
     // The baseline is hand-edited policy and versions its own semantic changes.
-    assert_eq!(RESULT_SCHEMA_VERSION, 4);
+    assert_eq!(RESULT_SCHEMA_VERSION, 5);
     assert_eq!(BASELINE_SCHEMA_VERSION, 3);
     let Some(root) = checkout_root() else {
         eprintln!("the checkout is not present; skipping the shipped-baseline fixture");
@@ -4773,9 +4910,14 @@ fn the_real_planners_plan_rolls_up() {
         !expected.is_empty(),
         "a source change in claudine must schedule cells"
     );
+    // `tools` is the archive-path guard's lint-only owner, selected by the
+    // Rust file this change touches rather than by anything under `tools/`.
+    // It owns no test tier here, so it drops out of the classification below.
     assert!(
-        expected.iter().all(|cell| cell.area == "claudine"),
-        "every cell of this plan belongs to the claudine area"
+        expected
+            .iter()
+            .all(|cell| cell.area == "claudine" || cell.area == "tools"),
+        "every cell of this plan belongs to the claudine area or to the guard's owner"
     );
 
     let cells = classify_simple(
@@ -4832,6 +4974,15 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
     )
     .unwrap();
 
+    // The executed cell certified itself, as every producer now must.
+    let completion = artifacts.join("completion-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(&completion).unwrap();
+    fs::write(
+        completion.join("completion.json"),
+        completion_record(json!({})).to_string(),
+    )
+    .unwrap();
+
     // Two areas: claudine executed on Linux and reused macOS; playa executed.
     let plan = temp.path().join("resolved-plan.json");
     let cells = vec![
@@ -4843,6 +4994,7 @@ fn the_command_surface_writes_reads_and_judges_one_areas_slice() {
         &plan,
         serde_json::json!({
             "schema_version": PLAN_SCHEMA_VERSION,
+            "head": FIXTURE_HEAD,
             "packages": [{"package": "claudine"}, {"package": "playa"}],
             "cells": cells,
             "change_inventory": serde_json::from_str::<serde_json::Value>(
@@ -6530,4 +6682,784 @@ fn the_legacy_single_companion_outcome_still_downgrades() {
     expectation.companion_suites = vec!["homelab-frontend".to_owned()];
     let cell = classify_one(&[expectation], &[status]);
     assert_eq!(cell.state, CellState::Fail);
+}
+
+// ---------------------------------------------------------------------------
+// Direct cell execution (`features/2026-09-19-direct-cell-execution`)
+//
+// The completion-record audit (AC6): a cell the plan executes must carry a
+// valid, complete, correctly bound completion record with its declared report
+// inventory, or the area verdict blocks. Written as pending oracles in Phase 2
+// and promoted in Phase 6, when the audit began reading the records.
+//
+// The legacy path — cells whose evidence carries no completion contract keep
+// the expected-manifest and skip-budget checks — is pinned by the ordinary
+// fixtures in this file (`an_owned_unexpired_policy_gap_does_not_block`, the
+// reused-cell rollups) and by the Phase 6 fixtures below.
+// ---------------------------------------------------------------------------
+
+/// The one-area fixture the completion oracles judge: a plan with a single
+/// executing L1 cell, a green JUnit report, and (optionally) the cell's
+/// completion record.
+struct CompletionFixture {
+    artifacts: PathBuf,
+    plan: PathBuf,
+    environments: PathBuf,
+    baseline: PathBuf,
+}
+
+const FIXTURE_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+fn completion_fixture(
+    temp: &TempDir,
+    completion: Option<serde_json::Value>,
+    cell_build: Option<&str>,
+) -> CompletionFixture {
+    let artifacts = temp.path().join("ci-artifacts");
+    let junit_dir = artifacts.join("junit-claudine-L1-ubuntu-latest");
+    fs::create_dir_all(junit_dir.join("L1")).unwrap();
+    fs::write(
+        junit_dir.join("L1").join("claudine.xml"),
+        junit(
+            "claudine",
+            &format!(
+                "{}{}",
+                passing_case("claudine::a"),
+                passing_case("claudine::b")
+            ),
+        ),
+    )
+    .unwrap();
+    fs::write(
+        junit_dir.join("manifest.jsonl"),
+        serde_json::json!({
+            "tier": "L1", "package": "claudine", "xml": "L1/claudine.xml",
+            "exit_code": 0, "environment": "ubuntu-latest",
+            "duration_s": 7, "report_present": true,
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+
+    let mut cell = plan_cell_json("claudine", "ubuntu-latest", "L1", false);
+    if let Some(key) = cell_build {
+        cell["build"] = serde_json::json!(key);
+    }
+    let plan = temp.path().join("resolved-plan.json");
+    fs::write(
+        &plan,
+        serde_json::json!({
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "head": FIXTURE_HEAD,
+            "packages": [{"package": "claudine"}],
+            "cells": vec![cell],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    if let Some(record) = completion {
+        let directory = artifacts.join("completion-claudine-L1-ubuntu-latest");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("completion.json"),
+            serde_json::to_string_pretty(&record).unwrap() + "\n",
+        )
+        .unwrap();
+    }
+
+    let environments = temp.path().join("environments.json");
+    fs::write(
+        &environments,
+        serde_json::json!({"schema_version": ENVIRONMENTS_SCHEMA_VERSION, "environments": []}).to_string(),
+    )
+    .unwrap();
+    let baseline = temp.path().join("ci-baseline.toml");
+    fs::write(&baseline, "schema_version = 3\n").unwrap();
+
+    CompletionFixture { artifacts, plan, environments, baseline }
+}
+
+/// The record shape R10 pins: keyed by cell, binding revision, build, run,
+/// attempt, nextest version, and the report inventory.
+fn completion_record(overrides: serde_json::Value) -> serde_json::Value {
+    let mut record = serde_json::json!({
+        "schema_version": 1,
+        "package": "claudine",
+        "environment": "ubuntu-latest",
+        "gate": "L1",
+        "complete": true,
+        "head": FIXTURE_HEAD,
+        "run": 123456,
+        "attempt": 1,
+        "nextest_version": "cargo-nextest 0.9.136",
+        "reports": ["L1/claudine.xml"],
+    });
+    if let serde_json::Value::Object(fields) = overrides {
+        for (name, value) in fields {
+            record[name] = value;
+        }
+    }
+    record
+}
+
+/// The completion record's field names, against the frozen cross-language
+/// contract the producer writes it from.
+///
+/// A passive corpus test over the shipped artifact, and the reason it is
+/// ordinary rather than pending: the contract exists now
+/// (`scripts/ci/schema.py::COMPLETION_RECORD_FIELDS`), and the fixture above is
+/// what Phase 6's reader will be built against. Renaming a field on either side
+/// without the other is exactly the silent failure `serde`'s "ignore what you
+/// do not recognize" would otherwise hand us.
+#[test]
+fn completion_record_fields_match_the_frozen_contract() {
+    let Some(root) = checkout_root() else {
+        eprintln!("the checkout is not present; skipping the shipped-contract fixture");
+        return;
+    };
+    let text = fs::read_to_string(root.join(".github/ci/schemas/contract.json"))
+        .expect("the frozen contract is shipped");
+    let contract: serde_json::Value =
+        serde_json::from_str(&text).expect("the frozen contract parses");
+    let described = &contract["completion_record"];
+    let fixture = completion_record(serde_json::json!({}));
+
+    assert_eq!(
+        described["schema_version"], fixture["schema_version"],
+        "this fixture builds a completion record generation the contract no \
+         longer describes"
+    );
+
+    let fields = described["document"]
+        .as_object()
+        .expect("the completion record contract lists its fields");
+    for (name, required) in fields {
+        if required.as_bool() == Some(true) {
+            assert!(
+                fixture.get(name).is_some(),
+                "the completion record contract requires `{name}`, which this \
+                 fixture does not build"
+            );
+        }
+    }
+    for name in fixture.as_object().expect("the fixture is an object").keys() {
+        assert!(
+            fields.contains_key(name),
+            "this fixture builds `{name}`, which the completion record contract \
+             does not describe"
+        );
+    }
+
+    let rejections = described["rejections"]
+        .as_array()
+        .expect("the completion record contract lists its rejection codes");
+    assert!(
+        rejections
+            .iter()
+            .all(|code| code.as_str().is_some_and(|code| code.starts_with("completion-"))),
+        "every producer refusal is prefixed so an audit reading a job log can \
+         tell it from a test failure"
+    );
+}
+
+/// Roll the fixture area up and judge it; returns the verdict exit code.
+fn verdict_of(fixture: &CompletionFixture, temp: &TempDir) -> i32 {
+    let (rollup, verdict, _) = audit_of(fixture, temp, &[], &[]);
+    assert_eq!(
+        rollup, 0,
+        "the area's cells rolled up green before the verdict is judged"
+    );
+    verdict
+}
+
+/// Roll the fixture area up and judge it through the command surface, with
+/// extra flags for either half. Returns both exit codes and the Markdown both
+/// commands appended, so a fixture can say WHICH rule decided.
+fn audit_of(
+    fixture: &CompletionFixture,
+    temp: &TempDir,
+    rollup_extra: &[&str],
+    verdict_extra: &[&str],
+) -> (i32, i32, String) {
+    let results = temp.path().join("claudine-results.json");
+    let summary = temp.path().join("summary.md");
+    fs::remove_file(&summary).ok();
+    let rollup_args = Args::parse(
+        [
+            "--artifacts",
+            fixture.artifacts.to_str().unwrap(),
+            "--plan",
+            fixture.plan.to_str().unwrap(),
+            "--environments",
+            fixture.environments.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--out",
+            results.to_str().unwrap(),
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .chain(rollup_extra.iter().copied())
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let rollup = cmd_rollup(&rollup_args).unwrap();
+
+    let verdict_args = Args::parse(
+        [
+            "--results",
+            results.to_str().unwrap(),
+            "--baseline",
+            fixture.baseline.to_str().unwrap(),
+            "--area",
+            "claudine",
+            "--summary",
+            summary.to_str().unwrap(),
+        ]
+        .into_iter()
+        .chain(verdict_extra.iter().copied())
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let verdict = cmd_verdict(&verdict_args).unwrap();
+    (rollup, verdict, fs::read_to_string(&summary).unwrap_or_default())
+}
+
+/// AC6: an executing cell with no completion record blocks the verdict, and
+/// a valid, correctly bound record clears it.
+#[test]
+fn an_executing_cell_without_a_completion_record_blocks_the_verdict() {
+    let temp = TempDir::new("completion-missing");
+    let without = completion_fixture(&temp, None, None);
+    assert_eq!(
+        EXIT_BLOCKED,
+        verdict_of(&without, &temp),
+        "an executing cell with no completion record blocks: a green \
+         status without its completion record is unproven coverage"
+    );
+
+    let with = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    assert_eq!(
+        0,
+        verdict_of(&with, &temp),
+        "a valid, correctly bound completion record clears the same area"
+    );
+}
+
+/// AC6: the record must bind the run's tested revision.
+#[test]
+fn a_completion_record_bound_to_another_revision_blocks() {
+    let temp = TempDir::new("completion-revision");
+    let other_head = "c".repeat(40);
+    let fixture = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "head": other_head }))),
+        None,
+    );
+    assert_eq!(
+        EXIT_BLOCKED,
+        verdict_of(&fixture, &temp),
+        "a completion record naming a revision other than the run's \
+         tested one is evidence about a different tree"
+    );
+}
+
+/// AC6: the record must bind the build key its cell executed.
+#[test]
+fn a_completion_record_bound_to_another_build_key_blocks() {
+    let temp = TempDir::new("completion-build");
+    let fixture = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "build": "fedcba9876543210" }))),
+        Some("0123456789abcdef"),
+    );
+    assert_eq!(
+        EXIT_BLOCKED,
+        verdict_of(&fixture, &temp),
+        "a completion record naming a build other than the one the \
+         cell's plan resolved is evidence from a different compile"
+    );
+}
+
+/// AC6: a green status whose declared report inventory is absent blocks.
+#[test]
+fn a_green_status_with_an_absent_report_inventory_blocks() {
+    let temp = TempDir::new("completion-inventory");
+    let fixture = completion_fixture(
+        &temp,
+        Some(completion_record(
+            json!({ "reports": ["L1/claudine.xml", "L1/vanished.xml"] }),
+        )),
+        None,
+    );
+    assert_eq!(
+        EXIT_BLOCKED,
+        verdict_of(&fixture, &temp),
+        "a completion record declaring a report nothing uploaded is \
+         not supported by its artifacts"
+    );
+}
+
+/// The record is authoritative: `complete: false` blocks even though the JUnit
+/// and status artifacts are green. This is the strongest form of the
+/// legacy-path contract — an old-shape green area (no record at all) is judged
+/// by the legacy path, but a record that EXISTS and denies completeness wins.
+#[test]
+fn an_incomplete_completion_record_blocks_green_junit() {
+    let temp = TempDir::new("completion-incomplete");
+    let fixture = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "complete": false }))),
+        None,
+    );
+    assert_eq!(
+        EXIT_BLOCKED,
+        verdict_of(&fixture, &temp),
+        "a completion record that did not validate cannot be outranked \
+         by the green reports it was supposed to certify"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Direct cell execution, Phase 6: the version-aware audit
+//
+// The fixtures above pin the four binding rules the Phase 2 oracles named.
+// These pin the rest of what "correctly bound" means, the legacy path the
+// completion contract must not bypass, and the producer-call rule. The whole
+// chain — the real row adapter, `cell_contract.py`, and `completion.py` feeding
+// this binary — runs in `scripts/ci/test_completion.py::AuditEndToEndTests`.
+// ---------------------------------------------------------------------------
+
+/// Write `document` as a completion artifact under `name`.
+fn write_completion(artifacts: &Path, name: &str, document: &str) {
+    let directory = artifacts.join(name);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("completion.json"), document).unwrap();
+}
+
+/// Every rule id the verdict table rendered as blocking.
+fn blocking_rules(summary: &str) -> Vec<String> {
+    summary
+        .lines()
+        .filter(|line| line.starts_with("| BLOCK |"))
+        .filter_map(|line| line.split('`').nth(1).map(str::to_owned))
+        .collect()
+}
+
+/// AC6: the record must name the run that is being judged, while any attempt
+/// of it is accepted — a rerun of other jobs keeps a passing cell's proof.
+#[test]
+fn a_completion_record_from_another_run_blocks_and_an_earlier_attempt_does_not() {
+    let temp = TempDir::new("completion-run");
+    let fixture = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &["--run-id", "999"], &[]);
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert!(summary.contains("not this run (999)"), "{summary}");
+
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &["--run-id", "123456"], &[]);
+    assert_eq!(0, verdict, "the record names this run: {summary}");
+
+    let retried = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "run": "123456", "attempt": 1 }))),
+        None,
+    );
+    let (_, verdict, summary) = audit_of(&retried, &temp, &["--run-id", "123456"], &[]);
+    assert_eq!(
+        0, verdict,
+        "a string run id and an attempt-1 record survive a rerun: {summary}"
+    );
+
+    let unattempted = completion_fixture(&temp, Some(completion_record(json!({ "attempt": 0 }))), None);
+    assert_eq!(EXIT_BLOCKED, verdict_of(&unattempted, &temp));
+}
+
+/// AC6: a record is found by its cell's artifact name and must also NAME that
+/// cell; a record of another generation is reported, never interpreted.
+#[rstest::rstest]
+#[case::another_package(json!({ "package": "playa" }), "names playa/ubuntu-latest/L1")]
+#[case::another_gate(json!({ "gate": "L2" }), "names claudine/ubuntu-latest/L2")]
+#[case::another_generation(json!({ "schema_version": 2 }), "is schema_version 2")]
+#[case::no_generation(json!({ "schema_version": null }), "is schema_version null")]
+#[case::missing_inventory(json!({ "reports": null }), "not a list of report paths")]
+#[case::string_complete(json!({ "complete": "true" }), "does not claim completeness")]
+fn a_completion_record_that_does_not_describe_its_cell_blocks(
+    #[case] overrides: serde_json::Value,
+    #[case] reason: &str,
+) {
+    let temp = TempDir::new("completion-identity");
+    let fixture = completion_fixture(&temp, Some(completion_record(overrides)), None);
+    let (rollup, verdict, summary) = audit_of(&fixture, &temp, &[], &[]);
+    assert_eq!(0, rollup, "the cell's state is what its evidence showed");
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert_eq!(vec!["completion-unproven".to_owned()], blocking_rules(&summary));
+    assert!(summary.contains(reason), "expected `{reason}` in:\n{summary}");
+    assert!(
+        summary.contains("### Unproven executions"),
+        "the area grid must show why a green-reading cell is refused: {summary}"
+    );
+}
+
+/// AC6: the inventory is compared both ways — a staged report the record does
+/// not certify is as unsupported as a declared report nothing uploaded.
+#[test]
+fn a_staged_report_the_record_does_not_certify_blocks() {
+    let temp = TempDir::new("completion-extra-report");
+    let fixture = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    let stage = fixture.artifacts.join("junit-claudine-L1-ubuntu-latest");
+    fs::write(
+        stage.join("L1").join("claudine-retry.xml"),
+        junit("claudine-retry", &passing_case("claudine::c")),
+    )
+    .unwrap();
+    let mut manifest = fs::read_to_string(stage.join("manifest.jsonl")).unwrap();
+    manifest.push_str(
+        &(json!({
+            "tier": "L1", "package": "claudine", "xml": "L1/claudine-retry.xml",
+            "exit_code": 0, "environment": "ubuntu-latest", "duration_s": 1,
+            "report_present": true,
+        })
+        .to_string()
+            + "\n"),
+    );
+    fs::write(stage.join("manifest.jsonl"), manifest).unwrap();
+
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &[], &[]);
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert!(summary.contains("`L1/claudine-retry.xml`"), "{summary}");
+
+    // Declared with a Windows separator, the same inventory is satisfied. The
+    // two-report manifest is kept: rebuilding the fixture rewrites it.
+    let manifest = fs::read_to_string(stage.join("manifest.jsonl")).unwrap();
+    let certified = completion_fixture(
+        &temp,
+        Some(completion_record(
+            json!({ "reports": ["L1\\claudine.xml", "./L1/claudine-retry.xml"] }),
+        )),
+        None,
+    );
+    fs::write(
+        certified.artifacts.join("junit-claudine-L1-ubuntu-latest").join("manifest.jsonl"),
+        manifest,
+    )
+    .unwrap();
+    assert_eq!(0, verdict_of(&certified, &temp));
+}
+
+/// AC6: the planned build and the recorded one must agree in both directions,
+/// and agreement clears the same cell (the non-vacuity half of
+/// `a_completion_record_bound_to_another_build_key_blocks`).
+#[test]
+fn a_completion_record_must_name_exactly_the_planned_build() {
+    let temp = TempDir::new("completion-build-both-ways");
+    let unnamed = completion_fixture(&temp, Some(completion_record(json!({}))), Some("0123456789abcdef"));
+    assert_eq!(EXIT_BLOCKED, verdict_of(&unnamed, &temp), "the record names no build");
+
+    let unplanned = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "build": "0123456789abcdef" }))),
+        None,
+    );
+    assert_eq!(EXIT_BLOCKED, verdict_of(&unplanned, &temp), "the cell consumes no build");
+
+    let matching = completion_fixture(
+        &temp,
+        Some(completion_record(json!({ "build": "0123456789abcdef" }))),
+        Some("0123456789abcdef"),
+    );
+    assert_eq!(0, verdict_of(&matching, &temp));
+}
+
+/// A completion record for a cell the plan did not execute is unplanned
+/// evidence: refused, never attached to a cell it does not describe.
+#[test]
+fn a_completion_record_for_an_unplanned_cell_blocks() {
+    let temp = TempDir::new("completion-unplanned");
+    let fixture = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    write_completion(
+        &fixture.artifacts,
+        "completion-claudine-L1-macos-latest",
+        &completion_record(json!({ "environment": "macos-latest" })).to_string(),
+    );
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &[], &[]);
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert_eq!(vec!["completion-unplanned".to_owned()], blocking_rules(&summary));
+    assert!(summary.contains("completion-claudine-L1-macos-latest"), "{summary}");
+}
+
+/// An unreadable completion record is an infrastructure failure — the audit
+/// could not read its inputs — never an invented test failure.
+#[test]
+fn a_malformed_completion_record_is_a_tool_error_not_a_verdict() {
+    let temp = TempDir::new("completion-malformed");
+    let fixture = completion_fixture(&temp, None, None);
+    write_completion(&fixture.artifacts, "completion-claudine-L1-ubuntu-latest", "{ not json");
+    let args = Args::parse(
+        [
+            "--artifacts",
+            fixture.artifacts.to_str().unwrap(),
+            "--plan",
+            fixture.plan.to_str().unwrap(),
+            "--environments",
+            fixture.environments.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let error = format!("{:#}", cmd_rollup(&args).expect_err("an unreadable input is refused"));
+    assert!(error.contains("malformed completion record"), "{error}");
+}
+
+/// A check cell is certified too: its producer runs `completion.py` with no
+/// listing, and a green status without that record is unsupported.
+#[test]
+fn a_green_check_status_needs_its_completion_record() {
+    let temp = TempDir::new("completion-check");
+    let fixture = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    let mut plan: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&fixture.plan).unwrap()).unwrap();
+    plan["cells"]
+        .as_array_mut()
+        .unwrap()
+        .push(plan_cell_json("claudine", "ubuntu-latest", "check", false));
+    fs::write(&fixture.plan, plan.to_string()).unwrap();
+    let status = fixture.artifacts.join("status-claudine-check-ubuntu-latest");
+    fs::create_dir_all(&status).unwrap();
+    fs::write(
+        status.join("status.json"),
+        json!({"package": "claudine", "job": "check", "environment": "ubuntu-latest", "result": "success"})
+            .to_string(),
+    )
+    .unwrap();
+
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &[], &[]);
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert!(summary.contains("claudine/ubuntu-latest/check"), "{summary}");
+
+    let mut record = completion_record(json!({ "gate": "check", "reports": [] }));
+    record.as_object_mut().unwrap().remove("nextest_version");
+    write_completion(&fixture.artifacts, "completion-claudine-check-ubuntu-latest", &record.to_string());
+    assert_eq!(0, verdict_of(&fixture, &temp));
+}
+
+/// Legacy evidence cannot bypass a check the new path removed. The expected
+/// manifest diff still turns a legacy cell's absent test into a skip, while
+/// the same manifest cannot reach an executing cell — whose absent test is its
+/// producer's `completion-test-missing`, and so never a skip here at all.
+#[test]
+fn the_expected_manifest_diff_applies_to_legacy_cells_only() {
+    let mut expected_tests: ExpectedTests = BTreeMap::new();
+    expected_tests
+        .entry(("ubuntu-latest".to_owned(), Tier::L1))
+        .or_default()
+        .insert(
+            "pkg".to_owned(),
+            vec!["pkg::a".into(), "pkg::b".into(), "pkg::c".into(), "pkg::gone".into()],
+        );
+    let records = [passing_record("pkg", "ubuntu-latest", Tier::L1)];
+    let judge = |executes: bool| {
+        let mut cell = expectation("pkg", "ubuntu-latest", Tier::L1);
+        cell.executes = executes;
+        only_cell(classify(&ClassifyInputs {
+            expected: &[cell],
+            records: &records,
+            statuses: &[],
+            builds: &BTreeMap::new(),
+            expected_tests: &expected_tests,
+        }))
+    };
+
+    let legacy = judge(false);
+    assert_eq!(legacy.skipped_tests, vec!["pkg::gone".to_owned()]);
+    assert!(!legacy.skip_evidence_degraded);
+    let findings = skip_findings(&rollup_of(vec![legacy], &["pkg"]), &Baseline::default(), &BTreeSet::new());
+    assert!(
+        findings.iter().any(|finding| finding.rule == "skip-new" && finding.severity == Severity::Block),
+        "a legacy cell's absent test is still judged by the skip budget: {findings:#?}"
+    );
+
+    let executing = judge(true);
+    assert!(executing.skipped_tests.is_empty(), "{executing:#?}");
+    assert!(
+        !executing.skip_evidence_degraded,
+        "a degraded skip set is a legacy-only notion"
+    );
+}
+
+/// An executing cell's observed skip was approved by its producer against the
+/// plan's skip snapshot, so the audit reports it rather than re-judging it —
+/// but it still retires a stale approval, and a legacy cell's identical skip is
+/// still judged by the budget.
+#[test]
+fn a_certified_cells_skips_are_reported_while_stale_approvals_still_block() {
+    let cell = |completion: Option<Completion>| Cell {
+        state: CellState::Pass,
+        scheduled: true,
+        skipped_tests: vec!["pkg::flaky".to_owned()],
+        completion,
+        ..blank_cell(cell_key("pkg", "ubuntu-latest", Tier::L1))
+    };
+    let judge = |cell: Cell, baseline: &Baseline| {
+        let rollup = rollup_of(vec![cell], &["pkg"]);
+        skip_findings(&rollup, baseline, &rollup.scope.iter().collect())
+    };
+    let rules = |findings: Vec<Finding>| -> Vec<(&'static str, Severity)> {
+        findings.into_iter().map(|finding| (finding.rule, finding.severity)).collect()
+    };
+
+    let empty = Baseline { schema_version: BASELINE_SCHEMA_VERSION, skip: Vec::new() };
+    assert_eq!(
+        rules(judge(cell(Some(Completion::default())), &empty)),
+        vec![("skip-certified", Severity::Note)]
+    );
+    assert_eq!(
+        rules(judge(cell(None), &empty)),
+        vec![("skip-new", Severity::Block)],
+        "the legacy path keeps the budget"
+    );
+    assert!(
+        judge(
+            cell(Some(Completion { problems: vec!["absent".into()], ..Completion::default() })),
+            &empty
+        )
+        .is_empty(),
+        "an uncertified cell is blocked once, by `completion-unproven`"
+    );
+
+    let stale = Baseline {
+        schema_version: BASELINE_SCHEMA_VERSION,
+        skip: vec![SkipEntry {
+            package: "pkg".into(),
+            environment: "ubuntu-latest".into(),
+            tier: Tier::L1,
+            backend: String::new(),
+            tests: vec!["pkg::fixed".into()],
+            owner: "@ken".into(),
+            reason: "was flaky".into(),
+            source_run: "1".into(),
+            expiry: None,
+        }],
+    };
+    assert!(
+        rules(judge(cell(Some(Completion::default())), &stale))
+            .contains(&("skip-resolved", Severity::Block)),
+        "a certified cell still retires an approval that no longer skips"
+    );
+}
+
+/// The producer-call rule. A skipped call is correct for an area with no
+/// executing cell and missing coverage for one with any; a failed or cancelled
+/// call is never judged here, because it already blocks through its own result.
+#[test]
+fn a_skipped_producer_call_blocks_only_over_executing_cells() {
+    let temp = TempDir::new("completion-producers");
+    let fixture = completion_fixture(&temp, Some(completion_record(json!({}))), None);
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &[], &["--producers", "skipped"]);
+    assert_eq!(EXIT_BLOCKED, verdict, "{summary}");
+    assert!(blocking_rules(&summary).contains(&"producers-skipped".to_owned()), "{summary}");
+
+    let (_, verdict, summary) = audit_of(&fixture, &temp, &[], &["--producers", "success"]);
+    assert_eq!(0, verdict, "{summary}");
+
+    let reused = TempDir::new("completion-producers-reused");
+    let all_reused = completion_fixture(&reused, None, None);
+    let plan = json!({
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "head": FIXTURE_HEAD,
+        "packages": [{"package": "claudine"}],
+        "cells": [plan_cell_json("claudine", "macos-latest", "L1", true)],
+    });
+    fs::write(&all_reused.plan, plan.to_string()).unwrap();
+    fs::remove_dir_all(&all_reused.artifacts).unwrap();
+    fs::create_dir_all(&all_reused.artifacts).unwrap();
+    let (_, verdict, summary) = audit_of(&all_reused, &reused, &[], &["--producers", "skipped"]);
+    assert_eq!(0, verdict, "an all-reused area is judged and clear: {summary}");
+
+    let results = reused.path().join("claudine-results.json");
+    for refused in ["failure", "cancelled"] {
+        let args = Args::parse(
+            [
+                "--results",
+                results.to_str().unwrap(),
+                "--baseline",
+                all_reused.baseline.to_str().unwrap(),
+                "--producers",
+                refused,
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap();
+        assert!(cmd_verdict(&args).is_err(), "`--producers {refused}` is not judged");
+    }
+}
+
+/// A version-2 expected manifest is the producer's; handing it to the audit is
+/// refused with a pointer, rather than as a shape error or a silent read.
+#[test]
+fn a_version_two_expected_manifest_is_refused_with_its_owner_named() {
+    let temp = TempDir::new("manifest-v2");
+    let path = temp.path().join("expected-L1.json");
+    fs::write(
+        &path,
+        json!({
+            "schema_version": 2, "environment": "ubuntu-latest", "tier": "L1",
+            "packages": {"claudine": {"tests": ["claudine::a"], "ignored": [], "excluded": []}},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let args = Args::parse(
+        ["--expected-manifest", path.to_str().unwrap()].into_iter().map(str::to_owned),
+    )
+    .unwrap();
+    let error = format!("{:#}", load_expected_manifests(&args).expect_err("v2 is refused"));
+    assert!(
+        error.contains("schema_version 2") && error.contains("completion.py"),
+        "{error}"
+    );
+}
+
+/// A version-4 result document carries no `completion` at all, so reading it
+/// would certify every executing cell without its proof.
+#[test]
+fn a_version_four_result_document_is_refused_rather_than_read_as_legacy() {
+    let error = format!(
+        "{:#}",
+        parse_rollup(
+            &json!({"schema_version": 4, "scope": [], "scope_degraded": false, "records": [], "cells": []})
+                .to_string(),
+            Path::new("ci-results.json"),
+        )
+        .expect_err("a version-4 slice is another generation")
+    );
+    assert!(error.contains("completion record"), "{error}");
+}
+
+/// Rollback safety for the Phase 7 path switch: the row path's rollback is a
+/// revert of the planner, the workflows, and this audit together. A partial
+/// one — any of them left a plan generation apart from the others — must
+/// fail the area's audit rather than judge it, because an earlier plan
+/// carries no rows or completion contract and a later one carries fields this
+/// reader cannot interpret; either reading would weaken enforcement.
+#[test]
+fn a_plan_from_another_schema_generation_is_refused_rather_than_audited() {
+    assert!(plan_expected_cells(&plan_of(vec![])).is_ok());
+    for version in [PLAN_SCHEMA_VERSION - 1, PLAN_SCHEMA_VERSION + 1] {
+        let mut plan = plan_of(vec![]);
+        plan.schema_version = version;
+        let error = format!(
+            "{:#}",
+            plan_expected_cells(&plan).expect_err("another plan generation is refused")
+        );
+        assert!(
+            error.contains(&format!("schema_version {version}"))
+                && error.contains("affected_scope.py"),
+            "{error}"
+        );
+    }
 }

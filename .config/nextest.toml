@@ -19,12 +19,6 @@
 # keeps their concurrency bounded on contended runners. Local runs use the
 # normal scheduler so developer machines are not capped at four tests.
 claudine-l1 = { max-threads = 4 }
-# Claudine's CLI integration tests spawn nested debug binaries. Even four-way
-# concurrency can starve those children on two-core CI runners long enough to
-# trip both their internal deadlines and nextest's termination ceiling. This
-# group is applied only by the CI profile; local runs use Nextest's normal
-# parallel scheduler.
-claudine-cli-ci-l1 = { max-threads = 1 }
 # Sniff exercises shared Windows host-network APIs from both direct tests and
 # spawned CLI processes. Windows may fail-fast a changing test process when
 # full network detections overlap, so CI runs them one process at a time. Local
@@ -211,10 +205,6 @@ retries = 0
 [[profile.ci.overrides]]
 filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
 test-group = 'claudine-l1'
-
-[[profile.ci.overrides]]
-filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
-test-group = 'claudine-cli-ci-l1'
 
 [[profile.ci.overrides]]
 platform = { host = "cfg(windows)" }
