@@ -174,7 +174,7 @@ Supported variable forms:
 
 - simple keys: `draft`
 - nested keys: `user.role`
-- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](./context-variables.md)
+- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](state-management/context-variables.md)
 - environment keys: `env.AGENT`, `env.HOME`
 
 ### Dot Access
@@ -219,7 +219,7 @@ namespace name never shadows the namespace.
 | Namespace | Resolves to |
 | --- | --- |
 | `doc` / `doc.*` | the **current** document's frontmatter (this document) |
-| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) |
+| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) |
 | `env.*` | process environment variables |
 
 ### The `doc` namespace
@@ -1065,4 +1065,4 @@ it never leaks an unresolved `{{ … }}` literal.
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)
-- [Context Variables](./context-variables.md)
+- [Context Variables](state-management/context-variables.md)

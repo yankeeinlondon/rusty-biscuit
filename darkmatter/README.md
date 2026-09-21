@@ -61,7 +61,7 @@ host OS input and take focus.
     - [Transclusion](./docs/topics/transclusion.md)
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)
-    - [Context Variables provided to Composition](./docs/topics/context-variables.md) — date/time, repo/monorepo, file changes, OS, hardware, and document discovery via `sniff`
+    - [Context Variables provided to Composition](docs/topics/state-management/context-variables.md) — date/time, repo/monorepo, file changes, OS, hardware, and document discovery via `sniff`
     - [Error Rendering Conventions](./docs/errors/README.md) — `BlockError` body
       contract, `SourceContext`, snapshot tests
 

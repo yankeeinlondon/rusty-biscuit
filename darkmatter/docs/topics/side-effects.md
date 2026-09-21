@@ -68,6 +68,6 @@ so denied hosts are rejected before any network request is attempted.
 ## See Also
 
 - [Darkmatter Expressions](./darkmatter-expressions.md)
-- [Context Variables](./context-variables.md)
+- [Context Variables](state-management/context-variables.md)
 </content>
 </invoke>
