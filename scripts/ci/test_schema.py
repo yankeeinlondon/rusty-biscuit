@@ -404,6 +404,36 @@ def schema_readme_prose() -> str:
     return re.sub(r"\s+", " ", " ".join(lines))
 
 
+class CanonicalSelectionContractTests(unittest.TestCase):
+    """`CANONICAL_SELECTION` is the gate-to-marker binding `completion.py`
+    checks a listing's filter against, and the contract document carries it."""
+
+    def test_the_selection_contract_partitions_the_marker_vocabulary(self):
+        contract = schema.CANONICAL_SELECTION
+        selected = list(contract["selects"].values())
+        excluded = contract["excludes"]["must"] + contract["excludes"]["may"]
+        # Every positive tier's marker is one L1 must take out, and the two
+        # L1-internal markers are the only ones no positive tier owns.
+        self.assertEqual(sorted(selected), sorted(contract["excludes"]["must"]))
+        self.assertEqual(sorted(schema.TIER_MARKERS), sorted(excluded))
+        self.assertEqual(len(set(excluded)), len(excluded), "a marker binds once")
+
+    def test_every_plan_test_gate_has_a_canonical_selection(self):
+        contract = schema.CANONICAL_SELECTION
+        for gate in schema.BUILD_GATES:
+            with self.subTest(gate):
+                self.assertTrue(
+                    gate in contract["selects"] or gate in contract["excludes"]["tiers"],
+                    f"an executing {gate} cell's listing could not be checked",
+                )
+
+    def test_the_contract_document_publishes_the_selection_contract(self):
+        self.assertEqual(
+            schema.CANONICAL_SELECTION,
+            schema.contract()["vocabulary"]["canonical_selection"],
+        )
+
+
 class SchemaReadmeVersionTests(unittest.TestCase):
     """The schema README states this module's version counters in prose.
 
@@ -1716,7 +1746,7 @@ class DirectExecutionSchemaOracleTests(unittest.TestCase):
                 entries=[skip_entry(backend="tmux", expiry="2027-06-30")]
             ),
         )
-        document["schema_version"] = 5
+        document["schema_version"] = schema.RESOLVED_PLAN_SCHEMA_VERSION
         for entry in document["areas"]:
             entry["execution_path"] = "rows"
         for entry in document["cells"]:
@@ -1725,13 +1755,13 @@ class DirectExecutionSchemaOracleTests(unittest.TestCase):
         document.update(overrides)
         return document
 
-    def test_version_5_is_the_plans_schema_and_the_receipts_do_not_move(self):
+    def test_version_6_is_the_plans_schema_and_the_receipts_do_not_move(self):
         self.assertEqual(
-            5,
+            6,
             schema.RESOLVED_PLAN_SCHEMA_VERSION,
-            "the direct-cell-execution fields force a version-5 plan: a "
-            "version-5 plan schema is required once rows and the skip policy "
-            "travel in the document",
+            "the direct-cell-execution fields forced a version-5 plan (rows and "
+            "the skip policy travel in the document); review-1 moved it to 6 when "
+            "an executing L2 cell started carrying its required backends",
         )
         self.assertEqual([], schema.validate_resolved_plan(self.v5_plan(), today="2026-09-20"))
         # The version-5 plan schema moves alone: validation receipts stay
@@ -1741,14 +1771,13 @@ class DirectExecutionSchemaOracleTests(unittest.TestCase):
         self.assertEqual(1, schema.LEGACY_RECEIPT_SCHEMA_VERSION)
         self.assertEqual(1, schema.SCOPE_RECEIPT_SCHEMA_VERSION)
         shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(5, shipped["resolved_plan"]["schema_version"])
+        self.assertEqual(6, shipped["resolved_plan"]["schema_version"])
 
     def test_a_version_4_plan_is_refused_by_version_before_field_set(self):
         self.assertEqual(
-            5,
+            6,
             schema.RESOLVED_PLAN_SCHEMA_VERSION,
-            "a version-4 refusal only exists once the tool writes a version-5 "
-            "plan schema",
+            "a version-4 refusal only exists once the tool writes a later plan schema",
         )
         stale = self.v5_plan()
         stale["schema_version"] = 4
@@ -1760,7 +1789,7 @@ class DirectExecutionSchemaOracleTests(unittest.TestCase):
         self.assertEqual(
             [
                 "unknown-schema-version: resolved plan is version 4, this tool "
-                "writes 5"
+                "writes 6"
             ],
             problems,
         )
@@ -1923,6 +1952,68 @@ class DirectExecutionSchemaOracleTests(unittest.TestCase):
         for code in ("skip-policy-cell", "skip-policy-expired", "skip-policy-provenance"):
             self.assertIn(code, schema.REJECTIONS)
         self.assertIn("skip-policy-cell", schema.contract()["vocabulary"]["rejections"])
+
+
+class CellBackendsValidationTests(unittest.TestCase):
+    """Version 6: an executing L2 cell names the backends its producer must prove.
+
+    `completion.py` reads that list and nothing else, so the schema refuses the
+    three shapes that would leave it guessing or bind a proof to the wrong gate.
+    """
+
+    def l2_plan(self, **cell_overrides: object) -> dict:
+        return plan(
+            packages=[package(tiers=["L1", "L2"], l2_backends=["tmux", "wezterm"])],
+            cells=[cell(gate="L2", **cell_overrides)],
+        )
+
+    def test_the_hostable_subset_on_an_executing_l2_cell_validates(self):
+        self.assertEqual([], schema.validate_resolved_plan(self.l2_plan(backends=["tmux"])))
+        self.assertIs(False, schema.CELL_FIELDS["backends"])
+
+    def test_an_executing_l2_cell_without_backends_is_malformed(self):
+        problems = schema.validate_resolved_plan(self.l2_plan())
+        self.assertTrue(
+            any("names no required backend" in problem for problem in problems), problems
+        )
+        for empty in ([], "tmux"):
+            with self.subTest(backends=empty):
+                problems = schema.validate_resolved_plan(self.l2_plan(backends=empty))
+                self.assertTrue(
+                    any("non-empty list of strings" in problem for problem in problems),
+                    problems,
+                )
+
+    def test_backends_on_a_non_l2_or_non_executing_cell_are_malformed(self):
+        l1 = plan(cells=[cell(gate="L1", backends=["tmux"])])
+        gap = plan(
+            packages=[package(tiers=["L1", "L2"], l2_backends=["tmux"])],
+            cells=[
+                cell(
+                    environment="windows-latest",
+                    gate="L2",
+                    execution="omit",
+                    origin="none",
+                    state="accepted-gap",
+                    gap={"owner": "@o", "reason": "no backend", "expiry": "2027-01-31"},
+                    backends=["tmux"],
+                )
+            ],
+        )
+        for label, document in (("L1", l1), ("gap", gap)):
+            with self.subTest(label):
+                problems = schema.validate_resolved_plan(document)
+                self.assertTrue(
+                    any("not an executing L2 cell" in problem for problem in problems),
+                    problems,
+                )
+
+    def test_a_backend_the_package_does_not_declare_is_malformed(self):
+        problems = schema.validate_resolved_plan(self.l2_plan(backends=["tmux", "kitty"]))
+        self.assertTrue(
+            any("'kitty'" in problem and "l2_backends" in problem for problem in problems),
+            problems,
+        )
 
 
 class PendingHarnessTests(unittest.TestCase):

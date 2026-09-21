@@ -2589,6 +2589,7 @@ def package_cells(
         reusable: bool = True,
         compiled_dependents: Sequence[str] = (),
         companions: Sequence[dict[str, Any]] = (),
+        backends: Sequence[str] = (),
     ) -> None:
         cell: dict[str, Any] = {
             "package": package,
@@ -2607,6 +2608,12 @@ def package_cells(
             cell["dependents"] = list(compiled_dependents)
         if companions:
             cell["companions"] = list(companions)
+        # The backends THIS cell must prove, not the package's declaration:
+        # `completion.py` compares the producer's `BISCUIT_TEST_REQUIRED_BACKENDS`
+        # against this list, and a gap cell requires nothing because it runs
+        # nothing.
+        if backends and gap is None:
+            cell["backends"] = sorted(backends)
         if gap is not None:
             cell["execution"] = "omit"
             cell["origin"] = "none"
@@ -2753,9 +2760,10 @@ def package_cells(
                     gap=toolchain_gap,
                 )
             elif tier == "L2":
-                hostable = any(
-                    backend_hostable(environment, backend)
+                hostable = sorted(
+                    backend
                     for backend in record["l2_backends"]
+                    if backend_hostable(environment, backend)
                 )
                 add(
                     name,
@@ -2765,6 +2773,7 @@ def package_cells(
                     f"{package} declares the L2 tier with backend(s) "
                     f"{', '.join(record['l2_backends'])}",
                     gap=None if hostable else gap_record(environment, record["l2_backends"]),
+                    backends=hostable,
                 )
             elif tier == "browser":
                 hostable = capability(environment, "headless_browser")

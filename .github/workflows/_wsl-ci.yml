@@ -865,6 +865,7 @@ jobs:
             --cell '${{ steps.cell.outputs.cell }}' \
             --expected-manifest "$stage/expected-${{ steps.cell.outputs.gate }}.json" \
             --artifacts "$stage" \
+            --backend-proofs "$stage/backend-proofs.json" \
             --target '${{ steps.cell.outputs.target }}' \
             --run '${{ github.run_id }}' \
             --attempt '${{ github.run_attempt }}' \

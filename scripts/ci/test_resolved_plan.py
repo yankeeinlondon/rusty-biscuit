@@ -2022,7 +2022,12 @@ class CellContractTests(PlannerFixture):
         self.assertEqual(package["test_args"], published["test_args"])
         self.assertEqual(package["check_args"], published["check_args"])
         self.assertEqual(json.dumps(package["runner_tools"]), published["runner_tools"])
-        self.assertEqual(json.dumps(package["l2_backends"]), published["backends"])
+        # `backends` is what THIS cell must prove (the plan's hostable subset);
+        # the package-wide declaration rides along for the coverage summary.
+        self.assertEqual(json.dumps(cell.get("backends", [])), published["backends"])
+        self.assertEqual(
+            json.dumps(package["l2_backends"]), published["declared_backends"]
+        )
         self.assertEqual(cell["profile"], published["profile"])
         self.assertEqual(
             {"L1": "_test", "L2": "_test_l2", "browser": "_test_browser"}[row["gate"]],

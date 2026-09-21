@@ -6,7 +6,7 @@ is also their validator.
 
 | Document | Version | Written by | Read by |
 |---|---|---|---|
-| Resolved plan | 5 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
+| Resolved plan | 6 | `scripts/ci/affected_scope.py --resolved-plan` | `ci.yml`, `ci-rollup`, `just ci-local --plan`, the pre-push hook |
 | Validation receipt | 2 | the pre-push hook, `scripts/cross-check.sh` | `scripts/ci/local_evidence.py`, the planner, `ci-rollup` |
 | Scope receipt | 1 | the pre-push hook (`local_evidence.py scope-record`) | `ci.yml` through `local_evidence.py scope-verify` |
 | Expected manifest | 2 | `just _expected_manifest`, on the execution target | `scripts/ci/completion.py` |
@@ -42,7 +42,7 @@ so Rust tooling can assert against it without running Python. Regenerate it with
 >
 > A third document, the rollup's own `ci-results.json`, is **not** defined here:
 > it is Rust-owned by `scripts/ci-rollup.rs` and is at `schema_version: 5`,
-> versioned independently of the plan's 5, the receipt's 2, and the baseline's
+> versioned independently of the plan's 6, the receipt's 2, and the baseline's
 > 3. The plan fields that tool reads are asserted against `contract.json` by
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
@@ -163,7 +163,11 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   selection reason. An executing test cell also carries the `profile` its
   nextest selection runs under — the same answer its expected-test listing and
   its gate command both read — and `requires_node` where that cell provisions
-  Node and pnpm.
+  Node and pnpm. An executing L2 cell also carries `backends` (version 6): the
+  sorted subset of the package's `l2_backends` its environment can host, which
+  is what the producer sets `BISCUIT_TEST_REQUIRED_BACKENDS` to and what
+  `completion.py` demands a `backend-proofs.json` entry for. A gap cell
+  carries none; the GUI backends stay in the package record only.
 - `skip_policy` — the snapshot of [`ci-baseline.toml`](../ci-baseline.toml)'s
   approved exact-skip budget: `source` and `content_hash` say which file was
   read and what it hashed to, and `entries[]` carries the approvals that apply
@@ -443,7 +447,7 @@ so an unreadable input is never reported as an invented test failure.
 | `completion-manifest-schema` | a listing from another manifest generation |
 | `completion-manifest-provenance` | the listing cannot say which environment, tier, nextest, or package it describes |
 | `completion-manifest-target` | listed on a target other than the one that executed |
-| `completion-manifest-selection` | selected with something no tier expression uses, another profile, `--run-ignored`, or backends/suites the plan does not declare |
+| `completion-manifest-selection` | selected with anything but the cell's gate's own tier expression (`schema.CANONICAL_SELECTION`: another tier's marker, an inverted or narrowed expression, a scope naming another package, a predicate no tier uses), another profile, `--run-ignored`, or backends/suites the plan does not declare |
 | `completion-report-missing` / `completion-report-malformed` | a staged report was never written, or does not parse |
 | `completion-report-duplicate` | one result staged twice, or one identity reported by two selections |
 | `completion-test-missing` | an expected identity that no report mentions |

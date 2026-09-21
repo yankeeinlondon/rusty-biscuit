@@ -89,7 +89,7 @@ def fixed_plan(base: str, head: str) -> dict:
         "native": {},
     }
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "base": base,
         "head": head,
         "change_class": "package",

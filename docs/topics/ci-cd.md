@@ -202,11 +202,12 @@ workspace. A push to `main` whose pull request
 validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
 environment for a pull request from its next push.
 
-`ci.yml` defines **exactly six top-level jobs**, and a contract test pins the set: `validation`
+`ci.yml` defines **exactly eight top-level jobs**, and a contract test pins the set: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
-(bootstrap prerequisites per selected OS — no test suite), `area-ci` (one caller identity per
-selected area), `ci-gate` (the required check, a policy-free fold of those four), and advisory
-`ci-reporting`. No job owns a test suite on CI's behalf: every suite belongs to a package and runs
+(bootstrap prerequisites per selected OS — no test suite), `build` (the native build owners),
+`area-ci` (one caller identity per selected area), `area-drift` (the planner's areas match
+`sniff`), `ci-gate` (the required check, a policy-free fold of the other six blocking jobs), and
+advisory `ci-reporting`. No job owns a test suite on CI's behalf: every suite belongs to a package and runs
 in that package's own cell, so the plan places it once and one owner answers for it.
 
 `preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan output read before
@@ -229,7 +230,10 @@ keeps its audit; otherwise each set expands as a `fail-fast: false` matrix. No w
 list of environments. Each job resolves everything else from the plan through
 `scripts/ci/cell_contract.py`, which refuses a row the plan does not schedule before anything
 runs. Plan schema version 5 stamps every area `execution_path: "rows"`, the only admitted value;
-rollback is a revert, not a per-area switch. The planner refuses, whole and before dispatch, a
+rollback is a revert, not a per-area switch. Version 6 gives every executing L2 cell `backends`, the
+hostable subset of the package's `l2_backends`: the producer requires exactly that list, `backend-proof
+verify` writes `backend-proofs.json` beside its evidence, and `completion.py` reads both from the same
+staging tree. The planner refuses, whole and before dispatch, a
 row set over 256 jobs, an area's rows over 16 KB, or all rows together over 512 KiB.
 
 A called workflow's jobs render as `<caller job name> / <called job name>`, and a matrix job's

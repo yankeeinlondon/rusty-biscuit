@@ -1,6 +1,6 @@
 {
   "resolved_plan": {
-    "schema_version": 5,
+    "schema_version": 6,
     "document": {
       "schema_version": true,
       "base": true,
@@ -77,7 +77,8 @@
       "companions": false,
       "build": false,
       "profile": false,
-      "requires_node": false
+      "requires_node": false,
+      "backends": false
     },
     "build": {
       "key": true,
@@ -444,6 +445,30 @@
       "real_",
       "slow_",
       "perf_"
-    ]
+    ],
+    "canonical_selection": {
+      "selects": {
+        "L2": "level2_",
+        "L3": "level3_",
+        "browser": "browser_",
+        "real": "real_"
+      },
+      "excludes": {
+        "tiers": [
+          "L1",
+          "sanity"
+        ],
+        "must": [
+          "level2_",
+          "level3_",
+          "browser_",
+          "real_"
+        ],
+        "may": [
+          "slow_",
+          "perf_"
+        ]
+      }
+    }
   }
 }

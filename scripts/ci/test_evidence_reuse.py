@@ -1297,7 +1297,9 @@ class BackendProofTests(EvidenceFixture):
 
     def l2_plan_cells(self) -> None:
         plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
-        plan["cells"].append(self.plan_cell("alpha", "macos-latest", "L2"))
+        # An executing L2 cell names the backends its producer must prove
+        # (plan schema 6): here the one tmux the package declares.
+        plan["cells"].append({**self.plan_cell("alpha", "macos-latest", "L2"), "backends": ["tmux"]})
         for entry in plan["packages"]:
             if entry["package"] == "alpha":
                 entry["gates"] = ["L1", "L2"]

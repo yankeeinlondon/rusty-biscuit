@@ -4782,6 +4782,26 @@ class L2BackendAxisTests(unittest.TestCase):
         self.assertEqual({("macos-latest", "L2")}, {cell for cell in contracts if cell[1] == "L2"})
         self.assertEqual('["wezterm"]', contracts[("macos-latest", "L2")]["backends"])
 
+    def test_a_mixed_backend_package_requires_only_what_the_environment_hosts(self) -> None:
+        # The cell's `backends` is what its producer must prove; the GUI
+        # backends stay in the package's declaration (so the job's coverage
+        # summary can name them as skipping) but are required of no CI cell.
+        environments = environments_for_tests()
+        for environment in environments:
+            environment["capabilities"]["wezterm"] = False
+            environment["capabilities"]["kitty"] = False
+        contracts = resolved_contracts(
+            plan_package(
+                package="a", tiers=["L1", "L2"], l2_backends=["wezterm", "tmux", "kitty"]
+            ),
+            environments,
+        )
+        l2 = {cell: contract for cell, contract in contracts.items() if cell[1] == "L2"}
+        self.assertEqual({("ubuntu-latest", "L2"), ("macos-latest", "L2")}, set(l2))
+        for contract in l2.values():
+            self.assertEqual('["tmux"]', contract["backends"])
+            self.assertEqual('["wezterm", "tmux", "kitty"]', contract["declared_backends"])
+
     def test_a_backend_no_environment_hosts_executes_nowhere(self) -> None:
         # `load_environments` refuses a table missing any known capability, so
         # "no entry" is unrepresentable; "no environment hosts it" is the case.

@@ -90,7 +90,7 @@ const COMPLETION_RECORD_SCHEMA_VERSION: u64 = 1;
 
 /// Version of the resolved execution plan this tool reads
 /// (`scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION`).
-const PLAN_SCHEMA_VERSION: u32 = 5;
+const PLAN_SCHEMA_VERSION: u32 = 6;
 
 /// Version of `.github/ci/environments.json`
 /// (`scripts/ci/affected_scope.py::ENVIRONMENTS_SCHEMA_VERSION`). Version 2

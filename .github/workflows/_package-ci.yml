@@ -525,12 +525,15 @@ jobs:
         env:
           PACKAGE: ${{ matrix.package }}
           ENVIRONMENT: ${{ matrix.environment }}
-          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+          DECLARED_BACKENDS: ${{ steps.cell.outputs.declared_backends }}
+          REQUIRED_BACKENDS: ${{ steps.cell.outputs.backends }}
         run: |
           set -euo pipefail
           # A backend that cannot exist here skips silently inside require_level!.
           # Naming every declared backend and its status turns "0 run / N skipped"
-          # from an invisible non-event into a readable row.
+          # from an invisible non-event into a readable row. Which ones this cell
+          # must prove is the plan's decision (the cell's `backends`), not a
+          # name test here.
           {
             echo "### L2 backends — ${PACKAGE} on ${ENVIRONMENT}"
             echo ""
@@ -538,8 +541,8 @@ jobs:
             echo "|---|---|"
             while IFS= read -r backend; do
               [ -n "$backend" ] || continue
-              if [ "$backend" = "tmux" ]; then
-                echo "| tmux | provisioned — its tests MUST execute |"
+              if [ "$(jq -r --arg b "$backend" 'index($b) != null' <<<"$REQUIRED_BACKENDS")" = "true" ]; then
+                echo "| ${backend} | required by the plan — its tests MUST execute |"
               elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
                 echo "| apple-terminal | unavailable — \`available()\` returns false when CI is truthy; its tests skip |"
               else
@@ -695,17 +698,18 @@ jobs:
           BISCUIT_CI_COMPANION_SUITES: ${{ steps.cell.outputs.companion_suites }}
           ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
           ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
-          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+          REQUIRED_BACKENDS: ${{ steps.cell.outputs.backends }}
           GATE: ${{ matrix.gate }}
         run: |
           set -euo pipefail
           # The plan's declared suites and required backends, in the spelling
           # the recipe records them as provenance. `completion.py` refuses a
-          # disagreement between these and the plan rather than preferring one.
+          # disagreement between these and the plan rather than preferring one,
+          # so the list is the cell's verbatim — never narrowed here.
           suites="$(jq -r 'join(",")' <<<"${BISCUIT_CI_COMPANION_SUITES:-[]}")"
           export BISCUIT_CI_COMPANION_SUITES="$suites"
           if [ "$GATE" = "L2" ]; then
-            required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
+            required="$(jq -r 'join(",")' <<<"${REQUIRED_BACKENDS:-[]}")"
             if [ -n "$required" ]; then
               export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
             fi
@@ -752,7 +756,7 @@ jobs:
           GATE: ${{ matrix.gate }}
           RECIPE: ${{ steps.cell.outputs.recipe }}
           RUNNER_TOOLS: ${{ steps.cell.outputs.runner_tools }}
-          DECLARED_BACKENDS: ${{ steps.cell.outputs.backends }}
+          REQUIRED_BACKENDS: ${{ steps.cell.outputs.backends }}
           BISCUIT_L1_INCLUDE_SLOW: ${{ steps.cell.outputs.l1_include_slow }}
           # A PROVISIONED capability hard-fails when missing; every other cell
           # (and every developer host) skips loudly and exits 0.
@@ -768,13 +772,15 @@ jobs:
               ;;
             L2)
               # Execution proof, not just availability: require exactly the
-              # declared backends this leg actually provisioned (tmux is the
-              # only CI-hostable one). With BISCUIT_TEST_REQUIRED_BACKENDS set,
-              # `_test_l2`'s backend-proof bracket fails the tier when a
-              # required backend produced zero executed tests — an installed
-              # tmux plus a suite that skipped everywhere must not render a
-              # green cell.
-              required="$(jq -r '[.[] | select(. == "tmux")] | join(",")' <<<"$DECLARED_BACKENDS")"
+              # backends the plan attached to this cell — the subset of the
+              # package's declaration its environment hosts, the same list the
+              # expected manifest recorded and `completion.py` will demand a
+              # proof for. With BISCUIT_TEST_REQUIRED_BACKENDS set, `_test_l2`'s
+              # backend-proof bracket fails the tier when a required backend
+              # produced zero executed tests and writes `backend-proofs.json`
+              # into the staging tree — an installed tmux plus a suite that
+              # skipped everywhere must not render a green cell.
+              required="$(jq -r 'join(",")' <<<"${REQUIRED_BACKENDS:-[]}")"
               if [ -n "$required" ]; then
                 export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
               fi
@@ -1010,6 +1016,7 @@ jobs:
             --expected-manifest "target/nextest/ci-reports/expected-${{ matrix.gate }}.json" \
             --artifacts target/nextest/ci-reports \
             --companions "$RUNNER_TEMP/companions.json" \
+            --backend-proofs target/nextest/ci-reports/backend-proofs.json \
             --target '${{ steps.cell.outputs.target }}' \
             --run "$GITHUB_RUN_ID" \
             --attempt "$GITHUB_RUN_ATTEMPT" \

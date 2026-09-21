@@ -84,15 +84,17 @@ nowhere else.
 
 ## `ci.yml`'s jobs
 
-`ci.yml` defines exactly six top-level jobs, and a contract test pins the set:
+`ci.yml` defines exactly eight top-level jobs, and a contract test pins the set:
 
 | job | blocks the merge? | what it is for |
 |---|---|---|
 | `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
 | `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
 | `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
+| `build` | yes | the native build owners; each builds the archives its plan keys name, serially |
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
-| `ci-gate` | yes — **the required check** | a policy-free fold of the four above |
+| `area-drift` | yes | checks that the planner's areas match `sniff`; skipped when nothing can move area derivation |
+| `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
 | `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
 
 There is no job that owns a test suite on CI's behalf. Every suite belongs to a
@@ -166,8 +168,8 @@ the library, binary, and test targets, so a separate compile job is scheduled
 on `ubuntu-latest` only, for the kinds no test gate produces and for the
 dependents' seam. Unchanged reverse dependents, their dependencies, and
 transitive reverse dependencies are not selected. Documentation, manifests, lockfiles, Just recipes, workflows,
-and other CI configuration select no package jobs; CI tooling has its own
-small contract-test leg. Only an explicit `workflow_dispatch` full-scope run
+and other CI configuration select no package jobs; CI's own suites run in their
+owning packages' cells (see [CI's own tooling](#cis-own-tooling)). Only an explicit `workflow_dispatch` full-scope run
 selects every package.
 
 Source classification is path based: `build.rs` and package-owned files with a
@@ -643,6 +645,17 @@ A package whose L2 tier runs on a CI runner — `tiers` includes `L2` and
 `harness-broker`. `just _test_l2` spawns both, they were recipe-time `cargo`
 invocations before the cutover, and a consumer has no Cargo to rebuild them
 with. The whole-workspace audit in `test_affected_scope.py` is what enforces it.
+
+Which of a package's declared backends an L2 cell must *prove* is the plan's
+decision, not the workflow's: each executing L2 cell carries `backends`, the
+subset of `l2-backends` its environment hosts (`tmux` alone on every hosted
+runner today). The job sets `BISCUIT_TEST_REQUIRED_BACKENDS` to that list
+verbatim, `_expected_manifest` records it, `backend-proof verify` writes its
+per-backend verdict to `backend-proofs.json` in the staging tree, and the
+certify step hands that document to `completion.py --backend-proofs`, which
+refuses a manifest requiring anything other than the cell's list. The
+package-wide declaration is published separately (`declared_backends`) so the
+job summary can still name the GUI backends that skip.
 
 ### `runner-tools` is a closed vocabulary
 

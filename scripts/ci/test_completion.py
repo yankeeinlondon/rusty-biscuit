@@ -37,7 +37,14 @@ python3 scripts/ci/completion.py \
   missing provenance field, or a target other than the comparison target is
   refused.
 - The companions input is `companion_suites.py`'s document; the backend-proof
-  input is a `{backend: {"proven": true}}` map.
+  input is `backend-proof verify`'s `backend-proofs.json`, a
+  `{backend: {"proven": bool, "executed": count}}` map over the backends the
+  cell required — `scripts/ci/fixtures/backend-proofs-tmux.json` is the copy
+  the Rust writer is asserted against.
+- An executing L2 cell's required backends are the plan's `backends` (the
+  hostable subset of the package's `l2_backends`), not the whole declaration:
+  `WorkflowBoundaryTests` resolves a real mixed-backend row and proves a tmux
+  proof completes it while an absent or `proven: false` one does not.
 - The completion record is keyed `{package, environment, gate}` and binds
   `head`, `run`, `attempt`, `nextest_version`, the report `reports` inventory,
   and `build` where the cell consumed an archive.
@@ -67,11 +74,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected_scope  # noqa: E402
+import cell_contract  # noqa: E402
 import completion  # noqa: E402
 import schema  # noqa: E402
 import tool_guard  # noqa: E402
@@ -85,6 +94,19 @@ SHA_A = "a" * 40
 SHA_B = "b" * 40
 
 TARGET = "x86_64-unknown-linux-gnu"
+
+#: The selections a fixture records, spelled as `_tier_filter` ships them. The
+#: validator binds the recorded expression to the cell's gate, so a fixture
+#: for an L2 cell must carry the L2 expression rather than any tier marker.
+L1_SELECTION = (
+    "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) "
+    "+ test(/(^|::)real_/) + test(/(^|::)slow_/))"
+)
+TIER_SELECTIONS = {
+    "L1": L1_SELECTION,
+    "L2": "test(/(^|::)level2_/)",
+    "browser": "test(/(^|::)browser_/)",
+}
 NEXTEST_VERSION = "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)"
 
 
@@ -252,16 +274,22 @@ def expected_manifest(**overrides: object) -> dict:
     """An expected-test manifest at schema version 2.
 
     The default lists the identities the happy-path JUnit reports, so a
-    fixture changes one thing at a time.
+    fixture changes one thing at a time; the recorded selection follows the
+    `tier` override, because the validator refuses another tier's expression.
     """
+    tier = str(overrides.get("tier", "L1"))
     document: dict = {
         "schema_version": 2,
         "environment": "ubuntu-latest",
-        "tier": "L1",
+        "tier": tier,
         "target": TARGET,
         "nextest_version": NEXTEST_VERSION,
         "from_archive": False,
-        "selection": {"filter": "package(claudine)", "profile": "ci", "test_args": ""},
+        "selection": {
+            "filter": TIER_SELECTIONS[tier],
+            "profile": "ci",
+            "test_args": "",
+        },
         "packages": {
             "claudine": {
                 "tests": ["claudine::green_one", "claudine::green_two"],
@@ -288,8 +316,15 @@ def companions_document(outcomes: dict[str, str]) -> dict:
     }
 
 
-def backend_proofs_document(proven: list[str]) -> dict:
-    return {backend: {"proven": True} for backend in proven}
+def backend_proofs_document(proven: list[str], unproven: list[str] = ()) -> dict:
+    """What `backend-proof verify` writes: every required backend, each way."""
+    return {
+        **{backend: {"proven": True, "executed": 1} for backend in proven},
+        **{backend: {"proven": False, "executed": 0} for backend in unproven},
+    }
+
+
+PROOF_FIXTURE = ROOT / "scripts" / "ci" / "fixtures" / "backend-proofs-tmux.json"
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +404,14 @@ class ValidatorHarness(unittest.TestCase):
         cell: str = "claudine/ubuntu-latest/L1",
         target: str = TARGET,
         include_manifest: bool = True,
+        write_backend_proofs: bool = True,
     ) -> tuple[int, str, Path]:
-        """Run the real CLI the producer runs; return exit, stderr, --out path."""
+        """Run the real CLI the producer runs; return exit, stderr, --out path.
+
+        `write_backend_proofs=False` leaves `--backend-proofs` pointing at a
+        path nothing wrote — the workflow always passes the flag, and the
+        document is absent exactly when `backend-proof verify` never ran.
+        """
         self.require_validator()
         plan_path = self.root / "resolved-plan.json"
         plan_path.write_text(
@@ -386,10 +427,11 @@ class ValidatorHarness(unittest.TestCase):
             json.dumps(companions if companions is not None else {}), encoding="utf-8"
         )
         proofs_path = self.root / "backend-proofs.json"
-        proofs_path.write_text(
-            json.dumps(backend_proofs if backend_proofs is not None else {}),
-            encoding="utf-8",
-        )
+        if write_backend_proofs:
+            proofs_path.write_text(
+                json.dumps(backend_proofs if backend_proofs is not None else {}),
+                encoding="utf-8",
+            )
         out_path = self.root / "completion.json"
         manifest_argument = (
             ["--expected-manifest", str(manifest_path)] if include_manifest else []
@@ -938,9 +980,11 @@ class CompletionValidatorOracleTests(ValidatorHarness):
             [self.manifest_entry("L2/claudine.xml", tier="L2")],
             directory="junit-claudine-L2-ubuntu-latest",
         )
+        # The package declares a GUI backend too; the cell requires only what
+        # its environment hosts, and that is the list the proof is checked for.
         plan = plan_document(
-            packages=[package_record(tiers=["L1", "L2"], l2_backends=["tmux"])],
-            cells=[cell_record(gate="L2")],
+            packages=[package_record(tiers=["L1", "L2"], l2_backends=["tmux", "wezterm"])],
+            cells=[cell_record(gate="L2", backends=["tmux"])],
         )
 
         code, stderr, out = self.validate(
@@ -950,8 +994,21 @@ class CompletionValidatorOracleTests(ValidatorHarness):
             cell="claudine/ubuntu-latest/L2",
             backend_proofs=backend_proofs_document([]),
         )
-        self.assertNotEqual(0, code, "a declared backend with no proof fails")
+        self.assertNotEqual(0, code, "a required backend with no proof fails")
+        self.assertIn("completion-backend-unproven", stderr)
         self.assertIn("tmux", stderr)
+        self.assertNotIn("wezterm", stderr, "an unhostable backend is not required here")
+        self.assertFalse(out.exists())
+
+        code, stderr, out = self.validate(
+            plan=plan,
+            manifest=manifest,
+            artifacts=tree,
+            cell="claudine/ubuntu-latest/L2",
+            backend_proofs=backend_proofs_document([], unproven=["tmux"]),
+        )
+        self.assertNotEqual(0, code, "`proven: false` is a recorded refusal, not a proof")
+        self.assertIn("completion-backend-unproven", stderr)
         self.assertFalse(out.exists())
 
         code, stderr, out = self.validate(
@@ -1027,10 +1084,17 @@ class ManifestCrossCheckTests(ValidatorHarness):
     provisioned for the work the plan scheduled rather than for something else.
     """
 
-    def l2_plan(self, backends: list[str]) -> dict:
+    def l2_plan(self, backends: list[str], declared: list[str] | None = None) -> dict:
+        """A plan whose one L2 cell requires `backends` of a package declaring
+        `declared` (default: the same list plus a GUI backend no runner hosts)."""
         return plan_document(
-            packages=[package_record(tiers=["L1", "L2"], l2_backends=backends)],
-            cells=[cell_record(gate="L2")],
+            packages=[
+                package_record(
+                    tiers=["L1", "L2"],
+                    l2_backends=declared if declared is not None else [*backends, "kitty"],
+                )
+            ],
+            cells=[cell_record(gate="L2", backends=backends)],
         )
 
     def l2_tree(self) -> Path:
@@ -1054,6 +1118,8 @@ class ManifestCrossCheckTests(ValidatorHarness):
         )
 
     def test_declared_backends_matching_the_plan_complete(self):
+        # The manifest agrees with the CELL, not with the package: the package
+        # also declares kitty, which this environment cannot host.
         code, stderr, out = self.validate(
             plan=self.l2_plan(["tmux"]),
             manifest=self.l2_manifest(backends=["tmux"]),
@@ -1075,11 +1141,41 @@ class ManifestCrossCheckTests(ValidatorHarness):
         self.assertNotEqual(
             0,
             code,
-            "a job that required wezterm while the plan declares tmux proved "
+            "a job that required wezterm while the cell requires tmux proved "
             "something other than the scheduled cell, even with both proven",
         )
+        self.assertIn("completion-manifest-selection", stderr)
         self.assertIn("wezterm", stderr)
         self.assertIn("tmux", stderr)
+        self.assertFalse(out.exists())
+
+    def test_a_producer_that_required_the_whole_declaration_is_refused(self):
+        # The pre-6 defect in reverse: a job that required every declared
+        # backend proved more than the plan asked of this environment, and the
+        # plan is the source of truth in both directions.
+        code, stderr, out = self.validate(
+            plan=self.l2_plan(["tmux"], declared=["tmux", "wezterm"]),
+            manifest=self.l2_manifest(backends=["tmux", "wezterm"]),
+            artifacts=self.l2_tree(),
+            cell="claudine/ubuntu-latest/L2",
+            backend_proofs=backend_proofs_document(["tmux", "wezterm"]),
+        )
+        self.assertNotEqual(0, code)
+        self.assertIn("completion-manifest-selection", stderr)
+        self.assertFalse(out.exists())
+
+    def test_an_executing_l2_cell_without_backends_is_an_unreadable_plan(self):
+        plan = self.l2_plan(["tmux"])
+        del plan["cells"][0]["backends"]
+        code, stderr, out = self.validate(
+            plan=plan,
+            manifest=self.l2_manifest(backends=["tmux"]),
+            artifacts=self.l2_tree(),
+            cell="claudine/ubuntu-latest/L2",
+            backend_proofs=backend_proofs_document(["tmux"]),
+        )
+        self.assertEqual(2, code, "a malformed plan is an input failure, not a verdict")
+        self.assertIn("completion-plan-unreadable", stderr)
         self.assertFalse(out.exists())
 
     def test_a_producer_that_ran_other_companions_is_refused(self):
@@ -1114,7 +1210,7 @@ class ManifestCrossCheckTests(ValidatorHarness):
         code, stderr, out = self.validate(
             manifest=expected_manifest(
                 selection={
-                    "filter": "package(claudine)",
+                    "filter": L1_SELECTION,
                     "profile": "ci",
                     "test_args": "--run-ignored all",
                 }
@@ -1128,7 +1224,7 @@ class ManifestCrossCheckTests(ValidatorHarness):
         code, stderr, out = self.validate(
             manifest=expected_manifest(
                 selection={
-                    "filter": "package(claudine)",
+                    "filter": L1_SELECTION,
                     "profile": "default",
                     "test_args": "",
                 }
@@ -1336,71 +1432,284 @@ class CompletionRecordContractTests(ValidatorHarness):
     enforced_by="the repo-deps L1 cell, which provisions `just` on every environment",
     detail="The canonical tier expressions come from `just _tier_filter`.",
 )
-class ShippedSelectionTests(unittest.TestCase):
-    """The shipped tier expressions, against the canonical-selection rule.
+class WorkflowBoundaryTests(ValidatorHarness):
+    """A real mixed-backend L2 row, resolved by the real planner, through the
+    real row reader and the real validator (review-1 finding #1).
 
-    A passive corpus check in the strict sense: the validator refuses a filter
-    built from anything but the tier markers, so every expression the
-    repository actually runs with has to pass it. If a tier gains a predicate,
-    this fails here rather than turning every producer red.
+    `biscuit-terminal-cli` declares tmux plus three GUI backends. On
+    `ubuntu-latest` only tmux is hostable, so the plan's cell requires exactly
+    `["tmux"]`, the row contract publishes that list, the expected manifest
+    `_expected_manifest` writes from `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`
+    records it, and the cell completes with the tmux proof `backend-proof
+    verify` writes — and with nothing less.
     """
 
-    def tier_filter(self, tier: str, package: str = "") -> str:
+    PACKAGE = "biscuit-terminal-cli"
+    ENVIRONMENT = "ubuntu-latest"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        today = date.today()
+        metadata = affected_scope.load_metadata(ROOT)
+        environments = affected_scope.load_environments(
+            affected_scope.ENVIRONMENTS_CONFIG, today=today
+        )
+        policy = affected_scope.package_ci_policy(
+            affected_scope.workspace_packages(metadata),
+            runner_labels={environment["runner"] for environment in environments},
+            root=ROOT,
+            today=today,
+        )
+        cls.plan = affected_scope.calculate_scope(
+            ["biscuit-terminal/cli/src/main.rs"], ROOT, metadata, environments, policy
+        )
+
+    def l2_cell(self) -> dict:
+        matches = [
+            entry
+            for entry in self.plan["cells"]
+            if (entry["package"], entry["environment"], entry["gate"])
+            == (self.PACKAGE, self.ENVIRONMENT, "L2")
+        ]
+        self.assertEqual(1, len(matches), "the planner schedules one L2 cell here")
+        return matches[0]
+
+    def row_contract(self) -> dict[str, str]:
+        rows = [
+            row
+            for row in affected_scope.row_sets(self.plan)["biscuit-terminal"]["test"]
+            if (row["package"], row["environment"], row["gate"])
+            == (self.PACKAGE, self.ENVIRONMENT, "L2")
+        ]
+        self.assertEqual(1, len(rows), "the L2 cell dispatches as one test row")
+        return cell_contract.contract(self.plan, rows[0], self.plan["head"])
+
+    def real_manifest(self, contract: dict[str, str], backends: list[str]) -> dict:
+        """What `_expected_manifest L2` writes on this row, given
+        `BISCUIT_TEST_REQUIRED_BACKENDS` joined from the contract's list."""
+        return expected_manifest(
+            environment=self.ENVIRONMENT,
+            tier="L2",
+            target=contract["target"],
+            from_archive=True,
+            selection={
+                "filter": f"package({self.PACKAGE}) & (test(/(^|::)level2_/))",
+                "profile": contract["profile"],
+                "test_args": contract["test_args"],
+            },
+            backends=sorted(set(backends)),
+            companion_suites=[],
+            packages={
+                self.PACKAGE: {
+                    "tests": [f"{self.PACKAGE}::level2_roundtrip"],
+                    "ignored": [],
+                    "excluded": [],
+                }
+            },
+        )
+
+    def real_tree(self) -> Path:
+        return self.staging_tree(
+            {
+                "L2/biscuit-terminal-cli.xml": junit_document(
+                    [junit_case("level2_roundtrip")], suite=self.PACKAGE
+                )
+            },
+            [
+                self.manifest_entry(
+                    "L2/biscuit-terminal-cli.xml", tier="L2", package=self.PACKAGE
+                )
+            ],
+            directory=f"junit-{self.PACKAGE}-L2-{self.ENVIRONMENT}",
+        )
+
+    def certify(self, manifest: dict, **options: object) -> tuple[int, str, Path]:
+        return self.validate(
+            plan=self.plan,
+            manifest=manifest,
+            artifacts=self.real_tree(),
+            cell=f"{self.PACKAGE}/{self.ENVIRONMENT}/L2",
+            target=self.row_contract()["target"],
+            **options,  # type: ignore[arg-type]
+        )
+
+    def test_the_plan_requires_only_the_hostable_backend_of_the_cell(self):
+        self.assertEqual([], schema.validate_resolved_plan(self.plan))
+        cell = self.l2_cell()
+        self.assertEqual("execute", cell["execution"])
+        self.assertEqual(["tmux"], cell["backends"])
+        package = completion.package_of(self.plan, self.PACKAGE)
+        self.assertGreater(
+            len(package["l2_backends"]), 1, "the fixture package must be mixed-backend"
+        )
+        self.assertIn("tmux", package["l2_backends"])
+        contract = self.row_contract()
+        self.assertEqual('["tmux"]', contract["backends"])
+        self.assertEqual(json.dumps(package["l2_backends"]), contract["declared_backends"])
+
+    def test_the_tmux_proof_the_rust_writer_emits_completes_the_cell(self):
+        proofs = json.loads(PROOF_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual({"tmux"}, set(proofs), "the fixture is the tmux-only verdict")
+        code, stderr, out = self.certify(
+            self.real_manifest(self.row_contract(), ["tmux"]), backend_proofs=proofs
+        )
+        self.assertEqual(0, code, f"a tmux-proven mixed-backend cell completes: {stderr}")
+        record = self.record(out)
+        self.assertEqual(["tmux"], record["backends"])
+        self.assertEqual(self.l2_cell()["build"], record["build"])
+
+    def test_an_absent_or_unproven_document_leaves_the_cell_unproven(self):
+        manifest = self.real_manifest(self.row_contract(), ["tmux"])
+        cases = {
+            "absent": {"write_backend_proofs": False},
+            "proven false": {"backend_proofs": backend_proofs_document([], unproven=["tmux"])},
+        }
+        for label, options in cases.items():
+            with self.subTest(label):
+                code, stderr, out = self.certify(manifest, **options)
+                self.assertEqual(1, code, f"{label}: an unproven cell is a verdict")
+                self.assertIn("completion-backend-unproven", stderr)
+                self.assertIn("tmux", stderr)
+                self.assertFalse(out.exists())
+
+    def test_a_manifest_requiring_the_whole_declaration_is_refused(self):
+        code, stderr, out = self.certify(
+            self.real_manifest(self.row_contract(), ["tmux", "wezterm"]),
+            backend_proofs=backend_proofs_document(["tmux", "wezterm"]),
+        )
+        self.assertEqual(1, code)
+        self.assertIn("completion-manifest-selection", stderr)
+        self.assertIn("wezterm", stderr)
+        self.assertFalse(out.exists())
+
+
+class ShippedSelectionTests(unittest.TestCase):
+    """The shipped tier expressions, against the gate-bound canonical rule.
+
+    A passive corpus check in the strict sense: the validator accepts only the
+    gate's own selection, so every expression the repository actually runs a
+    tier with has to pass for THAT tier — and, since the expected shape comes
+    from `schema.CANONICAL_SELECTION` rather than from the justfile, a
+    `_tier_filter` drifted onto another tier's marker fails here rather than
+    certifying itself on a producer.
+    """
+
+    PACKAGE = "claudine"
+
+    def tier_filter(self, tier: str, package: str = "", **env: str) -> str:
         arguments = ["just", "_tier_filter", tier]
         if package:
             arguments.append(package)
         completed = subprocess.run(
-            arguments, capture_output=True, text=True, timeout=120, cwd=ROOT, check=True
-        )
-        return completed.stdout.strip()
-
-    def assert_canonical(self, expression: str, where: str) -> None:
-        problems = completion.selection_problems(
-            {"filter": expression, "profile": "ci", "test_args": ""},
-            {"environment": "ubuntu-latest", "gate": "L1", "profile": "ci"},
-        )
-        self.assertEqual(
-            [], problems, f"the shipped {where} expression is not canonical: {expression}"
-        )
-
-    def test_every_shipped_tier_expression_is_canonical(self):
-        for tier in ("L1", "L2", "L3", "browser", "real", "sanity"):
-            self.assert_canonical(self.tier_filter(tier), tier)
-
-    def test_the_per_package_and_slow_variants_are_canonical(self):
-        # The two documented refinements of L1: `worktree-cli` drops its `perf_`
-        # SLA tests, and `l1-include-slow` keeps `slow_` in.
-        self.assert_canonical(self.tier_filter("L1", "worktree-cli"), "worktree-cli L1")
-        completed = subprocess.run(
-            ["just", "_tier_filter", "L1"],
+            arguments,
             capture_output=True,
             text=True,
             timeout=120,
             cwd=ROOT,
             check=True,
-            env={**os.environ, "BISCUIT_L1_INCLUDE_SLOW": "1"},
+            env={**os.environ, **env},
         )
-        self.assert_canonical(completed.stdout.strip(), "l1-include-slow")
+        return completed.stdout.strip()
+
+    def problems(self, expression: str, gate: str, package: str = PACKAGE) -> list[str]:
+        return completion.selection_problems(
+            {"filter": expression, "profile": "ci", "test_args": ""},
+            {"environment": "ubuntu-latest", "gate": gate, "profile": "ci", "package": package},
+        )
+
+    def assert_canonical(self, expression: str, gate: str, where: str) -> None:
+        self.assertEqual(
+            [],
+            self.problems(expression, gate),
+            f"the shipped {where} expression is not the canonical {gate} selection: "
+            f"{expression}",
+        )
+
+    def assert_refused(self, expression: str, gate: str, why: str) -> None:
+        problems = self.problems(expression, gate)
+        self.assertEqual(1, len(problems), f"{why}: {expression!r} for {gate}: {problems}")
+        self.assertIn("completion-manifest-selection", problems[0])
+        self.assertIn(f"canonical {gate} selection", problems[0], why)
+        self.assertIn(f"{gate} expects", problems[0], "the refusal names the gate's own shape")
+
+    def test_every_shipped_tier_expression_is_canonical_for_its_own_tier(self):
+        # `sanity`, `L3`, and `real` are not plan gates, but the rule is keyed
+        # on the tier name `_tier_filter` takes, so each shipped expression is
+        # checked against the tier it ships for.
+        for tier in ("L1", "L2", "L3", "browser", "real", "sanity"):
+            with self.subTest(tier):
+                self.assert_canonical(self.tier_filter(tier), tier, tier)
+
+    def test_the_per_package_and_slow_variants_are_canonical(self):
+        # The two documented refinements of L1: `worktree-cli` drops its `perf_`
+        # SLA tests, and `l1-include-slow` keeps `slow_` in.
+        self.assert_canonical(
+            self.tier_filter("L1", "worktree-cli"), "L1", "worktree-cli L1"
+        )
+        self.assert_canonical(
+            self.tier_filter("L1", BISCUIT_L1_INCLUDE_SLOW="1"), "L1", "l1-include-slow"
+        )
 
     def test_archive_mode_package_scoping_stays_canonical(self):
         # `_expected_manifest` wraps the tier expression when listing from an
         # archive, because `-p` is unavailable there.
-        expression = self.tier_filter("L1")
-        self.assert_canonical(f"package(claudine) & ({expression})", "archive-scoped L1")
+        for tier in ("L1", "L2", "browser"):
+            with self.subTest(tier):
+                self.assert_canonical(
+                    f"package({self.PACKAGE}) & ({self.tier_filter(tier)})",
+                    tier,
+                    f"archive-scoped {tier}",
+                )
+
+    def test_a_shipped_expression_is_refused_for_another_tier(self):
+        # The review's three examples: each expression is built from a tier
+        # marker, and each is another tier's selection. A `_tier_filter` that
+        # drifted this way would list and run the same wrong set, so the
+        # identity comparison alone would pass it.
+        for gate, other in (("L1", "L2"), ("L2", "browser"), ("browser", "L2")):
+            with self.subTest(f"{other} expression on a {gate} cell"):
+                self.assert_refused(
+                    self.tier_filter(other), gate, "a valid marker from the wrong tier"
+                )
+
+    def test_an_inverted_selection_is_refused(self):
+        for gate in ("L2", "browser"):
+            with self.subTest(gate):
+                self.assert_refused(
+                    f"!({self.tier_filter(gate)})", gate, "inverted inclusion"
+                )
+        # And the other way round: an L1 that keeps only one tier out.
+        self.assert_refused("!(test(/(^|::)level2_/))", "L1", "a partial L1 exclusion")
+
+    def test_a_package_scoped_wrong_tier_expression_is_refused(self):
+        self.assert_refused(
+            f"package({self.PACKAGE}) & ({self.tier_filter('browser')})",
+            "L2",
+            "a package scope does not launder the tier",
+        )
+
+    def test_a_scope_naming_another_package_is_refused(self):
+        self.assert_refused(
+            f"package(darkmatter) & ({self.tier_filter('L2')})",
+            "L2",
+            "the scope must be the cell's package",
+        )
 
     def test_an_ad_hoc_narrowing_of_a_shipped_expression_is_caught(self):
         # Non-vacuity: the rule above accepts every shipped expression, so this
-        # proves it still rejects the thing it exists to reject.
-        expression = self.tier_filter("L1")
-        problems = completion.selection_problems(
-            {
-                "filter": f"({expression}) & test(one_named_test)",
-                "profile": "ci",
-                "test_args": "",
-            },
-            {"environment": "ubuntu-latest", "gate": "L1", "profile": "ci"},
+        # proves it still rejects the things it exists to reject — a bare test
+        # name, and a second tier marker ANDed onto the tier's own expression.
+        for narrowing in ("test(one_named_test)", "test(/(^|::)slow_/)"):
+            with self.subTest(narrowing):
+                self.assert_refused(
+                    f"{self.tier_filter('L2')} & {narrowing}",
+                    "L2",
+                    "an ad hoc conjunction narrows the tier",
+                )
+        self.assertTrue(
+            self.problems(f"({self.tier_filter('L1')}) & test(one_named_test)", "L1"),
+            "an ad hoc test predicate must still be refused for L1",
         )
-        self.assertTrue(problems, "an ad hoc test predicate must still be refused")
 
 
 SCRATCH_TESTS = """\

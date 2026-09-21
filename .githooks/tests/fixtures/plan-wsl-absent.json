@@ -177,7 +177,7 @@
   "preflight_reason": "package-local change",
   "prohibited_cells": [],
   "reverse_dependencies": [],
-  "schema_version": 5,
+  "schema_version": 6,
   "skip_policy": {
     "content_hash": "aaaabbbbccccdddd",
     "entries": [],

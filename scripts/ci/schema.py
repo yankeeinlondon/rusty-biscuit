@@ -103,7 +103,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 5
+# 6: an executing L2 cell carries `backends`, the hostable subset its producer
+# must prove (review-1 of 2026-09-19-direct-cell-execution).
+RESOLVED_PLAN_SCHEMA_VERSION = 6
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -322,6 +324,24 @@ CELL_CONTRACT_REJECTIONS = (
 #: producer can notice a filter that shrank its expected and observed sets
 #: together. `test_completion.py` checks the shipped filters against it.
 TIER_MARKERS = ("level2_", "level3_", "browser_", "real_", "slow_", "perf_")
+
+#: What a canonical selection must say for each tier, as data rather than as
+#: the filter strings. `completion.py` binds a listing's recorded expression
+#: to the cell's gate through this table, so a `_tier_filter` that drifted to
+#: another tier's marker cannot certify itself: `nextest list` and `nextest
+#: run` would agree with each other and disagree with this. A positive tier
+#: selects exactly its own marker. An L1-shaped tier negates a union of
+#: markers that MUST take every other tier out and MAY also take out the
+#: L1-internal ones — `slow_` unless `l1-include-slow`, `perf_` for
+#: `worktree-cli` — because those two vary by package and switch, not by gate.
+CANONICAL_SELECTION: dict[str, Any] = {
+    "selects": {"L2": "level2_", "L3": "level3_", "browser": "browser_", "real": "real_"},
+    "excludes": {
+        "tiers": ["L1", "sanity"],
+        "must": ["level2_", "level3_", "browser_", "real_"],
+        "may": ["slow_", "perf_"],
+    },
+}
 
 #: Cap on `failed_tests` carried in a receipt cell. A failing L1 suite can name
 #: thousands of tests; a Git note is not a report store. Past the cap the cell
@@ -550,6 +570,14 @@ CELL_FIELDS: dict[str, bool] = {
     #: present only when true, like `requires_toolchain`: absent reads as false,
     #: so a plan written before the field existed still projects.
     "requires_node": False,
+    #: The terminal backends THIS cell must prove drove a test: the sorted,
+    #: non-empty subset of the package's `l2_backends` that the cell's
+    #: environment can host. Present exactly on an executing L2 cell. The
+    #: producer requires these through `BISCUIT_TEST_REQUIRED_BACKENDS`, records
+    #: them in its expected manifest, and `completion.py` demands a proof for
+    #: each — reading the package-wide list instead is what refused every
+    #: mixed-backend cell before schema version 6.
+    "backends": False,
 }
 
 #: One immutable compile configuration, its native owner, and every result cell
@@ -844,6 +872,7 @@ def contract() -> dict[str, Any]:
             "build_rejections": list(BUILD_REJECTIONS),
             "completion_rejections": list(COMPLETION_REJECTIONS),
             "tier_markers": list(TIER_MARKERS),
+            "canonical_selection": CANONICAL_SELECTION,
         },
     }
 
@@ -1321,6 +1350,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                     f"malformed-receipt: {label} carries dependents but only a check "
                     "cell compiles them"
                 )
+        problems += _cell_backends(label, entry, packages.get(entry["package"]))
         problems += _cell_consistency(label, entry)
 
     problems += _build_records(document, packages)
@@ -1639,6 +1669,47 @@ def _dependent_seam(package: str, seam: Any) -> list[str]:
         )
     if not isinstance(seam["check_args"], str) or not seam["check_args"]:
         problems.append(f"malformed-receipt: {where} check_args must be a non-empty string")
+    return problems
+
+
+def _cell_backends(
+    label: str, entry: dict[str, Any], package: dict[str, Any] | None
+) -> list[str]:
+    """Every reason a cell's `backends` disagrees with its gate or its package.
+
+    An executing L2 cell with none would make `completion.py` guess what the
+    producer had to prove; one on any other cell binds a proof to a gate that
+    drives no backend.
+    """
+    problems: list[str] = []
+    executing_l2 = entry.get("execution") == "execute" and entry.get("gate") == "L2"
+    if "backends" not in entry:
+        if executing_l2:
+            problems.append(
+                f"malformed-receipt: {label} will execute the L2 tier but names no "
+                "required backend; the producer could not know what to prove"
+            )
+        return problems
+    if not executing_l2:
+        problems.append(
+            f"malformed-receipt: {label} carries required backends but is not an "
+            "executing L2 cell"
+        )
+    backends = entry["backends"]
+    if not isinstance(backends, list) or not backends:
+        problems.append(
+            f"malformed-receipt: {label} backends must be a non-empty list of strings"
+        )
+        return problems
+    problems += _str_list(f"{label} backends", backends)
+    declared = package.get("l2_backends") if isinstance(package, dict) else None
+    if isinstance(declared, list):
+        problems += [
+            f"malformed-receipt: {label} requires backend {backend!r}, which its "
+            f"package does not declare in l2_backends"
+            for backend in backends
+            if isinstance(backend, str) and backend not in declared
+        ]
     return problems
 
 

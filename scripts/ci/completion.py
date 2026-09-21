@@ -21,7 +21,7 @@ python3 scripts/ci/completion.py \
     --expected-manifest target/nextest/ci-reports/expected-L1.json \
     --artifacts ci-artifacts \
     --companions "$RUNNER_TEMP/companions.json" \
-    --backend-proofs "$RUNNER_TEMP/backend-proofs.json" \
+    --backend-proofs target/nextest/ci-reports/backend-proofs.json \
     --target x86_64-unknown-linux-gnu \
     --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
     --out "$RUNNER_TEMP/completion.json"
@@ -71,15 +71,17 @@ import schema  # noqa: E402  (needs the path insert above)
 
 #: Predicates a canonical selection may use. `_tier_filter` builds every tier
 #: expression from `test(...)` alone and archive mode wraps it in
-#: `package(...)`; anything else — `binary(…)`, `kind(…)`, a bare test name —
-#: narrows the run to something the plan did not schedule.
-CANONICAL_PREDICATES = ("package", "test", "all")
+#: `package(...)`; anything else — `binary(…)`, `kind(…)`, `all()`, a bare
+#: test name — narrows the run to something the plan did not schedule.
+CANONICAL_PREDICATES = ("package", "test")
 
 _PREDICATE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 #: A tier marker as `_tier_filter` anchors it: `/(^|::)<marker>/`. The markers
-#: themselves live in `schema.TIER_MARKERS`; the expressions stay in the
-#: justfile, so this recognizes the shape without copying the strings.
+#: live in `schema.TIER_MARKERS` and which of them each gate selects or
+#: excludes in `schema.CANONICAL_SELECTION`; the expressions stay in the
+#: justfile, so [`canonical_selection_problems`] rebuilds the gate's shape
+#: from that data and never compares against a copy of the strings.
 _TIER_MARKER = re.compile(
     r"\A/\(\^\|::\)(" + "|".join(schema.TIER_MARKERS) + r")/\Z"
 )
@@ -184,10 +186,11 @@ def selection_problems(selection: Any, cell: dict[str, Any]) -> list[str]:
     """Every reason the listing's recorded selection is not the cell's.
 
     The narrowing an identity comparison cannot see on its own: an ad hoc
-    `-E 'test(one_name)'` shrinks the expected set and the observed set
-    together, so both agree and both are wrong. What catches it is that the
-    manifest recorded *what it selected with*, and a canonical selection is
-    built from the tier markers alone.
+    `-E 'test(one_name)'` — or a drifted `_tier_filter` that listed and ran
+    another tier — shrinks the expected set and the observed set together, so
+    both agree and both are wrong. What catches it is that the manifest
+    recorded *what it selected with*, and the cell's gate fixes which
+    canonical selection that must be.
     """
     problems = [
         f"completion-manifest-selection: the listing's selection is missing "
@@ -207,20 +210,18 @@ def selection_problems(selection: Any, cell: dict[str, Any]) -> list[str]:
             "expression, so nothing says the tier's own selection was applied"
         )
     else:
-        for name, argument in predicates(expression):
-            if name not in CANONICAL_PREDICATES:
-                problems.append(
-                    f"completion-manifest-selection: the listing selected with "
-                    f"'{name}(…)', which no tier expression uses; the run was "
-                    f"narrowed to something the plan did not schedule"
-                )
-            elif name == "test" and not _TIER_MARKER.match(argument.strip()):
-                problems.append(
-                    f"completion-manifest-selection: the listing selected with "
-                    f"'test({argument})', which is not a tier marker "
-                    f"{list(schema.TIER_MARKERS)}; an ad hoc filter shrinks the "
-                    f"expected and the observed sets together"
-                )
+        foreign = [
+            f"completion-manifest-selection: the listing selected with "
+            f"'{name}(…)', which no tier expression uses; the run was "
+            f"narrowed to something the plan did not schedule"
+            for name, _argument in predicates(expression)
+            if name not in CANONICAL_PREDICATES
+        ]
+        # A foreign predicate is conclusive on its own; the shape check would
+        # only restate it.
+        problems += foreign or canonical_selection_problems(
+            expression, cell["gate"], cell.get("package")
+        )
 
     profile = cell.get("profile")
     if profile is not None and selection["profile"] != profile:
@@ -247,17 +248,151 @@ def predicates(expression: str) -> list[tuple[str, str]]:
     """
     found: list[tuple[str, str]] = []
     for match in _PREDICATE.finditer(expression):
-        depth = 0
-        start = match.end()
-        for index in range(match.end() - 1, len(expression)):
-            if expression[index] == "(":
-                depth += 1
-            elif expression[index] == ")":
-                depth -= 1
-                if depth == 0:
-                    found.append((match.group(1), expression[start:index]))
-                    break
+        close = _closing(expression, match.end() - 1)
+        if close is not None:
+            found.append((match.group(1), expression[match.end() : close]))
     return found
+
+
+def canonical_selection_problems(
+    expression: str, tier: str, package: str | None
+) -> list[str]:
+    """Every reason `expression` is not the canonical selection for `tier`.
+
+    The check the marker vocabulary alone cannot make: `test(/(^|::)level2_/)`
+    is built from a tier marker and is still the wrong selection for an L1
+    cell. The expected shape comes from `schema.CANONICAL_SELECTION` and the
+    gate, never from the justfile, so a `_tier_filter` that drifted cannot
+    satisfy a validator that drifted with it.
+
+    Accepted, whitespace-insensitive: an optional `package(<package>) & ( … )`
+    wrapper (archive mode), around either exactly `test(/(^|::)<marker>/)` for a
+    positive tier or `!(test(…) + test(…) + …)` for an L1-shaped one whose
+    negated markers cover every `must` marker and nothing outside `must ∪ may`.
+    """
+    contract = schema.CANONICAL_SELECTION
+    selects = contract["selects"]
+    excludes = contract["excludes"]
+    if tier in selects:
+        expected = f"test(/(^|::){selects[tier]}/)"
+    elif tier in excludes["tiers"]:
+        expected = (
+            f"!(test(…) + …) negating every marker in {excludes['must']} and no "
+            f"marker outside those plus {excludes['may']}"
+        )
+    else:
+        return [
+            f"completion-manifest-selection: no canonical selection is defined "
+            f"for gate {tier!r}, so the listing's filter cannot be checked"
+        ]
+
+    def refuse(why: str) -> list[str]:
+        return [
+            f"completion-manifest-selection: the listing selected with "
+            f"{expression.strip()!r}, which is not the canonical {tier} selection "
+            f"({why}); {tier} expects {expected}, optionally inside "
+            f"'package(<package>) & (…)'"
+        ]
+
+    body = expression.strip()
+    scope = _term(body)
+    if scope is not None and scope[0] == "package":
+        name, argument, rest = scope
+        if argument.strip() != (package or ""):
+            return refuse(f"it is scoped to package {argument.strip()!r}, the cell's is {package!r}")
+        rest = rest.strip()
+        if not rest.startswith("&"):
+            return refuse("a package scope must be joined to the tier expression with '&'")
+        rest = rest[1:].strip()
+        close = _closing(rest, 0) if rest.startswith("(") else None
+        if close != len(rest) - 1:
+            return refuse("the tier expression after the package scope must be parenthesized")
+        body = rest[1:close].strip()
+
+    markers: list[str]
+    if body.startswith("!"):
+        if tier not in excludes["tiers"]:
+            return refuse("a positive tier does not negate")
+        inner = body[1:].strip()
+        close = _closing(inner, 0) if inner.startswith("(") else None
+        if close != len(inner) - 1:
+            return refuse("the negated union must be one parenthesized group")
+        terms = _split_union(inner[1:close])
+        if not terms:
+            return refuse("the negated group is empty")
+        markers = []
+        for text in terms:
+            marker = _marker(text)
+            if marker is None:
+                return refuse(f"{text.strip()!r} is not test(/(^|::)<marker>/)")
+            markers.append(marker)
+        missing = [marker for marker in excludes["must"] if marker not in markers]
+        allowed = set(excludes["must"]) | set(excludes["may"])
+        extra = [marker for marker in markers if marker not in allowed]
+        if missing:
+            return refuse(f"it leaves {missing} inside the run")
+        if extra:
+            return refuse(f"it excludes {extra}, which no L1-shaped tier may")
+        return []
+
+    if tier not in selects:
+        return refuse("an L1-shaped tier negates the other tiers' markers")
+    marker = _marker(body)
+    if marker is None:
+        return refuse("it is not exactly one test(/(^|::)<marker>/) predicate")
+    if marker != selects[tier]:
+        return refuse(f"it selects the {marker!r} tier")
+    return []
+
+
+def _closing(text: str, open_index: int) -> int | None:
+    """Index of the parenthesis closing the one at `open_index`, or None."""
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _term(text: str) -> tuple[str, str, str] | None:
+    """`(name, argument, rest)` when `text` opens with a predicate call."""
+    head = _PREDICATE.match(text)
+    if head is None:
+        return None
+    close = _closing(text, head.end() - 1)
+    if close is None:
+        return None
+    return head.group(1), text[head.end() : close], text[close + 1 :]
+
+
+def _marker(text: str) -> str | None:
+    """The tier marker when `text` is exactly one `test(/(^|::)<marker>/)`."""
+    term = _term(text.strip())
+    if term is None or term[0] != "test" or term[2].strip():
+        return None
+    match = _TIER_MARKER.match(term[1].strip())
+    return match.group(1) if match else None
+
+
+def _split_union(text: str) -> list[str]:
+    """The operands of a top-level `+` union, parentheses respected."""
+    terms: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "+" and depth == 0:
+            terms.append(text[start:index])
+            start = index + 1
+    terms.append(text[start:])
+    return [term for term in terms if term.strip()]
 
 
 def manifest_problems(
@@ -318,7 +453,7 @@ def manifest_problems(
         )
 
     problems += selection_problems(manifest["selection"], cell)
-    problems += declared_problems(manifest, cell, package)
+    problems += declared_problems(manifest, cell)
 
     packages = manifest.get("packages")
     if not isinstance(packages, dict) or cell["package"] not in packages:
@@ -337,9 +472,7 @@ def manifest_problems(
     return problems
 
 
-def declared_problems(
-    manifest: dict[str, Any], cell: dict[str, Any], package: dict[str, Any]
-) -> list[str]:
+def declared_problems(manifest: dict[str, Any], cell: dict[str, Any]) -> list[str]:
     """Every reason the producer's declared work differs from the plan's.
 
     Optional on the manifest, and cross-checked rather than trusted: the plan
@@ -350,11 +483,11 @@ def declared_problems(
     problems = []
     if "backends" in manifest:
         declared = sorted(set(manifest["backends"]))
-        planned = sorted(set(required_backends(cell, package)))
+        planned = sorted(set(required_backends(cell)))
         if declared != planned:
             problems.append(
                 f"completion-manifest-selection: the producer required backends "
-                f"{declared}, the plan declares {planned}"
+                f"{declared}, the plan requires {planned} of this cell"
             )
     if "companion_suites" in manifest:
         declared = sorted(set(manifest["companion_suites"]))
@@ -367,17 +500,34 @@ def declared_problems(
     return problems
 
 
-def required_backends(cell: dict[str, Any], package: dict[str, Any]) -> list[str]:
+def required_backends(cell: dict[str, Any]) -> list[str]:
     """The terminal backends this cell must prove drove a test.
 
-    Read off the plan rather than from a policy table: `l2_backends` is what
-    the package declares and the L2 gate is what consumes them. A backend that
-    is never provisioned skips its suite, and nextest prints PASS in about 0.02
-    seconds — indistinguishable from evidence unless the proof is read.
+    Read off the cell, not the package: the planner attaches the subset of
+    `l2_backends` the cell's environment can host, which is exactly what the
+    producer set `BISCUIT_TEST_REQUIRED_BACKENDS` to. The package-wide list
+    names GUI backends no runner hosts, and demanding those refused every
+    mixed-backend cell. A backend that is never provisioned skips its suite,
+    and nextest prints PASS in about 0.02 seconds — indistinguishable from
+    evidence unless the proof is read.
     """
     if cell["gate"] != "L2":
         return []
-    return [backend for backend in package.get("l2_backends", []) if backend]
+    backends = cell.get("backends")
+    if (
+        not isinstance(backends, list)
+        or not backends
+        or not all(isinstance(backend, str) and backend for backend in backends)
+    ):
+        raise refuse(
+            "completion-plan-unreadable",
+            f"the executing L2 cell {cell['package']}/{cell['environment']}/L2 "
+            "names no required backend; a plan of schema version "
+            f"{schema.RESOLVED_PLAN_SCHEMA_VERSION} attaches the hostable subset of "
+            "l2_backends to every executing L2 cell",
+            infrastructure=True,
+        )
+    return list(backends)
 
 
 # ---------------------------------------------------------------------------
@@ -657,15 +807,21 @@ def companion_problems(cell: dict[str, Any], companions: dict[str, Any]) -> list
     return problems
 
 
-def backend_problems(
-    cell: dict[str, Any], package: dict[str, Any], proofs: Any
-) -> list[str]:
+def backend_problems(cell: dict[str, Any], proofs: Any) -> list[str]:
+    """Every required backend the proof document does not mark `proven`.
+
+    `proofs` is `backend-proof verify`'s `backend-proofs.json`:
+    `{backend: {"proven": bool, "executed": count}}` for each backend it was
+    told to require. An absent document, an absent backend, and
+    `proven: false` are the same verdict here — nothing proves the backend
+    drove a test.
+    """
     problems = []
-    for backend in required_backends(cell, package):
+    for backend in required_backends(cell):
         proof = proofs.get(backend) if isinstance(proofs, dict) else None
         if not isinstance(proof, dict) or proof.get("proven") is not True:
             problems.append(
-                f"completion-backend-unproven: the {backend} backend is declared for "
+                f"completion-backend-unproven: the {backend} backend is required of "
                 f"this cell and nothing proves it drove a test; an absent backend "
                 f"skips its suite and still prints PASS"
             )
@@ -706,7 +862,7 @@ def completion_record(
     companions = sorted(entry["name"] for entry in cell.get("companions", []))
     if companions:
         record["companions"] = companions
-    backends = sorted(required_backends(cell, package))
+    backends = sorted(required_backends(cell))
     if backends:
         record["backends"] = backends
     return record
@@ -757,7 +913,7 @@ def validate(args: argparse.Namespace, today: date | None = None) -> dict[str, A
         else {}
     )
     problems += companion_problems(cell, companions)
-    problems += backend_problems(cell, package, proofs)
+    problems += backend_problems(cell, proofs)
 
     if problems:
         raise Refused(problems)

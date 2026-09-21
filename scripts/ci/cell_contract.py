@@ -252,7 +252,12 @@ def contract(plan: dict[str, Any], row: dict[str, str], head: str) -> dict[str, 
         "dependents_native": json.dumps(seam.get("native", [])),
         "l1_include_slow": "1" if package["l1_include_slow"] else "",
         "runner_tools": json.dumps(package["runner_tools"]),
-        "backends": json.dumps(package["l2_backends"]),
+        # What THIS cell must prove — the plan already narrowed the package's
+        # declaration to the backends this environment hosts. The package-wide
+        # list rides along only so the job's coverage summary can name the
+        # backends that skip here.
+        "backends": json.dumps(cell.get("backends", [])),
+        "declared_backends": json.dumps(package["l2_backends"]),
         "companion_suites": json.dumps(companions),
         # The dependency closure's prerequisites for THIS environment, already
         # narrowed. A WSL2 guest is Linux and consumes the `ubuntu-latest`
