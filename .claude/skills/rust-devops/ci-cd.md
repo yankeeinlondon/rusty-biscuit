@@ -195,12 +195,12 @@ manifest handed to `ci-rollup` is refused with `completion.py` named as its
 reader. The whole chain runs end to end in
 `test_completion.py::AuditEndToEndTests` against the real binary.
 
-4 named the union of two changes that each called themselves version 3 on
-separate branches — build records, and the `change_inventory` below — so "3"
-named two incompatible shapes and a document from either branch was refused for
-a *missing field* rather than a version skew. The validator checks the version
-before the field set for that reason: an older document usually differs in
-both, and the field complaint sends the reader after a corrupt document.
+Every document's version history, the rules for bumping one, and the mirrors
+that must move with it are in
+[`docs/cicd/schema-versions.md`](../../../docs/cicd/schema-versions.md). Read
+it before bumping any version, and record the bump there in the same change;
+`test_schema.py::SchemaChangelogVersionTests` fails when its table falls behind
+a constant.
 
 The required `archive_guard` scope and the `deleted` half of the change
 inventory it reads come from `fixes/2026-09-19-less-brittle`. The archive-path
@@ -291,7 +291,7 @@ semantics:
   Validation evidence never reopens selection: on a hit with accepted cells,
   `affected_scope.py --apply-to` overlays them on the carried plan and
   re-projects `scope.json` from it, reading nothing from the checkout. The
-  plan has been self-contained since schema version 3 so that it can — it carries its `environments`
+  plan has been self-contained since schema version 2 so that it can — it carries its `environments`
   table, per-package `l1_include_slow`/`exclusion`, per-cell `reusable`, and
   (since version 3) its `builds[]` records; an older receipt misses as
   `scope-schema` rather than being partially upgraded. The overlay derives no

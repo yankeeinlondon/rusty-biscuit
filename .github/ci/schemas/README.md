@@ -58,68 +58,9 @@ side keeps its own tests for the wording it produces.
 > `plan_fields_match_the_frozen_contract`, so renaming one breaks a test rather
 > than silently dropping a field serde never recognized.
 >
-> The version-1 field list was amended twice, both times additively and
-> both times without a version bump because no consumer had read the document
-> yet: `source_packages` and `reverse_dependencies` first (AC1 is stated over
-> the difference between "changed" and "selected", and the OQ1 seam report needs
-> the dependent names), then the optional `input_paths` (a package's build
-> closure, which the gate-input identity is defined over) and
-> `evidence_rejections`.
->
-> Version 2 makes a carried plan self-sufficient: CI applies verified evidence
-> to a matching scope receipt (`affected_scope.py --apply-to`) and re-projects
-> `scope.json` from it without re-selecting, so the plan carries the
-> `environments` table it was resolved against, each package's
-> `l1_include_slow` and (for `gates = false`) its `exclusion`, and each cell's
-> `reusable`. They are required, so a version-1 scope receipt misses as
-> `scope-schema` and CI calculates scope itself — the miss the receipt
-> contract permits — rather than hitting and then having to re-run selection.
->
-> Version 3 adds **build records**
-> (`fixes/2026-09-12-single-os-compile/spec.md`): the plan-level `builds[]`
-> list and the per-cell `build` reference that names one of them. A version-2
-> receipt carries no build records at all and misses as `scope-schema` for the
-> same reason — the alternative would be inventing ownership for a selection
-> this tool did not make.
->
-> Version 3 also added the required `change_inventory`: the changed paths,
-> normalized and bucketed once by the calculator so the plan renderer, the
-> pre-push report, and `ci-reporting` all state the same thing about what
-> changed.
->
-> Version 4 is those two together. Build records and the change inventory each
-> called themselves version 3 on separate branches, so "3" named two
-> incompatible shapes: a document from either branch passed the version check
-> and then failed on a field it never carried, which reads as corruption rather
-> than as a version skew. 4 names the union, and the validator checks the
-> version before the field set so the report says so. A version-2 or version-3
-> scope receipt misses once as `scope-schema` for the same reason a version-1
-> one did; validation receipts are untouched, so their version stays at 2 and
-> nothing already-recorded is invalidated.
->
-> Version 5 adds the required `archive_guard` scope
-> (`fixes/2026-09-19-less-brittle`) and the `deleted` half of the change
-> inventory it reads. The archive-path guard scans repository source for
-> compile-time paths that do not survive an archived run, and the planner is
-> the only thing that knows which files an event put in scope; a plan carrying
-> no answer would leave the guard choosing between an empty scan and a full
-> one, and it refuses to guess. A version-4 scope receipt misses once as
-> `scope-schema`, for the reason every earlier one did.
->
-> `2026-09-19-direct-cell-execution` numbered its own changes 5 and 6 on a
-> branch developed alongside it. The hosted workflows stop receiving
-> environment lists and expand one matrix row per executing cell, so every
-> input a downstream job used to be handed has to be answerable from the plan
-> alone: the plan-level `skip_policy` snapshot of `ci-baseline.toml`, the
-> area-level `execution_path`, the per-cell `profile` and `requires_node`, and
-> an executing L2 cell's `backends`.
->
-> Version 7 is those two together, for the reason version 4 exists: "5" named
-> two incompatible shapes, and a document of either would pass the version
-> check and then fail on a field it never carried. A version-5 or version-6
-> scope receipt misses once as `scope-schema`; the receipt version stays at 2,
-> because neither a change in how work is dispatched nor a new scan scope is a
-> reason to invalidate a cell that was validated.
+> Why each document is at its version, and what each generation changed, is
+> recorded in one place: [CI schema versions](../../../docs/cicd/schema-versions.md).
+> Update it in the same change as any version bump.
 
 ## Resolved plan
 

@@ -502,10 +502,7 @@ class SchemaReadmeVersionTests(unittest.TestCase):
 
     def test_the_prose_restates_the_receipt_version_correctly(self):
         prose = schema_readme_prose()
-        for pattern in (
-            r"Both receipt producers.*?write version (\d+)",
-            r"validation receipts are untouched, so their version stays at (\d+)",
-        ):
+        for pattern in (r"Both receipt producers.*?write version (\d+)",):
             match = re.search(pattern, prose)
             if match is None:
                 raise AssertionError(
@@ -513,6 +510,86 @@ class SchemaReadmeVersionTests(unittest.TestCase):
                     "claim has to be taught to this contract, not ignored"
                 )
             self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(1)), pattern)
+
+
+SCHEMA_CHANGELOG_PATH = schema.ROOT / "docs" / "cicd" / "schema-versions.md"
+
+
+class SchemaChangelogVersionTests(unittest.TestCase):
+    """`docs/cicd/schema-versions.md` states every CI document's current version.
+
+    It is the one changelog for these documents, so its "Current versions"
+    table is asserted against the constant that defines each number, including
+    the Rust owners, whose constants are read from source rather than trusted.
+    """
+
+    @staticmethod
+    def rust_constant(relative: str, name: str) -> int:
+        text = (schema.ROOT / relative).read_text(encoding="utf-8")
+        match = re.search(rf"\bconst {name}: u\d+ = (\d+);", text)
+        if match is None:
+            raise AssertionError(f"{relative} no longer declares {name}")
+        return int(match.group(1))
+
+    def stated(self, document: str) -> int:
+        match = re.search(
+            rf"^\|\s*\[{re.escape(document)}\]\([^)]*\)[^|]*\|\s*(\d+)",
+            SCHEMA_CHANGELOG_PATH.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if match is None:
+            raise AssertionError(
+                f"the schema changelog's table states no version for {document!r}; "
+                "a reworded row has to be taught to this contract, not ignored"
+            )
+        return int(match.group(1))
+
+    def test_the_table_states_every_owners_current_version(self):
+        rollup = "scripts/ci-rollup.rs"
+        archive = "scripts/ci-build-archive.rs"
+        expected = {
+            "Resolved plan": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "Validation receipt": schema.RECEIPT_SCHEMA_VERSION,
+            "Scope receipt": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
+            "Expected-test manifest": schema.EXPECTED_MANIFEST_SCHEMA_VERSION,
+            "Completion record": schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            "Result document": self.rust_constant(rollup, "RESULT_SCHEMA_VERSION"),
+            "Skip baseline": self.rust_constant(rollup, "BASELINE_SCHEMA_VERSION"),
+            "Environment table": self.rust_constant(rollup, "ENVIRONMENTS_SCHEMA_VERSION"),
+            "Build archive documents": self.rust_constant(archive, "MANIFEST_SCHEMA_VERSION"),
+            "Build key and compiler-work documents": self.rust_constant(
+                "scripts/ci-build.rs", "KEY_SCHEMA_VERSION"
+            ),
+        }
+        for document, version in expected.items():
+            with self.subTest(document=document):
+                self.assertEqual(version, self.stated(document))
+
+    def test_the_mirrors_it_names_agree_with_their_owners(self):
+        # The table names these as mirrors that move together; a mirror that
+        # stayed behind is the drift the changelog's rules section describes.
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            self.rust_constant("scripts/ci-rollup.rs", "PLAN_SCHEMA_VERSION"),
+        )
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            self.rust_constant("tools/test-toolkit/src/archive_guard.rs", "PLAN_SCHEMA_VERSION"),
+        )
+        self.assertEqual(
+            schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            self.rust_constant("scripts/ci-rollup.rs", "COMPLETION_RECORD_SCHEMA_VERSION"),
+        )
+
+    def test_the_receipt_version_claim_holds(self):
+        text = re.sub(r"\s+", " ", SCHEMA_CHANGELOG_PATH.read_text(encoding="utf-8"))
+        match = re.search(r"Every plan bump since has left this at (\d+)", text)
+        if match is None:
+            raise AssertionError(
+                "the schema changelog no longer states the receipt version the plan "
+                "bumps left alone; a reworded claim has to be taught to this contract"
+            )
+        self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(1)))
 
 
 class ChangeInventoryValidationTests(unittest.TestCase):
