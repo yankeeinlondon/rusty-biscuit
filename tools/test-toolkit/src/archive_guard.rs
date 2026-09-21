@@ -203,7 +203,7 @@ pub const PLAN_KEY: &str = "archive_guard";
 /// step; `the_plan_schema_version_matches_the_frozen_contract` fails here when
 /// one side is bumped alone, the way an earlier iteration of this fix stranded
 /// the pre-push fixtures.
-pub const PLAN_SCHEMA_VERSION: u64 = 5;
+pub const PLAN_SCHEMA_VERSION: u64 = 7;
 
 /// The closed field set of the plan's [`PLAN_KEY`] object, sorted.
 ///

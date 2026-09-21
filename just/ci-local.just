@@ -68,9 +68,9 @@
 #
 # `--plan-in <path>` (or `BISCUIT_CI_PLAN_IN`, the form the hook uses) runs the
 # gates FROM a resolved plan instead of computing one: the planner's selection
-# never runs, the package list, gates, and test arguments are the legacy
-# projection of that plan (`affected_scope.py --apply-to`, which reads nothing
-# from the checkout), and for this host's environment an L1/L2 cell runs only
+# never runs, the package list is the scope projection of that plan
+# (`affected_scope.py --apply-to`, which reads nothing from the checkout), the
+# gates and test arguments are its package records, and for this host's environment an L1/L2 cell runs only
 # when the plan says it EXECUTES — or when it was reused from prior evidence
 # whose outcome is a FAILURE, since a local rerun is cheap and the fresh result
 # supersedes the old one (spec ruling D2). Lint stages no report and is never
@@ -184,8 +184,9 @@ ci-local *args="":
     trap 'rm -f "${scope_file}" "${plan_file}" "${accepted_file}" "${rejected_file}"' EXIT
 
     # One calculation serves both documents: `--plan-out` writes the canonical
-    # resolved plan while stdout stays the legacy scope shape the gate loop and
-    # `ci.yml` still read. They cannot disagree about what CI will run.
+    # resolved plan the gate loop reads each package's facts and cells from,
+    # while stdout is the scope projection `ci.yml` also reads. They cannot
+    # disagree about what CI will run.
     scope_args=(--plan-out "${plan_file}" --constraints "${constraints_dir}")
     # `--plan` needs no legacy projection: it runs no gate, so the canonical
     # plan is both what it renders and what `--plan-out` writes.
@@ -395,7 +396,7 @@ ci-local *args="":
     if (( dry_run == 1 )); then
         while IFS= read -r package; do
             [[ -n "${package}" ]] || continue
-            test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"
+            test_args="$(jq -r --arg p "${package}" '.packages[] | select(.package == $p) | .test_args // ""' "${plan_file}")"
             echo "  ${package}${test_args:+  (test: ${test_args})}"
         done <<< "${packages}"
         exit 0
@@ -513,7 +514,7 @@ ci-local *args="":
     # fell back to a second digest would still emit a plan, and every
     # downstream comparison against a producer's manifest would stop meaning
     # anything. It is ~0.1s wherever `scripts/target` already holds `ci-build`.
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
@@ -541,13 +542,18 @@ ci-local *args="":
 
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
-        test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"
+        # The plan's package record; empty for a package the plan does not
+        # carry, which then runs no gate.
+        record="$(jq -c --arg p "${package}" '.packages[] | select(.package == $p)' "${plan_file}")"
+        test_args="$(jq -r '.test_args // ""' <<< "${record}")"
+        # The plan spells each test tier as its own gate; this loop runs them
+        # under one `test` gate, with L2 selected separately below.
+        gates="$(jq -r '[.gates[] | if . == "lint" or . == "check" then . else "test" end] | unique | join(" ")' <<< "${record}")"
         # A package reached only through the check gate. Unreachable today (see
         # the recipe header): every gating package owns a lint cell, so `check`
         # is never a package's sole gate.
-        gates="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .gates // ["lint","check","test"] | join(" ")' "${scope_file}")"
         if (( run_check == 1 )) && [[ " ${gates} " == " check " ]]; then
-            check_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .check_args' "${scope_file}")"
+            check_args="$(jq -r '.check_args' <<< "${record}")"
             # shellcheck disable=SC2086
             if cargo check ${check_args}; then
                 passed+=("check ${package} (check-only selection)")
@@ -560,7 +566,7 @@ ci-local *args="":
         # selected, not for the package, so its producer skips clippy — see
         # `_package-ci.yml`'s lint job. Linting here anyway would run work CI
         # will not run and report a gate that does not exist.
-        companions_only="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .lint_companions_only // false' "${scope_file}")"
+        companions_only="$(jq -r --arg p "${package}" '[.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any' "${plan_file}")"
         if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]] && [[ "${companions_only}" != "true" ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
@@ -615,10 +621,13 @@ ci-local *args="":
             fi
         fi
         if (( run_l2 == 1 )) && [[ " ${gates} " == *" test "* ]] && cell_runs_here "${package}" L2; then
-            has_l2="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .tiers | index("L2") != null' "${scope_file}")"
-            l2_here="$(jq -r --arg p "${package}" --arg e "${local_environment}" '.matrix[] | select(.package == $p) | .l2_environments | index($e) != null' "${scope_file}")"
+            has_l2="$(jq -r '.tiers | index("L2") != null' <<< "${record}")"
+            # Whether a missing backend is a failure is the plan's call: only
+            # an EXECUTING L2 cell here requires one; an unhostable one is a
+            # governed gap.
+            l2_here="$(jq -r --arg p "${package}" --arg e "${local_environment}" 'any(.cells[]; .package == $p and .environment == $e and .gate == "L2" and .execution == "execute")' "${plan_file}")"
             if [[ "${has_l2}" == "true" ]]; then
-                backends="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .l2_backends | join(" ")' "${scope_file}")"
+                backends="$(jq -r '.l2_backends | join(" ")' <<< "${record}")"
                 required=()
                 if [[ " ${backends} " == *" tmux "* ]] && command -v tmux > /dev/null 2>&1; then
                     required+=(tmux)
@@ -630,7 +639,7 @@ ci-local *args="":
                     required+=(kitty)
                 fi
                 l2_threads="${BISCUIT_L2_THREADS:-1}"
-                parallel_l2="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | (.runner_tools // []) | index("l2-parallel-self-spawn") != null' "${scope_file}")"
+                parallel_l2="$(jq -r '(.runner_tools // []) | index("l2-parallel-self-spawn") != null' <<< "${record}")"
                 if [[ "${parallel_l2}" == "true" ]]; then
                     l2_threads="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
                 fi

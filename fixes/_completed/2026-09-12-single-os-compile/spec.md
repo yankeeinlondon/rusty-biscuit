@@ -1,14 +1,14 @@
 ---
 created: 2026-09-12
-status: draft
+status: completed
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-12
-implemented: false
+implemented: true
 review_iterations: 3
 area: repository-ci
 depends-on:
-  - fixes/2026-09-11-cicd-cleanup/spec.md
+    - fixes/2026-09-11-cicd-cleanup/spec.md
 ---
 
 # Compile Once per Compatible Configuration Across Test Tiers
@@ -352,28 +352,25 @@ architecture:
 1. **Planner-declared compatibility cohorts (recommended fallback).** Split an
    environment's selected packages into a small number of deterministic
    cohorts while keeping every build key in exactly one cohort.
-
-   - Pros: restores parallelism; keeps ownership explicit; can isolate unusually
-     expensive native toolchains.
-   - Cons: dependencies shared by different cohorts may compile more than once;
-     cohort construction and diagnostics add planner complexity.
+    - Pros: restores parallelism; keeps ownership explicit; can isolate unusually
+      expensive native toolchains.
+    - Cons: dependencies shared by different cohorts may compile more than once;
+      cohort construction and diagnostics add planner complexity.
 
 2. **One owner per package.** Keep the current package fan-out and pass one
    archive from that package's L1 build to its higher tiers.
-
-   - Pros: simplest workflow change; high package-level parallelism; small
-     failure domains.
-   - Cons: preserves cross-package dependency recompilation and therefore does
-     not meet the full objective without a reliable compiler-artifact service.
+    - Pros: simplest workflow change; high package-level parallelism; small
+      failure domains.
+    - Cons: preserves cross-package dependency recompilation and therefore does
+      not meet the full objective without a reliable compiler-artifact service.
 
 3. **Remote compiler-artifact service.** Restore exact rustc outputs through a
    shared content-addressed backend while retaining package-level owners.
-
-   - Pros: combines parallel owners with cross-run and cross-package reuse.
-   - Cons: introduces credentials, storage lifecycle, trust, availability, and
-     Windows restore-cost concerns; prior GitHub-cache measurements were poor;
-     cache hits still need provenance strong enough to support the compile-once
-     claim.
+    - Pros: combines parallel owners with cross-run and cross-package reuse.
+    - Cons: introduces credentials, storage lifecycle, trust, availability, and
+      Windows restore-cost concerns; prior GitHub-cache measurements were poor;
+      cache hits still need provenance strong enough to support the compile-once
+      claim.
 
 Recommendation: use compatibility cohorts only if the required three-run
 measurements reject the single-owner design. It is the smallest fallback that

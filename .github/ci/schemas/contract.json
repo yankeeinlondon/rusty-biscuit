@@ -1,6 +1,6 @@
 {
   "resolved_plan": {
-    "schema_version": 5,
+    "schema_version": 7,
     "document": {
       "schema_version": true,
       "base": true,
@@ -18,6 +18,8 @@
       "cells": true,
       "builds": true,
       "accepted_evidence": true,
+      "skip_policy": true,
+      "rows": false,
       "evidence_rejections": false,
       "policy_gaps": true,
       "prohibited_cells": true,
@@ -33,7 +35,8 @@
     "area": {
       "area": true,
       "selection_reason": true,
-      "packages": true
+      "packages": true,
+      "execution_path": true
     },
     "package": {
       "package": true,
@@ -74,7 +77,10 @@
       "dependents": false,
       "companions": false,
       "companions_only": false,
-      "build": false
+      "build": false,
+      "profile": false,
+      "requires_node": false,
+      "backends": false
     },
     "build": {
       "key": true,
@@ -116,6 +122,34 @@
       "deleted": false,
       "reason": false
     },
+    "skip_policy": {
+      "source": true,
+      "content_hash": true,
+      "entries": true
+    },
+    "skip_entry": {
+      "package": true,
+      "environment": true,
+      "gate": true,
+      "owner": true,
+      "reason": true,
+      "source_run": true,
+      "tests": false,
+      "backend": false,
+      "expiry": false
+    },
+    "row": [
+      "package",
+      "gate",
+      "environment",
+      "runner"
+    ],
+    "row_sets": [
+      "test",
+      "check",
+      "lint",
+      "wsl"
+    ],
     "archive_guard": {
       "selected": true,
       "mode": false,
@@ -171,6 +205,83 @@
     "failure_detail_limit": 20,
     "unrecorded_measurement": "not recorded (v1 receipt)"
   },
+  "expected_manifest": {
+    "schema_version": 2,
+    "document": {
+      "schema_version": true,
+      "environment": true,
+      "tier": true,
+      "target": true,
+      "nextest_version": true,
+      "from_archive": true,
+      "selection": true,
+      "packages": true,
+      "backends": false,
+      "companion_suites": false
+    },
+    "selection": {
+      "filter": true,
+      "profile": true,
+      "test_args": true
+    },
+    "package": {
+      "tests": true,
+      "ignored": true,
+      "excluded": true
+    }
+  },
+  "completion_record": {
+    "schema_version": 1,
+    "document": {
+      "schema_version": true,
+      "package": true,
+      "environment": true,
+      "gate": true,
+      "complete": true,
+      "head": true,
+      "run": true,
+      "attempt": true,
+      "nextest_version": false,
+      "reports": true,
+      "build": false,
+      "gate_inputs": false,
+      "companions": false,
+      "backends": false
+    },
+    "rejections": [
+      "completion-plan-unreadable",
+      "completion-cell-unknown",
+      "completion-cell-not-executing",
+      "completion-manifest-missing",
+      "completion-manifest-schema",
+      "completion-manifest-provenance",
+      "completion-manifest-target",
+      "completion-manifest-selection",
+      "completion-report-missing",
+      "completion-report-malformed",
+      "completion-report-duplicate",
+      "completion-test-missing",
+      "completion-test-unexpected",
+      "completion-test-failed",
+      "completion-skip-unapproved",
+      "completion-expected-empty",
+      "completion-companion-incomplete",
+      "completion-companion-failed",
+      "completion-backend-unproven"
+    ]
+  },
+  "cell_contract": {
+    "rejections": [
+      "cell-contract-row",
+      "cell-contract-head",
+      "cell-contract-unknown",
+      "cell-contract-duplicate",
+      "cell-contract-not-executing",
+      "cell-contract-mismatch",
+      "cell-contract-package",
+      "cell-contract-build"
+    ]
+  },
   "scope_receipt": {
     "schema_version": 1,
     "document": {
@@ -186,7 +297,7 @@
       "packages",
       "areas",
       "scheduled_areas",
-      "area_matrix",
+      "area_rows",
       "area_slugs",
       "source_packages",
       "reverse_dependencies",
@@ -195,7 +306,6 @@
       "change_class",
       "preflight_os",
       "preflight_reason",
-      "matrix",
       "policy",
       "build_owners",
       "build_slices",
@@ -257,6 +367,10 @@
       "accepted-gap",
       "prohibited"
     ],
+    "execution_paths": [
+      "rows"
+    ],
+    "ci_profile": "ci",
     "change_buckets": [
       "configuration",
       "documentation",
@@ -294,7 +408,10 @@
       "dirty-tree",
       "v1-requires-exact-tree",
       "v1-not-equivalence-eligible",
-      "v1-is-pass-only"
+      "v1-is-pass-only",
+      "skip-policy-cell",
+      "skip-policy-expired",
+      "skip-policy-provenance"
     ],
     "build_rejections": [
       "build-manifest-missing",
@@ -312,6 +429,59 @@
       "build-asset-missing",
       "build-inventory-incomplete",
       "build-inventory-unexpected"
-    ]
+    ],
+    "completion_rejections": [
+      "completion-plan-unreadable",
+      "completion-cell-unknown",
+      "completion-cell-not-executing",
+      "completion-manifest-missing",
+      "completion-manifest-schema",
+      "completion-manifest-provenance",
+      "completion-manifest-target",
+      "completion-manifest-selection",
+      "completion-report-missing",
+      "completion-report-malformed",
+      "completion-report-duplicate",
+      "completion-test-missing",
+      "completion-test-unexpected",
+      "completion-test-failed",
+      "completion-skip-unapproved",
+      "completion-expected-empty",
+      "completion-companion-incomplete",
+      "completion-companion-failed",
+      "completion-backend-unproven"
+    ],
+    "tier_markers": [
+      "level2_",
+      "level3_",
+      "browser_",
+      "real_",
+      "slow_",
+      "perf_"
+    ],
+    "canonical_selection": {
+      "selects": {
+        "L2": "level2_",
+        "L3": "level3_",
+        "browser": "browser_",
+        "real": "real_"
+      },
+      "excludes": {
+        "tiers": [
+          "L1",
+          "sanity"
+        ],
+        "must": [
+          "level2_",
+          "level3_",
+          "browser_",
+          "real_"
+        ],
+        "may": [
+          "slow_",
+          "perf_"
+        ]
+      }
+    }
   }
 }

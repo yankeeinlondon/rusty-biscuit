@@ -63,9 +63,10 @@ pub use backend::{
     parse_required_backends, required_backends,
 };
 pub use evidence::{
-    BACKEND_EXECUTIONS_FILE, BISCUIT_JUNIT_STAGE_DIR, ExecutionDecision, ExecutionRecord,
-    append_backend_execution, backend_executions_path, decision_counts, read_backend_executions,
-    normalize_test_name, record_backend_execution, stage_dir, unproven_backends, workspace_root,
+    BACKEND_EXECUTIONS_FILE, BACKEND_PROOFS_FILE, BISCUIT_JUNIT_STAGE_DIR, ExecutionDecision,
+    ExecutionRecord, append_backend_execution, backend_executions_path, backend_proofs_json,
+    clear_backend_evidence, decision_counts, read_backend_executions, normalize_test_name,
+    record_backend_execution, stage_dir, unproven_backends, workspace_root, write_backend_proofs,
 };
 
 use std::env;

@@ -37,6 +37,7 @@ def plan(**overrides: object) -> dict:
                 "area": "claudine",
                 "selection_reason": "source change under claudine/",
                 "packages": ["claudine"],
+                "execution_path": "rows",
             }
         ],
         "packages": [package()],
@@ -59,6 +60,7 @@ def plan(**overrides: object) -> dict:
         "cells": [cell()],
         "builds": None,
         "accepted_evidence": [],
+        "skip_policy": skip_policy(),
         "policy_gaps": [],
         "prohibited_cells": [],
         "job_estimate": 3,
@@ -153,6 +155,17 @@ def cell(**overrides: object) -> dict:
         record["build"] = BUILD_KEY
     if record.get("build") is None:
         record.pop("build", None)
+    # The nextest profile follows the same rule as the build reference, so the
+    # fixture derives it the same way rather than leaving every caller to
+    # remember which shape carries one.
+    if (
+        "profile" not in overrides
+        and record["execution"] == "execute"
+        and record["gate"] in schema.BUILD_GATES
+    ):
+        record["profile"] = schema.CI_PROFILE
+    if record.get("profile") is None:
+        record.pop("profile", None)
     return record
 
 
@@ -300,13 +313,7 @@ class ContractArtifactTests(unittest.TestCase):
     # `plan_schema_version` check is what produces the one intended miss.
     # -----------------------------------------------------------------------
 
-    def test_the_plan_schema_carries_the_guard_inventory_and_builds_at_version_5(self):
-        if schema.RESOLVED_PLAN_SCHEMA_VERSION != 5:
-            raise AssertionError(
-                "the resolved plan schema must be version 5 once it requires "
-                "the change inventory, build records, and the archive-path "
-                f"guard's scope, got {schema.RESOLVED_PLAN_SCHEMA_VERSION}"
-            )
+    def test_the_plan_schema_carries_the_guard_inventory_and_builds(self):
         for field in ("builds", "change_inventory", "archive_guard"):
             self.assertIs(
                 True,
@@ -314,7 +321,10 @@ class ContractArtifactTests(unittest.TestCase):
                 f"{field} is a REQUIRED plan field, not an optional sibling",
             )
         shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(5, shipped["resolved_plan"]["schema_version"])
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            shipped["resolved_plan"]["schema_version"],
+        )
         self.assertIn("change_inventory", shipped["resolved_plan"]["document"])
         self.assertIn("archive_guard", shipped["resolved_plan"]["document"])
 
@@ -338,6 +348,36 @@ class ContractArtifactTests(unittest.TestCase):
         self.assertEqual(2, schema.RECEIPT_SCHEMA_VERSION)
         self.assertEqual(1, schema.LEGACY_RECEIPT_SCHEMA_VERSION)
         self.assertEqual(1, schema.SCOPE_RECEIPT_SCHEMA_VERSION)
+
+    def test_the_producer_documents_are_on_their_own_version_lines(self):
+        # The manifest and the record version independently of the plan: a
+        # producer's proof shape is not a reason to invalidate a resolved plan,
+        # and the reverse is what version 5 already established.
+        self.assertEqual(2, schema.EXPECTED_MANIFEST_SCHEMA_VERSION)
+        self.assertEqual(1, schema.COMPLETION_RECORD_SCHEMA_VERSION)
+        shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            schema.EXPECTED_MANIFEST_SCHEMA_VERSION,
+            shipped["expected_manifest"]["schema_version"],
+        )
+        self.assertEqual(
+            schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            shipped["completion_record"]["schema_version"],
+        )
+        self.assertEqual(
+            list(schema.COMPLETION_REJECTIONS),
+            shipped["completion_record"]["rejections"],
+        )
+
+    def test_completion_rejections_are_their_own_vocabulary(self):
+        # A producer refusal says "this job did not prove its cell". Sharing a
+        # spelling with a receipt rejection or a build rejection would let a
+        # summary report one as the other.
+        codes = set(schema.COMPLETION_REJECTIONS)
+        self.assertEqual(codes & set(schema.REJECTIONS), set())
+        self.assertEqual(codes & set(schema.SCOPE_REJECTIONS), set())
+        self.assertEqual(codes & set(schema.BUILD_REJECTIONS), set())
+        self.assertTrue(all(code.startswith("completion-") for code in codes))
 
     def test_vocabularies_are_disjoint_where_they_must_be(self):
         # A cell state and an execution are separate axes; overlapping spellings
@@ -374,6 +414,36 @@ def schema_readme_prose() -> str:
     return re.sub(r"\s+", " ", " ".join(lines))
 
 
+class CanonicalSelectionContractTests(unittest.TestCase):
+    """`CANONICAL_SELECTION` is the gate-to-marker binding `completion.py`
+    checks a listing's filter against, and the contract document carries it."""
+
+    def test_the_selection_contract_partitions_the_marker_vocabulary(self):
+        contract = schema.CANONICAL_SELECTION
+        selected = list(contract["selects"].values())
+        excluded = contract["excludes"]["must"] + contract["excludes"]["may"]
+        # Every positive tier's marker is one L1 must take out, and the two
+        # L1-internal markers are the only ones no positive tier owns.
+        self.assertEqual(sorted(selected), sorted(contract["excludes"]["must"]))
+        self.assertEqual(sorted(schema.TIER_MARKERS), sorted(excluded))
+        self.assertEqual(len(set(excluded)), len(excluded), "a marker binds once")
+
+    def test_every_plan_test_gate_has_a_canonical_selection(self):
+        contract = schema.CANONICAL_SELECTION
+        for gate in schema.BUILD_GATES:
+            with self.subTest(gate):
+                self.assertTrue(
+                    gate in contract["selects"] or gate in contract["excludes"]["tiers"],
+                    f"an executing {gate} cell's listing could not be checked",
+                )
+
+    def test_the_contract_document_publishes_the_selection_contract(self):
+        self.assertEqual(
+            schema.CANONICAL_SELECTION,
+            schema.contract()["vocabulary"]["canonical_selection"],
+        )
+
+
 class SchemaReadmeVersionTests(unittest.TestCase):
     """The schema README states this module's version counters in prose.
 
@@ -407,6 +477,14 @@ class SchemaReadmeVersionTests(unittest.TestCase):
         self.assertEqual(
             schema.SCOPE_RECEIPT_SCHEMA_VERSION, self.version_in_table("Scope receipt")
         )
+        self.assertEqual(
+            schema.EXPECTED_MANIFEST_SCHEMA_VERSION,
+            self.version_in_table("Expected manifest"),
+        )
+        self.assertEqual(
+            schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            self.version_in_table("Completion record"),
+        )
 
     def test_the_prose_version_inventory_states_this_modules_versions(self):
         match = re.search(
@@ -424,10 +502,7 @@ class SchemaReadmeVersionTests(unittest.TestCase):
 
     def test_the_prose_restates_the_receipt_version_correctly(self):
         prose = schema_readme_prose()
-        for pattern in (
-            r"Both receipt producers.*?write version (\d+)",
-            r"validation receipts are untouched, so their version stays at (\d+)",
-        ):
+        for pattern in (r"Both receipt producers.*?write version (\d+)",):
             match = re.search(pattern, prose)
             if match is None:
                 raise AssertionError(
@@ -435,6 +510,86 @@ class SchemaReadmeVersionTests(unittest.TestCase):
                     "claim has to be taught to this contract, not ignored"
                 )
             self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(1)), pattern)
+
+
+SCHEMA_CHANGELOG_PATH = schema.ROOT / "docs" / "cicd" / "schema-versions.md"
+
+
+class SchemaChangelogVersionTests(unittest.TestCase):
+    """`docs/cicd/schema-versions.md` states every CI document's current version.
+
+    It is the one changelog for these documents, so its "Current versions"
+    table is asserted against the constant that defines each number, including
+    the Rust owners, whose constants are read from source rather than trusted.
+    """
+
+    @staticmethod
+    def rust_constant(relative: str, name: str) -> int:
+        text = (schema.ROOT / relative).read_text(encoding="utf-8")
+        match = re.search(rf"\bconst {name}: u\d+ = (\d+);", text)
+        if match is None:
+            raise AssertionError(f"{relative} no longer declares {name}")
+        return int(match.group(1))
+
+    def stated(self, document: str) -> int:
+        match = re.search(
+            rf"^\|\s*\[{re.escape(document)}\]\([^)]*\)[^|]*\|\s*(\d+)",
+            SCHEMA_CHANGELOG_PATH.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if match is None:
+            raise AssertionError(
+                f"the schema changelog's table states no version for {document!r}; "
+                "a reworded row has to be taught to this contract, not ignored"
+            )
+        return int(match.group(1))
+
+    def test_the_table_states_every_owners_current_version(self):
+        rollup = "scripts/ci-rollup.rs"
+        archive = "scripts/ci-build-archive.rs"
+        expected = {
+            "Resolved plan": schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "Validation receipt": schema.RECEIPT_SCHEMA_VERSION,
+            "Scope receipt": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
+            "Expected-test manifest": schema.EXPECTED_MANIFEST_SCHEMA_VERSION,
+            "Completion record": schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            "Result document": self.rust_constant(rollup, "RESULT_SCHEMA_VERSION"),
+            "Skip baseline": self.rust_constant(rollup, "BASELINE_SCHEMA_VERSION"),
+            "Environment table": self.rust_constant(rollup, "ENVIRONMENTS_SCHEMA_VERSION"),
+            "Build archive documents": self.rust_constant(archive, "MANIFEST_SCHEMA_VERSION"),
+            "Build key and compiler-work documents": self.rust_constant(
+                "scripts/ci-build.rs", "KEY_SCHEMA_VERSION"
+            ),
+        }
+        for document, version in expected.items():
+            with self.subTest(document=document):
+                self.assertEqual(version, self.stated(document))
+
+    def test_the_mirrors_it_names_agree_with_their_owners(self):
+        # The table names these as mirrors that move together; a mirror that
+        # stayed behind is the drift the changelog's rules section describes.
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            self.rust_constant("scripts/ci-rollup.rs", "PLAN_SCHEMA_VERSION"),
+        )
+        self.assertEqual(
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            self.rust_constant("tools/test-toolkit/src/archive_guard.rs", "PLAN_SCHEMA_VERSION"),
+        )
+        self.assertEqual(
+            schema.COMPLETION_RECORD_SCHEMA_VERSION,
+            self.rust_constant("scripts/ci-rollup.rs", "COMPLETION_RECORD_SCHEMA_VERSION"),
+        )
+
+    def test_the_receipt_version_claim_holds(self):
+        text = re.sub(r"\s+", " ", SCHEMA_CHANGELOG_PATH.read_text(encoding="utf-8"))
+        match = re.search(r"Every plan bump since has left this at (\d+)", text)
+        if match is None:
+            raise AssertionError(
+                "the schema changelog no longer states the receipt version the plan "
+                "bumps left alone; a reworded claim has to be taught to this contract"
+            )
+        self.assertEqual(schema.RECEIPT_SCHEMA_VERSION, int(match.group(1)))
 
 
 class ChangeInventoryValidationTests(unittest.TestCase):
@@ -1715,6 +1870,22 @@ class ScopeReceiptValidationTests(unittest.TestCase):
         self.assertNotIn("builds", receipt["plan"])
         self.assertTrue(all("build" not in cell for cell in receipt["plan"]["cells"]))
 
+    def test_a_receipt_carrying_the_retired_environment_lists_still_validates(self):
+        # A receipt published before Phase 8 of
+        # `2026-09-19-direct-cell-execution` carries the same version-5 plan
+        # plus `matrix` and `area_matrix`. Retiring them from the projection is
+        # not a reason to invalidate the receipt: CI re-projects from `plan`.
+        projection = {name: [] for name in schema.SCOPE_PROJECTION_FIELDS} | {
+            "packages": ["claudine"],
+            "matrix": [{"package": "claudine", "native_environments": ["macos-latest"]}],
+            "area_matrix": {"claudine": {"include": []}},
+        }
+        self.assertEqual([], schema.validate_scope_receipt(scope_receipt(scope=projection)))
+        # Missing keys are still refused: tolerance is for extra keys only.
+        del projection["area_rows"]
+        problems = schema.validate_scope_receipt(scope_receipt(scope=projection))
+        self.assertTrue(any("'area_rows'" in problem for problem in problems), problems)
+
     def test_the_carried_plan_must_name_the_receipts_base_and_head(self):
         problems = schema.validate_scope_receipt(scope_receipt(plan=plan(base=SHA_T)))
         self.assertTrue(any("names base" in problem for problem in problems), problems)
@@ -1728,11 +1899,19 @@ class ScopeReceiptValidationTests(unittest.TestCase):
         # `ci.yml` reads these keys of `scope.json`; a projection missing one
         # would fail the fan-out after the planner was already skipped.
         workflow = (schema.ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        for name in ("matrix", "scheduled_areas", "area_matrix", "area_slugs", "packages",
+        for name in ("scheduled_areas", "area_rows", "area_slugs", "packages",
                      "full_scope", "flags", "job_estimate", "preflight_os",
                      "preflight_reason", "change_class"):
             self.assertIn(name, schema.SCOPE_PROJECTION_FIELDS)
             self.assertIn(f".{name}", workflow)
+        # The environment-list projections are retired (Phase 8 of
+        # `2026-09-19-direct-cell-execution`): nothing reads them, so the
+        # receipt contract must not require a projection to carry them.
+        for retired in ("matrix", "area_matrix"):
+            self.assertNotIn(retired, schema.SCOPE_PROJECTION_FIELDS)
+            self.assertNotIn(f".{retired} ", workflow)
+            self.assertNotIn(f".{retired}[", workflow)
+            self.assertNotIn(f".{retired}'", workflow)
 
 
 class ReusableCellsTests(unittest.TestCase):
@@ -1775,6 +1954,437 @@ class ReusableCellsTests(unittest.TestCase):
         accepted, rejected = schema.reusable_cells(broken)
         self.assertEqual(accepted, [])
         self.assertTrue(rejected)
+
+
+def completion_record(**overrides: object) -> dict:
+    record: dict = {
+        "schema_version": schema.COMPLETION_RECORD_SCHEMA_VERSION,
+        "package": "claudine",
+        "environment": "macos-latest",
+        "gate": "L1",
+        "complete": True,
+        "head": "b" * 40,
+        "run": "123456",
+        "attempt": 1,
+        "nextest_version": "cargo-nextest 0.9.136",
+        "reports": ["L1/claudine.xml"],
+    }
+    record.update(overrides)
+    return record
+
+
+class CompletionRecordValidationTests(unittest.TestCase):
+    """`validate_completion_record` — the record's structure, not its truth.
+
+    Whether the record is *true* is the producer's question and whether it is
+    bound to a given run is the audit's; this is the shape both of them read.
+    """
+
+    def test_a_well_formed_record_is_accepted(self):
+        self.assertEqual([], schema.validate_completion_record(completion_record()))
+
+    def test_the_optional_bindings_are_optional_and_checked_when_present(self):
+        with_build = completion_record(
+            build="0123456789abcdef",
+            gate_inputs=["claudine/lib"],
+            companions=["test_schema.py"],
+            backends=["tmux"],
+        )
+        self.assertEqual([], schema.validate_completion_record(with_build))
+        # A check or lint cell drives no nextest, so its record names none.
+        lean = completion_record(gate="check", reports=[])
+        del lean["nextest_version"]
+        self.assertEqual([], schema.validate_completion_record(lean))
+
+    def test_a_record_missing_a_required_binding_is_rejected(self):
+        for field in ("head", "run", "attempt", "reports", "complete"):
+            document = completion_record()
+            del document[field]
+            problems = schema.validate_completion_record(document)
+            self.assertTrue(problems, f"a record without {field} must be rejected")
+            self.assertIn(field, problems[0])
+
+    def test_a_record_that_did_not_validate_is_not_a_record(self):
+        problems = schema.validate_completion_record(completion_record(complete=False))
+        self.assertTrue(problems)
+        self.assertIn("complete", problems[0])
+
+    def test_an_unknown_field_is_rejected_rather_than_carried(self):
+        problems = schema.validate_completion_record(completion_record(verdict="green"))
+        self.assertTrue(problems)
+        self.assertIn("verdict", problems[0])
+
+    def test_a_future_version_is_refused_by_version_before_field_set(self):
+        future = completion_record(schema_version=99)
+        problems = schema.validate_completion_record(future)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("completion-manifest-schema", problems[0])
+
+    def test_an_unknown_environment_or_gate_is_rejected(self):
+        for field, value in (("environment", "solaris"), ("gate", "L9")):
+            problems = schema.validate_completion_record(
+                completion_record(**{field: value})
+            )
+            self.assertTrue(problems, f"an unknown {field} must be rejected")
+            self.assertIn("completion-cell-unknown", problems[0])
+
+    def test_a_record_naming_a_short_revision_is_rejected(self):
+        problems = schema.validate_completion_record(completion_record(head="bbbb"))
+        self.assertTrue(problems)
+        self.assertIn("completion-plan-unreadable", problems[0])
+
+    def test_every_rejection_this_validator_emits_is_in_the_vocabulary(self):
+        emitted = set()
+        for document in (
+            {},
+            completion_record(schema_version=99),
+            completion_record(environment="solaris"),
+            completion_record(head="bbbb"),
+            completion_record(complete=False),
+            completion_record(reports="L1/claudine.xml"),
+        ):
+            for problem in schema.validate_completion_record(document):
+                emitted.add(problem.split(":", 1)[0])
+        self.assertTrue(emitted)
+        self.assertTrue(
+            emitted <= set(schema.COMPLETION_REJECTIONS),
+            f"undeclared rejection codes: {sorted(emitted - set(schema.COMPLETION_REJECTIONS))}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Direct cell execution (features/2026-09-19-direct-cell-execution), Phase 2.
+#
+# Every fixture below is a pending oracle: it asserts the version-5 plan
+# contract Phase 3 of that feature implements, and today it fails for the
+# recorded reason. The shapes are pinned here so Phase 3 implements exactly
+# this vocabulary:
+#
+# - plan-level `skip_policy` (REQUIRED): the snapshot of
+#   `.github/ci/ci-baseline.toml` with `{source, content_hash, entries}` and
+#   per-entry `{package, environment, gate, owner, reason, source_run}` plus
+#   optional `backend` and `expiry`;
+# - area-level `execution_path` (REQUIRED): "rows" (ruling R9; `lists` was
+#   admitted until Phase 7 retired the per-area switch);
+# - cell-level `profile` (optional in the table, required by consistency on
+#   exactly an executing L1/L2/browser cell) and `requires_node` (optional
+#   boolean, absent reads as false);
+# - new rejection codes `skip-policy-cell`, `skip-policy-expired`, and
+#   `skip-policy-provenance`, joining REJECTIONS;
+# - `validate_resolved_plan(document, today=None)`: the optional date is what
+#   turns an expired approval into a planner-time coded error (ruling R8).
+# ---------------------------------------------------------------------------
+
+
+def skip_policy(**overrides: object) -> dict:
+    """A well-formed snapshot of an empty baseline file.
+
+    The shipped `ci-baseline.toml` is empty, so the honest snapshot carries no
+    entries; the fixture adds one through `entries=` where a case needs it.
+    """
+    document: dict = {
+        "source": ".github/ci/ci-baseline.toml",
+        "content_hash": "0123456789abcdef",
+        "entries": [],
+    }
+    entries = overrides.pop("entries", None)
+    if entries is not None:
+        document["entries"] = entries
+    document.update(overrides)
+    return document
+
+
+def skip_entry(**overrides: object) -> dict:
+    record: dict = {
+        "package": "claudine",
+        "environment": "ubuntu-latest",
+        "gate": "L1",
+        "owner": "@ken",
+        "reason": "flaky under load; tracked in the baseline file",
+        "source_run": "12345678901",
+    }
+    record.update(overrides)
+    return record
+
+
+class DirectExecutionSchemaOracleTests(unittest.TestCase):
+    """Pending contracts for the version-5 resolved plan (Phase 3 implements)."""
+
+    def v5_plan(self, **overrides: object) -> dict:
+        """A complete version-5 document: today's shape plus the new fields."""
+        document = plan(
+            skip_policy=skip_policy(
+                entries=[skip_entry(backend="tmux", expiry="2027-06-30")]
+            ),
+        )
+        document["schema_version"] = schema.RESOLVED_PLAN_SCHEMA_VERSION
+        for entry in document["areas"]:
+            entry["execution_path"] = "rows"
+        for entry in document["cells"]:
+            if entry["execution"] == "execute" and entry["gate"] in schema.BUILD_GATES:
+                entry["profile"] = "ci"
+        document.update(overrides)
+        return document
+
+    def test_version_7_is_the_plans_schema_and_the_receipts_do_not_move(self):
+        self.assertEqual(
+            7,
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "the direct-cell-execution fields (rows, the skip policy, and an "
+            "executing L2 cell's backends) reached 6 on their own branch while "
+            "the archive-path guard's scope took 5 on main; 7 names the union",
+        )
+        self.assertEqual([], schema.validate_resolved_plan(self.v5_plan(), today="2026-09-20"))
+        # The version-5 plan schema moves alone: validation receipts stay
+        # reusable under their existing cell and gate-input checks, and the
+        # scope receipt keeps missing through its plan_schema_version check.
+        self.assertEqual(2, schema.RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.LEGACY_RECEIPT_SCHEMA_VERSION)
+        self.assertEqual(1, schema.SCOPE_RECEIPT_SCHEMA_VERSION)
+        shipped = json.loads(schema.CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(7, shipped["resolved_plan"]["schema_version"])
+
+    def test_a_version_4_plan_is_refused_by_version_before_field_set(self):
+        self.assertEqual(
+            7,
+            schema.RESOLVED_PLAN_SCHEMA_VERSION,
+            "a version-4 refusal only exists once the tool writes a later plan schema",
+        )
+        stale = self.v5_plan()
+        stale["schema_version"] = 4
+        # A stale document also differs in shape; the version complaint must
+        # still be the only one, or a reader is sent after a corrupt document
+        # when the answer is that this tool moved on.
+        del stale["skip_policy"]
+        problems = schema.validate_resolved_plan(stale)
+        self.assertEqual(
+            [
+                "unknown-schema-version: resolved plan is version 4, this tool "
+                "writes 7"
+            ],
+            problems,
+        )
+
+    def test_the_new_execution_fields_are_required_where_the_spec_requires_them(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "skip_policy is a REQUIRED plan field: an optional snapshot would "
+            "let a plan silently lack the exact-skip policy (skip_policy is "
+            "the version-5 field this contract waits for)",
+        )
+        self.assertIs(True, schema.RESOLVED_PLAN_FIELDS["skip_policy"])
+        self.assertIn("execution_path", schema.AREA_FIELDS)
+        self.assertIs(True, schema.AREA_FIELDS["execution_path"])
+        # Optional in the table, required by consistency exactly where the
+        # specification assigns them.
+        self.assertIs(False, schema.CELL_FIELDS.get("profile"))
+        self.assertIs(False, schema.CELL_FIELDS.get("requires_node"))
+
+        missing_policy = self.v5_plan()
+        del missing_policy["skip_policy"]
+        self.assertIn(
+            "malformed-receipt: resolved plan is missing required field 'skip_policy'",
+            schema.validate_resolved_plan(missing_policy, today="2026-09-20"),
+        )
+        missing_path = self.v5_plan()
+        for entry in missing_path["areas"]:
+            entry.pop("execution_path")
+        self.assertTrue(
+            any(
+                "execution_path" in problem
+                for problem in schema.validate_resolved_plan(
+                    missing_path, today="2026-09-20"
+                )
+            ),
+            "an area record without its execution path must be refused by name",
+        )
+
+    def test_an_area_on_the_environment_list_path_is_refused(self):
+        # No shipped workflow dispatches environment lists any more (Phase 7),
+        # so a plan claiming that path would describe work nothing runs. The
+        # native and the quoted-by-hand spellings are both outside the
+        # vocabulary; only `rows` is admitted.
+        self.assertEqual(("rows",), schema.EXECUTION_PATHS)
+        self.assertEqual([], schema.validate_resolved_plan(self.v5_plan(), today="2026-09-20"))
+        for claimed in ("lists", "LISTS", "", None, ["rows"]):
+            with self.subTest(execution_path=claimed):
+                document = self.v5_plan()
+                document["areas"][0]["execution_path"] = claimed
+                problems = schema.validate_resolved_plan(document, today="2026-09-20")
+                self.assertTrue(
+                    any(
+                        problem.startswith("malformed-receipt")
+                        and "execution_path" in problem
+                        for problem in problems
+                    ),
+                    f"{claimed!r} was admitted: {problems}",
+                )
+
+    def test_an_entry_naming_a_cell_the_plan_does_not_carry_is_rejected(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-cell rejection this fixture waits for cannot exist "
+            "while the plan carries no skip_policy",
+        )
+        document = self.v5_plan(
+            skip_policy=skip_policy(
+                entries=[
+                    skip_entry(),
+                    skip_entry(package="claudine", environment="macos-latest", gate="lint"),
+                ]
+            ),
+        )
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any(problem.startswith("skip-policy-cell:") for problem in problems),
+            f"an approval for a cell the plan does not carry is a coded "
+            f"rejection, not a silent pass: {problems}",
+        )
+
+    def test_an_expired_entry_is_rejected_with_a_coded_reason(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-expired rejection this fixture waits for cannot "
+            "exist while the plan carries no skip_policy",
+        )
+        document = self.v5_plan(
+            skip_policy=skip_policy(entries=[skip_entry(expiry="2026-01-01")]),
+        )
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any(problem.startswith("skip-policy-expired:") for problem in problems),
+            f"an expired approval is a planner-time error (ruling R8): {problems}",
+        )
+        # An unexpired entry on the same shape stays valid, so the rule is the
+        # expiry and not the presence of the field.
+        fresh = self.v5_plan(
+            skip_policy=skip_policy(entries=[skip_entry(expiry="2027-06-30")]),
+        )
+        self.assertEqual([], schema.validate_resolved_plan(fresh, today="2026-09-20"))
+
+    def test_malformed_provenance_is_rejected_with_a_coded_reason(self):
+        self.assertIn(
+            "skip_policy",
+            schema.RESOLVED_PLAN_FIELDS,
+            "the skip-policy-provenance rejection this fixture waits for cannot "
+            "exist while the plan carries no skip_policy",
+        )
+        no_hash = skip_policy()
+        del no_hash["content_hash"]
+        for broken in (
+            skip_policy(content_hash="not-hex!"),
+            skip_policy(source=""),
+            no_hash,
+        ):
+            with self.subTest(policy=broken):
+                document = self.v5_plan(skip_policy=broken)
+                problems = schema.validate_resolved_plan(document, today="2026-09-20")
+                self.assertTrue(
+                    any(
+                        problem.startswith("skip-policy-provenance:")
+                        for problem in problems
+                    ),
+                    f"provenance names the file and its content hash; a "
+                    f"snapshot that cannot say what it read excuses nothing: "
+                    f"{problems}",
+                )
+
+    def test_a_profile_belongs_to_exactly_an_executing_test_cell(self):
+        self.assertIn("profile", schema.CELL_FIELDS)
+        document = self.v5_plan()
+        executing_l1 = next(
+            entry
+            for entry in document["cells"]
+            if entry["gate"] == "L1" and entry["execution"] == "execute"
+        )
+        del executing_l1["profile"]
+        problems = schema.validate_resolved_plan(document, today="2026-09-20")
+        self.assertTrue(
+            any("profile" in problem for problem in problems),
+            f"an executing test cell without its canonical profile leaves the "
+            f"consumer to guess the selection: {problems}",
+        )
+        # The negative half: a lint cell carries no nextest profile at all.
+        linting = self.v5_plan(
+            cells=[cell(gate="lint", execution="execute", build=None, profile="ci")],
+        )
+        linting["cells"][0].pop("build", None)
+        problems = schema.validate_resolved_plan(linting, today="2026-09-20")
+        self.assertTrue(
+            any("profile" in problem for problem in problems),
+            f"a lint gate runs no nextest selection; a profile on it is a "
+            f"misbinding: {problems}",
+        )
+
+    def test_the_skip_policy_codes_join_the_rejection_vocabulary(self):
+        for code in ("skip-policy-cell", "skip-policy-expired", "skip-policy-provenance"):
+            self.assertIn(code, schema.REJECTIONS)
+        self.assertIn("skip-policy-cell", schema.contract()["vocabulary"]["rejections"])
+
+
+class CellBackendsValidationTests(unittest.TestCase):
+    """Version 6: an executing L2 cell names the backends its producer must prove.
+
+    `completion.py` reads that list and nothing else, so the schema refuses the
+    three shapes that would leave it guessing or bind a proof to the wrong gate.
+    """
+
+    def l2_plan(self, **cell_overrides: object) -> dict:
+        return plan(
+            packages=[package(tiers=["L1", "L2"], l2_backends=["tmux", "wezterm"])],
+            cells=[cell(gate="L2", **cell_overrides)],
+        )
+
+    def test_the_hostable_subset_on_an_executing_l2_cell_validates(self):
+        self.assertEqual([], schema.validate_resolved_plan(self.l2_plan(backends=["tmux"])))
+        self.assertIs(False, schema.CELL_FIELDS["backends"])
+
+    def test_an_executing_l2_cell_without_backends_is_malformed(self):
+        problems = schema.validate_resolved_plan(self.l2_plan())
+        self.assertTrue(
+            any("names no required backend" in problem for problem in problems), problems
+        )
+        for empty in ([], "tmux"):
+            with self.subTest(backends=empty):
+                problems = schema.validate_resolved_plan(self.l2_plan(backends=empty))
+                self.assertTrue(
+                    any("non-empty list of strings" in problem for problem in problems),
+                    problems,
+                )
+
+    def test_backends_on_a_non_l2_or_non_executing_cell_are_malformed(self):
+        l1 = plan(cells=[cell(gate="L1", backends=["tmux"])])
+        gap = plan(
+            packages=[package(tiers=["L1", "L2"], l2_backends=["tmux"])],
+            cells=[
+                cell(
+                    environment="windows-latest",
+                    gate="L2",
+                    execution="omit",
+                    origin="none",
+                    state="accepted-gap",
+                    gap={"owner": "@o", "reason": "no backend", "expiry": "2027-01-31"},
+                    backends=["tmux"],
+                )
+            ],
+        )
+        for label, document in (("L1", l1), ("gap", gap)):
+            with self.subTest(label):
+                problems = schema.validate_resolved_plan(document)
+                self.assertTrue(
+                    any("not an executing L2 cell" in problem for problem in problems),
+                    problems,
+                )
+
+    def test_a_backend_the_package_does_not_declare_is_malformed(self):
+        problems = schema.validate_resolved_plan(self.l2_plan(backends=["tmux", "kitty"]))
+        self.assertTrue(
+            any("'kitty'" in problem and "l2_backends" in problem for problem in problems),
+            problems,
+        )
 
 
 class PendingHarnessTests(unittest.TestCase):

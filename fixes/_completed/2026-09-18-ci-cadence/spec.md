@@ -2,7 +2,7 @@
 kind: fix
 name: ci-cadence
 date: 2026-09-18
-status: implementing
+status: complete
 related:
   - 2026-09-12-single-os-compile
 ---
@@ -77,6 +77,18 @@ version moves with the required set). A scope receipt is bound to its event:
 `scope-verify --event` refuses a receipt planned for another event with
 `scope-event-mismatch`, and the hook plans `push` for `main` and
 `pull_request` for every other branch.
+
+## Completion (2026-09-19)
+
+All five decisions shipped on 2026-09-18 (9b441396b, documented in
+269fc596c) and merged to `main` with PR #83 on 2026-09-19. Their first
+hosted runs exposed three consumers of the new policy that had to follow:
+`requires-toolchain` packages now provision the pinned toolchain on their
+consumers, `ci-rollup` accepts environments schema version 3, and the
+publisher writes whole-second upload windows — all on `main` with #83. The
+nightly's shape was narrowed the next day by 2026-09-19-nightly-scope, which
+this spec's Decisions section records as an amendment. The two items below
+stay deliberately not done.
 
 ## Not done
 
