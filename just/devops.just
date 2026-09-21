@@ -1306,22 +1306,20 @@ _test pkg *args="": _storage_preflight
     echo -e "✅ {{ green }} all tests passing in {{ bold }}{{ pkg }}{{ reset }}{{ green }} package{{ reset }}"
     echo
 
-# Emit the expected-test manifest that `ci-rollup --expected-manifest` consumes.
+# Emit the expected-test manifest `scripts/ci/completion.py` compares against.
 #
 # A JUnit report cannot distinguish a test that does not exist on this
 # environment (compile-time `#[cfg]`) from a test that silently stopped running:
 # both are simply absent. Absence must therefore never be *inferred* from the
-# report — the rollup marks every skip-budgeted cell `skip-evidence-degraded`
-# until something tells it what the compiled binaries on this environment
-# actually contain. `cargo nextest list` is that something, which is why the
-# manifest has to be generated ON the target environment.
+# report. `cargo nextest list` is what tells a producer what the compiled
+# binaries on this environment actually contain, which is why the manifest has
+# to be generated ON the execution target, from the same binaries the gate ran.
 #
 # The hazard it closes is live: `_test` passes `--no-tests=pass`, so a tier that
-# selects zero tests exits 0 and stages a valid, empty report. The rollup renders
-# that `NOTHING TO RUN` — correct in isolation, since a tier with no tests is
-# not a PASS — so a drifted filter expression would quietly downgrade a real
-# package to NOTHING TO RUN with nothing anywhere failing. Comparing against
-# the manifest turns that into N absent tests.
+# selects zero tests exits 0 and stages a valid, empty report — a drifted filter
+# expression would quietly downgrade a real package to "nothing to run" with
+# nothing anywhere failing. Comparing against the manifest turns that into N
+# absent tests.
 #
 # `tier` is `L1` / `L2` / `L3` / `browser` / `real` / `sanity`. `specs` follows
 # `_run_all`: whitespace-separated package names, or — when it contains a `;` —
@@ -1331,8 +1329,47 @@ _test pkg *args="": _storage_preflight
 #
 # Writes `$STAGE/expected-<tier>.json`, where `$STAGE` is the staging directory
 # `_stage_junit` uses. `environment` comes from `$BISCUIT_CI_ENVIRONMENT` — the
-# same value the manifest records carry, because the rollup keys expectations by
-# `{environment, tier}` and has no other way to join the two.
+# same value the manifest records carry, because expectations are keyed by
+# `{environment, tier}` and there is no other way to join the two.
+#
+# ## Schema version 2
+#
+# Version 1 recorded only the identities the tier selected, so an identity that
+# never appeared in the report could be a `cfg`-absent test, an `#[ignore]`d
+# one, another tier's, or a lost one — four different verdicts wearing the same
+# silence. Version 2 splits them and records where the listing came from:
+#
+# * `tests` / `ignored` / `excluded` — the three disjoint identity sets, from
+#   `filter-match.status` and its `reason` (S2 proved `ignored` and `expression`
+#   are distinguishable at the resolved version). A `cfg`-excluded test is in
+#   none of them: it is absent from the listing entirely, which is the correct
+#   answer for this target and the reason `target` is recorded.
+# * `target` — read from the listing's own `rust-build-meta`, not from `rustc`.
+#   An archive consumer has no compiler, and in archive mode this is the
+#   PRODUCER's target, which is exactly the one `cfg` was evaluated against.
+# * `nextest_version` — R4: the repository pins no version, so the guarantee is
+#   "the binary in this job", and the resolved string is recorded so a
+#   cross-host mismatch is visible after the fact.
+# * `selection` — the expression, profile, and test arguments applied. An ad hoc
+#   `-E 'test(one_name)'` shrinks the expected and the observed sets together
+#   and is invisible to a set comparison; recording what was selected with is
+#   what lets `completion.py` refuse it.
+# * `backends` / `companion_suites` — optional, and only what this job was TOLD
+#   to require (`$BISCUIT_TEST_REQUIRED_BACKENDS`,
+#   `$BISCUIT_CI_COMPANION_SUITES`). The plan remains the source of truth;
+#   `completion.py` cross-checks these against it, so a job provisioned for
+#   different work than the plan scheduled says so.
+#
+# ## Listing runs the test binaries, so provisioning comes first
+#
+# `nextest list` executes each test binary to enumerate its tests. A binary
+# that needs a native library, a sidecar, or a pinned toolchain fails to start
+# here exactly as it would in the gate — so the caller must provision native
+# prerequisites, sidecars, backends, and (for `requires-toolchain` packages) the
+# toolchain BEFORE calling this recipe. A consumer needs no compiler to list:
+# archive mode runs the binaries the producer already built. A listing failure
+# is reported with that order named, because an unprovisioned listing looks
+# identical to a drifted filter otherwise.
 _expected_manifest tier specs *args="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1397,10 +1434,27 @@ _expected_manifest tier specs *args="":
         exit 1
     fi
 
+    # R4: no version is pinned anywhere in this repository, so the guarantee is
+    # "the binary this job installed". Record its first `--version` line; the
+    # remaining lines are recoverable from it.
+    # Captured whole, then trimmed: `… --version | head -n 1` closes the pipe
+    # after one line, and under `pipefail` the resulting EPIPE would fail the
+    # recipe on a host whose pipe buffer is smaller than the version banner.
+    version_banner="$("${nextest_bin[@]}" --version 2>/dev/null || true)"
+    nextest_version="${version_banner%%$'\n'*}"
+    if [[ -z "${nextest_version}" ]]; then
+        echo "_expected_manifest: '${nextest_bin[*]} --version' produced nothing." >&2
+        echo "  The manifest records which nextest listed it, so a cross-host" >&2
+        echo "  mismatch is visible after the fact; an unlabelled listing is not." >&2
+        exit 1
+    fi
+
     parts_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-expected-parts.XXXXXX")"
     listing="$(mktemp "${TMPDIR:-/tmp}/biscuit-expected-list.XXXXXX")"
     trap 'rm -f "${parts_file}" "${listing}"' EXIT
 
+    target=""
+    applied_filter=""
     for entry in "${entries[@]}"; do
         # Word-splitting is the point: an entry is `<package> [extra args…]`.
         # shellcheck disable=SC2206
@@ -1419,36 +1473,107 @@ _expected_manifest tier specs *args="":
                 list_args+=("${kept_arg}")
             done < <(just _archive_drop_build_flags ${extra[@]+"${extra[@]}"} ${forwarded[@]+"${forwarded[@]}"})
         fi
+        # One package: the expression actually applied. Several: the tier's own,
+        # because there is no single applied expression to honestly name.
+        if (( ${#entries[@]} == 1 )); then
+            applied_filter="${filter}"
+        else
+            applied_filter="$(just _tier_filter '{{ tier }}')"
+        fi
 
         echo -e "🧾 Listing {{ bold }}{{ tier }}{{ reset }} tests for {{ bold }}${package}{{ reset }} on {{ bold }}${environment}{{ reset }}"
-        "${nextest_bin[@]}" list ${selection[@]+"${selection[@]}"} -E "${filter}" \
-            --message-format json ${list_args[@]+"${list_args[@]}"} > "${listing}"
+        if ! "${nextest_bin[@]}" list ${selection[@]+"${selection[@]}"} -E "${filter}" \
+            --message-format json ${list_args[@]+"${list_args[@]}"} > "${listing}"; then
+            echo >&2
+            echo "_expected_manifest: listing ${package} failed." >&2
+            echo "  Listing RUNS each test binary to enumerate it, so this fails for the" >&2
+            echo "  same reasons the gate would: an unprovisioned native prerequisite, a" >&2
+            echo "  missing sidecar or backend, or an absent pinned toolchain. Provision" >&2
+            echo "  before listing; do not narrow the filter to get past it." >&2
+            exit 1
+        fi
 
-        # `list` reports EVERY discovered test with a `filter-match` verdict, so
-        # the manifest must keep only `matches` — an `#[ignore]`d or
-        # filtered-out test is not expected to produce a result. Identity is
-        # `<binary-id>::<test name>`, which is exactly how the rollup rebuilds it
-        # from JUnit `<testsuite name>` + `<testcase name>`.
+        # `list` reports EVERY discovered test with a `filter-match` verdict, and
+        # v2 keeps all three verdicts apart: `matches` must produce a result,
+        # `mismatch`+`ignored` was excused by `#[ignore]`, and `mismatch`+
+        # anything else is another tier's. Identity is `<binary-id>::<test
+        # name>`, which is how a JUnit `<testsuite name>` + `<testcase name>`
+        # rebuilds it. `test-count` counts discoveries, never matches (S2).
         jq -c --arg pkg "${package}" '
-            { ($pkg): [ .["rust-suites"]
-                        | to_entries[]
-                        | . as $suite
-                        | select($suite.value["package-name"] == $pkg)
-                        | $suite.value.testcases
-                        | to_entries[]
-                        | select(.value["filter-match"].status == "matches")
-                        | ($suite.value["binary-id"] + "::" + .key)
-                      ] | unique }
+            def cases:
+                .["rust-suites"] | to_entries[] as $e
+                | select($e.value["package-name"] == $pkg)
+                | (($e.value.testcases) // {}) | to_entries[]
+                | { id: ((($e.value["binary-id"]) // $e.key) + "::" + .key),
+                    m: (.value["filter-match"]) };
+            { ($pkg): {
+                tests:    ([ cases | select(.m.status == "matches") | .id ] | unique),
+                ignored:  ([ cases | select(.m.status != "matches" and .m.reason == "ignored") | .id ] | unique),
+                excluded: ([ cases | select(.m.status != "matches" and .m.reason != "ignored") | .id ] | unique) } }
         ' "${listing}" >> "${parts_file}"
+
+        if [[ -z "${target}" ]]; then
+            # The listing's own build metadata, so no consumer needs `rustc`.
+            # `target-platforms` is the compiled-for triple; the host platform
+            # is the fallback for a listing that names no explicit target.
+            target="$(jq -r '
+                .["rust-build-meta"]
+                | (.["target-platforms"][0].triple?
+                   // .platforms.host.platform.triple?
+                   // .["target-platform"]?
+                   // empty)
+            ' "${listing}")"
+        fi
     done
 
+    if [[ -z "${target}" ]]; then
+        echo "_expected_manifest: the listing named no target triple." >&2
+        echo "  A listing from another target proves nothing about this one —" >&2
+        echo "  cfg-compiled tests differ — so an unlabelled manifest is refused." >&2
+        exit 1
+    fi
+
+    from_archive=false
+    if (( archive_mode == 1 )); then
+        from_archive=true
+    fi
+
+    # Optional, and only what THIS job was told to require. The plan stays the
+    # source of truth; `completion.py` refuses a disagreement rather than
+    # preferring either side.
+    backends_json='[]'
+    if [[ -n "${BISCUIT_TEST_REQUIRED_BACKENDS:-}" ]]; then
+        backends_json="$(printf '%s' "${BISCUIT_TEST_REQUIRED_BACKENDS}" \
+            | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | unique')"
+    fi
+    companions_json='[]'
+    if [[ -n "${BISCUIT_CI_COMPANION_SUITES:-}" ]]; then
+        companions_json="$(printf '%s' "${BISCUIT_CI_COMPANION_SUITES}" \
+            | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | unique')"
+    fi
+
     out="${stage}/expected-{{ tier }}.json"
-    jq -s --arg environment "${environment}" --arg tier '{{ tier }}' \
-        '{schema_version: 1, environment: $environment, tier: $tier, packages: (add // {})}' \
+    jq -s \
+        --arg environment "${environment}" \
+        --arg tier '{{ tier }}' \
+        --arg target "${target}" \
+        --arg nextest_version "${nextest_version}" \
+        --argjson from_archive "${from_archive}" \
+        --arg filter "${applied_filter}" \
+        --arg profile "${NEXTEST_PROFILE:-default}" \
+        --arg test_args '{{ args }}' \
+        --argjson backends "${backends_json}" \
+        --argjson companion_suites "${companions_json}" \
+        '{schema_version: 2, environment: $environment, tier: $tier, target: $target,
+          nextest_version: $nextest_version, from_archive: $from_archive,
+          selection: {filter: $filter, profile: $profile, test_args: $test_args},
+          backends: $backends, companion_suites: $companion_suites,
+          packages: (add // {})}' \
         "${parts_file}" > "${out}"
 
-    total="$(jq '[.packages[] | length] | add // 0' "${out}")"
-    echo -e "✅ {{ green }}expected-test manifest{{ reset }} ${out} {{ dim }}(${total} tests){{ reset }}"
+    total="$(jq '[.packages[].tests | length] | add // 0' "${out}")"
+    other="$(jq '[.packages[] | (.ignored | length) + (.excluded | length)] | add // 0' "${out}")"
+    echo -e "✅ {{ green }}expected-test manifest{{ reset }} ${out} {{ dim }}(${total} expected, ${other} ignored/excluded, ${target}){{ reset }}"
 
 # Run Level-1 tests for every workspace package, continuing after failures.
 #

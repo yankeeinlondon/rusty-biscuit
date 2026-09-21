@@ -108,7 +108,10 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 - **Relative `cd` into a package area can land elsewhere** when `CDPATH` is
   set; the shell stays at the repo root and `just lint`/`just test` run the
   root recipes, surfacing unrelated packages' failures. Use absolute paths and
-  confirm with `pwd`.
+  confirm with `pwd`. An *exported* `CDPATH` also makes `cd` print the path,
+  so `$(cd … && pwd)` captures it twice: `.githooks/tests/test-pre-push.sh`
+  then fails at once with `FAIL: hook not executable at <root>\n<root>/…`.
+  Run it as `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
 - **`#!/usr/bin/env bash` selects `/bin/bash` 3.2 on a stock Mac**, which
   under `set -u` rejects `"${arr[@]}"` on an empty array as unbound and aborts
   the script. Homebrew's Bash 5 accepts it, so the script runs for whoever has

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Canonical CI contracts: the resolved plan, the validation receipt, and the
-scope receipt.
+"""Canonical CI contracts: the resolved plan, the validation receipt, the scope
+receipt, and the two documents a producer proves itself with — the expected-test
+manifest and the completion record.
 
 One module owns both documents so the planner, the evidence verifier, the hook,
 and the Rust rollup cannot drift into private copies of the same vocabulary.
@@ -75,8 +76,33 @@ inventory it reads. The guard scans repository source for compile-time paths
 that do not survive an archived run, and the planner is the only thing that
 knows which files an event put in scope; a plan that carried no answer would
 leave the guard choosing between an empty scan and a full one, and it refuses
-to guess. A version-4 scope receipt misses once as `scope-schema`, for the same
-reason every earlier one did.
+to guess.
+
+`2026-09-19-direct-cell-execution` numbered its own changes 5 and 6 on a
+branch developed alongside it: the hosted workflows stop consuming environment
+lists and expand one matrix row per executing cell, so every input a downstream
+job used to receive as a workflow argument has to be answerable from the plan
+alone. It adds the plan-level `skip_policy` snapshot of
+`.github/ci/ci-baseline.toml` (ruling R8 — producers and the audit read the
+plan, never the file), the area-level `execution_path` that says which dispatch
+form that area is on (R9), the per-cell `profile` and `requires_node`
+execution inputs, and an executing L2 cell's `backends`, the hostable subset
+its producer must prove.
+
+Version 7 is those two together, for the reason version 4 exists: "5" named two
+incompatible shapes. A version-4, -5, or -6 scope receipt misses once as
+`scope-schema`; `RECEIPT_SCHEMA_VERSION` again does not move, because neither a
+scheduling representation nor a scan scope is a reason to invalidate a
+validated cell.
+
+The direct-cell-execution work adds two producer-side documents on their own
+version lines. `EXPECTED_MANIFEST_SCHEMA_VERSION` moves 1 → 2: a v1 manifest
+listed only the identities a tier selected, which cannot tell a test that was
+never compiled on this target from one that stopped running, so v2 records the
+ignored and excluded identities and the provenance of the listing.
+`COMPLETION_RECORD_SCHEMA_VERSION` starts at 1 — the artifact a producer
+publishes to say it ran what the plan scheduled. Neither touches the plan or
+the receipt.
 """
 
 from __future__ import annotations
@@ -84,6 +110,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +118,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 
-RESOLVED_PLAN_SCHEMA_VERSION = 5
+RESOLVED_PLAN_SCHEMA_VERSION = 7
 RECEIPT_SCHEMA_VERSION = 2
 
 #: The scope receipt: what the planner selected for one exact `{base, head,
@@ -104,6 +131,18 @@ SCOPE_RECEIPT_SCHEMA_VERSION = 1
 #: exact tree identity, pass-only, whole-environment, and never upgraded in
 #: place (spec section 3.6).
 LEGACY_RECEIPT_SCHEMA_VERSION = 1
+
+#: The producer's expected-test manifest (`just/devops.just::_expected_manifest`).
+#: Version 2 records `ignored` and `excluded` identities explicitly instead of
+#: dropping them, and carries the provenance — environment, tier, target,
+#: resolved nextest version, archive mode, and the selection applied — without
+#: which a listing proves nothing about the report it is compared to.
+EXPECTED_MANIFEST_SCHEMA_VERSION = 2
+
+#: The producer completion record (`scripts/ci/completion.py`). Written only
+#: after validation succeeds, so `complete: true` cannot exist without the
+#: evidence behind it (ruling R10).
+COMPLETION_RECORD_SCHEMA_VERSION = 1
 
 #: Rendered in place of counts and duration for a version-1 receipt. Verbatim
 #: from spec section 3.6 — the text is part of the contract, not decoration.
@@ -139,6 +178,30 @@ ORIGINS = ("ci", "local", "prior-local", "none")
 
 #: The plan-time state of a cell, before any result exists.
 CELL_STATES = ("pending", "reused", "accepted-gap", "prohibited")
+
+#: How an area's work reaches its hosted jobs: one matrix row per executing
+#: cell. The environment-list form (`lists`) is not admitted, because no
+#: shipped workflow can dispatch it; a plan that claimed it would describe work
+#: nothing runs. Ruling R9's per-area switch was replaced by an all-areas
+#: switch whose rollback is a revert (Phase 7 of
+#: `2026-09-19-direct-cell-execution`); Phase 8 retires this field.
+EXECUTION_PATHS = ("rows",)
+
+#: One dispatch row's keys, in the order a matrix job's label renders them
+#: (ruling R1). Dispatch identity only: everything else a job needs it resolves
+#: from the plan by the `{package, environment, gate}` this row names.
+ROW_FIELDS = ("package", "gate", "environment", "runner")
+
+#: The four disjoint row sets one area dispatches. `wsl` takes every
+#: archive-only guest cell, `check` and `lint` their gates, and `test` the
+#: native test tiers; together they partition the area's executing cells.
+ROW_SET_NAMES = ("test", "check", "lint", "wsl")
+
+#: The nextest profile a hosted test cell runs under. One value today — the
+#: workflows export `NEXTEST_PROFILE: ci` for every tier — carried on the cell
+#: so the producer's expected-test listing and its gate command select from one
+#: recorded answer rather than two independent conventions.
+CI_PROFILE = "ci"
 
 #: Buckets of the plan's change inventory, in report order. Exhaustive and
 #: disjoint over the changed paths: `other` is the declared home for a path no
@@ -177,6 +240,14 @@ REJECTIONS = (
     "v1-requires-exact-tree",
     "v1-not-equivalence-eligible",
     "v1-is-pass-only",
+    #: The plan's snapshot of the exact-skip policy (ruling R8). All three are
+    #: planner-time errors: the snapshot travels in the artifact a carried scope
+    #: receipt reuses, so an approval that cannot be bound to a cell, one whose
+    #: expiry has passed, or a snapshot that cannot say what it read must be
+    #: refused here rather than surprising a producer hours later.
+    "skip-policy-cell",
+    "skip-policy-expired",
+    "skip-policy-provenance",
 )
 
 #: Why CI declined a scope receipt and calculated scope itself. Kept apart
@@ -217,6 +288,73 @@ BUILD_REJECTIONS = (
     "build-inventory-incomplete",
     "build-inventory-unexpected",
 )
+
+#: Why a producer refused to certify its own cell. Kept apart from every other
+#: rejection tuple: these are decided ON the producer, before any artifact is
+#: published, and each one means "this job did not prove what it was asked to
+#: prove" rather than "a test failed" or "an input was unreadable".
+COMPLETION_REJECTIONS = (
+    "completion-plan-unreadable",
+    "completion-cell-unknown",
+    "completion-cell-not-executing",
+    "completion-manifest-missing",
+    "completion-manifest-schema",
+    "completion-manifest-provenance",
+    "completion-manifest-target",
+    "completion-manifest-selection",
+    "completion-report-missing",
+    "completion-report-malformed",
+    "completion-report-duplicate",
+    "completion-test-missing",
+    "completion-test-unexpected",
+    "completion-test-failed",
+    "completion-skip-unapproved",
+    "completion-expected-empty",
+    "completion-companion-incomplete",
+    "completion-companion-failed",
+    "completion-backend-unproven",
+)
+
+#: Why a producer refused a dispatch row before running anything. A row carries
+#: dispatch identity alone, so every one of these means the row and the plan
+#: disagree about what this run scheduled — the class of defect direct cell
+#: execution exists to make impossible to ignore.
+CELL_CONTRACT_REJECTIONS = (
+    "cell-contract-row",
+    "cell-contract-head",
+    "cell-contract-unknown",
+    "cell-contract-duplicate",
+    "cell-contract-not-executing",
+    "cell-contract-mismatch",
+    "cell-contract-package",
+    "cell-contract-build",
+)
+
+#: The tier markers `_tier_filter` builds every canonical selection from. The
+#: filter STRINGS stay in `just/devops.just` — copying them here is the drift
+#: this feature exists to remove — but the vocabulary is what tells an ad hoc
+#: `-E 'test(one_test)'` apart from a tier expression, which is the only way a
+#: producer can notice a filter that shrank its expected and observed sets
+#: together. `test_completion.py` checks the shipped filters against it.
+TIER_MARKERS = ("level2_", "level3_", "browser_", "real_", "slow_", "perf_")
+
+#: What a canonical selection must say for each tier, as data rather than as
+#: the filter strings. `completion.py` binds a listing's recorded expression
+#: to the cell's gate through this table, so a `_tier_filter` that drifted to
+#: another tier's marker cannot certify itself: `nextest list` and `nextest
+#: run` would agree with each other and disagree with this. A positive tier
+#: selects exactly its own marker. An L1-shaped tier negates a union of
+#: markers that MUST take every other tier out and MAY also take out the
+#: L1-internal ones — `slow_` unless `l1-include-slow`, `perf_` for
+#: `worktree-cli` — because those two vary by package and switch, not by gate.
+CANONICAL_SELECTION: dict[str, Any] = {
+    "selects": {"L2": "level2_", "L3": "level3_", "browser": "browser_", "real": "real_"},
+    "excludes": {
+        "tiers": ["L1", "sanity"],
+        "must": ["level2_", "level3_", "browser_", "real_"],
+        "may": ["slow_", "perf_"],
+    },
+}
 
 #: Cap on `failed_tests` carried in a receipt cell. A failing L1 suite can name
 #: thousands of tests; a Git note is not a report store. Past the cap the cell
@@ -282,6 +420,18 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     #: plan schedules no owner at all.
     "builds": True,
     "accepted_evidence": True,
+    #: The snapshot of `.github/ci/ci-baseline.toml`'s approved exact-skip
+    #: budget, with the entries that apply to this plan's cells and provenance
+    #: naming the file and its content hash. Required: an optional snapshot
+    #: would let a plan silently carry no policy at all, and the producer that
+    #: decides whether an observed skip is approved reads only the plan.
+    "skip_policy": True,
+    #: The dispatch rows derived from the executing cells, `{area: {test,
+    #: check, lint, wsl, has_*_rows}}`. Optional and derived: `row_sets` is the
+    #: one function that computes it, every consumer re-derives rather than
+    #: trusting a carried copy, and it rides in the document so the renderer
+    #: and the workflow show the same dispatch.
+    "rows": False,
     #: Why each rejected receipt cell was refused, one coded reason per entry.
     #: Optional because a plan resolved with no evidence at all has nothing to
     #: report; `just ci-local --plan` renders it when present (AC7).
@@ -344,6 +494,37 @@ AREA_FIELDS: dict[str, bool] = {
     "area": True,
     "selection_reason": True,
     "packages": True,
+    #: Which dispatch form this area is on (ruling R9). Required, because
+    #: "unstated" is the one answer a workflow branching on it cannot act on.
+    "execution_path": True,
+}
+
+#: The plan's snapshot of the hand-edited exact-skip policy. `source` and
+#: `content_hash` are the provenance: which file was read and what it hashed
+#: to, so an audit reading the plan alone can say what policy it is applying.
+SKIP_POLICY_FIELDS: dict[str, bool] = {
+    "source": True,
+    "content_hash": True,
+    "entries": True,
+}
+
+#: One approved exact-test skip, keyed like every other stored result. `backend`
+#: narrows it to one L2 terminal backend; `expiry` is optional but an expired
+#: entry is refused rather than ignored.
+SKIP_ENTRY_FIELDS: dict[str, bool] = {
+    "package": True,
+    "environment": True,
+    "gate": True,
+    "owner": True,
+    "reason": True,
+    "source_run": True,
+    #: The exact `<testsuite>::<testcase>` identities approved, as the baseline
+    #: file spells them. Optional: an entry that names none approves any
+    #: observed skip in its cell, which is the widest an approval can be and
+    #: still be owned, dated, and attributable.
+    "tests": False,
+    "backend": False,
+    "expiry": False,
 }
 
 PACKAGE_FIELDS: dict[str, bool] = {
@@ -366,14 +547,14 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: binaries, compiled by the producer and shipped beside the archive
     #: because a consumer with no Cargo cannot build one.
     "sidecars": True,
-    #: The package's `l1-include-slow` policy, forwarded to the test job
-    #: through the legacy matrix; it is projected, never re-read.
+    #: The package's `l1-include-slow` policy, which `cell_contract.py` hands
+    #: the test job; it is resolved from the plan, never re-read.
     "l1_include_slow": True,
     "native": True,
     #: The package's `requires-toolchain` policy: its L1 drives `cargo`/`rustc`
     #: itself, so the consumer provisions the pinned toolchain where the
-    #: environment has `cargo_toolchain`. Projected into the matrix, never
-    #: re-read from the checkout. Optional (absent reads as false) so a plan
+    #: environment has `cargo_toolchain`. Resolved per cell by
+    #: `cell_contract.py`, never re-read from the checkout. Optional (absent reads as false) so a plan
     #: written before the field existed still projects.
     "requires_toolchain": False,
     #: The governance of a `gates = false` package: exclusion class, owner,
@@ -428,6 +609,23 @@ CELL_FIELDS: dict[str, bool] = {
     #: executing [`BUILD_GATES`] cell: a reused, governed, or prohibited cell
     #: consumes no build, and lint and check compile their own configurations.
     "build": False,
+    #: The nextest profile this cell's gate command and its expected-test
+    #: listing both select. Present exactly where `build` is, and for the same
+    #: reason: a lint or check gate drives no nextest selection at all, so a
+    #: profile on one is a misbinding rather than a harmless extra.
+    "profile": False,
+    #: Whether this cell provisions Node and pnpm before its gate. Optional and
+    #: present only when true, like `requires_toolchain`: absent reads as false,
+    #: so a plan written before the field existed still projects.
+    "requires_node": False,
+    #: The terminal backends THIS cell must prove drove a test: the sorted,
+    #: non-empty subset of the package's `l2_backends` that the cell's
+    #: environment can host. Present exactly on an executing L2 cell. The
+    #: producer requires these through `BISCUIT_TEST_REQUIRED_BACKENDS`, records
+    #: them in its expected manifest, and `completion.py` demands a proof for
+    #: each — reading the package-wide list instead is what refused every
+    #: mixed-backend cell before schema version 6.
+    "backends": False,
 }
 
 #: One immutable compile configuration, its native owner, and every result cell
@@ -544,7 +742,12 @@ SCOPE_PROJECTION_FIELDS = (
     "packages",
     "areas",
     "scheduled_areas",
-    "area_matrix",
+    #: The dispatch rows `ci.yml` hands each area, `{area: {test, check, lint,
+    #: wsl, has_*_rows}}`. A scope receipt is re-projected from its carried
+    #: plan rather than read back, so this is derived with everything else —
+    #: but it is what the fan-out expands, so a projection without it would
+    #: schedule nothing.
+    "area_rows",
     "area_slugs",
     "source_packages",
     "reverse_dependencies",
@@ -553,7 +756,6 @@ SCOPE_PROJECTION_FIELDS = (
     "change_class",
     "preflight_os",
     "preflight_reason",
-    "matrix",
     "policy",
     #: The deterministic native build-owner matrix, one entry per producer
     #: environment that owns at least one record. Derived from the final plan,
@@ -571,6 +773,85 @@ SCOPE_PROJECTION_FIELDS = (
 
 COUNT_FIELDS = ("total", "passed", "failed", "skipped", "errored")
 
+#: The producer's expected-test manifest. Every provenance field is required:
+#: a listing that cannot say which environment, tier, target, nextest binary,
+#: transport, and selection produced it is not comparable to any report, and
+#: the one thing a v1 manifest could not express — why an identity is absent —
+#: is exactly what the tightened skip rule now turns into a failure.
+EXPECTED_MANIFEST_FIELDS: dict[str, bool] = {
+    "schema_version": True,
+    "environment": True,
+    "tier": True,
+    #: The target triple the listed binaries were COMPILED for, read from the
+    #: listing itself. In archive mode that is the producer's target, not the
+    #: consumer's host — which is the point: `cfg` decided what exists when the
+    #: archive was built.
+    "target": True,
+    "nextest_version": True,
+    "from_archive": True,
+    "selection": True,
+    "packages": True,
+    #: The L2 terminal backends and companion suites the producer was told to
+    #: require. Optional, and cross-checked against the plan rather than trusted:
+    #: the plan is the source of truth, and a disagreement means the job was
+    #: provisioned for different work than the plan scheduled.
+    "backends": False,
+    "companion_suites": False,
+}
+
+#: What the listing selected with. `filter` is `_tier_filter`'s expression for
+#: this tier (package-scoped in archive mode); `profile` and `test_args` are the
+#: cell's and the package's, so a producer that ran something else says so.
+EXPECTED_SELECTION_FIELDS: dict[str, bool] = {
+    "filter": True,
+    "profile": True,
+    "test_args": True,
+}
+
+#: One package's listing. Three disjoint identity sets: `tests` is what must
+#: report a result, `ignored` what `#[ignore]` excused, and `excluded` what the
+#: tier expression did not select. A test compiled out by `cfg` appears in none
+#: of them — it does not exist on this target.
+EXPECTED_PACKAGE_FIELDS: dict[str, bool] = {
+    "tests": True,
+    "ignored": True,
+    "excluded": True,
+}
+
+#: The completion record, keyed like every other stored result. `complete` is
+#: never written false by a successful validation — the record exists only when
+#: the producer proved its cell, so an absent record and a false one are the
+#: same verdict to the audit (ruling R10).
+COMPLETION_RECORD_FIELDS: dict[str, bool] = {
+    "schema_version": True,
+    "package": True,
+    "environment": True,
+    "gate": True,
+    "complete": True,
+    #: The revision the plan was resolved for and this job tested.
+    "head": True,
+    "run": True,
+    "attempt": True,
+    #: The nextest binary that both listed and ran this cell's tests (R4).
+    #: Present exactly when the cell ran tests: a check or lint gate drives no
+    #: nextest at all, and a placeholder there would read as a version.
+    "nextest_version": False,
+    #: Every staged report the comparison read, relative to the staging tree.
+    #: The audit's inventory check: a record naming a report nothing uploaded
+    #: is unproven coverage.
+    "reports": True,
+    #: The planned build key this cell consumed, present exactly when the cell
+    #: references one.
+    "build": False,
+    #: The package's `input_paths` — what this gate's identity is computed over.
+    #: Optional because a plan may omit them, which simply makes the cell
+    #: exact-tree-only for reuse.
+    "gate_inputs": False,
+    #: The companion suites and L2 backends this cell proved, when it owed any.
+    "companions": False,
+    "backends": False,
+}
+
 
 def contract() -> dict[str, Any]:
     """The whole field contract, for cross-language assertion."""
@@ -585,6 +866,10 @@ def contract() -> dict[str, Any]:
             "build_consumer": BUILD_CONSUMER_FIELDS,
             "build_identity": BUILD_IDENTITY_FIELDS,
             "change_inventory": CHANGE_INVENTORY_FIELDS,
+            "skip_policy": SKIP_POLICY_FIELDS,
+            "skip_entry": SKIP_ENTRY_FIELDS,
+            "row": list(ROW_FIELDS),
+            "row_sets": list(ROW_SET_NAMES),
             "archive_guard": ARCHIVE_GUARD_FIELDS,
         },
         "receipt": {
@@ -597,6 +882,20 @@ def contract() -> dict[str, Any]:
             "counts": list(COUNT_FIELDS),
             "failure_detail_limit": FAILURE_DETAIL_LIMIT,
             "unrecorded_measurement": UNRECORDED_MEASUREMENT,
+        },
+        "expected_manifest": {
+            "schema_version": EXPECTED_MANIFEST_SCHEMA_VERSION,
+            "document": EXPECTED_MANIFEST_FIELDS,
+            "selection": EXPECTED_SELECTION_FIELDS,
+            "package": EXPECTED_PACKAGE_FIELDS,
+        },
+        "completion_record": {
+            "schema_version": COMPLETION_RECORD_SCHEMA_VERSION,
+            "document": COMPLETION_RECORD_FIELDS,
+            "rejections": list(COMPLETION_REJECTIONS),
+        },
+        "cell_contract": {
+            "rejections": list(CELL_CONTRACT_REJECTIONS),
         },
         "scope_receipt": {
             "schema_version": SCOPE_RECEIPT_SCHEMA_VERSION,
@@ -612,6 +911,8 @@ def contract() -> dict[str, Any]:
             "executions": list(EXECUTIONS),
             "origins": list(ORIGINS),
             "cell_states": list(CELL_STATES),
+            "execution_paths": list(EXECUTION_PATHS),
+            "ci_profile": CI_PROFILE,
             "change_buckets": list(CHANGE_BUCKETS),
             "archive_guard_modes": list(ARCHIVE_GUARD_MODES),
             "accepted_gap_state": ACCEPTED_GAP_STATE,
@@ -619,6 +920,9 @@ def contract() -> dict[str, Any]:
             "outcomes": list(OUTCOMES),
             "rejections": list(REJECTIONS),
             "build_rejections": list(BUILD_REJECTIONS),
+            "completion_rejections": list(COMPLETION_REJECTIONS),
+            "tier_markers": list(TIER_MARKERS),
+            "canonical_selection": CANONICAL_SELECTION,
         },
     }
 
@@ -873,14 +1177,179 @@ def _change_inventory(value: Any) -> list[str]:
     return problems
 
 
-def validate_resolved_plan(document: Any) -> list[str]:
+def _as_date(value: Any) -> date | None:
+    """`value` as a calendar date, or `None` when it is not one."""
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _skip_policy(value: Any, cells: set[tuple[str, str, str]], today: date) -> list[str]:
+    """Every reason `value` is not a valid exact-skip snapshot (ruling R8).
+
+    The provenance code covers the snapshot's own shape, not only a malformed
+    hash: a snapshot that cannot say which file it read and what that file
+    hashed to excuses nothing, however well-formed its entries are.
+    """
+    problems = _keys(
+        "resolved plan skip_policy", value, SKIP_POLICY_FIELDS, "skip-policy-provenance"
+    )
+    if problems:
+        return problems
+
+    if not isinstance(value["source"], str) or not value["source"]:
+        problems.append(
+            "skip-policy-provenance: resolved plan skip_policy names no source file"
+        )
+    content_hash = value["content_hash"]
+    if not isinstance(content_hash, str) or not _IDENTITY.fullmatch(content_hash):
+        problems.append(
+            f"skip-policy-provenance: resolved plan skip_policy content_hash "
+            f"{content_hash!r} is not a content digest"
+        )
+
+    entries = value["entries"]
+    if not isinstance(entries, list):
+        return problems + [
+            "malformed-receipt: resolved plan skip_policy entries must be a list"
+        ]
+    for index, entry in enumerate(entries):
+        label = f"resolved plan skip_policy entry {index}"
+        entry_problems = _keys(label, entry, SKIP_ENTRY_FIELDS)
+        problems += entry_problems
+        if entry_problems or not isinstance(entry, dict):
+            continue
+        problems += _member(
+            f"{label} environment", entry["environment"], ENVIRONMENTS, "unknown-environment"
+        )
+        problems += _member(f"{label} gate", entry["gate"], GATES, "unknown-gate")
+        problems += [
+            f"malformed-receipt: {label} has no {field}"
+            for field in ("owner", "reason", "source_run")
+            if not entry[field]
+        ]
+        if "tests" in entry:
+            problems += _str_list(f"{label} tests", entry["tests"])
+        if "backend" in entry and not (
+            isinstance(entry["backend"], str) and entry["backend"]
+        ):
+            problems.append(f"malformed-receipt: {label} names an empty backend")
+        key = (entry["package"], entry["environment"], entry["gate"])
+        if key not in cells:
+            problems.append(
+                f"skip-policy-cell: {label} approves {key[0]}/{key[1]}/{key[2]}, "
+                "which this plan does not carry; an approval nothing can bind to "
+                "is a policy the audit would never apply"
+            )
+        if "expiry" in entry:
+            expiry = _as_date(entry["expiry"])
+            if expiry is None:
+                problems.append(
+                    f"skip-policy-provenance: {label} expiry {entry['expiry']!r} is "
+                    "not a YYYY-MM-DD date"
+                )
+            elif expiry < today:
+                problems.append(
+                    f"skip-policy-expired: {label} expired on {entry['expiry']}; an "
+                    "expired approval is refused at planning time, not discovered by "
+                    "a producer"
+                )
+    return problems
+
+
+def _rows(value: Any, areas: set[str]) -> list[str]:
+    """Every reason `value` is not a valid dispatch-row document.
+
+    Shape, key order, area membership, and global uniqueness only. The join
+    back to the cells is deliberately not asserted here: `row_sets` derives the
+    document from the plan's cells in one place, and re-deriving it inside
+    validation would make the check agree with itself rather than with the
+    scheduler.
+    """
+    if not isinstance(value, dict):
+        return ["malformed-receipt: resolved plan rows must be an object"]
+    problems: list[str] = []
+    seen: dict[tuple[str, str, str], str] = {}
+    for area in sorted(value):
+        document = value[area]
+        if area not in areas:
+            problems.append(
+                f"malformed-receipt: resolved plan rows name area {area!r}, which "
+                "the plan does not select"
+            )
+        if not isinstance(document, dict):
+            problems.append(f"malformed-receipt: resolved plan rows {area} must be an object")
+            continue
+        expected = {*ROW_SET_NAMES, *(f"has_{name}_rows" for name in ROW_SET_NAMES)}
+        if set(document) != expected:
+            problems.append(
+                f"malformed-receipt: resolved plan rows {area} must carry exactly "
+                f"{sorted(expected)}"
+            )
+            continue
+        for name in ROW_SET_NAMES:
+            rows = document[name]
+            if not isinstance(rows, list):
+                problems.append(
+                    f"malformed-receipt: resolved plan rows {area} {name} must be a list"
+                )
+                continue
+            if document[f"has_{name}_rows"] is not bool(rows):
+                problems.append(
+                    f"malformed-receipt: resolved plan rows {area} has_{name}_rows "
+                    "must be true exactly when the row set is nonempty"
+                )
+            for row in rows:
+                # The key SET, not the key order: [`canonical`] sorts keys, so
+                # a plan that has been persisted once no longer spells a row in
+                # R1's order. That order is the emitter's contract — it is what
+                # GitHub renders a matrix job's label from, and `row_sets`
+                # builds every row in it — and it survives the `scope.json`
+                # projection the workflow actually expands.
+                if not isinstance(row, dict) or set(row) != set(ROW_FIELDS):
+                    problems.append(
+                        f"malformed-receipt: resolved plan rows {area} {name} carries "
+                        f"{row!r}, which is not a {list(ROW_FIELDS)} dispatch row"
+                    )
+                    continue
+                problems += _member(
+                    f"resolved plan rows {area} {name} environment",
+                    row["environment"],
+                    ENVIRONMENTS,
+                    "unknown-environment",
+                )
+                problems += _member(
+                    f"resolved plan rows {area} {name} gate", row["gate"], GATES, "unknown-gate"
+                )
+                key = (row["package"], row["environment"], row["gate"])
+                if key in seen:
+                    problems.append(
+                        f"conflicting-evidence: resolved plan rows dispatch "
+                        f"{key[0]}/{key[1]}/{key[2]} from both {seen[key]} and "
+                        f"{area}/{name}; one executing cell is exactly one row"
+                    )
+                seen[key] = f"{area}/{name}"
+    return problems
+
+
+def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     """Every reason `document` is not a valid resolved plan, or an empty list.
+
+    `today` is the date an approval's expiry is judged against, defaulting to
+    the current date. A caller that validates a stored document as of some
+    other day passes it explicitly.
 
     ## Returns
 
     Problems in document order. Each begins with a code from [`REJECTIONS`] so
     a caller can classify without parsing prose.
     """
+    judged = _as_date(today) or date.today()
     # Version before shape, deliberately. A document from an older schema
     # usually differs in BOTH, and the field check would then report the field
     # it lacks — sending the reader after a corrupt document when the answer is
@@ -917,6 +1386,13 @@ def validate_resolved_plan(document: Any) -> list[str]:
             if not entry.get("selection_reason"):
                 problems.append(
                     f"malformed-receipt: area {entry['area']!r} has no selection reason"
+                )
+            if "execution_path" in entry:
+                problems += _member(
+                    f"area {entry['area']} execution_path",
+                    entry["execution_path"],
+                    EXECUTION_PATHS,
+                    "malformed-receipt",
                 )
 
     packages = {}
@@ -1019,9 +1495,22 @@ def validate_resolved_plan(document: Any) -> list[str]:
                     f"malformed-receipt: {label} carries dependents but only a check "
                     "cell compiles them"
                 )
+        problems += _cell_backends(label, entry, packages.get(entry["package"]))
         problems += _cell_consistency(label, entry)
 
     problems += _build_records(document, packages)
+    problems += _skip_policy(
+        document["skip_policy"],
+        {
+            (entry["package"], entry["environment"], entry["gate"])
+            for entry in document["cells"]
+            if isinstance(entry, dict)
+            and {"package", "environment", "gate"} <= set(entry)
+        },
+        judged,
+    )
+    if "rows" in document:
+        problems += _rows(document["rows"], set(areas))
 
     if "evidence_rejections" in document:
         problems += _str_list(
@@ -1328,6 +1817,47 @@ def _dependent_seam(package: str, seam: Any) -> list[str]:
     return problems
 
 
+def _cell_backends(
+    label: str, entry: dict[str, Any], package: dict[str, Any] | None
+) -> list[str]:
+    """Every reason a cell's `backends` disagrees with its gate or its package.
+
+    An executing L2 cell with none would make `completion.py` guess what the
+    producer had to prove; one on any other cell binds a proof to a gate that
+    drives no backend.
+    """
+    problems: list[str] = []
+    executing_l2 = entry.get("execution") == "execute" and entry.get("gate") == "L2"
+    if "backends" not in entry:
+        if executing_l2:
+            problems.append(
+                f"malformed-receipt: {label} will execute the L2 tier but names no "
+                "required backend; the producer could not know what to prove"
+            )
+        return problems
+    if not executing_l2:
+        problems.append(
+            f"malformed-receipt: {label} carries required backends but is not an "
+            "executing L2 cell"
+        )
+    backends = entry["backends"]
+    if not isinstance(backends, list) or not backends:
+        problems.append(
+            f"malformed-receipt: {label} backends must be a non-empty list of strings"
+        )
+        return problems
+    problems += _str_list(f"{label} backends", backends)
+    declared = package.get("l2_backends") if isinstance(package, dict) else None
+    if isinstance(declared, list):
+        problems += [
+            f"malformed-receipt: {label} requires backend {backend!r}, which its "
+            f"package does not declare in l2_backends"
+            for backend in backends
+            if isinstance(backend, str) and backend not in declared
+        ]
+    return problems
+
+
 def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
     """The cross-field rules a reader relies on when acting on a cell."""
     problems: list[str] = []
@@ -1369,6 +1899,20 @@ def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
         problems.append(
             f"malformed-receipt: {label} is in state 'reused' but its execution is {execution!r}"
         )
+    runs_nextest = execution == "execute" and entry.get("gate") in BUILD_GATES
+    if runs_nextest and not entry.get("profile"):
+        problems.append(
+            f"malformed-receipt: {label} will execute but names no nextest profile; "
+            "the consumer would have to guess the selection its expected-test "
+            "listing and its gate command must share"
+        )
+    if not runs_nextest and "profile" in entry:
+        problems.append(
+            f"malformed-receipt: {label} carries a nextest profile but runs no "
+            "nextest selection"
+        )
+    if "requires_node" in entry and not isinstance(entry["requires_node"], bool):
+        problems.append(f"malformed-receipt: {label} requires_node must be a boolean")
     if "companions_only" in entry:
         if entry["companions_only"] is not True:
             problems.append(
@@ -1533,6 +2077,50 @@ def validate_scope_receipt(document: Any) -> list[str]:
             "scope-malformed: the carried scope projection names other packages "
             "than the carried plan"
         )
+    return problems
+
+
+def validate_completion_record(document: Any) -> list[str]:
+    """Every reason `document` is not a valid completion record, or an empty list.
+
+    Structural only, and deliberately so: whether the record is *true* is the
+    producer's question (it wrote the record from the comparison it just ran)
+    and whether it is *bound to this run* is the audit's. Each problem begins
+    with a code from [`COMPLETION_REJECTIONS`].
+    """
+    problems = _keys(
+        "completion record", document, COMPLETION_RECORD_FIELDS, "completion-plan-unreadable"
+    )
+    if problems:
+        return problems
+    if document["schema_version"] != COMPLETION_RECORD_SCHEMA_VERSION:
+        return [
+            f"completion-manifest-schema: completion record is version "
+            f"{document['schema_version']!r}, this tool reads "
+            f"{COMPLETION_RECORD_SCHEMA_VERSION}"
+        ]
+    problems += _member(
+        "completion record environment",
+        document["environment"],
+        ENVIRONMENTS,
+        "completion-cell-unknown",
+    )
+    problems += _member(
+        "completion record gate", document["gate"], GATES, "completion-cell-unknown"
+    )
+    problems += [
+        problem.replace("malformed-receipt", "completion-plan-unreadable", 1)
+        for problem in _sha("completion record head", document["head"])
+    ]
+    if document["complete"] is not True:
+        problems.append(
+            "completion-plan-unreadable: a completion record exists only when "
+            "validation succeeded, so `complete` must be true"
+        )
+    problems += [
+        problem.replace("malformed-receipt", "completion-report-missing", 1)
+        for problem in _str_list("completion record reports", document["reports"])
+    ]
     return problems
 
 

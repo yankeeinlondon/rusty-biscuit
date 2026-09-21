@@ -53,11 +53,13 @@ from typing import Any
 
 RUNNER_LOST_MARKER = "lost communication with the server"
 
-# The producer status names come from `_package-ci.yml` and `_wsl-ci.yml`: L1
-# for `test`, L2 for `test-l2`, and the job id for `check`, `lint`, and
-# `test-browser`. `lint` carries no environment (its artifact is
-# `status-<package>-lint`), and the WSL2 `archive` job records no status of its
-# own — its loss surfaces through the dependent `test` leg's upstream edge.
+# The job ids a producer can carry, mapped to the gate they prove when the
+# label does not say. Under the row-driven layout the gate IS in the label —
+# a row is `{package, gate, environment, runner}` and GitHub renders every one
+# of its values — so this table only decides the THREE-token form the
+# workflows carried before, and the pre-row `test-l2`/`test-browser` job ids
+# that historical runs still hold. `lint` carries no environment (its artifact
+# is `status-<package>-lint`).
 JOB_KINDS = {
     "test": "L1",
     "test-l2": "L2",
@@ -66,19 +68,31 @@ JOB_KINDS = {
     "lint": "lint",
 }
 
+#: The gates a row's second token may name, as the plan spells them. `test` is
+#: the job id, never a gate: a status under that name would manufacture a
+#: phantom cell beside the real L1 one.
+ROW_GATES = frozenset({"L1", "L2", "browser", "check", "lint"})
+
 # GitHub labels a called workflow's job `<caller job label> / <called job
-# label>`, so the area restructure put every producer three or four segments
-# deep:
+# label>`, and it builds a matrix job's own label from EVERY value in its row.
+# Both label shapes therefore reach this parser (ruling R1):
 #
-#   area-ci (claudine) / claudine-cli / test (ubuntu-latest)
-#   area-ci (claudine) / claudine-cli / wsl2 / test (wsl2-ubuntu)
+#   area-ci (claudine) / package-ci / test (claudine-cli, L1, macos-latest, macos-latest)
+#   area-ci (claudine) / package-ci / wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)
+#   area-ci (claudine) / claudine-cli / test (ubuntu-latest)                      <- pre-row
+#   area-ci (claudine) / claudine-cli / wsl2 / test (wsl2-ubuntu)                 <- pre-row
 #
-# Parsed from the TAIL, never from a fixed segment count. The last segment
-# names the gate and the environment; the segment that owns it is the package,
-# which `_area-ci.yml` labels `name: ${{ matrix.package }}`. A caller chain
-# that gains or loses a level therefore changes nothing here — which matters,
-# because the chain is already at GitHub's four-level ceiling and the previous
-# whole-name regexes stopped matching the moment the area level was inserted.
+# Both are parsed, and deliberately: reverting R1 must be a label-format change
+# rather than a silent attribution loss, and a retry decision is routinely
+# taken over a run created before the current layout.
+#
+# Parsed from the TAIL, never from a fixed segment count. A four-token
+# parenthetical carries the whole cell; a three-token one carries only the
+# environment, and the package is then the segment that owns it — which the
+# pre-row `_area-ci.yml` labelled `name: ${{ matrix.package }}`. A caller chain
+# that gains or loses a level changes nothing here, which matters because the
+# chain is at GitHub's four-level ceiling and the previous whole-name regexes
+# stopped matching the moment the area level was inserted.
 GATE_SEGMENT = re.compile(
     r"^(?P<kind>test|test-l2|test-browser|check|lint) \((?P<detail>[^()]+)\)$"
 )
@@ -97,9 +111,12 @@ def parse_build_job_name(name: str) -> str | None:
     matched = BUILD_JOB_SEGMENT.match(name.strip())
     return matched["artifact"] if matched else None
 
-# `_package-ci.yml`'s delegating job, which owns no cell of its own: the WSL2
-# cell belongs to the package one segment further up.
+# `_package-ci.yml`'s delegating job, which owns no cell of its own. Under the
+# row layout it expands a matrix, so its label carries the row the delegated
+# workflow's static job name cannot — which is exactly where the WSL2 cell's
+# identity has to be read from.
 WSL_DELEGATION_SEGMENT = "wsl2"
+WSL_DELEGATION_ROW = re.compile(r"^wsl2 \((?P<detail>[^()]+)\)$")
 
 # Jobs that only fold or summarize the run rather than produce evidence. Their
 # failure follows from producers and must not veto a retry. The legacy `rollup`
@@ -123,6 +140,30 @@ def is_non_producer(name: str) -> bool:
     return name in NON_PRODUCER_JOBS or LEGACY_AREA_ROLLUP_JOB.match(name) is not None
 
 
+def row_cell(detail: str) -> dict[str, str | None] | None:
+    """The cell a four-token row parenthetical names, if it is one.
+
+    `package, gate, environment, runner` — ruling R1's order, which is also
+    the order GitHub renders the row's values in. The runner is dropped: it is
+    dispatch, not identity, and `wsl2-ubuntu` on `windows-latest` is precisely
+    the pair that must not collapse. `lint` keeps its environment out of the
+    key, because its status artifact has never carried one.
+    """
+    tokens = [token.strip() for token in detail.split(",")]
+    if len(tokens) != 4:
+        return None
+    package, gate, environment, runner = tokens
+    if gate not in ROW_GATES:
+        return None
+    if not all(NAME_TOKEN.fullmatch(token) for token in (package, environment, runner)):
+        return None
+    return {
+        "package": package,
+        "job": gate,
+        "environment": None if gate == "lint" else environment,
+    }
+
+
 def parse_job_name(name: str) -> dict[str, str | None] | None:
     """Map a GitHub job name to the producer cell it would have reported."""
     segments = [segment.strip() for segment in name.split(" / ")]
@@ -131,8 +172,25 @@ def parse_job_name(name: str) -> dict[str, str | None] | None:
     gate = GATE_SEGMENT.match(segments.pop())
     if gate is None:
         return None
-    while segments and segments[-1] == WSL_DELEGATION_SEGMENT:
-        segments.pop()
+    # A row-driven label carries the whole cell in its own parenthetical, so
+    # no enclosing segment is consulted at all.
+    cell = row_cell(gate["detail"])
+    if cell is not None:
+        return cell
+    # The delegated WSL2 workflow labels its job statically, so the row rides
+    # one segment out — on the delegating matrix job that called it.
+    while segments:
+        delegation = WSL_DELEGATION_ROW.match(segments[-1])
+        if delegation is not None:
+            cell = row_cell(delegation["detail"])
+            if cell is not None:
+                return cell
+            segments.pop()
+            continue
+        if segments[-1] == WSL_DELEGATION_SEGMENT:
+            segments.pop()
+            continue
+        break
     if not segments or not NAME_TOKEN.fullmatch(segments[-1]):
         return None
     kind = gate["kind"]

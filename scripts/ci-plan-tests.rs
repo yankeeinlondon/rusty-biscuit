@@ -22,9 +22,21 @@ fn plan_json(prohibited: bool) -> String {
     };
     format!(
         r#"{{
-        "schema_version":4,"base":"{a}","head":"{b}","change_class":"package",
+        "schema_version":7,"base":"{a}","head":"{b}","change_class":"package",
         "full_scope":false,"full_scope_gates":[],
-        "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"]}}],
+        "areas":[{{"area":"pkg","selection_reason":"source change","packages":["alpha"],
+            "execution_path":"rows"}}],
+        "rows":{{"pkg":{{
+          "test":[{{"package":"alpha","gate":"L1","environment":"ubuntu-latest",
+            "runner":"ubuntu-latest"}}],
+          "check":[],"lint":[],"wsl":[],
+          "has_test_rows":true,"has_check_rows":false,"has_lint_rows":false,
+          "has_wsl_rows":false}}}},
+        "skip_policy":{{"source":".github/ci/ci-baseline.toml",
+          "content_hash":"0123456789abcdef",
+          "entries":[{{"package":"alpha","environment":"ubuntu-latest","gate":"L1",
+            "owner":"@ken","reason":"flaky under load","source_run":"12345678901",
+            "backend":"tmux","expiry":"2027-06-30"}}]}},
         "packages":[],"source_packages":["alpha"],"reverse_dependencies":[],
         "cells":[
           {{"package":"alpha","area":"pkg","environment":"macos-latest","gate":"L1",
@@ -368,4 +380,87 @@ fn a_plan_without_the_optional_fields_still_renders() {
     assert!(output.contains("documentation"), "{output}");
     assert!(rows(&plan).is_empty());
     assert!(details(&plan).is_empty());
+}
+
+#[test]
+fn the_dispatch_rows_are_rendered_as_the_plan_carries_them() {
+    // The reviewer's question before triggering CI is what will actually be
+    // dispatched. One row per executing cell, named by its cell key so it
+    // reconciles against the table above it.
+    let dispatched = dispatch_rows(&parsed(false));
+    assert_eq!(
+        vec![vec![
+            "pkg".to_owned(),
+            "test".to_owned(),
+            "alpha/ubuntu-latest/L1".to_owned(),
+            "ubuntu-latest".to_owned(),
+        ]],
+        dispatched
+    );
+    let output = render(&parsed(false), &Terminal::new());
+    assert!(output.contains("Dispatch rows"), "{output}");
+}
+
+#[test]
+fn a_plan_carrying_no_rows_says_nothing_about_dispatch() {
+    // A plan from before the rows existed, or one that schedules nothing:
+    // an empty dispatch table would read as "nothing was planned" rather than
+    // "this document does not say".
+    let mut plan = parsed(false);
+    plan.rows.clear();
+    let output = render(&plan, &Terminal::new());
+    assert!(!output.contains("Dispatch rows"), "{output}");
+}
+
+#[test]
+fn the_skip_snapshot_names_its_source_owner_and_expiry() {
+    // The approvals a producer will apply, from the artifact it will read
+    // them from: a reviewer can see the policy without opening the baseline.
+    // Asserted on the detail lines rather than the rendered text, because the
+    // renderer hyphenates a date across a line break at narrow widths.
+    let plan = parsed(false);
+    let policy = plan.skip_policy.as_ref().expect("the plan carries a snapshot");
+    assert_eq!(
+        vec![
+            "`alpha/ubuntu-latest/L1` on tmux — flaky under load \
+             (owner @ken, expires 2027-06-30)"
+                .to_owned()
+        ],
+        skip_details(policy)
+    );
+    let output = render(&plan, &Terminal::new());
+    assert!(output.contains("Approved skips"), "{output}");
+    assert!(output.contains(".github/ci/ci-baseline.toml"), "{output}");
+}
+
+#[test]
+fn an_approval_without_an_expiry_says_so_rather_than_leaving_it_blank() {
+    // An approval with no end date is a permanent one; the reviewer has to see
+    // that stated, not infer it from an empty position in the sentence.
+    let mut plan = parsed(false);
+    let policy = plan.skip_policy.as_mut().expect("the plan carries a snapshot");
+    policy.entries[0].expiry = None;
+    policy.entries[0].backend = None;
+    assert_eq!(
+        vec![
+            "`alpha/ubuntu-latest/L1` — flaky under load (owner @ken, no expiry)".to_owned()
+        ],
+        skip_details(policy)
+    );
+}
+
+#[test]
+fn a_plan_whose_baseline_approves_nothing_still_names_the_file_it_read() {
+    // An empty budget is a fact about the policy, not an absence of one: the
+    // shipped baseline is empty, and a renderer that said nothing would leave
+    // a reviewer unable to tell "approves nothing" from "was never read".
+    let mut plan = parsed(false);
+    plan.skip_policy
+        .as_mut()
+        .expect("the plan carries a snapshot")
+        .entries
+        .clear();
+    let output = render(&plan, &Terminal::new());
+    assert!(output.contains("Approved skips"), "{output}");
+    assert!(output.contains(".github/ci/ci-baseline.toml"), "{output}");
 }

@@ -41,9 +41,14 @@
   reported by name and scheduled nowhere. The package's passing local L1 on
   an environment satisfies its check cell there, so the pushing host's OS is
   not compile-checked again; a check cell that compiles dependents always runs.
-- **Each area audits its planned coverage.** Its `coverage-audit` renders every
-  result and, when producers are green, enforces exact skips, governed gaps,
-  and missing-cell rules for that area alone. Producer failures reach the gate
+- **Producers prove their cells; each area audits its planned coverage.** Each
+  executing cell is one dispatch row, and its producer compares its own
+  expected-test listing with its reports and uploads a completion record
+  (`completion-{package}-{gate}-{environment}`); a test that left no report
+  fails even if a skip approval names it. The area's `coverage-audit` renders
+  every result and, when producers succeeded or none were needed, enforces
+  completion records, missing cells, governed gaps, and legacy exact skips for
+  that area alone. Producer failures reach the gate
   directly and do not create a second red audit check. A governed, unexpired
   capability gap is a distinct `ACCEPTED GAP` state decided by the planner — it
   is never inferred from a GitHub conclusion, never baselined, published

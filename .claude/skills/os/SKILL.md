@@ -152,7 +152,9 @@ push mode.
   standing clones, storage rules, `just cross-check` usage and gotchas,
   remote-process hygiene.
 - [wsl.md](wsl.md) — the archive-mode contract, faithful reproduction on the
-  `BUILD_WSL` guest, `bin_exe!`, the guest's GitHub API 403 history.
+  `BUILD_WSL` guest, `bin_exe!`, the guest's GitHub API 403 history, its apt
+  set (`python3` for the in-guest completion check), the one dispatch row the
+  leg receives, and which red step means what.
 - [ci-runners.md](ci-runners.md) — hosted runner sizes (macOS is the
   tightest), per-leg build and execution profiles, the anonymous API limit,
   cache-quota and `main`-cancellation behavior, merge-gate bypass, and the

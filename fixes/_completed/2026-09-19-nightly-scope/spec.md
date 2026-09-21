@@ -2,7 +2,7 @@
 kind: fix
 name: nightly-scope
 date: 2026-09-19
-status: implementing
+status: complete
 related:
   - 2026-09-18-ci-cadence
   - 2026-09-19-hosted-evidence-reuse
@@ -59,6 +59,18 @@ Three reasons, none of them WSL2:
 Resulting nightly: one Ubuntu producer for the changed packages, their WSL2
 L1 cells, and the two preflight runners. An unchanged workspace plans
 nothing.
+
+## Completion (2026-09-19)
+
+Merged to `main` with PR #87 (353aaf6ee) the same day, one commit
+(09be36560), ahead of the first nightly. Planned locally against the
+shipped table, that first nightly is 66 WSL2 cells and one 66-key Ubuntu
+producer (job estimate 132, was 361); it plans the full workspace once
+because no nightly has yet succeeded to diff from. Its post-merge run on
+`main` was cancelled by the shared concurrency group when the next merge
+followed within a minute, so its Windows proof came from the merge that
+followed rather than its own run. The first hosted nightly's numbers, once
+it has run, belong here.
 
 ## Not done
 

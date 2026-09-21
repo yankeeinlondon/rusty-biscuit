@@ -189,11 +189,13 @@ case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
 than near-misses. Unset or all-whitespace means "no backend is required" and
 every gate keeps its skip behavior. The same vocabulary appears in each
 package's `[package.metadata.ci.tests]` `l2-backends` and
-`scripts/ci/affected_scope.py`. CI's per-package L2 legs set it to the
-package's declared backends intersected with the provisioned set (tmux is the
-only CI-hostable backend), so an installed-but-never-exercised backend fails
-the `_test_l2` backend-proof bracket instead of rendering a green cell with
-zero executed L2 tests.
+`scripts/ci/affected_scope.py`. CI's per-package L2 legs set it to the cell's
+`backends` — the planner's intersection of the package's declaration with what
+the environment hosts (tmux alone on every hosted runner today) — so an
+installed-but-never-exercised backend fails the `_test_l2` backend-proof
+bracket instead of rendering a green cell with zero executed L2 tests, and
+`backend-proof verify` writes the per-backend verdict `completion.py` certifies
+the cell from (`$STAGE/backend-proofs.json`).
 
 ```bash
 BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2        # tmux fatal, GUI backends skip
@@ -416,8 +418,8 @@ entire test evidence. Every configured L1 leg blocks: the `soft_os` policy is
 retired, because `continue-on-error` removed a leg from the run's verdict
 rather than merely making it non-blocking. The L2 leg provisions tmux,
 verifies it (`tmux -V`), and sets `BISCUIT_TEST_REQUIRED_BACKENDS` to the
-declared ∩ provisioned backends, so an installed-but-never-exercised backend
-fails the tier. The shared workflow denies warnings in the `lint` job only
+plan cell's `backends` (declared ∩ hostable), so an installed-but-never-exercised
+backend fails the tier. The shared workflow denies warnings in the `lint` job only
 (`_lint` passes `-D warnings` to clippy directly, so the same bar applies
 locally). `check` is a compile gate and does not promote warnings — dead code
 is not a build failure, and platform-conditional dead code is normal.

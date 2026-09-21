@@ -2,7 +2,7 @@
 kind: fix
 name: just-recipe-identity
 date: 2026-09-19
-status: implementing
+status: complete
 related:
   - 2026-09-18-ci-cadence
   - 2026-09-19-hosted-evidence-reuse
@@ -54,6 +54,15 @@ moves every gate; a comment-only edit moves nothing; swapping two commands
 inside a recipe moves it. Two end-to-end cases drive `verify_cells`: an older
 receipt survives a `notify` edit and is rejected with `gate-inputs-changed`
 for a `_tier_filter` edit.
+
+## Completion (2026-09-19)
+
+Merged to `main` with PR #86 (5ba675f08) the same day, one commit
+(f8cacdf33). The proof section above is the shipped test set; the push that
+carried it published receipts from a clean tree, and its pull request run
+was green. The post-merge run on `main` failed one cell, `repo-deps` L1 on
+Windows, for a reason unrelated to this fix: the archive fixtures' cold
+rebuild of `ci-build` outrunning nextest's window, tracked separately.
 
 ## Not done
 

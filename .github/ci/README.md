@@ -92,9 +92,9 @@ nowhere else.
 | `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
 | `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
 | `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
-| `build` | yes | the native archive owners; a failed owner is an infrastructure failure of the run |
+| `build` | yes | the native build owners; each builds the archives its plan keys name, serially |
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
-| `area-drift` | yes | AC15's planner-vs-sniff contract; skips where area derivation cannot move |
+| `area-drift` | yes | checks that the planner's areas match `sniff`; skipped when nothing can move area derivation |
 | `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
 | `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
 
@@ -155,11 +155,11 @@ lookup are keyed by runner OS.
 | `macos-latest` | `macos-latest` | |
 | `wsl2-ubuntu` | `windows-latest` | runs through `wsl-bash`; see `.github/workflows/_wsl-ci.yml` |
 
-`affected_scope.py` derives the per-package workflow inputs from the
-environment capability table so the reusable workflow can never route
-`wsl2-ubuntu` into a `runs-on` matrix: `native_environments` (the environment
-names that *are* runner labels), `l2_environments`, `browser_environments`,
-`node_environments`, and `wsl` (a boolean).
+`affected_scope.py` resolves each executing cell's runner from the environment
+capability table and keeps every `wsl2-ubuntu` cell in its own `wsl` row set
+(see [The area fan-out](#the-area-fan-out)), so the reusable workflow can never
+route `wsl2-ubuntu` into a `runs-on` matrix. No workflow receives a list of
+environments.
 
 It also derives `gates` — which of `lint`, `check`, and `test` this run selected
 the package for. A package owning a changed source file carries `lint` and
@@ -169,8 +169,8 @@ the library, binary, and test targets, so a separate compile job is scheduled
 on `ubuntu-latest` only, for the kinds no test gate produces and for the
 dependents' seam. Unchanged reverse dependents, their dependencies, and
 transitive reverse dependencies are not selected. Documentation, manifests, lockfiles, Just recipes, workflows,
-and other CI configuration select no package jobs; CI tooling has its own
-small contract-test leg. Only an explicit `workflow_dispatch` full-scope run
+and other CI configuration select no package jobs; CI's own suites run in their
+owning packages' cells (see [CI's own tooling](#cis-own-tooling)). Only an explicit `workflow_dispatch` full-scope run
 selects every package.
 
 Source classification is path based: `build.rs` and package-owned files with a
@@ -565,7 +565,7 @@ own tooling — they open the workspace with `cargo metadata` or drive real
 environment: the cell still appears, still names the capability it lacks, and
 still carries an owner and expiry. Where the capability IS present, the
 declaration is what makes the consumer run `rustup show` before the suite
-(`toolchain_environments` in the matrix record): the archive brings no
+(the cell's `requires_toolchain`, which `cell_contract.py` hands the job): the archive brings no
 toolchain, and a hosted runner's rustup proxy would otherwise install the pin
 from inside whichever tests reach `cargo` first — concurrently, which corrupted
 rustup's download directory on run 35326800778. That toolchain is for the
@@ -647,6 +647,17 @@ A package whose L2 tier runs on a CI runner — `tiers` includes `L2` and
 invocations before the cutover, and a consumer has no Cargo to rebuild them
 with. The whole-workspace audit in `test_affected_scope.py` is what enforces it.
 
+Which of a package's declared backends an L2 cell must *prove* is the plan's
+decision, not the workflow's: each executing L2 cell carries `backends`, the
+subset of `l2-backends` its environment hosts (`tmux` alone on every hosted
+runner today). The job sets `BISCUIT_TEST_REQUIRED_BACKENDS` to that list
+verbatim, `_expected_manifest` records it, `backend-proof verify` writes its
+per-backend verdict to `backend-proofs.json` in the staging tree, and the
+certify step hands that document to `completion.py --backend-proofs`, which
+refuses a manifest requiring anything other than the cell's list. The
+package-wide declaration is published separately (`declared_backends`) so the
+job summary can still name the GUI backends that skip.
+
 ### `runner-tools` is a closed vocabulary
 
 Implemented by the reusable workflow (`_package-ci.yml`), not an arbitrary
@@ -691,7 +702,7 @@ outcome; the registry — never the workflow — decides which recipe runs where
 | `environment` | the ONE environment that runs it. Only that cell loses its reuse (R7); the owner's other L1 cells stay reusable |
 | `counts` / `counts_args` | how `companion_suites.py` obtains machine-readable counts: `json` (this repository's own document, written by `suite_runner.py`) or `vitest` (`--reporter=json`) |
 | `counts_reason` | why a suite reports no counts, for a gate with no test cardinality (`tsc --noEmit`). Rendered as `not recorded` with this reason — never `0` |
-| `node` | the suite needs the Node + pnpm toolchain, which is what `node-environments` is derived from |
+| `node` | the suite needs the Node + pnpm toolchain, which is what a cell's `requires_node` is derived from |
 
 `_package-ci.yml` runs one step per job that invokes
 `scripts/ci/companion_suites.py` for that cell's `{environment, gate}`; the
@@ -748,6 +759,18 @@ unmeasured guess would defeat the mechanism.
 An entry is applied by the area that owns its `package` and by no other.
 Policy gaps are **not** baselined here — they are governed once in
 `environments.json`.
+
+The planner snapshots this file into the resolved plan (`skip_policy`), so a
+producer never reloads a baseline that could differ from the one the plan was
+made against. **An approval excuses only an observed skip.** A skip identity
+comes only from a `<skipped/>` element in a report; an expected test that
+reported nothing at all fails its cell as `completion-test-missing`, and no
+entry here can excuse it — an observed skip is a decision, silence is a lost
+test. The predecessor also let an expected-but-unreported test count as a
+skip; that interpretation was removed on purpose
+(`2026-09-19-direct-cell-execution`), which is why a test that should not run
+has to be `#[ignore]`d or excluded by its tier, never simply left unreported.
+An entry that names no `tests` approves any observed skip in its cell.
 
 ## Native build owners and archive consumers
 
@@ -897,51 +920,108 @@ table.
 ## The area fan-out
 
 The tested half of a run is one top-level entry per selected package **area**.
-`ci.yml`'s `area-ci` job fans out over `scheduled_areas` and calls
-`_area-ci.yml`, which fans out over that area's package matrix and calls
-`_package-ci.yml`, which delegates the WSL2 cell to `_wsl-ci.yml`. That is four
-levels including the caller — GitHub's maximum, with no margin for another.
+`ci.yml`'s `area-ci` job fans out over `scheduled_areas`, hands each area its
+dispatch rows (`area_rows`), and calls `_area-ci.yml`, which calls
+`_package-ci.yml` **once for the whole area**, which delegates each WSL2 row to
+`_wsl-ci.yml`. That is four levels including the caller. GitHub documents ten;
+the repository's contracts hold the chain at four and add no fifth.
 
-A called workflow's jobs render as `<caller job name> / <called job name>`, so
-a compile cell reads `area-ci (claudine) / claudine-cli / check
-(windows-latest)`: area first, package under it, environment on the leaf. No
-display name is parsed anywhere; identity still comes from each artifact's
-`manifest.jsonl` and `status.json`.
+**The unit of dispatch is a plan cell.** The planner emits one row
+`{package, gate, environment, runner}` per *executing* cell — never for a
+reused, accepted-gap, prohibited, or event-deferred one — and groups each
+area's rows into four disjoint sets: `test` (native L1, L2, and browser),
+`check`, `lint`, and `wsl`, plus the scalar flags `has_test_rows`,
+`has_check_rows`, `has_lint_rows`, and `has_wsl_rows`. `_area-ci.yml` skips
+the execution call entirely when all four are false; otherwise
+`_package-ci.yml`'s `check`, `test`, `lint`, and `wsl2` jobs each expand one
+set as an `include:` matrix with `fail-fast: false`, behind a scalar
+`inputs.<set>-rows != '[]'` guard. `wsl2` passes each row whole to
+`_wsl-ci.yml`'s single `row` input. No workflow accepts a list of environments.
+
+A row carries dispatch identity and nothing else. Every job resolves the rest
+— recipe, profile, test and check arguments, runner tools, backends, companion
+suites, native prerequisites, toolchain and Node needs, the build record, and
+its own artifact names — from the run's `ci-resolved-plan` through
+`scripts/ci/cell_contract.py`, which joins the row back to its cell and refuses
+an unknown, duplicated, non-executing, or mismatched row with a
+`cell-contract-*` code before anything runs. Every area record in the plan
+states `execution_path: "rows"`, the only value the schema admits: there is no
+per-area switch, and rolling this layout back means reverting the change.
+
+The planner refuses, before emitting anything, a row set over GitHub's 256-job
+matrix limit, one area's rows over 16 KB, or all areas' rows together over
+512 KiB (`TOTAL_ROW_SET_BUDGET` — they travel as the one `area_rows` job
+output). It refuses the whole plan rather than truncating it.
+
+A called workflow's jobs render as `<caller job name> / <called job name>`, and
+GitHub builds a matrix job's label from every value in its row in key order, so
+a producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+macos-latest, macos-latest)`: area first, then the whole cell with its runner.
+A WSL2 row rides on the delegating job, `… / wsl2 (playa, L1, wsl2-ubuntu,
+windows-latest) / test (wsl2-ubuntu)`, because the delegated job's name is
+static. No display name is parsed for identity, which still comes from each
+artifact's `manifest.jsonl` and `status.json`; `runner_loss.py` parses the
+label only to attribute a lost runner to its cell.
 
 **Area is a grouping; package is the identity.** Nothing is re-keyed by area.
 The one place an area name appears in a stored name is the per-area result
 slice `ci-results-<slug>`, where the slug spells `/` as `--` because GitHub
 rejects `/` in an artifact name.
 
-**Both matrices come from the planner.** `affected_scope.py` emits
-`scheduled_areas`, `area_matrix` (one ready-made `{"include": [...]}` per
-area), and `area_slugs`. Grouping in the planner rather than in workflow `jq`
-is what gives the shape test coverage.
+**Every matrix comes from the planner.** `affected_scope.py` emits
+`scheduled_areas` and `area_slugs`, derived from the plan's gating packages,
+and `area_rows`, derived from its executing cells. Grouping in the planner
+rather than in workflow `jq` is what gives the shape test coverage.
 
 **Skippable jobs carry no `name:`.** GitHub never evaluates the matrix context
 for a job it skips, so a declared `name:` containing `${{ matrix.… }}` reaches
 the Checks tab as raw expression text — 63 such labels in run 34638047631. A
 job that can be skipped as a whole therefore omits `name:` and lets GitHub fall
 back to the job id, which is static when the job is skipped and gains the
-matrix values when it runs. `lint` has no matrix, so it keeps a static
-`lint (ubuntu-latest)` — its environment has to be visible.
+row's values when it runs — which is how `lint`'s environment stays visible
+too.
 
 ## Each area audits its planned coverage
 
+**Each producer proves its own cell first.** A test job lists its expected
+tests on its own execution target before the gate runs — after provisioning,
+because listing executes the test binaries — with `just _expected_manifest`
+(the version-2 expected-test manifest: `tests`, `ignored`, and `excluded`
+identities plus the listing's provenance). After the gate,
+`scripts/ci/completion.py` compares that listing with the job's staged reports
+as identities, not counts, and writes the cell's completion record only when
+they agree: no missing or malformed report, no expected test absent, no
+unexpected or duplicate identity, no unapproved skip, no failed companion
+suite, and every required backend proven. The job then uploads it as
+`completion-<package>-<gate>-<environment>`; that upload has no
+`continue-on-error`, so a producer that cannot publish its proof fails. Check
+and lint jobs write a record too, with no expected manifest. A refusal names
+its `completion-*` reason and leaves no record behind.
+
 `_area-ci.yml`'s `coverage-audit` job runs `if: always()` behind that area's
 producers and always renders `ci-rollup rollup --area`. It enforces
-`ci-rollup verdict --area` only when every producer succeeded. A producer
-failure already makes the area and `ci-gate` red, so the audit does not emit a
-second red check for the same failure. When producers are green, the audit
-fails closed on missing or unscheduled evidence, invalid governed gaps, and
-exact-skip violations. Another area's evidence or exception cannot affect it.
+`ci-rollup verdict --area --producers <result>` when the area's producer call
+succeeded **or was skipped**. A producer failure already makes the area and
+`ci-gate` red, so the audit does not emit a second red check for the same
+failure. A skipped call is correct for an all-reused or gap-only area, which is
+still judged; over executing cells it blocks as `producers-skipped`. When it
+enforces, the audit fails closed on missing or unscheduled evidence, an
+executing cell without a valid completion record (`completion-unproven`), a
+record for a cell the plan did not execute (`completion-unplanned`), invalid
+governed gaps, and exact-skip violations on legacy cells. It recomputes no
+expected test identity and no skip for an executing cell: that cell's producer
+did both before writing its record (see
+[the completion record](schemas/README.md#expected-manifest-and-completion-record)).
+Another area's evidence or exception cannot affect it.
 It also narrows runner-loss attribution to its own packages
 (`runner_loss.py attribute --package`), because a job name carries no area.
 
 Its step summary is where a reused cell becomes visible: the grid's "Reused
 results" table names the receipt's evidence ref, counts, duration, and host. No
-setup, build, archive, or test step runs for such a cell — the planner already
-removed its execution from the environment lists the area hands each package.
+setup, build, archive, or test step runs for such a cell — the planner emits
+no row for it. The audit takes the area's package membership from the plan,
+not from the rows, which is what lets an all-reused or gap-only area keep its
+blocking audit with no execution call at all.
 
 ## `ci-gate` — the single required check
 
@@ -959,15 +1039,16 @@ into `success` for the fold, so it is reserved for advisory `ci-reporting` and n
 blocking job may carry it. All of this was measured in a scratch repository:
 `fixes/2026-09-11-cicd-cleanup/fixtures/scratch-2026-09-12.md`.
 
-A producer — `check`, `lint`, `test`, `test-l2`, `test-browser`, `wsl2` — fails
-visibly when its gate command fails. The command keeps an `id:` and the job's
+A producer — `_package-ci.yml`'s `check`, `test` (L1, L2, and browser rows),
+and `lint`, and `_wsl-ci.yml`'s `wsl` — fails visibly when its gate command
+fails. The command keeps an `id:` and the job's
 `always()` status step still publishes the cell result, while JUnit and status
 uploads remain reachable through explicit status predicates. Every matrix uses
 `fail-fast: false`, so one red cell does not cancel any other OS cell still
 scheduled after evidence reuse. The area's coverage audit remains
-authoritative for missing cells, exact skip budgets, and governed gaps when
-producers are green; ordinary failures reach `ci-gate` directly through the
-producer's truthful job result.
+authoritative for missing cells, completion records, legacy skip budgets, and
+governed gaps when producers are green or were never called; ordinary failures
+reach `ci-gate` directly through the producer's truthful job result.
 
 **Required context.** Ruleset `protect-your-bacon` (id 19747338) requires
 `ci-gate`. It named `ci-verdict` until 2026-09-13, when that job no longer
@@ -981,14 +1062,16 @@ slices (there is no whole-run `ci-results` artifact any more) and
 ### The result document
 
 `ci-results.json` and the skip-only baseline are independently versioned:
-the result document is at `schema_version: 4` and the baseline at 3. Identity is still
+the result document is at `schema_version: 5` and the baseline at 3. Identity is still
 `{package, environment, tier}`; each cell also
 carries its derived `area`, its `origin` (`ci`, `local`, `prior-local`, or
 `none`), the `evidence` behind a reused result, its measured `duration_s`, and
 the `target_kinds` and `compile_coverage_from` the plan assigned it. Version 4
 made `counts` optional alongside `duration_s`, so a cell nobody measured omits
 the field rather than reporting a zero that reads as a suite which found
-nothing. The document carries `accepted_evidence`, one entry per reused cell —
+nothing. Version 5 adds `completion` to every cell the plan executed — the
+artifact its record came from, the attempt that wrote it, and every reason it
+does not certify the cell — and `unplanned_completions` to the document. The document carries `accepted_evidence`, one entry per reused cell —
 the same set that was accepted for *scheduling*, so the scheduler and the
 report cannot disagree. A document from an earlier generation is refused by its
 version, before any cell is interpreted, with the migration that applies named;
@@ -1002,12 +1085,14 @@ applies no policy at all.
 
 ### Artifact contract
 
-Two artifact families, both walked by `ci-rollup rollup --artifacts`:
+Four artifact families, all walked by `ci-rollup rollup --artifacts`:
 
 ```
 junit-<package>-<tier>-<environment>/
     manifest.jsonl            one JSON record per nextest invocation
     <tier>/<package>.xml      that invocation's verbatim JUnit document
+    expected-<tier>.json      the cell's expected-test listing (version 2),
+                               which completion.py compared the reports with
 
 status-<package>-<job>[-<environment>]/
     status.json               {"package","job","environment","result"[,"detail"]
@@ -1017,6 +1102,10 @@ build-status-<package>-<producer>-<key>/
     build-status.json         {"key","package","producer","artifact","result","stage",
                                "consumers"[,"digest"][,"detail"][,"timings"]
                                [,"stage_seconds"]}
+
+completion-<package>-<gate>-<environment>/
+    completion.json           the cell's completion record, written only when its
+                               producer's validation succeeded
 ```
 
 `timings` on a consumer is `{download_seconds, verify_seconds, extract_ms,
@@ -1026,7 +1115,12 @@ millisecond stages, and `stage_seconds` is the pair the owner *job* observed
 only — see [What each stage cost](#what-each-stage-cost). A job that measured
 nothing omits the object rather than publishing zeros.
 
-The third family is the build plumbing, not a result: it carries no
+The completion record is the executing cell's proof, and the audit requires
+one for every cell the plan executed — check and lint included. Its fields and
+the audit's binding rules are in
+[the schema README](schemas/README.md#expected-manifest-and-completion-record).
+
+The build-status family is the build plumbing, not a result: it carries no
 `{package, environment, tier}` identity, creates no cell, and is never
 baselined. `ci-rollup` reads it only to explain a cell that could not run, and
 a cell's own `build` field records the key, producer, and realized digest it
@@ -1204,8 +1298,8 @@ nowhere and violations accumulated until an unrelated change happened to select
 | changed input | selects |
 |---|---|
 | any `.rs` file the scanner would read — outside workspace members included, deletions included | the guard |
-| `ARCHIVE_GUARD_OWN_INPUTS`, source half: the matcher, its fixture corpus, the driver, `tools/test-toolkit/justfile`, `scripts/ci/affected_scope.py` | the guard |
-| `ARCHIVE_GUARD_OWN_INPUTS`, configuration half: `tools/test-toolkit/Cargo.toml`, `.github/workflows/_package-ci.yml`, `.github/workflows/_area-ci.yml` | the guard |
+| `ARCHIVE_GUARD_OWN_INPUTS`, source half: the matcher, its fixture corpus, the driver, `tools/test-toolkit/justfile`, `scripts/ci/affected_scope.py`, `scripts/ci/cell_contract.py` | the guard |
+| `ARCHIVE_GUARD_OWN_INPUTS`, configuration half: `tools/test-toolkit/Cargo.toml`, `.github/workflows/_package-ci.yml` | the guard |
 | anything else — documentation, lockfiles, and every other manifest or workflow file | nothing |
 
 An input is owned when it carries configuration whose **only** consumer is the
@@ -1217,9 +1311,9 @@ than "every workflow, manifest, or lockfile edit selects the guard".
 |---|---|
 | `tools/test-toolkit/Cargo.toml` | its `[package.metadata.ci.tests] companion-suites` is the only declaration binding `archive-path-guard` to an owner; drop the entry and the scan silently never runs again |
 | `.github/workflows/_package-ci.yml` | the `BISCUIT_ARCHIVE_GUARD_PLAN` export (one reader, the guard) and the companions-only status fold |
-| `.github/workflows/_area-ci.yml` | the sole conduit for `lint-companions-only` |
+| `scripts/ci/cell_contract.py` | the sole conduit for a cell's `companions_only`, read by the lint job as `steps.cell.outputs.companions_only` |
 
-All three already select `test-toolkit` through `SUITE_OWNER_PREFIXES` /
+The two configuration inputs already select `test-toolkit` through `SUITE_OWNER_PREFIXES` /
 `SUITE_OWNER_PATHS`, so the lint cell and its attached companion exist either
 way and these entries add **no** cell. What they add is the plan's account of
 the run: before them the companion read a `selected: false` scope and performed
@@ -1259,20 +1353,22 @@ records `selected: false` rather than gaining a runner.
 
 #### How the cell executes
 
-`companions_only` reaches the workflow as `_area-ci.yml`'s
-`lint-companions-only` input, which `_package-ci.yml`'s `lint` job reads three
-times:
+`companions_only` reaches the workflow the way every other execution input
+does: the lint job resolves its row against the plan through `cell_contract.py`,
+and reads the cell's `companions_only` and `companion_suites` from
+`steps.cell.outputs`. No workflow input carries it. The `lint` job uses it
+three times:
 
-1. the **Lint** step — Clippy — carries `if: ${{ !inputs.lint-companions-only }}`.
+1. the **Lint** step — Clippy — carries
+   `if: ${{ steps.cell.outputs.companions_only != 'true' }}`.
    A guard-only cell lints a package no change selected, so it skips Clippy
    rather than doing work nothing asked for. The step is gated, never deleted:
    every ordinary lint cell runs it exactly as before. A skipped Clippy records
    no `duration_s`, which the status step already spells as an absent
    measurement rather than a `0`.
-2. the **Download the resolved execution plan** step, gated on the same
-   condition as the companion step that reads it, so a lint cell with no
-   companion pays no transfer. `BISCUIT_ARCHIVE_GUARD_PLAN` is then exported to
-   the companion step as an **absolute** path — neither the recipe
+2. the **Companion suites (lint)** step, which receives
+   `BISCUIT_ARCHIVE_GUARD_PLAN` pointing at the plan the job already
+   downloaded to resolve its cell. It is an **absolute** path — neither the recipe
    (`cd tools/test-toolkit && …`) nor nextest's test binary runs in the
    workspace directory the artifact landed in.
 3. the **Record producer status** fold. On a companions-only cell the
@@ -1281,8 +1377,8 @@ times:
    touches a Rust file; reading it as a pass would let a cell that ran nothing
    go green.
 
-**A missing plan is an error, deliberately.** `download-artifact` fails the job
-when `ci-resolved-plan` is absent, and the variable is exported unconditionally
+**A missing plan is an error, deliberately.** The job's first
+`download-artifact` step fails when `ci-resolved-plan` is absent, and the variable is exported unconditionally
 so a file that arrived unreadable makes the guard hard-error. The alternative —
 exporting it only when the file exists — would turn a lost artifact into a
 full-tree scan recorded as this cell's evidence, and a full-tree result

@@ -1,9 +1,14 @@
 # CI baseline — approved exact-test skip budget.
 #
 # Keyed by stable identity (`package`, `environment`, `tier`), never by a
-# GitHub display name or a shard. Enforced by `ci-rollup verdict`, which runs
-# once per selected area inside `_area-ci.yml`'s `coverage-audit` job
-# (`--area`) when all producers succeeded. The required branch-protection
+# GitHub display name or a shard. Enforced twice, for two different cells. A
+# cell the plan EXECUTES is judged by its own producer: the plan carries a
+# snapshot of this file (`skip_policy`), and `scripts/ci/completion.py` refuses
+# to certify a cell whose observed skip no unexpired entry approves. Every
+# other cell — reused, or rolled up without a plan — is judged by
+# `ci-rollup verdict`, which runs once per selected area inside
+# `_area-ci.yml`'s `coverage-audit` job (`--area`) when the area's producer
+# call succeeded or was never needed. The required branch-protection
 # check, `ci.yml`'s `ci-gate`, folds the area workflows' job results and never
 # reads this file.
 #
@@ -47,15 +52,17 @@ schema_version = 3
 # see a one-for-one swap where an approved skip is resolved and a different
 # test starts skipping in the same run.
 #
-# A skip identity comes from two places:
-#   1. an explicit `<skipped/>` in the JUnit report, and
-#   2. a test present in that environment's expected-test manifest that
-#      produced no result at all.
+# A skip identity comes ONLY from an observed `<skipped/>` in the JUnit report.
+# An expected test that reported no result at all is a FAILURE, not a skip: the
+# producer compares its reports with the listing taken on its own target and
+# refuses it as `completion-test-missing`, and no entry here can excuse it — an
+# observed skip is a decision, silence is a lost test. An entry naming no
+# `tests` approves any observed skip in its cell.
 #
-# (2) requires `--expected-manifest`, generated ON the target environment. No
-# producer for it is wired yet (see `fixes/2026-07-27-refactor/ci-verdict-job.md`),
-# so today only (1) is observed and the verdict records
-# `skip_evidence_degraded` for every cell with a budget entry.
+# For a cell its producer certified, the audit reports each observed skip
+# (`skip-certified`) rather than re-judging it, and still blocks an entry that
+# no longer skips (`skip-resolved`), so a stale approval cannot linger as a
+# standing permission. Only a legacy cell can still be `skip_evidence_degraded`.
 #
 # EMPTY ON PURPOSE. The area-keyed baseline recorded no skips, and inventing
 # entries from an un-measured guess would defeat the mechanism. Populate it

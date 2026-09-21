@@ -215,6 +215,13 @@ belong here.
   `-c commit.gpgsign=false`). If signing hangs or fails, stop and report.
 - Plumbing commits (`commit-tree` + `update-ref`) do NOT honor
   `commit.gpgsign=true`; pass `-S` to `commit-tree` explicitly.
+- `git filter-branch --msg-filter` (or any filter-branch filter) also strips
+  signatures: even with `commit.gpgsign=true`, the rewritten commits come out
+  with `%G? = N` rather than `G`. Verify with `git verify-commit <hash>` after
+  filter-branch; if unsigned, roll back via `git update-ref HEAD <pre-batch-sha>`
+  (keeps index/working tree staged) and replay with normal `git commit`. Using
+  filter-branch to "fix message only" forces an unsigned chain unless you
+  resign each commit afterwards, which is more invasive than a clean replay.
 - Commit exit status covers the index update, not the signature. Always follow
   up with `git verify-commit <hash>`; review-cycle tooling under
   `darkmatter/features/*` depends on `%G?` showing `G`.
@@ -391,7 +398,25 @@ belong here.
   versa) and orphans the evidence from the plan. Same rationale as
   multi-spec consolidation — the events are one cohesive planning
   record.
-
+- A supersede banner may land as a NEW spec file added directly to
+  `fixes/_completed/` (or `features/_completed/`) on its first commit,
+  paired atomically with the successor spec. The variant covers the
+  case where the superseded spec was a draft that never advanced to
+  implementation, so it has no active-directory history — it ships
+  already in `_completed/` with `status: superseded` and `superseded-by:
+  ../<new>/spec.md` frontmatter. The atomic commit is still mandatory:
+  the new spec's `supersedes:` frontmatter and the supersede banner's
+  `superseded-by:` frontmatter must resolve against each other inside
+  one tree, so splitting them ships either a successor that points at a
+  non-existent banner or a banner that points at a non-existent
+  successor. See `817de5bb9` (planning(repo): schedule direct-cell-
+  execution feature and supersede 2026-09-12-better-cicd-flow fix) for
+  the canonical example: one commit added the successor
+  `features/2026-09-19-direct-cell-execution/spec.md` and the banner
+  `fixes/_completed/2026-09-12-better-cicd-flow/spec.md` together.
+  Contrast with the existing 5-file consolidation at `4616e9aec`, where
+  the superseded specs were already tracked at HEAD and only their
+  `status:` flipped.
 - `planning(<area>): close <fix> as invalidated` is distinct from
   `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
   (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
@@ -507,8 +532,28 @@ belong here.
     catches the same miss next run, so the follow-up is documentation, not
     drift.
 - Recovery from N agent-authored stacked commits: `git update-ref HEAD <new>
-    <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
-    and the paths reappear staged for a single recommit.
+  <old>` (ref, new, old) is a CAS soft-reset; index and working tree are kept
+  and the paths reappear staged for a single recommit.
+- `git commit --amend` (no explicit ref) targets HEAD silently. If the goal is
+  to fix a non-HEAD commit's message (e.g. commit N in a chain of N+1 — "I
+  mistyped a file count in the body and want to correct commit 3, not the tip"),
+  `git commit -F <corrected-msg> --amend` rewrites HEAD with the new message
+  *and HEAD's tree content*, so the chain becomes inconsistent: HEAD now
+  carries commit N's intended message but commit N+1's tree (or vice versa).
+  `--only -- <paths>` does NOT pin amend to those paths — it operates on HEAD
+  regardless. The clean fix is `git update-ref HEAD <pre-batch-sha>` (rolls
+  the chain back while leaving the index staged), then replay the commits in
+  order with `git commit -F <msg> -- <paths>`. Pre-flight `git log -1
+  --pretty=%P HEAD` to capture the pre-batch parent before any amend attempt.
+- A 7-commit rename-to-_completed batch where one commit's body said "the 14
+  files" but the diff had 13 was recovered this way: `git update-ref HEAD
+  9b797b61a` rolled the chain back to the pre-batch commit while keeping all
+  19 staged renames in the index, then the 7 `git commit --only -F <msg> --
+  <old-path> <new-path>` invocations replayed with corrected messages and
+  fresh GPG signatures. The new SHAs all differ from the originals (each
+  commit re-signs with the current author/key) but the tree content is
+  identical — verify with `git diff <old-sha> <new-sha>` for each corrected
+  commit to confirm only the message changed.
 - Multi-agent batch + `update-ref` chain loss. When agents A and B commit in
     parallel (B on top of A) and you `update-ref` from B back to A's parent to
     recover from a bad B, A is severed from HEAD too — A is still reachable
@@ -786,19 +831,48 @@ belong here.
   alongside the call-site `M` updates that consume the new module path,
   even when the sub-modules individually look independent.
 - CLI test files (`cli/tests/cli.rs`, `cli/tests/snapshots.rs`, etc.) that
-  cover both focused subcommands AND aggregate output force the aggregate's
-  library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
-  in the same commit as the CLI tests, even when the aggregate driver is
-  technically library code. The coupling is through the test's imports:
-  the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
-  shape whose struct is owned by the library file, and the test will fail
-  to compile (or test a stale shape) if the library file is committed
-  separately. Splitting "library feat" and "CLI refactor" along the
-  conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
-  coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
-  the CLI test file reveals which library symbols the tests reference,
-  and any of those symbols' defining file belongs with the CLI commit
-  rather than the library one.
+    cover both focused subcommands AND aggregate output force the aggregate's
+    library driver (`filesystem/repo/aggregate_view.rs` and friends) to ship
+    in the same commit as the CLI tests, even when the aggregate driver is
+    technically library code. The coupling is through the test's imports:
+    the test deserializes or asserts on a `RepoAggregate` / aggregate JSON
+    shape whose struct is owned by the library file, and the test will fail
+    to compile (or test a stale shape) if the library file is committed
+    separately. Splitting "library feat" and "CLI refactor" along the
+    conventional `sniff/lib/**` vs `sniff/cli/**` boundary can lose this
+    coupling; pre-flight `git grep -nE 'fn test_.*(aggregate|json)'` over
+    the CLI test file reveals which library symbols the tests reference,
+    and any of those symbols' defining file belongs with the CLI commit
+    rather than the library one.
+- A `planning(<area>):` phase close whose `implementation-log.md`
+    `source_files_during_phase_N` (or `docs_updated_during_phase_N`,
+    `skills_files_updated_during_phase_N`) lists entries — as opposed
+    to being empty or measurement-only — must land AFTER those entries
+    are in history. The existing "working-tree-only" rule (line 667)
+    covers a narrow shape (a follow-up fix the developer accidentally
+    left uncommitted); the broader principle is that any per-phase
+    file list in implementation-log.md frontmatter, plus any named
+    file in `spikes/<name>.md` (e.g. the s0-baseline.md Phase 2
+    pending-contract inventory table that names seven test files by
+    path and the Python `@pending` / Rust `pending_contract`
+    mechanisms they use), plus the spec.md `message_to_agent`'s
+    forward-looking references to test files by name, all describe a
+    state that must match HEAD at the moment of the planning commit.
+    Committing the planning close first leaves `git log` as the only
+    way to resolve "this phase shipped these files"; committing the
+    test commits first makes the claim trivially true at every
+    subsequent read. Splitting is safe only when the per-phase file
+    lists are empty (a measurement-only phase) or when the named
+    files are docs created IN the planning commit (rulings.md,
+    spikes/*.md, s0-baseline.md sections). When a phase ships test
+    files across N packages (e.g. `scripts/ci/*` in the `scripts`
+    workspace = `repo-deps`, `tools/test-toolkit/tests/*` in
+    `test-toolkit`), the test commits can run in parallel — their
+    paths are disjoint — and the planning commit runs sequentially
+    after all of them land. See the direct-cell-execution Phase 2
+    close (222f7612d + f9d74abc5 + 11e2c4e95 + 09b9f9d5f, four
+    commits: three parallel test commits then the planning close)
+    for the canonical 2-package, test-only-phase shape.
 - A pre-implementation spec review — flipping `reviewed: false` to `true`
   on a still-`draft-spec` fix without adding a `review-N.md` file or
   bumping `review_iterations` past 0 — is a separate shape from the

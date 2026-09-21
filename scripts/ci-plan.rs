@@ -13,6 +13,7 @@
 //! crates and must stay that way. `--plan` uses this renderer only when it is
 //! already built, because a pre-trigger review must not start a build.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::process::ExitCode;
@@ -53,6 +54,56 @@ struct Plan {
     #[serde(default)]
     prohibited_cells: Vec<String>,
     job_estimate: u32,
+    /// The dispatch rows the hosted matrices expand, by area. Defaulted so a
+    /// plan written before schema 5 still renders the cells it does carry.
+    #[serde(default)]
+    rows: BTreeMap<String, AreaRows>,
+    #[serde(default)]
+    skip_policy: Option<SkipPolicy>,
+}
+
+/// One area's four disjoint row sets. The scalar `has_*_rows` guards belong to
+/// the workflow, not to a reader, so they are not deserialized here.
+#[derive(Debug, Default, Deserialize)]
+struct AreaRows {
+    #[serde(default)]
+    test: Vec<Row>,
+    #[serde(default)]
+    check: Vec<Row>,
+    #[serde(default)]
+    lint: Vec<Row>,
+    #[serde(default)]
+    wsl: Vec<Row>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Row {
+    package: String,
+    gate: String,
+    environment: String,
+    runner: String,
+}
+
+/// The plan's snapshot of the approved exact-skip budget.
+#[derive(Debug, Deserialize)]
+struct SkipPolicy {
+    source: String,
+    content_hash: String,
+    #[serde(default)]
+    entries: Vec<SkipEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkipEntry {
+    package: String,
+    environment: String,
+    gate: String,
+    owner: String,
+    reason: String,
+    #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
+    expiry: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +229,82 @@ impl Cell {
 }
 
 const COLUMNS: [&str; 4] = ["Cell", "Execution", "Origin", "State"];
+
+const ROW_COLUMNS: [&str; 4] = ["Area", "Set", "Cell", "Runner"];
+
+impl AreaRows {
+    /// The four sets in dispatch order, each with the name the workflow's
+    /// input carries.
+    fn sets(&self) -> [(&'static str, &Vec<Row>); 4] {
+        [
+            ("test", &self.test),
+            ("check", &self.check),
+            ("lint", &self.lint),
+            ("wsl", &self.wsl),
+        ]
+    }
+
+    fn total(&self) -> usize {
+        self.sets().iter().map(|(_, rows)| rows.len()).sum()
+    }
+}
+
+/// One line per approved skip: which cell, who owns it, and until when.
+///
+/// The governance is prose for the same reason a gap's is — an owner and a
+/// reason wrapped into a table column are unreadable — and it is separated
+/// from [`render`] so a fixture can assert on it without asserting on the
+/// layout engine's wrapping.
+fn skip_details(policy: &SkipPolicy) -> Vec<String> {
+    policy
+        .entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "`{}/{}/{}`{} — {} (owner {}, {})",
+                entry.package,
+                entry.environment,
+                entry.gate,
+                entry
+                    .backend
+                    .as_deref()
+                    .map(|backend| format!(" on {backend}"))
+                    .unwrap_or_default(),
+                entry.reason,
+                entry.owner,
+                entry
+                    .expiry
+                    .as_deref()
+                    .map(|expiry| format!("expires {expiry}"))
+                    .unwrap_or_else(|| "no expiry".to_owned()),
+            )
+        })
+        .collect()
+}
+
+/// The dispatch table's data: one line per matrix row CI will expand.
+///
+/// A reviewer's question is whether what CI dispatches is what the plan
+/// resolved, so the rows are rendered as the plan carries them rather than
+/// re-derived from the cells here. A tool that recomputed them could agree
+/// with itself while disagreeing with the scheduler.
+fn dispatch_rows(plan: &Plan) -> Vec<Vec<String>> {
+    plan.rows
+        .iter()
+        .flat_map(|(area, sets)| {
+            sets.sets().into_iter().flat_map(move |(name, rows)| {
+                rows.iter().map(move |row| {
+                    vec![
+                        area.clone(),
+                        name.to_owned(),
+                        format!("{}/{}/{}", row.package, row.environment, row.gate),
+                        row.runner.clone(),
+                    ]
+                })
+            })
+        })
+        .collect()
+}
 
 const BUILD_COLUMNS: [&str; 4] = ["Build", "Package", "Producer", "Consumers"];
 
@@ -397,6 +524,61 @@ fn render(plan: &Plan, term: &Terminal) -> String {
         out.push('\n');
         out.push_str(&UnorderedList::new(build_details(plan)).render(term));
         out.push('\n');
+    }
+
+    let dispatched = dispatch_rows(plan);
+    if !dispatched.is_empty() {
+        out.push_str(
+            &Prose::new(format!(
+                "**Dispatch rows** — {} matrix row(s) across {} area(s); one per executing \
+                 cell, and nothing else is scheduled.",
+                dispatched.len(),
+                plan.rows
+                    .values()
+                    .filter(|sets| sets.total() > 0)
+                    .count()
+            ))
+            .render(term),
+        );
+        out.push('\n');
+        let columns = ROW_COLUMNS
+            .into_iter()
+            .map(|header| {
+                let column = TableColumn::new(header);
+                // The runner is derivable from the environment for every
+                // native row, so it is the column that yields when a cell key
+                // has already taken most of the width.
+                if header == "Runner" {
+                    column.drop_when_space_is_limited(Some("runner comes from the plan's environment table"))
+                } else {
+                    column
+                }
+            })
+            .collect::<Vec<_>>();
+        let data = dispatched
+            .into_iter()
+            .map(|row| row.into_iter().map(Into::into).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        out.push_str(&Table::new().with_columns(columns).with_data(data).render(term));
+        out.push('\n');
+    }
+
+    if let Some(policy) = &plan.skip_policy {
+        out.push_str(
+            &Prose::new(format!(
+                "**Approved skips** — {} entr(ies) from `{}` (`{}`).",
+                policy.entries.len(),
+                policy.source,
+                policy.content_hash
+            ))
+            .render(term),
+        );
+        out.push('\n');
+        let approvals = skip_details(policy);
+        if !approvals.is_empty() {
+            out.push_str(&UnorderedList::new(approvals).render(term));
+            out.push('\n');
+        }
     }
 
     if !plan.evidence_rejections.is_empty() {

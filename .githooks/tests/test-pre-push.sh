@@ -1101,6 +1101,58 @@ test_scope_only_publishes_committed_scope_for_a_push_to_main() {
     fi
 }
 
+# The published receipt binds the plan GENERATION it carries, and CI's
+# `scope-verify` refuses another one whole. That refusal is the migration path
+# every plan schema bump relies on: one fresh calculation, never an in-place
+# upgrade of a document this tool did not write.
+test_the_published_scope_receipt_binds_this_plan_generation() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_publishing_tools "$tmpdir"
+    local repo="$tmpdir/repo" main_sha
+    main_sha="$(git -C "$repo" rev-parse origin/main)"
+    run_hook_in_repo "$tmpdir" scope-only refs/heads/main "$main_sha"
+    assert_exit "scope-only push to main" "$tmpdir" 0 || return 1
+    local receipt
+    receipt="$(scope_receipt "$tmpdir")" || {
+        echo "  no scope receipt is attached to HEAD" >&2
+        return 1
+    }
+    printf '%s' "$receipt" >"$tmpdir/scope-receipt.json"
+    python3 - "$REPO_ROOT" "$tmpdir/scope-receipt.json" <<'PYCHECK'
+import json, sys
+from pathlib import Path
+root, path = Path(sys.argv[1]), Path(sys.argv[2])
+sys.path.insert(0, str(root / "scripts" / "ci"))
+import schema
+
+receipt = json.loads(path.read_text(encoding="utf-8"))
+if receipt["plan_schema_version"] != schema.RESOLVED_PLAN_SCHEMA_VERSION:
+    print(
+        f"  the published receipt carries a version {receipt['plan_schema_version']} "
+        f"plan; this tool writes {schema.RESOLVED_PLAN_SCHEMA_VERSION}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if receipt["plan"]["schema_version"] != schema.RESOLVED_PLAN_SCHEMA_VERSION:
+    print("  the receipt's declared generation and its plan's disagree", file=sys.stderr)
+    raise SystemExit(1)
+problems = schema.validate_scope_receipt(receipt)
+if problems:
+    print(f"  the published receipt does not validate: {problems}", file=sys.stderr)
+    raise SystemExit(1)
+
+# The previous generation misses once, by version, and is refused whole.
+stale = json.loads(path.read_text(encoding="utf-8"))
+stale["plan_schema_version"] = schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
+stale["plan"]["schema_version"] = schema.RESOLVED_PLAN_SCHEMA_VERSION - 1
+problems = schema.validate_scope_receipt(stale)
+if len(problems) != 1 or not problems[0].startswith("scope-schema:"):
+    print(f"  a previous-generation receipt must miss once as scope-schema: {problems}", file=sys.stderr)
+    raise SystemExit(1)
+PYCHECK
+}
+
 test_the_committed_scope_declares_deletions_and_omits_rename_sources() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
@@ -2122,7 +2174,7 @@ stage_ci_local_harness() {
     # The recipe's self-test loop: no-op stubs, since this fixture tests the
     # recipe's scheduling, not those suites.
     local suite
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
+    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
         : >"$harness/scripts/ci/$suite"
     done
     cat >"$harness/scripts/ci/affected_scope.py" <<EOF
@@ -2483,6 +2535,7 @@ run_test "reports that cannot be retained publish no receipt"         test_repor
 run_test "a blocked strict failure publishes its note; CI reruns it"  test_a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell
 run_test "a complete warn failure publishes its note"                 test_a_complete_warn_failure_publishes_its_note
 run_test "scope-only publishes committed scope for a push to main"    test_scope_only_publishes_committed_scope_for_a_push_to_main
+run_test "the published scope receipt binds this plan generation"     test_the_published_scope_receipt_binds_this_plan_generation
 run_test "committed scope declares deletions, omits rename sources"   test_the_committed_scope_declares_deletions_and_omits_rename_sources
 run_test "a feature push records the PR base, not its previous tip"   test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip
 run_test "a branch-creating push records the remote's main tip, says so" test_a_branch_creating_push_records_the_remote_main_tip_and_says_so
