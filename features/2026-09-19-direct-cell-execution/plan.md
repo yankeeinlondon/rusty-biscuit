@@ -1,7 +1,7 @@
 ---
 title: Direct cell execution — hosted matrices built from the plan's cells
 created: 2026-09-19
-phase: 2
+phase: 8
 total_phases: 9
 agent: claude/opus
 yolo: true
@@ -39,6 +39,129 @@ docs_updated_during_phase_2:
   - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - scripts/ci/schema.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/plan_fixtures.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/test_cross_check.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_local_evidence.py
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-rollup.rs
+  - .github/ci/schemas/contract.json
+  - .githooks/tests/test-pre-push.sh
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - .githooks/tests/fixtures/plan-macos-executing.json
+  - .githooks/tests/fixtures/plan-macos-two-packages.json
+  - .githooks/tests/fixtures/plan-wsl-absent.json
+  - .githooks/tests/fixtures/plan-wsl-executing.json
+  - .githooks/tests/fixtures/plan-wsl-reused.json
+  - features/2026-09-19-direct-cell-execution/spikes/row-equality.py
+docs_updated_during_phase_3:
+  - .github/ci/schemas/README.md
+docs_created_during_phase_3:
+  - features/2026-09-19-direct-cell-execution/spikes/s4-row-equality.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-runners.md
+source_files_during_phase_4:
+  - scripts/ci/completion.py
+  - scripts/ci/schema.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_schema.py
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - just/devops.just
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_4:
+  - .github/ci/schemas/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_5:
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_area-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - .github/workflows/ci.yml
+  - scripts/ci/cell_contract.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/schema.py
+  - scripts/ci/runner_loss.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci/test_local_evidence.py
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/test_runner_loss.py
+  - scripts/ci/test_schema.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_5:
+  - features/2026-09-19-direct-cell-execution/spikes/s0-baseline.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/wsl.md
+source_files_during_phase_6:
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_affected_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/workflows/_area-ci.yml
+  - .github/ci/ci-baseline.toml
+docs_updated_during_phase_6:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_7:
+  - scripts/ci/schema.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/plan_fixtures.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/ci/schemas/contract.json
+  - features/2026-09-19-direct-cell-execution/spikes/capacity.py
+docs_updated_during_phase_7:
+  - .github/ci/schemas/README.md
+  - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_8:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - just/ci-local.just
+  - scripts/ci/affected_scope.py
+  - scripts/ci/schema.py
+  - scripts/ci/test_ci_local.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_resolved_plan.py
+  - scripts/ci/test_affected_scope.py
+  - .github/workflows/ci.yml
+  - .github/ci/schemas/contract.json
+  - .githooks/tests/fixtures/affected_scope_stub.py
+  - features/2026-09-19-direct-cell-execution/spikes/capacity.py
+docs_updated_during_phase_8:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/topics/ci-cd.md
+  - CLAUDE.md
+  - features/2026-09-19-direct-cell-execution/spikes/s3-capacity.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/wsl.md
+  - .claude/skills/os/SKILL.md
 ---
 
 # Implementation Plan — Direct Cell Execution
@@ -497,7 +620,7 @@ workflow.
 
 ### Wave 1 — Schema and contract
 
-- [ ] **`scripts/ci/schema.py`** — bump `RESOLVED_PLAN_SCHEMA_VERSION` to 5;
+- [x] **`scripts/ci/schema.py`** — bump `RESOLVED_PLAN_SCHEMA_VERSION` to 5;
       add the per-cell execution fields, the per-package fields the specification
       assigns to package records, and `skip_policy` with its applicability and
       provenance; extend `CELL_FIELDS`/`PACKAGE_FIELDS`/`RESOLVED_PLAN_FIELDS` and
@@ -505,10 +628,10 @@ workflow.
       absent cell, an expired entry, and malformed provenance. Keep the
       version-before-fields check order — an older document usually differs in
       both, and the field complaint misdirects the reader.
-- [ ] **`.github/ci/schemas/contract.json`** — regenerate through the existing
+- [x] **`.github/ci/schemas/contract.json`** — regenerate through the existing
       generator path and confirm the Rust-side assertions in `ci-rollup.rs`,
       `ci-rollup-tests.rs`, and `ci-build-archive-tests.rs` read the new names.
-- [ ] **Scope-receipt fallback** — leave `SCOPE_RECEIPT_SCHEMA_VERSION` at 1 and
+- [x] **Scope-receipt fallback** — leave `SCOPE_RECEIPT_SCHEMA_VERSION` at 1 and
       confirm its embedded `plan_schema_version` check refuses a version-4
       receipt once with the existing `scope-schema` reason, forcing one fresh
       calculation rather than an in-place upgrade. Assert the hook and
@@ -516,43 +639,43 @@ workflow.
 
 ### Wave 2 — Planner population (depends on Wave 1)
 
-- [ ] **Cell and package execution inputs** — `affected_scope.py`: move every
+- [x] **Cell and package execution inputs** — `affected_scope.py`: move every
       value `_package-ci.yml` and `_wsl-ci.yml` currently receive as an input onto
       the plan, package-wide values on package records and cell-specific values on
       cells. Resolve nothing new from the checkout: every one of these already
       exists in `matrix_record` or the package policy, which is why this is a
       relocation rather than a new policy read.
-- [ ] **Skip-policy snapshot** — read `.github/ci/ci-baseline.toml` once, validate
+- [x] **Skip-policy snapshot** — read `.github/ci/ci-baseline.toml` once, validate
       per R8, and write the snapshot with provenance (path plus content hash
       through `biscuit-hash`'s xxHash convention where a hash is wanted). Fail
       planning on an expired or unmatched entry.
-- [ ] **Row adapter** — a pure function from plan to
+- [x] **Row adapter** — a pure function from plan to
       `{area: {test: [...], check: [...], lint: [...], wsl: [...]}}` plus scalar
       flags, ordered `package, gate, environment, runner` per R1, deterministic,
       reading only the plan. Emit it into the plan and project it into
       `scope.json` beside `area_matrix`; do not remove `area_matrix` yet.
-- [ ] **Capacity guard** — enforce R7's row and byte budgets with a named error.
+- [x] **Capacity guard** — enforce R7's row and byte budgets with a named error.
 
 ### Wave 3 — Readers and fixtures (depends on Wave 2)
 
-- [ ] **`scripts/ci/plan_fixtures.py`** — teach the fixture builder the v5 shape so
+- [x] **`scripts/ci/plan_fixtures.py`** — teach the fixture builder the v5 shape so
       `test_evidence_reuse`, `test_ci_local`, and the `just ci-local` stub planner
       do not hand-write three drifting variants.
-- [ ] **`scripts/ci-plan.rs`** — render the row sets and the skip snapshot through
+- [x] **`scripts/ci-plan.rs`** — render the row sets and the skip snapshot through
       `TerminalRenderable` so `just ci-local --plan` shows what CI will dispatch.
-- [ ] **Equality and uniqueness proof** — a repeatable comparison over the Phase 1
+- [x] **Equality and uniqueness proof** — a repeatable comparison over the Phase 1
       corpus asserting the row sets and the environment-list projection describe
       the same executing cells, with the row side additionally proving uniqueness.
       Save the output under `spikes/` as the Migration step 1 evidence.
 
 ### Checkpoint
 
-- [ ] Promote the Wave 1 and Wave 2 Python oracles; `test_schema.py`,
+- [x] Promote the Wave 1 and Wave 2 Python oracles; `test_schema.py`,
       `test_resolved_plan.py`, `test_affected_scope.py`, `test_evidence_reuse.py`,
       `test_ci_local.py`, `test_local_evidence.py` all green.
-- [ ] `just _test repo-deps` green; `just ci-local --plan` renders on this tree;
+- [x] `just _test repo-deps` green; `just ci-local --plan` renders on this tree;
       `.githooks/tests/test-pre-push.sh` green.
-- [ ] No workflow file has changed.
+- [x] No workflow file has changed.
 
 ## Phase 4 — The Producer Completion Contract (tool side)
 
@@ -562,21 +685,21 @@ together" applies.
 
 ### Wave 1 — Expected manifest v2
 
-- [ ] **`just/devops.just::_expected_manifest`** — schema version 2: keep the
+- [x] **`just/devops.just::_expected_manifest`** — schema version 2: keep the
       `_tier_filter`-derived selection (its whole point is that expected and
       observed come from one expression), and add explicit `ignored` and
       `excluded` identity sets, the declared L2 backends and companion suites for
       the cell, the resolved `cargo-nextest --version`, the environment, tier,
       target triple, and whether the listing came from an archive with a remap.
       Keep archive mode working through `_archive_drop_build_flags`.
-- [ ] **Provisioning-before-listing order** — document and enforce that listing
+- [x] **Provisioning-before-listing order** — document and enforce that listing
       executes test binaries, so native prerequisites, sidecars, backends, and the
       toolchain (where `requires-toolchain` × `cargo_toolchain` applies) are in
       place first, and that no consumer needs a compiler merely to list.
 
 ### Wave 2 — The validator (depends on Wave 1)
 
-- [ ] **`scripts/ci/completion.py`** — stdlib only. Inputs: the resolved plan, the
+- [x] **`scripts/ci/completion.py`** — stdlib only. Inputs: the resolved plan, the
       cell key, the expected manifest, the JUnit staging tree (`manifest.jsonl`
       included), the companion results, and the backend-proof evidence. It
       compares **identities**, not counts, scoped by cell, backend, and companion
@@ -587,33 +710,33 @@ together" applies.
       tests or companions, and absent required backend proof. An empty expected
       set requires a plan-recorded reason. It never compares an L1 report against
       every tier in a shared archive.
-- [ ] **The completion record** — versioned, keyed `{package, environment, gate}`,
+- [x] **The completion record** — versioned, keyed `{package, environment, gate}`,
       binding the tested revision, the build key where applicable, the gate
       inputs, the run and attempt, the resolved nextest version, and the report
       inventory. `complete` is set only after validation succeeds (R10).
       Add its field list and rejection codes to `schema.py` and
       `contract.json`.
-- [ ] **Failure-path behavior** — diagnostics are published best effort under the
+- [x] **Failure-path behavior** — diagnostics are published best effort under the
       existing cancellation rules; a *required* upload failure fails the job.
 
 ### Wave 3 — Fixtures (depends on Wave 2)
 
-- [ ] **`scripts/ci/test_completion.py`** — implement the full AC5 matrix from
+- [x] **`scripts/ci/test_completion.py`** — implement the full AC5 matrix from
       Phase 2 and promote those pending fixtures. Include the two cases the
       specification singles out: a missing test cannot use a skip approval, and a
       canonical tier exclusion must not create a false missing-test failure.
-- [ ] **Cross-language contract** — assert the record's field names against
+- [x] **Cross-language contract** — assert the record's field names against
       `contract.json` from the Rust side so a rename cannot land silently, the
       same way the compiler-work publisher fixture works.
 
 ### Checkpoint
 
-- [ ] `python3 scripts/ci/test_completion.py` green with every AC5 case covered;
+- [x] `python3 scripts/ci/test_completion.py` green with every AC5 case covered;
       `test_schema.py` green on the record's contract.
-- [ ] A local dry run on one real package (for example `repo-deps` L1 on
+- [x] A local dry run on one real package (for example `repo-deps` L1 on
       `macos-latest`) produces a valid record, and a deliberately narrowed filter
       makes it fail with the missing-test reason.
-- [ ] No workflow file has changed.
+- [x] No workflow file has changed.
 
 ## Phase 5 — The Row-Driven Workflow Layout
 
@@ -622,58 +745,58 @@ Preserve archive owners and all existing execution behavior.
 
 ### Wave 1 — The execution workflow (largest single task; do first, alone)
 
-- [ ] **`.github/workflows/_package-ci.yml`** — replace the six environment-list
+- [x] **`.github/workflows/_package-ci.yml`** — replace the six environment-list
       jobs with four row-driven ones: `test` (native L1/L2/browser rows), `check`,
       `lint`, and `wsl2` (delegating each row to `_wsl-ci.yml`). Each job expands
       `${{ fromJSON(inputs.<set>-rows) }}` behind a scalar guard, carries no
       `name:`, and keeps `fail-fast: false`.
-- [ ] **`scripts/ci/cell_contract.py`** — the one reader every job uses: given the
+- [x] **`scripts/ci/cell_contract.py`** — the one reader every job uses: given the
       plan, a row, and the run's tested revision, it verifies row identity and
       dispatch fields against the plan, refuses an unknown, duplicate,
       non-executing, or mismatched cell with a coded reason, and emits the cell's
       execution contract as step outputs and environment values. No job reads a
       manifest, a package policy, or `environments.json`.
-- [ ] **Tier branching** — inside the `test` job, branch only where execution
+- [x] **Tier branching** — inside the `test` job, branch only where execution
       genuinely differs: L2 backend provisioning and proof, browser
       serialization and `BISCUIT_BROWSER_REQUIRED`, `requires-toolchain`
       provisioning, Node/pnpm provisioning, and the canonical recipe selected
       (`_test` / `_test_l2` / `_test_browser`). Preserve timeouts, concurrency
       limits, serialization, and compiler-work measurement exactly; L2 and
       browser must still not bring a terminal or browser window into focus.
-- [ ] **Producer completeness steps** — after provisioning and before the gate:
+- [x] **Producer completeness steps** — after provisioning and before the gate:
       verify the planned archive, then `_expected_manifest`; after the gate:
       `completion.py`, then the JUnit, status, and completion uploads. A failed
       validation or a failed required upload fails the job.
-- [ ] **Labels** — confirm every producer label exposes package, environment, and
+- [x] **Labels** — confirm every producer label exposes package, environment, and
       gate without dumping row JSON, and that a job skipped before expansion shows
       no unevaluated expression.
-- [ ] **R12's selection entry** — add `_expected_manifest` to
+- [x] **R12's selection entry** — add `_expected_manifest` to
       `CI_RECIPES_BY_GATE["test"]` in this same change, with the fixture in
       `test_affected_scope.py` asserting an edit to it selects the test gate and
       moves the test cells' gate-input identity.
 
 ### Wave 2 — Callers and the guest (depends on Wave 1's input surface)
 
-- [ ] **`.github/workflows/_area-ci.yml`** — one guarded call to
+- [x] **`.github/workflows/_area-ci.yml`** — one guarded call to
       `_package-ci.yml` per area with the four row sets; skip that call entirely
       for an all-reused or gap-only area; keep `accepted-gaps`, the slice upload,
       and `coverage-audit` unconditional; resolve the audit's package membership
       from the plan rather than from execution rows; keep the token confinement
       (`contents: read` on the execution call, `checks: write` on the publisher
       alone).
-- [ ] **`.github/workflows/ci.yml`** — publish per-area row sets and scalar flags
+- [x] **`.github/workflows/ci.yml`** — publish per-area row sets and scalar flags
       from the `scope` job in place of `area_matrix`; leave `has_packages`,
       `preflight`, `build`, `area-drift`, `ci-gate`, and `ci-reporting`
       untouched. `ci-gate` must remain byte-identical.
-- [ ] **`.github/workflows/_wsl-ci.yml`** — accept one row instead of a package
+- [x] **`.github/workflows/_wsl-ci.yml`** — accept one row instead of a package
       plus lists; add `python3` to the declared guest apt provisioning with a
       reachability check (R2); keep the archive-download, verification,
       measurement-return, and status behavior unchanged; run only the row's gate,
       never an internal tier matrix.
-- [ ] **Row-set disjointness at the boundary** — a contract test asserting the
+- [x] **Row-set disjointness at the boundary** — a contract test asserting the
       union of the four inputs equals the area's executing cells with no
       duplicate key, checked against the plan artifact rather than recomputed.
-- [ ] **R11's selection entries** — add `.github/workflows/_area-ci.yml` to
+- [x] **R11's selection entries** — add `.github/workflows/_area-ci.yml` to
       `GLOBAL_PATHS_ALL_GATES` **and** `ORCHESTRATION_PATHS` in this same change,
       with the paired fixture in `test_affected_scope.py` and
       `test_local_evidence.py`: the path forces workspace scope and is absent from
@@ -681,17 +804,17 @@ Preserve archive owners and all existing execution behavior.
 
 ### Wave 3 — Attribution, lint, and promotion (depends on Waves 1–2)
 
-- [ ] **`scripts/ci/runner_loss.py`** — update `JOB_KINDS`, the gate-segment
+- [x] **`scripts/ci/runner_loss.py`** — update `JOB_KINDS`, the gate-segment
       pattern, and the WSL delegation handling for the new labels; accept both
       label forms per R1; keep `ci-gate` excluded and the build-owner synthesis
       intact.
-- [ ] **`scripts/ci/test_runner_loss.py`** — derive every label from the shipped
+- [x] **`scripts/ci/test_runner_loss.py`** — derive every label from the shipped
       workflows (never by hand — Phase 6 of the earlier plan broke all six labels
       at once while every fixture spelled them literally) and promote the Phase 2
       oracles.
-- [ ] **`actionlint`** on all four reader-facing workflows; remember it models no
+- [x] **`actionlint`** on all four reader-facing workflows; remember it models no
       `github.run_started_at`.
-- [ ] **Promote** the Phase 2 workflow oracles in `ci_workflow_contracts.rs` and
+- [x] **Promote** the Phase 2 workflow oracles in `ci_workflow_contracts.rs` and
       rewrite the tests the baseline flagged: the D4 staging assertion (R3), the
       per-package fan-out assertions, and any test asserting an environment-list
       input. Remove an obsolete shape check only once its behavioral replacement
@@ -699,13 +822,13 @@ Preserve archive owners and all existing execution behavior.
 
 ### Checkpoint
 
-- [ ] `just _test test-toolkit`, `just _lint test-toolkit`,
+- [x] `just _test test-toolkit`, `just _lint test-toolkit`,
       `python3 scripts/ci/test_runner_loss.py`,
       `python3 scripts/ci/test_ci_local.py`, `actionlint` on four workflows: all
       green.
-- [ ] `just ci-local` self-test loop green; `.githooks/tests/test-pre-push.sh`
+- [x] `just ci-local` self-test loop green; `.githooks/tests/test-pre-push.sh`
       green.
-- [ ] Every job label in the four workflows is enumerated in the baseline
+- [x] Every job label in the four workflows is enumerated in the baseline
       document with its parsed cell, and the WSL2 and native rows for one package
       map to two distinct cells.
 
@@ -716,13 +839,13 @@ any old completeness check.
 
 ### Wave 1 — Consume completion records
 
-- [ ] **`scripts/ci-rollup.rs`** — read `completion-*` artifacts; for a
+- [x] **`scripts/ci-rollup.rs`** — read `completion-*` artifacts; for a
       new-format executing cell, require a valid, complete, correctly bound
       record and its declared report inventory, and stop recomputing expected
       identities and exact skips; refuse a green status record unsupported by its
       artifacts; keep run-attempt selection, current-result precedence, and
       retained passing evidence on retries.
-- [ ] **Legacy path** — retain the existing expected-manifest/baseline path for
+- [x] **Legacy path** — retain the existing expected-manifest/baseline path for
       records without the new contract, gated on the record's version, and keep
       `skip_evidence_degraded` for those cells only. Removing producer-side skip
       checks from the audit must not retroactively certify an old receipt; where
@@ -730,36 +853,36 @@ any old completeness check.
 
 ### Wave 2 — Verdict rules (depends on Wave 1)
 
-- [ ] **Enforcement condition** — enforce the verdict when execution producers
+- [x] **Enforcement condition** — enforce the verdict when execution producers
       succeeded **or when none were required**, so an all-reused or gap-only area
       is still judged; treat a skipped producer call with nonempty execution rows
       as missing coverage; keep an unreadable input an infrastructure failure
       rather than an invented test failure.
-- [ ] **Presentation** — render the area slice even after a producer failure
+- [x] **Presentation** — render the area slice even after a producer failure
       without adding a second coverage-policy failure; keep reused and
       accepted-gap cells in both the area summary and the advisory run summary;
       keep an explicit current execution outranking a reused claim with the
       discrepancy reported; a failure still outranks a gap.
-- [ ] **Reuse and gaps** — unchanged: qualifying evidence for every reused cell,
+- [x] **Reuse and gaps** — unchanged: qualifying evidence for every reused cell,
       valid governance for every accepted gap, existing duplicate/conflicting
       result rejection, no cross-tree hosted reuse.
 
 ### Wave 3 — Fixtures (depends on Waves 1–2)
 
-- [ ] **`scripts/ci-rollup-tests.rs`** — implement and promote the Phase 2 audit
+- [x] **`scripts/ci-rollup-tests.rs`** — implement and promote the Phase 2 audit
       oracles (AC6), covering all-reused, gap-only, mixed, and
       unexpectedly-skipped-producer areas, and legacy evidence that must not
       bypass a removed check.
-- [ ] **`.github/ci/ci-baseline.toml`** — update its header to state the tightened
+- [x] **`.github/ci/ci-baseline.toml`** — update its header to state the tightened
       rule: a skip identity now comes only from an observed `<skipped/>`, and an
       expected-but-unreported test is a failure. Keep the file empty; do not
       invent entries.
 
 ### Checkpoint
 
-- [ ] `just _test repo-deps` green including `ci-rollup`'s suite; every AC6
+- [x] `just _test repo-deps` green including `ci-rollup`'s suite; every AC6
       fixture green; no pending decorator remains for an implemented contract.
-- [ ] A synthetic end-to-end fixture run: plan → rows → producer artifacts →
+- [x] A synthetic end-to-end fixture run: plan → rows → producer artifacts →
       `ci-rollup rollup --area` → `verdict --area`, for each of the four area
       shapes, passing and failing for the right reasons.
 
@@ -769,41 +892,63 @@ Migration steps 4 and 5.
 
 ### Wave 1 — Offline validation
 
-- [ ] **Validate full-workspace and nightly plans offline** for every individual
+- [x] **Validate full-workspace and nightly plans offline** for every individual
       matrix's cardinality, the four-level call depth, the unique reusable
       workflow count, the job estimate including area audits, gap publishers, and
       build owners, and the serialized output sizes. Record the result as this
       feature's capacity evidence, extending S3.
-- [ ] **Confirm the guard fires** on a synthetic over-budget area with a clear
+      *(Done: `spikes/capacity.py`, recorded in `spikes/s3-capacity.md` §
+      "Phase 7 re-measurement"; pinned by
+      `CapacityGuardTests::test_the_real_full_workspace_and_nightly_plans_fit_every_ceiling`.)*
+- [x] **Confirm the guard fires** on a synthetic over-budget area with a clear
       pre-dispatch failure and no truncation.
+      *(Done through `main()`: `CapacityGuardTests::test_an_over_budget_area_fails_before_dispatch_and_emits_nothing`;
+      S3's aggregate 512 KB budget, never implemented, added as
+      `TOTAL_ROW_SET_BUDGET`.)*
 
 ### Wave 2 — Per-area path selection (parallel with Wave 1)
 
-- [ ] **`.github/ci/direct-execution.json`** — the R9 allowlist, `["root"]` to
-      start, with `execution_path` on each area record in the plan.
-- [ ] **Dual-path contract** — a test that fails if any area would emit both row
+- [x] ~~**`.github/ci/direct-execution.json`** — the R9 allowlist, `["root"]` to
+      start, with `execution_path` on each area record in the plan.~~
+      **Amended (human-review option A, pending ratification):** Phase 5 left
+      the workflows rows-only, so no `lists` path exists to allowlist against.
+      The allowlist loader is removed, every area record states `rows`, and
+      the plan contract admits only `rows`. Rollback is a revert.
+- [x] **Dual-path contract** — a test that fails if any area would emit both row
       sets and environment lists, and one asserting rollback restores compatible
       workflow and audit readers together. Rollback must never erase evidence or
       weaken enforcement.
+      *(Done: `ExecutionPathTests` (Python) and
+      `the_plan_admits_exactly_the_dispatch_path_the_workflows_implement`
+      (Rust). Rollback is one revert of planner, workflows, and audit together;
+      see the Phase 7 log for why no separate rollback test exists.)*
 
 ### Wave 3 — Trial (depends on Waves 1–2)
 
-- [ ] **Local comparison** — `just ci-local --plan` and `just ci-local` on the
+- [x] **Local comparison** — `just ci-local --plan` and `just ci-local` on the
       root area under the new path, plus `scripts/cross-check.sh` if a WSL2 row is
       in scope, confirming the observed cells match the plan.
+      *(Done: areas `root` and `tools`, 9 executing cells = 9 rows, unique;
+      `just ci-local` 13/13 gates green on macOS. No WSL2 row executes — both
+      WSL2 cells are accepted gaps — so `cross-check` was not triggered.)*
 - [ ] **One ordinary affected-area CI run** on this feature's branch for reporting
       and artifact behavior — never a full-workspace or nightly dispatch.
       **BLOCKED: needs push.** Evidence to capture: the four row sets actually
       dispatched, every job label, one completion artifact per executing cell, the
       area slice, the neutral gap checks, `ci-gate` green, and no duplicate gate
-      run.
-- [ ] **Switch the remaining areas** only after the focused contracts pass and the
+      run. *(Still blocked after Phase 7; the exact commands are in the Phase 7
+      log, "The hosted trial".)*
+- [x] ~~**Switch the remaining areas** only after the focused contracts pass and the
       trial's observed cells match the plan. Keep the area-level rollback switch
-      until this review closes.
+      until this review closes.~~
+      **Amended (option A, pending ratification):** there is no per-area
+      switch to flip. Every area has dispatched rows since Phase 5 and states
+      `rows` since this phase. The hosted trial above still gates Phase 8's
+      deletions.
 
 ### Checkpoint
 
-- [ ] Capacity evidence written; guard proven; exactly one path per area asserted
+- [x] Capacity evidence written; guard proven; exactly one path per area asserted
       by a test; the trial's evidence captured or the blocker recorded with the
       exact commands to run.
 
@@ -814,52 +959,73 @@ each deletion removes a fallback.
 
 ### Wave 1 — Workflow inputs
 
-- [ ] Delete every environment-list input from `_area-ci.yml`,
+- [x] Delete every environment-list input from `_area-ci.yml`,
       `_package-ci.yml`, and `_wsl-ci.yml`, together with the `lists` branch and
       `.github/ci/direct-execution.json` once every area is switched. Assert the
       absence with a contract test.
+      *(The inputs went in Phase 5; no `lists` branch or allowlist file ever
+      shipped. Absence is now pinned exactly by
+      `the_reusable_workflows_accept_only_rows_and_run_scalars`, which fails on
+      `main`'s 23-input `_package-ci.yml`.)*
 
 ### Wave 2 — Local readers, then the projection (strictly ordered)
 
-- [ ] **Migrate `just/ci-local.just`** — the six `.matrix[]` lookups at lines ~361
+- [x] **Migrate `just/ci-local.just`** — the six `.matrix[]` lookups at lines ~361
       and ~507–555 (`test_args`, `gates`, `check_args`, `tiers`,
       `l2_environments`, `l2_backends`, `runner_tools`) read the plan's cells and
       package records instead.
-- [ ] **Migrate the hook's readers** — `.githooks/pre-push`,
+      *(Done: one `.packages[]` record per package; `l2_environments` became
+      "this host's L2 cell executes". `CiLocalTests` now feeds a scope without
+      `matrix` plus a `--plan-out` plan, and went red before the change.)*
+- [x] **Migrate the hook's readers** — `.githooks/pre-push`,
       `.githooks/tests/fixtures/affected_scope_stub.py`, and
       `.githooks/tests/test-pre-push.sh` where they name `area_matrix` or
       `matrix`.
-- [ ] **Only then** remove `matrix`, `area_matrix`, and `area_slugs`' matrix
+      *(`pre-push` and `test-pre-push.sh` read neither: the hook passes the
+      scope document straight to `scope-record`. The stub was the only site;
+      it now projects the planner's shape. Hook suite 67/67.)*
+- [x] **Only then** remove `matrix`, `area_matrix`, and `area_slugs`' matrix
       dependence from `legacy_scope_document` and `matrix_record`'s environment
       lists. **Retain** the policy and build-owner projections (`policy`,
       `build_owners`, `build_slices`, `build_artifacts`, `build_runners`) —
       `ci-rollup` and `ci.yml`'s owner job still read them — and keep
       `SCOPE_PROJECTION_FIELDS` honest about what survives.
+      *(`matrix_record` had no other caller and was deleted whole.
+      `scheduled_areas`/`area_slugs` derive from the plan's gating packages;
+      `ci.yml`'s `has_packages` reads `scheduled_areas`. Older receipts that
+      still carry the two fields keep validating.)*
 
 ### Wave 3 — Documentation and drift (parallel with Wave 2)
 
-- [ ] **`.github/ci/README.md`** — rewrite "The area fan-out", "Each area audits
+- [x] **`.github/ci/README.md`** — rewrite "The area fan-out", "Each area audits
       its planned coverage", the baseline section, and the artifact contract to
       describe row-driven dispatch, the producer completion contract, and the
       tightened skip rule.
-- [ ] **`docs/topics/ci-cd.md`** — the central policy page's layer descriptions.
-- [ ] **`.claude/skills/rust-devops/ci-cd.md`** — the fan-out topology, the
+- [x] **`docs/topics/ci-cd.md`** — the central policy page's layer descriptions.
+- [x] **`.claude/skills/rust-devops/ci-cd.md`** — the fan-out topology, the
       four-level chain, the schema version, the label contract, the new producer
       responsibility, and the tightened skip interpretation.
-- [ ] **`.claude/skills/os/`** — the WSL2 leg's new guest provisioning and the row
+- [x] **`.claude/skills/os/`** — the WSL2 leg's new guest provisioning and the row
       it receives; add anything Phase 5 or 7 cost time to learn.
-- [ ] **`CLAUDE.md`** — the CI Structure bullets that describe audit
+- [x] **`CLAUDE.md`** — the CI Structure bullets that describe audit
       responsibility and per-area coverage enforcement.
-- [ ] **`docs/dependencies.md`** — only if a crate was added or removed (none is
+- [x] **`docs/dependencies.md`** — only if a crate was added or removed (none is
       expected).
+      *(Unchanged: no crate added or removed. `.github/ci/schemas/README.md`
+      was also corrected; it still described `area_matrix` as live.)*
 
 ### Checkpoint
 
-- [ ] `no_reader_facing_document_or_recipe_names_a_retired_ci_entity` and
+- [x] `no_reader_facing_document_or_recipe_names_a_retired_ci_entity` and
       `the_ci_documentation_states_the_implemented_behavior` green;
       `just ci-local` and the hook suite green after the reader migration;
       `grep` finds no environment-list input and no remaining `area_matrix`
       reader.
+      *(Both greps are now contracts:
+      `the_reusable_workflows_accept_only_rows_and_run_scalars` and
+      `no_shipped_reader_consumes_a_retired_environment_list_projection`.
+      `just ci-local` 13/13, hook suite 67/67. The Phase 7 hosted trial still
+      has not run; see the Phase 8 log.)*
 
 ## Phase 9 — Acceptance Evidence and Handoff
 
