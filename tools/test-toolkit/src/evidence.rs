@@ -16,7 +16,7 @@
 //! Recording is off unless [`BISCUIT_TEST_REQUIRED_BACKENDS`] is set, so local
 //! development does no file I/O.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -33,6 +33,12 @@ pub const BISCUIT_JUNIT_STAGE_DIR: &str = "BISCUIT_JUNIT_STAGE_DIR";
 
 /// File name, inside the staging directory, of the execution-evidence log.
 pub const BACKEND_EXECUTIONS_FILE: &str = "backend-executions.jsonl";
+
+/// File name, inside the staging directory, of the per-backend verdict
+/// `backend-proof verify` writes for `scripts/ci/completion.py
+/// --backend-proofs`: `{"<backend>": {"executed": <run count>, "proven": <bool>}}`
+/// for every required backend. Mirrored by `scripts/ci/local_evidence.py`.
+pub const BACKEND_PROOFS_FILE: &str = "backend-proofs.json";
 
 /// Staging-root path relative to the workspace root, used when
 /// [`BISCUIT_JUNIT_STAGE_DIR`] is unset.
@@ -107,6 +113,68 @@ pub fn stage_dir() -> PathBuf {
 #[must_use]
 pub fn backend_executions_path() -> PathBuf {
     stage_dir().join(BACKEND_EXECUTIONS_FILE)
+}
+
+/// Write the proof document `completion.py` consumes, one entry per required
+/// backend, in backend-name order.
+///
+/// Written on the proven and the unproven outcome alike: a refusal must be
+/// recorded as `proven: false`, never as an absent file, or a producer that
+/// skipped its verify step would be indistinguishable from one that failed it.
+/// Deterministic (sorted keys, one line) so two hosts agree byte for byte.
+///
+/// ## Errors
+///
+/// Any I/O error from creating the parent directory or writing the file.
+pub fn write_backend_proofs(
+    path: &Path,
+    required: &BTreeSet<Backend>,
+    records: &[ExecutionRecord],
+) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, backend_proofs_json(required, records))
+}
+
+/// The proof document as text; see [`write_backend_proofs`].
+#[must_use]
+pub fn backend_proofs_json(required: &BTreeSet<Backend>, records: &[ExecutionRecord]) -> String {
+    let entries: BTreeMap<&str, usize> = required
+        .iter()
+        .map(|backend| (backend.as_str(), decision_counts(*backend, records).0))
+        .collect();
+    let body: Vec<String> = entries
+        .iter()
+        .map(|(name, executed)| {
+            format!(
+                "\"{}\":{{\"executed\":{executed},\"proven\":{}}}",
+                escape_json(name),
+                *executed > 0
+            )
+        })
+        .collect();
+    format!("{{{}}}\n", body.join(","))
+}
+
+/// Delete both evidence files under `stage`, so a previous run's records and
+/// verdict cannot satisfy this run's check.
+///
+/// An absent file is not an error: "nothing to clear" is the ordinary first
+/// run.
+///
+/// ## Errors
+///
+/// Any I/O error other than "not found" from removing either file.
+pub fn clear_backend_evidence(stage: &Path) -> io::Result<()> {
+    for name in [BACKEND_EXECUTIONS_FILE, BACKEND_PROOFS_FILE] {
+        match fs::remove_file(stage.join(name)) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 /// The workspace root containing the running test's package.

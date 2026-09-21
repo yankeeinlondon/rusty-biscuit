@@ -767,12 +767,25 @@ fn l2_provisions_and_verifies_only_the_ci_capable_backend() {
         "the L2 job must not SET a global L2 hard-require (would panic GUI-only tests)"
     );
     // Execution proof, not mere availability: the leg requires exactly the
-    // declared backends it provisioned (today only tmux is CI-hostable), so an
-    // installed-but-never-exercised backend fails `_test_l2`'s backend-proof
-    // bracket instead of rendering a green cell with zero executed L2 tests.
+    // backends the PLAN attached to the cell (the hostable subset of the
+    // package's declaration), so an installed-but-never-exercised backend
+    // fails `_test_l2`'s backend-proof bracket instead of rendering a green
+    // cell with zero executed L2 tests.
     assert!(
         shared.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),
         "the L2 job must require the provisioned backends through BISCUIT_TEST_REQUIRED_BACKENDS"
+    );
+    // The list is the cell's verbatim. Narrowing it here by name is what made
+    // the expected manifest and the completion validator disagree: the job
+    // recorded `["tmux"]` while the validator demanded the package's whole
+    // declaration (review-1 of 2026-09-19-direct-cell-execution).
+    assert!(
+        !shared.contains(r#"select(. == "tmux")"#),
+        "the L2 job must not hardcode which declared backend it requires; the plan decides"
+    );
+    assert!(
+        shared.contains("REQUIRED_BACKENDS: ${{ steps.cell.outputs.backends }}"),
+        "the required backends come from the cell contract's `backends` output"
     );
     // Focus safety: CI must never run L3 or take foreground focus.
     assert!(
@@ -4883,6 +4896,38 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "still names the retired",
             "`protect-your-bacon` has required `ci-gate` since 2026-09-13",
         ),
+        // `build` and `area-drift` arrived with the single-OS-compile fix and
+        // `ci-gate` folds both; see `TARGET_CI_JOBS` and `GATED_JOBS`.
+        (
+            ".github/ci/README.md",
+            "exactly six top-level jobs",
+            "`ci.yml` defines eight top-level jobs",
+        ),
+        (
+            ".github/ci/README.md",
+            "fold of the four above",
+            "`ci-gate` folds six jobs, including `build` and `area-drift`",
+        ),
+        (
+            ".github/ci/README.md",
+            "small contract-test leg",
+            "CI's own suites are owned by `repo-deps` and `test-toolkit` and run in their cells",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "exactly six top-level jobs",
+            "`ci.yml` defines eight top-level jobs",
+        ),
+        (
+            "docs/topics/ci-cd.md",
+            "fold of those four",
+            "`ci-gate` folds six jobs, including `build` and `area-drift`",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "exactly six top-level jobs",
+            "`ci.yml` defines eight top-level jobs",
+        ),
     ];
     for (file, phrase, why) in RETIRED {
         let source = read(file);
@@ -4913,7 +4958,9 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         ("docs/topics/ci-cd.md", "ci-reporting"),
         ("docs/topics/ci-cd.md", "SUITE_REGISTRY"),
         ("docs/topics/ci-cd.md", "change inventory"),
-        ("docs/topics/ci-cd.md", "exactly six top-level jobs"),
+        ("docs/topics/ci-cd.md", "exactly eight top-level jobs"),
+        (".github/ci/README.md", "exactly eight top-level jobs"),
+        (".claude/skills/rust-devops/ci-cd.md", "exactly eight top-level jobs"),
         (".claude/skills/rust-devops/ci-cd.md", "ci-reporting"),
         (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
         (".claude/skills/rust-testing/SKILL.md", "repo-deps"),
@@ -5714,6 +5761,47 @@ fn the_l2_consumer_still_provisions_and_proves_its_runtime_backend() {
         l2.contains("apple-terminal") && l2.contains("its tests skip"),
         "the macOS backend coverage row must still name the GUI emulators that skip"
     );
+}
+
+/// The certify step reads the backend-proof document from the stage tree the
+/// tier wrote it into — the same tree that holds the expected manifest and the
+/// JUnit reports it already reads.
+///
+/// `backend-proof verify` (bracketed by `_test_l2`) writes
+/// `backend-proofs.json` beside `backend-executions.jsonl` in
+/// `$BISCUIT_JUNIT_STAGE_DIR`, which defaults to `target/nextest/ci-reports`
+/// under the workspace root. Without this flag `completion.py` reads an empty
+/// proof map and refuses every L2 cell as `completion-backend-unproven`.
+#[test]
+fn the_certify_step_reads_backend_proofs_from_the_same_stage_tree() {
+    let native = job_block("_package-ci.yml", "  test:");
+    let native_steps = steps(&native);
+    let certify = step_named(&native_steps, "Certify this cell's completeness")
+        .expect("the native test job certifies its cell");
+    for flag in [
+        r#"--expected-manifest "target/nextest/ci-reports/expected-${{ matrix.gate }}.json""#,
+        "--artifacts target/nextest/ci-reports",
+        "--backend-proofs target/nextest/ci-reports/backend-proofs.json",
+    ] {
+        assert!(
+            certify.contains(flag),
+            "the native certify step must pass `{flag}` so every input comes from one stage tree"
+        );
+    }
+
+    let wsl = workflow("_wsl-ci.yml");
+    let wsl_steps = steps(&wsl);
+    let certify = step_named(&wsl_steps, "Certify this cell's completeness")
+        .expect("the guest certifies its cell");
+    for flag in [
+        r#"--artifacts "$stage""#,
+        r#"--backend-proofs "$stage/backend-proofs.json""#,
+    ] {
+        assert!(
+            certify.contains(flag),
+            "the guest certify step must pass `{flag}`; the two certify steps stay parallel"
+        );
+    }
 }
 
 /// Lint and check compile on purpose, and their work is counted as its own
