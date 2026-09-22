@@ -259,7 +259,7 @@ environment they require are documented in
 
 | Level | Description | Location |
 |-------|-------------|----------|
-| **Level 1** | PTY-based tests using `expectrl` — no real terminal required | `lib/tests/level1_*.rs` |
+| **Level 1** | PTY-based tests using `expectrl` — no real terminal required | `lib/tests/l1/level1_*.rs` |
 | **Level 2** | Real-terminal tests using the shared `biscuit-test-harness` crate | `cli/tests/level2_*.rs` |
 | **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input). See [`biscuit-test-harness/README.md`](../biscuit-test-harness/README.md). | — |
 
