@@ -163,6 +163,7 @@ package's `test`-kind executables only (the `s3-measure.sh` step 2 filter).
 |---|---|---|---|---:|---:|
 | `darkmatter` | 4 | `048e44f7a` | `terminal-tests,browser-tests,effects-instrumentation` | 74 → 5 | 5.01 GB → 0.51 GB (−90%) |
 | `darkmatter-cli` | 5 | `cb9a3d38b` | `terminal-tests` | 53 → 2 | 0.40 GB → 0.15 GB (−62%) |
+| `biscuit-terminal` | 6 | `beca6c368` | `image,terminal-tests,browser-tests` | 38 → 2 | 1.35 GB → 0.10 GB (−93%) |
 
 From Phase 5 on, the before side builds into its own `--target-dir`, not the
 shared one. A build script run from the Phase 4 base worktree kept that
@@ -170,3 +171,7 @@ worktree's absolute path, and after the worktree was deleted, the next
 `just test` in the main tree failed in `zed-dmls-cli`'s build script
 (`cargo clean -p zed-dmls-cli` fixed it). Executable sizes do not depend on the
 target directory. Exact bytes: 396,639,664 → 148,746,664.
+
+`biscuit-terminal` (Phase 6), built the same way with the before side in
+`/tmp/p6/target-before`, since deleted. Exact bytes: 1,347,420,400 →
+95,134,552.

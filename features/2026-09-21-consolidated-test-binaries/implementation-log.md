@@ -550,6 +550,123 @@ packages_during_phase_5:
     - darkmatter
     - claudine-cli
     - biscuit-terminal
+source_files_during_phase_6:
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/tests/compose_parity.rs
+    - biscuit-terminal/lib/tests/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/html_page_example.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/integration.rs
+    - biscuit-terminal/lib/tests/l1/compose_parity.rs
+    - biscuit-terminal/lib/tests/l1/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/l1/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/l1/html_page_example.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/l1/integration.rs
+    - biscuit-terminal/lib/tests/l1/layout_matrix.rs
+    - biscuit-terminal/lib/tests/l1/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/l1/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/l1/level1_cursor.rs
+    - biscuit-terminal/lib/tests/l1/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/l1/list_parity.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/l1/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/parity_helpers.rs
+    - biscuit-terminal/lib/tests/l1/perf_gate.rs
+    - biscuit-terminal/lib/tests/l1/prelude_exports.rs
+    - biscuit-terminal/lib/tests/l1/progress_parity.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_comparison.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/section_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_parity.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/l1/test_layout.rs
+    - biscuit-terminal/lib/tests/l1/text_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/todo_parity.rs
+    - biscuit-terminal/lib/tests/l1/tree_layout.rs
+    - biscuit-terminal/lib/tests/l1/two_column_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/layout_matrix.rs
+    - biscuit-terminal/lib/tests/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/level1_cursor.rs
+    - biscuit-terminal/lib/tests/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/level2/level2_terminal_osc_wezterm.rs
+    - biscuit-terminal/lib/tests/level2/main.rs
+    - biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs
+    - biscuit-terminal/lib/tests/list_parity.rs
+    - biscuit-terminal/lib/tests/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/parity_helpers.rs
+    - biscuit-terminal/lib/tests/perf_gate.rs
+    - biscuit-terminal/lib/tests/prelude_exports.rs
+    - biscuit-terminal/lib/tests/progress_parity.rs
+    - biscuit-terminal/lib/tests/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/render_comparison.rs
+    - biscuit-terminal/lib/tests/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/section_parity.rs
+    - biscuit-terminal/lib/tests/status_block_parity.rs
+    - biscuit-terminal/lib/tests/status_parity.rs
+    - biscuit-terminal/lib/tests/table_parity.rs
+    - biscuit-terminal/lib/tests/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/text_block_parity.rs
+    - biscuit-terminal/lib/tests/todo_parity.rs
+    - biscuit-terminal/lib/tests/tree_layout.rs
+    - biscuit-terminal/lib/tests/two_column_parity.rs
+    - biscuit-terminal/lib/tests/unordered_list_parity.rs
+    - claudine/cli/tests/common/pty.rs
+    - renderable/justfile
+    - "biscuit-terminal/lib/tests/snapshots/*.snap → biscuit-terminal/lib/tests/l1/snapshots/l1__*.snap (1,086 byte-identical moves; see biscuit-terminal/snapshot-mapping.json)"
+docs_updated_during_phase_6:
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/dependencies.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_6:
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal-migration.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-mapping.json
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/renderable/tree.md
+packages_during_phase_6:
+    - biscuit-terminal
+    - renderable
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-09-21-consolidated-test-binaries (8 phases)
@@ -1287,6 +1404,179 @@ Commit split, following Phase 4: (1) manifest and evidence; (2) structural
 move (the `tests/` tree, `Cargo.toml`, the spawn-guard path repair, and the
 layout gate with its manifest `addition`); (3) docs, comments, and the
 `lint-files` recipe.
+
+### Unrelated working-tree changes
+
+None observed.
+
+## Phase 6
+
+Worked 2026-09-22 on macOS (`aarch64-apple-darwin`) against base revision
+`beca6c368`, with a clean tree at start. All evidence is under
+`biscuit-terminal/` in this feature directory, plus
+`biscuit-terminal-migration.json`. The Phase 5 human-review items (free `W:`
+before Phase 6; confirm the manifest as sole authority) were still open. This
+phase went ahead on the prompt's instruction and re-tried Windows first; it is
+still blocked (below).
+
+### What was done
+
+| Plan task | Result | Artifact |
+|---|---|---|
+| Fresh before side | re-captured unmigrated, 5 feature sets (`none`, `image`, `terminal-tests`, `browser-tests`, all three). `compare` against `selfproof/capture-a`: identical, and the 20 notes are the claudine/darkmatter override rewrites | `biscuit-terminal/capture-before` |
+| Manifest and move | 38 targets → 2: `l1` (37 modules, no features) and `level2` (1 module, `terminal-tests`). `autotests = false`, 2 explicit `[[test]]`. No alias and no override rewrite: `.config/nextest.toml`'s `test(=level2_render_tree_style_in_wezterm)` belongs to `biscuit-terminal-cli`, which is not migrated. 1,121 tests mapped (432 of them the per-module `parity_helpers` copies), plus 1 addition (the layout gate) | `biscuit-terminal-migration.json` |
+| `check-attributes` | 0 failures. The review items are the reviewed `#[path]` repairs below | `biscuit-terminal/attribute-check.json` |
+| Snapshot moves | 1,086 moved byte-for-byte, `tests/snapshots/*` → `tests/l1/snapshots/l1__*` (60 `inline_content_matrix`, 1,026 `layout_matrix`). 117 unaffected (`src/**/snapshots`). 744 are read by running tests; 342 only by the `#[ignore]`d `layout_matrix_snapshots`, which `check-snapshots` states. `INSTA_UPDATE=no` suites green, 0 `.snap.new` | `biscuit-terminal/snapshot-{mapping,check}.json` |
+| Identity comparison, macOS | **identical**, 0 failures, 0 notes: 5 feature sets × 22 selectors | `biscuit-terminal/comparison-darwin.{json,md}` |
+| Structural guard | `tests/l1/test_layout.rs` calls the shared `test_toolkit::test_layout` | manifest `additions` (1 test) |
+| Guard file sets | archive-path guard over `biscuit-terminal/lib/tests/**`: 42 → 45, the only additions are the 2 roots and `l1/test_layout.rs`. Nothing missing, eligibility unchanged, `files-checked=3494`. The package has no spawn/isolation guard | `biscuit-terminal/guard-scans-after.md` |
+| Area recipe/doc pass | `renderable` `drift-report`, 3 module-doc regeneration selectors, path comments, README, 2 skills, area `docs/dependencies.md` | list below |
+| macOS suites | `just test` 3,263/3,263. `just test-l2` lib 2/2 + CLI 76/76 (after one transient CLI timeout, below). `just test-browser` 54/54. `just lint` exit 0. `check-tier-coverage biscuit-terminal` and `check-canonical biscuit-terminal` pass | — |
+| Linux | on-host before/after captures **identical**. `just test` (lib + CLI L1) 3,257/3,257 | `biscuit-terminal/comparison-linux.*`, `biscuit-terminal/linux-l1-summary.txt` |
+| macOS + Linux platform-absent | **identical**, evaluated on both hosts for all 5 feature sets | `biscuit-terminal/comparison-darwin-linux.*` |
+| Native Windows | **pending**. `just cross-check biscuit-terminal --os windows` refused at storage preflight: `W:` has **36 GiB** free (37.9 in Phase 5) after the recipe's automatic reclaim cleaned nothing. The `Ubuntu-26.04 ext4.vhdx` is 130.8 GiB, 47% of the volume. Cross-compile for `x86_64-pc-windows-gnu`, clippy `--tests -D warnings`, with all three features and with none: clean. Compile evidence only | — |
+| WSL2 | **pending**: its VHDX is on the same `W:`. Not attempted, because a full `W:` has reset SSH to both Windows hosts before | — |
+| Lightweight observations | 38 → 2 targets, 1.35 GB → 0.10 GB (−93%) | `measurements.md` §Rollout |
+| Skip-baseline check | `.github/ci/ci-baseline.toml` holds only `schema_version = 3` (0 `[[skip]]`) | — |
+
+### Decisions made during the move
+
+- **`parity_helpers` keeps one private copy per parity module.** It is both a
+  test target (24 unit tests in its `mod tests`) and a helper that 18 parity
+  files declared with `mod parity_helpers;`, so each old binary ran its own
+  copy of those 24 tests (`<parity_file>::parity_helpers::tests::*`). The
+  planner kept those identities, so they are kept: `parity_helpers` is an
+  `l1` module, and each parity module declares
+  `#[allow(clippy::duplicate_mod)] #[path = "parity_helpers.rs"] mod
+  parity_helpers;` (a path repair). Replacing the copies with `use
+  crate::parity_helpers;` would have removed 432 test identities, a behavior
+  change that spec §3 does not allow. `clippy -D warnings` rejects the
+  duplicate module without the `allow`, which sits only on the 18 copies. The
+  root declaration keeps the lint, and a comment there says why. Whether to
+  deduplicate is a follow-up question for the author, not a structural edit.
+- **Helpers (R2).** `layout_matrix_support/` (two `l1` modules, plus
+  `examples/layout_matrix.rs`) stays at `tests/` and is declared once at the
+  `l1` root by `#[path]`. Its two users now `use crate::layout_matrix_support;`,
+  as in darkmatter. `inline_content_matrix_support/` has one user whose file
+  name differs from the directory, so moving it "beside" the file would not
+  have kept `mod inline_content_matrix_support;` resolving anyway. It stays at
+  `tests/` and its user declares it with
+  `#[path = "../inline_content_matrix_support/mod.rs"]`.
+- **`level2` root declares no `common`.** The mover adds
+  `#[path = "../common/mod.rs"] mod common;` to every root when
+  `tests/common/` exists. `level2_terminal_osc_wezterm` never used it, so it
+  was removed from `level2/main.rs` rather than widening that binary.
+- **`common` stays `#[cfg(unix)]`-free at the root.** `level1_terminal_osc_cache`
+  declared `#[cfg(unix)] mod common;`, and it is now `#[cfg(unix)] use
+  crate::common;`. `level1_apple_terminal_prose` already declared it
+  unconditionally, so `common` compiled on Windows before as well (Windows
+  cross-compile clean).
+- **The layout gate needs a dev-dependency.** `test-toolkit` was only an
+  optional `terminal-tests` dependency, so it is now also an unconditional
+  `[dev-dependencies]` entry. It adds no crate to the graph (`Cargo.lock`
+  unchanged, `--locked` builds pass): its dependencies are already built by
+  the test build. Recorded in `biscuit-terminal/docs/dependencies.md`.
+- **Nothing path-keyed needed repair.** Every fixture path goes through
+  `manifest_dir!()`. `level2_terminal_osc_wezterm`'s `discovery_probe_path()`
+  climbs from `current_exe()` in `target/<profile>/deps/`, which the move
+  does not change (Level 2 passes).
+- **The Phase 5 note about snapshots was partly wrong.** It said all 1,086
+  `layout_matrix__*` snapshots belong to the `#[ignore]`d test. Only 342 do.
+  684 are read by the running `layout_matrix_markdown_snapshots` and
+  `layout_matrix_browser_snapshots`, and those pass with `INSTA_UPDATE=no` at
+  the new paths.
+- **`drift-report` no longer branches per crate.** Both crates now use
+  `--test l1 render_comparison::`, so the `case` became one inline selector.
+  Verified: the recipe runs, and the biscuit-terminal selector runs exactly
+  1 test that prints both `KNOWN_DRIFT` ledger markers.
+- **Before-side size build in its own worktree and target dir**
+  (`/tmp/p6/base`, `/tmp/p6/target-before`), both deleted afterward.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Test / check (targeted) | Red-then-green shown |
+|---|---|---|
+| Every old test keeps identity, tier, ignore state, platform presence (5 feature sets; biscuit-terminal sets no `l1-include-slow`, so there is no second slow-policy selector, and R4 found no `slow_` tests) | `consolidation.py compare` macOS, Linux, macOS+Linux | toolkit oracles (Phase 2 mutation check); identical here |
+| 432 `parity_helpers::tests::*` copies kept | same `compare` (each is a manifest row) | a dedup would fail `compare` as unmapped-missing |
+| Former file-level `cfg` moved to the declaration (`unix` ×3, `image` ×3) | `check-attributes` (0 failures); `compare` on the `none` vs `image` sets; Windows cross-compile | Phase 2 mutation |
+| Snapshots found at their new paths | `INSTA_UPDATE=no just test`, `check-snapshots` | an unmapped move makes the reading test fail (S4, Phase 3) |
+| Acceptance 12, biscuit-terminal | `test_layout::every_test_source_is_compiled_by_a_declared_target` | yes: planted `tests/stray_probe.rs`, `tests/l1/orphan_probe.rs`, `tests/level9/main.rs` → red naming all three, then green |
+| Guard file sets (acceptance 7) | temporary probe, `biscuit-terminal/guard-scans-after.md` | populations compared by path |
+| Level 2 opt-in unchanged | `just test` (no `terminal-tests`) builds no `level2`; `just test-l2` runs its 2 | — |
+| Browser tier still selected inside `l1` | `just test-browser` 54/54, plus `compare`'s `browser` selector | — |
+| `drift-report` recipe | `just drift-report` (renderable) + direct selector run | — |
+
+"Passive corpus" and "shipped artifact end-to-end": the layout gate reads the
+real `Cargo.toml` and tree, and `compare` runs over real captures. No value is
+persisted and read back.
+
+### Gates run
+
+- `cargo clippy -p biscuit-terminal --all-targets -- -D warnings` with no
+  features, with `image`, and with `image,terminal-tests,browser-tests`: clean.
+- `x86_64-pc-windows-gnu` clippy of the test targets, all features and none:
+  clean.
+- `just lint` (biscuit-terminal): exit 0.
+- `INSTA_UPDATE=no just test --no-fail-fast` (biscuit-terminal area): 3,263
+  passed, 0 failed, 55 skipped.
+- `just test-l2`: first run, lib 2/2 and CLI 47/48, with
+  `biscuit-terminal-cli::level2_prose_cells level2_prose_cells_in_wezterm`
+  failing on `send_command_with_env ... command timed out after 10s`. That
+  package is not migrated or touched. The test passed alone (6.96 s) and the
+  whole recipe then passed: lib 2/2, CLI 76/76. Recorded as a transient
+  WezTerm timeout.
+- `just test-browser`: 54/54.
+- `just check-tier-coverage biscuit-terminal`, `just check-canonical
+  biscuit-terminal`: pass.
+- `cargo nextest run -p test-toolkit --test archive_path_guard`: 3/3 (with the
+  temporary probe, since removed; the file was restored byte-for-byte).
+- Linux (`build-linux`, private `--shared` clone at `beca6c368` + bundle
+  `3efdbe450..HEAD` + working-tree patch, `RUSTC_WRAPPER="" KACHE_AUTO=0`):
+  before/after captures, and `just test` 3,257/3,257. The lock is still held
+  by `feat-nightly-perf` (since 2026-09-14). The scratch clone and uploads
+  were deleted.
+- GitNexus `detect-changes --scope all`: risk low, 0 affected processes.
+- Not run: the root-area fan-out, `just test-l3` (biscuit-terminal has no
+  Level 3 tests).
+
+### Pre-existing failures
+
+None in this package. The two darkmatter-library failures recorded in Phases 4
+and 5 are outside this area and were not re-run.
+
+### Host problems met
+
+- **`build-win-native` `W:` has 36 GiB free**, still going down (43 → 37.9 →
+  36 across Phases 4–6). The recipe's automatic reclaim cleaned nothing. No
+  override was used. Native-Windows listings and WSL2 are pending for **all
+  four** migrated packages.
+- **`build-linux` cross-check lock** is still held by `feat-nightly-perf`.
+
+### Changed outside `biscuit-terminal/lib/tests`
+
+`biscuit-terminal/lib/Cargo.toml`; comment-only path updates in
+`biscuit-terminal/lib/examples/discovery_probe.rs`,
+`biscuit-terminal/lib/src/discovery/osc_queries/query.rs`, and
+`claudine/cli/tests/common/pty.rs`; `renderable/justfile` (`drift-report`);
+`biscuit-terminal/README.md`; `biscuit-terminal/docs/dependencies.md`;
+`.claude/skills/biscuit-terminal/SKILL.md` (new layout bullet);
+`.claude/skills/renderable/tree.md` (`tests/l1/perf_gate.rs`); and this
+feature's `measurements.md` and `plan.md`. `.config/nextest.toml` was not
+touched.
+
+Suggested commit split, following Phases 4–5: (1) manifest and evidence;
+(2) structural move (the `tests/` tree including snapshots, `Cargo.toml`, the
+`parity_helpers`/helper path repairs, and the layout gate with its manifest
+`addition`); (3) docs, comments, the skills, and the `drift-report` recipe.
+
+### Left for Phase 7
+
+- The Phase 5 list still stands (rust-testing SKILL.md:673 spawn-guard path,
+  claudine's `l1/spawn_site_guard.rs` failure messages, claudine's own
+  layout-gate copy → `test_toolkit::test_layout`).
+- `biscuit-terminal/README.md`'s test table lists only the CLI's Level 2
+  location (`cli/tests/level2_*.rs`). The library's Level 2 now lives in
+  `lib/tests/level2/`. The row predates this phase and is left for the sweep.
 
 ### Unrelated working-tree changes
 

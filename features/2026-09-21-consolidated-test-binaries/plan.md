@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 5
+phase: 6
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -554,6 +554,123 @@ docs_created_during_phase_5:
     - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-mapping.json
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6:
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/tests/compose_parity.rs
+    - biscuit-terminal/lib/tests/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/html_page_example.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/integration.rs
+    - biscuit-terminal/lib/tests/l1/compose_parity.rs
+    - biscuit-terminal/lib/tests/l1/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/l1/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/l1/html_page_example.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/l1/integration.rs
+    - biscuit-terminal/lib/tests/l1/layout_matrix.rs
+    - biscuit-terminal/lib/tests/l1/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/l1/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/l1/level1_cursor.rs
+    - biscuit-terminal/lib/tests/l1/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/l1/list_parity.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/l1/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/parity_helpers.rs
+    - biscuit-terminal/lib/tests/l1/perf_gate.rs
+    - biscuit-terminal/lib/tests/l1/prelude_exports.rs
+    - biscuit-terminal/lib/tests/l1/progress_parity.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_comparison.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/section_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_parity.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/l1/test_layout.rs
+    - biscuit-terminal/lib/tests/l1/text_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/todo_parity.rs
+    - biscuit-terminal/lib/tests/l1/tree_layout.rs
+    - biscuit-terminal/lib/tests/l1/two_column_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/layout_matrix.rs
+    - biscuit-terminal/lib/tests/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/level1_cursor.rs
+    - biscuit-terminal/lib/tests/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/level2/level2_terminal_osc_wezterm.rs
+    - biscuit-terminal/lib/tests/level2/main.rs
+    - biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs
+    - biscuit-terminal/lib/tests/list_parity.rs
+    - biscuit-terminal/lib/tests/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/parity_helpers.rs
+    - biscuit-terminal/lib/tests/perf_gate.rs
+    - biscuit-terminal/lib/tests/prelude_exports.rs
+    - biscuit-terminal/lib/tests/progress_parity.rs
+    - biscuit-terminal/lib/tests/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/render_comparison.rs
+    - biscuit-terminal/lib/tests/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/section_parity.rs
+    - biscuit-terminal/lib/tests/status_block_parity.rs
+    - biscuit-terminal/lib/tests/status_parity.rs
+    - biscuit-terminal/lib/tests/table_parity.rs
+    - biscuit-terminal/lib/tests/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/text_block_parity.rs
+    - biscuit-terminal/lib/tests/todo_parity.rs
+    - biscuit-terminal/lib/tests/tree_layout.rs
+    - biscuit-terminal/lib/tests/two_column_parity.rs
+    - biscuit-terminal/lib/tests/unordered_list_parity.rs
+    - claudine/cli/tests/common/pty.rs
+    - renderable/justfile
+    - "biscuit-terminal/lib/tests/snapshots/*.snap → biscuit-terminal/lib/tests/l1/snapshots/l1__*.snap (1,086 byte-identical moves; see biscuit-terminal/snapshot-mapping.json)"
+docs_updated_during_phase_6:
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/dependencies.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_6:
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal-migration.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-mapping.json
+skills_files_updated_during_phase_6:
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/renderable/tree.md
+packages_during_phase_6:
+    - biscuit-terminal
+    - renderable
+    - claudine-cli
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -1156,14 +1273,14 @@ Same shape as Phase 4/5. Distinct hazards: smallest package (38), the
 
 ### Wave 1 — Structural move (sequential)
 
-- [ ] **biscuit-terminal manifest and move** — fresh inventory/plan
+- [x] **biscuit-terminal manifest and move** — fresh inventory/plan
       (committed as `biscuit-terminal-migration.json`); expected `l1` +
       `level2` (×`terminal-tests`); `autotests = false`; structural edits
       only; benches unchanged.
 
 ### Wave 2 — Fix-ups (parallel)
 
-- [ ] **Identity comparison** on macOS; snapshot moves if any; structural
+- [x] **Identity comparison** on macOS; snapshot moves if any; structural
       guard added inside the consolidated L1 target; active recipe/doc pass
       for the `biscuit-terminal` area.
 
@@ -1173,12 +1290,23 @@ Same shape as Phase 4/5. Distinct hazards: smallest package (38), the
       `check-tier-coverage`); Linux / Windows on-host listings +
       comparison; WSL2 when available else `pending`; rollout observations
       appended; skip-baseline check per R5.
+      *Phase 6 status:* everything here is done except the native-Windows
+      on-host listings. `just cross-check biscuit-terminal --os windows`
+      refused at storage preflight: `W:` has 36 GiB free, under the 50 GiB
+      floor. Windows has cross-compile evidence only (`x86_64-pc-windows-gnu`,
+      all features and none, clippy `-D warnings` clean), and WSL2 is
+      `pending` (see the log's Phase 6 section).
 
 ### Checkpoint
 
 - [ ] Identity equality on three OSes; area suites green; guard test live;
       all four packages now migrated and the four migration manifests plus
       evidence sets are complete and committed.
+      *Phase 6 status:* identity is identical on macOS, on Linux, and on both
+      together with platform-absent evaluated. Area suites are green, the
+      layout gate is live, and all four manifests and evidence sets are in
+      this directory. Native Windows and WSL2 are pending (disk space), now
+      for all four packages.
 
 ## Phase 7 — Developer Workflow and Documentation Sweep
 
