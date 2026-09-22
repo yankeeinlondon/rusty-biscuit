@@ -342,7 +342,7 @@ fn level2_no_trailing_blank_offset_after_code() {
 
 // Interior vertical rhythm (no run of >=2 blank rows) is verified
 // deterministically and across every shape by the library-side `I5` invariant
-// in `darkmatter/lib/tests/render_invariants.rs`. A real-terminal version is
+// in `darkmatter/lib/tests/l1/render_invariants.rs`. A real-terminal version is
 // omitted here because transient mid-scroll captures make it flaky without
 // adding coverage the deterministic invariant does not already provide.
 

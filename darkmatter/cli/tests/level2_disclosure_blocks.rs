@@ -150,7 +150,7 @@ fn level2_disclosure_honors_frontmatter_style_color_width_alignment() {
     // `bg-color` terminal-cell painting for disclosures is not asserted here: the
     // disclosure terminal target renders its body as a dim/italic block quote and
     // does not fill background cells for the component bucket. The browser tier
-    // (`darkmatter/lib/tests/browser_render.rs`) covers component `bg-color`.
+    // (`darkmatter/lib/tests/browser/browser_render.rs`) covers component `bg-color`.
     let body = r#"---
 style:
     disclosure:
