@@ -80,7 +80,10 @@
   `biscuit-test-harness` dependency already builds it, so the graph is
   unchanged. `toml` 1.x is a regular dependency for `test_layout`, the layout
   gate each consolidated package's Level 1 binary calls to read its
-  `Cargo.toml` (`autotests` and every `[[test]]` path).
+  `Cargo.toml` (`autotests` and every `[[test]]` path). `unicode-ident` is a
+  regular dependency for the same gate, which must recognize identifiers by
+  Rust's Unicode (XID) rules so a macro named `café` cannot expose a dormant
+  `mod`; `proc-macro2` already builds it, so the graph is unchanged.
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
   executables when cooperative cleanup times out.
@@ -1052,6 +1055,12 @@ This is a Rust workspace with the following modules:
 - [unicode-normalization](https://crates.io/crates/unicode-normalization) _v0.1_
 
     _Unicode normalization forms (NFC/NFD/NFKC/NFKD). DMLS normalizes wiki-link targets and logical paths to NFC for cross-platform-identical resolution._
+
+- [unicode-ident](https://crates.io/crates/unicode-ident) _v1_
+
+    _Unicode XID_Start/XID_Continue predicates, the identifier rules Rust itself uses. `test-toolkit`'s layout gate tokenizes Rust source with them._
+
+    _Tags: unicode, identifiers, parsing_
 
 - [unicode-width](https://crates.io/crates/unicode-width) _v0.2_
 

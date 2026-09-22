@@ -145,7 +145,7 @@ pub(crate) fn module_declarations(source: &str) -> Vec<ModuleDeclaration> {
     let mut declarations = Vec::new();
     let mut index = 0;
     while index < code.len() {
-        if index > 0 && is_ident(code[index - 1]) {
+        if continues_identifier(&code, index) {
             index += 1;
             continue;
         }
@@ -165,10 +165,7 @@ pub(crate) fn module_declarations(source: &str) -> Vec<ModuleDeclaration> {
             && code.get(cursor + 3).is_some_and(u8::is_ascii_whitespace)
         {
             let name_start = skip_whitespace(&code, cursor + 3);
-            let mut name_end = name_start;
-            while code.get(name_end).is_some_and(|&byte| is_ident(byte)) {
-                name_end += 1;
-            }
+            let name_end = plain_identifier_end(&code, name_start).unwrap_or(name_start);
             let after = skip_whitespace(&code, name_end);
             if name_end > name_start && code.get(after) == Some(&b';') {
                 declarations.push(ModuleDeclaration {
@@ -227,8 +224,35 @@ fn path_attribute(attribute: &str) -> Option<String> {
     Some(value[..value.find('"')?].to_string())
 }
 
-fn is_ident(byte: u8) -> bool {
-    byte == b'_' || byte.is_ascii_alphanumeric()
+/// The char starting at byte `index`, or `None` off a char boundary.
+fn char_at(bytes: &[u8], index: usize) -> Option<char> {
+    let head = bytes.get(index..)?;
+    let head = &head[..head.len().min(4)];
+    let valid = match std::str::from_utf8(head) {
+        Ok(valid) => valid,
+        Err(error) => std::str::from_utf8(&head[..error.valid_up_to()]).ok()?,
+    };
+    valid.chars().next()
+}
+
+/// The char ending exactly at byte `index`.
+fn char_before(bytes: &[u8], index: usize) -> Option<char> {
+    let mut start = index.checked_sub(1)?;
+    while start > 0 && index - start < 4 && bytes[start] & 0xC0 == 0x80 {
+        start -= 1;
+    }
+    char_at(bytes, start).filter(|character| start + character.len_utf8() == index)
+}
+
+/// Rust identifiers are Unicode: `XID_Start` or `_`, then `XID_Continue`.
+fn is_identifier_start(character: char) -> bool {
+    character == '_' || unicode_ident::is_xid_start(character)
+}
+
+/// Whether the char ending at `index` can continue an identifier, so a word
+/// starting at `index` would be the tail of a longer one.
+fn continues_identifier(bytes: &[u8], index: usize) -> bool {
+    char_before(bytes, index).is_some_and(unicode_ident::is_xid_continue)
 }
 
 fn skip_whitespace(bytes: &[u8], mut index: usize) -> usize {
@@ -258,7 +282,7 @@ fn matching(bytes: &[u8], open: usize, opening: u8, closing: u8) -> Option<usize
 }
 
 fn skip_visibility(bytes: &[u8], cursor: usize) -> usize {
-    if bytes.get(cursor..cursor + 3) != Some(b"pub") || bytes.get(cursor + 3).is_some_and(|&byte| is_ident(byte)) {
+    if bytes.get(cursor..cursor + 3) != Some(b"pub") || char_at(bytes, cursor + 3).is_some_and(unicode_ident::is_xid_continue) {
         return cursor;
     }
     let mut cursor = skip_whitespace(bytes, cursor + 3);
@@ -270,30 +294,35 @@ fn skip_visibility(bytes: &[u8], cursor: usize) -> usize {
     cursor
 }
 
-/// Blank the body of every macro token tree in `code`: a `name!(…)`, `name![…]`
-/// or `name!{…}` invocation, and a `macro_rules! name { … }` definition.
+/// Blank the body of every macro token tree in `code`: a `path!(…)`,
+/// `path![…]` or `path!{…}` invocation, and a `macro_rules! name { … }`
+/// definition.
 ///
 /// A `mod x;` written inside one declares nothing by itself. Rust compiles
 /// `x.rs` only where an expansion puts that item, so counting the token as a
 /// declaration marks the file reachable and lets an orphaned test file pass
 /// the gate (review 1 of `2026-09-21-consolidated-test-binaries`).
 ///
+/// `code` must already be [`sanitize`]d: comments are then blank, so skipping
+/// whitespace skips all of Rust's trivia around the `!` (review 3). The path
+/// may be qualified (`a::b!`) or raw (`r#b!`), and a definition name may be raw
+/// (`macro_rules! r#type`). A `!` counts only after an identifier that is
+/// neither a keyword nor a label, which keeps `!=`, `#![…]`, and unary `!`
+/// (`a && !x`, `if !x`, `return !(x)`) out. Identifiers follow Rust's Unicode
+/// grammar, so `café!` and `macro_rules! café` are recognized too (review 4).
+///
 /// Lengths and newlines are preserved, so offsets still index into `source`.
 fn blank_macro_token_trees(code: &mut [u8]) {
     let mut index = 0;
     while index < code.len() {
-        // `a != b` never reaches a delimiter below, so only `ident!` matches.
-        if code[index] != b'!' || index == 0 || !is_ident(code[index - 1]) {
+        let Some(path) = (code[index] == b'!').then(|| macro_path_before(code, index)).flatten() else {
             index += 1;
             continue;
-        }
+        };
         let mut cursor = skip_whitespace(code, index + 1);
-        // `macro_rules! name { … }` names the macro before its body.
-        if code.get(cursor).is_some_and(|&byte| is_ident(byte)) {
-            let mut name_end = cursor;
-            while code.get(name_end).is_some_and(|&byte| is_ident(byte)) {
-                name_end += 1;
-            }
+        if path == MacroPath::Rules
+            && let Some(name_end) = identifier_end(code, cursor)
+        {
             cursor = skip_whitespace(code, name_end);
         }
         let delimiters = match code.get(cursor) {
@@ -316,6 +345,64 @@ fn blank_macro_token_trees(code: &mut [u8]) {
         }
         index = close + 1;
     }
+}
+
+#[derive(PartialEq)]
+enum MacroPath {
+    /// `macro_rules`, whose `!` is followed by the defined name.
+    Rules,
+    Other,
+}
+
+/// Rust's strict and reserved keywords. None can end a macro path unless
+/// written raw, and several (`if`, `return`, `match`, `in`, …) precede unary `!`.
+const KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate", "do",
+    "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in", "let",
+    "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref", "return", "self",
+    "Self", "static", "struct", "super", "trait", "true", "try", "type", "typeof", "unsafe", "unsized",
+    "use", "virtual", "where", "while", "yield",
+];
+
+/// The macro path whose last segment ends just before the `!` at `bang`, or
+/// `None` when that `!` cannot open a macro invocation or definition.
+fn macro_path_before(code: &[u8], bang: usize) -> Option<MacroPath> {
+    let mut end = bang;
+    while end > 0 && code[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let mut start = end;
+    while let Some(character) = char_before(code, start).filter(|&character| unicode_ident::is_xid_continue(character)) {
+        start -= character.len_utf8();
+    }
+    if start == end || !char_at(code, start).is_some_and(is_identifier_start) {
+        return None;
+    }
+    let raw = start >= 2 && code[start - 2..start] == *b"r#" && !continues_identifier(code, start - 2);
+    if raw {
+        return Some(MacroPath::Other);
+    }
+    let word = &code[start..end];
+    if (start > 0 && code[start - 1] == b'\'') || KEYWORDS.iter().any(|keyword| keyword.as_bytes() == word) {
+        return None;
+    }
+    Some(if word == b"macro_rules" { MacroPath::Rules } else { MacroPath::Other })
+}
+
+/// End of the identifier, plain or raw (`r#name`), starting at `start`.
+fn identifier_end(code: &[u8], start: usize) -> Option<usize> {
+    let name_start = if code.get(start..start + 2) == Some(b"r#") { start + 2 } else { start };
+    plain_identifier_end(code, name_start)
+}
+
+/// End of the non-raw identifier starting at `start`.
+fn plain_identifier_end(code: &[u8], start: usize) -> Option<usize> {
+    let first = char_at(code, start).filter(|&character| is_identifier_start(character))?;
+    let mut end = start + first.len_utf8();
+    while let Some(character) = char_at(code, end).filter(|&character| unicode_ident::is_xid_continue(character)) {
+        end += character.len_utf8();
+    }
+    Some(end)
 }
 
 /// `source` with comments and string/char literals blanked to spaces; every
@@ -389,12 +476,15 @@ fn sanitize(source: &str) -> Vec<u8> {
     output
 }
 
+/// Content start and hash count of a raw string (`r`, `br`, or `cr`, with any
+/// number of `#`) opening at `index`. Other prefixed literals (`b"…"`, `c"…"`,
+/// `b'…'`) lex as ordinary strings and chars, so they need no case here.
 fn raw_string_open(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
-    if index > 0 && is_ident(bytes[index - 1]) {
+    if continues_identifier(bytes, index) {
         return None;
     }
     let mut cursor = index;
-    if bytes.get(cursor) == Some(&b'b') {
+    if matches!(bytes.get(cursor), Some(b'b' | b'c')) {
         cursor += 1;
     }
     if bytes.get(cursor) != Some(&b'r') {
@@ -419,6 +509,10 @@ fn char_literal_end(bytes: &[u8], index: usize) -> Option<usize> {
             while cursor < bytes.len() && bytes[cursor] != b'}' {
                 cursor += 1;
             }
+        } else if bytes.get(cursor) == Some(&b'x') {
+            // `'\x7b'`: unrecognized, its closing quote would pair with the
+            // next one and leave a delimiter literal such as `'{'` unblanked.
+            cursor += 2;
         }
         cursor += 1;
     } else {

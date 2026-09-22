@@ -120,15 +120,17 @@ fn declarations_resolve_like_rustc() {
 
 #[test]
 fn literals_and_comments_hide_declarations_without_desynchronizing() {
-    // A raw string with hashes, a char literal holding a quote, a lifetime, and
-    // a nested block comment each precede a real declaration.
+    // A raw string with hashes, a char literal holding a quote, a lifetime, a
+    // nested block comment, and prefixed literals beside a raw identifier each
+    // precede a real declaration.
     let source = "const R: &str = r#\"mod raw; \"quoted\"\"#;\nmod after_raw;\n\
                   const C: char = '\"';\nmod after_char;\n\
                   fn f<'a>(x: &'a str) -> &'a str { x }\nmod after_lifetime;\n\
-                  /* outer /* mod nested; */ mod still_comment; */\nmod after_comment;\n";
+                  /* outer /* mod nested; */ mod still_comment; */\nmod after_comment;\n\
+                  const K: &CStr = c\"mod c_string;\"; let r#type = b'\"';\nmod after_prefixed;\n";
     assert_eq!(
         module_declarations(source).into_iter().map(|d| d.name).collect::<Vec<_>>(),
-        ["after_raw", "after_char", "after_lifetime", "after_comment"]
+        ["after_raw", "after_char", "after_lifetime", "after_comment", "after_prefixed"]
     );
     assert_eq!(sanitize(source).len(), source.len());
 }
@@ -149,6 +151,32 @@ fn a_module_token_inside_a_macro_declares_nothing() {
         "discard![mod orphan;];\nmod guard;\n",
         "discard! { mod orphan; }\nmod guard;\n",
         "outer! { inner! { mod orphan; } }\nmod guard;\n",
+        // Delimiters inside literals and comments must not unbalance the body.
+        "discard! { \"}\" '}' /* ) */ mod orphan; }\nmod guard;\n",
+        "discard! { ['\\x41','{']; mod orphan; }\nmod guard;\n",
+        // Raw C strings, hashed and bare, hide a closing delimiter too.
+        "macro_rules! discard { ($($token:tt)*) => {}; }\ndiscard! { cr#\"\"}\"\"#; mod orphan; }\nmod guard;\n",
+        // Without hashes a backslash still ends nothing: `cr"\"` is one byte.
+        "discard! { cr\"\\\"; mod orphan; }\nmod guard;\n",
+        // Rust allows trivia between the macro path, the `!`, and what follows
+        // (review 3); comments reach this pass already blanked to spaces.
+        "macro_rules ! discard { ($($token:tt)*) => {} }\ndiscard ! { mod orphan; }\nmod guard;\n",
+        "discard /* a */ ! // b\n { mod orphan; }\nmod guard;\n",
+        "discard\n!\n(mod orphan;);\nmod guard;\n",
+        // Path-qualified and raw-identifier invocation paths.
+        "self::discard ! [mod orphan;];\nmod guard;\n",
+        "crate :: m :: discard! { mod orphan; }\nmod guard;\n",
+        "r#discard ! { mod orphan; }\nmod guard;\n",
+        // A raw-identifier definition name, with and without trivia.
+        "macro_rules! r#type { () => { mod orphan; }; }\nmod guard;\n",
+        "macro_rules /* a */ ! /* b */ r#type\n{ () => { mod orphan; }; }\nmod guard;\n",
+        // Rust identifiers are Unicode (XID), in definition names and in every
+        // segment of an invocation path (review 4).
+        "macro_rules! café { () => { mod orphan; }; }\nmod guard;\n",
+        "café! { mod orphan; }\nmod guard;\n",
+        "crate::m::café ! [mod orphan;];\nmod guard;\n",
+        "данные!(mod orphan;);\nmod guard;\n",
+        "macro_rules! r#données { () => { mod orphan; }; }\nmod guard;\n",
     ] {
         assert_eq!(
             module_declarations(source).into_iter().map(|d| d.name).collect::<Vec<_>>(),
@@ -162,6 +190,34 @@ fn a_module_token_inside_a_macro_declares_nothing() {
         module_declarations(comparison).into_iter().map(|d| d.name).collect::<Vec<_>>(),
         ["after"]
     );
+}
+
+#[test]
+fn a_bang_that_is_not_a_macro_leaves_real_declarations_visible() {
+    // Inner attributes, `!=`, and unary `!` after an operator or a keyword are
+    // not invocations; `real` sits in a block a misread `!` would blank.
+    for source in [
+        "#![allow(unused)]\nmod guard;\n",
+        "fn f(a: u8, b: u8) -> bool { a != b }\nmod guard;\n",
+        "fn f(a: u8, b: u8) -> bool { a != (b) }\nmod guard;\n",
+        "const X: bool = ! Y;\nmod guard;\n",
+        "fn f(x: bool) -> bool { if !x { return !{ #[path = \"real.rs\"] mod real; x }; } x }\nmod guard;\n",
+        "fn f(x: bool) -> bool { match ! { #[path = \"real.rs\"] mod real; x } { _ => x } }\nmod guard;\n",
+        "fn f(x: bool) -> bool { 'a: loop { break 'a ! { #[path = \"real.rs\"] mod real; x }; } }\nmod guard;\n",
+    ] {
+        let names = module_declarations(source).into_iter().map(|d| d.name).collect::<Vec<_>>();
+        let expected: &[&str] = if source.contains("mod real") { &["real", "guard"] } else { &["guard"] };
+        assert_eq!(names, expected, "{source}");
+    }
+}
+
+#[test]
+fn a_unicode_module_name_is_a_real_declaration() {
+    // rustc requires `#[path]` for a non-ASCII module name (E0754).
+    let source = "#[path = \"donnees.rs\"] mod données;\n#[path = \"namae.rs\"] pub(crate) mod 名前;\nmod guard;\n";
+    let declarations = module_declarations(source);
+    assert_eq!(declarations.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["données", "名前", "guard"]);
+    assert_eq!(declarations[0].path.as_deref(), Some("donnees.rs"));
 }
 
 #[test]
@@ -181,6 +237,46 @@ fn a_file_reachable_only_through_a_dormant_macro_is_a_violation() {
         violations[0].starts_with("tests/l1/guard/orphan.rs: no declared test target compiles this module"),
         "{violations:?}"
     );
+}
+
+#[test]
+fn a_file_named_only_after_a_raw_c_string_in_a_dormant_macro_is_a_violation() {
+    let violations = layout_violations(
+        MANIFEST,
+        &tree(&[
+            (
+                "tests/l1/guard.rs",
+                "macro_rules! discard { ($($token:tt)*) => {}; }\ndiscard! { cr#\"\"}\"\"#; mod orphan; }\nmod scan;\n",
+            ),
+            ("tests/l1/guard/orphan.rs", "#[test]\nfn case() {}\n"),
+        ]),
+    );
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("tests/l1/guard/orphan.rs: no declared test target compiles this module"),
+        "{violations:?}"
+    );
+}
+
+#[test]
+fn a_file_named_only_in_a_spaced_raw_or_unicode_named_dormant_macro_is_a_violation() {
+    for guard in [
+        "macro_rules ! discard { ($($token:tt)*) => {} }\ndiscard ! { mod orphan; }\nmod scan;\n",
+        "macro_rules! r#type { () => { mod orphan; }; }\nmod scan;\n",
+        "r#discard /* a */ ! { mod orphan; }\nmod scan;\n",
+        "macro_rules! café { () => { mod orphan; }; }\nmod scan;\n",
+        "café! { mod orphan; }\nmod scan;\n",
+    ] {
+        let violations = layout_violations(
+            MANIFEST,
+            &tree(&[("tests/l1/guard.rs", guard), ("tests/l1/guard/orphan.rs", "#[test]\nfn case() {}\n")]),
+        );
+        assert_eq!(violations.len(), 1, "{guard}: {violations:?}");
+        assert!(
+            violations[0].starts_with("tests/l1/guard/orphan.rs: no declared test target compiles this module"),
+            "{guard}: {violations:?}"
+        );
+    }
 }
 
 #[test]
