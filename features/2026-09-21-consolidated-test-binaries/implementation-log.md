@@ -3,7 +3,8 @@ spec: /Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-conso
 plan: features/2026-09-21-consolidated-test-binaries/plan.md
 implemented_by: claude/opus
 started_phase: "1"
-packages: []
+packages:
+    - repo-deps
 source_files_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
     - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
@@ -27,6 +28,20 @@ docs_created_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/guard-scans.md
     - features/2026-09-21-consolidated-test-binaries/baseline/disk-and-ci.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - scripts/ci/test_ci_local.py
+    - just/ci-local.just
+    - features/2026-09-21-consolidated-test-binaries/selfproof/mutation-check.py
+docs_updated_during_phase_2:
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_2:
+    - features/2026-09-21-consolidated-test-binaries/selfproof/README.md
+    - features/2026-09-21-consolidated-test-binaries/selfproof/noop-comparison.md
+skills_files_updated_during_phase_2: []
 ---
 
 # Implementation Log for 2026-09-21-consolidated-test-binaries (8 phases)
@@ -142,3 +157,113 @@ While this phase ran, `just/devops.just` (the `status` / `_status_recent`
 recipes) and spec files under `tree-hugger/`, `unchained-ai/`, and
 `worktree/` were modified by another process (mtime 16:59). They do not touch
 `_tier_filter`, so the listings are unaffected. They were left untouched.
+
+## Phase 2
+
+Completed 2026-09-21 on macOS (`aarch64-apple-darwin`, cargo-nextest 0.9.136)
+at revision `da6e3847d`. No file in the four package trees changed. This
+phase builds and proves the toolkit only.
+
+### Resumed work
+
+An earlier run of this phase wrote `scripts/ci/consolidation.py` (all six
+subcommands), `scripts/ci/test_consolidation.py`, `selfproof/mutation-check.py`,
+and the first self-proof capture (`selfproof/capture-a/`). It ticked the four
+Wave 1 tasks and "Toolkit tests", then stopped before logging anything. This
+run re-verified that work instead of trusting the ticks:
+
+- **Toolkit tests**: 62 of 62 pass. `mutation-check.py` reports 8 of 8 oracles
+  red on their mutation and green on the original.
+- **"Wire into the existing Python suite runner" was not done**, although the
+  task was ticked. It is done now (next section).
+- Only the second capture, the comparisons, and the records were missing.
+
+### Suite wiring (the one behavior change outside the toolkit)
+
+`test_consolidation.py` now runs in the `just ci-local` ci-infra self-test
+loop (`just/ci-local.just`). The two `test_ci_local.py` fixtures that stub
+every suite in that loop gained the new name, so the fixtures still model
+the recipe exactly.
+
+It is deliberately **not** in `affected_scope.py`'s `SUITE_REGISTRY`. That
+registry schedules a CI companion cell on `ubuntu-latest`, and R1 rules that
+no workflow runs this toolkit (spec §Out of scope). The comment in the recipe
+says so, so a later "every `test_*.py` is a companion" sweep does not add it by
+reflex. It costs about 4 s per `ci-local` run. The shipped-artifact tests read
+frozen Phase 1 evidence (`baseline/inventory.json`, `baseline/listings/`), so
+they do not drift as packages migrate.
+
+Note: R1 and the plan say "pytest suite", but the suite is stdlib `unittest`
+like every other `scripts/ci/test_*.py`. It runs as
+`python3 scripts/ci/test_consolidation.py`. R1's intent, the house pattern,
+holds.
+
+### Self-proof (`selfproof/README.md`)
+
+| Proof | Result |
+|---|---|
+| `capture` twice, then `compare --require-identical-digests` over all four packages | **identical**: 0 failures and 0 notes across 18 feature-set captures and 404 selector cells, every raw-listing digest equal (`selfproof/noop-comparison.{json,md}`) |
+| Capture determinism | The two runs are byte-identical, so the second is kept only as `capture-b.SHA256SUMS` |
+| Reproduces the Phase 1 listings | `compare --before baseline/listings --after capture-a --common-selectors --require-identical-digests`: 114 of 114 digests equal (locality fields excluded), zero identity differences |
+| Reproduces the Phase 1 inventory | `inventory --listings baseline/listings` equals `baseline/inventory.json` except `generator` |
+
+Platform-absent is `not-evaluated` in every cell. The captures are
+single-host, and the tool refuses to report that set as empty.
+
+### Requirement-to-test mapping
+
+All in `scripts/ci/test_consolidation.py` unless noted. "Mutation" marks a
+test that `selfproof/mutation-check.py` proves red against a broken tool.
+
+| Requirement | Test(s) |
+|---|---|
+| Tier expressions come only from `_tier_filter`; every shipped filter parses | `ShippedFilterCorpusTests.test_every_tier_and_override_filter_parses` (passive corpus over the live `_tier_filter` and `.config/nextest.toml`), `…test_include_slow_is_captured_only_where_the_manifest_declares_it` |
+| Filterset semantics (anchoring, binary is never the test path, precedence, matchers, refusal of unsupported predicates) | `FilterEvaluatorTests.*` (5) |
+| Evaluator must agree with every Nextest verdict before planning | `PlanTests.test_the_evaluator_must_agree_with_every_nextest_verdict` (mutation), `…test_a_capture_taken_under_another_filter_is_refused` |
+| Inventory merges metadata and manifest; fails on one-sided targets, undeclared targets, unbuilt nested roots | `InventoryTests.*` (5) |
+| Contract grouping, R2 names, neutral alias, collisions, reserved names, R3 target-wide keys | `PlanTests.test_contracts_become_named_targets`, `…marker_name_that_would_move_tests_gets_a_neutral_alias` (mutation), `…alias_that_collides…`, `…reserved_names_custom_harness_and_target_wide_keys_are_refused`, `…unmarked_name_matched_by_an_unanchored_override_is_refused`, `…a_target_no_capture_lists_falls_back_to_a_source_scan` (cfg-absent targets) |
+| Exact-name override → rewrite, not alias (R5) | `PlanTests.test_an_exact_name_override_is_a_rewrite_not_an_alias` |
+| End to end over the real shipped artifacts | `ShippedArtifactPlanTests.test_darkmatter_cli_needs_exactly_the_one_known_alias` (reproduces `level2_harness_integrity` → `harness_integrity`), `…test_the_ruled_target_sets_for_every_package` |
+| Capture folding, locality-free digest, same-build check, package-skipped binaries, empty listing ≠ zero tests, gzip round trip | `CaptureDocumentTests.*` (6; skipped-binary one is a mutation) |
+| Four-way compare by exact identity, never counts | `CompareTests.test_identity_loss_masked_by_identity_gain_fails_with_the_identities` (mutation; silent count match), `…tier_move_by_module_name_fails`, `…ignore_flip_fails`, `…absent_consolidated_suite_is_lost_identities_not_zero` |
+| Unmapped test / duplicate normalization fail | `CompareTests.test_an_unmapped_module_and_a_duplicate_normalization_fail` (mutation) |
+| Platform-absent needs other hosts; single host is `not-evaluated` | `CompareTests.test_platform_absent_needs_other_hosts` (mutation) |
+| Missing captures and one-sided selectors, tier-filter change, override rewrite noted, additions, digest requirement, CLI exit codes 0/1/2 | `CompareTests.*` (remaining 6) |
+| No-op comparison identical | `CompareTests.test_an_unmigrated_tree_compares_identical_to_itself` plus the real-tree self-proof above |
+| Inner attributes anywhere in the leading block; declarations with attributes | `SourceScanTests.*` (2) |
+| Attribute checker: cfg moved to the declaration, cfg missing, dropped lint, crate-root-only, missing declaration, crate-global and identity detectors, `crate::`, path review | `CheckAttributesTests.*` (8; the cfg-missing one is a mutation) |
+| Snapshot mapper: rule-derived paths, byte-identical move, missing row, disagreeing row, changed bytes / left-behind / `.snap.new`, unmoved changed, Insta path settings, unattributable, `#[ignore]`d readers stated per file, most-specific attribution | `CheckSnapshotsTests.*` (10; the missing-row one is a mutation) |
+| Suite wiring is modeled exactly by the recipe fixtures | `scripts/ci/test_ci_local.py` (100 of 100 pass) |
+
+No persisted value is written and read back beyond the capture documents.
+Their round trip is `CaptureDocumentTests.test_round_trip_and_raw_listing_directories`,
+and on the real tree the byte-identical recapture shows it.
+
+### Gates run
+
+- `python3 scripts/ci/test_consolidation.py`: 62 passed.
+- `python3 selfproof/mutation-check.py`: 8 of 8 OK.
+- `python3 scripts/ci/test_ci_local.py`: 100 passed (82 s).
+- `just _lint repo-deps` (the owning package's lint; `scripts/` belongs to the
+  `root` area, whose `just lint` fans out across the whole monorepo): exit 0.
+- `just --list` parses. `py_compile` is clean on all changed Python.
+- **Not run:** the root-area `just lint`/`just test` fan-out across every
+  area. Only Python and a `just` recipe changed, and no Rust source.
+- **Cross-OS:** not run in this phase. The toolkit is stdlib Python with
+  `pathlib` / POSIX-normalized paths, and Phase 3 exercises it on-host on
+  Linux and Windows (plan Phase 3 Wave 3). Capture's `host` is
+  `platform.system().lower()` (`darwin`/`linux`/`windows`), which matches the
+  baseline's file naming.
+
+### Open for review
+
+- Plan Phase 2 checkpoint "Reviewer sign-off that the manifest format is the
+  single authoritative mapping" is left unticked. It is a human reviewer's
+  call, and it is raised in the spec's `human_review_items`.
+
+### Unrelated working-tree changes (not made by this phase)
+
+`just/devops.just` (`_status_recent`) and
+`darkmatter/features/2026-07-22-explicit-null/spec.md` (deleted) were already
+modified when this run started. They were left untouched. Neither affects
+`_tier_filter`.

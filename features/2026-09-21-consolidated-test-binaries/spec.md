@@ -36,18 +36,29 @@ reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-21
 review_iterations: 0
-human_review: false
-message_to_agent: |-
-    Phase 1 (rulings, spikes, baselines) is complete. Read `rulings.md` first: several plan assumptions were corrected by evidence, and Phase 2's task text now has an "Adjustments from Phase 1 evidence" block at the top of the Phase 2 section that supersedes it where they differ.
+human_review: true
+human_review_items:
+    - |-
+        **Confirm that the migration manifest is the one authoritative record of where each test moves.**
 
-    Key facts for Phase 2 (toolkit):
-    - The skip baseline is NOT the only static identity store (R5). `.config/nextest.toml` has exact-name overrides for two in-scope tests (`compose_loop_rate_limit_pause_waits_then_continues` in claudine-cli `loop_cli.rs`, `every_catalog_variable_survives_ambient_options` in darkmatter `ambient_ctx_capture.rs`) that silently stop matching once the file becomes a module. `capture` must also list under every override `filter` (read verbatim from the config), and `compare` must check them.
-    - Exactly one neutral alias is required today: darkmatter-cli `level2_harness_integrity` (gated on `terminal-tests`, but its 4 tests are L1-tier) becomes `harness_integrity` inside the `level2` binary. `plan` must reproduce this from projection, not hard-code it. Alias form = strip the marker prefix (R2); prefixing is rejected because unanchored override regexes like `test(/level2_/)` would still match.
-    - A `required-features` target that is not enabled is absent from `rust-suites`, not an empty suite (S1 section 4). Platform-absent sets need on-host captures from Linux/Windows (S1).
-    - The before-listings are at `baseline/listings/*.json.gz` (114 files, macOS, 18 package x feature-set combinations x every `_tier_filter` tier, plus darkmatter's `BISCUIT_L1_INCLUDE_SLOW=1` L1), with `SHA256SUMS` over the raw JSON. `baseline/inventory.json` is the migration manifest's before side. The Phase 1 prototypes (`baseline/*.py|sh`, `spikes/s2-scan.py`) are what `consolidation.py` should fold in; its no-op self-proof reproduces those outputs.
-    - The S3 measurement before series was taken on a loaded shared host (load average 10 to 57). Phase 3 must re-run the before side in a pre-migration worktree alternating with the after side, and must first add an edit-only mode to `spikes/s3-measure.sh` without changing the measured command (see `measurements.md`).
-    - R9 decides how test-code strings that name `--test <old-binary>` or a test path are handled. The self-exec `--exact public_entry_points::...` string in darkmatter's L2 support is a permitted identity repair. Regenerate-command strings (including the one persisted into `claudine/docs/providers/dispatch-inventory.json`) are updated in each package's docs pass as a separate commit. The author may override R9 before Phase 3.
-    - Pre-existing, out of scope, preserved as-is: darkmatter `schema_phase_validation::real_shipped_inline_schema_uses_normal_resolution_and_phase_path` carries a `real_` prefix, so no recipe runs it; biscuit-terminal's 1,086 `layout_matrix__*` snapshots belong to an `#[ignore]`d test.
+        The next phase (the `claudine-cli` pilot) moves about 139 test files into 4 test programs. A tool writes a JSON "migration manifest" that says, for every old test file, which new program and module it lands in and what each test's new name will be. Every later check (the before/after test comparison, the snapshot-file check, the attribute check) reads only that manifest. The plan's Phase 2 checkpoint asks a person to agree to this before any file moves, because the whole proof that no test was lost rests on it. An example is in the toolkit's tests. Run `python3 scripts/ci/consolidation.py plan --package darkmatter-cli --listings features/2026-09-21-consolidated-test-binaries/selfproof/capture-a` to see a real one.
+
+        - **Option A: approve the manifest as the only authority (recommended).** File names and directory layout carry no meaning of their own. Pros: one source of truth, and every check is mechanical and repeatable. Cons: a manifest mistake spreads to every check, but the comparison step catches it, because any test that ends up in the wrong place shows up as a named difference.
+        - **Option B: also require a hand-reviewed table in each package's pull request.** Pros: a person reads every mapping. Cons: 300+ rows across four packages, and a second record that can drift from the one the tools actually check.
+        - **Option C: change the format first** (for example, add fields). Pros: fixes a gap you see now, while changing it is cheap. Cons: delays the pilot, and the toolkit and its tests change with it.
+
+        I recommend **Option A**. The comparison against the before-state already fails loudly on any mis-mapped test, so a second hand-maintained table adds work without adding safety.
+message_to_agent: |-
+    Phase 2 (toolkit) is complete: `scripts/ci/consolidation.py` with `inventory`, `plan`, `capture`, `compare`, `check-attributes`, `check-snapshots`. It is self-proven on the unmigrated tree (`selfproof/README.md`). Only the human sign-off on the manifest format is open (see `human_review_items`).
+
+    For Phase 3 (claudine-cli pilot):
+    - Use `selfproof/capture-a/` as the before side of every comparison. Unlike `baseline/listings/`, it includes the `.config/nextest.toml` override selectors (R5), so no `--common-selectors` is needed. It is byte-identical to a second capture, and its 114 tier listings reproduce `baseline/listings/` digest for digest.
+    - The manifest comes from `consolidation.py plan --package claudine-cli --listings selfproof/capture-a`. It emits `override_rewrites` for the exact-name override `compose_loop_rate_limit_pause_waits_then_continues` (profiles `ci` index 5 and `default` index 0), with `suggested_filter: test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)`. Rewrite that override in the same change as the move. `compare` notes an override rewrite, but fails a tier-filter change.
+    - `plan` checks its filterset evaluator against every Nextest verdict in the supplied captures and refuses to plan on any disagreement. If it refuses, recapture: do not edit the evaluator to pass.
+    - Five claudine-cli targets list no tests on macOS (`sequence_ctrl_c_windows`, `wrap_ctrl_c_windows`, `level2_windows_provided_partial_file_capture`, `level3_linux_sequence_ctrl_c`, `level3_windows_sequence_ctrl_c`), so `plan` takes their tests from a source scan (`test_basis: source-scan`). Confirm them from the Linux and Windows on-host captures (`just cross-check`, then `capture` on each host). Platform-absent stays `not-evaluated` until captures from more than one host are fed to `compare`.
+    - `check-attributes` needs identity-sensitive constructs (R9) and `crate::` uses dispositioned in the manifest's `dispositions` list (`{path, detector}`). Unrecorded hits fail by design.
+    - `test_consolidation.py` runs in `just ci-local`'s self-test loop and deliberately NOT in `affected_scope.py`'s `SUITE_REGISTRY` (R1: no CI cell).
+    - Still true from Phase 1: re-run the S3 before series in a pre-migration worktree alternating with the after side, after adding an edit-only mode to `spikes/s3-measure.sh` (`measurements.md`). `dispatch-inventory.json`'s persisted `--test dispatch_inventory` selector is handled in the docs pass per R9. Pre-existing oddities (darkmatter `real_`-prefixed L1 test, biscuit-terminal's ignored `layout_matrix__*` snapshots) are preserved as-is.
 ---
 
 # Consolidate compatible integration tests into shared binaries

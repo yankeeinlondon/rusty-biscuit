@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 1
+phase: 2
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -11,6 +11,7 @@ packages:
     - darkmatter
     - darkmatter-cli
     - biscuit-terminal
+    - repo-deps
 source_files_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
     - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
@@ -35,6 +36,22 @@ docs_created_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/disk-and-ci.md
 skills_files_updated_during_phase_1: []
 packages_during_phase_1: []
+source_files_during_phase_2:
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - scripts/ci/test_ci_local.py
+    - just/ci-local.just
+    - features/2026-09-21-consolidated-test-binaries/selfproof/mutation-check.py
+docs_updated_during_phase_2:
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_2:
+    - features/2026-09-21-consolidated-test-binaries/selfproof/README.md
+    - features/2026-09-21-consolidated-test-binaries/selfproof/noop-comparison.md
+skills_files_updated_during_phase_2: []
+packages_during_phase_2:
+    - repo-deps
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -382,12 +399,12 @@ supersede the task text below where they differ:
 
 ### Wave 1 — Independent modules (parallel)
 
-- [ ] **Inventory generator** — `consolidation.py inventory`: merges
+- [x] **Inventory generator** — `consolidation.py inventory`: merges
       `cargo metadata --no-deps` with manifest parsing (per R3's key list)
       into the checked per-package table; fails on a target present in one
       source and absent from the other, on an undeclared nested crate root,
       and on any `[[test]]` whose source path does not exist.
-- [ ] **Contract planner** — `consolidation.py plan`: groups the inventory by
+- [x] **Contract planner** — `consolidation.py plan`: groups the inventory by
       execution-contract key (tier × required-features × harness ×
       target-wide settings), assigns consolidated target names and module
       names per R2, applies the neutral-alias rule by projecting every test's
@@ -395,12 +412,12 @@ supersede the task text below where they differ:
       `just`; never embedding the expressions), and emits the migration
       manifest JSON (old target → consolidated target, module name or
       recorded alias, per-test projected path).
-- [ ] **Attribute checker** — `consolidation.py check-attributes`: compares
+- [x] **Attribute checker** — `consolidation.py check-attributes`: compares
       each moved file's former file-level crate attributes against its new
       module declaration attributes (`#[cfg(unix)] mod x;` etc.), using S2's
       detector list; reports any crate-global construct that survived
       modularization.
-- [ ] **Snapshot mapper** — `consolidation.py check-snapshots`: validates a
+- [x] **Snapshot mapper** — `consolidation.py check-snapshots`: validates a
       committed old→new snapshot mapping table — every tracked snapshot
       affected by the move is mapped, mapped files are byte-identical after
       the move, no `.snap.new` exists, and unmoved snapshots are proven
@@ -408,7 +425,7 @@ supersede the task text below where they differ:
 
 ### Wave 2 — Comparator and self-proof (needs Wave 1's manifest format)
 
-- [ ] **Identity comparator** — `consolidation.py capture` + `compare`:
+- [x] **Identity comparator** — `consolidation.py capture` + `compare`:
       capture runs `nextest list --message-format json` per tier expression
       (again via `just _tier_filter`) and feature set; `compare` loads
       before/after captures plus the migration manifest, normalizes only the
@@ -416,21 +433,21 @@ supersede the task text below where they differ:
       selected, excluded-as-other-tier, ignored, platform-absent — by exact
       identity. Any difference, any unmapped test, or any count-only output
       fails with a named, actionable error.
-- [ ] **Toolkit tests** — `scripts/ci/test_consolidation.py`: unit fixtures
+- [x] **Toolkit tests** — `scripts/ci/test_consolidation.py`: unit fixtures
       for each subcommand (synthetic metadata/manifest/listing JSON), plus
       the failure oracle for every guard above (missing mapping, drifted
       attribute, identity loss masked by identity gain, silent count match).
       Wire into the existing Python suite runner for `scripts/ci`.
-- [ ] **No-op self-proof** — run `capture` twice against the current
+- [x] **No-op self-proof** — run `capture` twice against the current
       (unmigrated) tree for all four packages and `compare` the captures:
       identical, all tests mapped trivially. This is the toolkit's own
       acceptance gate before any source file moves.
 
 ### Checkpoint
 
-- [ ] `just lint` and the `scripts/ci` Python suites pass; every failure
+- [x] `just lint` and the `scripts/ci` Python suites pass; every failure
       oracle demonstrated red-then-green in the suite.
-- [ ] The no-op comparison artifact for all four packages is committed under
+- [x] The no-op comparison artifact for all four packages is committed under
       this feature directory as the toolkit's self-proof.
 - [ ] Reviewer sign-off that the manifest format is the single authoritative
       mapping — filenames were never authoritative, and now nothing else is
