@@ -872,8 +872,48 @@ belong here.
   reviewer's findings" rather than "cycle N is closed". `status` stays
   `draft-spec`, `implemented` stays `false`, and `review_iterations`
   does NOT bump — the bump arrives when the implementation lands and a
-  real `review-N.md` flips `implemented: true`. Mixing this with a
+  real    `review-N.md` flips `implemented: true`. Mixing this with a
   cycle-close body overstates the work; splitting it from the eventual
   cycle-close is correct because the cycle close carries
   `implemented: true` and an `next:` pointer, which the spec-only
   review does not yet have.
+- A structural move that retires per-file selectors (e.g. test
+  consolidation that turns N per-file test binaries into one consolidated
+  target) has more path dependents than the structural commit alone. The
+  "comment-only and doc-only changes go in a separate commit from the
+  structural move" guidance (AGENTS.md scope discipline) still applies,
+  but the dependent docs churn is large enough to need an audience-scoped
+  split — each bucket targets a different reviewer audience and a
+  different `docs(<area>):` scope:
+
+  - Library/component source `//!`/`///` comments (1:1 path swaps in
+    inline module docs) ship in `docs(<library-area>):`.
+  - Area docs, area prompts, and area justfile recipes (spec §11
+    "active area pass") ship together in `docs(<area>):`. This is
+    the right bucket for any `--test <old-binary>` selector the
+    retirement invalidates and for any provider-metadata string a test
+    asserts on (e.g. `dispatch-inventory.json`'s `regenerate` line —
+    the R9 hand-edit). The recipe and the regenerate string share the
+    same audience, so splitting them is wrong.
+  - Cross-area skills ship in `docs(skills):` (no area scope) — skill
+    files are read by every agent, not just the package-area maintainer,
+    so the recipient audience is the whole repo.
+  - Cross-package config (`.config/nextest.toml` override filter
+    rewrites, anything keyed on the old identity) ships INSIDE the
+    feat commit because the rewrite exists to make the new module
+    graph runnable under the existing test harness — it is part of
+    the move, not commentary on it.
+
+  Worked example: 2026-09-21-consolidated-test-binaries Phase 3
+  (`4287deb0c feat(claudine-cli): consolidate 139 integration tests...`,
+  `093788b57 docs(claudine): refresh test path references in
+  source-code comments`, `6198b0dc1 docs(claudine): refresh test path
+  references in area docs, prompts, and recipes`, `84afc4e78
+  docs(skills): refresh test path references and record kache
+  really-off in the os skill`, then `93ed5c710 planning(repo): record
+  Phase 3 close`). The feat commit absorbed 145 renames + 4 new
+  `tests/<target>/main.rs` + `.config/nextest.toml` slow-timeout
+  override rewrite + 3 snapshot renames + the one-stale-comment
+  prune in `tests/common/mod.rs`; the three docs commits split by
+  audience, not by file type.
+
