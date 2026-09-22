@@ -134,6 +134,56 @@ fn literals_and_comments_hide_declarations_without_desynchronizing() {
 }
 
 #[test]
+fn a_module_token_inside_a_macro_declares_nothing() {
+    // The macro is never expanded here, so rustc does not compile `orphan.rs`;
+    // counting its token as a declaration would hide an orphaned test file.
+    let dormant = "macro_rules! dormant {\n    () => { mod orphan; };\n}\nmod guard;\n";
+    assert_eq!(
+        module_declarations(dormant).into_iter().map(|d| d.name).collect::<Vec<_>>(),
+        ["guard"]
+    );
+    // A token-discarding invocation, in each delimiter, and one nested inside
+    // another macro's body.
+    for source in [
+        "discard!(mod orphan;);\nmod guard;\n",
+        "discard![mod orphan;];\nmod guard;\n",
+        "discard! { mod orphan; }\nmod guard;\n",
+        "outer! { inner! { mod orphan; } }\nmod guard;\n",
+    ] {
+        assert_eq!(
+            module_declarations(source).into_iter().map(|d| d.name).collect::<Vec<_>>(),
+            ["guard"],
+            "{source}"
+        );
+    }
+    // The walker must not mistake `!=` for a macro and blank what follows.
+    let comparison = "fn f(a: usize, b: usize) -> bool { a != b }\nmod after;\n";
+    assert_eq!(
+        module_declarations(comparison).into_iter().map(|d| d.name).collect::<Vec<_>>(),
+        ["after"]
+    );
+}
+
+#[test]
+fn a_file_reachable_only_through_a_dormant_macro_is_a_violation() {
+    let violations = layout_violations(
+        MANIFEST,
+        &tree(&[
+            (
+                "tests/l1/guard.rs",
+                "macro_rules! dormant {\n    () => { mod orphan; };\n}\nmod scan;\n",
+            ),
+            ("tests/l1/guard/orphan.rs", "#[test]\nfn case() {}\n"),
+        ]),
+    );
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("tests/l1/guard/orphan.rs: no declared test target compiles this module"),
+        "{violations:?}"
+    );
+}
+
+#[test]
 fn collect_test_sources_skips_data_directories_and_uses_forward_slashes() {
     let root = tempfile::tempdir().expect("tempdir");
     for (path, source) in [

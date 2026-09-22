@@ -11,7 +11,10 @@
 //!
 //! The walk is textual: a `cfg`-gated `mod` still counts as declared (the gate
 //! decides where a module compiles, not whether anything compiles it), and a
-//! `mod x;` inside a comment or string literal does not.
+//! `mod x;` inside a comment, a string literal, or a macro token tree does
+//! not. The macro rule cuts both ways by design: a module a macro expansion
+//! declares is reported as unreached, because nothing here expands macros.
+//! Declare test modules directly in a root or a `mod.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -137,7 +140,8 @@ pub(crate) struct ModuleDeclaration {
 
 /// Every out-of-line `mod name;` in `source`, whatever its `cfg` or visibility.
 pub(crate) fn module_declarations(source: &str) -> Vec<ModuleDeclaration> {
-    let code = sanitize(source);
+    let mut code = sanitize(source);
+    blank_macro_token_trees(&mut code);
     let mut declarations = Vec::new();
     let mut index = 0;
     while index < code.len() {
@@ -264,6 +268,54 @@ fn skip_visibility(bytes: &[u8], cursor: usize) -> usize {
         cursor = skip_whitespace(bytes, close + 1);
     }
     cursor
+}
+
+/// Blank the body of every macro token tree in `code`: a `name!(…)`, `name![…]`
+/// or `name!{…}` invocation, and a `macro_rules! name { … }` definition.
+///
+/// A `mod x;` written inside one declares nothing by itself. Rust compiles
+/// `x.rs` only where an expansion puts that item, so counting the token as a
+/// declaration marks the file reachable and lets an orphaned test file pass
+/// the gate (review 1 of `2026-09-21-consolidated-test-binaries`).
+///
+/// Lengths and newlines are preserved, so offsets still index into `source`.
+fn blank_macro_token_trees(code: &mut [u8]) {
+    let mut index = 0;
+    while index < code.len() {
+        // `a != b` never reaches a delimiter below, so only `ident!` matches.
+        if code[index] != b'!' || index == 0 || !is_ident(code[index - 1]) {
+            index += 1;
+            continue;
+        }
+        let mut cursor = skip_whitespace(code, index + 1);
+        // `macro_rules! name { … }` names the macro before its body.
+        if code.get(cursor).is_some_and(|&byte| is_ident(byte)) {
+            let mut name_end = cursor;
+            while code.get(name_end).is_some_and(|&byte| is_ident(byte)) {
+                name_end += 1;
+            }
+            cursor = skip_whitespace(code, name_end);
+        }
+        let delimiters = match code.get(cursor) {
+            Some(b'(') => (b'(', b')'),
+            Some(b'[') => (b'[', b']'),
+            Some(b'{') => (b'{', b'}'),
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        let Some(close) = matching(code, cursor, delimiters.0, delimiters.1) else {
+            index += 1;
+            continue;
+        };
+        for byte in &mut code[cursor + 1..close] {
+            if !matches!(*byte, b'\n' | b'\r') {
+                *byte = b' ';
+            }
+        }
+        index = close + 1;
+    }
 }
 
 /// `source` with comments and string/char literals blanked to spaces; every
