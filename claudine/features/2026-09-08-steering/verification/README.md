@@ -38,7 +38,7 @@ from the repository root with the binary's absolute path:
 CLAUDINE_PI_BINARY=/absolute/path/to/pi \
 CLAUDINE_PI_REPORT=/tmp/pi-steering-result.json \
 cargo nextest run -p claudine-cli --features real-tests \
-  --test real_pi_steering --run-ignored all --no-fail-fast
+  --test real real_pi_steering:: --run-ignored all --no-fail-fast
 ```
 
 On PowerShell, set `$env:CLAUDINE_PI_BINARY` and `$env:CLAUDINE_PI_REPORT` before
