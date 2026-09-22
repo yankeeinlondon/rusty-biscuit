@@ -93,6 +93,13 @@ push mode.
   fixture bare remotes with `-b main` rather than inheriting the host's default
   branch. A missing-tool test must use a controlled PATH: Ubuntu's `/usr/bin`
   already contains `gh`, so adding it defeats a missing-`gh` fixture.
+- **L2 red only on Ubuntu, a timeout, passes on the macOS host:** CI's
+  checkouts are depth-1, and macOS L2 is satisfied by local evidence from a
+  full-history clone, so Ubuntu is where git-history code first meets a
+  shallow boundary. That commit diffs against the empty tree, so every file
+  is an addition. Reproduce in a `git clone --depth 1` (Docker, see
+  [macos.md](macos.md)). On 2026-09-22 sniff's rewrite tracker turned this into
+  a quadratic 30 s+ `claudine context --values`.
 - **Red only on `wsl2-ubuntu`:** the guest runs a nextest *archive* built on
   `ubuntu-latest`. Anything resolved at compile time to a builder path
   (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures outside the
