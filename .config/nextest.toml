@@ -99,7 +99,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # it replaced cost nearly as much, because the capture dominates regardless of
 # how many variables are read.
 [[profile.default.overrides]]
-filter = 'test(=every_catalog_variable_survives_ambient_options)'
+filter = 'test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # These merge-regression tests intentionally perform several complete compose
@@ -243,7 +243,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # captures, which is the comparison it performs. CI uses the same measured WSL
 # allowance.
 [[profile.ci.overrides]]
-filter = 'test(=every_catalog_variable_survives_ambient_options)'
+filter = 'test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: WezTerm CLI capture round trips make this
