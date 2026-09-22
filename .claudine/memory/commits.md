@@ -917,3 +917,24 @@ belong here.
   prune in `tests/common/mod.rs`; the three docs commits split by
   audience, not by file type.
 
+- When a structural move introduces a NEW tier-named directory (e.g.
+  `tests/level2/`) that did not exist before, a path-keyed guard whose
+  `excluded` predicate scopes by file-name prefix (`level2_*`,
+  `level3_*`, `browser_*`, `real_*`, `slow_*`) silently picks up
+  files under that directory: the leading-segment name (`level2/`)
+  matches the prefix without its trailing underscore, so a renamed
+  R2-aliased module (`level2/harness_integrity.rs`) and the new
+  crate root (`level2/main.rs`) both join the governed population.
+  The predicate extension — also skipping any leading segment whose
+  name equals a prefix's underscore-stripped form — belongs INSIDE
+  the same commit as the guard rename, because that commit is what
+  introduces the directory that defeats the old predicate. Shown red
+  first with `tier_naming_decides_what_the_guard_governs` /
+  `the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site`
+  in darkmatter-cli's `1456c1ede` Phase 5 close; the same hazard is
+  pre-called for `biscuit-terminal`'s Phase 6 in the spec's
+  `message_to_agent`. The journal's separate "path-sensitive guards
+  also move with the sources" rule is the rename side; this is the
+  *predicate extension* side, which the rename-only rule does not
+  cover.
+
