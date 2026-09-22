@@ -46,7 +46,7 @@ darkmatter_lib/
 
 | Crate | Purpose |
 |-------|---------|
-| `chromiumoxide` + `futures-util` | Headless-Chrome browser-render tests (`tests/browser_render.rs`) + `examples/html_to_png.rs` screenshot helper; skip cleanly without a browser |
+| `chromiumoxide` + `futures-util` | Headless-Chrome browser-render tests (`tests/browser/browser_render.rs`) + `examples/html_to_png.rs` screenshot helper; skip cleanly without a browser |
 
 ## Public Modules (`lib.rs`)
 
