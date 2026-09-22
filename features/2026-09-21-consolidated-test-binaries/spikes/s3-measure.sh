@@ -10,6 +10,17 @@
 #   s3-measure.sh <series-label> <out-dir> [trials]
 #
 # Environment knobs (defaults are the R6 protocol):
+#   S3_MODE       full | build | edit           (default: full)
+#                 full  — clean build, targets, warm-up, <trials> edit trials
+#                 build — clean build and targets only, into S3_TARGET_DIR
+#                 edit  — one edit trial labeled S3_TRIAL (`warmup` or a
+#                         number) against the already-built S3_TARGET_DIR
+#                 build + edit exist so before and after trials can alternate
+#                 (measurements.md, Phase 3 protocol amendment). The measured
+#                 `touch` + `cargo nextest run …` command is the same in
+#                 every mode.
+#   S3_TARGET_DIR target dir for build/edit     (default: a fresh mktemp dir)
+#   S3_TRIAL      trial label for edit mode
 #   S3_FEATURES   feature set for every build   (default: terminal-tests)
 #   S3_EDIT_FILE  file touched per edit trial    (default: resolved from S3_EDIT_TEST)
 #   S3_EDIT_TEST  positional test-name filter    (default: handle_rejects_present_non_absolute_agent_cwd)
@@ -25,17 +36,34 @@ package="claudine-cli"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 mkdir -p "${out_dir}"
-unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER BISCUIT_TEST_FILTER BISCUIT_L1_INCLUDE_SLOW
+unset CARGO_BUILD_RUSTC_WRAPPER BISCUIT_TEST_FILTER BISCUIT_L1_INCLUDE_SLOW
+# kache off (R6). `unset` is not enough: `~/.cargo/config.toml` can name
+# `rustc-wrapper = "kache"`, and only an explicitly empty RUSTC_WRAPPER
+# overrides it. kache's `cc`/`gcc`/`clang` shims leave PATH for the same reason.
+export RUSTC_WRAPPER=""
+PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -v '/kache/shims' | paste -sd: -)"
+export PATH
 
 # The test moves between series (tests/agent_cwd.rs → tests/l1/agent_cwd.rs);
 # locate it by content so the recipe itself never changes.
 edit_file="${S3_EDIT_FILE:-$(grep -rl --include='*.rs' "fn ${edit_test}(" claudine/cli/tests | head -n 1)}"
 [[ -n "${edit_file}" ]] || { echo "cannot find fn ${edit_test}" >&2; exit 1; }
 
-target_dir="$(mktemp -d "${TMPDIR:-/tmp}/s3-${series}-target.XXXXXX")"
+mode="${S3_MODE:-full}"
+case "${mode}" in
+    full) target_dir="$(mktemp -d "${TMPDIR:-/tmp}/s3-${series}-target.XXXXXX")" ;;
+    build) target_dir="${S3_TARGET_DIR:?build mode needs S3_TARGET_DIR}"
+        [[ ! -e "${target_dir}" ]] || { echo "${target_dir} exists; a clean build needs a fresh dir" >&2; exit 1; } ;;
+    edit) target_dir="${S3_TARGET_DIR:?edit mode needs S3_TARGET_DIR}"
+        [[ -d "${target_dir}" ]] || { echo "${target_dir} is not built" >&2; exit 1; } ;;
+    *) echo "unknown S3_MODE ${mode}" >&2; exit 2 ;;
+esac
 filter="$(just _tier_filter L1 "${package}")"
 log="${out_dir}/${series}.log"
-: >"${log}"
+[[ "${mode}" == edit ]] || : >"${log}"
+
+run_one=(cargo nextest run --locked -p "${package}" --features "${features}" --target-dir "${target_dir}"
+    --color=never -E "${filter}" --no-tests=fail "${edit_test}")
 
 snapshot() {
     {
@@ -56,6 +84,17 @@ timed() {
     echo "${label}: $(tr '\n' ' ' <"${tfile}")"
 }
 
+if [[ "${mode}" == edit ]]; then
+    trial="${S3_TRIAL:?edit mode needs S3_TRIAL}"
+    touch "${edit_file}"
+    if [[ "${trial}" == warmup ]]; then
+        timed edit-warmup "${run_one[@]}"
+    else
+        timed "edit-trial-${trial}" "${run_one[@]}"
+    fi
+    exit 0
+fi
+
 {
     echo "series=${series}"
     echo "revision=$(git rev-parse HEAD)"
@@ -68,7 +107,8 @@ timed() {
     echo "features=${features}"
     echo "jobs=$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
     echo "linker=default ($(cc --version 2>/dev/null | head -n 1))"
-    echo "rustc_wrapper=${RUSTC_WRAPPER:-unset}"
+    echo "rustc_wrapper=${RUSTC_WRAPPER:-empty (disabled)}"
+    echo "cc=$(command -v cc)"
     echo "target_dir=${target_dir} (fresh)"
     echo "edit_file=${edit_file}"
     echo "edit_test=${edit_test}"
@@ -104,11 +144,15 @@ print(f"test_executable_bytes={size}")
 echo "targets: $(tr '\n' ' ' <"${out_dir}/${series}-targets.txt")"
 echo "target_dir_bytes=$(/usr/bin/du -sk "${target_dir}" | awk '{print $1 * 1024}')" >>"${out_dir}/${series}-targets.txt"
 
+if [[ "${mode}" == build ]]; then
+    snapshot "built"
+    echo "built; run S3_MODE=edit S3_TARGET_DIR=${target_dir} trials next"
+    exit 0
+fi
+
 # 3. Warm edit-to-one-test loop: one warm-up, then <trials> timed trials.
 # `touch` changes no bytes, so every trial rebuilds exactly the target that
 # owns the file and nothing else.
-run_one=(cargo nextest run --locked -p "${package}" --features "${features}" --target-dir "${target_dir}"
-    --color=never -E "${filter}" --no-tests=fail "${edit_test}")
 touch "${edit_file}"
 timed edit-warmup "${run_one[@]}"
 for trial in $(seq 1 "${trials}"); do

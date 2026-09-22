@@ -2,12 +2,13 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 2
+phase: 3
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 packages:
     - claudine-cli
+    - claudine
     - darkmatter
     - darkmatter-cli
     - biscuit-terminal
@@ -52,6 +53,206 @@ docs_created_during_phase_2:
 skills_files_updated_during_phase_2: []
 packages_during_phase_2:
     - repo-deps
+source_files_during_phase_3:
+    - .config/nextest.toml
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/wrap/exec/termination/coordinator/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_cwd.rs
+    - claudine/cli/tests/l1/argv_normalization.rs
+    - claudine/cli/tests/l1/characterization_error_routes.rs
+    - claudine/cli/tests/l1/cli_process_fixture.rs
+    - claudine/cli/tests/l1/command_routing.rs
+    - claudine/cli/tests/l1/completion_cli.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_contract.rs
+    - claudine/cli/tests/l1/completion_inline_compose.rs
+    - claudine/cli/tests/l1/completion_perf.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+    - claudine/cli/tests/l1/completion_sequence.rs
+    - claudine/cli/tests/l1/completion_setter.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_cli.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_header_first.rs
+    - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/compose_interactive_timeout_cli.rs
+    - claudine/cli/tests/l1/compose_removed_validation_keys.rs
+    - claudine/cli/tests/l1/compose_repository_context.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/compose_system_prompt_lifetime.rs
+    - claudine/cli/tests/l1/compose_ttff_perf.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/contamination_probes.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/contextual_errors.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/detached_audio.rs
+    - claudine/cli/tests/l1/diagnostic_discovery.rs
+    - claudine/cli/tests/l1/dispatch_inventory.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/source_scan.rs
+    - claudine/cli/tests/l1/errors_command.rs
+    - claudine/cli/tests/l1/handle_blocking_output.rs
+    - claudine/cli/tests/l1/handle_deadline.rs
+    - claudine/cli/tests/l1/handle_repo_config.rs
+    - claudine/cli/tests/l1/hooks_cli.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/inline_compose_cli.rs
+    - claudine/cli/tests/l1/inline_compose_hash.rs
+    - claudine/cli/tests/l1/inline_compose_sequence_mismatch.rs
+    - claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs
+    - claudine/cli/tests/l1/level1_dry_run_pty.rs
+    - claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+    - claudine/cli/tests/l1/level1_pty_wrapper_summary.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/l1/level1_schema_prompt_pty.rs
+    - claudine/cli/tests/l1/level1_structured_error_message.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_initialize_state.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/mcp_cli.rs
+    - claudine/cli/tests/l1/prompt_reporting.rs
+    - claudine/cli/tests/l1/propagated_context_fixtures.rs
+    - claudine/cli/tests/l1/protect_cli.rs
+    - claudine/cli/tests/l1/provider_error_finalize.rs
+    - claudine/cli/tests/l1/run_harness_loop_call_sites.rs
+    - claudine/cli/tests/l1/sequence_budget.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_prompt_property.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/shipped_prompt_contract.rs
+    - claudine/cli/tests/l1/shipped_prompt_route_drift.rs
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/l1/skills_integration.rs
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/l1/system_prompt_perf_bench.rs
+    - claudine/cli/tests/l1/test_placement.rs
+    - claudine/cli/tests/l1/wrap_antigravity_exit_signal.rs
+    - claudine/cli/tests/l1/wrap_basics.rs
+    - claudine/cli/tests/l1/wrap_compose_agent.rs
+    - claudine/cli/tests/l1/wrap_compose_exec.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/wrap_direct_argv.rs
+    - claudine/cli/tests/l1/wrap_incomplete_subagents.rs
+    - claudine/cli/tests/l1/wrap_inline_compose.rs
+    - claudine/cli/tests/l1/wrap_inline_compose_interactive.rs
+    - claudine/cli/tests/l1/wrap_opencode.rs
+    - claudine/cli/tests/l1/wrap_opencode_models.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_provider_flags.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/l1/wrap_structured_stream.rs
+    - claudine/cli/tests/l1/wrap_watchdog_startup_stall.rs
+    - claudine/cli/tests/l1/wrap_watchdog_timeout.rs
+    - claudine/cli/tests/level2/level2_auto_complete_chooser.rs
+    - claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+    - claudine/cli/tests/level2/level2_context_capture.rs
+    - claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+    - claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+    - claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs
+    - claudine/cli/tests/level2/level2_interrupt_feedback_capture.rs
+    - claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+    - claudine/cli/tests/level2/level2_lifecycle_action_forms.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_lifecycle_loop.rs
+    - claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/level2_prompt_reporting_capture.rs
+    - claudine/cli/tests/level2/level2_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+    - claudine/cli/tests/level2/level2_removed_validation_key_capture.rs
+    - claudine/cli/tests/level2/level2_schema_parse_capture.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/level2_stalled_generation_capture.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/level2/level2_windows_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_wrap_ctrl_c_loop_wedge_tmux.rs
+    - claudine/cli/tests/level2/level2_wrap_ctrl_c_tmux.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/level3/level3_auto_complete_chooser.rs
+    - claudine/cli/tests/level3/level3_linux_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_windows_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_wrap_ctrl_c.rs
+    - claudine/cli/tests/level3/main.rs
+    - claudine/cli/tests/real/main.rs
+    - claudine/cli/tests/real/real_inline_write_grant.rs
+    - claudine/cli/tests/real/real_opencode_yolo_subagent.rs
+    - claudine/cli/tests/real/real_pi_steering.rs
+    - claudine/justfile
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - features/2026-09-21-consolidated-test-binaries/pilot/apply-move.py
+    - features/2026-09-21-consolidated-test-binaries/spikes/s3-measure.sh
+docs_updated_during_phase_3:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/performance-testing.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/prompts/create-new-provider.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_3:
+    - features/2026-09-21-consolidated-test-binaries/claudine-cli-migration.json
+    - features/2026-09-21-consolidated-test-binaries/pilot.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/pilot/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/snapshot-mapping.json
+skills_files_updated_during_phase_3:
+    - .claude/skills/biscuit-test-harness/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/argv-normalization.md
+    - .claude/skills/claudine/cli-pre-parsing.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/error-architecture.md
+    - .claude/skills/os/build-hosts.md
+packages_during_phase_3:
+    - claudine-cli
+    - claudine
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -463,7 +664,7 @@ measurement series and the seam decision. Expected result: 139 targets → 4
 
 ### Wave 1 — Structural move (sequential; one working tree)
 
-- [ ] **Execute migration** — generate the pilot manifest
+- [x] **Execute migration** — generate the pilot manifest
       (`plan` output, reviewed and committed as
       `claudine-cli-migration.json` under this feature directory); create
       `claudine/cli/tests/{l1,level2,level3,real}/main.rs` and shared
@@ -475,25 +676,25 @@ measurement series and the seam decision. Expected result: 139 targets → 4
       `include_*`/fixture/snapshot path repairs, crate-namespace collision
       fixes). Any test that needs a behavior change halts the pilot and
       becomes a separate defect record.
-- [ ] **Compile and list on macOS** — `cargo nextest list` succeeds for the
+- [x] **Compile and list on macOS** — `cargo nextest list` succeeds for the
       package under each feature set; `check-attributes` reports zero
       unrepresented crate-level conditions; S2's crate-global hits are all
       dispositioned.
 
 ### Wave 2 — Pilot fix-ups (parallel once macOS compiles)
 
-- [ ] **Snapshot moves** — apply the S4-derived mapping mechanically; run the
+- [x] **Snapshot moves** — apply the S4-derived mapping mechanically; run the
       affected suites with `INSTA_UPDATE=no`; `check-snapshots` green; zero
       `.snap.new` files in the tree.
-- [ ] **Identity comparison** — run `capture` after-state and `compare`
+- [x] **Identity comparison** — run `capture` after-state and `compare`
       against `baseline/listings/` for every feature set: four-way identity
       equality on macOS. Any diff is a manifest or move defect, never a
       filter change.
-- [ ] **Test-placement guard** — extend `claudine/cli/tests/test_placement.rs`
+- [x] **Test-placement guard** — extend `claudine/cli/tests/test_placement.rs`
       so it rejects an unexpected test crate root or undeclared module under
       the new layout (acceptance 12), keeping it inside the consolidated L1
       binary — no new test target, no CI gate.
-- [ ] **Area recipe/doc pass** — update anything **active** in
+- [x] **Area recipe/doc pass** — update anything **active** in
       `claudine/justfile`, `claudine/just.md`, and area docs that names the
       old per-file targets or recommends `--test <old-binary>`; narrow-test
       guidance switches to Nextest positional filtering with the tier's
@@ -502,7 +703,7 @@ measurement series and the seam decision. Expected result: 139 targets → 4
 
 ### Wave 3 — Cross-host verification and measurements (parallel across hosts)
 
-- [ ] **macOS full validation** — `just test claudine`, `just test-l2`,
+- [x] **macOS full validation** — `just test claudine`, `just test-l2`,
       `just lint` for the area; L3 terminal and real-provider suites run per
       their opt-in and the no-focus rule; `just check-tier-coverage claudine`
       and `just check-canonical claudine` pass.
@@ -511,28 +712,28 @@ measurement series and the seam decision. Expected result: 139 targets → 4
       identity comparison re-run **on each host** (a macOS source scan cannot
       prove the Windows module graph); Windows `cfg` module coverage
       confirmed from the host's listing, not from inspection.
-- [ ] **WSL2 archive portability** — when the standing WSL2 host is
+- [x] **WSL2 archive portability** — when the standing WSL2 host is
       reachable, run the archive-path check per the `os` skill; otherwise
       record `pending` with the exact missing evidence (acceptance 4 allows
       pending, never a silent pass).
-- [ ] **After measurement series** — on the idle macOS host, run the exact
+- [x] **After measurement series** — on the idle macOS host, run the exact
       S3 command list against the migrated tree: clean-build time, five
       alternating edit-one-test trials (median + slowest), peak compiler
       RSS, produced target count, on-disk test executable size. Append to
       `measurements.md` beside the before series with the Sniff host/load
       snapshots for both series.
-- [ ] **Skip-baseline check** — confirm `.github/ci/ci-baseline.toml` is
+- [x] **Skip-baseline check** — confirm `.github/ci/ci-baseline.toml` is
       still empty (or translate entries via the pilot manifest per R5).
 
 ### Wave 4 — Seam decision and pilot close
 
-- [ ] **Guardrail decision** — apply the §8 thresholds to the measurement
+- [x] **Guardrail decision** — apply the §8 thresholds to the measurement
       series. Default: keep one binary per contract. Only if median edit
       latency rises by both >50% and >5 s, or the consolidated target cannot
       compile reliably / exceeds runner memory: split into **stable subject
       groups** (same tier and feature contract, named product areas — never
       numbered shards), re-run Waves 1–3 for the split, and record why.
-- [ ] **Pilot report** — `pilot.md` under this feature directory: manifest
+- [x] **Pilot report** — `pilot.md` under this feature directory: manifest
       summary, before/after identity artifacts, per-host results, measurement
       table, seam decision, defects filed (if any). This is the review packet
       for Phases 4–6 proceeding.
@@ -542,9 +743,9 @@ measurement series and the seam decision. Expected result: 139 targets → 4
 - [ ] All Wave 3 evidence committed; four-way identity equality on macOS,
       Linux, and native Windows; WSL2 recorded as passed or pending-with-
       reason.
-- [ ] `measurements.md` complete with matched conditions stated; seam
+- [x] `measurements.md` complete with matched conditions stated; seam
       decision recorded against the guardrail.
-- [ ] `claudine-cli` shows 4 declared test targets, `autotests = false`, no
+- [x] `claudine-cli` shows 4 declared test targets, `autotests = false`, no
       undeclared crate roots (guard test proves it), and the area suites
       named above are green.
 
