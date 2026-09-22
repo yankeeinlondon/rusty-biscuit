@@ -1,0 +1,52 @@
+## claudine-cli (148 .rs files under tests/)
+### inner attributes
+-   76  platform-or-feature-condition: #![cfg(unix)]  [claudine/cli/tests/compose_cli.rs:1, claudine/cli/tests/compose_frontmatter_model.rs:1, claudine/cli/tests/compose_header_first.rs:1, …]
+-    6  lint-level: #![allow(dead_code)]  [claudine/cli/tests/common/completion.rs:14, claudine/cli/tests/common/host_tools.rs:15, claudine/cli/tests/common/incomplete_subagents.rs:18, claudine/cli/tests/common/mod.rs:145, claudine/cli/tests/common/pty.rs:20, claudine/cli/tests/common/wrap.rs:12]
+-    3  platform-or-feature-condition: #![cfg(windows)]  [claudine/cli/tests/level2_windows_provided_partial_file_capture.rs:50, claudine/cli/tests/level3_windows_sequence_ctrl_c.rs:87, claudine/cli/tests/sequence_ctrl_c_windows.rs:61]
+-    2  platform-or-feature-condition: #![cfg(target_os = "macos")]  [claudine/cli/tests/level3_auto_complete_chooser.rs:8, claudine/cli/tests/level3_sequence_ctrl_c.rs:117]
+-    1  platform-or-feature-condition: #![cfg(target_os = "linux")]  [claudine/cli/tests/level3_linux_sequence_ctrl_c.rs:87]
+### detector hits
+- link_attr: 1 files  [claudine/cli/tests/sequence_ctrl_c_windows.rs:82]
+- fn_main: 4 files  [claudine/cli/tests/level2_provider_overlay_capture.rs:323; claudine/cli/tests/sequence_budget.rs:39; claudine/cli/tests/sequence_cli.rs:731; claudine/cli/tests/wrap_ctrl_c_windows.rs:56]
+- macro_rules: 1 files  [claudine/cli/tests/wrap_compose_agent.rs:300]
+- mod_common: 129 files  [claudine/cli/tests/agent_cwd.rs:4; claudine/cli/tests/argv_normalization.rs:14; claudine/cli/tests/characterization_error_routes.rs:44; claudine/cli/tests/cli_process_fixture.rs:12; claudine/cli/tests/command_routing.rs:2; claudine/cli/tests/completion_cli.rs:29; … (+123 files)]
+- mod_decl_other: 5 files  [claudine/cli/tests/common/mod.rs:147,148,149,151,152,153,154; claudine/cli/tests/error_guards.rs:48; claudine/cli/tests/spawn_site_guard.rs:149; claudine/cli/tests/system_prompt_perf_bench.rs:14; claudine/cli/tests/test_placement.rs:16]
+- path_attr: 5 files  [claudine/cli/tests/common/host_tools.rs:10; claudine/cli/tests/error_guards.rs:47; claudine/cli/tests/spawn_site_guard.rs:148; claudine/cli/tests/system_prompt_perf_bench.rs:13; claudine/cli/tests/test_placement.rs:15]
+- include_macro: 5 files  [claudine/cli/tests/common/review_router.rs:31; claudine/cli/tests/compose_caller_file_provenance.rs:283,288,294,298,302,348,1121,1159,1196,1223; claudine/cli/tests/sequence_schema.rs:520; claudine/cli/tests/shipped_prompt_contract.rs:443,641; claudine/cli/tests/wrap_compose_validation.rs:582,593,605]
+- current_exe: 3 files  [claudine/cli/tests/level2_auto_complete_chooser.rs:142; claudine/cli/tests/level2_auto_complete_operation_file.rs:194; claudine/cli/tests/level2_provider_overlay_capture.rs:324]
+- insta: 1 files  [claudine/cli/tests/wrap_basics.rs:25,25,307,307]
+
+## darkmatter (100 .rs files under tests/)
+### inner attributes
+-    6  lint-level: #![allow(deprecated)]  [darkmatter/lib/tests/browser_render.rs:19, darkmatter/lib/tests/layout_matrix_support/mod.rs:9, darkmatter/lib/tests/level2_render_tree_terminal.rs:57, darkmatter/lib/tests/level3_image_painting.rs:61, darkmatter/lib/tests/render_tree_hr_snapshots.rs:22, darkmatter/lib/tests/yaml_block_parity.rs:8]
+-    3  other: #![proptest_config(ProptestConfig {  [darkmatter/lib/tests/schema_quoting_safety.rs:94, darkmatter/lib/tests/schema_quoting_safety.rs:223, darkmatter/lib/tests/schemas_grammar_proptest.rs:198]
+-    2  platform-or-feature-condition: #![cfg(target_os = "macos")]  [darkmatter/lib/tests/level3_image_painting.rs:60, darkmatter/lib/tests/level3_popover.rs:36]
+-    1  lint-level: #![allow(dead_code)]  [darkmatter/lib/tests/layout_matrix_support/mod.rs:6]
+-    1  platform-or-feature-condition: #![cfg(windows)]  [darkmatter/lib/tests/declined_path_transclusion.rs:16]
+### detector hits
+- mod_decl_other: 6 files  [darkmatter/lib/tests/error_snapshots/main.rs:18,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35; darkmatter/lib/tests/image_pixel_classification.rs:2; darkmatter/lib/tests/layout_matrix.rs:7; darkmatter/lib/tests/level2_render_tree_terminal.rs:60,62,64,66,68,70,72; darkmatter/lib/tests/level3_image_painting.rs:64; darkmatter/lib/tests/render_comparison.rs:14]
+- path_attr: 3 files  [darkmatter/lib/tests/image_pixel_classification.rs:1; darkmatter/lib/tests/level2_render_tree_terminal.rs:59,61,63,65,67,69,71; darkmatter/lib/tests/level3_image_painting.rs:63]
+- include_macro: 5 files  [darkmatter/lib/tests/as_block_error_registry.rs:31; darkmatter/lib/tests/inline_document_text.rs:9,13,17,21; darkmatter/lib/tests/predict_conflicts.rs:200; darkmatter/lib/tests/schema_phase_validation.rs:639; darkmatter/lib/tests/suggest_constraint_phase1.rs:274,275]
+- current_exe: 3 files  [darkmatter/lib/tests/interpolation_literal_pipeline.rs:9; darkmatter/lib/tests/level2_render_tree_terminal/support/mod.rs:421; darkmatter/lib/tests/shell_expansion_coordinates.rs:42]
+- insta: 19 files  [darkmatter/lib/tests/cutover_reference.rs:145,145,146,146,152,152,153,153,162,162,166,166,175,175,176,176,182,182,186,186,198,198,202,202; darkmatter/lib/tests/error_snapshots/condition.rs:30,30,52,52; darkmatter/lib/tests/error_snapshots/deferred_set.rs:26,26,44,44; darkmatter/lib/tests/error_snapshots/image_ref.rs:13,13,21,21,29,29,44,44,64,64,79,79,94,94,114,114,134,134,147,147,166,166,189,189; darkmatter/lib/tests/error_snapshots/link.rs:13,13,21,21,29,29,50,50,65,65,73,73,84,84,105,105; darkmatter/lib/tests/error_snapshots/markdown_error.rs:157,157,185,185,220,220,279,279,292,292,324,324,370,370; … (+13 files)]
+
+## darkmatter-cli (58 .rs files under tests/)
+### inner attributes
+-    4  lint-level: #![allow(dead_code)]  [darkmatter/cli/tests/common/fixture.rs:109, darkmatter/cli/tests/common/level2.rs:1, darkmatter/cli/tests/common/mod.rs:1, darkmatter/cli/tests/common/protected_env.rs:18]
+### detector hits
+- mod_common: 51 files  [darkmatter/cli/tests/clean.rs:1; darkmatter/cli/tests/clean_frontmatter.rs:10; darkmatter/cli/tests/clean_json.rs:9; darkmatter/cli/tests/clean_schema.rs:13; darkmatter/cli/tests/code_block.rs:14; darkmatter/cli/tests/compose_array_rendering.rs:1; … (+45 files)]
+- mod_decl_other: 2 files  [darkmatter/cli/tests/common/mod.rs:3,4,409; darkmatter/cli/tests/spawn_site_guard.rs:158,162]
+- path_attr: 1 files  [darkmatter/cli/tests/spawn_site_guard.rs:157,161]
+
+## biscuit-terminal (42 .rs files under tests/)
+### inner attributes
+-    3  lint-level: #![allow(dead_code)]  [biscuit-terminal/lib/tests/common/mod.rs:1, biscuit-terminal/lib/tests/inline_content_matrix_support/mod.rs:8, biscuit-terminal/lib/tests/layout_matrix_support/mod.rs:5]
+-    3  platform-or-feature-condition: #![cfg(feature = "image")]  [biscuit-terminal/lib/tests/graph_expression_parity.rs:39, biscuit-terminal/lib/tests/horizontal_rule_parity.rs:25, biscuit-terminal/lib/tests/mermaid_parity.rs:27]
+-    3  platform-or-feature-condition: #![cfg(unix)]  [biscuit-terminal/lib/tests/level1_cursor.rs:10, biscuit-terminal/lib/tests/level1_osc_queries.rs:9, biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs:48]
+### detector hits
+- macro_rules: 1 files  [biscuit-terminal/lib/tests/layout_matrix_support/mod.rs:442,459,483]
+- mod_common: 7 files  [biscuit-terminal/lib/tests/level1_apple_terminal_prose.rs:10; biscuit-terminal/lib/tests/level1_clipboard.rs:8; biscuit-terminal/lib/tests/level1_cursor.rs:12; biscuit-terminal/lib/tests/level1_mode_2027.rs:8; biscuit-terminal/lib/tests/level1_osc_queries.rs:11; biscuit-terminal/lib/tests/level1_terminal_init.rs:6; biscuit-terminal/lib/tests/level1_terminal_osc_cache.rs:33]
+- mod_decl_other: 22 files  [biscuit-terminal/lib/tests/common/mod.rs:3; biscuit-terminal/lib/tests/filesystem_parity.rs:31; biscuit-terminal/lib/tests/graph_expression_parity.rs:41; biscuit-terminal/lib/tests/horizontal_rule_parity.rs:27; biscuit-terminal/lib/tests/inline_content_matrix.rs:7; biscuit-terminal/lib/tests/layout_matrix.rs:7; … (+16 files)]
+- current_exe: 2 files  [biscuit-terminal/lib/tests/common/pty.rs:47; biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs:161]
+- insta: 2 files  [biscuit-terminal/lib/tests/inline_content_matrix.rs:56,56; biscuit-terminal/lib/tests/layout_matrix.rs:125,125,217,217,243,243]
+
