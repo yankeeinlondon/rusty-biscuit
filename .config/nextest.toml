@@ -69,7 +69,7 @@ leak-timeout = { period = "30s", result = "fail" }
 # 2026-09-08), which is close enough that ordinary contention would otherwise
 # mark a healthy run slow and a loaded runner could reach the 30s kill.
 [[profile.default.overrides]]
-filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # Proptest-driven acceptance test exploring many randomized compose conditions.
@@ -228,7 +228,7 @@ retries = 0
 # today; it stays so the contract survives a change to that default rather than
 # silently inheriting a tighter one.
 [[profile.ci.overrides]]
-filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: the randomized-conditions proptest can approach

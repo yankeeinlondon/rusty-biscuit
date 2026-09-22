@@ -1,0 +1,992 @@
+//! Structural analyzers for Claudine's test-placement conventions.
+//!
+//! Three Level 1 hard gates for Claudine's package area:
+//!
+//! - inline `#[cfg(test)]` modules must stay under a line budget,
+//! - focus-stealing terminal APIs must stay inside `level3_*` files, and
+//! - every `.rs` file under `cli/tests/` must be compiled by a test target
+//!   `Cargo.toml` declares. With `autotests = false`, a new top-level file or an
+//!   undeclared `mod` is otherwise never built, and its tests silently never
+//!   run (`2026-09-21-consolidated-test-binaries`, acceptance 12).
+
+use crate::common::source_scan;
+
+use source_scan::{is_ident, sanitize};
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const PRODUCTION_LINE_LIMIT: usize = 800;
+const INLINE_TEST_LINE_LIMIT: usize = 300;
+
+const SOURCE_ROOTS: &[&str] = &[
+    "lib/src",
+    "cli/src",
+    "contract/src",
+    "catalog-types/src",
+    "gen/src",
+    "rendezvous/core/src",
+    "rendezvous/client/src",
+    "rendezvous/daemon/src",
+];
+
+const TEST_ROOTS: &[&str] = &[
+    "cli/tests",
+    "lib/tests",
+    "contract/tests",
+    "gen/tests",
+    "rendezvous/client/tests",
+    "rendezvous/daemon/tests",
+];
+
+/// Harness APIs that place a GUI terminal window in front of the user's own.
+///
+/// `SpawnVisibility::Foreground` skips WezTerm's off-screen `biscuit-bg`
+/// workspace (and Kitty's `--keep-focus`); `focus_spawned_pane` then AXRaises
+/// that window and polls until it is the frontmost macOS application. Both are
+/// prerequisites for OS keyboard injection, which delivers to whatever app owns
+/// focus — and both are therefore hostile to anyone using the machine while the
+/// suite runs. Confining them to `level3_*` keeps them behind the `level3_`
+/// nextest filterset and the `RUN_LEVEL3=1` opt-in, so `just test` and
+/// `just test-l2` can never take focus.
+const FOCUS_STEALING_APIS: &[&str] = &["SpawnVisibility::Foreground", "focus_spawned_pane"];
+
+struct Exception {
+    path: &'static str,
+    rationale: &'static str,
+}
+
+// Exceptions are deliberately file-specific and must explain why co-location
+// is materially better. The repository test rejects entries after they become
+// stale, so this table cannot become a permanent grandfather list.
+const EXCEPTIONS: &[Exception] = &[];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ExceededThreshold {
+    Production,
+    InlineTests,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Violation {
+    path: String,
+    production_lines: usize,
+    test_lines: usize,
+    exceeded: BTreeSet<ExceededThreshold>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LineCounts {
+    production: usize,
+    tests: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InlineTestModule {
+    start: usize,
+    close: usize,
+}
+
+fn skip_whitespace(bytes: &[u8], mut index: usize) -> usize {
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    index
+}
+
+fn matching_delimiter(bytes: &[u8], open: usize, opening: u8) -> Option<usize> {
+    let closing = match opening {
+        b'[' => b']',
+        b'{' => b'}',
+        b'(' => b')',
+        _ => return None,
+    };
+    let mut depth = 0usize;
+    for (index, &byte) in bytes.iter().enumerate().skip(open) {
+        if byte == opening {
+            depth += 1;
+        } else if byte == closing {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+struct CfgParser<'a> {
+    bytes: &'a [u8],
+    index: usize,
+}
+
+impl CfgParser<'_> {
+    fn skip_whitespace(&mut self) {
+        while self.bytes.get(self.index).is_some_and(u8::is_ascii_whitespace) {
+            self.index += 1;
+        }
+    }
+
+    fn identifier(&mut self) -> &[u8] {
+        self.skip_whitespace();
+        let start = self.index;
+        while self.bytes.get(self.index).is_some_and(|&byte| is_ident(byte)) {
+            self.index += 1;
+        }
+        &self.bytes[start..self.index]
+    }
+
+    /// Whether this cfg expression can only be true when `cfg(test)` is true.
+    fn requires_test(&mut self) -> bool {
+        let name = self.identifier().to_vec();
+        if name == b"test" {
+            return true;
+        }
+        self.skip_whitespace();
+        if self.bytes.get(self.index) != Some(&b'(') {
+            return false;
+        }
+        self.index += 1;
+        let mut children = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.bytes.get(self.index) == Some(&b')') {
+                self.index += 1;
+                break;
+            }
+            if self.index >= self.bytes.len() {
+                break;
+            }
+            children.push(self.requires_test());
+            self.skip_to_cfg_separator();
+            if self.bytes.get(self.index) == Some(&b',') {
+                self.index += 1;
+            }
+        }
+        match name.as_slice() {
+            b"all" => children.into_iter().any(|requires_test| requires_test),
+            b"any" => {
+                !children.is_empty() && children.into_iter().all(|requires_test| requires_test)
+            }
+            // `not(test)` excludes tests, and an unknown predicate is not safe
+            // to classify as test-only.
+            _ => false,
+        }
+    }
+
+    fn skip_to_cfg_separator(&mut self) {
+        let mut depth = 0usize;
+        while let Some(&byte) = self.bytes.get(self.index) {
+            match byte {
+                b'(' => depth += 1,
+                b')' if depth == 0 => break,
+                b')' => depth -= 1,
+                b',' if depth == 0 => break,
+                _ => {}
+            }
+            self.index += 1;
+        }
+    }
+}
+
+fn attribute_requires_test(attribute: &[u8]) -> bool {
+    let text = std::str::from_utf8(attribute).unwrap_or_default();
+    let attribute = text.trim_start_matches("#[").trim_start();
+    let Some(predicate) = attribute.strip_prefix("cfg") else {
+        return false;
+    };
+    let predicate = predicate.trim_start();
+    let Some(predicate) = predicate.strip_prefix('(') else {
+        return false;
+    };
+    CfgParser {
+        bytes: predicate.as_bytes(),
+        index: 0,
+    }
+    .requires_test()
+}
+
+fn skip_visibility(bytes: &[u8], cursor: usize) -> usize {
+    if bytes.get(cursor..cursor + 3) != Some(b"pub")
+        || bytes.get(cursor + 3).is_some_and(|&byte| is_ident(byte))
+    {
+        return cursor;
+    }
+    let mut cursor = skip_whitespace(bytes, cursor + 3);
+    if bytes.get(cursor) == Some(&b'(')
+        && let Some(close) = matching_delimiter(bytes, cursor, b'(')
+    {
+        cursor = skip_whitespace(bytes, close + 1);
+    }
+    cursor
+}
+
+fn inline_test_modules(source: &str) -> Vec<InlineTestModule> {
+    let bytes = sanitize(source);
+    let mut modules = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'#' || bytes.get(index + 1) != Some(&b'[') {
+            index += 1;
+            continue;
+        }
+
+        let attribute_start = index;
+        let mut cursor = index;
+        let mut gated_by_test = false;
+        while let Some(close) = matching_delimiter(&bytes, cursor + 1, b'[') {
+            gated_by_test |= attribute_requires_test(&bytes[cursor..=close]);
+            cursor = skip_whitespace(&bytes, close + 1);
+            if bytes.get(cursor) != Some(&b'#') || bytes.get(cursor + 1) != Some(&b'[') {
+                break;
+            }
+        }
+
+        cursor = skip_visibility(&bytes, cursor);
+        if gated_by_test
+            && bytes.get(cursor..cursor + 3) == Some(b"mod")
+            && bytes.get(cursor + 3).is_some_and(|&byte| !is_ident(byte))
+        {
+            cursor = skip_whitespace(&bytes, cursor + 3);
+            while bytes.get(cursor).is_some_and(|&byte| is_ident(byte)) {
+                cursor += 1;
+            }
+            cursor = skip_whitespace(&bytes, cursor);
+            if bytes.get(cursor) == Some(&b'{')
+                && let Some(close) = matching_delimiter(&bytes, cursor, b'{')
+            {
+                modules.push(InlineTestModule {
+                    start: attribute_start,
+                    close,
+                });
+                index = close + 1;
+                continue;
+            }
+        }
+        index = cursor.max(index + 1);
+    }
+    modules
+}
+
+fn line_starts(source: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    starts.extend(
+        source
+            .bytes()
+            .enumerate()
+            .filter_map(|(index, byte)| (byte == b'\n').then_some(index + 1)),
+    );
+    if source.ends_with('\n') {
+        starts.pop();
+    }
+    starts
+}
+
+fn line_index(starts: &[usize], offset: usize) -> usize {
+    starts.partition_point(|&start| start <= offset).saturating_sub(1)
+}
+
+fn count_lines(source: &str) -> Option<LineCounts> {
+    let modules = inline_test_modules(source);
+    if modules.is_empty() {
+        return None;
+    }
+    let starts = line_starts(source);
+    let mut test_lines = BTreeSet::new();
+    for module in modules {
+        let first = line_index(&starts, module.start);
+        let last = line_index(&starts, module.close);
+        test_lines.extend(first..=last);
+    }
+    Some(LineCounts {
+        production: starts.len().saturating_sub(test_lines.len()),
+        tests: test_lines.len(),
+    })
+}
+
+fn normalized(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn generated_path(path: &str) -> bool {
+    path == "lib/src/signals/generated.rs"
+        || path == "lib/src/model_catalog/families_generated.rs"
+        || path == "lib/src/stream/providers/vocabulary.rs"
+        || path.starts_with("lib/src/provider/") && path.ends_with("/data.rs")
+}
+
+fn generated_header(source: &str) -> bool {
+    source
+        .lines()
+        .take(12)
+        .any(|line| line.starts_with("// GENERATED by claudine-gen") && line.contains("DO NOT EDIT"))
+}
+
+fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn violation(path: String, counts: LineCounts) -> Option<Violation> {
+    let mut exceeded = BTreeSet::new();
+    if counts.production > PRODUCTION_LINE_LIMIT {
+        exceeded.insert(ExceededThreshold::Production);
+    }
+    if counts.tests > INLINE_TEST_LINE_LIMIT {
+        exceeded.insert(ExceededThreshold::InlineTests);
+    }
+    (!exceeded.is_empty()).then_some(Violation {
+        path,
+        production_lines: counts.production,
+        test_lines: counts.tests,
+        exceeded,
+    })
+}
+
+fn apply_exceptions(violations: &mut Vec<Violation>, exceptions: &[Exception]) -> Vec<String> {
+    let live_paths: BTreeSet<_> = violations.iter().map(|item| item.path.as_str()).collect();
+    let mut errors = Vec::new();
+    for exception in exceptions {
+        if exception.rationale.trim().is_empty() {
+            errors.push(format!("exception {} has no rationale", exception.path));
+        } else if !live_paths.contains(exception.path) {
+            errors.push(format!("exception {} is stale", exception.path));
+        }
+    }
+    violations.retain(|item| !exceptions.iter().any(|entry| entry.path == item.path));
+    errors
+}
+
+fn scan_repository(area_root: &Path) -> Result<(Vec<Violation>, Vec<String>), String> {
+    let mut files = Vec::new();
+    for root in SOURCE_ROOTS {
+        collect_rust_files(&area_root.join(root), &mut files)
+            .map_err(|error| format!("failed to scan {root}: {error}"))?;
+    }
+    files.sort();
+
+    let mut all_violations = Vec::new();
+    for file in files {
+        let relative = normalized(file.strip_prefix(area_root).map_err(|error| error.to_string())?);
+        let source = fs::read_to_string(&file)
+            .map_err(|error| format!("failed to read {relative}: {error}"))?;
+        if generated_path(&relative) || generated_header(&source) {
+            continue;
+        }
+        if let Some(counts) = count_lines(&source)
+            && let Some(found) = violation(relative, counts)
+        {
+            all_violations.push(found);
+        }
+    }
+
+    let exception_errors = apply_exceptions(&mut all_violations, EXCEPTIONS);
+    Ok((all_violations, exception_errors))
+}
+
+fn report(violations: &[Violation]) -> String {
+    if violations.is_empty() {
+        return String::new();
+    }
+    let mut both = 0;
+    let mut production_only = 0;
+    let mut tests_only = 0;
+    for item in violations {
+        match (
+            item.exceeded.contains(&ExceededThreshold::Production),
+            item.exceeded.contains(&ExceededThreshold::InlineTests),
+        ) {
+            (true, true) => both += 1,
+            (true, false) => production_only += 1,
+            (false, true) => tests_only += 1,
+            (false, false) => unreachable!("a violation must exceed a threshold"),
+        }
+    }
+    let details = violations
+        .iter()
+        .map(|item| {
+            let exceeded = item
+                .exceeded
+                .iter()
+                .map(|threshold| match threshold {
+                    ExceededThreshold::Production => format!("production>{PRODUCTION_LINE_LIMIT}"),
+                    ExceededThreshold::InlineTests => format!("inline-tests>{INLINE_TEST_LINE_LIMIT}"),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{}: production={}, inline-tests={} ({exceeded})",
+                item.path, item.production_lines, item.test_lines
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "violations={} (both={both}, production-only={production_only}, \
+         inline-tests-only={tests_only})\n{details}",
+        violations.len()
+    )
+}
+
+/// Names the focus-stealing APIs used in `source` as executable code.
+///
+/// Runs against [`sanitize`]d bytes so the module docs of the legitimate
+/// `level3_*` tests — which name these APIs while explaining why they need
+/// them — do not register as uses.
+fn focus_stealing_apis(source: &str) -> Vec<&'static str> {
+    let code = String::from_utf8_lossy(&sanitize(source)).into_owned();
+    FOCUS_STEALING_APIS
+        .iter()
+        .filter(|api| code.contains(**api))
+        .copied()
+        .collect()
+}
+
+fn is_level3_file(relative: &str) -> bool {
+    relative
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("level3_"))
+}
+
+fn scan_focus_stealing(area_root: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for root in TEST_ROOTS {
+        let directory = area_root.join(root);
+        if !directory.exists() {
+            continue;
+        }
+        collect_rust_files(&directory, &mut files)
+            .map_err(|error| format!("failed to scan {root}: {error}"))?;
+    }
+    files.sort();
+
+    let mut violations = Vec::new();
+    for file in files {
+        let relative = normalized(file.strip_prefix(area_root).map_err(|error| error.to_string())?);
+        if is_level3_file(&relative) {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .map_err(|error| format!("failed to read {relative}: {error}"))?;
+        let used = focus_stealing_apis(&source);
+        if !used.is_empty() {
+            violations.push(format!("{relative}: {}", used.join(", ")));
+        }
+    }
+    Ok(violations)
+}
+
+/// Directories under `cli/tests/` that hold data, never Rust modules.
+const DATA_DIRECTORIES: &[&str] = &["fixtures", "snapshots"];
+
+/// One `mod name;` declaration and its `#[path]` value, if it has one.
+#[derive(Debug, PartialEq, Eq)]
+struct ModuleDeclaration {
+    name: String,
+    path: Option<String>,
+}
+
+/// The value of a `#[path = "…"]` attribute, read from the original source.
+fn path_attribute(attribute: &str) -> Option<String> {
+    let inner = attribute.strip_prefix("#[")?.trim_start();
+    let value = inner.strip_prefix("path")?.trim_start().strip_prefix('=')?;
+    let value = value.trim_start().strip_prefix('"')?;
+    Some(value[..value.find('"')?].to_string())
+}
+
+/// Every out-of-line `mod name;` in `source`, whatever its `cfg`.
+///
+/// A platform-gated module is still declared: the gate decides where it
+/// compiles, and this check is about whether anything compiles it at all.
+/// Runs on [`sanitize`]d bytes so a `mod x;` in prose or a string is not one.
+fn module_declarations(source: &str) -> Vec<ModuleDeclaration> {
+    let code = sanitize(source);
+    let mut declarations = Vec::new();
+    let mut index = 0;
+    while index < code.len() {
+        if index > 0 && is_ident(code[index - 1]) {
+            index += 1;
+            continue;
+        }
+        let mut cursor = index;
+        let mut path = None;
+        while code.get(cursor) == Some(&b'#') && code.get(cursor + 1) == Some(&b'[') {
+            let Some(close) = matching_delimiter(&code, cursor + 1, b'[') else {
+                break;
+            };
+            path = path.or_else(|| path_attribute(&source[cursor..=close]));
+            cursor = skip_whitespace(&code, close + 1);
+        }
+        cursor = skip_visibility(&code, cursor);
+        if code.get(cursor..cursor + 3) == Some(b"mod")
+            && code.get(cursor + 3).is_some_and(u8::is_ascii_whitespace)
+        {
+            let name_start = skip_whitespace(&code, cursor + 3);
+            let mut name_end = name_start;
+            while code.get(name_end).is_some_and(|&byte| is_ident(byte)) {
+                name_end += 1;
+            }
+            let after = skip_whitespace(&code, name_end);
+            if name_end > name_start && code.get(after) == Some(&b';') {
+                declarations.push(ModuleDeclaration {
+                    name: source[name_start..name_end].to_string(),
+                    path,
+                });
+                index = after + 1;
+                continue;
+            }
+        }
+        index = cursor.max(index + 1);
+    }
+    declarations
+}
+
+/// `a/b/../c` → `a/c`, on `/`-separated relative paths.
+fn normalize_relative(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
+/// Where rustc looks for `declaration` made in `file` (crate-relative paths).
+///
+/// A `#[path]` is relative to the declaring file's directory. A plain `mod x;`
+/// resolves beside a `main.rs`/`mod.rs`, and under `<stem>/` for any other
+/// file.
+fn declared_module_files(file: &str, declaration: &ModuleDeclaration) -> Vec<String> {
+    let (directory, name) = file.rsplit_once('/').unwrap_or(("", file));
+    if let Some(path) = &declaration.path {
+        return vec![normalize_relative(&format!("{directory}/{path}"))];
+    }
+    let base = if name == "main.rs" || name == "mod.rs" {
+        directory.to_string()
+    } else {
+        format!("{directory}/{}", name.trim_end_matches(".rs"))
+    };
+    vec![
+        normalize_relative(&format!("{base}/{}.rs", declaration.name)),
+        normalize_relative(&format!("{base}/{}/mod.rs", declaration.name)),
+    ]
+}
+
+/// Every layout violation for a crate whose `Cargo.toml` is `manifest` and
+/// whose `tests/` Rust sources are `files` (crate-relative path → source).
+///
+/// The module graph is walked from the declared `[[test]]` roots, so one rule
+/// covers both an unexpected crate root and an undeclared module: each is a
+/// file no declared target reaches.
+fn layout_violations(manifest: &str, files: &BTreeMap<String, String>) -> Vec<String> {
+    let mut violations = Vec::new();
+    let manifest: toml::Table = match toml::from_str(manifest) {
+        Ok(table) => table,
+        Err(error) => return vec![format!("Cargo.toml does not parse: {error}")],
+    };
+    let autotests = manifest
+        .get("package")
+        .and_then(|package| package.get("autotests"))
+        .and_then(toml::Value::as_bool);
+    if autotests != Some(false) {
+        violations.push(
+            "Cargo.toml must set `autotests = false`: every test target is declared \
+             explicitly"
+                .to_string(),
+        );
+    }
+
+    let mut pending = Vec::new();
+    for target in manifest
+        .get("test")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let name = target.get("name").and_then(toml::Value::as_str).unwrap_or("<unnamed>");
+        match target.get("path").and_then(toml::Value::as_str) {
+            Some(path) if files.contains_key(&normalize_relative(path)) => {
+                pending.push(normalize_relative(path));
+            }
+            Some(path) => violations.push(format!("[[test]] {name}: {path} does not exist")),
+            None => violations.push(format!("[[test]] {name}: declare its `path` explicitly")),
+        }
+    }
+
+    let mut reached = BTreeSet::new();
+    while let Some(file) = pending.pop() {
+        if !reached.insert(file.clone()) {
+            continue;
+        }
+        for declaration in module_declarations(&files[&file]) {
+            if let Some(found) = declared_module_files(&file, &declaration)
+                .into_iter()
+                .find(|candidate| files.contains_key(candidate))
+            {
+                pending.push(found);
+            }
+        }
+    }
+
+    for file in files.keys().filter(|file| !reached.contains(*file)) {
+        let (directory, name) = file.rsplit_once('/').unwrap_or(("", file));
+        violations.push(if directory == "tests" {
+            format!(
+                "{file}: a top-level test file is never compiled; move it into a declared \
+                 target's directory and declare it in that target's main.rs"
+            )
+        } else if name == "main.rs" {
+            format!(
+                "{file}: an undeclared test crate root; add it to an existing target, or \
+                 declare a [[test]] for a new execution contract"
+            )
+        } else {
+            format!("{file}: no declared test target compiles this module; declare it with `mod`")
+        });
+    }
+    violations
+}
+
+fn collect_test_sources(
+    crate_root: &Path,
+    directory: &Path,
+    files: &mut BTreeMap<String, String>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            if !path
+                .file_name()
+                .is_some_and(|name| DATA_DIRECTORIES.iter().any(|data| name == *data))
+            {
+                collect_test_sources(crate_root, &path, files)?;
+            }
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            let relative = normalized(path.strip_prefix(crate_root).unwrap_or(&path));
+            files.insert(relative, fs::read_to_string(&path)?);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn every_test_source_is_compiled_by_a_declared_target() {
+    let cli_root = biscuit_test_harness::manifest_dir!();
+    let manifest = fs::read_to_string(cli_root.join("Cargo.toml")).expect("read Cargo.toml");
+    let mut files = BTreeMap::new();
+    collect_test_sources(&cli_root, &cli_root.join("tests"), &mut files).expect("scan tests/");
+
+    // Non-vacuity: the walk read the real suite, including a platform-gated
+    // module on every host and the shared helpers the roots include by path.
+    assert!(files.len() > 140, "scanned only {} test source file(s)", files.len());
+    for expected in [
+        "tests/l1/main.rs",
+        "tests/l1/sequence_ctrl_c_windows.rs",
+        "tests/l1/error_guards/source_scan.rs",
+        "tests/level3/level3_linux_sequence_ctrl_c.rs",
+        "tests/common/pty.rs",
+    ] {
+        assert!(files.contains_key(expected), "{expected} was not scanned");
+    }
+
+    let violations = layout_violations(&manifest, &files);
+    assert!(
+        violations.is_empty(),
+        "test sources outside every declared test target:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn layout_gate_rejects_stray_roots_and_undeclared_modules() {
+    const MANIFEST: &str = "[package]\nname = \"fixture\"\nautotests = false\n\n\
+        [[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n";
+    let tree = |extra: &[(&str, &str)]| {
+        let mut files: BTreeMap<String, String> = [
+            (
+                "tests/l1/main.rs",
+                "#[path = \"../common/mod.rs\"]\nmod common;\n\n#[cfg(windows)]\nmod windows_only;\nmod guard;\n",
+            ),
+            ("tests/l1/windows_only.rs", "#[test]\nfn case() {}\n"),
+            ("tests/l1/guard.rs", "mod scan;\n"),
+            ("tests/l1/guard/scan.rs", ""),
+            ("tests/common/mod.rs", "pub(crate) mod pty;\n"),
+            ("tests/common/pty.rs", ""),
+        ]
+        .into_iter()
+        .map(|(path, source)| (path.to_string(), source.to_string()))
+        .collect();
+        for (path, source) in extra {
+            files.insert(path.to_string(), source.to_string());
+        }
+        files
+    };
+    assert_eq!(layout_violations(MANIFEST, &tree(&[])), Vec::<String>::new());
+
+    let stray = layout_violations(MANIFEST, &tree(&[("tests/wrap_env.rs", "#[test]\nfn a() {}\n")]));
+    assert_eq!(stray.len(), 1);
+    assert!(stray[0].starts_with("tests/wrap_env.rs: a top-level test file"), "{stray:?}");
+
+    let root = layout_violations(MANIFEST, &tree(&[("tests/level9/main.rs", "")]));
+    assert_eq!(root.len(), 1);
+    assert!(root[0].contains("undeclared test crate root"), "{root:?}");
+
+    // Undeclared beside the root, undeclared inside a helper directory, and a
+    // declaration that exists only in prose or a string literal.
+    let modules = layout_violations(
+        MANIFEST,
+        &tree(&[
+            ("tests/l1/orphan.rs", ""),
+            ("tests/l1/guard/unused.rs", ""),
+            ("tests/l1/quoted.rs", ""),
+            ("tests/common/wrap.rs", "// mod quoted;\nconst S: &str = \"mod quoted;\";\n"),
+        ]),
+    );
+    assert_eq!(
+        modules.iter().map(|v| v.split(':').next().unwrap()).collect::<Vec<_>>(),
+        ["tests/common/wrap.rs", "tests/l1/guard/unused.rs", "tests/l1/orphan.rs", "tests/l1/quoted.rs"]
+    );
+}
+
+#[test]
+fn layout_gate_requires_explicit_targets() {
+    let files = BTreeMap::from([("tests/l1/main.rs".to_string(), String::new())]);
+    let autodiscovered = layout_violations(
+        "[package]\nname = \"fixture\"\n\n[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n",
+        &files,
+    );
+    assert_eq!(autodiscovered.len(), 1);
+    assert!(autodiscovered[0].contains("autotests = false"));
+
+    let unpathed = layout_violations(
+        "[package]\nname = \"fixture\"\nautotests = false\n\n[[test]]\nname = \"l1\"\n\n\
+         [[test]]\nname = \"gone\"\npath = \"tests/gone/main.rs\"\n",
+        &files,
+    );
+    assert!(unpathed.iter().any(|v| v == "[[test]] l1: declare its `path` explicitly"), "{unpathed:?}");
+    assert!(unpathed.iter().any(|v| v == "[[test]] gone: tests/gone/main.rs does not exist"), "{unpathed:?}");
+    assert!(unpathed.iter().any(|v| v.starts_with("tests/l1/main.rs: an undeclared test crate root")));
+}
+
+#[test]
+fn module_declarations_read_attributes_visibility_and_path() {
+    let source = "//! mod in_docs;\n#[cfg(unix)]\n#[path = \"../common/mod.rs\"]\nmod common;\n\
+                  pub(crate) mod helpers;\nmod inline { }\nlet remod = 1;\n";
+    assert_eq!(
+        module_declarations(source),
+        [
+            ModuleDeclaration { name: "common".into(), path: Some("../common/mod.rs".into()) },
+            ModuleDeclaration { name: "helpers".into(), path: None },
+        ]
+    );
+    assert_eq!(
+        declared_module_files("tests/l1/main.rs", &module_declarations("#[path = \"../common/mod.rs\"] mod common;")[0]),
+        ["tests/common/mod.rs"]
+    );
+    assert_eq!(
+        declared_module_files("tests/l1/error_guards.rs", &module_declarations("mod source_scan;")[0]),
+        ["tests/l1/error_guards/source_scan.rs", "tests/l1/error_guards/source_scan/mod.rs"]
+    );
+}
+
+// Test names must not contain `level3_`: the L1 and L2 filtersets exclude
+// `test(/level3_/)` by substring, so such a name silently skips itself out of
+// every recipe that would run it.
+#[test]
+fn focus_stealing_apis_stay_in_keyboard_tier_files() {
+    let cli_root = biscuit_test_harness::manifest_dir!();
+    let area_root = cli_root
+        .parent()
+        .expect("CLI crate should be inside the Claudine package area");
+    let violations = scan_focus_stealing(area_root).expect("focus-stealing scan");
+    assert!(
+        violations.is_empty(),
+        "focus-stealing harness APIs outside a `level3_` file — these raise a GUI \
+         terminal over the user's own window and run under `just test` / \
+         `just test-l2`, which carry no `RUN_LEVEL3=1` opt-in. Drive the terminal \
+         headlessly (`TmuxHarness`, or `WezTermHarness` at its default \
+         `SpawnVisibility::Background`), or rename the file to `level3_*`:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn focus_stealing_detection_ignores_comments_and_honors_tier_naming() {
+    assert!(is_level3_file("cli/tests/level3_wrap_ctrl_c.rs"));
+    assert!(!is_level3_file("cli/tests/level2_perf_capture.rs"));
+    assert!(!is_level3_file("cli/tests/sequence_overlay_pty.rs"));
+
+    // A module doc naming the API is how the legitimate L3 tests explain
+    // themselves; only executable use counts.
+    assert!(
+        focus_stealing_apis("//! Pairs `SpawnVisibility::Foreground` with `focus_spawned_pane`.\n")
+            .is_empty()
+    );
+    assert_eq!(
+        focus_stealing_apis(
+            "let h = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);\n"
+        ),
+        ["SpawnVisibility::Foreground"]
+    );
+    assert_eq!(
+        focus_stealing_apis("let coords = harness.focus_spawned_pane().unwrap();\n"),
+        ["focus_spawned_pane"]
+    );
+}
+
+#[test]
+fn repository_test_placement() {
+    let cli_root = biscuit_test_harness::manifest_dir!();
+    let area_root = cli_root
+        .parent()
+        .expect("CLI crate should be inside the Claudine package area");
+    let (violations, exception_errors) = scan_repository(area_root).expect("repository scan");
+    assert!(exception_errors.is_empty(), "{}", exception_errors.join("\n"));
+
+    let diagnostics = report(&violations);
+    assert!(violations.is_empty(), "test-placement violations:\n{diagnostics}");
+}
+
+#[test]
+fn analyzer_handles_rust_syntax_and_nested_braces() {
+    let source = r####"
+fn production() {
+    let fake = "#[cfg(test)] mod tests { }";
+    let raw = r###"mod tests { { } }"###;
+    /* #[cfg(test)] mod ignored { } /* nested { comment } */ */
+}
+
+#[allow(clippy::bool_assert_comparison)]
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn braces_in_literals_do_not_close_the_module() {
+        assert_eq!('}', '}');
+        assert_eq!(b'}', b'}');
+        assert_eq!("}", "}");
+    }
+}
+"####;
+    assert_eq!(
+        count_lines(source),
+        Some(LineCounts {
+            production: 7,
+            tests: 10,
+        })
+    );
+}
+
+#[test]
+fn analyzer_is_newline_portable_and_ignores_external_test_modules() {
+    let unix = "fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn case() {}\n}\n";
+    let windows = unix.replace('\n', "\r\n");
+    assert_eq!(count_lines(unix), count_lines(&windows));
+    assert_eq!(count_lines("#[cfg(test)]\nmod tests;\n"), None);
+    assert_eq!(
+        count_lines("#[cfg(any(test, unix))]\nmod mixed { fn live() {} }\n"),
+        None
+    );
+    assert!(count_lines("#[cfg(all(test, unix))]\nmod tests { fn case() {} }\n").is_some());
+}
+
+#[test]
+fn analyzer_recognizes_visibility_qualified_inline_test_modules() {
+    for visibility in ["", "pub ", "pub(crate) ", "pub(super) "] {
+        let source = format!(
+            "fn live() {{}}\n#[cfg(test)]\n{visibility}mod tests {{\n    fn case() {{}}\n}}\n"
+        );
+        assert_eq!(
+            count_lines(&source),
+            Some(LineCounts {
+                production: 1,
+                tests: 4,
+            }),
+            "visibility {visibility:?} was not recognized"
+        );
+    }
+}
+
+#[test]
+fn thresholds_and_diagnostics_are_centralized() {
+    let both = violation(
+        "lib/src/example.rs".into(),
+        LineCounts {
+            production: PRODUCTION_LINE_LIMIT + 1,
+            tests: INLINE_TEST_LINE_LIMIT + 1,
+        },
+    )
+    .expect("both limits should be exceeded");
+    assert_eq!(
+        both.exceeded,
+        BTreeSet::from([
+            ExceededThreshold::Production,
+            ExceededThreshold::InlineTests,
+        ])
+    );
+    assert!(report(&[both]).contains("production=801, inline-tests=301"));
+}
+
+#[test]
+fn generated_files_require_an_explicit_path_or_header() {
+    assert!(generated_path("lib/src/provider/claude/data.rs"));
+    assert!(generated_path("lib/src/signals/generated.rs"));
+    assert!(generated_header(
+        "// GENERATED by claudine-gen — DO NOT EDIT BY HAND.\n"
+    ));
+    assert!(!generated_path("gen/src/registry.rs"));
+    assert!(!generated_header("// This helper processes generated data.\n"));
+}
+
+#[test]
+fn exceptions_require_a_live_violation_and_durable_rationale() {
+    let mut violations = vec![violation(
+        "lib/src/live.rs".into(),
+        LineCounts {
+            production: PRODUCTION_LINE_LIMIT + 1,
+            tests: 1,
+        },
+    )
+    .expect("fixture violation")];
+    let errors = apply_exceptions(
+        &mut violations,
+        &[
+            Exception {
+                path: "lib/src/live.rs",
+                rationale: "The test depends on private parser state.",
+            },
+            Exception {
+                path: "lib/src/stale.rs",
+                rationale: "No longer applicable.",
+            },
+            Exception {
+                path: "lib/src/missing-reason.rs",
+                rationale: "",
+            },
+        ],
+    );
+    assert!(violations.is_empty());
+    assert_eq!(
+        errors,
+        [
+            "exception lib/src/stale.rs is stale",
+            "exception lib/src/missing-reason.rs has no rationale",
+        ]
+    );
+}
