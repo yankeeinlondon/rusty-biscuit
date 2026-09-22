@@ -19,12 +19,16 @@ second implementation of it.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Callable
@@ -52,12 +56,39 @@ HOSTS = {
 }
 
 #: `ssh`/`scp` replacements: they append one JSON line per invocation and, for
-#: `scp`, copy the shipped files where the fixture can read them.
+#: `scp`, copy the shipped files where the fixture can read them. The one query
+#: `ssh` answers is the host preparation: a Unix one (its script on stdin) is
+#: EXECUTED under the fixture's remote home (and its `CODING_DIR`, when a test
+#: sets one), so the layout and pruning policy is the shell's rather than the
+#: stub's; a Windows one answers with the directory the fixture names.
 SSH_STUB = """#!/usr/bin/env python3
-import json, os, sys
+import json, os, subprocess, sys
 with open(os.environ['CROSS_CHECK_LOG'], 'a', encoding='utf-8') as log:
     log.write(json.dumps({'tool': 'ssh', 'argv': sys.argv[1:]}) + '\\n')
+command = sys.argv[-1]
+if '-EncodedCommand' in command:
+    print('clone-dir: ' + os.environ['CROSS_CHECK_WIN_CLONE_DIR'])
+elif command == 'bash -ls':
+    env = {k: v for k, v in os.environ.items() if k != 'CODING_DIR'}
+    env['HOME'] = os.environ['CROSS_CHECK_REMOTE_HOME']
+    if os.environ.get('CROSS_CHECK_REMOTE_CODING_DIR'):
+        env['CODING_DIR'] = os.environ['CROSS_CHECK_REMOTE_CODING_DIR']
+    raise SystemExit(subprocess.run(['bash', '-c', command], env=env).returncode)
 """
+
+#: What the Windows host answers for its clone directory, minus the offset.
+WIN_CODING_DIR = "B:\\coding"
+
+
+def origin_host() -> str:
+    """This machine as the script names it: sanitized, lowercased, no `--`."""
+    host = re.sub(r"[^A-Za-z0-9-]", "-", socket.gethostname().split(".")[0])
+    return re.sub(r"-+", "-", host).lower()
+
+
+def clone_offset(worktree: str = "main") -> str:
+    """The `{host}--{worktree}` offset the script must derive for this machine."""
+    return f"{origin_host()}--{re.sub(r'[^A-Za-z0-9._-]', '-', worktree).lower()}"
 
 SCP_STUB = """#!/usr/bin/env python3
 import json, os, shutil, sys
@@ -189,6 +220,9 @@ class CrossCheckHarness(unittest.TestCase):
         *extra: str,
         prepare: Callable[[Path, Callable[..., str]], None] | None = None,
         replay: bool = False,
+        coding_dir: str | None = None,
+        worktree: str | None = None,
+        remote_setup: Callable[[Path], None] | None = None,
     ) -> dict:
         """Run the script for one OS and return everything it shipped.
 
@@ -197,7 +231,10 @@ class CrossCheckHarness(unittest.TestCase):
         base, or both. `replay` then EXECUTES the shipped remote prelude against
         a fresh clone of the fixture's origin — the identity boundary itself,
         not an assertion about the text that implements it — and reports the
-        revision that host ended up on.
+        revision that host ended up on. `coding_dir` is the remote host's
+        `CODING_DIR`; `worktree` runs the script from a linked worktree of that
+        name instead of the main checkout. `remote_setup` is handed the remote
+        host's coding dir before the run, to plant existing clones there.
         """
         with tempfile.TemporaryDirectory(prefix="cross-check-") as temporary:
             root = Path(temporary)
@@ -241,6 +278,15 @@ class CrossCheckHarness(unittest.TestCase):
             git("fetch", "--quiet", "origin")
             if prepare is not None:
                 prepare(repo, git)
+            checkout = repo
+            if worktree is not None:
+                checkout = root / worktree
+                git("worktree", "add", "--quiet", "-b", worktree, str(checkout))
+
+            remote_coding = Path(coding_dir) if coding_dir else root / "remote-home" / "coding"
+            if remote_setup is not None:
+                remote_coding.mkdir(parents=True, exist_ok=True)
+                remote_setup(remote_coding)
 
             for name, body in (("ssh", SSH_STUB), ("scp", SCP_STUB)):
                 path = bin_dir / name
@@ -253,21 +299,28 @@ class CrossCheckHarness(unittest.TestCase):
                 "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
                 "CROSS_CHECK_LOG": str(log),
                 "CROSS_CHECK_SHIPPED": str(shipped),
+                "CROSS_CHECK_REMOTE_HOME": str(root / "remote-home"),
+                "CROSS_CHECK_REMOTE_CODING_DIR": coding_dir or "",
+                "CROSS_CHECK_WIN_CLONE_DIR": WIN_CODING_DIR
+                + "\\"
+                + clone_offset(worktree or "main"),
                 HOSTS[os_name][0]: HOSTS[os_name][1],
             }
+            # The developer's own layout is not the remote's.
+            environment.pop("CODING_DIR", None)
             for other, (variable, _) in HOSTS.items():
                 if other != os_name:
                     environment.pop(variable, None)
             result = subprocess.run(
                 [
                     "/bin/bash" if sys.platform == "darwin" else "bash",
-                    str(repo / "scripts" / "cross-check.sh"),
+                    str(checkout / "scripts" / "cross-check.sh"),
                     "--os",
                     os_name,
                     PACKAGE,
                     *extra,
                 ],
-                cwd=repo,
+                cwd=checkout,
                 env=environment,
                 capture_output=True,
                 text=True,
@@ -284,8 +337,15 @@ class CrossCheckHarness(unittest.TestCase):
             plan = ""
             for candidate in sorted(shipped.glob("*-plan.json")):
                 plan = candidate.read_text()
+            clone_dir = ""
+            prefix = f"clone: {HOSTS[os_name][1]}:"
+            for line in result.stdout.splitlines():
+                if line.startswith(prefix):
+                    clone_dir = line[len(prefix):]
             report = {
                 "stdout": result.stdout,
+                "clone_dir": clone_dir,
+                "remote_entries": self.settled_entries(remote_coding),
                 "stderr": result.stderr,
                 "returncode": result.returncode,
                 "calls": calls,
@@ -299,10 +359,23 @@ class CrossCheckHarness(unittest.TestCase):
                 "local_refs": git("for-each-ref", "--format=%(refname)"),
             }
             if replay:
-                report.update(self.replay_prelude(root, shipped, remote))
+                report.update(self.replay_prelude(Path(clone_dir), shipped, remote))
             return report
 
-    def replay_prelude(self, root: Path, shipped: Path, remote: str) -> dict:
+    @staticmethod
+    def settled_entries(coding: Path) -> list[str]:
+        """The remote coding dir once this origin's background deletes finish."""
+        if not coding.is_dir():
+            return []
+        mine = f".cross-check-trash--{origin_host()}--"
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if not any(p.name.startswith(mine) for p in coding.iterdir()):
+                break
+            time.sleep(0.1)
+        return sorted(p.name for p in coding.iterdir())
+
+    def replay_prelude(self, clone_dir: Path, shipped: Path, remote: str) -> dict:
         """Run the shipped remote prelude on a fresh clone, as a host would.
 
         Everything up to and including the checkout, which is the whole of the
@@ -313,22 +386,20 @@ class CrossCheckHarness(unittest.TestCase):
         self.assertIn(marker, remote, "the prelude must end by checking out one revision")
         prelude = remote[: remote.index("\n", remote.index(marker) + 1)] + "\n"
 
-        home = root / "remote-home"
-        staged = home / "ci-verification"
-        staged.mkdir(parents=True)
-        # What `scp` delivers before the remote script runs.
+        # What `scp` delivers before the remote script runs, into the directory
+        # the host resolved.
         for artifact in shipped.iterdir():
-            shutil.copyfile(artifact, staged / artifact.name)
+            shutil.copyfile(artifact, clone_dir / artifact.name)
 
         run = subprocess.run(
             ["/bin/bash" if sys.platform == "darwin" else "bash", "-c", prelude],
-            cwd=root,
-            env={**os.environ, "HOME": str(home)},
+            cwd=clone_dir,
+            env=os.environ,
             capture_output=True,
             text=True,
             timeout=120,
         )
-        host_repo = home / "ci-verification" / "rusty-biscuit"
+        host_repo = clone_dir / "rusty-biscuit"
         if run.returncode != 0 or not host_repo.is_dir():
             return {
                 "replay_returncode": run.returncode,
@@ -442,6 +513,24 @@ class CrossCheckShipTests(CrossCheckHarness):
                 self.assertNotIn("cargo test", remote)
                 self.assertIn("cargo build --release --manifest-path scripts/Cargo.toml", remote)
 
+    def test_the_run_script_is_not_handed_to_a_login_shell(self) -> None:
+        """A login shell's status is its `~/.bash_logout`'s, not the script's.
+
+        On the WSL guest that file ends with a `clear_console -q` that fails
+        without a tty, so `bash -l <script>` returned 1 for a run whose every
+        test passed (diagnosed 2026-09-22). `bash -lc` still sources the
+        profile, so `cargo` is on PATH, and the inner shell inherits it.
+        """
+        for os_name in ("linux", "wsl", "macos"):
+            with self.subTest(os=os_name):
+                run = self.ship(os_name)
+                commands = [c["argv"][-1] for c in run["calls"] if c["tool"] == "ssh"]
+                launch = [c for c in commands if "cross-check-" in c and ".sh" in c]
+                self.assertTrue(launch, commands)
+                for command in launch:
+                    self.assertIn("bash -lc 'bash \"$0\"'", command)
+                    self.assertNotIn("bash -l /", command)
+
     def test_every_ssh_and_scp_invocation_is_non_interactive(self) -> None:
         run = self.ship("linux")
         self.assertTrue(run["calls"], "the script must reach a host")
@@ -471,6 +560,13 @@ class CrossCheckShipTests(CrossCheckHarness):
         # Every path handed to a `just` recipe goes through `_native_path`: a
         # backslash in a recipe's `*args` is eaten by bash before nextest sees it.
         self.assertIn("just _native_path $src", remote)
+        # `scripts` is a root-workspace member: its binaries land in the
+        # workspace target dir, which is also the one the run hides.
+        self.assertIn('$tool = "$repo\\target\\release\\ci-build.exe"', remote)
+        self.assertIn('Move-Item "$repo\\target" "$repo\\target.hold"', remote)
+        # Git for Windows caps a path at 260 characters unless told otherwise,
+        # and this repository is deep enough to exceed that from the clone.
+        self.assertIn("git config core.longpaths true", remote)
         self.assertIn("--archive-file $archiveFile --workspace-remap $nativeSrc", remote)
         self.assertNotIn("cargo nextest run", remote)
         self.assertIn("cross-check-key:", remote)
@@ -624,6 +720,179 @@ class CrossCheckSourceIdentityTests(CrossCheckHarness):
             "the ref the bundle was cut from must not outlive the run",
         )
 
+
+class CrossCheckLayoutTests(CrossCheckHarness):
+    """Where a host keeps the clone: the HOST's coding dir, one per checkout.
+
+    Nothing about a build host's disk may be assumed locally. The coding dir is
+    the host's `CODING_DIR`, else `~/coding`; under it each originating
+    checkout gets `{host}-{worktree | main}`, so two checkouts never share a
+    clone, its lock, or its target dir.
+    """
+
+    def assertNoFixedLayout(self, run: dict) -> None:
+        shipped_to = [a for c in run["calls"] for a in c["argv"]]
+        for text in [run["remote"], *shipped_to]:
+            self.assertNotIn("ci-verification", text)
+            self.assertNotIn("W:", text)
+
+    def test_a_unix_host_defaults_to_its_home_coding_dir(self) -> None:
+        for os_name in ("linux", "wsl", "macos"):
+            with self.subTest(os=os_name):
+                run = self.ship(os_name)
+                self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+                self.assertTrue(
+                    run["clone_dir"].endswith(f"/remote-home/coding/{clone_offset()}"),
+                    run["clone_dir"],
+                )
+                self.assertIn(f"base={run['clone_dir']}\n", run["remote"])
+                self.assertIn('repo="$base/rusty-biscuit"', run["remote"])
+                scp = [c for c in run["calls"] if c["tool"] == "scp"]
+                self.assertTrue(scp[0]["argv"][-1].endswith(f":{run['clone_dir']}/"))
+                self.assertNoFixedLayout(run)
+
+    def test_a_unix_host_honors_its_coding_dir(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="coding-dir-") as coding:
+            run = self.ship("linux", coding_dir=coding)
+            self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+            self.assertEqual(
+                os.path.realpath(Path(coding) / clone_offset()),
+                os.path.realpath(run["clone_dir"]),
+            )
+
+    def test_a_linked_worktree_gets_its_own_clone(self) -> None:
+        run = self.ship("linux", worktree="feat-thing", replay=True)
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertTrue(
+            run["clone_dir"].endswith(f"/coding/{clone_offset('feat-thing')}"),
+            run["clone_dir"],
+        )
+        self.assertEqual(0, run["replay_returncode"], run.get("replay_stderr", ""))
+
+    def test_windows_uses_the_directory_the_host_resolves(self) -> None:
+        run = self.ship("windows")
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        expected = f"{WIN_CODING_DIR}\\{clone_offset()}"
+        self.assertEqual(expected, run["clone_dir"])
+        # Resolved on the host from its own environment, never assumed here.
+        lookup = next(c for c in run["calls"] if "-EncodedCommand" in c["argv"][-1])
+        encoded = lookup["argv"][-1].split("-EncodedCommand ", 1)[1]
+        command = base64.b64decode(encoded).decode("utf-16-le")
+        self.assertIn("$env:CODING_DIR", command)
+        self.assertIn("Join-Path $env:USERPROFILE 'coding'", command)
+        self.assertIn(f"'{clone_offset()}'", command)
+        self.assertIn(f"$base = '{expected}'", run["remote"])
+        self.assertIn('$repo = "$base\\rusty-biscuit"', run["remote"])
+        scp = [c for c in run["calls"] if c["tool"] == "scp"]
+        self.assertTrue(scp[0]["argv"][-1].endswith(":" + expected.replace("\\", "/") + "/"))
+        self.assertNoFixedLayout(run)
+
+
+def plant_clone(coding: Path, name: str, locked: bool = False) -> None:
+    """A clone directory as an earlier run (or something else) left it."""
+    clone = coding / name
+    (clone / "rusty-biscuit" / "target").mkdir(parents=True)
+    if locked:
+        (clone / ".cross-check.lock").mkdir()
+
+
+class CrossCheckStaleCloneTests(CrossCheckHarness):
+    """Clones whose origin worktree is gone are removed before any leg runs.
+
+    A clone is `<host>--<worktree>`, and the host part never contains `--`,
+    so the first `--` always separates the two and only this origin host's
+    clones are candidates.
+    """
+
+    def test_a_clone_for_a_removed_worktree_is_deleted(self) -> None:
+        stale = f"{origin_host()}--gone"
+        run = self.ship("linux", remote_setup=lambda c: plant_clone(c, stale))
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertNotIn(stale, run["remote_entries"])
+        self.assertIn(
+            f"removing stale clone build-linux:{run['clone_dir'].rsplit('/', 1)[0]}/{stale} in the background",
+            run["stdout"],
+        )
+        # Renamed to trash, then deleted detached: nothing of it remains.
+        self.assertEqual([clone_offset()], run["remote_entries"])
+
+    def test_trash_a_previous_delete_left_behind_is_deleted_again(self) -> None:
+        trash = f".cross-check-trash--{origin_host()}--gone-1-1"
+        run = self.ship("linux", remote_setup=lambda c: plant_clone(c, trash))
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertEqual([clone_offset()], run["remote_entries"])
+
+    def test_live_worktrees_keep_their_clones(self) -> None:
+        def extra_worktree(repo: Path, git: Callable[..., str]) -> None:
+            git("worktree", "add", "--quiet", "-b", "other", str(repo.parent / "other--x"))
+
+        live = clone_offset("other--x")
+        run = self.ship("linux", prepare=extra_worktree, remote_setup=lambda c: plant_clone(c, live))
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertIn(live, run["remote_entries"])
+        self.assertNotIn("stale clone", run["stdout"])
+
+    def test_a_worktree_whose_directory_is_gone_counts_as_removed(self) -> None:
+        # `git worktree list` still names it, marked `prunable`.
+        def vanished_worktree(repo: Path, git: Callable[..., str]) -> None:
+            path = repo.parent / "vanished"
+            git("worktree", "add", "--quiet", "-b", "vanished", str(path))
+            shutil.rmtree(path)
+
+        stale = clone_offset("vanished")
+        run = self.ship("linux", prepare=vanished_worktree, remote_setup=lambda c: plant_clone(c, stale))
+        self.assertNotIn(stale, run["remote_entries"])
+
+    def test_only_this_hosts_clones_are_candidates(self) -> None:
+        host = origin_host()
+        others = (
+            f"{host}-notes",  # a real project that merely shares the prefix
+            f"{host}-mini--main",  # another origin whose name extends this one
+            f"other--{host}",
+            "rusty-biscuit",
+            ".cross-check-trash--other--gone-1-1",  # another origin's trash
+        )
+
+        def plant(coding: Path) -> None:
+            for name in others:
+                plant_clone(coding, name)
+
+        run = self.ship("linux", remote_setup=plant)
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        for name in others:
+            self.assertIn(name, run["remote_entries"])
+        self.assertNotIn("stale clone", run["stdout"])
+
+    def test_a_locked_stale_clone_is_kept_and_reported(self) -> None:
+        stale = f"{origin_host()}--gone"
+        run = self.ship("linux", remote_setup=lambda c: plant_clone(c, stale, locked=True))
+        self.assertEqual(0, run["returncode"], run["stdout"] + run["stderr"])
+        self.assertIn(stale, run["remote_entries"])
+        self.assertIn("its lock is held", run["stdout"])
+
+    def test_pruning_happens_before_anything_is_shipped(self) -> None:
+        run = self.ship("linux")
+        tools = [c["tool"] for c in run["calls"]]
+        self.assertEqual("ssh", tools[0])
+        self.assertEqual(["bash -ls"], run["calls"][0]["argv"][-1:])
+        self.assertIn("scp", tools[1:])
+
+    def test_windows_prunes_under_the_same_rules(self) -> None:
+        run = self.ship("windows")
+        lookup = next(c for c in run["calls"] if "-EncodedCommand" in c["argv"][-1])
+        command = base64.b64decode(
+            lookup["argv"][-1].split("-EncodedCommand ", 1)[1]
+        ).decode("utf-16-le")
+        self.assertIn("$live = @('main')", command)
+        self.assertIn(f"$prefix = '{origin_host()}--'", command)
+        self.assertIn("if ($live -contains $entry.Name.Substring($prefix.Length)) { continue }", command)
+        self.assertIn(".cross-check.lock", command)
+        # Renamed at once, deleted outside the SSH session's job, past MAX_PATH.
+        self.assertIn("Rename-Item -LiteralPath $dir -NewName $trash", command)
+        self.assertIn("Invoke-CimMethod -ClassName Win32_Process -MethodName Create", command)
+        self.assertIn('''rd /s /q "\\\\?\\''', command)
+        self.assertIn(f'".cross-check-trash--$prefix"', command)
+        self.assertNotIn("Remove-Item", command)
 
 if __name__ == "__main__":
     unittest.main()
