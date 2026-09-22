@@ -615,10 +615,15 @@ fn install_marker_provider(fixture: &CliProcessFixture) -> std::path::PathBuf {
         &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho run >> \"$PROVIDER_MARKER\"\necho done\nexit 0\n",
     );
+    // A built binary rather than the `.cmd` shim this used to write: Rust
+    // refuses to pass arguments it cannot safely escape to a batch file, so
+    // Claudine's prompt argument failed with "batch file arguments are
+    // invalid" before the shim ran. The fixture honors `PROVIDER_MARKER` the
+    // same way the shim did.
     #[cfg(windows)]
-    fs::write(
-        fixture.bin_dir().join("goose.cmd"),
-        "@echo off\r\necho run>> \"%PROVIDER_MARKER%\"\r\necho done\r\nexit /b 0\r\n",
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        fixture.bin_dir().join("goose.exe"),
     )
     .unwrap();
     fixture.cwd().join("provider-runs.log")

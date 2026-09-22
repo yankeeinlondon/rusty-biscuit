@@ -135,6 +135,11 @@ rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 name = "sequence_budget"
 required-features = ["test-fixtures"]
 
+# Installs the `claudine-fake-goose` fixture as its marker provider on Windows.
+[[test]]
+name = "wrap_compose_validation"
+required-features = ["test-fixtures"]
+
 [[test]]
 name = "level2_ac2_worktree_compose"
 required-features = ["terminal-tests"]

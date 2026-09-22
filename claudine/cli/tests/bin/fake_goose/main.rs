@@ -18,6 +18,24 @@
 use std::{env, fs, thread, time::Duration};
 
 fn main() {
+    // Marker mode, for callers that only need to count launches
+    // (`wrap_compose_validation`). It shares this binary because the reason a
+    // compiled fixture exists at all is the same one: Rust refuses to pass
+    // arguments it cannot safely escape to a `.bat`/`.cmd` file, so a batch
+    // shim carrying Claudine's prompt fails with "batch file arguments are
+    // invalid" before the provider ever runs.
+    if let Some(marker) = env::var_os("PROVIDER_MARKER") {
+        use std::io::Write as _;
+        let mut log = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(marker)
+            .expect("open PROVIDER_MARKER");
+        writeln!(log, "run").expect("record the launch");
+        println!("done");
+        return;
+    }
+
     let dir = std::path::PathBuf::from(env::var_os("FAKE_DIR").expect("FAKE_DIR"));
     fs::create_dir_all(&dir).unwrap();
     let mut n = 1;
