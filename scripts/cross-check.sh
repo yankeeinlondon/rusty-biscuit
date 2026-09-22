@@ -527,8 +527,17 @@ run_unix() {
     local -a ship=("${script}")
     [[ -n "${bundle_file}" ]] && ship+=("${bundle_file}")
     [[ "${mode}" == "archive" ]] && ship+=("${plan_file}")
-    "${SSH[@]}" "${host}" 'mkdir -p "$HOME/ci-verification"'
-    "${SCP[@]}" "${ship[@]}" "${host}:ci-verification/"
+    # Checked explicitly for the same reason as the Windows leg below: `set -e`
+    # does not fire inside a function invoked as a condition, so an unchecked
+    # upload failure becomes a green verdict for a leg that ran nothing.
+    "${SSH[@]}" "${host}" 'mkdir -p "$HOME/ci-verification"' || {
+        echo "cross-check: could not create ~/ci-verification on ${host}" >&2
+        return 1
+    }
+    "${SCP[@]}" "${ship[@]}" "${host}:ci-verification/" || {
+        echo "cross-check: could not upload the run script to ${host}:ci-verification/ (is the disk full?)" >&2
+        return 1
+    }
     # A login shell is what puts cargo on PATH on every Unix host. The WSL leg's
     # output is teed so its `cross-check-*:` markers can be read afterwards
     # without hiding the run from the terminal.
@@ -789,8 +798,20 @@ EOF
     local -a ship=("${script}")
     [[ -n "${bundle_file}" ]] && ship+=("${bundle_file}")
     [[ "${mode}" == "archive" ]] && ship+=("${plan_file}")
-    "${SSH[@]}" "${host}" "New-Item -ItemType Directory -Force -Path '${WIN_BASE}' | Out-Null"
-    "${SCP[@]}" "${ship[@]}" "${host}:W:/ci-verification/"
+    # Checked explicitly, not left to `set -e`: this function is called as
+    # `if run_windows; then`, and bash suppresses `set -e` inside a function
+    # whose invocation is a condition. An unchecked failure here therefore ran
+    # on and reported `pass` for a leg that never executed a test — which is
+    # what a full `W:` produced on 2026-09-21 ("scp: write remote ... Failure"
+    # followed by "windows pass").
+    "${SSH[@]}" "${host}" "New-Item -ItemType Directory -Force -Path '${WIN_BASE}' | Out-Null" || {
+        echo "cross-check: could not create ${WIN_BASE} on ${host}" >&2
+        return 1
+    }
+    "${SCP[@]}" "${ship[@]}" "${host}:W:/ci-verification/" || {
+        echo "cross-check: could not upload the run script to ${host}:W:/ci-verification/ (is the volume full?)" >&2
+        return 1
+    }
     local status=0
     "${SSH[@]}" "${host}" "powershell -NoProfile -ExecutionPolicy Bypass -File '${WIN_BASE}\\cross-check-${run_id}.ps1'; exit \$LASTEXITCODE" || status=$?
     # Nothing fetches a Windows report; see `discard_remote_report`.
