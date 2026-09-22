@@ -16,7 +16,7 @@
 //! and styling in `raw`.
 //!
 //! This mirrors the Darkmatter `md compose` capture
-//! (`darkmatter/cli/tests/level2_errors.rs`) so the same failure renders
+//! (`darkmatter/cli/tests/level2/level2_errors.rs`) so the same failure renders
 //! identically through both binaries, per the real-errors spec.
 
 #[allow(deprecated)]
