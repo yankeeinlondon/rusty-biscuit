@@ -78,7 +78,9 @@
   development dependency to a regular one for `archive_guard`, which reads the
   CI planner's canonical resolved plan from library code; the crate's existing
   `biscuit-test-harness` dependency already builds it, so the graph is
-  unchanged.
+  unchanged. `toml` 1.x is a regular dependency for `test_layout`, the layout
+  gate each consolidated package's Level 1 binary calls to read its
+  `Cargo.toml` (`autotests` and every `[[test]]` path).
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
   executables when cooperative cleanup times out.
