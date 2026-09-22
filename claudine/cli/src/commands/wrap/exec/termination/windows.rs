@@ -49,6 +49,10 @@ struct WindowsChild {
     process_id: u32,
     process: isize,
     job: isize,
+    /// `false` when the OS refused to put the child in this Job (see
+    /// [`windows_wait_loop`]), which leaves the Job empty: forceful rungs then
+    /// have to reach the child process directly.
+    job_assigned: bool,
     /// `false` for interactive TUI passthrough, where the child shares this
     /// console and the terminal already delivers Ctrl+C to it.
     own_group: bool,
@@ -137,13 +141,24 @@ fn apply_press(target: &PressTarget<WindowsChild>) {
             // Passthrough child shares this console; the terminal already
             // delivered the chord. Only the press count matters here.
         }
-        (PressAction::Force, true) => {
+        (PressAction::Force, true) if child.job_assigned => {
             unsafe {
                 let _ = TerminateJobObject(as_handle(child.job), 1);
             }
             tracing::warn!(
                 child_pid = child.process_id,
                 "repeat interrupt; force-terminating Job Object",
+            );
+        }
+        (PressAction::Force, true) => {
+            // The Job is empty, so terminating it would reach nothing.
+            unsafe {
+                let _ = TerminateProcess(as_handle(child.process), 1);
+            }
+            tracing::warn!(
+                child_pid = child.process_id,
+                "repeat interrupt; the child was never assigned to a Job, so only it is \
+                 terminated and any descendants it spawned survive",
             );
         }
         (PressAction::Force, false) => unsafe {
@@ -414,7 +429,7 @@ fn windows_wait_loop(
     // wrapper. Cleared on every exit path.
     let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
 
-    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HANDLE};
     use windows::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
@@ -450,10 +465,32 @@ fn windows_wait_loop(
     // Assign the child to the Job. Per Windows docs, assignment works after
     // spawn as long as the child hasn't spawned descendants yet — true here
     // because we assign immediately after `Command::spawn`.
+    //
+    // A refusal is not fatal. When this wrapper itself runs inside a Job that
+    // forbids nesting, the call returns ERROR_ACCESS_DENIED, and failing the
+    // launch over it would mean no provider could run at all: an SSH session
+    // on Windows puts everything it starts in such a Job, which made every
+    // `sequence_budget` launch fail with "Access is denied. (0x80070005)"
+    // (measured on `build-win-native`, 2026-09-22). The run continues with
+    // descendant cleanup degraded to the child process itself.
+    let mut job_assigned = false;
     if child_in_own_pgroup {
-        unsafe { AssignProcessToJobObject(as_handle(job.raw()), child_handle)?; }
-        #[cfg(test)]
-        tests::signal_job_assignment(child_pid);
+        match unsafe { AssignProcessToJobObject(as_handle(job.raw()), child_handle) } {
+            Ok(()) => {
+                job_assigned = true;
+                #[cfg(test)]
+                tests::signal_job_assignment(child_pid);
+            }
+            Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+                tracing::warn!(
+                    child_pid,
+                    "this process is inside a Job that forbids nesting, so the child could not \
+                     be assigned to one; a forceful stop will reach the child but not any \
+                     descendants it spawns",
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 
     // Declared after `job` so it drops *first*: the console handler may
@@ -464,6 +501,7 @@ fn windows_wait_loop(
         process_id: child_process_id,
         process: child_handle.0 as isize,
         job: job.raw(),
+        job_assigned,
         own_group: child_in_own_pgroup,
     });
 
@@ -521,7 +559,7 @@ fn windows_wait_loop(
             match early_rx.try_recv() {
                 Ok(signal) => {
                     if child.try_wait()?.is_none() {
-                        let _ = unsafe { TerminateJobObject(as_handle(job.raw()), 1) };
+                        terminate_tree(&job, job_assigned, child, 1);
                         early_termination = Some(signal);
                         grace_deadline = Some(Instant::now() + grace_period);
                     }
@@ -542,7 +580,7 @@ fn windows_wait_loop(
             match done_rx.try_recv() {
                 Ok(CompletionTermination) => {
                     if child.try_wait()?.is_none() {
-                        let _ = unsafe { TerminateJobObject(as_handle(job.raw()), 0) };
+                        terminate_tree(&job, job_assigned, child, 0);
                         completion_requested = true;
                         grace_deadline = Some(Instant::now() + grace_period);
                     }
@@ -560,7 +598,7 @@ fn windows_wait_loop(
             match wd_rx.try_recv() {
                 Ok(req) => {
                     if child.try_wait()?.is_none() {
-                        let _ = unsafe { TerminateJobObject(as_handle(job.raw()), 1) };
+                        terminate_tree(&job, job_assigned, child, 1);
                         early_termination = Some(watchdog_request_to_early_termination(req));
                         grace_deadline = Some(Instant::now() + grace_period);
                     }
@@ -579,13 +617,29 @@ fn windows_wait_loop(
             && Instant::now() >= deadline
         {
             if child.try_wait()?.is_none() {
-                let _ = unsafe { TerminateJobObject(as_handle(job.raw()), 1) };
+                terminate_tree(&job, job_assigned, child, 1);
                 reap_deadline = Some(Instant::now() + POST_SIGKILL_REAP_TIMEOUT);
             }
             grace_deadline = None;
         }
 
         std::thread::sleep(poll_interval);
+    }
+}
+
+/// Stop the child's whole tree, or just the child when the Job is empty.
+///
+/// `TerminateJobObject` on a Job nothing was assigned to reaches nothing, so a
+/// wrapper running inside a nesting-hostile Job would otherwise never stop its
+/// child at all.
+#[cfg(windows)]
+fn terminate_tree(job: &OwnedJob, job_assigned: bool, child: &mut Child, exit_code: u32) {
+    use windows::Win32::System::JobObjects::TerminateJobObject;
+
+    if job_assigned {
+        let _ = unsafe { TerminateJobObject(as_handle(job.raw()), exit_code) };
+    } else {
+        let _ = child.kill();
     }
 }
 
