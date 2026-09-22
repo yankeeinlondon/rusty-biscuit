@@ -4,6 +4,11 @@ four packages in scope, classified active vs historical.
 
 Run from the repository root. Writes Markdown to stdout. The classification
 rules are listed in the output so a reviewer can audit each decision.
+
+`--after` (Phase 7) re-runs the sweep once the packages are migrated. The old
+per-file target names are no longer Cargo targets, so they are read from the
+four committed migration manifests instead, and each historical hit is listed
+with its record date.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 PACKAGES = {
     "claudine-cli": "claudine/cli/",
@@ -32,6 +38,29 @@ HISTORICAL = [
     (re.compile(r"(^|/)(features|fixes)/_unscheduled/"), "unscheduled spec (not active guidance; revisit when scheduled)"),
 ]
 IN_FLIGHT = re.compile(r"(^|/)(features|fixes)/\d{4}-\d{2}-\d{2}-[^/]+/")
+FEATURE_DIR = Path(__file__).resolve().parent.parent
+DATED = re.compile(r"(\d{4}-\d{2}-\d{2})-[^/]+/")
+
+
+def old_targets() -> dict[str, set[str]]:
+    """Old per-file target name -> owning package, from the migration manifests."""
+    owners: dict[str, set[str]] = defaultdict(set)
+    for package in PACKAGES:
+        manifest = json.loads((FEATURE_DIR / f"{package}-migration.json").read_text())
+        for module in manifest["modules"]:
+            owners[module["old_target"]].add(package)
+    return owners
+
+
+def record_date(path: str) -> str:
+    """The date a historical record carries: its dated directory, else its last commit."""
+    dated = DATED.findall(path)
+    if dated:
+        return dated[-1]
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%cs", "--", path], check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    return out or "untracked"
 
 
 def metadata() -> dict:
@@ -64,6 +93,7 @@ def classify(path: str, line: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    after = "--after" in sys.argv[1:]
     meta = metadata()
     members = set(meta["workspace_members"])
     owners: dict[str, set[str]] = defaultdict(set)
@@ -73,6 +103,14 @@ def main() -> int:
         for target in package["targets"]:
             if "test" in target["kind"]:
                 owners[target["name"]].add(package["name"])
+    if after:
+        # Migrated packages now expose only consolidated targets; their old
+        # names come from the manifests, while other packages keep theirs so
+        # same-named targets elsewhere still mark a hit ambiguous.
+        for names in owners.values():
+            names.difference_update(PACKAGES)
+        for name, packages in old_targets().items():
+            owners[name] |= packages
 
     files = subprocess.run(["git", "ls-files"], check=True, capture_output=True, text=True).stdout.split()
     rows = []
@@ -104,16 +142,28 @@ def main() -> int:
     print("---")
     print("kind: evidence")
     print("feature: 2026-09-21-consolidated-test-binaries")
-    print("created: 2026-09-21")
-    print("plan_phase: 1")
-    print("generator: baseline/consumer-sweep.py")
-    print("---")
-    print()
-    print("# Active `--test` consumer sweep (before any migration)")
-    print()
-    print("Every `--test <name>` selector in git-tracked text files whose `<name>` is a")
-    print("current test target of `claudine-cli`, `darkmatter`, `darkmatter-cli`, or")
-    print("`biscuit-terminal`. A line that names another package with `-p`/`--package`")
+    if after:
+        print("plan_phase: 7")
+        print("generator: baseline/consumer-sweep.py --after")
+        print("---")
+        print()
+        print("# `--test` consumer re-sweep (after all four migrations)")
+        print()
+        print("Every `--test <name>` selector in git-tracked text files whose `<name>` is an")
+        print("old per-file test target of `claudine-cli`, `darkmatter`, `darkmatter-cli`, or")
+        print("`biscuit-terminal`, as recorded in the four `*-migration.json` manifests.")
+        print("A line that names another package with `-p`/`--package`")
+    else:
+        print("created: 2026-09-21")
+        print("plan_phase: 1")
+        print("generator: baseline/consumer-sweep.py")
+        print("---")
+        print()
+        print("# Active `--test` consumer sweep (before any migration)")
+        print()
+        print("Every `--test <name>` selector in git-tracked text files whose `<name>` is a")
+        print("current test target of `claudine-cli`, `darkmatter`, `darkmatter-cli`, or")
+        print("`biscuit-terminal`. A line that names another package with `-p`/`--package`")
     print("is dropped. A bare name that another workspace package also uses is kept")
     print("and marked **ambiguous** for the package phase to confirm.")
     print()
@@ -149,10 +199,16 @@ def main() -> int:
     counts: dict[str, int] = defaultdict(int)
     for row in by_kind.get("historical", []):
         counts[row[1]] += 1
-    print("| File | Hits |")
-    print("|---|---:|")
-    for path in sorted(counts):
-        print(f"| `{path}` | {counts[path]} |")
+    if after:
+        print("| File | Hits | Record date |")
+        print("|---|---:|---|")
+        for path in sorted(counts):
+            print(f"| `{path}` | {counts[path]} | {record_date(path)} |")
+    else:
+        print("| File | Hits |")
+        print("|---|---:|")
+        for path in sorted(counts):
+            print(f"| `{path}` | {counts[path]} |")
     return 0
 
 
