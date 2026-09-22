@@ -837,6 +837,26 @@ belong here.
     close (222f7612d + f9d74abc5 + 11e2c4e95 + 09b9f9d5f, four
     commits: three parallel test commits then the planning close)
     for the canonical 2-package, test-only-phase shape.
+- The `docs_created_during_phase_N` list is not strictly bound to the
+    planning close the way `source_files_during_phase_N` is. A
+    `docs_created` entry can ship in any commit that lands BEFORE the
+    planning close — the typical case is a `feat(<area>):` that produces
+    a self-proof README + noop-comparison.{json,md} report alongside
+    the toolkit, with the planning close later recording "Phase N
+    created these docs". The README and report are outputs of the feat,
+    not the planning, so folding them into the planning commit would
+    hide them from `git log -- <path>` when readers trace the file's
+    provenance. The only constraint that survives is the same one
+    already stated above: every `docs_created_during_phase_N` path
+    must be in HEAD at the moment the planning close lands. See the
+    consolidated-test-binaries Phase 2 close
+    (`3b0babe20 feat(repo-deps): ship consolidation toolkit with noop
+    selfproof` then `e63d49255 planning(repo): record Phase 2 close
+    for consolidated-test-binaries feature`) for the canonical
+    shape: toolkit ships with `selfproof/README.md` and
+    `selfproof/noop-comparison.{json,md}`; planning close records them
+    in `docs_created_during_phase_2` and adds them as final-wave
+    references in `spec.md message_to_agent`.
 - A pre-implementation spec review — flipping `reviewed: false` to `true`
   on a still-`draft-spec` fix without adding a `review-N.md` file or
   bumping `review_iterations` past 0 — is a separate shape from the
