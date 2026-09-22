@@ -42,7 +42,7 @@ Deterministic L1 tests that execute `md` use the per-test
 CWD/home/config/cache state, Git and rendering inputs, and a portable minimal
 PATH. Tests needing a real tool or a fixture-built repository use the named
 builder escapes; they do not restore ambient state on the returned command.
-`cli/tests/spawn_site_guard.rs` rejects raw `md` spawns, post-build isolation
+`cli/tests/l1/spawn_site_guard.rs` rejects raw `md` spawns, post-build isolation
 bypasses, and stale migration exemptions.
 
 L2 and browser tests stay on their canonical recipes because those recipes own
