@@ -17,7 +17,7 @@
 //!
 //! The CLI's own short-circuit — the early return that keeps the
 //! trigger-schema git-root walk off the no-frontmatter path — is proven at
-//! Level 1 in `darkmatter/cli/tests/clean_schema.rs`, which points
+//! Level 1 in `darkmatter/cli/tests/l1/clean_schema.rs`, which points
 //! `--baseline-schema` at a missing file and shows the command still
 //! succeeds. That is a stronger proof than a counter (the walk cannot have
 //! run, or resolution would have failed) and it is not duplicated here.
