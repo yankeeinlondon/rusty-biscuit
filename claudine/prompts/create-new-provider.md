@@ -138,9 +138,9 @@ as a *failing test*, one line each:
   the wire shape is ambiguous), `quick_start` hook selection, contract
   `support_matrix` length + the `auth_env_vars` arm, the signals dormant test.
 - Re-bless the dispatch census `docs/providers/dispatch-inventory.json`
-  (`CLAUDINE_UPDATE_INVENTORY=1 cargo nextest run -p claudine-cli --test dispatch_inventory`).
+  (`CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in `claudine/`).
   The scanner now covers **both** `lib/src` and `cli/src`.
-- **Unified dispatch guard** (Phase I, `cli/tests/dispatch_inventory.rs` →
+- **Unified dispatch guard** (Phase I, `cli/tests/l1/dispatch_inventory.rs` →
   `cli_dispatch_guard_holds_the_line`): the new per-provider
   `wrap/profile/<slug>.rs` and `permissions/providers/<slug>.rs` impl files are
   blanket-exempt automatically. But any **new conditional dispatch** the provider

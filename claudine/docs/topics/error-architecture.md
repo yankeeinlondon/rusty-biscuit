@@ -48,7 +48,7 @@ It is `pub` because `claudine-cli` is a separate crate, and it is the CLI's *onl
 Claudine allowlist.
 
 Nothing in the language makes that list exhaustive. What does is
-`registry_lists_every_diagnostic_impl` (`cli/tests/error_guards.rs`), which parses
+`registry_lists_every_diagnostic_impl` (`cli/tests/l1/error_guards.rs`), which parses
 every production `impl Diagnostic for …` out of the sources and fails in both
 directions — an unregistered impl, or a downcast to a type no impl defines. A
 missing arm here *is* the incident this architecture was built to fix: a
@@ -288,7 +288,7 @@ never back-derived from `kind` or parsed out of `Display`.
 
 ## The lossy-boundary audit
 
-The guards live in `cli/tests/error_guards.rs`, backed by a `syn` reader over
+The guards live in `cli/tests/l1/error_guards.rs`, backed by a `syn` reader over
 `lib/src`, `cli/src`, and `contract/src`. They run under `just test` and
 `just lint-transport`.
 
@@ -335,4 +335,4 @@ guard: the registry did list the type, no typed value was collapsed, and the
 headless suite exercised a different route. The error entered a `Report` as a
 `Box`, and only a real terminal driving the second proxy route end-to-end found
 it. That is the argument for the L2 render captures
-(`cli/tests/level2_typed_error_render_capture.rs`) existing at all.
+(`cli/tests/level2/level2_typed_error_render_capture.rs`) existing at all.

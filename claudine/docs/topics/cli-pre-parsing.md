@@ -304,7 +304,7 @@ Whenever a rule is added, modified, removed, or re-gated:
    documentation matches.
 4. Add unit tests in `argv.rs` and — if the rule is load-bearing —
    integration tests in
-   [`claudine/cli/tests/argv_normalization.rs`](../../cli/tests/argv_normalization.rs).
+   [`claudine/cli/tests/l1/argv_normalization.rs`](../../cli/tests/l1/argv_normalization.rs).
 
 The pre-parser's value is in its predictability. Out-of-date docs are
 the fastest way to erode that.
@@ -328,13 +328,13 @@ greedy-positional + `--help` interaction).
   setter-vs-tail classification). They include a drift-detection test that
   iterates the clap surface to verify the derived owned-flag surface.
 - **Integration tests** live in
-  [`claudine/cli/tests/argv_normalization.rs`](../../cli/tests/argv_normalization.rs)
+  [`claudine/cli/tests/l1/argv_normalization.rs`](../../cli/tests/l1/argv_normalization.rs)
   and drive the compiled `claudine` binary end-to-end through the
   headline bug cases, the fuzzy-match case, and the core pass-through
   cases (`--version`, root `--help`, `hooks --describe`, wrapper
   passthrough).
 - **Wrapper regression tests** in
-  [`claudine/cli/tests/wrap_direct_argv.rs`](../../cli/tests/wrap_direct_argv.rs)
+  [`claudine/cli/tests/l1/wrap_direct_argv.rs`](../../cli/tests/l1/wrap_direct_argv.rs)
   ensure the wrapper lenient pass continues to accept unknown tokens
   after any pre-parser change.
 

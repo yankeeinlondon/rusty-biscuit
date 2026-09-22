@@ -275,7 +275,7 @@ carries.
 > state* schema; on a directly invoked document it is not also validated as that
 > document's own frontmatter schema. Parity is pinned by
 > `a_formal_document_normalizes_identically_through_both_entry_paths` in
-> `cli/tests/sequence_sources_cli.rs`.
+> `cli/tests/l1/sequence_sources_cli.rs`.
 
 The retired external `kind: sequence` + `list:` form is **gone**. Use
 `sequence:`.

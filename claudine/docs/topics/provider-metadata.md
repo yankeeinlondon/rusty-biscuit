@@ -199,7 +199,7 @@ stream providers expose an event; ACP events imply ACP support).
 
 Decentralized `match Provider` / `matches!` / `== ` / `!=` dispatch is prevented
 from regrowing by a single inventory-based, site-level guard in
-**`claudine-cli/tests/dispatch_inventory.rs`**, covering **both** `lib/src` and
+**`claudine-cli/tests/l1/dispatch_inventory.rs`**, covering **both** `lib/src` and
 `cli/src`. (Phase I retired the lib crate's earlier regex-based
 `no_unauthorized_match_provider_in_lib` guard and folded both crates into this one
 mechanism.)
