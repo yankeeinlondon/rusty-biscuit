@@ -193,7 +193,7 @@ have no declared override at all: handing one back re-contaminates the child.
 builder and the guard read.
 
 Do not hand-build an `md` command or undo isolation afterward;
-`cli/tests/spawn_site_guard.rs` rejects raw spawns, post-build CWD/PATH/
+`cli/tests/l1/spawn_site_guard.rs` rejects raw spawns, post-build CWD/PATH/
 environment-clear escapes, a post-build `.env`/`.env_remove` naming any
 protected key, and stale exemptions.
 
