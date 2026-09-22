@@ -4869,7 +4869,7 @@ fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
 // `say:`, `effect:`, and `shell:` properties are respectively a real TTS call,
 // real audio playback, and a pair of commands that are denied without an
 // interactive approver (which would divert the run to `blocked` before the
-// loop's second iteration). `tests/shipped_prompt_route_drift.rs` mechanically
+// loop's second iteration). `tests/l1/shipped_prompt_route_drift.rs` mechanically
 // holds that copy in sync and fails when either shipped file changes.
 
 /// A fake `goose` that records the phase heading of the body it was handed.

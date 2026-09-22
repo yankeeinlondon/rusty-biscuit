@@ -1,4 +1,4 @@
-# D8 lossy-boundary exceptions, read by `cli/tests/error_guards.rs`.
+# D8 lossy-boundary exceptions, read by `cli/tests/l1/error_guards.rs`.
 #
 # Each entry suppresses one shape in one enclosing symbol in one file. Keying on
 # the symbol — not, as the predecessor grep guard did, on a trimmed source line —

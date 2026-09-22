@@ -805,7 +805,7 @@ fn l1_tests_spawn_claudine_through_the_fixture_builder() {
          launch context, host PATH, and $HOME. Build the command with \
          `CliProcessFixture::command()` (or `command_builder()` plus a named escape), or — \
          if the file genuinely cannot — add it to SPAWN_ALLOWLIST in \
-         cli/tests/spawn_site_guard.rs with a one-line reason.\nUnlisted sites:\n{}",
+         cli/tests/l1/spawn_site_guard.rs with a one-line reason.\nUnlisted sites:\n{}",
         result.unlisted.join("\n")
     );
     assert!(
@@ -854,7 +854,7 @@ fn migrated_l1_tests_keep_the_isolation_the_builder_gave_them() {
          `ambient_context(dir)` for the launch CWD, `host_path()` or `fake_only_path()` for \
          PATH, `inherit_no_env()` for a cleared environment — or, if the site targets a \
          command the fixture did not build, add the file to ISOLATION_ALLOWLIST in \
-         cli/tests/spawn_site_guard.rs with a one-line reason.\nEscapes:\n{}",
+         cli/tests/l1/spawn_site_guard.rs with a one-line reason.\nEscapes:\n{}",
         result.unlisted.join("\n")
     );
     assert!(

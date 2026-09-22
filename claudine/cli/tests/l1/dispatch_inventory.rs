@@ -909,7 +909,7 @@ fn generate_inventory() -> Inventory {
     );
 
     Inventory {
-        tool: "claudine-cli/tests/dispatch_inventory.rs",
+        tool: "claudine-cli/tests/l1/dispatch_inventory.rs",
         pattern_set_version: PATTERN_SET_VERSION,
         scanned_root: "claudine/lib/src + claudine/cli/src",
         regenerate: REGEN_COMMAND,
@@ -1221,7 +1221,7 @@ fn cli_dispatch_guard_holds_the_line() {
     assert!(
         unlisted.is_empty(),
         "New decentralized `Provider` dispatch found that is not grandfathered in \
-         GUARD_ALLOWLIST (cli/tests/dispatch_inventory.rs). Migrate it to a ProviderInfo \
+         GUARD_ALLOWLIST (cli/tests/l1/dispatch_inventory.rs). Migrate it to a ProviderInfo \
          catalog field / behavior trait, or add a `keep` entry with a reason.\nUnlisted: {unlisted:#?}"
     );
     assert!(

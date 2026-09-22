@@ -1,5 +1,5 @@
 {
-  "tool": "claudine-cli/tests/dispatch_inventory.rs",
+  "tool": "claudine-cli/tests/l1/dispatch_inventory.rs",
   "pattern_set_version": 3,
   "scanned_root": "claudine/lib/src + claudine/cli/src",
   "regenerate": "CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory:: (in claudine/)",
