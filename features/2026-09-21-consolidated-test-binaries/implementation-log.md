@@ -12,6 +12,7 @@ packages:
     - renderable
     - biscuit-file
     - darkmatter-cli
+    - biscuit-terminal
 source_files_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
     - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
@@ -404,6 +405,151 @@ packages_during_phase_4:
     - renderable
     - biscuit-file
     - darkmatter-cli
+source_files_during_phase_5:
+    - biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs
+    - claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/clean.rs
+    - darkmatter/cli/tests/clean_frontmatter.rs
+    - darkmatter/cli/tests/clean_json.rs
+    - darkmatter/cli/tests/clean_schema.rs
+    - darkmatter/cli/tests/code_block.rs
+    - darkmatter/cli/tests/compose_array_rendering.rs
+    - darkmatter/cli/tests/compose_base_schema.rs
+    - darkmatter/cli/tests/compose_basic.rs
+    - darkmatter/cli/tests/compose_interpolation.rs
+    - darkmatter/cli/tests/compose_layout.rs
+    - darkmatter/cli/tests/compose_page_blocks.rs
+    - darkmatter/cli/tests/compose_perf.rs
+    - darkmatter/cli/tests/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/compose_schema.rs
+    - darkmatter/cli/tests/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/compose_shell.rs
+    - darkmatter/cli/tests/compose_state_set.rs
+    - darkmatter/cli/tests/compose_terminal_detection.rs
+    - darkmatter/cli/tests/compose_transclusion.rs
+    - darkmatter/cli/tests/delta.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/cli/tests/graph.rs
+    - darkmatter/cli/tests/hash.rs
+    - darkmatter/cli/tests/hash_directory.rs
+    - darkmatter/cli/tests/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/help.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/code_block.rs
+    - darkmatter/cli/tests/l1/compose_array_rendering.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_basic.rs
+    - darkmatter/cli/tests/l1/compose_interpolation.rs
+    - darkmatter/cli/tests/l1/compose_layout.rs
+    - darkmatter/cli/tests/l1/compose_page_blocks.rs
+    - darkmatter/cli/tests/l1/compose_perf.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/compose_terminal_detection.rs
+    - darkmatter/cli/tests/l1/compose_transclusion.rs
+    - darkmatter/cli/tests/l1/delta.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/graph.rs
+    - darkmatter/cli/tests/l1/hash.rs
+    - darkmatter/cli/tests/l1/hash_directory.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/l1/help.rs
+    - darkmatter/cli/tests/l1/layout_alignment.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_flags.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/md_process_fixture.rs
+    - darkmatter/cli/tests/l1/render_basic.rs
+    - darkmatter/cli/tests/l1/rm.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_detect.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline.rs
+    - darkmatter/cli/tests/l1/spawn_site_guard.rs
+    - darkmatter/cli/tests/l1/test_layout.rs
+    - darkmatter/cli/tests/l1/toc.rs
+    - darkmatter/cli/tests/l1/validate_refs.rs
+    - darkmatter/cli/tests/layout_alignment.rs
+    - darkmatter/cli/tests/layout_fill.rs
+    - darkmatter/cli/tests/layout_flags.rs
+    - darkmatter/cli/tests/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/level2/harness_integrity.rs
+    - darkmatter/cli/tests/level2/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2/level2_errors.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2/level2_schema_about.rs
+    - darkmatter/cli/tests/level2/level2_schema_validate.rs
+    - darkmatter/cli/tests/level2/main.rs
+    - darkmatter/cli/tests/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2_errors.rs
+    - darkmatter/cli/tests/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2_harness_integrity.rs
+    - darkmatter/cli/tests/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2_schema_about.rs
+    - darkmatter/cli/tests/level2_schema_validate.rs
+    - darkmatter/cli/tests/md_process_fixture.rs
+    - darkmatter/cli/tests/render_basic.rs
+    - darkmatter/cli/tests/rm.rs
+    - darkmatter/cli/tests/schema_about.rs
+    - darkmatter/cli/tests/schema_detect.rs
+    - darkmatter/cli/tests/schema_triggers.rs
+    - darkmatter/cli/tests/schema_validate.rs
+    - darkmatter/cli/tests/schema_validate_baseline.rs
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/toc.rs
+    - darkmatter/cli/tests/validate_refs.rs
+    - darkmatter/justfile
+    - darkmatter/lib/tests/l1/clean_counters.rs
+docs_updated_during_phase_5:
+    - darkmatter/README.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_5:
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli-migration.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-mapping.json
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/SKILL.md
+packages_during_phase_5:
+    - darkmatter-cli
+    - darkmatter
+    - claudine-cli
+    - biscuit-terminal
 ---
 
 # Implementation Log for 2026-09-21-consolidated-test-binaries (8 phases)
@@ -982,6 +1128,165 @@ Commit split, per R7 and the AGENTS.md scope discipline:
    manifest `addition`
 4. docs, comments, and the recipe pass, including the `benchmark_fixtures.rs`
    header string and `manifest.yaml`
+
+### Unrelated working-tree changes
+
+None observed.
+
+## Phase 5
+
+Worked 2026-09-21 on macOS (`aarch64-apple-darwin`, rustc 1.98.1,
+cargo-nextest 0.9.136) against base revision `cb9a3d38b`, with a clean tree
+at start. All evidence is under `darkmatter-cli/` in this feature directory,
+plus `darkmatter-cli-migration.json`.
+
+### What was done
+
+| Plan task | Result | Artifact |
+|---|---|---|
+| Fresh before side | re-captured unmigrated (`capture-a` is refused after the Phase 3/4 override rewrites). `compare` against `selfproof/capture-a`: identical, and the 8 notes are the claudine/darkmatter override rewrites | `darkmatter-cli/capture-before` |
+| Manifest and move | 53 targets → 2: `l1` (42 modules, no features) and `level2` (11 modules, `terminal-tests`). `autotests = false`, 2 explicit `[[test]]`. The planner produced the one known alias, `level2_harness_integrity` → `harness_integrity` (R2). 647 integration tests mapped, plus 1 addition (the 784 listed with `terminal-tests` include the lib and bin unit tests) | `darkmatter-cli-migration.json` |
+| `check-attributes` | 0 failures. 2 review items, both the reviewed `#[path = "../common/source_scan.rs"]` repair below | `darkmatter-cli/attribute-check.json` |
+| Snapshot moves | none needed: the package tracks no Insta snapshots or proptest regression files. `check-snapshots` with the rule-derived (empty) mapping: 0 moved, 0 failures, 0 `.snap.new` | `darkmatter-cli/snapshot-{mapping,check}.json` |
+| Identity comparison, macOS | **identical**, 0 failures, 0 notes: 2 feature sets × 23 selectors (incl. `L1-include-slow`, R4) | `darkmatter-cli/comparison-darwin.{json,md}` |
+| Structural guard | `tests/l1/test_layout.rs` calls the shared `test_toolkit::test_layout` | manifest `additions` (1 test) |
+| Spawn-site guard | runs inside `l1`, 24/24 pass. Populations by path: walked 58 → 61, spawn 42 → 44, isolation 40 → 40. The only additions are the 2 roots and `l1/test_layout.rs` (spawn: `l1/main.rs` and `l1/test_layout.rs`). Nothing is missing | `darkmatter-cli/guard-scans-after.md` |
+| Archive-path guard | `darkmatter/cli/tests/**` 58 → 61, same three additions, eligibility unchanged, `files-checked=3491` | same file |
+| Area recipe/doc pass | `lint-files` accepted-exception paths, README, skill, 3 cross-area comments | list below |
+| macOS suites | `just test` 7,948/7,949 (the 1 red is pre-existing, below). `just test-l2` 18 + 69 + 3 passed. `just lint` exit 0. `check-tier-coverage darkmatter` red for the pre-existing stranded `real_` test only. `check-canonical darkmatter` passes | — |
+| Linux | on-host before/after captures **identical**. L1 712/712 passed | `darkmatter-cli/comparison-linux.*`, `darkmatter-cli/linux-l1-summary.txt` |
+| macOS + Linux platform-absent | **identical**, evaluated on both hosts | `darkmatter-cli/comparison-darwin-linux.*` |
+| Native Windows | **pending**. `just cross-check darkmatter-cli --os windows` refused at storage preflight: `W:` has 37.9 GiB free (down from 43), after the recipe's automatic reclaim. The cross-compile of both targets with `terminal-tests` for `x86_64-pc-windows-gnu` is clean (0 warnings). That is compile evidence only | — |
+| WSL2 | **pending**: its VHDX lives on the same full `W:` | — |
+| Lightweight observations | 53 → 2 targets, 396.6 MB → 148.7 MB (−62%) | `measurements.md` §Rollout |
+| Skip-baseline check | `.github/ci/ci-baseline.toml` holds only `schema_version = 3` (0 `[[skip]]`) | — |
+
+### Decisions made during the move
+
+- **Spawn-guard exclusion follows the tier directory.** `excluded` dropped
+  Level 2 files by their `level2_` file-name prefix. After the move, the
+  aliased `level2/harness_integrity.rs` no longer carries it, and neither does
+  `level2/main.rs`. Both would have joined the spawn population silently. The
+  harness-integrity file has no detected site today, so the guard would still
+  have passed, but it would have scanned a file the baseline excludes. A first
+  path segment equal to a prefix without its `_` (`level2/`, `level3/`,
+  `browser/`, `real/`, `slow/`) now excludes too. Only a whole leading segment
+  counts (`level2x/…` and `l1/level2/…` stay governed; both asserted). The
+  module docs were updated. **Shown red first:** with the new clause
+  disabled, `tier_naming_decides_what_the_guard_governs` and
+  `the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site`
+  fail on `level2/harness_integrity.rs`.
+- **Guard assertions moved with the paths.** `ISOLATION_ALLOWLIST`'s entry is
+  now `l1/md_process_fixture.rs`, and the population assertions name
+  `l1/…`/`level2/…`. Left alone, `!names.contains("level2_errors.rs")` would
+  have passed vacuously. The two failure messages that tell a developer where
+  to add an allow-list entry name `cli/tests/l1/spawn_site_guard.rs`.
+- **`source_scan` keeps a `#[path]`, `protected_env` becomes an import.**
+  `common/mod.rs` declares `protected_env` (the fixture builder uses it) but
+  not `source_scan`, whose only user is this guard. So the guard's
+  `#[path = "common/protected_env.rs"] mod protected_env;` copy became
+  `use crate::common::protected_env::…` (it would otherwise compile twice in
+  `l1`). The sanitizer stays a guard-local `#[path = "../common/source_scan.rs"]`
+  instead of widening `common` into `level2`. The old comment's reason (this
+  binary avoided `common`) no longer applied and was rewritten.
+- **`level2/main.rs` module order** is alphabetical (`harness_integrity`
+  first), so a future `rustfmt` does not reorder it. The mover emitted it in
+  manifest order.
+- **`lint-files` (darkmatter/justfile)** keyed four accepted over-cap
+  exceptions on `./cli/tests/<file>.rs`. After the move, the four files showed
+  up as unaccepted (the recipe is advisory, exit 0, not in `lint`). They are
+  re-keyed to `./cli/tests/l1/…`. `md_process_fixture.rs`'s reason lost its
+  "one binary so mod common compiles once" clause, which no longer holds.
+- **Comment drift** in `l1/clean_frontmatter.rs`'s header: "this target" →
+  "this module" (twice).
+- **Before-side size build in its own target dir.** Phase 4's base worktree
+  (`/tmp/p4/base`) shared the main target dir. `zed-dmls-cli`'s build script
+  kept that path, and the first `just test` here failed with
+  `NotFound` in that build script. `cargo clean -p zed-dmls-cli` fixed it, and
+  the before-side build for the size row used `--target-dir /tmp/p5/target-before`,
+  since deleted. Recorded in `measurements.md`.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Test / check (targeted) | Red-then-green shown |
+|---|---|---|
+| Every old test keeps identity, tier, ignore state, platform presence (both feature sets, both slow-policy states) | `consolidation.py compare` macOS, Linux, macOS+Linux | toolkit oracles (Phase 2 mutation check); identical here |
+| Neutral alias keeps `harness_integrity` tests in L1 under `terminal-tests` | same `compare` (`L1`/`L2` selectors, `terminal-tests`: 715/69 before and after) | Phase 2 alias oracle |
+| Acceptance 12, darkmatter-cli | `test_layout::every_test_source_is_compiled_by_a_declared_target` | yes: planted `tests/stray_probe.rs`, `tests/level2/orphan_probe.rs`, `tests/level9/main.rs` → red naming all three, then green |
+| Spawn/isolation guards keep their intended population | `spawn_site_guard::tier_naming_decides_what_the_guard_governs` (new `level2/…`, `l1/…`, and segment-boundary cases), `the_spawn_gate_reads_a_real_population_…`, `the_isolation_gate_governs_…`, plus a temporary probe diffed by path against the baseline | yes (above) |
+| Guard file sets (acceptance 7) | temporary probes, `darkmatter-cli/guard-scans-after.md` | populations compared by path |
+| Level 2 opt-in unchanged | `just test` (no `terminal-tests`) builds no `level2`. `just test-l2` runs 69 | — |
+| `lint-files` exceptions | `just lint-files` shows the four `l1/…` files as accepted again | the unfixed run listed them as unaccepted |
+
+"Passive corpus" and "shipped artifact end-to-end": the layout gate reads the
+real `Cargo.toml` and tree, and `compare` runs over real captures. No value is
+persisted and read back.
+
+### Gates run
+
+- `cargo check --tests` (none, `terminal-tests`) and `cargo clippy
+  --all-targets --features terminal-tests -- -D warnings` for darkmatter-cli:
+  clean.
+- `just lint` (darkmatter): exit 0.
+- `just test --no-fail-fast` (darkmatter area): 7,948 passed, 1 failed
+  (pre-existing), 7 skipped. `just test-l2`: 18 + 69 + 3 passed.
+- `just check-canonical darkmatter`: pass. `just check-tier-coverage
+  darkmatter`: fails, pre-existing (below).
+- `x86_64-pc-windows-gnu` cross-compile of darkmatter-cli tests with
+  `terminal-tests`: clean.
+- Linux (`build-linux`, private `--shared` clone at `cb9a3d38b` + bundle +
+  working-tree patch, `RUSTC_WRAPPER=""`): before/after captures, and L1
+  712/712. The scratch clone and uploads were deleted.
+- `cargo nextest run -p test-toolkit --test archive_path_guard`: 3/3 pass
+  (with the temporary probe, since removed).
+- GitNexus `detect-changes --scope all`: risk low, 0 affected processes.
+- Not run: the root-area fan-out, and `just test-l3` (darkmatter-cli has no
+  Level 3 tests).
+
+### Pre-existing failures (the same as Phase 4, proven there on the unmigrated base)
+
+- `darkmatter::l1 schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes`
+  (reads a doc deleted by `aa1f03c70`).
+- `check-tier-coverage darkmatter`: stranded
+  `darkmatter::l1::schema_phase_validation::real_shipped_inline_schema_uses_normal_resolution_and_phase_path`.
+- Neither is in darkmatter-cli. Every darkmatter-cli test passed on macOS and
+  Linux.
+
+### Host problems met
+
+- **`build-win-native` `W:` has 37.9 GiB free**, after the recipe's own
+  automatic Cargo reclaim, under the 50 GiB preflight. It had 43 GB in
+  Phase 4. No override was used. Native-Windows listings and WSL2 are pending
+  for all three migrated packages.
+- **`build-linux` cross-check lock** is still held by `feat-nightly-perf`
+  (since 2026-09-14). Linux evidence came from the private-clone procedure in
+  the `os` skill.
+
+### Left alone (noted for Phase 7)
+
+- `claudine/cli/tests/l1/spawn_site_guard.rs` failure messages still name
+  `cli/tests/spawn_site_guard.rs` (stale since Phase 3; claudine is not this
+  phase's package).
+- `.claude/skills/rust-testing/SKILL.md:673` says "each area's
+  `cli/tests/spawn_site_guard.rs`". Two of its three areas are now under
+  `cli/tests/l1/` (sniff's is not migrated). That is the Phase 7 skill rewrite.
+- `l1/layout_style_frontmatter.rs` cites `darkmatter/cli/tests/level2_layout.rs`,
+  which did not exist before this phase either.
+
+### Changed outside `darkmatter/cli/tests`
+
+`darkmatter/cli/Cargo.toml`, `darkmatter/justfile` (`lint-files`),
+`darkmatter/README.md`, `.claude/skills/darkmatter/SKILL.md`, comment-only path
+swaps in `biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs`,
+`claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs`, and
+`darkmatter/lib/tests/l1/clean_counters.rs`, and this feature's
+`measurements.md`. `.config/nextest.toml` was not touched, because no override
+names a darkmatter-cli test.
+
+Commit split, following Phase 4: (1) manifest and evidence; (2) structural
+move (the `tests/` tree, `Cargo.toml`, the spawn-guard path repair, and the
+layout gate with its manifest `addition`); (3) docs, comments, and the
+`lint-files` recipe.
 
 ### Unrelated working-tree changes
 

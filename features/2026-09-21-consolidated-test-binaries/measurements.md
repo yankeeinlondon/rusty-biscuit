@@ -162,3 +162,11 @@ package's `test`-kind executables only (the `s3-measure.sh` step 2 filter).
 | Package | Phase | Base | Feature set | Test targets | Test executable bytes |
 |---|---|---|---|---:|---:|
 | `darkmatter` | 4 | `048e44f7a` | `terminal-tests,browser-tests,effects-instrumentation` | 74 → 5 | 5.01 GB → 0.51 GB (−90%) |
+| `darkmatter-cli` | 5 | `cb9a3d38b` | `terminal-tests` | 53 → 2 | 0.40 GB → 0.15 GB (−62%) |
+
+From Phase 5 on, the before side builds into its own `--target-dir`, not the
+shared one. A build script run from the Phase 4 base worktree kept that
+worktree's absolute path, and after the worktree was deleted, the next
+`just test` in the main tree failed in `zed-dmls-cli`'s build script
+(`cargo clean -p zed-dmls-cli` fixed it). Executable sizes do not depend on the
+target directory. Exact bytes: 396,639,664 → 148,746,664.

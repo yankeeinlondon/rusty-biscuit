@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 4
+phase: 5
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -414,6 +414,146 @@ packages_during_phase_4:
     - renderable
     - biscuit-file
     - darkmatter-cli
+source_files_during_phase_5:
+    - biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs
+    - claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/clean.rs
+    - darkmatter/cli/tests/clean_frontmatter.rs
+    - darkmatter/cli/tests/clean_json.rs
+    - darkmatter/cli/tests/clean_schema.rs
+    - darkmatter/cli/tests/code_block.rs
+    - darkmatter/cli/tests/compose_array_rendering.rs
+    - darkmatter/cli/tests/compose_base_schema.rs
+    - darkmatter/cli/tests/compose_basic.rs
+    - darkmatter/cli/tests/compose_interpolation.rs
+    - darkmatter/cli/tests/compose_layout.rs
+    - darkmatter/cli/tests/compose_page_blocks.rs
+    - darkmatter/cli/tests/compose_perf.rs
+    - darkmatter/cli/tests/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/compose_schema.rs
+    - darkmatter/cli/tests/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/compose_shell.rs
+    - darkmatter/cli/tests/compose_state_set.rs
+    - darkmatter/cli/tests/compose_terminal_detection.rs
+    - darkmatter/cli/tests/compose_transclusion.rs
+    - darkmatter/cli/tests/delta.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/cli/tests/graph.rs
+    - darkmatter/cli/tests/hash.rs
+    - darkmatter/cli/tests/hash_directory.rs
+    - darkmatter/cli/tests/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/help.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/code_block.rs
+    - darkmatter/cli/tests/l1/compose_array_rendering.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_basic.rs
+    - darkmatter/cli/tests/l1/compose_interpolation.rs
+    - darkmatter/cli/tests/l1/compose_layout.rs
+    - darkmatter/cli/tests/l1/compose_page_blocks.rs
+    - darkmatter/cli/tests/l1/compose_perf.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/compose_terminal_detection.rs
+    - darkmatter/cli/tests/l1/compose_transclusion.rs
+    - darkmatter/cli/tests/l1/delta.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/graph.rs
+    - darkmatter/cli/tests/l1/hash.rs
+    - darkmatter/cli/tests/l1/hash_directory.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/l1/help.rs
+    - darkmatter/cli/tests/l1/layout_alignment.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_flags.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/md_process_fixture.rs
+    - darkmatter/cli/tests/l1/render_basic.rs
+    - darkmatter/cli/tests/l1/rm.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_detect.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline.rs
+    - darkmatter/cli/tests/l1/spawn_site_guard.rs
+    - darkmatter/cli/tests/l1/test_layout.rs
+    - darkmatter/cli/tests/l1/toc.rs
+    - darkmatter/cli/tests/l1/validate_refs.rs
+    - darkmatter/cli/tests/layout_alignment.rs
+    - darkmatter/cli/tests/layout_fill.rs
+    - darkmatter/cli/tests/layout_flags.rs
+    - darkmatter/cli/tests/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/level2/harness_integrity.rs
+    - darkmatter/cli/tests/level2/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2/level2_errors.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2/level2_schema_about.rs
+    - darkmatter/cli/tests/level2/level2_schema_validate.rs
+    - darkmatter/cli/tests/level2/main.rs
+    - darkmatter/cli/tests/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2_errors.rs
+    - darkmatter/cli/tests/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2_harness_integrity.rs
+    - darkmatter/cli/tests/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2_schema_about.rs
+    - darkmatter/cli/tests/level2_schema_validate.rs
+    - darkmatter/cli/tests/md_process_fixture.rs
+    - darkmatter/cli/tests/render_basic.rs
+    - darkmatter/cli/tests/rm.rs
+    - darkmatter/cli/tests/schema_about.rs
+    - darkmatter/cli/tests/schema_detect.rs
+    - darkmatter/cli/tests/schema_triggers.rs
+    - darkmatter/cli/tests/schema_validate.rs
+    - darkmatter/cli/tests/schema_validate_baseline.rs
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/toc.rs
+    - darkmatter/cli/tests/validate_refs.rs
+    - darkmatter/justfile
+    - darkmatter/lib/tests/l1/clean_counters.rs
+docs_updated_during_phase_5:
+    - darkmatter/README.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_5:
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli-migration.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-mapping.json
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -973,17 +1113,17 @@ the `terminal-tests` feature across Level 2.
 
 ### Wave 1 — Structural move (sequential)
 
-- [ ] **darkmatter-cli manifest and move** — fresh inventory/plan (committed
+- [x] **darkmatter-cli manifest and move** — fresh inventory/plan (committed
       as `darkmatter-cli-migration.json`); expected `l1` + `level2`
       (×`terminal-tests`) with the inventory authoritative; `autotests =
       false`; structural edits only.
 
 ### Wave 2 — Fix-ups (parallel)
 
-- [ ] **Identity comparison** on macOS across feature sets; snapshot moves if
+- [x] **Identity comparison** on macOS across feature sets; snapshot moves if
       the inventory finds any; structural guard added inside the consolidated
       L1 target; active recipe/doc pass for `darkmatter/cli` area docs.
-- [ ] **Spawn-site guard** — re-run `darkmatter/cli/tests/spawn_site_guard.rs`
+- [x] **Spawn-site guard** — re-run `darkmatter/cli/tests/spawn_site_guard.rs`
       (now inside its consolidated target) and diff its scanned-file list
       against `baseline/guard-scans.md`: identical intended coverage, by
       path, not by count.
@@ -994,11 +1134,19 @@ the `terminal-tests` feature across Level 2.
       canonical recipes, `test-l2`, `lint`, `check-tier-coverage`); Linux /
       Windows on-host listings + comparison; WSL2 when available else
       `pending`; rollout observations appended; skip-baseline check per R5.
+      *Phase 5 status:* everything here is done except the native-Windows
+      on-host listings. The `build-win-native` `W:` volume has 37.9 GiB free,
+      below the 50 GiB preflight. Windows has cross-compile evidence only, and
+      WSL2 is `pending` (see the log's Phase 5 section).
 
 ### Checkpoint
 
 - [ ] Identity equality on three OSes; spawn-site guard file list identical
       to baseline; area suites green; guard test live.
+      *Phase 5 status:* identity is identical on macOS and Linux, and on both
+      together with platform-absent evaluated. The guard file lists match by
+      path. Area suites are green apart from pre-existing failures, and the
+      layout gate is live. Native Windows is pending (disk space).
 
 ## Phase 6 — `biscuit-terminal` Migration
 
