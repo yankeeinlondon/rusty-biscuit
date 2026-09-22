@@ -4,7 +4,7 @@
 //! `biscuit_file::SourceSpan` is the single byte-offset span type shared with
 //! Darkmatter, which re-exports it at `darkmatter::SourceSpan` and
 //! `darkmatter::markdown::span::SourceSpan`. The cross-crate half of this
-//! contract lives in `darkmatter/lib/tests/span_compat.rs`; a cyclic
+//! contract lives in `darkmatter/lib/tests/l1/span_compat.rs`; a cyclic
 //! dev-dependency would be needed to assert it from here.
 
 use std::ops::Range;
