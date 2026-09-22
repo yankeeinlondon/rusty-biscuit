@@ -200,7 +200,7 @@ fn field(text: &str, key: &str) -> Option<String> {
 ///
 /// stdout is deliberately **not** redirected: `is_tty()` keys on stdout, and a
 /// redirect suppresses the OSC query entirely (that suppression is itself
-/// correct behavior — it is what `darkmatter/cli/tests/compose_terminal_detection.rs`
+/// correct behavior — it is what `darkmatter/cli/tests/l1/compose_terminal_detection.rs`
 /// covers for Finding 5). Output is therefore read back off the pane.
 fn run_probe(harness: &mut WezTermHarness, env: &[(&str, &str)], marker: &str) -> String {
     let probe = discovery_probe_path();
