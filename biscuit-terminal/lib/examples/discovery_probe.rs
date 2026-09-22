@@ -3,9 +3,9 @@
 //! Accepts environment variables that control which discovery routines are
 //! exercised and prints machine-readable `key=value` lines. Two suites drive it:
 //!
-//! * Level 1 (`tests/level1_*.rs`) runs it inside a pseudoterminal and
+//! * Level 1 (`tests/l1/level1_*.rs`) runs it inside a pseudoterminal and
 //!   manufactures the OSC reply bytes itself.
-//! * Level 2 (`tests/level2_terminal_osc_wezterm.rs`) runs it inside a real
+//! * Level 2 (`tests/level2/level2_terminal_osc_wezterm.rs`) runs it inside a real
 //!   WezTerm pane, where the emulator supplies the replies.
 //!
 //! Output is read back off the terminal, so keep stdout on the tty: `is_tty()`

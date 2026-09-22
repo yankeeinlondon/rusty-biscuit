@@ -21,7 +21,7 @@ use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 /// the wire, so there is no PTY master to tally request bytes on. Emitting the
 /// attempt as its own tracing event lets an in-repo observer — currently
 /// `examples/discovery_probe.rs`, which feeds the Level-2 cache proof in
-/// `tests/level2_terminal_osc_wezterm.rs` — count attempts with a local layer
+/// `tests/level2/level2_terminal_osc_wezterm.rs` — count attempts with a local layer
 /// instead of the library exporting a counter as public API.
 ///
 /// The event carries a `code` field; a dedicated target keeps it distinguishable
