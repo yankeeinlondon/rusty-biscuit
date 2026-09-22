@@ -12,6 +12,10 @@
 use crate::common::source_scan;
 
 use source_scan::{is_ident, sanitize};
+// The module-graph walk is `test_toolkit`'s, shared with the darkmatter,
+// darkmatter-cli, and biscuit-terminal gates. A second parser here drifted from
+// it once already (review 1 of `2026-09-21-consolidated-test-binaries`).
+use test_toolkit::test_layout::{collect_test_sources, layout_violations};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -488,210 +492,19 @@ fn scan_focus_stealing(area_root: &Path) -> Result<Vec<String>, String> {
     Ok(violations)
 }
 
-/// Directories under `cli/tests/` that hold data, never Rust modules.
-const DATA_DIRECTORIES: &[&str] = &["fixtures", "snapshots"];
 
-/// One `mod name;` declaration and its `#[path]` value, if it has one.
-#[derive(Debug, PartialEq, Eq)]
-struct ModuleDeclaration {
-    name: String,
-    path: Option<String>,
-}
 
-/// The value of a `#[path = "…"]` attribute, read from the original source.
-fn path_attribute(attribute: &str) -> Option<String> {
-    let inner = attribute.strip_prefix("#[")?.trim_start();
-    let value = inner.strip_prefix("path")?.trim_start().strip_prefix('=')?;
-    let value = value.trim_start().strip_prefix('"')?;
-    Some(value[..value.find('"')?].to_string())
-}
 
-/// Every out-of-line `mod name;` in `source`, whatever its `cfg`.
-///
-/// A platform-gated module is still declared: the gate decides where it
-/// compiles, and this check is about whether anything compiles it at all.
-/// Runs on [`sanitize`]d bytes so a `mod x;` in prose or a string is not one.
-fn module_declarations(source: &str) -> Vec<ModuleDeclaration> {
-    let code = sanitize(source);
-    let mut declarations = Vec::new();
-    let mut index = 0;
-    while index < code.len() {
-        if index > 0 && is_ident(code[index - 1]) {
-            index += 1;
-            continue;
-        }
-        let mut cursor = index;
-        let mut path = None;
-        while code.get(cursor) == Some(&b'#') && code.get(cursor + 1) == Some(&b'[') {
-            let Some(close) = matching_delimiter(&code, cursor + 1, b'[') else {
-                break;
-            };
-            path = path.or_else(|| path_attribute(&source[cursor..=close]));
-            cursor = skip_whitespace(&code, close + 1);
-        }
-        cursor = skip_visibility(&code, cursor);
-        if code.get(cursor..cursor + 3) == Some(b"mod")
-            && code.get(cursor + 3).is_some_and(u8::is_ascii_whitespace)
-        {
-            let name_start = skip_whitespace(&code, cursor + 3);
-            let mut name_end = name_start;
-            while code.get(name_end).is_some_and(|&byte| is_ident(byte)) {
-                name_end += 1;
-            }
-            let after = skip_whitespace(&code, name_end);
-            if name_end > name_start && code.get(after) == Some(&b';') {
-                declarations.push(ModuleDeclaration {
-                    name: source[name_start..name_end].to_string(),
-                    path,
-                });
-                index = after + 1;
-                continue;
-            }
-        }
-        index = cursor.max(index + 1);
-    }
-    declarations
-}
 
-/// `a/b/../c` → `a/c`, on `/`-separated relative paths.
-fn normalize_relative(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            part => parts.push(part),
-        }
-    }
-    parts.join("/")
-}
 
-/// Where rustc looks for `declaration` made in `file` (crate-relative paths).
-///
-/// A `#[path]` is relative to the declaring file's directory. A plain `mod x;`
-/// resolves beside a `main.rs`/`mod.rs`, and under `<stem>/` for any other
-/// file.
-fn declared_module_files(file: &str, declaration: &ModuleDeclaration) -> Vec<String> {
-    let (directory, name) = file.rsplit_once('/').unwrap_or(("", file));
-    if let Some(path) = &declaration.path {
-        return vec![normalize_relative(&format!("{directory}/{path}"))];
-    }
-    let base = if name == "main.rs" || name == "mod.rs" {
-        directory.to_string()
-    } else {
-        format!("{directory}/{}", name.trim_end_matches(".rs"))
-    };
-    vec![
-        normalize_relative(&format!("{base}/{}.rs", declaration.name)),
-        normalize_relative(&format!("{base}/{}/mod.rs", declaration.name)),
-    ]
-}
 
-/// Every layout violation for a crate whose `Cargo.toml` is `manifest` and
-/// whose `tests/` Rust sources are `files` (crate-relative path → source).
-///
-/// The module graph is walked from the declared `[[test]]` roots, so one rule
-/// covers both an unexpected crate root and an undeclared module: each is a
-/// file no declared target reaches.
-fn layout_violations(manifest: &str, files: &BTreeMap<String, String>) -> Vec<String> {
-    let mut violations = Vec::new();
-    let manifest: toml::Table = match toml::from_str(manifest) {
-        Ok(table) => table,
-        Err(error) => return vec![format!("Cargo.toml does not parse: {error}")],
-    };
-    let autotests = manifest
-        .get("package")
-        .and_then(|package| package.get("autotests"))
-        .and_then(toml::Value::as_bool);
-    if autotests != Some(false) {
-        violations.push(
-            "Cargo.toml must set `autotests = false`: every test target is declared \
-             explicitly"
-                .to_string(),
-        );
-    }
 
-    let mut pending = Vec::new();
-    for target in manifest
-        .get("test")
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let name = target.get("name").and_then(toml::Value::as_str).unwrap_or("<unnamed>");
-        match target.get("path").and_then(toml::Value::as_str) {
-            Some(path) if files.contains_key(&normalize_relative(path)) => {
-                pending.push(normalize_relative(path));
-            }
-            Some(path) => violations.push(format!("[[test]] {name}: {path} does not exist")),
-            None => violations.push(format!("[[test]] {name}: declare its `path` explicitly")),
-        }
-    }
-
-    let mut reached = BTreeSet::new();
-    while let Some(file) = pending.pop() {
-        if !reached.insert(file.clone()) {
-            continue;
-        }
-        for declaration in module_declarations(&files[&file]) {
-            if let Some(found) = declared_module_files(&file, &declaration)
-                .into_iter()
-                .find(|candidate| files.contains_key(candidate))
-            {
-                pending.push(found);
-            }
-        }
-    }
-
-    for file in files.keys().filter(|file| !reached.contains(*file)) {
-        let (directory, name) = file.rsplit_once('/').unwrap_or(("", file));
-        violations.push(if directory == "tests" {
-            format!(
-                "{file}: a top-level test file is never compiled; move it into a declared \
-                 target's directory and declare it in that target's main.rs"
-            )
-        } else if name == "main.rs" {
-            format!(
-                "{file}: an undeclared test crate root; add it to an existing target, or \
-                 declare a [[test]] for a new execution contract"
-            )
-        } else {
-            format!("{file}: no declared test target compiles this module; declare it with `mod`")
-        });
-    }
-    violations
-}
-
-fn collect_test_sources(
-    crate_root: &Path,
-    directory: &Path,
-    files: &mut BTreeMap<String, String>,
-) -> std::io::Result<()> {
-    for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            if !path
-                .file_name()
-                .is_some_and(|name| DATA_DIRECTORIES.iter().any(|data| name == *data))
-            {
-                collect_test_sources(crate_root, &path, files)?;
-            }
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            let relative = normalized(path.strip_prefix(crate_root).unwrap_or(&path));
-            files.insert(relative, fs::read_to_string(&path)?);
-        }
-    }
-    Ok(())
-}
 
 #[test]
 fn every_test_source_is_compiled_by_a_declared_target() {
     let cli_root = biscuit_test_harness::manifest_dir!();
     let manifest = fs::read_to_string(cli_root.join("Cargo.toml")).expect("read Cargo.toml");
-    let mut files = BTreeMap::new();
-    collect_test_sources(&cli_root, &cli_root.join("tests"), &mut files).expect("scan tests/");
+    let files = collect_test_sources(&cli_root).expect("scan tests/");
 
     // Non-vacuity: the walk read the real suite, including a platform-gated
     // module on every host and the shared helpers the roots include by path.
@@ -763,6 +576,21 @@ fn layout_gate_rejects_stray_roots_and_undeclared_modules() {
         modules.iter().map(|v| v.split(':').next().unwrap()).collect::<Vec<_>>(),
         ["tests/common/wrap.rs", "tests/l1/guard/unused.rs", "tests/l1/orphan.rs", "tests/l1/quoted.rs"]
     );
+
+    // A `mod` token inside a macro that never expands compiles nothing, so the
+    // file it names is still unreached.
+    let dormant = layout_violations(
+        MANIFEST,
+        &tree(&[
+            (
+                "tests/l1/guard.rs",
+                "macro_rules! dormant {\n    () => { mod orphan; };\n}\nmod scan;\n",
+            ),
+            ("tests/l1/guard/orphan.rs", "#[test]\nfn case() {}\n"),
+        ]),
+    );
+    assert_eq!(dormant.len(), 1, "{dormant:?}");
+    assert!(dormant[0].starts_with("tests/l1/guard/orphan.rs: no declared"), "{dormant:?}");
 }
 
 #[test]
@@ -783,27 +611,6 @@ fn layout_gate_requires_explicit_targets() {
     assert!(unpathed.iter().any(|v| v == "[[test]] l1: declare its `path` explicitly"), "{unpathed:?}");
     assert!(unpathed.iter().any(|v| v == "[[test]] gone: tests/gone/main.rs does not exist"), "{unpathed:?}");
     assert!(unpathed.iter().any(|v| v.starts_with("tests/l1/main.rs: an undeclared test crate root")));
-}
-
-#[test]
-fn module_declarations_read_attributes_visibility_and_path() {
-    let source = "//! mod in_docs;\n#[cfg(unix)]\n#[path = \"../common/mod.rs\"]\nmod common;\n\
-                  pub(crate) mod helpers;\nmod inline { }\nlet remod = 1;\n";
-    assert_eq!(
-        module_declarations(source),
-        [
-            ModuleDeclaration { name: "common".into(), path: Some("../common/mod.rs".into()) },
-            ModuleDeclaration { name: "helpers".into(), path: None },
-        ]
-    );
-    assert_eq!(
-        declared_module_files("tests/l1/main.rs", &module_declarations("#[path = \"../common/mod.rs\"] mod common;")[0]),
-        ["tests/common/mod.rs"]
-    );
-    assert_eq!(
-        declared_module_files("tests/l1/error_guards.rs", &module_declarations("mod source_scan;")[0]),
-        ["tests/l1/error_guards/source_scan.rs", "tests/l1/error_guards/source_scan/mod.rs"]
-    );
 }
 
 // Test names must not contain `level3_`: the L1 and L2 filtersets exclude
