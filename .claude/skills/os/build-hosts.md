@@ -153,6 +153,21 @@ ZFS without a working clone path; the WSL guest is ext4) a restored artifact is 
 into the store, and the next unwrapped rebuild fails with "output file ... is not writeable"
 (2026-09-09, 89 such files). Ruling per platform: `docs/kache-strategy.md`.
 
+`unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
+`RUSTC_WRAPPER=""` does (measured 2026-09-21):
+
+- `build-linux` has a `/usr/local/bin/cargo` shim ahead of the rustup proxy on
+  `PATH`. It turns kache on for any compile-ish subcommand whose `target/` does
+  not exist yet, which is every fresh private `~/scratch` clone, and leaves an
+  already-set `RUSTC_WRAPPER` (even empty) alone. A capture into a new clone
+  followed by a rebuild after a patch failed with the hardlink error above.
+  Export `RUSTC_WRAPPER=""` (or `KACHE_AUTO=0`) before the first cargo command.
+- The macOS dev host sets `rustc-wrapper = "kache"` in `~/.cargo/config.toml`
+  and puts kache `cc`/`gcc`/`clang` shims (`~/.local/lib/kache/shims`) on
+  `PATH`. A "kache off" timing needs `RUSTC_WRAPPER=""` and those shims removed
+  from `PATH`. Otherwise the second of two "clean" builds restores the first
+  one's dependencies (33.8 s against 114 s for the same package).
+
 ## Remote-process hygiene
 
 - Stopping a local background task does not stop a backgrounded remote

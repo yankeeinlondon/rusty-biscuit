@@ -269,7 +269,7 @@ partition (implicit/explicit tails, owned-flag reclaim after tail start,
 ordering errors, setter-vs-tail classification, owned-surface drift).
 
 Integration tests live in
-`claudine/cli/tests/argv_normalization.rs`
+`claudine/cli/tests/l1/argv_normalization.rs`
 and drive the compiled `claudine` binary through the headline cases plus
 the key pass-through cases (`--version`, root `--help`, `hooks --describe`)
 and the provider-forwarding cases (non-owned flag after/before the file).
