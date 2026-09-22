@@ -2493,7 +2493,8 @@ _readme_files:
 #   just status --recent-all    the same, every package area, grouped
 #
 # The summary sits last because that is the only line `just --list` shows.
-# feature and fix status; --recent / --recent-all narrow to the last 7 days
+# feature and fix status; --recent / --recent-all narrow to the last 7 days,
+# skipping listings dated older than that whose spec says `implemented: true`
 status subject="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2601,12 +2602,20 @@ status subject="":
 # `scope` is `area` for the current package area, `all` for every package area
 # in the repo, each under its own heading and silent when it has nothing.
 #
-# Python rather than find/stat: the listing's *newest* mtime is what decides
-# and what is displayed, and `stat`'s format flags differ between BSD and GNU,
-# so a shell version would not behave the same on macOS, Linux and Windows.
+# Listings dated more than the window ago whose spec frontmatter says
+# `implemented: true` are skipped: another spec's implementation touching
+# their files is reporting noise, not activity.
+#
+# "Touched" comes from git, not filesystem mtimes: `git worktree add` and
+# branch checkouts rewrite mtimes wholesale, which made every listing in a
+# fresh checkout report as recent. A file counts when a commit on HEAD touched
+# it inside the window, or it is dirty/untracked with an mtime inside the
+# window.
 _status_recent scope="area":
     #!/usr/bin/env python3
+    import datetime
     import os
+    import re
     import subprocess
     import sys
     import time
@@ -2623,8 +2632,16 @@ _status_recent scope="area":
     CYAN = "\033[36m"
 
     now = time.time()
+    today = datetime.date.today()
     cutoff = now - RECENT_DAYS * 86400
     window = "last " + str(RECENT_DAYS) + " days"
+
+    root = sniff("root")
+    if not root:
+        done = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+        )
+        root = done.stdout.strip() if done.returncode == 0 else os.getcwd()
 
     def sniff(*args):
         try:
@@ -2634,6 +2651,15 @@ _status_recent scope="area":
         except OSError:
             return ""
         return done.stdout.strip() if done.returncode == 0 else ""
+
+    def git(*args):
+        try:
+            done = subprocess.run(
+                ["git", "-C", root, *args], capture_output=True, text=True
+            )
+        except OSError:
+            return ""
+        return done.stdout if done.returncode == 0 else ""
 
     def age(mtime):
         secs = max(0, int(now - mtime))
@@ -2646,6 +2672,33 @@ _status_recent scope="area":
     def hyperlink(path, label):
         target = "file://" + os.path.abspath(path)
         return "\033]8;;" + target + "\033\\" + label + "\033]8;;\033\\"
+
+    LISTING_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
+
+    def listing_date(name):
+        match = LISTING_DATE.match(name)
+        if not match:
+            return None
+        try:
+            return datetime.date.fromisoformat(match.group(1))
+        except ValueError:
+            return None
+
+    def implemented(listing_dir):
+        spec = os.path.join(listing_dir, "spec.md")
+        try:
+            with open(spec, encoding="utf-8", errors="replace") as handle:
+                if handle.readline().strip() != "---":
+                    return False
+                for line in handle:
+                    stripped = line.strip()
+                    if stripped == "---":
+                        return False
+                    if stripped.startswith("implemented:"):
+                        return stripped.split(":", 1)[1].strip().lower() == "true"
+        except OSError:
+            return False
+        return False
 
     # Every cell is padded on its own so `·` and `ago` line up down the whole
     # report, not just within one heading: (name, count, unit, age).
@@ -2660,6 +2713,16 @@ _status_recent scope="area":
                 continue
             for entry in os.scandir(base):
                 if not entry.is_dir() or entry.name.startswith(("_", ".")):
+                    continue
+                # Excluded only when BOTH hold: the dated name is older than
+                # the window, and the spec says `implemented: true`. Either
+                # alone keeps the listing in the report.
+                started = listing_date(entry.name)
+                if (
+                    started is not None
+                    and (today - started).days > RECENT_DAYS
+                    and implemented(entry.path)
+                ):
                     continue
                 count = 0
                 newest = 0.0
