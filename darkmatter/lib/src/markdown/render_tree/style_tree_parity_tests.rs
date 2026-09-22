@@ -2,7 +2,7 @@
 //! item 6 / acceptance criterion 5,
 //! `renderable/features/2026-06-30-style-everywhere/spec.md`).
 //!
-//! The sibling integration suite `tests/style_frontmatter_parity.rs` proves the
+//! The sibling integration suite `tests/l1/style_frontmatter_parity.rs` proves the
 //! frontmatter *parser + policy* is correct: it renders a `from_frontmatter`
 //! [`DarkmatterPage`] and a hand-built [`ComponentPolicy`]
 //! [`DarkmatterPage`] and asserts the two match. Both sides funnel through the
