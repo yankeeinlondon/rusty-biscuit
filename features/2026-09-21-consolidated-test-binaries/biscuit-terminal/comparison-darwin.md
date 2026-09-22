@@ -1,0 +1,126 @@
+# Identity comparison: identical
+
+## `biscuit-terminal`
+
+Migration manifest applied: yes
+
+| Host | Feature set | Selector | Present | Selected | Excluded | Ignored | Differences |
+|---|---|---|---:|---:|---:|---:|---|
+| darwin | `browser-tests` | `L1` | 2866 | 2810 | 54 | 2 | none |
+| darwin | `browser-tests` | `L2` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `L3` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `browser` | 2866 | 54 | 2810 | 2 | none |
+| darwin | `browser-tests` | `override-ci-0` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-1` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-2` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-3` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-4` | 2866 | 82 | 2782 | 2 | none |
+| darwin | `browser-tests` | `override-ci-5` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-6` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-7` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-ci-8` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-0` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-1` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-2` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-3` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-4` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-5` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `override-default-6` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `real` | 2866 | 0 | 2864 | 2 | none |
+| darwin | `browser-tests` | `sanity` | 2866 | 2810 | 54 | 2 | none |
+| darwin | `image` | `L1` | 3000 | 2945 | 53 | 2 | none |
+| darwin | `image` | `L2` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `L3` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `browser` | 3000 | 53 | 2945 | 2 | none |
+| darwin | `image` | `override-ci-0` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-1` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-2` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-3` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-4` | 3000 | 81 | 2917 | 2 | none |
+| darwin | `image` | `override-ci-5` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-6` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-7` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-ci-8` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-0` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-1` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-2` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-3` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-4` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-5` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `override-default-6` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `real` | 3000 | 0 | 2998 | 2 | none |
+| darwin | `image` | `sanity` | 3000 | 2945 | 53 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `L1` | 3005 | 2945 | 58 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `L2` | 3005 | 2 | 3001 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `L3` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `browser` | 3005 | 56 | 2947 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-0` | 3005 | 2 | 3001 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-1` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-2` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-3` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-4` | 3005 | 84 | 2919 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-5` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-6` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-7` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-ci-8` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-0` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-1` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-2` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-3` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-4` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-5` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `override-default-6` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `real` | 3005 | 0 | 3003 | 2 | none |
+| darwin | `image+terminal-tests+browser-tests` | `sanity` | 3005 | 2945 | 58 | 2 | none |
+| darwin | `none` | `L1` | 2863 | 2810 | 51 | 2 | none |
+| darwin | `none` | `L2` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `L3` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `browser` | 2863 | 51 | 2810 | 2 | none |
+| darwin | `none` | `override-ci-0` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-1` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-2` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-3` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-4` | 2863 | 79 | 2782 | 2 | none |
+| darwin | `none` | `override-ci-5` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-6` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-7` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-ci-8` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-0` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-1` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-2` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-3` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-4` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-5` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `override-default-6` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `real` | 2863 | 0 | 2861 | 2 | none |
+| darwin | `none` | `sanity` | 2863 | 2810 | 51 | 2 | none |
+| darwin | `terminal-tests` | `L1` | 2865 | 2810 | 53 | 2 | none |
+| darwin | `terminal-tests` | `L2` | 2865 | 2 | 2861 | 2 | none |
+| darwin | `terminal-tests` | `L3` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `browser` | 2865 | 51 | 2812 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-0` | 2865 | 2 | 2861 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-1` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-2` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-3` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-4` | 2865 | 79 | 2784 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-5` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-6` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-7` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-ci-8` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-0` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-1` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-2` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-3` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-4` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-5` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `override-default-6` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `real` | 2865 | 0 | 2863 | 2 | none |
+| darwin | `terminal-tests` | `sanity` | 2865 | 2810 | 53 | 2 | none |
+
+Platform-absent:
+
+- `browser-tests`: not-evaluated (hosts: darwin) — captures from one host only; platform-absent needs the other hosts' captures
+- `image`: not-evaluated (hosts: darwin) — captures from one host only; platform-absent needs the other hosts' captures
+- `image+terminal-tests+browser-tests`: not-evaluated (hosts: darwin) — captures from one host only; platform-absent needs the other hosts' captures
+- `none`: not-evaluated (hosts: darwin) — captures from one host only; platform-absent needs the other hosts' captures
+- `terminal-tests`: not-evaluated (hosts: darwin) — captures from one host only; platform-absent needs the other hosts' captures

@@ -1,0 +1,3 @@
+build-linux, private --shared clone at beca6c368 + working-tree patch, RUSTC_WRAPPER="" KACHE_AUTO=0
+cd biscuit-terminal && INSTA_UPDATE=no just test --no-fail-fast   # library (--features image) + CLI, Level 1
+     Summary [   3.232s] 3257 tests run: 3257 passed, 55 skipped
