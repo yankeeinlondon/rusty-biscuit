@@ -1,0 +1,1013 @@
+{
+  "kind": "consolidation-snapshot-mapping",
+  "moved": [
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__condition__eval.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__condition__eval.snap",
+      "sha256": "5dee462596cb76b0a6b5072abae4c2318d0bab37f00e2102136f6bf2613e5c8a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__condition__parse.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__condition__parse.snap",
+      "sha256": "ed33fb48741591cc374858943caa557c0415e92d569f371c8ca7c96edf0d8afc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__deferred_set__invalid_assignment.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__deferred_set__invalid_assignment.snap",
+      "sha256": "4a41a0d3e2068cd17c5af729516d48fba8f09ddaea2bec0f7677366acc5d3994"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__deferred_set__reassigned_property.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__deferred_set__reassigned_property.snap",
+      "sha256": "5c1adf796f1f63ca414176139176c5106e67db0583dbef764f3d5db9ed146778"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__empty_source.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__empty_source.snap",
+      "sha256": "742afe0787d78898f8962d8f6183843b0d82da0984763b08468921e277b65f50"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_decoding.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_decoding.snap",
+      "sha256": "c97ddcf7b48e62e368247a066a8655e60777a55527e6f17259cbadfe816139bf"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_fetch_priority.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_fetch_priority.snap",
+      "sha256": "26005bf98a6dc5756edfd719da2e0c7b95b898d700e92f5d85e183ae438feec2"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_loading.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_loading.snap",
+      "sha256": "5e596817fb88c89be7ac260b76368c21dbba4530cd4f412eb540c34423b354fa"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_referrer_policy_no_match.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_referrer_policy_no_match.snap",
+      "sha256": "92d44d9670ea892a4f6f5e6e4b97325dfc08e58417eb86e258a1c9aa2f79d9a9"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_referrer_policy_suggests.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_referrer_policy_suggests.snap",
+      "sha256": "e7a64103622183aef407cf6c8c5e407ecda5db8b17dd9bc63be0abd5022ca3ba"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_style_delegates.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_style_delegates.snap",
+      "sha256": "7c4e93b15cbde65c943e531defe182a4c8ee364664fb955b19b282e721c0a1a7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_html.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_html.snap",
+      "sha256": "8a2a0741d7f1ea5e4850d509ea528a0d0e8052b9aed4deeb516823ea97443faf"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_markdown_with_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_markdown_with_context.snap",
+      "sha256": "dee286e3ac7fbf53f5a2ea8f918d09d73f7623f75c6d077580cc92e31411a17f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_markdown_without_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_markdown_without_context.snap",
+      "sha256": "6afb1d2111ef9c88697c011aadbbfb78234ad14ba50075371b53bfc342ed478c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__missing_source.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__missing_source.snap",
+      "sha256": "2a072bf71385999916460f7db9fb7a12d46de67b8d7cf4ee40e893b6eb7f9e30"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__unrecognized_format.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__unrecognized_format.snap",
+      "sha256": "c5967139e3206a994d2252bafb2c2e5870bed7b533d020774854001619808880"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__empty_href.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__empty_href.snap",
+      "sha256": "c1c538523c471b6c13ae5b11ec975cad4d4076b6845c396cffc67724e2ab9da3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__invalid_style_delegates.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__invalid_style_delegates.snap",
+      "sha256": "faffcdfbd0a4ce79229aa3ee8da0f747d69802a86d03db509a839b33078c3977"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__invalid_target.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__invalid_target.snap",
+      "sha256": "ce71f19fda0d2830c3397f4d5387f32e4f579f946aa0fb8872f5308cb7cd2a8e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_html.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_html.snap",
+      "sha256": "2ace071300b2d3a2a5b54c8bc2da3d8dcaa86d0889ef9cab4f7bb50e716f308b"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_markdown_with_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_markdown_with_context.snap",
+      "sha256": "4928137b3cc699801665b8fcb6bcfe2e82e09451786be9f2327dc1081b8ddb6e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_markdown_without_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_markdown_without_context.snap",
+      "sha256": "994a687565671eba3c720c4274304dd5d8f8eb617232981fc72800982231ea0e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__missing_href.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__missing_href.snap",
+      "sha256": "ecec81519825e9e4e3029fb6b4703f4e172424b48e8f52c08926d64787f2419d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__unrecognized_format.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__unrecognized_format.snap",
+      "sha256": "4f5352a3c1728dae7a6e0d363babbe1dd65c758e9ab0d1ee44c21038b7e25301"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap",
+      "sha256": "a1a9eefe4a68de411fdd1f55a178e1c6884aff8b8e390d4d05940532266f3adc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_missing_required_renders_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_missing_required_renders_block.snap",
+      "sha256": "572b504df5bff2076deaa03021b8a44ae5d594f8b1fb3c1bbb770a566caebd88"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_multiple_problems_renders_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_multiple_problems_renders_block.snap",
+      "sha256": "700461c1474b461e187ee5795ed10221ce6a7b1bd45c38d402fcff259d5bc6fd"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_preparation_failure_renders_summary.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_preparation_failure_renders_summary.snap",
+      "sha256": "a1986f0c13ebdfa47387a1c0d7a8d325a8a3af7e2698f0eee80889426e51696b"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_preparation_failure_with_description_renders_summary.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_preparation_failure_with_description_renders_summary.snap",
+      "sha256": "ead4399cf579e784a1d66b3d26b8f8d7bdb63c5a7fd07b74dbd0b48e2a15ebc3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_root_union_arm_index_renders_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_root_union_arm_index_renders_block.snap",
+      "sha256": "117c79c0614cd24a97dde9020c1ce14531f0be38d357c3d84160858fc3339055"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_wrong_type_renders_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__markdown_error__schema_validation_wrong_type_renders_block.snap",
+      "sha256": "bddd96765312889e9cb7c963b196e0c742694f0df3f00b2907fbfc9f1f91face"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__condition_delegates.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__condition_delegates.snap",
+      "sha256": "31c8728557694b74270ddded11759b82f06c9f4d9a51fbe64744cac24dd7e9cb"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__parse_directive.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__parse_directive.snap",
+      "sha256": "82989209225a0ccba33f1950d541717a8a05b129177e43fd5407328c950bba24"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__unmatched_end.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__unmatched_end.snap",
+      "sha256": "89a9e4f4dc167b863e6495d8399f3d0e761e1046c246c6ac9665e59897f705bd"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__unterminated_block.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__unterminated_block.snap",
+      "sha256": "d651e9d94482f0e3aa45f28ea53c106a9c1d15561f777542628d12366d567ce8"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__compose_delegates.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__compose_delegates.snap",
+      "sha256": "6cf0632cf2d3e82fdfea97166ad8f7f78d5f5aa8b038bff91cf83644b6c33596"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__file_reference.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__file_reference.snap",
+      "sha256": "8ace1c87a3c245a975ce697cfe6ebf2e883645338d74d745cedb6b4f3b38c694"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__io_error.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__io_error.snap",
+      "sha256": "6050618b7b06b51dd37c22242984cb897a382e8d0f73397ae0975c041ddb79f8"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__missing_source_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__missing_source_context.snap",
+      "sha256": "a2eae9b53929652e8d7932a107705c91c587dca5eb7e899389839317499cd00c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__parse_directive.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__parse_directive.snap",
+      "sha256": "26f67660b70cb82fe18132f217b860131e93830c905176407451a98d650d793e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__url_error.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__url_error.snap",
+      "sha256": "b5d9fc413f28945c27359e66e8bd6084da1b946d9404a19652d698f3720bdcef"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__validation.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__validation.snap",
+      "sha256": "b88821e410b32f6c1e3abb5dccee2484127a53ce53a48a02cf745d7dea6e739c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_color.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_color.snap",
+      "sha256": "e4ef21094602fef0cbc8124fbbd3e319dc1a5b3641d9b2bbd5ad8e4a9b891583"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_custom_property.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_custom_property.snap",
+      "sha256": "7ae687928f84abe125beabde3b7b9445d83f7ab632601f633be669f008f4c718"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_declaration.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_declaration.snap",
+      "sha256": "d0963d5485891d27d1b7a3d24c5278d62b468ad6c46a8136accc98c01ad69221"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_integer.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_integer.snap",
+      "sha256": "2beaea2fc10bdaeadfbbd05669e885cce267f1fdbd6c2a65675dcf67a20ee748"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_multi_sizing.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_multi_sizing.snap",
+      "sha256": "3b97c844806953ff995747d49ba4b3b292583e9407cda79497d6cbf0c91b5bdc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_property_name.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_property_name.snap",
+      "sha256": "e4749a740f0e539ff3552b5853b05724896d53ef81239d84f995f0f14aa66c23"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_raw_value.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_raw_value.snap",
+      "sha256": "803acd441ad6377b8c17282d19f6e35779b16fb804b21bb573c37517b57235a3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_sizing.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_sizing.snap",
+      "sha256": "979c533b268b51db6a7ec53b67faf5ee17502feba9fe9c0aaa4dbee850f09c1e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__property_value_type_mismatch.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__property_value_type_mismatch.snap",
+      "sha256": "5332d190448eebdce86e816c3270f1ff51d7f0aa6693bac8a88cfd2bf1556e03"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__condition_eval.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__condition_eval.snap",
+      "sha256": "527f70b79fa0ea6c2d6d7a253e2efae93fb0fc2daad53d9573646679c221dead"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__condition_parse.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__condition_parse.snap",
+      "sha256": "540a35348f81c11d09b8696e0cdd2973cfede1c9a51f94315463c255a1da3346"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__cycle_detected.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__cycle_detected.snap",
+      "sha256": "6c51e8e4b6a87fcf983516e99124e693a07e27d9612c88f251d2df4e69274f72"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__file_reference.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__file_reference.snap",
+      "sha256": "be33e234fba3bc7edcdac814d1c702aac4c2f7f1f2c8f30e1b99bedd90104347"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_frontmatter_assignment.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_frontmatter_assignment.snap",
+      "sha256": "4702f3b006a6d67b4ff2a231e32d373d4dfa3ca8cc775c852828ee5c2cff8654"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_reassigned_frontmatter_property.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_reassigned_frontmatter_property.snap",
+      "sha256": "de11c55e7d606c2684810fbc049c21cd29c94b6fbf750b750ae4e53e96b5503e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_reference.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_reference.snap",
+      "sha256": "113a0e073130df0130ee9a633cfee1d6c37bff7d4f20f01ad46db1b58be260d6"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__io_error.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__io_error.snap",
+      "sha256": "c9ed1825c024846cfe0074cddee90d86a48a8cfcbb31324bb0e68e22f2208330"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__json_error.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__json_error.snap",
+      "sha256": "87d57b041e2db1f1620e6a7d4e4b5a2d5782d3ac892f02ae41699577dd03a6fc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__max_depth_exceeded.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__max_depth_exceeded.snap",
+      "sha256": "26bcc7fb8881bb0352ad53167f72cc2e7600b5e79a7798eba31d095b0962d9a2"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__missing_source_context.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__missing_source_context.snap",
+      "sha256": "1b650947e26eeaf93bd5ef849ea847b63f8e131ab799064ec9ce91c81196bd59"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__missing_source_context_markup.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__missing_source_context_markup.snap",
+      "sha256": "74b802273b7a5fe89b8b71c3916833798d35b7817077bb9ac6c1726118861a0d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__non_text_code_source.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__non_text_code_source.snap",
+      "sha256": "9d5b5c776e2b72c0943e51f888f8dbf422ce9266846134869929a6b85512b797"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__parse_directive.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__parse_directive.snap",
+      "sha256": "8ed6ff3f68a9e3a3e0616a9d33469140190f12728951c5ecccc12383cafe8f2f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__relevel.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__relevel.snap",
+      "sha256": "74eb0d1078299f0636ad024c4cc96b3144a25f0d52e92679325b651004b0d65c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_file_type.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__unsupported_file_type.snap",
+      "sha256": "19620987c5b48cac3210add316abe67620c60879ac8bcafc2027ccd7c4f04fc6"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_reference_type.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__unsupported_reference_type.snap",
+      "sha256": "395a11b3e6a9d9dd773a165f57061aa9687429f188fe53ffd879f73bf42686f6"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_reference_type_markup.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__unsupported_reference_type_markup.snap",
+      "sha256": "55300d07f65050ce5ad07b7cd30c4874c0de51d98312d543536a1baeb5949e28"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__url_execution_disabled.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__url_execution_disabled.snap",
+      "sha256": "f52c96c317284859c17398bf15b46a9d01bf6e74142d3f2829871176a1df3ac3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__url_parse_error.snap",
+      "old": "darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__url_parse_error.snap",
+      "sha256": "5eee8bbccb499f021ef5988ed32697a662fb3e00387e8a21b7529e7c1e73ea9a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_block_quote_width_and_left_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_block_quote_width_and_left_browser.snap",
+      "sha256": "d9a5896289570482f69a3c86ad10d67ac215b2f0fde221c29bb327df21a3ae4c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_block_quote_width_and_left_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_block_quote_width_and_left_terminal.snap",
+      "sha256": "0ed985a3fd6e4325b1bc97af1679e3fe4c89f994657c4dd77c31d934f27a775d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_centered_table_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_centered_table_browser.snap",
+      "sha256": "cd7fa6d1167fdc646b9096f11561de69972e028046da382f696a3ba904b6f860"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_centered_table_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_centered_table_terminal.snap",
+      "sha256": "75a320d125526d1bc8c8c6bf6e9f05117ae826ce6ef1369220f65d29b256e5bf"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_list_left_margin_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_list_left_margin_browser.snap",
+      "sha256": "b190a5436d92ea49bd6d738040aa52cdd4ea4737ab0f32e5a2d6c3885afbad2a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_list_left_margin_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_list_left_margin_terminal.snap",
+      "sha256": "14554cadecd268a37f1a6eff419ad8cbf562ac7af3005937a3d1f1ba3ade771e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_background_pronounced_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_page_background_pronounced_browser.snap",
+      "sha256": "9d88bf6d7ccd7d054e8decc58fdeb6f1ffa4ea61e60b8835f082df33ff342ef3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_background_pronounced_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_page_background_pronounced_terminal.snap",
+      "sha256": "1ea93f77652e33cbe39bb5f1c6f96e1dc0e95b27178cff5f3b66d0b0d178e926"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_page_margin_and_padding_browser.snap",
+      "sha256": "b5e451d4f43e058fcb6c10a8d6b8fb3cec5313fbcc0b937a0879c97792fc2639"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_page_margin_and_padding_terminal.snap",
+      "sha256": "6ebe84bef4870c9a49a24d16bb88e3158f92a90e15b266c99907bd6f02b62d84"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_table_max_width_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_table_max_width_browser.snap",
+      "sha256": "def199b54aa651965aa327b8a39c58c4ae46a1ae6cee7d2a9fa08138c34d459a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_table_max_width_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/cutover_reference__ref_table_max_width_terminal.snap",
+      "sha256": "5534ed46f808f9ee8887fd48c579f78d375d4f154b9526b6e2858bfd0e8ec25d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_all_attributes.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_all_attributes.snap",
+      "sha256": "fefd435947b81178f993d8f0e7ab78dcddafd3c8a2c9d4a9c95cb392821fd91b"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_centered_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_centered_waves.snap",
+      "sha256": "15567566ca75f8b6ff8351dfeffae42fc7278650a5da77808c664ebe4e8fd7df"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_complex_document.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_complex_document.snap",
+      "sha256": "db4047b54d4606b5ba7270992f0821399864ebed8a28918fcee5752e3a553e1f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_custom_color.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_custom_color.snap",
+      "sha256": "20c38b7b8c29b9b810e601dc5b0b9e814c823d6f613991f7f118b967001e1c90"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_custom_width.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_custom_width.snap",
+      "sha256": "1db9973c7674414f71019cf33b59b02500be6dcb16bc1b5b5d601788bb4f075c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_dashes.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_simple_dashes.snap",
+      "sha256": "119b4a41725f70cae1df3c7ef5cae26f3408f6547402ba5e7c6e70ebba6ff1a0"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_dots.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_simple_dots.snap",
+      "sha256": "44d1bae7fbeb7f77fbad17f65b76674c497316a0bc264b0192bdd566d39f3829"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_simple_waves.snap",
+      "sha256": "15567566ca75f8b6ff8351dfeffae42fc7278650a5da77808c664ebe4e8fd7df"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_thick_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__html_thick_waves.snap",
+      "sha256": "7f75caf14ff224083d7d5d3e38740724e3a635bc8ab9c5ad84f5be321dedd372"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_all_attributes.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_all_attributes.snap",
+      "sha256": "df051b3ff8a65388edb904220129fbf6be48c2219d47d877ff4f2a0b174abb8f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_centered_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_centered_waves.snap",
+      "sha256": "02ae0410ccaf6037442b56e04a71669710df98407875b01c214ea8b5fc831944"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_complex_document.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_complex_document.snap",
+      "sha256": "d56f1f22955e0349590156a01445b5e233f3a8511778ac4adc9a45060cff5eb7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_custom_color.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_custom_color.snap",
+      "sha256": "2b121842be2e91da1aa6450e917815f09cd2fe86697c58599ded1e1218ff1b1f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_custom_width.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_custom_width.snap",
+      "sha256": "d0d4ec5d2274ab029e881e698fd68e00e4c51736f467d7612c36f30d77ced6e3"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_left_dots.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_left_dots.snap",
+      "sha256": "e43722c740a78e190f2191e237c023ec310c969473c4c7c82e6f84eaf584b131"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_right_dashes.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_right_dashes.snap",
+      "sha256": "728e2af36f0ce22f9336eb7523dde6b9c9f75db0da01713e1b9726c69a32fc88"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_curtain_rod.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_curtain_rod.snap",
+      "sha256": "79baaa3d87d08fd7f3f26c23ef628b401e422c5fdd617bd8599eea80ca2a4af1"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_dashes.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_dashes.snap",
+      "sha256": "264336e67c7b99e44ff6a92a47e4dbe5d359ee39857c18440ef3e6d8682b6ea4"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_dots.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_dots.snap",
+      "sha256": "5307bb927d1bc862a3da7680b9c18d06f3559c3ba58e5a7a3e7e970e72356826"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_inset_line.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_inset_line.snap",
+      "sha256": "bb802bba873de6fb4d67a021d99743674287c1dce31b219c7b4b9cfd3fa278a4"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_line_circle.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_line_circle.snap",
+      "sha256": "adbab5ffb577d86e87985d88458159d81c06424476033e305c0bfe41912fbf44"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_line_star.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_line_star.snap",
+      "sha256": "e4846bab2534b63413e3d50930034346f218175f78790a0061674254bb77e779"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_simple_waves.snap",
+      "sha256": "3aa416f45a5a5a651c27aed05eab185d190c9e099d07959ffb47aa2d29922815"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_thick_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_thick_waves.snap",
+      "sha256": "3aa416f45a5a5a651c27aed05eab185d190c9e099d07959ffb47aa2d29922815"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_thin_dots.snap",
+      "old": "darkmatter/lib/tests/snapshots/horizontal_rule_snapshots__tests__terminal_thin_dots.snap",
+      "sha256": "5307bb927d1bc862a3da7680b9c18d06f3559c3ba58e5a7a3e7e970e72356826"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__align_center.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__align_center.snap",
+      "sha256": "8e31e21cfca87c95ecc54748b9b012627fb393b44838ce48f0bdda24543386ab"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__align_right.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__align_right.snap",
+      "sha256": "8e31e21cfca87c95ecc54748b9b012627fb393b44838ce48f0bdda24543386ab"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__baseline.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__baseline.snap",
+      "sha256": "8e31e21cfca87c95ecc54748b9b012627fb393b44838ce48f0bdda24543386ab"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__bottom_margin_2.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__bottom_margin_2.snap",
+      "sha256": "8e31e21cfca87c95ecc54748b9b012627fb393b44838ce48f0bdda24543386ab"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__left_margin_4.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__left_margin_4.snap",
+      "sha256": "ae3ddb494e17370ca2c0215ac0b23d6470bbc5f80df9b82673ffcbc7101cc4de"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__left_margin_pct_10.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__left_margin_pct_10.snap",
+      "sha256": "5a579e9efde4fb80f370b3f5adb99d3c8a2b016f26e087c412489c85ce3b0f01"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__right_margin_4.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__right_margin_4.snap",
+      "sha256": "e952da5aa2bfd8f614e332bb5af7b69c5b83cbae673439f3a1235f821fb2e09e"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__top_margin_2.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__top_margin_2.snap",
+      "sha256": "b8dd1e99b71ca1017eb3dbbadd6c2ab8c8bdbf42ccabf1b96996035a5c4cfa1c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__width_120.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__width_120.snap",
+      "sha256": "6d30ce7f2946d5fd7928efff77bddb60fbad8a6c1cdb3fc22e9de254b1031f07"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__width_40.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__width_40.snap",
+      "sha256": "ab4744888c7473622dd550791f7c3ec582e8e4a57f8f2925a0e1d0c63a17baa7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__word_wrap_prose.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__word_wrap_prose.snap",
+      "sha256": "8e31e21cfca87c95ecc54748b9b012627fb393b44838ce48f0bdda24543386ab"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__end_to_end_example_snapshot.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_snapshots__end_to_end_example_snapshot.snap",
+      "sha256": "b655df46a3cb379b8e76bd466f3f660d9417f495482db9caffcfdb28d43bd17a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__pronounced_background_snapshot.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_snapshots__pronounced_background_snapshot.snap",
+      "sha256": "6685f02e260ffb008230b994d05d930c8d0ed4f540debcf49f5d9e060f12b884"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__zero_config_prose_snapshot.snap",
+      "old": "darkmatter/lib/tests/snapshots/layout_snapshots__zero_config_prose_snapshot.snap",
+      "sha256": "4bfafd2639a0ab4021d5efd2f9191dd2372f1db525db594263caeb170db2806d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_all_attributes.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__html_all_attributes.snap",
+      "sha256": "29a863ba29c12c17b27ddf525a9bb0489e5135203076fb71b71b6a70529ac5c7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_kind_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__html_kind_waves.snap",
+      "sha256": "d71225ee0579bbb6e28b938fdadc7aa5e42435fae47dcb076df5290db0fb1e79"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_mark_dim_hr.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__html_mark_dim_hr.snap",
+      "sha256": "1f5af99cd2a01c66183cc1ed3f7787943e22409a94e8f71d04f6d6bbddb31193"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__html_waves.snap",
+      "sha256": "9fd8e71e4c126a8455e4272ef4c31488f4861072a57682de4074f201e690ca8b"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_all_attributes.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__markdown_all_attributes.snap",
+      "sha256": "f359f0e53e1947da25e962dcdddbdc45adda0bdb4b9dfe4659136f9dff25d8b7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_kind_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__markdown_kind_waves.snap",
+      "sha256": "f359f0e53e1947da25e962dcdddbdc45adda0bdb4b9dfe4659136f9dff25d8b7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_mark_dim_hr.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__markdown_mark_dim_hr.snap",
+      "sha256": "604deb1574e2cb8b1d144c24a8b6e4317b240ddbc32bcd2ed433d440bd4ff881"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__markdown_waves.snap",
+      "sha256": "f359f0e53e1947da25e962dcdddbdc45adda0bdb4b9dfe4659136f9dff25d8b7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_all_attributes.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__terminal_all_attributes.snap",
+      "sha256": "dcd9ff328daadaba00dd6a9194e78b496c6c8058528a01e57e14dccf6324bb61"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_kind_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__terminal_kind_waves.snap",
+      "sha256": "557afecef4e9d0ccaa29a8c9fa658c4aa30e7c65038b377c2a191456e57592e8"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_mark_dim_hr.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__terminal_mark_dim_hr.snap",
+      "sha256": "4e40cdf65883d5210c86778bef848cdd2a12fa76b0b50157bb808ac4561623ad"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_waves.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_hr_snapshots__terminal_waves.snap",
+      "sha256": "557afecef4e9d0ccaa29a8c9fa658c4aa30e7c65038b377c2a191456e57592e8"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__code_block.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__code_block.snap",
+      "sha256": "397c1068396a4052e74588261cde2fc585eb4c5429db1fe8ae1ff8c0405a2b8c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__document_json_surface.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__document_json_surface.snap",
+      "sha256": "e96d0bb8cc5064c13a938d3544138b0a685eafd8263ec5ed81632e53e0b7f82a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__frontmatter.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__frontmatter.snap",
+      "sha256": "293cb70316ff23cefceeaee28d4f4825a5a635f5b50ec4d60d3efe7dbe8783f4"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__headings.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__headings.snap",
+      "sha256": "d61969113a048a367c529d47ddb795bef6eb5448d857af0e0731e40b6567579c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__html.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__html.snap",
+      "sha256": "b70e49ea7f6beac7367d8a1f92163b28b205573ea4c64138e8a80b72af100eea"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__inline_styles.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__inline_styles.snap",
+      "sha256": "43371d1b83134d42c8c7b5c6fc1f08a7a15c877dfc7a663bb2edb1cfa2a98476"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__links_images.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__links_images.snap",
+      "sha256": "a4f6354bbf1c775facf46a36b904b3d7f0633e905ed13759f52cb2b7cb557658"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__lists.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__lists.snap",
+      "sha256": "5f61c166668940b8e6c908b181971e8eb43029b29df4d6b29e9341da92ca83f5"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__paragraph.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__paragraph.snap",
+      "sha256": "1c771012fe7e78db26f3f03f74a7d0d91302ec3c7d8d65a709fc731a4bc84edd"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__table.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__table.snap",
+      "sha256": "4f6ab977ba9680c1c912ca5a2772465b5a039ec075ca1268feb32298042ce899"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__task_list.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__task_list.snap",
+      "sha256": "2ee031da384c0510581a5aff99f17015347873b7f2bb776c93f74d48951e5a8a"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__unsupported_math_or_definition.snap",
+      "old": "darkmatter/lib/tests/snapshots/render_tree_roundtrip__unsupported_math_or_definition.snap",
+      "sha256": "9d0204fb2754bffb0828d528cd3c602e915b9f6efcdb214f40f8e414a7753ac1"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap",
+      "sha256": "26f8f6bd1e2db686118c017f61e2a093c315f97c620dec3872a2f1d7f941dfce"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_array_with_description.snap",
+      "sha256": "c895a702f71bcea397bfb565a5bcea3d0991498affcb043532aef524be2f5509"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_any.snap",
+      "sha256": "e8f1f410234640be19263496c1fc5eb1d03ba519aa48a878ba2cfdfba4f95c83"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_boolean.snap",
+      "sha256": "a032f3cf6644ec12c35cafb2eb6d2b53fe64d6c45ba82960f164ece59ca5edfc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_boolish.snap",
+      "sha256": "f73c691d040d88f7d846226d48e9d122552866f0fb4355575475a287bed4fb85"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_date.snap",
+      "sha256": "c847ed3113ac56d0e7d5339009a17df6f90c3c832c64b02820e4ff0ad104b7e5"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_datetime.snap",
+      "sha256": "8e6db6edb80687d3f0c71f1eb87ab150311e942e57181d5385666fac1d654c56"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_email.snap",
+      "sha256": "86b55ce4cd890f89472ca1257f5e80ad646b5b8c79e3e281415627a44c69a8cf"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_enum_members.snap",
+      "sha256": "8657521a0732def69a3400f23aa80150c9a16e0ac80dd6b503fdc960b6858bdc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap",
+      "sha256": "d0c78047f4d4e40406f523afd8ff8347d35ff97ea5cb8032fa86cf280d6be6f6"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_file_bare.snap",
+      "sha256": "752c149cd31b26e7ffd581bca843319e3a02096751d06dd4529da8178669ef19"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_file_match.snap",
+      "sha256": "1ec5345b8929033fbec55210f4f89bc4ad08df6f17cb981e636f58ef0d12489f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_number.snap",
+      "sha256": "dfc7b8313717179a3f04d663b67647ef21426ba1c8b25b548e6752ff52b76be0"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap",
+      "sha256": "c1ed6501686e9b49d262faa4de9db20ec376b5599c0d919ce43d6e6dc45212fb"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_numberlike.snap",
+      "sha256": "4e11d6ba0c3aea512dd3c810ba188fb28e0726cef1dcb92c62e415d660fa1c15"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_object.snap",
+      "sha256": "deb82d1fca198a9773f3bebae0df91d04d4ef1ae8e0661d8a471897afe40097d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_string.snap",
+      "sha256": "41eb9d36958cbfb634147d0b923218112e8879a527e249b6afc6af34cbe726cd"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_string_min_max.snap",
+      "sha256": "ad2ea38bbc2ed8a9976948a099edc51e91bb19e5d8c99a8c982c6fe14e2b1691"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_string_not_empty.snap",
+      "sha256": "3c1a47ad794fedde477b560d9141dd09f75fbc5900169618d20f298a79062ddd"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_string_pattern.snap",
+      "sha256": "72867dea60ac0e340a818d1211fe7f3095f9c612695c6706a1afa355ab92b0a1"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_time.snap",
+      "sha256": "a640a3eea06b46cde4bfe86b641dcb4d323e1e427fb69b7e755985a7a1477b65"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_url_bare.snap",
+      "sha256": "d2fe23f0e0c8fe5cb3a9995fcc83f02cd6a259900232def0fe42fd50107bb7ea"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_url_scheme.snap",
+      "sha256": "c226c01926fc765b2811f3ebace2e8f16b8a156045821c701a7b458f27667065"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_atom_with_description.snap",
+      "sha256": "0952273cc3a3089ea89617445381a27aaa978897b6d4213daead4ca1b035d565"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_default_and_required_atoms.snap",
+      "sha256": "ab5bc77d3f1a42cd65fbbe43a7c6389b68e53acbe19485910ccb83f86be160f2"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap",
+      "sha256": "7fdf3ed4d3fe395792e349ebd5c7390d3ae1ed6c2de7fd1f695938e495cf0431"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_full_document_schema.snap",
+      "sha256": "0c797d701aceedcfe0d489b609a50b9fef582a8518ddfb079df2f1baa15da8d7"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_array.snap",
+      "sha256": "696bb56ee59dc0022526246e21aab0e80ce813e21c5ffca82c8b311e7f430ea9"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap",
+      "sha256": "9e60e74b3f9850dd87c942034830bc2e6ff8da82a299029358ae457fb4bab0d4"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_bare.snap",
+      "sha256": "055f3311faade8f05890714d5a22d4add89b5d23ff2d67d6cd3c7405e8edd84b"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap",
+      "sha256": "cd0a8e7cd89c0f931b534a3d1b485c10f77f4c87a26e6e30bd508fee16533cf2"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_empty.snap",
+      "sha256": "f024cebbbf9f321e5a300d6252e46dde85216a5a2b4e0965a512584d9c6e3861"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap",
+      "sha256": "adae7d880d092fe94212e0be7b29d03878136ce38ac9d4b01a0c253429cc4468"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_multi_line.snap",
+      "sha256": "03263e57b2cc10518c09b2ffa7716086c8932b7cec63f2dade0dafd218849323"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_nested.snap",
+      "sha256": "b76f245fa636a780e3fbbfef508df836282f90be5e6ace14b291d95172c0102c"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_inline_object_required_value.snap",
+      "sha256": "179da14846752f76c1eabf7c6c1378933b7cc61a88a7388f60db5a1fdfe679b1"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_property_union_basic.snap",
+      "sha256": "4eb09d3fdb2b9bbda23065ff32bc0e19fa90c3789bc89fd34d57794c53676887"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap",
+      "sha256": "f0a8684ffcd4906d961d1361193220bb786f63d302568605d6bd761b810c0271"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_property_union_hoists_required.snap",
+      "sha256": "eccc5c7b7ddbe723d98b2fb7cc25ece35d66b37cad422a3b9260dfde23200789"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap",
+      "old": "darkmatter/lib/tests/snapshots/schemas_convert_snapshots__snapshot_root_union_inline_only.snap",
+      "sha256": "6f0a3265c961d8548323c8905f6352bc56b20a3e7c592fe79bc02d7e1d980828"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__style_features_phase5__full_page_standalone_document.snap",
+      "old": "darkmatter/lib/tests/snapshots/style_features_phase5__full_page_standalone_document.snap",
+      "sha256": "3b5d6bff50564278a884081e76739a6c1099571803ce535f3dfe1c6d31f4b420"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__style_features_phase5__mermaid_body_only_wrapper.snap",
+      "old": "darkmatter/lib/tests/snapshots/style_features_phase5__mermaid_body_only_wrapper.snap",
+      "sha256": "6d59eb8c1d170e273f9e9f7b6a62316c6d4c702fdd3b8edfd73797e88533a4b6"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap",
+      "old": "darkmatter/lib/tests/snapshots/suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap",
+      "sha256": "4f00cb7fbe0cdf14833700bbc63457a3f2f35781d51aa75e1c00052abae14665"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_current_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_current_browser.snap",
+      "sha256": "faf33925bd92f502ff8b6dc68d3c5ab7f2b4ec941d3c50840d1a5a28ff851fee"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_half_opacity_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_half_opacity_browser.snap",
+      "sha256": "700e82b50078ca0eaed5fffef6a89afeb4e8f8dd35ef4e2c9656ca6864a0b7eb"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_inherit_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_inherit_browser.snap",
+      "sha256": "7ece375574a207d1a50fa01b5fbf40dfa74c339ba7b3f82cd263a3051b71ea44"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_opaque_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_opaque_browser.snap",
+      "sha256": "933ddb66c3448fe03058117c4c6e78e96cc28b332381ccd4f68da7f077de5a67"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_transparent_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_transparent_browser.snap",
+      "sha256": "d9da56aadace964c29ce7abdc112eb310e25a74033d6f8e6fa959f7c37df0c04"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_exact_width_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_hyperlink_exact_width_terminal.snap",
+      "sha256": "5f25aee13a0a087d7eaea5948a1de203b137f3d802e3e92441ef92ea3fefa57d"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_max_width_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_hyperlink_max_width_terminal.snap",
+      "sha256": "139e3efecef0d412d14beae28845ad64ace602d7aa649da2123208824ba4e03f"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_list_item_center_alignment_terminal.snap",
+      "sha256": "999fa2870c854f50e84695deedcdd006ad75b7b56080569318e583954352cf84"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_list_item_right_alignment_terminal.snap",
+      "sha256": "db4ba19450666cbbcb33c6ffa537d9521f8002a1b3ee69fff96faeae5c768155"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_local_image_inline_css_precedence_browser.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_local_image_inline_css_precedence_browser.snap",
+      "sha256": "0c92211fcffb31d3328600e9619b2b4afd4c5aee615614e558902eb4acfb76dc"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_structured_link_attributes_html.snap",
+      "old": "darkmatter/lib/tests/snapshots/tree_features_characterization__char_structured_link_attributes_html.snap",
+      "sha256": "e21849382ab9ae7dfe2fc791396b7498904dff3e03b4bdc71dd5edd53095c240"
+    }
+  ],
+  "package": "darkmatter",
+  "unaffected": [
+    {
+      "path": "darkmatter/lib/src/layout/page/snapshots/darkmatter__layout__page__tests__pronounced_background_snapshot.snap",
+      "sha256": "6e938daba6e0f74992b5c86d1b0a3e46bc8e11b2c740ee52754136039760bf3c"
+    }
+  ],
+  "version": 1
+}
