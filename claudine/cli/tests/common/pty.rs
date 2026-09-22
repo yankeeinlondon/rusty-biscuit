@@ -57,7 +57,7 @@ pub(crate) const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
 /// contract [`answer_pending_dsr`] already honours for the cursor probe.
 ///
 /// The replies are biscuit-terminal's own manufactured pair from
-/// `lib/tests/level1_terminal_osc_cache.rs`: a dark background and a light
+/// `lib/tests/l1/level1_terminal_osc_cache.rs`: a dark background and a light
 /// foreground, i.e. the ordinary developer terminal these tests' styling
 /// assertions were written against.
 const COLOR_QUERY_ANSWERS: [(&[u8], &[u8]); 2] = [
