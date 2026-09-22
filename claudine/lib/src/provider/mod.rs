@@ -29,7 +29,7 @@
 //! MCP, adapters, and configurators is complete: provider-varying *data* is a
 //! [`ProviderInfo`] field, provider-varying *behavior* is a trait method, and
 //! decentralized `match Provider` dispatch is held in check by the unified
-//! dispatch-inventory guard (`claudine-cli/tests/dispatch_inventory.rs`). See
+//! dispatch-inventory guard (`claudine-cli/tests/l1/dispatch_inventory.rs`). See
 //! `docs/topics/provider-metadata.md` for the field-source matrix and the
 //! generation pipeline.
 

@@ -14,7 +14,7 @@
 //!
 //! The counterpart rows proving a coordinator-owned hand-off is still consumed
 //! normally live in [`super::coordinator_adoption`]; the end-to-end wrapper
-//! behavior is `cli/tests/level2_lifecycle_control.rs`
+//! behavior is `cli/tests/level2/level2_lifecycle_control.rs`
 //! (`level2_lifecycle_wrapper_*`).
 
 use super::*;

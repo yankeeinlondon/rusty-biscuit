@@ -1,7 +1,7 @@
 //! Ledger arithmetic, state transitions, and persistence.
 //!
 //! End-to-end enforcement through a real `claudine sequence` lives in
-//! `cli/tests/sequence_budget.rs`.
+//! `cli/tests/l1/sequence_budget.rs`.
 
 use chrono::{DateTime, TimeZone, Utc};
 
