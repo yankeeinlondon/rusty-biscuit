@@ -938,3 +938,77 @@ belong here.
   *predicate extension* side, which the rename-only rule does not
   cover.
 
+- A helper file that is ALSO a test target has its identities claimed
+  by every binary that declared it. In `biscuit-terminal`'s Phase 6
+  (`c63c3861f`), `tests/parity_helpers.rs` was both a test binary
+  (24 unit tests in its `mod tests`) AND a helper that 18 parity
+  modules declared with `mod parity_helpers;`, so each old binary
+  ran its own copy of those 24 tests at
+  `<parity_file>::parity_helpers::tests::*` (432 identities). The
+  migration manifest keeps those identities, so the feat commit
+  keeps the duplicates: `parity_helpers` is an `l1` module and
+  every parity module declares
+  `#[allow(clippy::duplicate_mod)] #[path = "parity_helpers.rs"] mod
+  parity_helpers;`. The `allow` lives only on the 18 copies (the
+  root declaration still lints), `clippy -D warnings` passes, and a
+  comment on the root declaration says why. Deduplicating to
+  `use crate::parity_helpers;` would have removed 432 test
+  identities — a spec §3 behavior change — so it is a deliberate
+  follow-up test change, not a structural edit. The duplicate-copy
+  decision must be recorded in the migration manifest alongside the
+  layout-gate `addition`, because `consolidation.py compare` would
+  otherwise flag the kept copies as unmapped-missing on any
+  dedup-intent mutation. This shape is unique to packages where a
+  helper module's `#[cfg(test)] mod tests` was claimed as part of
+  the consuming test target's identity; do not generalize it as a
+  pattern to copy.
+
+- Promoting a previously feature-gated dep to unconditional
+  `[dev-dependencies]` may add zero crates to the graph. In
+  `biscuit-terminal`'s Phase 6, `test-toolkit` was only an optional
+  `terminal-tests` dependency before; the new L1 layout gate
+  (`tests/l1/test_layout.rs`) needs it under `none` too, so
+  `Cargo.toml` adds `test-toolkit = { path = "..." }` to
+  `[dev-dependencies]`. `Cargo.lock` is unchanged (`--locked`
+  builds pass), because every transitive dep of `test-toolkit` was
+  already built by the test build under the `terminal-tests`
+  feature. The `docs(dependencies.md)` update for the new entry is
+  the audit trail; the lockfile staying put is the verification that
+  the change was purely a dev-dep reclassification. Pre-flight
+  `git diff --cached -- Cargo.lock` (or `cargo check --tests
+  --locked`) after staging the manifest change, before the feat
+  commit lands, catches a forgotten transitive that would otherwise
+  silently grow the test-build graph.
+
+- When a previously conditional recipe branch loses its
+  discriminator, the discriminator-drop is a single-line semantic
+  group that still ships in `docs(<area>):`. In `renderable/justfile`
+  `drift-report` (Phase 6, `f3c52bdd8`), the recipe had a per-crate
+  `case` branch added in Phase 4 when only darkmatter had
+  consolidated; biscuit-terminal's Phase 6 collapse lets the recipe
+  drop the branch and use `--test l1 render_comparison::` for both
+  crates. The body of the `docs(renderable):` commit says the
+  *unification* explicitly, not just "refreshed paths", so the
+  refactor is visible in `git log -p -- renderable/justfile` rather
+  than looking like a routine selector tweak. A multi-area recipe
+  whose per-crate branches can never collapse (because the contracts
+  still differ) stays branched, and that is fine.
+
+- `docs(<area>):` may appear twice in one batch even when there is
+  only one package in scope, split by audience. Phase 6 dispatched
+  both `a1b665902 docs(biscuit-terminal): refresh test path
+  references in source-code comments` (2 lib `//!` paths) and
+  `d8af9fc12 docs(biscuit-terminal): refresh test path references
+  in area docs` (README + `docs/dependencies.md`) in parallel
+  Wave 1. The two commits had disjoint paths and identical scope;
+  the split is the same "audience, not file type" rule the Phase 3
+  worked example records for two `docs(claudine):` commits in one
+  phase. The shape generalizes: any package whose consolidation
+  touches both `lib/**` inline `///` doc-comments AND
+  area-level surfaces (README, `docs/`, justfile) is two
+  audience-scoped `docs(<area>):` commits in the same batch, even
+  when one area, even when parallelizable. The spec's `message_to_agent`
+  forward-looking lists often split the same way — a "doc sweep"
+  listing both library comment paths and README/justfile paths is
+  the cue to ship two commits, not one.
+
