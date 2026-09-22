@@ -1,0 +1,3 @@
+build-linux, private --shared clone at cb9a3d38b + working-tree patch, RUSTC_WRAPPER="" 
+BISCUIT_L1_INCLUDE_SLOW=1 cargo nextest run -p darkmatter-cli -E "$(just _tier_filter L1 darkmatter-cli)"
+     Summary [   2.230s] 712 tests run: 712 passed, 0 skipped

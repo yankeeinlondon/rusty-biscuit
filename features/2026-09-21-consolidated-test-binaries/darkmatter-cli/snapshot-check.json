@@ -1,0 +1,9 @@
+{
+  "failures": [],
+  "kind": "consolidation-snapshot-check",
+  "moved": 0,
+  "package": "darkmatter-cli",
+  "readers": {},
+  "unaffected": 0,
+  "version": 1
+}
