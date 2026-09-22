@@ -2636,13 +2636,6 @@ _status_recent scope="area":
     cutoff = now - RECENT_DAYS * 86400
     window = "last " + str(RECENT_DAYS) + " days"
 
-    root = sniff("root")
-    if not root:
-        done = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
-        )
-        root = done.stdout.strip() if done.returncode == 0 else os.getcwd()
-
     def sniff(*args):
         try:
             done = subprocess.run(
@@ -2651,6 +2644,13 @@ _status_recent scope="area":
         except OSError:
             return ""
         return done.stdout.strip() if done.returncode == 0 else ""
+
+    root = sniff("root")
+    if not root:
+        done = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+        )
+        root = done.stdout.strip() if done.returncode == 0 else os.getcwd()
 
     def git(*args):
         try:
@@ -2700,12 +2700,43 @@ _status_recent scope="area":
             return False
         return False
 
+    # First log occurrence wins: the log is newest-first, so a file's initial
+    # sighting is its newest in-window commit. Merge commits print a bare `@ts`
+    # line with no paths. Dirty/untracked files count by their mtime — real
+    # edits, unlike checkout-forged mtimes — but only inside the window.
+    def recent_files():
+        changed = {}
+        stamp = None
+        since = datetime.datetime.fromtimestamp(cutoff).isoformat(timespec="seconds")
+        log = git("log", "--since=" + since, "--pretty=format:@%ct", "--name-only")
+        for line in log.splitlines():
+            if line.startswith("@"):
+                try:
+                    stamp = float(line[1:])
+                except ValueError:
+                    stamp = None
+            elif line and stamp is not None and line not in changed:
+                changed[line] = stamp
+        for line in git("status", "--porcelain").splitlines():
+            path = line[3:]
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            if not path:
+                continue
+            try:
+                stamp = os.stat(os.path.join(root, path)).st_mtime
+            except OSError:
+                stamp = now
+            if stamp >= cutoff and stamp > changed.get(path, 0.0):
+                changed[path] = stamp
+        return changed
+
     # Every cell is padded on its own so `·` and `ago` line up down the whole
     # report, not just within one heading: (name, count, unit, age).
     def cells(row):
         return (row[1], str(row[3]), "file" if row[3] == 1 else "files", age(row[4]))
 
-    def scan(area_dir):
+    def scan(area_dir, changed):
         rows = []
         for kind in ("features", "fixes"):
             base = os.path.join(area_dir, kind)
@@ -2727,21 +2758,20 @@ _status_recent scope="area":
                 count = 0
                 newest = 0.0
                 newest_file = ""
-                for root, dirs, files in os.walk(entry.path):
+                for walk_root, dirs, files in os.walk(entry.path):
                     dirs[:] = [d for d in dirs if not d.startswith(".")]
                     for name in files:
                         if name.startswith("."):
                             continue
-                        path = os.path.join(root, name)
-                        try:
-                            mtime = os.stat(path).st_mtime
-                        except OSError:
-                            continue
-                        if mtime < cutoff:
+                        path = os.path.join(walk_root, name)
+                        stamp = changed.get(
+                            os.path.relpath(path, root).replace(os.sep, "/")
+                        )
+                        if stamp is None:
                             continue
                         count += 1
-                        if mtime > newest:
-                            newest = mtime
+                        if stamp > newest:
+                            newest = stamp
                             newest_file = os.path.relpath(path, entry.path)
                 if count:
                     rows.append(
@@ -2790,7 +2820,7 @@ _status_recent scope="area":
         print()
 
     if SCOPE == "area":
-        rows = scan(os.getcwd())
+        rows = scan(os.getcwd(), recent_files())
         title(sniff("area") or os.path.basename(os.getcwd()))
         if rows:
             block(rows, widths(rows), "  ", BOLD + BLUE + UNDERLINE, True)
@@ -2802,7 +2832,6 @@ _status_recent scope="area":
         print("_status_recent: scope must be `area` or `all`", file=sys.stderr)
         sys.exit(2)
 
-    root = sniff("root") or os.getcwd()
     areas = [a for a in sniff("package-areas", "--list").splitlines() if a.strip()]
     if not areas:
         print("_status_recent: `sniff repo package-areas` found none", file=sys.stderr)
@@ -2810,9 +2839,10 @@ _status_recent scope="area":
 
     # Scanned in full before anything prints: the columns are sized across
     # every area so one heading's long name does not shift its neighbours.
+    changed = recent_files()
     found = []
     for area in areas:
-        rows = scan(root if area == "root" else os.path.join(root, area))
+        rows = scan(root if area == "root" else os.path.join(root, area), changed)
         if rows:
             found.append((area, rows))
 
