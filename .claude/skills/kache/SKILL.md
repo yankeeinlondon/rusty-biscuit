@@ -60,7 +60,7 @@ sharing across machines and CI. Apache-2.0.
 Repository policy overrides the generic checklist below: **macOS on** (store and `target/` on the
 same APFS volume), **Linux on only when `cp --reflink=always` from the store to `target/`
 succeeds** (ZFS with block cloning is the expected case), **Windows and WSL off**. A `target/` is
-always wrapped or never wrapped; the standing `ci-verification` clones are never wrapped. Version
+always wrapped or never wrapped; the standing `cross-check` clones are never wrapped. Version
 floor `.github/kache-min-version`; `just init` installs the latest on macOS/Linux and never
 reinstalls. Details: `docs/kache-strategy.md`.
 

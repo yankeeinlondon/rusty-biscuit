@@ -2455,3 +2455,62 @@ Created: `acceptance.md`, `ci-observations.md`,
 ### Unrelated working-tree changes
 
 None observed.
+
+## Review 1 fixes (2026-09-22)
+
+Closes review 1's implementation finding and its first human-review item.
+Nothing here changes a migrated test's body.
+
+### The layout guard's macro false negative (high, review 1)
+
+`module_declarations` scanned sanitized bytes for `mod name;` without asking
+whether the token was a Rust item, so a declaration inside an unexpanded
+`macro_rules!` body or a token-discarding invocation marked the named file
+reachable — the one hole that lets `autotests = false` drop an orphaned test
+source while the gate stays green.
+
+- `tools/test-toolkit/src/test_layout.rs`: `blank_macro_token_trees` blanks
+  every `name!(…)`, `name![…]`, `name!{…}` and `macro_rules! name { … }` body
+  before the scan, preserving offsets. The rule is symmetric and documented:
+  a module a macro *expands* is now reported as unreached, because nothing
+  here expands macros.
+- Two regressions in `test_layout/tests.rs`, both verified to fail without the
+  fix: one on the parser (all three delimiters, nesting, and `!=`), one on a
+  whole layout whose orphan is reachable only through a dormant macro.
+- `claudine/cli/tests/l1/test_placement.rs`: the byte-for-byte copy of the
+  walker is deleted; the guard calls `test_toolkit::test_layout`, which is
+  what stops the two parsers drifting again. Claudine keeps its own
+  fixture-level regression through the shared `layout_violations`.
+
+### Native Windows and WSL2 evidence (human-review item 1)
+
+All four packages ran on both, closing acceptance 4; results and the five
+defects the first working Windows leg exposed are in `acceptance.md` §4. Two
+of those defects are outside this feature: `scripts/cross-check.sh` (tool
+path, `core.longpaths`, and the login-shell exit status that made a green run
+report `FAIL`) and Claudine's `windows_wait_loop`, which treated a refused
+`AssignProcessToJobObject` as fatal and so could not run under SSH at all.
+
+### Verification
+
+- `just test test-toolkit`: 341 passed, 2 skipped (339 before; +2 regressions).
+- `just test` in `claudine/`: 7,333 passed, 9 skipped.
+- `just lint` in `claudine/` and `tools/`: clean.
+- `python3 scripts/ci/test_cross_check.py`: 26 passed.
+- `acceptance/metadata-check.py`: PASS, 139/74/53/38 old targets mapped.
+- `cargo check -p claudine-cli --target x86_64-pc-windows-gnu --tests`: clean.
+- Eight `just cross-check` legs, four packages × Windows and WSL2: all pass
+  except `darkmatter`'s pre-existing `schema_phase_validation` failure, which
+  reproduces identically on both hosts.
+
+### Changed files
+
+`tools/test-toolkit/src/test_layout.rs`, `tools/test-toolkit/src/test_layout/tests.rs`,
+`claudine/cli/tests/l1/test_placement.rs`,
+`claudine/cli/tests/l1/wrap_compose_validation.rs`,
+`claudine/cli/src/commands/wrap/exec/termination/windows.rs`,
+`scripts/cross-check.sh`, `scripts/ci/test_cross_check.py`,
+`.claude/skills/os/build-hosts.md`, `.claude/skills/os/windows.md`,
+`.claude/skills/kache/SKILL.md`, `docs/initialization.md`,
+`docs/kache-strategy.md`, `justfile`, and this feature's `spec.md` and
+`acceptance.md`.

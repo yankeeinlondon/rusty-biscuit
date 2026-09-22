@@ -35,7 +35,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-21
-review_iterations: 0
+review_iterations: 1
 implemented: true
 implemented_by: claude/opus
 human_review: true
@@ -52,6 +52,8 @@ human_review_items:
         - **Option C: record criterion 4 as an accepted gap for Windows in the spec, and close without it.** Pros: honest and quick. Cons: it weakens the acceptance bar this spec set for itself.
 
         I recommend **Option A**. macOS and Linux are fully clean, so this is probably a formality. But the before-and-after list comparison is the only check that can catch a test that silently disappears on Windows, and the spec asks for it.
+
+        **Decision, 2026-09-22 (author).** Option A, with criterion 4's Windows clause narrowed: run the suites on the Windows host and the WSL2 archive leg, and drop the on-host base-versus-migrated listing capture as overly conservative for what it costs (see criterion 4). The disk problem that blocked this is gone: `cross-check` now keeps one clone per origin worktree under the host's `CODING_DIR` (`B:` there, 173 GB free), so the `W:` shortage no longer decides whether the leg can run.
     - |-
         **Still open from Phase 2: confirm that the four migration manifests are the one authoritative record of where each test moved.**
 
@@ -64,9 +66,9 @@ human_review_items:
 message_to_agent: |-
     Phase 8 (the last) is done except for items that need evidence nobody has yet. Read the log's "## Phase 8" section and `acceptance.md`.
 
-    - `acceptance.md` walks all 12 criteria. Pending: criterion 4, native-Windows on-host listings and WSL2 (`W:` on `build-win-native` at 36.77 GB, under the 50 GiB preflight; `build-win` SSH reset at key exchange), and criterion 10, CI observations (the branch is unpushed, so no ordinary run exists).
+    - `acceptance.md` walks all 12 criteria. Criterion 4 closed on 2026-09-22: all four packages now run on native Windows and under WSL2, and the run found four `cross-check` defects plus one Claudine Windows defect, all fixed (see `acceptance.md` §4, "What the Windows run cost"). Still pending: criterion 10, CI observations (the branch is unpushed, so no ordinary run exists).
     - The plan's "Producer observations" task is deliberately unchecked. When the first ordinary run selects the packages (this branch's PR, or the push to `main`), fill `ci-observations.md` using its "How to harvest" section. Never trigger a run just for this.
-    - To close criterion 4 once `W:` has 50 GiB or more free: for each package run on-host `scripts/ci/consolidation.py capture` on the base tree and the migrated tree (bases: claudine-cli `9621882ae`, darkmatter `048e44f7a`, darkmatter-cli `cb9a3d38b`, biscuit-terminal `beca6c368`). Then `compare` with the committed darwin and linux captures, and run `just cross-check <pkg> --os windows` and `--os wsl`. Update `acceptance.md` §4 and its `pending` frontmatter.
+    - To close criterion 4 (narrowed 2026-09-22): run `just cross-check <pkg> --os windows` and `--os wsl` for each of the four packages, and update `acceptance.md` §4 and its `pending` frontmatter. On-host base-versus-migrated listings are no longer required on Windows; criterion 4 says why.
     - New re-runnable checks: `acceptance/metadata-check.py` (Cargo targets vs manifests; exits 1 on a mismatch) and `acceptance/body-diff.py` (criterion 5 review aid; writes `acceptance/body-diff.md`).
     - Final sweep: `just test claudine darkmatter biscuit-terminal` 18,818/18,819, lint and check-canonical green. The 1 failure and the 1 stranded tier-coverage test in darkmatter are pre-existing (Phase 4, proven on base) and belong to separate defects, not this spec.
     - Do not move the spec to `_completed`; that is the author's action after review.
@@ -316,11 +318,23 @@ other numerically. The comparison must use exact normalized identities.
 Crate-level platform attributes become outer attributes on the relevant module
 declaration, for example `#[cfg(unix)] mod compose_validation;`. A committed
 check compares every moved file's former crate-level attributes with its module
-declaration. Compilation and listings must still be checked on macOS, Linux,
-and native Windows; a source scan on macOS cannot prove that the Windows module
-graph compiles. WSL2 follows the Linux target configuration but separately
-proves that the Linux-built Nextest archive remains portable to a different
-checkout path.
+declaration.
+
+The before-and-after listing comparison is required on **macOS and Linux**. On
+**native Windows** the requirement is that the consolidated suites compile and
+run on the host — `just cross-check <package> --os windows` — not that the
+pre-migration listing be recaptured there (narrowed 2026-09-22; the original
+rule asked for on-host listings on Windows too). Recapturing a base listing
+means checking out each package's pre-migration revision on the Windows host
+and compiling it a second time, four times over, and the risk it covers is
+already held down from three sides: the attribute check proves each file's
+platform `cfg` moved onto its module declaration unchanged, the macOS and Linux
+comparisons prove the platform-absent sets test by test, and criterion 12's
+in-binary layout guard fails whenever a test source is not compiled by a
+declared target. A Windows-only test could then vanish only by a route all
+three miss. WSL2 follows the Linux target configuration but separately proves
+that the Linux-built Nextest archive remains portable to a different checkout
+path (`--os wsl`).
 
 ### 5. Migrate identity consumers and snapshots deliberately
 

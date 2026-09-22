@@ -4,8 +4,6 @@ feature: 2026-09-21-consolidated-test-binaries
 created: 2026-09-22
 verdict: met-with-pending
 pending:
-    - acceptance 4, native Windows on-host listings (compile evidence only)
-    - acceptance 4, WSL2 archive path
     - acceptance 10, CI producer observations
 ---
 
@@ -16,13 +14,16 @@ committed artifact that shows it, and the command that re-runs it where one
 exists. Paths are relative to this feature directory unless they start at the
 repository root.
 
-**Summary.** Nine criteria are met. Criterion 5 is met as far as a tool can
-show, and it still needs the reviewer's reading, as the spec says. Two are
-partly pending, and nothing pending is counted as a pass:
+**Summary.** Ten criteria are met. Criterion 5 is met as far as a tool can
+show, and it still needs the reviewer's reading, as the spec says. One is
+pending, and nothing pending is counted as a pass:
 
-- **4:** native-Windows on-host listings and the WSL2 archive path. Both are
-  blocked by free space on the Windows build host.
 - **10:** CI observations. No ordinary run has selected the packages yet.
+
+Criterion 4 closed on 2026-09-22: every package's consolidated suites now run
+on native Windows and under WSL2 (§4). Its Windows clause was narrowed the
+same day — on-host base-versus-migrated listings are no longer required there;
+the spec says why.
 
 Evidence per package lives in `pilot/` (`claudine-cli`), `darkmatter/`,
 `darkmatter-cli/`, and `biscuit-terminal/`, next to the four manifests
@@ -71,22 +72,56 @@ against the manifest. Darkmatter's Level 3 tests stay in two targets:
   (`consolidation.py check-attributes`) has 0 failures.
 - **Met: macOS and Linux compile and list.** The same comparisons as
   criterion 2. Linux ran on `build-linux`.
-- **Pending: native Windows.** The evidence is compile-only. Every package's
-  consolidated targets cross-compile for `x86_64-pc-windows-gnu` with 0
-  warnings (implementation log, Phases 3–6). There are **no on-host Windows
-  listings**, so the criterion's "listings" clause is not met for Windows.
-  `just cross-check <package> --os windows` refuses at the storage preflight.
-  `build-win-native`'s `W:` drive had 36.77 GB free on 2026-09-22, below the
-  50 GiB floor, and the recipe's reclaim found nothing to remove.
-- **Pending: WSL2 archive path.** No qualifying evidence. On 2026-09-22, SSH to
-  `build-win` reset at key exchange. The `os` skill ties that symptom to the
-  same full `W:` drive, since the guest's VHDX lives there. No ordinary nightly
-  run has built these packages yet.
+- **Met: native Windows, on-host.** Every package's consolidated suites were
+  run on `build-win-native` with `just cross-check <package> --os windows` on
+  2026-09-22, the first time that leg has ever worked (see "What the Windows
+  run cost"):
 
-**To close:** free `W:`, then for each package run `consolidation.py capture`
-on-host for the base and migrated trees and `compare` with the darwin and
-linux captures. Then run `just cross-check <package> --os windows` and
-`--os wsl`.
+  | Package | Windows | WSL2 |
+  |---|---|---|
+  | `claudine-cli` | 2,250 passed, 11 skipped | 2,767 passed, 241 skipped |
+  | `darkmatter` | 6,478 passed, 1 pre-existing failure, 68 skipped | 6,493 passed, same failure, 68 skipped |
+  | `darkmatter-cli` | 717 passed, 69 skipped | 716 passed, 69 skipped |
+  | `biscuit-terminal` | 2,923 passed, 58 skipped | 2,940 passed, 60 skipped |
+
+  The one `darkmatter` failure on both hosts is the pre-existing
+  `schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes`
+  named in §8, which Phase 4 proved fails identically on the unmigrated base.
+- **Met: WSL2 archive path.** The `--os wsl` leg produces the `ubuntu-latest`
+  record and consumes it as `wsl2-ubuntu` from a second checkout, which is the
+  relocation this criterion asks for. Column two above.
+
+**How it was closed.** `cross-check` now keeps one clone per origin worktree
+under the host's `CODING_DIR` (`B:\coding` on `build-win-native`, 173 GB
+free), so the full `W:` that blocked this no longer decides whether the leg
+can run.
+
+### What the Windows run cost
+
+The leg had never run to completion before, so it found four defects of its
+own. None belongs to this migration; all are fixed in this change:
+
+1. `scripts/cross-check.sh` looked for `ci-build.exe` under
+   `<clone>\scripts\target\release`. `scripts` is a root-workspace member,
+   so its binaries are in the workspace `target\`.
+2. Git for Windows refused this repository's deepest paths (`Filename too
+   long`) until the clone sets `core.longpaths true`.
+3. Every Unix leg reported the exit status of the host's `~/.bash_logout`
+   rather than the run's, because the run script was handed to a login shell.
+   A green WSL run was summarized `FAIL` — the symptom the `os` skill recorded
+   on 2026-09-15 without a cause. Fixed by `bash -lc`.
+4. `AssignProcessToJobObject` was fatal in `windows_wait_loop`, and an SSH
+   session's processes are already inside a Job that forbids nesting, so every
+   provider launch under `sequence_budget` failed with `Access is denied.
+   (0x80070005)`. It now degrades to terminating the child alone. This one is
+   a real Claudine defect, not a harness artifact: it breaks any Windows run
+   under SSH.
+
+A fifth was a test defect this run exposed: `wrap_compose_validation`'s
+Windows provider stub was a `goose.cmd`, and Rust refuses to spawn a batch
+file with a newline-bearing argument — which Claudine's composed prompt always
+is. It is now a compiled `.exe`, as every other Claudine provider fixture
+already was.
 
 ## 5. Test bodies unchanged: met, for reviewer confirmation
 
@@ -107,6 +142,14 @@ No assertion's expected value, input, timeout, or skip decision changed. The
 criterion 2 comparison shows the same tests, in the same tier, ignored the same
 way. The spec makes this a review criterion, so the reviewer should read the
 "other lines" list.
+
+`body-diff.py` reads each module at `HEAD`, so its record does not yet include
+the review-1 fixes, which are uncommitted as this is written. Re-run it after
+they land: it will add `wrap_compose_validation`'s Windows provider stub (a
+`goose.cmd` replaced by a compiled `.exe`, §4) as a fifth "other" group, and
+claudine's `test_placement.rs` layout gate — already classified as manifest
+`additions` — loses its duplicated module-graph parser to
+`test_toolkit::test_layout`.
 
 ## 6. Snapshots: met
 
@@ -192,13 +235,19 @@ file has the pull request 92 context and the harvest procedure.
 
 | Package | Guard test (in `l1`) |
 |---|---|
-| `claudine-cli` | `test_placement::every_test_source_is_compiled_by_a_declared_target`, plus 3 layout-gate tests |
+| `claudine-cli` | `test_placement::every_test_source_is_compiled_by_a_declared_target`, plus 2 layout-gate tests |
 | `darkmatter` | `test_layout::every_test_source_is_compiled_by_a_declared_target` |
 | `darkmatter-cli` | `test_layout::every_test_source_is_compiled_by_a_declared_target` |
 | `biscuit-terminal` | `test_layout::every_test_source_is_compiled_by_a_declared_target` |
 
-The three non-claudine guards call the shared `test_toolkit::test_layout`,
-which has 10 unit tests. Each guard went red on a planted stray root and an
+All four guards call the shared `test_toolkit::test_layout`, which has 12 unit
+tests. Claudine kept a byte-for-byte copy of the walker until 2026-09-22, when
+review 1 found that both copies read a `mod name;` token inside an unexpanded
+macro as a real declaration — which marks the file reachable and lets an
+orphaned test source pass the gate. The shared walker now blanks macro token
+trees before the scan, two regressions cover it (one on the parser, one on a
+whole layout), and Claudine's duplicate is deleted in favor of the shared
+implementation, so the two cannot drift again. Each guard went red on a planted stray root and an
 undeclared module, then green (Phases 3–6). The three shared-gate packages
 were also shown red on an undeclared `tests/level9/main.rs`.
 None is a new binary or CI gate. All four passed in the Phase 8 sweep.

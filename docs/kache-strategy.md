@@ -61,7 +61,7 @@ Two rules that apply everywhere:
 
 - **A `target/` is always wrapped or never wrapped.** In hardlink mode a restored artifact is a
   read-only link into the store, and the next *unwrapped* rebuild fails with
-  "output file ... is not writeable" (build-linux, 2026-09-09). The standing `ci-verification`
+  "output file ... is not writeable" (build-linux, 2026-09-09). The standing `cross-check`
   clones on every build host are never wrapped, because CI is never wrapped; do not export
   `RUSTC_WRAPPER` in a session that touches them.
 - **Hosts run the latest kache; the repository states only a floor.** `.github/kache-min-version`
@@ -337,7 +337,7 @@ Swept artifacts come back as link-restores, not recompiles.
   `~/.cargo/config.toml` also records that activation disables incremental compilation at ~670 ms
   per edit-rebuild. Sweep is scheduled here by **cron, daily 04:00** (`crontab -l`), logging to
   `~/.local/state/rusty-biscuit-sweep.log`, and it sweeps `~/coding/rusty-biscuit`, not
-  `~/ci-verification`. Two host constraints to know:
+  the standing `cross-check` clones. Two host constraints to know:
   - `~/.config` is a **read-only CIFS mount** (`//192.168.100.97/config`, `uid=0,gid=0`), so
     `just install-kache` reports (no longer fails on) its config-seeding step and
     `~/.config/systemd/user` is unavailable — hence cron rather than a systemd user timer. The

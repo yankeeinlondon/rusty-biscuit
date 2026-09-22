@@ -94,16 +94,17 @@ non-vacuous on 2026-09-09: shipping the broken `CARGO_BIN_EXE` form of
 Running the archive on the same machine that built it does **not** reproduce
 the failure on its own, because the baked builder path still resolves; hiding
 the target directory is the load-bearing step. The manual equivalent, for
-when you need to vary the procedure:
+when you need to vary the procedure (`<clone dir>` is the path on the
+`clone:` line `cross-check` prints):
 
 ```bash
 ssh -o BatchMode=yes "$BUILD_WSL" 'bash -lc "
-  cd ~/ci-verification/rusty-biscuit
+  cd <clone dir>/rusty-biscuit
   cargo nextest archive -p <pkg> --archive-file /tmp/a.tar.zst
   mv target target.hold
   rm -rf /tmp/x && mkdir -p /tmp/x
   cargo nextest run --archive-file /tmp/a.tar.zst \
-    --workspace-remap ~/ci-verification/rusty-biscuit --extract-to /tmp/x \
+    --workspace-remap <clone dir>/rusty-biscuit --extract-to /tmp/x \
     --no-fail-fast <test-name-substring>
   mv target.hold target
 "'
