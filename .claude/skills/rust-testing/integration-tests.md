@@ -2,6 +2,15 @@
 
 Integration tests verify your public API from an external perspective. They live in the `tests/` directory.
 
+> **In this monorepo:** this page describes Cargo's default layout, one crate per
+> `tests/*.rs` file. `claudine-cli`, `darkmatter`, `darkmatter-cli`, and
+> `biscuit-terminal` instead declare one binary per execution contract under
+> `autotests = false` (`tests/l1/main.rs`, `tests/level2/main.rs`, ...). See
+> "Consolidated Integration-Test Binaries" in [SKILL.md](SKILL.md) for that
+> layout. Run any repository suite through the Nextest-backed `just` recipes.
+> The `cargo test` commands below run all of a binary's cases in one process,
+> which is not equivalent (see the process-isolation note there).
+
 ## Structure
 
 ```

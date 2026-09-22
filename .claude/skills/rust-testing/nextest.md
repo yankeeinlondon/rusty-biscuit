@@ -112,7 +112,7 @@ filter = "test(/flaky/)"
 retries = 3
 ```
 
-For PTY or timing-sensitive smoke tests, prefer `#[ignore]` plus a manual command such as `cargo test --test pty_tests -- --ignored` instead of hiding instability behind aggressive retries in the default profile.
+For PTY or timing-sensitive smoke tests, prefer `#[ignore]` plus a manual command such as `cargo nextest run --test l1 pty_tests:: --run-ignored only` instead of hiding instability behind aggressive retries in the default profile.
 
 ## Slow Test Detection
 

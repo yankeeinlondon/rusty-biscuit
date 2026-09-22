@@ -89,7 +89,7 @@ This should not replace normal Rust tests. Keep parser/state/reducer/widget test
 
 ## Reference implementation: rusty-biscuit `biscuit-test-harness`
 
-The shared `biscuit-test-harness` crate contains a battle-tested macOS Level-3 harness that solves most of the problems below. Treat it as the reference implementation — copy the patterns rather than reinventing them. Live Level-3 consumers (e.g. `claudine/cli/tests/level3_*.rs`) attach to it.
+The shared `biscuit-test-harness` crate contains a battle-tested macOS Level-3 harness that solves most of the problems below. Treat it as the reference implementation — copy the patterns rather than reinventing them. Live Level-3 consumers (e.g. `claudine/cli/tests/level3/level3_*.rs`) attach to it.
 
 Key patterns it implements:
 
