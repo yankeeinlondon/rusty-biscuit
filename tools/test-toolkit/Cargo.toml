@@ -28,6 +28,11 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # `biscuit-test-harness` above already builds it.
 serde_json = "1"
 
+# `test_layout` reads a consolidated package's `Cargo.toml` (`autotests` and
+# each `[[test]]` path) from library code its Level 1 layout gates call. The
+# same major version every workspace TOML reader already builds.
+toml = "1.0"
+
 # Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
 # that depend on this crate as a dev-dependency do not inherit them.
 clap = { version = "4", features = ["derive"], optional = true }
