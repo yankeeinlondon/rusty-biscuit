@@ -1,0 +1,5 @@
+claudine-cli: 4 Cargo test targets, 4 declared, 139 old targets mapped
+darkmatter: 5 Cargo test targets, 5 declared, 74 old targets mapped
+darkmatter-cli: 2 Cargo test targets, 2 declared, 53 old targets mapped
+biscuit-terminal: 2 Cargo test targets, 2 declared, 38 old targets mapped
+PASS
