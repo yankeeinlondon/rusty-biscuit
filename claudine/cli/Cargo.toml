@@ -9,12 +9,21 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
+# Test-only fake provider driven by `tests/sequence_budget.rs`. A built target
+# because an archived CI run has no compiler to build one at test time. Gated
+# behind `test-fixtures` so it stays out of default builds and `cargo install`.
+[[bin]]
+name = "claudine-fake-goose"
+path = "tests/bin/fake_goose/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
 daemon-tests = ["dep:rendezvous-daemon"]
 terminal-tests = []
 real-tests = []
+test-fixtures = []
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
@@ -120,6 +129,11 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # build against. Unlike the daemon itself it carries no native dependency, so it
 # is available on every target.
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
+
+# Spawns the `claudine-fake-goose` fixture binary above.
+[[test]]
+name = "sequence_budget"
+required-features = ["test-fixtures"]
 
 [[test]]
 name = "level2_ac2_worktree_compose"
@@ -282,8 +296,8 @@ required-features = ["real-tests"]
 # `md` binary built into the workspace target dir (inline_compose_hash).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
-features = ["daemon-tests", "terminal-tests"]
-local-features = []
+features = ["daemon-tests", "terminal-tests", "test-fixtures"]
+local-features = ["test-fixtures"]
 l2-backends = ["tmux", "wezterm"]
 runner-tools = ["ai-provider-stubs", "l2-parallel-self-spawn"]
 # The `md` binary and the L2 harness broker are other packages' compile-time
