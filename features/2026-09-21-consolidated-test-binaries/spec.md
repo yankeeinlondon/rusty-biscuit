@@ -35,7 +35,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-21
-review_iterations: 1
+review_iterations: 5
+completed: true
 implemented: true
 implemented_by: claude/opus
 human_review: true
@@ -63,6 +64,8 @@ human_review_items:
         - **Option B: also require a hand-reviewed table per package.** Pros: a person reads every row. Cons: over 3,800 rows, and a second record that can drift from the first.
 
         I recommend **Option A**.
+
+        **Decision, 2026-09-22 (author).** Option A: the four migration manifests are the sole authoritative mapping. No second, hand-reviewed record is created, so every automated comparison keeps reading one source. No implementation change follows from this.
 message_to_agent: |-
     Phase 8 (the last) is done except for items that need evidence nobody has yet. Read the log's "## Phase 8" section and `acceptance.md`.
 

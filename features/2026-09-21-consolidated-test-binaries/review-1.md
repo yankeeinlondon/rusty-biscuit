@@ -24,9 +24,12 @@ human_review_items:
 reviewed_by: codex/gpt-5.6-sol
 created: "2026-09-22T01:39:51-07:00"
 spec: 2026-09-21-consolidated-test-binaries/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: features/2026-09-21-consolidated-test-binaries/implementation-log.md
 description: "A **fix** review of `2026-09-21-consolidated-test-binaries/spec.md`"
 fix: 2026-09-21-consolidated-test-binaries/review-1.md
+next: 2026-09-21-consolidated-test-binaries/review-2.md
 ---
 
 # Review 1

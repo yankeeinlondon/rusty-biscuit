@@ -3,6 +3,10 @@ spec: /Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-conso
 plan: features/2026-09-21-consolidated-test-binaries/plan.md
 implemented_by: claude/opus
 started_phase: "1"
+implementation_1: "2026-09-22T13:06:01-07:00"
+implementation_2: "2026-09-22T13:27:23-07:00"
+implementation_3: "2026-09-22T13:40:34-07:00"
+implementation_4: "2026-09-22T13:54:23-07:00"
 packages:
     - repo-deps
     - claudine-cli
@@ -2514,3 +2518,117 @@ report `FAIL`) and Claudine's `windows_wait_loop`, which treated a refused
 `.claude/skills/kache/SKILL.md`, `docs/initialization.md`,
 `docs/kache-strategy.md`, `justfile`, and this feature's `spec.md` and
 `acceptance.md`.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-22T13:06:01-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-consolidated-test-binaries/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- review 1 contains **one** implementation finding (high: layout guard mistakes dormant macro tokens for compiled modules) plus two human-review items, which are author decisions rather than implementation work
+- on arrival, the finding had already been addressed by commits `4b611e285` (shared walker blanks macro token trees) and `7014c683c` (Claudine moved onto the shared walker); this cycle independently verifies that fix against the review's requirements and closes any remaining gap
+- starting the work on 'The layout guard can mistake dormant macro tokens for compiled modules' at 13:06:20
+        - verified the committed fix meets all three review requirements:
+                - `module_declarations` runs `sanitize` (comments, strings, char literals) before `blank_macro_token_trees`, preserving offsets, so literal delimiters cannot unbalance a macro body
+                - dormant-macro regressions exist in `tools/test-toolkit/src/test_layout/tests.rs` (parser level and whole-layout level)
+                - Claudine's private walker is gone; `claudine/cli/tests/l1/test_placement.rs` uses the shared `layout_violations` and its `layout_gate_rejects_stray_roots_and_undeclared_modules` asserts a dormant-macro orphan stays a violation; all four package guards use the shared walker and no other copy exists
+        - exercised 19 extra edge cases in a throwaway test (removed): `()`/`[]`/`{}` bodies, path-qualified and nested invocations, lifetimes, `!=`, `!x`, `-> !`, `impl !Send`, `#[cfg_attr]`, `#![allow]`, `#[doc = concat!(..)]`, `#[cfg(unix)] mod`, `#[path] #[cfg(windows)] pub mod`; 18 behaved correctly
+        - **defect found and fixed:** `char_literal_end` did not recognize `\x` escapes, so a macro body containing `['\x41','{']` mispaired quotes, left `{` unblanked, the body never balanced, and a dormant `mod orphan;` was counted as a declaration again (the same false negative)
+                - `tools/test-toolkit/src/test_layout.rs`: `\x` escapes now consume their two hex digits
+                - `tools/test-toolkit/src/test_layout/tests.rs`: two new cases in `a_module_token_inside_a_macro_declares_nothing` (literal/comment delimiters in a macro body, and the `\x` case); confirmed failing without the fix
+        - left unfixed because they fail safe (an extra violation, never a hidden file): `mod r#type;` is not parsed; `#[cfg_attr(x, path = "..")]` is ignored
+        - pre-existing, not macro-related, and unused in the repo today: `mod inner;` inside an inline `mod outer { … }` resolves beside the parent file rather than under `outer/`
+        - results:
+                - `just test` in `tools/`: 341 passed, 2 skipped (re-run by the orchestrator)
+                - `just test-cli test_placement::` in `claudine/`: 12 passed
+                - `just test test_layout::` in `darkmatter/`: 2 passed; in `biscuit-terminal/`: 1 passed
+                - `just lint` in `tools/` and `claudine/`: clean
+- work completed for 'The layout guard can mistake dormant macro tokens for compiled modules' at 13:10:25
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in about 6 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the review's two human-review items (Windows/WSL2 evidence option, migration-manifest authority) are author decisions, not implementation findings; item 1 was already recorded as decided (option A, narrowed) in `spec.md` and closed in `acceptance.md` §4
+
+The files changed in this cycle are `tools/test-toolkit/src/test_layout.rs`, `tools/test-toolkit/src/test_layout/tests.rs`, and this log; the review file's frontmatter was also updated.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-22T13:27:23-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-consolidated-test-binaries/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'Raw C strings reopen the dormant-macro false negative' at 13:27:36
+        - lexer-crate evaluation: `cargo tree -p test-toolkit -e normal` shows `proc-macro2`/`syn` only as proc-macro (host) dependencies of `tracing-attributes`, not as a library dependency; using `proc-macro2` for byte-offset literal boundaries would mean a new direct dependency with the `span-locations` feature, plus a sanitizer rewrite, so the targeted fix was chosen (Rules 2 and 3)
+        - fix: `raw_string_open` in `tools/test-toolkit/src/test_layout.rs` now accepts an optional `b` or `c` before `r` (so `r`, `br`, `cr`, with zero or more `#`); the existing non-identifier-before-prefix check is unchanged, so `xcr"…"` and `bar#` are not mis-lexed; added a short doc naming the recognized raw prefixes and noting that `b"…"`, `c"…"`, `b'…'` lex as ordinary literals
+        - GitNexus impact on `raw_string_open`: `UNKNOWN` (private fn); a text search confirms the only caller is the private `sanitize`
+        - tests (`tools/test-toolkit/src/test_layout/tests.rs`): added the exact review case plus a zero-hash `cr"\"` variant to `a_module_token_inside_a_macro_declares_nothing` (a bare `cr"}"` passed even before the fix, because ordinary-string lexing blanks it the same way; the backslash variant is where raw and escaped lexing differ); new layout-level `a_file_named_only_after_a_raw_c_string_in_a_dormant_macro_is_a_violation`; `c"…"`, `b'"'`, and `r#type` sanity line in `literals_and_comments_hide_declarations_without_desynchronizing`; the uncommitted `\xNN` fix and its tests are kept
+        - before the fix: the review case gave `left: ["orphan", "guard"]`; the `cr"\"` variant alone gave `left: []`; the layout regression failed with no violations. After the fix all of them pass
+        - results: `tools/` `just test` 342 passed, 2 skipped; `just lint` clean (exit 0); `claudine` `just test-cli test_placement::` 12 passed; `darkmatter` `just test test_layout::` 2 passed; `biscuit-terminal` `just test test_layout::` 1 passed. No blockers
+- work completed for 'Raw C strings reopen the dormant-macro false negative' at 13:30:54
+        - orchestrator re-ran `just test` in `tools/`: 342 passed, 2 skipped
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in about 4 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the review's one human-review item (the migration manifests as sole authority) is an author decision, not an implementation finding, and is left open
+
+The files changed in this cycle are `tools/test-toolkit/src/test_layout.rs`, `tools/test-toolkit/src/test_layout/tests.rs`, and this log; the review file's frontmatter was also updated.
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-22T13:40:34-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-consolidated-test-binaries/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- starting the work on 'Macro spacing still lets dormant modules pass the layout gate' at 13:40:43
+        - GitNexus impact on `blank_macro_token_trees`: `UNKNOWN` (private fn, no resolved callers); a text search confirms the only caller is `module_declarations`, reached through public `layout_violations` from the four live guards (claudine-cli `test_placement.rs`, darkmatter lib and CLI `test_layout.rs`, biscuit-terminal `test_layout.rs`)
+        - approach: a token-aware backward/forward scan around each `!` instead of another byte special case, with no new dependency. The pass runs on `sanitize`d code, where comments are already blank, so skipping whitespace skips all legal trivia. The new `macro_path_before` walks back over whitespace to the last path segment and accepts it only if it is an identifier (plain or `r#` raw) that is not a keyword (strict or reserved) or a `'label`. That keeps `!=` (no delimiter follows), `#![…]` (no identifier before), and unary `!` after an operator or a keyword (`if !x`, `return !(x)`, `match ! {…}`, `break 'a ! {…}`) out. A name after `!` is now consumed only for `macro_rules`, through the new `identifier_end`, which accepts `r#name`. Path-qualified invocations work because only the last segment matters. Byte offsets are preserved as before. The `blank_macro_token_trees` doc now states the sanitized-input precondition and these rules
+        - tests (`tools/test-toolkit/src/test_layout/tests.rs`): both review cases plus comment/newline trivia, `self::discard ! […]`, `crate :: m :: discard!`, `r#discard ! {…}`, and `macro_rules /* a */ ! /* b */ r#type` added to `a_module_token_inside_a_macro_declares_nothing`; new layout-level `a_file_named_only_in_a_spaced_or_raw_named_dormant_macro_is_a_violation` (three dormant forms, each must report the existing `orphan.rs`); new negative guard `a_bang_that_is_not_a_macro_leaves_real_declarations_visible` (`#![…]`, `a != b`, `a != (b)`, `! Y`, and keyword/label-preceded `!` before a block that holds a real `#[path] mod real;`)
+        - before the fix, a temporary per-case probe gave `["orphan", "guard"]` for every new positive case except `crate :: m :: discard!` (no trivia before `!`, already handled; kept as coverage); the parser and layout tests failed (`left: ["orphan", "guard"]`, `left: 0`). After the fix all 15 `test_layout::` tests pass. Mutation check: disabling the keyword/label rejection turns the negative guard red (`left: ["guard"]` for the `return !{…}` case), so it is not vacuous; the source was restored and touched
+        - results: `tools/` `just test` 344 passed, 2 skipped; `just lint` clean (exit 0); `claudine` `just test-cli test_placement::` 12 passed; `darkmatter` `just test test_layout::` 2 passed (lib and CLI guards); `biscuit-terminal` `just test test_layout::` 1 passed. No blockers
+- work completed for 'Macro spacing still lets dormant modules pass the layout gate' at 13:44:28
+        - orchestrator re-ran `just test` (344 passed, 2 skipped) and `just lint` (clean) in `tools/`
+        - residual limits noted by the subagent: only `macro_rules` may take a name after `!` (Rust has no other `path! name {…}` form), and unstable `macro` 2.0 definitions (no `!`) remain unhandled, as before
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in about 5 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the review's one human-review item (the migration manifests as sole authority) is an author decision, not an implementation finding, and is left open
+
+The files changed in this cycle are `tools/test-toolkit/src/test_layout.rs`, `tools/test-toolkit/src/test_layout/tests.rs`, and this log; the review file's frontmatter was also updated.
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-09-22T13:54:23-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-21-consolidated-test-binaries/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- starting the work on 'Unicode macro identifiers still let dormant modules pass the layout gate' at 13:54:35
+        - GitNexus impact on `is_ident`, `identifier_end`, and `macro_path_before`: `UNKNOWN` (private fns, 0 resolved callers); a text search confirms they are reached only through the public walker (`layout_violations` / `module_declarations`) from the four live guards. Claudine's separate ASCII `is_ident` in `claudine/cli/tests/common/source_scan.rs` serves other scans (line budget, spawn sites, dispatch inventory), not this gate
+        - approach: added `unicode-ident = "1"` as a direct dependency of `test-toolkit` for exact XID_Start/XID_Continue predicates, which std does not expose; it already builds through `proc-macro2`, so `Cargo.lock` gains only one edge and no new crate. `docs/dependencies.md` was updated
+        - removed `is_ident` and replaced it with UTF-8-aware helpers (`char_at`, `char_before`, `is_identifier_start`, `continues_identifier`, `plain_identifier_end`). Every former caller now uses the same rule: the boundary check before `mod`, module-name parsing, `skip_visibility`, the backward scan in `macro_path_before` (including the `r#` boundary), `identifier_end`, and `raw_string_open`. Byte offsets remain valid because the helpers never split a multi-byte char
+        - tests (`tools/test-toolkit/src/test_layout/tests.rs`):
+                - `a_module_token_inside_a_macro_declares_nothing` gained `macro_rules! café`, `café! {…}`, `crate::m::café ! […]`, `данные!(…)`, and `macro_rules! r#données`
+                - the layout test was renamed to `a_file_named_only_in_a_spaced_raw_or_unicode_named_dormant_macro_is_a_violation` and gained Unicode definition and invocation cases. Each case must report the existing `orphan.rs`
+                - new `a_unicode_module_name_is_a_real_declaration` (`#[path] mod données;`, `pub(crate) mod 名前;`) shows the old scanner also missed real Unicode module declarations
+        - before the fix, 3 of 16 `test_layout::` tests failed (parser: `left: ["orphan", "guard"]`; layout: `left: 0`, `right: 1`; module name: `left: ["guard"]`). The invocation-only case also failed by itself. After the fix, all 16 pass
+        - results: `tools/` `just test` 345 passed, 2 skipped; `just lint` clean; `claudine` `just test-cli test_placement::` 12 passed; `darkmatter` `just test test_layout::` 2 passed; `biscuit-terminal` `just test test_layout::` 1 passed. No blockers
+        - residual limits: the walker is still textual and does not expand macros, by design. A raw module name (`mod r#foo;`) is still not treated as a declaration, as before
+- work completed for 'Unicode macro identifiers still let dormant modules pass the layout gate' at 13:59:10
+        - the orchestrator re-ran `tools/` `just test` (345 passed, 2 skipped) and `just lint` (exit 0)
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in about 5 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the review's one human-review item, whether the migration manifests are the sole authority, is an author decision rather than an implementation finding, and it remains open
+
+The files changed in this cycle are `tools/test-toolkit/src/test_layout.rs`, `tools/test-toolkit/src/test_layout/tests.rs`, `tools/test-toolkit/Cargo.toml`, `Cargo.lock`, `docs/dependencies.md`, and this log. The review file's frontmatter was also updated.

@@ -38,6 +38,10 @@ Evidence per package lives in `pilot/` (`claudine-cli`), `darkmatter/`,
 
 ## 1. Explicit targets and a complete manifest: met
 
+The author signed off on 2026-09-22 that these four manifests are the sole
+authoritative mapping (spec human-review item 2, option A), so no second,
+hand-reviewed record exists to drift from them.
+
 - Each package's `Cargo.toml` sets `autotests = false` and lists its
   `[[test]]` targets.
 - `acceptance/metadata-check.py` compares `cargo metadata` with each
