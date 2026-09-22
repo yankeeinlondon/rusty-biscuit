@@ -4,12 +4,13 @@ Shared test lifecycle helpers for the Rusty Biscuit workspace.
 
 ## What it provides
 
-This crate solves four common pain points when writing tests in a Rust workspace:
+This crate solves five common pain points when writing tests in a Rust workspace:
 
 1. **Tracing output in tests** — `trace_phase!` macro and `init_test_tracing()` to emit structured spans around setup/body/teardown phases.
 2. **Safe environment variable mutation** — `EnvGuard` RAII guard that restores env vars after test completion, even when tests panic.
 3. **Containing detached audio** — `LockedAudioSpool`, the one publication fixture for Playa's detached spool.
 4. **Nextest integration** — Works out of the box with the workspace `.config/nextest.toml` for slow-test detection and JUnit reporting.
+5. **Tests that never compile** — `test_layout`, the layout gate for a package that declares its test binaries explicitly (`autotests = false`).
 
 ## Usage
 
@@ -233,6 +234,34 @@ cargo run -p test-toolkit --features backend-proof --bin backend-proof -- verify
 `0` proved (or nothing required), `1` a required backend executed no test, `2`
 bad configuration or unreadable evidence. `--stage-dir` and `--required`
 override the environment.
+
+### `test_layout` — consolidated-test layout gate
+
+A package whose integration tests are consolidated into one binary per
+execution contract sets `autotests = false` and declares each `[[test]]` with
+an explicit `path`. Cargo then compiles only what those roots reach, so a new
+top-level `tests/*.rs`, an undeclared `tests/<x>/main.rs`, or a module no `mod`
+reaches silently never runs. `layout_violations` walks the module graph from
+the declared roots (a `cfg`-gated `mod` still counts as declared) and names
+every unreached file. It also flags a missing `autotests = false` and a
+`[[test]]` without an existing `path`. Call it from a test in the package's
+Level 1 binary:
+
+```rust
+use test_toolkit::test_layout::{collect_test_sources, layout_violations};
+
+#[test]
+fn every_test_source_is_compiled_by_a_declared_target() {
+    let crate_root = biscuit_test_harness::manifest_dir!();
+    let manifest = std::fs::read_to_string(crate_root.join("Cargo.toml")).unwrap();
+    let files = collect_test_sources(&crate_root).unwrap();
+    let violations = layout_violations(&manifest, &files);
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+```
+
+Also assert that `files` holds a few known paths, so a scan that read nothing
+cannot pass. `darkmatter/lib/tests/l1/test_layout.rs` is the reference use.
 
 ### `leak-sweep` binary — post-run orphan detector
 
