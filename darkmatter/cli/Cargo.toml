@@ -3,6 +3,7 @@ name = "darkmatter-cli"
 description = "A themed markdown renderer for both console (escape-codes) and the browser (HTML)."
 version = "0.1.0"
 edition = "2024"
+autotests = false
 license = "AGPL-3.0-only"
 readme = "../README.md"
 repository = "https://github.com/yankeeinlondon/dockhand"
@@ -58,48 +59,16 @@ syntect = "5.2"
 # `[dependencies]` entry above cannot supply without the feature.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "level2_code_block_styling"
-required-features = ["terminal-tests"]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level2_disclosure_blocks"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_errors"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_frontmatter_images"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_frontmatter_tables"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_harness_integrity"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_horizontal_rules"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_layout_dimensions"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_ordered_lists"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_schema_about"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_schema_validate"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
