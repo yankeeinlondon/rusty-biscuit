@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 6
+phase: 7
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -16,6 +16,7 @@ packages:
     - test-toolkit
     - renderable
     - biscuit-file
+    - biscuit-terminal-cli
 source_files_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
     - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
@@ -671,6 +672,37 @@ packages_during_phase_6:
     - biscuit-terminal
     - renderable
     - claudine-cli
+source_files_during_phase_7:
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/l1/dispatch_inventory.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-terminal/cli/tests/level2_style_everywhere_matrix.rs
+    - features/2026-09-21-consolidated-test-binaries/baseline/consumer-sweep.py
+docs_updated_during_phase_7:
+    - biscuit-terminal/README.md
+    - docs/testing-strategy.md
+    - prompts/_prompt.md
+    - claudine/features/2026-09-08-steering/verification/README.md
+    - darkmatter/features/2026-07-15-performance-followup/benchmarks/README.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/test-selector-consumers.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_7:
+    - features/2026-09-21-consolidated-test-binaries/baseline/test-selector-consumers-after.md
+skills_files_updated_during_phase_7:
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/rust-testing/integration-tests.md
+    - .claude/skills/rust-testing/cli-output-testing.md
+    - .claude/skills/rust-testing/nextest.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/cli/cliclick.md
+packages_during_phase_7:
+    - claudine-cli
+    - biscuit-terminal-cli
+    - biscuit-terminal
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -1316,7 +1348,7 @@ its **active** entries change.
 
 ### Wave 1 — Documentation surfaces (parallel)
 
-- [ ] **`rust-testing` skill update** — document the consolidated layout
+- [x] **`rust-testing` skill update** — document the consolidated layout
       (`tests/<tier>/` + `common`), positional test-name filtering with the
       tier's canonical `-E` expression retained, the feature boundary
       (consolidation never unions features), and both sides of the
@@ -1325,12 +1357,12 @@ its **active** entries change.
       `cargo test` runs cases from one binary in one process and must never
       be presented as an equivalent way to run a migrated suite
       (acceptance 11, spec §7).
-- [ ] **Active-doc sweep** — update every active entry from the consumer
+- [x] **Active-doc sweep** — update every active entry from the consumer
       inventory (root and area `just.md`s, READMEs, skill files that
       recommend `--test <old-binary>`) to the positional-filter pattern;
       re-verify each remaining grep hit is a historical record and annotate
       the inventory file saying so.
-- [ ] **Drift-maintenance pass** — per AGENTS.md: area READMEs where public
+- [x] **Drift-maintenance pass** — per AGENTS.md: area READMEs where public
       behavior changed, `.claude/skills/` where architecture or workflows
       changed (beyond `rust-testing`: `rust-devops` and `os` skills only if
       they describe per-file test binaries or archive composition), and this
@@ -1338,10 +1370,10 @@ its **active** entries change.
 
 ### Checkpoint
 
-- [ ] A grep for `--test ` across justfiles, active docs, and skills returns
+- [x] A grep for `--test ` across justfiles, active docs, and skills returns
       zero references to migrated targets; the consumer inventory records
       every remaining hit as historical with its record date.
-- [ ] The `rust-testing` skill renders correctly (darkmatter `md` render) and
+- [x] The `rust-testing` skill renders correctly (darkmatter `md` render) and
       a reviewer confirms the process-isolation statement is present and
       two-sided.
 

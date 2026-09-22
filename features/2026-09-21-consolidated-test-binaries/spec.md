@@ -45,13 +45,13 @@ human_review_items:
 
         The Windows machine (`build-win-native`) now has **36 GB** free on its `W:` drive. That was 43 GB two phases ago and 37.9 GB last phase. The build recipe's own automatic cleanup found nothing to remove, and every build recipe refuses to start below 50 GB. The WSL2 virtual disk file on that drive is 130.8 GB, almost half the drive. I did not override the limit or delete anything by hand.
 
-        The next phase (7) only changes documentation, so it does not need Windows. The final phase (8) signs off acceptance and does need it.
+        Phase 7, which only changed documentation, is now done. The final phase (8) signs off acceptance and cannot close without this, so it now blocks the next phase. (The free space was not re-measured during Phase 7.)
 
         - **Option A: free space on `W:` (aim for at least 60 GB free, for example by compacting the WSL2 disk with `just wsl-compact` on that machine), then have an agent run the Windows and WSL2 checks for all four packages, before or during Phase 7 (recommended).** Pros: one session of about 2 to 3 hours of machine time covers everything, and Phase 8 can then close without an open item. Cons: you have to free the space. Something keeps filling the drive, so it may need a look.
-        - **Option B: continue with Phase 7 now and do the Windows and WSL2 checks at the start of Phase 8.** Pros: no waiting now. Cons: if a Windows-only problem turns up, it is fixed at the very end, with all four packages to re-check.
+        - **Option B: start Phase 8 and do the Windows and WSL2 checks as its first step, once space is freed.** Pros: no separate session. Cons: Phase 8 stalls if `W:` is still full, and a Windows-only problem found then is fixed at the very end, with all four packages to re-check.
         - **Option C: accept compile-only Windows evidence and let the next ordinary CI run on `main` supply the real Windows run.** Pros: no machine work. Cons: CI runs Windows only after merge, so a problem would be found after it lands. It also weakens acceptance criterion 4.
 
-        I recommend **Option A**. macOS and Linux are fully clean, so this is probably a formality. But it is the only check that can catch a test that silently disappears on Windows, and Phase 7 does not depend on it, so it can run in parallel.
+        I recommend **Option A**. macOS and Linux are fully clean, so this is probably a formality. But it is the only check that can catch a test that silently disappears on Windows, and acceptance criterion 4 asks for it.
     - |-
         **Still open from Phase 2: confirm that the migration manifest is the one authoritative record of where each test moved.**
 
@@ -62,15 +62,13 @@ human_review_items:
 
         I recommend **Option A**. Phase 8's acceptance document links these four files as the evidence, so a decision is needed before then.
 message_to_agent: |-
-    Phase 6 (biscuit-terminal) is implemented, so all four packages are migrated. Read the log's "## Phase 6" section first. macOS and Linux are fully proven for biscuit-terminal: identity is identical for all 5 feature sets on each host and on both together, the archive-path guard's file set matches the baseline by path, and the area suites are green (`just test` 3,263, `test-l2` lib 2 + CLI 76, `test-browser` 54, `lint`, `check-tier-coverage`, `check-canonical`). Native Windows and WSL2 are still PENDING for all four packages: `W:` has 36 GiB free, below the 50 GiB preflight. If the owner has freed `W:`, prove all four with on-host `consolidation.py capture --package <pkg>` of the base and migrated trees (`py` on Windows), then `compare` with each manifest, feeding darwin + linux + windows captures together. Then run `just cross-check <pkg> --os windows` and `--os wsl`. The base for biscuit-terminal is `beca6c368`.
+    Phase 7 (docs sweep) is done. Read the log's "## Phase 7" section. Result: `baseline/consumer-sweep.py --after` reports 0 active `--test <old-binary>` hits. It reads the old per-file names from the four `*-migration.json` manifests. Its output is `baseline/test-selector-consumers-after.md` and regenerates byte-identical. The 4 remaining in-flight-spec hits are execution records, each annotated with a record date in `baseline/test-selector-consumers.md` ("Phase 7 annotation"). The rust-testing skill now has "Consolidated Integration-Test Binaries", with a two-sided process-isolation subsection that an independent reviewer passed. Link that skill diff as the acceptance-11 evidence.
 
-    For Phase 7 (docs sweep), in addition to the earlier lists:
-    - biscuit-terminal's integration tests are `lib/tests/l1/` and `lib/tests/level2/`. Selectors are `--test l1 <module>::`. `renderable/justfile` `drift-report` is done, and so are the three module-doc regeneration commands (`layout_matrix`, `inline_content_matrix`, `render_comparison`). They now use `cargo nextest run ... --test l1 <module>::`, matching darkmatter.
-    - `.claude/skills/biscuit-terminal/SKILL.md` has a new bullet describing the layout. Keep it consistent with whatever the rust-testing skill rewrite says.
-    - `biscuit-terminal/README.md`'s test table names only the CLI's Level 2 location (`cli/tests/level2_*.rs`). The library's Level 2 is now `lib/tests/level2/`. That row predates this feature, but the sweep should fix it.
-    - One pattern is unique to biscuit-terminal. `tests/l1/parity_helpers.rs` is both an `l1` module and a helper that 18 parity modules each compile privately (`#[allow(clippy::duplicate_mod)] #[path = "parity_helpers.rs"] mod parity_helpers;`), because every old binary ran its own copy of its 24 unit tests, and the manifest keeps those 432 identities. If the rust-testing skill documents helper placement, describe this as a preserved legacy shape, not a pattern to copy. Deduplicating it is a separate, deliberate test change and does not belong in a docs sweep.
-    - The Phase 5 claim that all 1,086 `layout_matrix__*` snapshots belong to an `#[ignore]`d test was wrong: only 342 do. It is corrected in the log. Do not repeat it in docs.
-    - Linux evidence still needs the private-clone procedure, because the `build-linux` lock is held by `feat-nightly-perf`.
+    For Phase 8:
+    - Windows and WSL2 are still PENDING for all four packages. They are blocked on `build-win-native` `W:` free space (36 GiB at Phase 6, under the 50 GiB preflight), which was not re-measured in Phase 7. Check `human_review_items` first. Procedure: on-host `consolidation.py capture` of base and migrated trees, then `compare` with darwin + linux + windows captures, then `just cross-check <pkg> --os windows` and `--os wsl`. Each package's base revision is in its phase's log section (biscuit-terminal: `beca6c368`).
+    - `just test` passes in claudine (7,334) and biscuit-terminal (3,263) after this phase's edits. So does `just lint` in both.
+    - One open follow-up, not a Phase 8 blocker: claudine's `l1/test_placement.rs` still carries its own copy of the layout-gate logic, not `test_toolkit::test_layout`. Switching it changes manifest `additions`, so it is the author's call.
+    - `build-linux`'s cross-check lock was held by `feat-nightly-perf` through Phase 6. Use the private-clone procedure in the `os` skill if it still is.
 ---
 
 # Consolidate compatible integration tests into shared binaries
