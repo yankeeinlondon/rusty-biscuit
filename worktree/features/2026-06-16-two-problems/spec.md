@@ -1,3 +1,7 @@
+---
+implemented: true
+---
+
 # Two Problems Feature
 
 The worktree CLI's **list** command (`wt list`, the default subcommand) was
@@ -29,7 +33,7 @@ Performance                                664.3ms  100%
 ```
 
 `list gather` is the target. `graph gather` is secondary. The `graph image
-render` figure is a one-off rasterization cache *miss* (normally ~13 ms cached) —
+render` figure is a one-off rasterization cache _miss_ (normally ~13 ms cached) —
 inherent and out of scope. `pre-dispatch` is clap parse + `Terminal::default()`
 capability detection (process startup, not git work) — out of scope.
 
@@ -40,7 +44,7 @@ The initial assumption — that the per-worktree `git status` walk is slow — i
 
 - Per-worktree `git status --porcelain` (the `dirty_status` call): **20–90 ms,
   uniformly cheap.** Not the bottleneck.
-- The real cost is the **merge analysis** run for every *divergent* worktree.
+- The real cost is the **merge analysis** run for every _divergent_ worktree.
 
 `worktree::list_worktrees` (`lib/src/worktree.rs:161-216`) spawns one thread per
 worktree. Within each non-main thread:
@@ -53,10 +57,10 @@ worktree. Within each non-main thread:
 In this repo **10 of 15 branches are divergent**, so all 10 run a full 3-way tree
 merge against branches 300–4,575 commits behind `main`:
 
-| op | per-call | count | ~total CPU |
-| --- | ---: | ---: | ---: |
-| `git status` (dirty) | 20–90 ms | 16 | ~0.6 s |
-| `rev-list` (ahead/behind) | ~45 ms | 15 | ~0.7 s |
+| op                            |      per-call |  count |  ~total CPU |
+| ----------------------------- | ------------: | -----: | ----------: |
+| `git status` (dirty)          |      20–90 ms |     16 |      ~0.6 s |
+| `rev-list` (ahead/behind)     |        ~45 ms |     15 |      ~0.7 s |
 | **`merge-tree --write-tree`** | **40–132 ms** | **10** | **~0.75 s** |
 
 ~2 s of CPU work fanned across cores with disk/object-DB contention ≈ the 470 ms
@@ -109,7 +113,7 @@ For genuine cache misses (first run, or after tips move):
   (speculative). Most divergent branches need it anyway; collapses the ~177 ms
   chain toward `max(rev-list, merge-tree)`.
 - **Overlap `graph gather` with `list gather`.** `graph gather` needs only the
-  default branch + branch *names*, both available right after the cheap
+  default branch + branch _names_, both available right after the cheap
   `git worktree list --porcelain` parse — before any dirty/merge work. Start it
   concurrently so its ~110 ms hides behind `list gather`.
 
@@ -163,26 +167,26 @@ Not active work. Recorded so the investigation isn't lost if it recurs.
   Current runs render correctly — the issue appears intermittent or already
   resolved. No fix is being implemented now.
 - **If it recurs, the confirmed facts:**
-  - Rendering path: `wt` → `biscuit_terminal::components::mermaid::MermaidDiagram`
-    (display: cells→pixels via `term.cell_size()`, terminal image protocol) →
-    `biscuit_visualized` (`MermaidDiagram`/`MermaidRenderer`) for SVG generation +
-    rasterization. The CLI uses the existing biscuit-terminal component — nothing
-    bespoke.
-  - The terminal/raster path is faithful (uniform scale, aspect preserved). Any
-    mis-proportion originates in `mermaid_rs_renderer::compute_layout`
-    (`biscuit-visualized/src/src/mermaid/render.rs:223-225`), which can produce a
-    near-square / padded canvas for small (few-commit) gitGraphs.
-  - Measured cached gitGraph PNGs: broken cases were all ~square (h/w 0.9–1.3),
-    small graphs; healthy graphs were wide-and-short (h/w 0.25–0.45). Branches
-    further behind `main` get more horizontal commits → wider → correct, which
-    explains the "further behind renders correctly more often" anecdote.
-  - **Candidate fix (if needed):** in biscuit-visualized, re-fit the SVG canvas to
-    its content bounding box before rasterizing — single chokepoint at
-    `raster/png.rs::render_tree_to_pixmap` (covers both the at-width and
-    scale rasterization entry points). Note: a content-bbox crop normalizes dead
-    space but does **not** widen an intrinsically near-square small graph; making
-    small graphs "always wide" is a separate layout-level change. Bump the cache
-    backend id (`MERMAID_BACKEND`) on any such change.
+    - Rendering path: `wt` → `biscuit_terminal::components::mermaid::MermaidDiagram`
+      (display: cells→pixels via `term.cell_size()`, terminal image protocol) →
+      `biscuit_visualized` (`MermaidDiagram`/`MermaidRenderer`) for SVG generation +
+      rasterization. The CLI uses the existing biscuit-terminal component — nothing
+      bespoke.
+    - The terminal/raster path is faithful (uniform scale, aspect preserved). Any
+      mis-proportion originates in `mermaid_rs_renderer::compute_layout`
+      (`biscuit-visualized/src/src/mermaid/render.rs:223-225`), which can produce a
+      near-square / padded canvas for small (few-commit) gitGraphs.
+    - Measured cached gitGraph PNGs: broken cases were all ~square (h/w 0.9–1.3),
+      small graphs; healthy graphs were wide-and-short (h/w 0.25–0.45). Branches
+      further behind `main` get more horizontal commits → wider → correct, which
+      explains the "further behind renders correctly more often" anecdote.
+    - **Candidate fix (if needed):** in biscuit-visualized, re-fit the SVG canvas to
+      its content bounding box before rasterizing — single chokepoint at
+      `raster/png.rs::render_tree_to_pixmap` (covers both the at-width and
+      scale rasterization entry points). Note: a content-bbox crop normalizes dead
+      space but does **not** widen an intrinsically near-square small graph; making
+      small graphs "always wide" is a separate layout-level change. Bump the cache
+      backend id (`MERMAID_BACKEND`) on any such change.
 
 ---
 
