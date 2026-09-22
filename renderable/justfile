@@ -157,8 +157,14 @@ drift-report:
     tree_total=0
     cosmetic_tree_total=0
     for crate in biscuit-terminal darkmatter; do
+        # darkmatter's integration tests are consolidated into one binary per
+        # execution contract, so its `render_comparison` is a module of `l1`.
+        case "$crate" in
+            darkmatter) selector=(--test l1 render_comparison::) ;;
+            *) selector=(--test render_comparison) ;;
+        esac
         echo -e "  {{ DIM }}comparing ${crate} (compiling + running render_comparison, ~1-2 min, no output until done)…{{ RESET }}"
-        out=$(RECORD_DRIFT=1 cargo test -q -p "$crate" --test render_comparison -- --nocapture)
+        out=$(RECORD_DRIFT=1 cargo test -q -p "$crate" "${selector[@]}" -- --nocapture)
         # Isolate the recorded ledger block.
         ledger=$(echo "$out" \
             | awk '/=== BEGIN KNOWN_DRIFT/{f=1;next} /=== END KNOWN_DRIFT/{f=0} f')
