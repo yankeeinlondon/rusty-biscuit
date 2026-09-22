@@ -151,4 +151,14 @@ No subject-group split is needed. Waves 1–3 do not re-run.
 
 ## Rollout observations (Phases 4–6)
 
-_Not yet recorded._
+Lightweight observations only (plan Phases 4–6). There is no clean-build,
+edit-latency, or memory series here; that was pilot-only. Each package's
+before and after are built on this macOS host with the same command:
+`cargo test --no-run --locked -p <package> --features <set>` with
+`RUSTC_WRAPPER=""`. The before side is a detached worktree at the base
+revision, sharing the same target directory. Count and bytes cover the
+package's `test`-kind executables only (the `s3-measure.sh` step 2 filter).
+
+| Package | Phase | Base | Feature set | Test targets | Test executable bytes |
+|---|---|---|---|---:|---:|
+| `darkmatter` | 4 | `048e44f7a` | `terminal-tests,browser-tests,effects-instrumentation` | 74 → 5 | 5.01 GB → 0.51 GB (−90%) |

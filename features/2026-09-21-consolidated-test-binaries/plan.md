@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 3
+phase: 4
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -13,6 +13,9 @@ packages:
     - darkmatter-cli
     - biscuit-terminal
     - repo-deps
+    - test-toolkit
+    - renderable
+    - biscuit-file
 source_files_during_phase_1:
     - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
     - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
@@ -253,6 +256,164 @@ skills_files_updated_during_phase_3:
 packages_during_phase_3:
     - claudine-cli
     - claudine
+source_files_during_phase_4:
+    - .config/nextest.toml
+    - Cargo.lock
+    - biscuit-file/lib/tests/span_compat.rs
+    - darkmatter/cli/tests/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2_disclosure_blocks.rs
+    - darkmatter/justfile
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/render_tree/inline_extension.rs
+    - darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+    - darkmatter/lib/tests/browser/browser_render.rs
+    - darkmatter/lib/tests/browser/main.rs
+    - darkmatter/lib/tests/l1/ambient_ctx_capture.rs
+    - darkmatter/lib/tests/l1/array_rendering_json.rs
+    - darkmatter/lib/tests/l1/as_block_error_registry.rs
+    - darkmatter/lib/tests/l1/backslash_escape_spans.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/benchmark_fixtures.rs
+    - darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/compose_reuse_phase5.rs
+    - darkmatter/lib/tests/l1/cutover_reference.rs
+    - darkmatter/lib/tests/l1/debug_test.rs
+    - darkmatter/lib/tests/l1/declined_path_transclusion.rs
+    - darkmatter/lib/tests/l1/disclosure_render_targets.rs
+    - darkmatter/lib/tests/l1/disclosure_transclusion_integration.rs
+    - darkmatter/lib/tests/l1/effects_integration.rs
+    - darkmatter/lib/tests/l1/error_snapshots/condition.rs
+    - darkmatter/lib/tests/l1/error_snapshots/ctx_merge.rs
+    - darkmatter/lib/tests/l1/error_snapshots/deferred_set.rs
+    - darkmatter/lib/tests/l1/error_snapshots/editor.rs
+    - darkmatter/lib/tests/l1/error_snapshots/file_tree.rs
+    - darkmatter/lib/tests/l1/error_snapshots/helpers.rs
+    - darkmatter/lib/tests/l1/error_snapshots/image_ref.rs
+    - darkmatter/lib/tests/l1/error_snapshots/link.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/error_snapshots/mermaid_theme.rs
+    - darkmatter/lib/tests/l1/error_snapshots/mod.rs
+    - darkmatter/lib/tests/l1/error_snapshots/normalization.rs
+    - darkmatter/lib/tests/l1/error_snapshots/page_block.rs
+    - darkmatter/lib/tests/l1/error_snapshots/reference.rs
+    - darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs
+    - darkmatter/lib/tests/l1/error_snapshots/stylesheet.rs
+    - darkmatter/lib/tests/l1/error_snapshots/toc_linking.rs
+    - darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+    - darkmatter/lib/tests/l1/git_context_integration.rs
+    - darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+    - darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+    - darkmatter/lib/tests/l1/html_inversion.rs
+    - darkmatter/lib/tests/l1/image_pixel_classification.rs
+    - darkmatter/lib/tests/l1/inline_document_text.rs
+    - darkmatter/lib/tests/l1/inline_envelope_prototype.rs
+    - darkmatter/lib/tests/l1/interpolation_literal_pipeline.rs
+    - darkmatter/lib/tests/l1/layout_matrix.rs
+    - darkmatter/lib/tests/l1/layout_snapshots.rs
+    - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/prelude_exports.rs
+    - darkmatter/lib/tests/l1/prose_wrap_parity.rs
+    - darkmatter/lib/tests/l1/reference_integration.rs
+    - darkmatter/lib/tests/l1/render_comparison.rs
+    - darkmatter/lib/tests/l1/render_invariants.rs
+    - darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs
+    - darkmatter/lib/tests/l1/render_tree_roundtrip.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
+    - darkmatter/lib/tests/l1/schemas_detect_table.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_required_count_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_validate_table.rs
+    - darkmatter/lib/tests/l1/set_overlay_integration.rs
+    - darkmatter/lib/tests/l1/shell_block_integration.rs
+    - darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+    - darkmatter/lib/tests/l1/span_compat.rs
+    - darkmatter/lib/tests/l1/style_features_baseline.rs
+    - darkmatter/lib/tests/l1/style_features_phase5.rs
+    - darkmatter/lib/tests/l1/style_frontmatter.rs
+    - darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/lib/tests/l1/test_layout.rs
+    - darkmatter/lib/tests/l1/tree_features_characterization.rs
+    - darkmatter/lib/tests/l1/yaml_block_parity.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/basic_spans.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/public_entry_points.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/level2/main.rs
+    - darkmatter/lib/tests/level3-browser/level3_popover.rs
+    - darkmatter/lib/tests/level3-browser/main.rs
+    - darkmatter/lib/tests/level3-terminal/level3_image_painting.rs
+    - darkmatter/lib/tests/level3-terminal/main.rs
+    - features/2026-09-21-consolidated-test-binaries/pilot/apply-move.py
+    - renderable/justfile
+    - tools/test-toolkit/Cargo.toml
+    - tools/test-toolkit/src/lib.rs
+    - tools/test-toolkit/src/test_layout.rs
+    - tools/test-toolkit/src/test_layout/tests.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/rendering/popover.md
+    - darkmatter/features/2026-07-15-performance-followup/benchmarks/manifest.yaml
+    - darkmatter/lib/README.md
+    - darkmatter/lib/tests/fixtures/mermaid/README.md
+    - docs/dependencies.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+    - tools/test-toolkit/README.md
+docs_created_during_phase_4:
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-migration.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/snapshot-mapping.json
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/errors.md
+    - .claude/skills/darkmatter/structure.md
+packages_during_phase_4:
+    - darkmatter
+    - test-toolkit
+    - renderable
+    - biscuit-file
+    - darkmatter-cli
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -760,7 +921,7 @@ policy, and the heaviest snapshot population in the four packages. Benches
 
 ### Wave 1 — Structural move (sequential)
 
-- [ ] **Darkmatter manifest and move** — fresh `inventory` + `plan` for
+- [x] **Darkmatter manifest and move** — fresh `inventory` + `plan` for
       `darkmatter/lib` (committed as `darkmatter-migration.json`); the
       browser-backed Level 3 tests (`browser_render`, `level3_popover`) and
       terminal-backed Level 3 test (`level3_image_painting`) land in
@@ -772,37 +933,37 @@ policy, and the heaviest snapshot population in the four packages. Benches
 
 ### Wave 2 — Fix-ups (parallel)
 
-- [ ] **Snapshot moves** — the S4 rule applied to darkmatter's snapshot
+- [x] **Snapshot moves** — the S4 rule applied to darkmatter's snapshot
       directories (`tests/snapshots`, `error_snapshots` payloads); mechanical
       moves, `INSTA_UPDATE=no`, `check-snapshots` green, zero `.snap.new`.
-- [ ] **Identity comparison** — `compare` against `baseline/listings/` for
+- [x] **Identity comparison** — `compare` against `baseline/listings/` for
       every darkmatter feature set **and** both `BISCUIT_L1_INCLUDE_SLOW`
       states (R4), on macOS.
-- [ ] **Structural guard** — add the undeclared-crate-root/module check
+- [x] **Structural guard** — add the undeclared-crate-root/module check
       inside darkmatter's consolidated Level 1 target (acceptance 12; not a
       new binary, not a CI gate).
-- [ ] **Area recipe/doc pass** — active `darkmatter/justfile`, `just.md`,
+- [x] **Area recipe/doc pass** — active `darkmatter/justfile`, `just.md`,
       and docs updated off per-file `--test` selectors; browser-suite
       guidance keeps its opt-in and no-focus rule.
 
 ### Wave 3 — Cross-host verification (parallel)
 
-- [ ] **macOS suites** — `just test darkmatter`, `just test-l2`,
+- [x] **macOS suites** — `just test darkmatter`, `just test-l2`,
       `just lint`, `just test-browser` (no focus); `just check-tier-coverage
       darkmatter` passes.
 - [ ] **Linux / Windows listings + comparison on host**; **WSL2** archive
       portability when available, else `pending` with reason.
-- [ ] **Lightweight observations** — target count and on-disk executable
+- [x] **Lightweight observations** — target count and on-disk executable
       size before/after on this host recorded into `measurements.md`'s
       rollout table (no full measurement series; that was pilot-only).
-- [ ] **Skip-baseline check** per R5.
+- [x] **Skip-baseline check** per R5.
 
 ### Checkpoint
 
 - [ ] Identity equality four-way on macOS/Linux/Windows for every feature set
       and both slow-policy states; browser and terminal Level 3 contracts
       still separate targets; `error_snapshots` disposition recorded.
-- [ ] Area suites green; guard test live; snapshot mapping table committed.
+- [x] Area suites green; guard test live; snapshot mapping table committed.
 
 ## Phase 5 — `darkmatter-cli` Migration
 
