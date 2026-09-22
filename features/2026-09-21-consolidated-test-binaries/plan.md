@@ -2,7 +2,7 @@
 title: Consolidate compatible integration tests into shared binaries
 spec: 2026-09-21-consolidated-test-binaries
 created: 2026-09-21
-phase: 7
+phase: 8
 total_phases: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -703,6 +703,629 @@ packages_during_phase_7:
     - claudine-cli
     - biscuit-terminal-cli
     - biscuit-terminal
+source_files_during_phase_8:
+    - features/2026-09-21-consolidated-test-binaries/acceptance/metadata-check.py
+    - features/2026-09-21-consolidated-test-binaries/acceptance/body-diff.py
+docs_updated_during_phase_8:
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+docs_created_during_phase_8:
+    - features/2026-09-21-consolidated-test-binaries/acceptance.md
+    - features/2026-09-21-consolidated-test-binaries/ci-observations.md
+    - features/2026-09-21-consolidated-test-binaries/acceptance/metadata-check.txt
+    - features/2026-09-21-consolidated-test-binaries/acceptance/body-diff.md
+skills_files_updated_during_phase_8: []
+packages_during_phase_8: []
+source_code:
+    - features/2026-09-21-consolidated-test-binaries/baseline/capture-listings.sh
+    - features/2026-09-21-consolidated-test-binaries/baseline/inventory.py
+    - features/2026-09-21-consolidated-test-binaries/baseline/consumer-sweep.py
+    - features/2026-09-21-consolidated-test-binaries/baseline/deps-census.py
+    - features/2026-09-21-consolidated-test-binaries/spikes/s2-scan.py
+    - features/2026-09-21-consolidated-test-binaries/spikes/s3-measure.sh
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - scripts/ci/test_ci_local.py
+    - just/ci-local.just
+    - features/2026-09-21-consolidated-test-binaries/selfproof/mutation-check.py
+    - .config/nextest.toml
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/budget/tests.rs
+    - claudine/cli/src/commands/wrap/exec/termination/coordinator/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_cwd.rs
+    - claudine/cli/tests/l1/argv_normalization.rs
+    - claudine/cli/tests/l1/characterization_error_routes.rs
+    - claudine/cli/tests/l1/cli_process_fixture.rs
+    - claudine/cli/tests/l1/command_routing.rs
+    - claudine/cli/tests/l1/completion_cli.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_contract.rs
+    - claudine/cli/tests/l1/completion_inline_compose.rs
+    - claudine/cli/tests/l1/completion_perf.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+    - claudine/cli/tests/l1/completion_sequence.rs
+    - claudine/cli/tests/l1/completion_setter.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_cli.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_header_first.rs
+    - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/compose_interactive_timeout_cli.rs
+    - claudine/cli/tests/l1/compose_removed_validation_keys.rs
+    - claudine/cli/tests/l1/compose_repository_context.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/compose_system_prompt_lifetime.rs
+    - claudine/cli/tests/l1/compose_ttff_perf.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/contamination_probes.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/l1/contextual_errors.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/detached_audio.rs
+    - claudine/cli/tests/l1/diagnostic_discovery.rs
+    - claudine/cli/tests/l1/dispatch_inventory.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/source_scan.rs
+    - claudine/cli/tests/l1/errors_command.rs
+    - claudine/cli/tests/l1/handle_blocking_output.rs
+    - claudine/cli/tests/l1/handle_deadline.rs
+    - claudine/cli/tests/l1/handle_repo_config.rs
+    - claudine/cli/tests/l1/hooks_cli.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/inline_compose_cli.rs
+    - claudine/cli/tests/l1/inline_compose_hash.rs
+    - claudine/cli/tests/l1/inline_compose_sequence_mismatch.rs
+    - claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs
+    - claudine/cli/tests/l1/level1_dry_run_pty.rs
+    - claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+    - claudine/cli/tests/l1/level1_pty_wrapper_summary.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/l1/level1_schema_prompt_pty.rs
+    - claudine/cli/tests/l1/level1_structured_error_message.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_initialize_state.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/mcp_cli.rs
+    - claudine/cli/tests/l1/prompt_reporting.rs
+    - claudine/cli/tests/l1/propagated_context_fixtures.rs
+    - claudine/cli/tests/l1/protect_cli.rs
+    - claudine/cli/tests/l1/provider_error_finalize.rs
+    - claudine/cli/tests/l1/run_harness_loop_call_sites.rs
+    - claudine/cli/tests/l1/sequence_budget.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_prompt_property.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/shipped_prompt_contract.rs
+    - claudine/cli/tests/l1/shipped_prompt_route_drift.rs
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/l1/skills_integration.rs
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/l1/system_prompt_perf_bench.rs
+    - claudine/cli/tests/l1/test_placement.rs
+    - claudine/cli/tests/l1/wrap_antigravity_exit_signal.rs
+    - claudine/cli/tests/l1/wrap_basics.rs
+    - claudine/cli/tests/l1/wrap_compose_agent.rs
+    - claudine/cli/tests/l1/wrap_compose_exec.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/wrap_direct_argv.rs
+    - claudine/cli/tests/l1/wrap_incomplete_subagents.rs
+    - claudine/cli/tests/l1/wrap_inline_compose.rs
+    - claudine/cli/tests/l1/wrap_inline_compose_interactive.rs
+    - claudine/cli/tests/l1/wrap_opencode.rs
+    - claudine/cli/tests/l1/wrap_opencode_models.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_provider_flags.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/l1/wrap_structured_stream.rs
+    - claudine/cli/tests/l1/wrap_watchdog_startup_stall.rs
+    - claudine/cli/tests/l1/wrap_watchdog_timeout.rs
+    - claudine/cli/tests/level2/level2_auto_complete_chooser.rs
+    - claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+    - claudine/cli/tests/level2/level2_context_capture.rs
+    - claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+    - claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+    - claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/cli/tests/level2/level2_incomplete_subagents_capture.rs
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs
+    - claudine/cli/tests/level2/level2_interrupt_feedback_capture.rs
+    - claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+    - claudine/cli/tests/level2/level2_lifecycle_action_forms.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_lifecycle_loop.rs
+    - claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/level2_prompt_reporting_capture.rs
+    - claudine/cli/tests/level2/level2_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_provider_overlay_capture.rs
+    - claudine/cli/tests/level2/level2_removed_validation_key_capture.rs
+    - claudine/cli/tests/level2/level2_schema_parse_capture.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/level2_stalled_generation_capture.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/level2/level2_windows_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_wrap_ctrl_c_loop_wedge_tmux.rs
+    - claudine/cli/tests/level2/level2_wrap_ctrl_c_tmux.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/level3/level3_auto_complete_chooser.rs
+    - claudine/cli/tests/level3/level3_linux_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_windows_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_wrap_ctrl_c.rs
+    - claudine/cli/tests/level3/main.rs
+    - claudine/cli/tests/real/main.rs
+    - claudine/cli/tests/real/real_inline_write_grant.rs
+    - claudine/cli/tests/real/real_opencode_yolo_subagent.rs
+    - claudine/cli/tests/real/real_pi_steering.rs
+    - claudine/justfile
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - features/2026-09-21-consolidated-test-binaries/pilot/apply-move.py
+    - Cargo.lock
+    - biscuit-file/lib/tests/span_compat.rs
+    - darkmatter/cli/tests/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2_disclosure_blocks.rs
+    - darkmatter/justfile
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/render_tree/inline_extension.rs
+    - darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+    - darkmatter/lib/tests/browser/browser_render.rs
+    - darkmatter/lib/tests/browser/main.rs
+    - darkmatter/lib/tests/l1/ambient_ctx_capture.rs
+    - darkmatter/lib/tests/l1/array_rendering_json.rs
+    - darkmatter/lib/tests/l1/as_block_error_registry.rs
+    - darkmatter/lib/tests/l1/backslash_escape_spans.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/benchmark_fixtures.rs
+    - darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/compose_reuse_phase5.rs
+    - darkmatter/lib/tests/l1/cutover_reference.rs
+    - darkmatter/lib/tests/l1/debug_test.rs
+    - darkmatter/lib/tests/l1/declined_path_transclusion.rs
+    - darkmatter/lib/tests/l1/disclosure_render_targets.rs
+    - darkmatter/lib/tests/l1/disclosure_transclusion_integration.rs
+    - darkmatter/lib/tests/l1/effects_integration.rs
+    - darkmatter/lib/tests/l1/error_snapshots/condition.rs
+    - darkmatter/lib/tests/l1/error_snapshots/ctx_merge.rs
+    - darkmatter/lib/tests/l1/error_snapshots/deferred_set.rs
+    - darkmatter/lib/tests/l1/error_snapshots/editor.rs
+    - darkmatter/lib/tests/l1/error_snapshots/file_tree.rs
+    - darkmatter/lib/tests/l1/error_snapshots/helpers.rs
+    - darkmatter/lib/tests/l1/error_snapshots/image_ref.rs
+    - darkmatter/lib/tests/l1/error_snapshots/link.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/error_snapshots/mermaid_theme.rs
+    - darkmatter/lib/tests/l1/error_snapshots/mod.rs
+    - darkmatter/lib/tests/l1/error_snapshots/normalization.rs
+    - darkmatter/lib/tests/l1/error_snapshots/page_block.rs
+    - darkmatter/lib/tests/l1/error_snapshots/reference.rs
+    - darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs
+    - darkmatter/lib/tests/l1/error_snapshots/stylesheet.rs
+    - darkmatter/lib/tests/l1/error_snapshots/toc_linking.rs
+    - darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+    - darkmatter/lib/tests/l1/git_context_integration.rs
+    - darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+    - darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+    - darkmatter/lib/tests/l1/html_inversion.rs
+    - darkmatter/lib/tests/l1/image_pixel_classification.rs
+    - darkmatter/lib/tests/l1/inline_document_text.rs
+    - darkmatter/lib/tests/l1/inline_envelope_prototype.rs
+    - darkmatter/lib/tests/l1/interpolation_literal_pipeline.rs
+    - darkmatter/lib/tests/l1/layout_matrix.rs
+    - darkmatter/lib/tests/l1/layout_snapshots.rs
+    - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/prelude_exports.rs
+    - darkmatter/lib/tests/l1/prose_wrap_parity.rs
+    - darkmatter/lib/tests/l1/reference_integration.rs
+    - darkmatter/lib/tests/l1/render_comparison.rs
+    - darkmatter/lib/tests/l1/render_invariants.rs
+    - darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs
+    - darkmatter/lib/tests/l1/render_tree_roundtrip.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
+    - darkmatter/lib/tests/l1/schemas_detect_table.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_required_count_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_validate_table.rs
+    - darkmatter/lib/tests/l1/set_overlay_integration.rs
+    - darkmatter/lib/tests/l1/shell_block_integration.rs
+    - darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+    - darkmatter/lib/tests/l1/span_compat.rs
+    - darkmatter/lib/tests/l1/style_features_baseline.rs
+    - darkmatter/lib/tests/l1/style_features_phase5.rs
+    - darkmatter/lib/tests/l1/style_frontmatter.rs
+    - darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/lib/tests/l1/test_layout.rs
+    - darkmatter/lib/tests/l1/tree_features_characterization.rs
+    - darkmatter/lib/tests/l1/yaml_block_parity.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/basic_spans.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/file_links.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/public_entry_points.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/level2/main.rs
+    - darkmatter/lib/tests/level3-browser/level3_popover.rs
+    - darkmatter/lib/tests/level3-browser/main.rs
+    - darkmatter/lib/tests/level3-terminal/level3_image_painting.rs
+    - darkmatter/lib/tests/level3-terminal/main.rs
+    - renderable/justfile
+    - tools/test-toolkit/Cargo.toml
+    - tools/test-toolkit/src/lib.rs
+    - tools/test-toolkit/src/test_layout.rs
+    - tools/test-toolkit/src/test_layout/tests.rs
+    - biscuit-terminal/lib/tests/level2_terminal_osc_wezterm.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/clean.rs
+    - darkmatter/cli/tests/clean_frontmatter.rs
+    - darkmatter/cli/tests/clean_json.rs
+    - darkmatter/cli/tests/clean_schema.rs
+    - darkmatter/cli/tests/code_block.rs
+    - darkmatter/cli/tests/compose_array_rendering.rs
+    - darkmatter/cli/tests/compose_base_schema.rs
+    - darkmatter/cli/tests/compose_basic.rs
+    - darkmatter/cli/tests/compose_interpolation.rs
+    - darkmatter/cli/tests/compose_layout.rs
+    - darkmatter/cli/tests/compose_page_blocks.rs
+    - darkmatter/cli/tests/compose_perf.rs
+    - darkmatter/cli/tests/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/compose_remote_caching.rs
+    - darkmatter/cli/tests/compose_schema.rs
+    - darkmatter/cli/tests/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/compose_shell.rs
+    - darkmatter/cli/tests/compose_state_set.rs
+    - darkmatter/cli/tests/compose_terminal_detection.rs
+    - darkmatter/cli/tests/compose_transclusion.rs
+    - darkmatter/cli/tests/delta.rs
+    - darkmatter/cli/tests/get_set_rm.rs
+    - darkmatter/cli/tests/graph.rs
+    - darkmatter/cli/tests/hash.rs
+    - darkmatter/cli/tests/hash_directory.rs
+    - darkmatter/cli/tests/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/help.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/cli/tests/l1/clean_json.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/code_block.rs
+    - darkmatter/cli/tests/l1/compose_array_rendering.rs
+    - darkmatter/cli/tests/l1/compose_base_schema.rs
+    - darkmatter/cli/tests/l1/compose_basic.rs
+    - darkmatter/cli/tests/l1/compose_interpolation.rs
+    - darkmatter/cli/tests/l1/compose_layout.rs
+    - darkmatter/cli/tests/l1/compose_page_blocks.rs
+    - darkmatter/cli/tests/l1/compose_perf.rs
+    - darkmatter/cli/tests/l1/compose_refs_and_missing.rs
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/cli/tests/l1/compose_schema_file_rewrite.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/cli/tests/l1/compose_terminal_detection.rs
+    - darkmatter/cli/tests/l1/compose_transclusion.rs
+    - darkmatter/cli/tests/l1/delta.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/graph.rs
+    - darkmatter/cli/tests/l1/hash.rs
+    - darkmatter/cli/tests/l1/hash_directory.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+    - darkmatter/cli/tests/l1/help.rs
+    - darkmatter/cli/tests/l1/layout_alignment.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_flags.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/md_process_fixture.rs
+    - darkmatter/cli/tests/l1/render_basic.rs
+    - darkmatter/cli/tests/l1/rm.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/cli/tests/l1/schema_detect.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_baseline.rs
+    - darkmatter/cli/tests/l1/spawn_site_guard.rs
+    - darkmatter/cli/tests/l1/test_layout.rs
+    - darkmatter/cli/tests/l1/toc.rs
+    - darkmatter/cli/tests/l1/validate_refs.rs
+    - darkmatter/cli/tests/layout_alignment.rs
+    - darkmatter/cli/tests/layout_fill.rs
+    - darkmatter/cli/tests/layout_flags.rs
+    - darkmatter/cli/tests/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/level2/harness_integrity.rs
+    - darkmatter/cli/tests/level2/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2/level2_errors.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2/level2_schema_about.rs
+    - darkmatter/cli/tests/level2/level2_schema_validate.rs
+    - darkmatter/cli/tests/level2/main.rs
+    - darkmatter/cli/tests/level2_errors.rs
+    - darkmatter/cli/tests/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2_harness_integrity.rs
+    - darkmatter/cli/tests/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2_schema_about.rs
+    - darkmatter/cli/tests/level2_schema_validate.rs
+    - darkmatter/cli/tests/md_process_fixture.rs
+    - darkmatter/cli/tests/render_basic.rs
+    - darkmatter/cli/tests/rm.rs
+    - darkmatter/cli/tests/schema_about.rs
+    - darkmatter/cli/tests/schema_detect.rs
+    - darkmatter/cli/tests/schema_triggers.rs
+    - darkmatter/cli/tests/schema_validate.rs
+    - darkmatter/cli/tests/schema_validate_baseline.rs
+    - darkmatter/cli/tests/spawn_site_guard.rs
+    - darkmatter/cli/tests/toc.rs
+    - darkmatter/cli/tests/validate_refs.rs
+    - biscuit-terminal/lib/Cargo.toml
+    - biscuit-terminal/lib/examples/discovery_probe.rs
+    - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+    - biscuit-terminal/lib/tests/compose_parity.rs
+    - biscuit-terminal/lib/tests/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/html_page_example.rs
+    - biscuit-terminal/lib/tests/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/integration.rs
+    - biscuit-terminal/lib/tests/l1/compose_parity.rs
+    - biscuit-terminal/lib/tests/l1/filesystem_parity.rs
+    - biscuit-terminal/lib/tests/l1/graph_expression_parity.rs
+    - biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs
+    - biscuit-terminal/lib/tests/l1/html_page_example.rs
+    - biscuit-terminal/lib/tests/l1/inline_content_matrix.rs
+    - biscuit-terminal/lib/tests/l1/integration.rs
+    - biscuit-terminal/lib/tests/l1/layout_matrix.rs
+    - biscuit-terminal/lib/tests/l1/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/l1/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/l1/level1_cursor.rs
+    - biscuit-terminal/lib/tests/l1/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/l1/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/l1/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/l1/list_parity.rs
+    - biscuit-terminal/lib/tests/l1/main.rs
+    - biscuit-terminal/lib/tests/l1/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/l1/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/l1/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/l1/parity_helpers.rs
+    - biscuit-terminal/lib/tests/l1/perf_gate.rs
+    - biscuit-terminal/lib/tests/l1/prelude_exports.rs
+    - biscuit-terminal/lib/tests/l1/progress_parity.rs
+    - biscuit-terminal/lib/tests/l1/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/l1/render_comparison.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/l1/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/l1/section_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/status_parity.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/l1/test_layout.rs
+    - biscuit-terminal/lib/tests/l1/text_block_parity.rs
+    - biscuit-terminal/lib/tests/l1/todo_parity.rs
+    - biscuit-terminal/lib/tests/l1/tree_layout.rs
+    - biscuit-terminal/lib/tests/l1/two_column_parity.rs
+    - biscuit-terminal/lib/tests/l1/unordered_list_parity.rs
+    - biscuit-terminal/lib/tests/layout_matrix.rs
+    - biscuit-terminal/lib/tests/level1_apple_terminal_prose.rs
+    - biscuit-terminal/lib/tests/level1_clipboard.rs
+    - biscuit-terminal/lib/tests/level1_cursor.rs
+    - biscuit-terminal/lib/tests/level1_mode_2027.rs
+    - biscuit-terminal/lib/tests/level1_osc_queries.rs
+    - biscuit-terminal/lib/tests/level1_terminal_init.rs
+    - biscuit-terminal/lib/tests/level1_terminal_osc_cache.rs
+    - biscuit-terminal/lib/tests/level2/level2_terminal_osc_wezterm.rs
+    - biscuit-terminal/lib/tests/level2/main.rs
+    - biscuit-terminal/lib/tests/list_parity.rs
+    - biscuit-terminal/lib/tests/mermaid_parity.rs
+    - biscuit-terminal/lib/tests/metrics_tree_parity.rs
+    - biscuit-terminal/lib/tests/ordered_list_parity.rs
+    - biscuit-terminal/lib/tests/parity_helpers.rs
+    - biscuit-terminal/lib/tests/perf_gate.rs
+    - biscuit-terminal/lib/tests/prelude_exports.rs
+    - biscuit-terminal/lib/tests/progress_parity.rs
+    - biscuit-terminal/lib/tests/prose_cells_parity.rs
+    - biscuit-terminal/lib/tests/render_comparison.rs
+    - biscuit-terminal/lib/tests/render_tree_code_context.rs
+    - biscuit-terminal/lib/tests/render_tree_component_parity.rs
+    - biscuit-terminal/lib/tests/section_parity.rs
+    - biscuit-terminal/lib/tests/status_block_parity.rs
+    - biscuit-terminal/lib/tests/status_parity.rs
+    - biscuit-terminal/lib/tests/table_parity.rs
+    - biscuit-terminal/lib/tests/terminal_image_parity.rs
+    - biscuit-terminal/lib/tests/text_block_parity.rs
+    - biscuit-terminal/lib/tests/todo_parity.rs
+    - biscuit-terminal/lib/tests/tree_layout.rs
+    - biscuit-terminal/lib/tests/two_column_parity.rs
+    - biscuit-terminal/lib/tests/unordered_list_parity.rs
+    - claudine/cli/tests/common/pty.rs
+    - biscuit-terminal/lib/tests/snapshots/*.snap → biscuit-terminal/lib/tests/l1/snapshots/l1__*.snap (1,086 byte-identical moves; see biscuit-terminal/snapshot-mapping.json)
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-terminal/cli/tests/level2_style_everywhere_matrix.rs
+    - features/2026-09-21-consolidated-test-binaries/acceptance/metadata-check.py
+    - features/2026-09-21-consolidated-test-binaries/acceptance/body-diff.py
+documentation:
+    - features/2026-09-21-consolidated-test-binaries/plan.md
+    - features/2026-09-21-consolidated-test-binaries/spec.md
+    - features/2026-09-21-consolidated-test-binaries/rulings.md
+    - features/2026-09-21-consolidated-test-binaries/measurements.md
+    - features/2026-09-21-consolidated-test-binaries/implementation-log.md
+    - features/2026-09-21-consolidated-test-binaries/spikes/s1-nextest-identity.md
+    - features/2026-09-21-consolidated-test-binaries/spikes/s2-crate-globals.md
+    - features/2026-09-21-consolidated-test-binaries/spikes/s3-measurement.md
+    - features/2026-09-21-consolidated-test-binaries/spikes/s4-snapshots.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/inventory.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/test-selector-consumers.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/guard-scans.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/disk-and-ci.md
+    - features/2026-09-21-consolidated-test-binaries/selfproof/README.md
+    - features/2026-09-21-consolidated-test-binaries/selfproof/noop-comparison.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/performance-testing.md
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/prompts/create-new-provider.md
+    - features/2026-09-21-consolidated-test-binaries/claudine-cli-migration.json
+    - features/2026-09-21-consolidated-test-binaries/pilot.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/pilot/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/pilot/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/pilot/snapshot-mapping.json
+    - .claude/skills/biscuit-test-harness/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/argv-normalization.md
+    - .claude/skills/claudine/cli-pre-parsing.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/composition.md
+    - .claude/skills/claudine/error-architecture.md
+    - .claude/skills/os/build-hosts.md
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/rendering/popover.md
+    - darkmatter/features/2026-07-15-performance-followup/benchmarks/manifest.yaml
+    - darkmatter/lib/README.md
+    - darkmatter/lib/tests/fixtures/mermaid/README.md
+    - docs/dependencies.md
+    - tools/test-toolkit/README.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-migration.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter/snapshot-mapping.json
+    - .claude/skills/darkmatter/errors.md
+    - .claude/skills/darkmatter/structure.md
+    - darkmatter/README.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli-migration.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/darkmatter-cli/snapshot-mapping.json
+    - .claude/skills/darkmatter/SKILL.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/dependencies.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal-migration.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/attribute-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-after/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/capture-linux-before/
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-darwin.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/comparison-linux.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/guard-scans-after.md
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/linux-l1-summary.txt
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-check.json
+    - features/2026-09-21-consolidated-test-binaries/biscuit-terminal/snapshot-mapping.json
+    - .claude/skills/biscuit-terminal/SKILL.md
+    - .claude/skills/renderable/tree.md
+    - docs/testing-strategy.md
+    - prompts/_prompt.md
+    - claudine/features/2026-09-08-steering/verification/README.md
+    - darkmatter/features/2026-07-15-performance-followup/benchmarks/README.md
+    - features/2026-09-21-consolidated-test-binaries/baseline/test-selector-consumers-after.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/rust-testing/integration-tests.md
+    - .claude/skills/rust-testing/cli-output-testing.md
+    - .claude/skills/rust-testing/nextest.md
+    - .claude/skills/cli/cliclick.md
+    - features/2026-09-21-consolidated-test-binaries/acceptance.md
+    - features/2026-09-21-consolidated-test-binaries/ci-observations.md
+    - features/2026-09-21-consolidated-test-binaries/acceptance/metadata-check.txt
+    - features/2026-09-21-consolidated-test-binaries/acceptance/body-diff.md
+completed_phase: 8
+implemented: true
 ---
 
 # Implementation Plan — Consolidated Test Binaries
@@ -1390,23 +2013,26 @@ phase harvests the next ordinary runs and closes the acceptance record.
       `ci-observations.md`, each labeled as single observations with run
       URLs (acceptance 10). Compare against the pull-request-92 numbers only
       as context, never as pass/fail.
-- [ ] **WSL2 closure** — re-check any Phase 3–6 `pending` WSL2 items against
+      *Pending (2026-09-22): the branch is unpushed, so no ordinary run has
+      selected a migrated package. `ci-observations.md` holds the context and
+      the harvest procedure. Left unchecked on purpose.*
+- [x] **WSL2 closure** — re-check any Phase 3–6 `pending` WSL2 items against
       ordinary-run or standing-host evidence now available; anything still
       unproven is reported pending in the acceptance document, not silently
       passed.
 
 ### Wave 2 — Acceptance and final validation (sequential)
 
-- [ ] **Acceptance document** — `acceptance.md` walking all twelve spec
+- [x] **Acceptance document** — `acceptance.md` walking all twelve spec
       acceptance criteria, each linked to its committed evidence artifact
       (manifests, identity comparisons, guard scans, measurement and
       observation files, skill diff).
-- [ ] **Final validation sweep** — `just test claudine darkmatter
+- [x] **Final validation sweep** — `just test claudine darkmatter
       biscuit-terminal`, `just lint` for the four areas, `just
       check-canonical`, `just check-tier-coverage` for migrated areas, and a
       workspace `cargo metadata` check that the four packages report exactly
       their declared consolidated test targets.
-- [ ] **Status transition** — spec `status` → `implemented` with
+- [x] **Status transition** — spec `status` → `implemented` with
       `implemented_by` recorded; the working tree is left at
       "implementation complete, ready for review" — moving the spec to
       `_completed` is the author's action after the review cycle closes, per
@@ -1414,7 +2040,10 @@ phase harvests the next ordinary runs and closes the acceptance record.
 
 ### Checkpoint
 
-- [ ] All twelve acceptance criteria linked to evidence; any pending item
+- [x] All twelve acceptance criteria linked to evidence; any pending item
       (WSL2) explicitly named with what evidence is missing.
-- [ ] Final sweep green; spec status updated; handoff note written for the
+- [x] Final sweep green; spec status updated; handoff note written for the
       reviewer.
+      *Green apart from two darkmatter items that were already failing on
+      the unmigrated base (Phase 4): one missing-doc test and one stranded
+      `real_` tier-coverage entry. See `acceptance.md` §8.*

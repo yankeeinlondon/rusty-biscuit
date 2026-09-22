@@ -1,6 +1,6 @@
 ---
 area: repo
-status: planned
+status: implemented
 created: 2026-09-21
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job and of local disk use, 2026-09-21
@@ -36,39 +36,40 @@ reviewed: true
 reviewed_by: codex/gpt-5.6-sol
 reviewed_on: 2026-09-21
 review_iterations: 0
+implemented: true
+implemented_by: claude/opus
 human_review: true
 human_review_items:
     - |-
-        **The Windows and WSL2 checks are still blocked by a full disk on the Windows build machine. All four packages now wait on them, and the free space keeps going down.**
+        **Windows is still not proven test-by-test, because the Windows build machine's disk is still too full. This needs a decision before the work is reviewed and merged.**
 
-        This project merges each package's many small test programs into a few larger ones. All four packages are now done: `claudine-cli` (139 programs down to 4), `darkmatter` (74 down to 5), `darkmatter-cli` (53 down to 2), and now `biscuit-terminal` (38 down to 2). For each one, a tool checked on macOS and Linux, test by test, that every test still exists, runs in the same group, and is skipped or ignored exactly as before. Every check came back identical. On Windows, the only evidence is that the code *compiles*: it was built on the Mac for Windows, with no warnings. The plan also calls for the test-by-test check on a real Windows machine, and a WSL2 check.
+        This project merged each package's many small test programs into a few larger ones (`claudine-cli` 139 → 4, `darkmatter` 74 → 5, `darkmatter-cli` 53 → 2, `biscuit-terminal` 38 → 2). All eight phases are done. On macOS and Linux, a tool checked every test one by one and found them all present, in the same group, and skipped or ignored exactly as before. On Windows, the only evidence is that the code *compiles* (built on the Mac for Windows, no warnings). Acceptance criterion 4 asks for the per-test check on a real Windows machine too. It lets only the WSL2 check stay "pending", not the native Windows one.
 
-        The Windows machine (`build-win-native`) now has **36 GB** free on its `W:` drive. That was 43 GB two phases ago and 37.9 GB last phase. The build recipe's own automatic cleanup found nothing to remove, and every build recipe refuses to start below 50 GB. The WSL2 virtual disk file on that drive is 130.8 GB, almost half the drive. I did not override the limit or delete anything by hand.
+        On 2026-09-22 the Windows machine (`build-win-native`) had **36.77 GB** free on `W:`. Every build recipe refuses to start below 50 GB. The WSL2 machine (`build-win`) would not accept a connection at all, which is what a full `W:` looked like before. Nothing was deleted and the limit was not overridden. The full record is in `acceptance.md` §4.
 
-        Phase 7, which only changed documentation, is now done. The final phase (8) signs off acceptance and cannot close without this, so it now blocks the next phase. (The free space was not re-measured during Phase 7.)
+        - **Option A: free space on `W:` (aim for 60 GB or more; `just wsl-compact` on that machine shrinks the 130 GB WSL2 disk file), then have an agent run the Windows and WSL2 checks before merging (recommended).** Pros: criterion 4 is met fully, and a Windows-only problem is found before it lands. About 2–3 hours of machine time for all four packages. Cons: you have to free the space, and something keeps filling that drive.
+        - **Option B: merge now, and accept compile-only Windows evidence. The first push to `main` runs the full Windows test suite in CI.** Pros: no machine work, and CI does run every Windows test after the merge. Cons: a problem would be found after it lands and fixed forward. CI also runs tests rather than comparing test lists, so a test that silently vanished on Windows would not be caught.
+        - **Option C: record criterion 4 as an accepted gap for Windows in the spec, and close without it.** Pros: honest and quick. Cons: it weakens the acceptance bar this spec set for itself.
 
-        - **Option A: free space on `W:` (aim for at least 60 GB free, for example by compacting the WSL2 disk with `just wsl-compact` on that machine), then have an agent run the Windows and WSL2 checks for all four packages, before or during Phase 7 (recommended).** Pros: one session of about 2 to 3 hours of machine time covers everything, and Phase 8 can then close without an open item. Cons: you have to free the space. Something keeps filling the drive, so it may need a look.
-        - **Option B: start Phase 8 and do the Windows and WSL2 checks as its first step, once space is freed.** Pros: no separate session. Cons: Phase 8 stalls if `W:` is still full, and a Windows-only problem found then is fixed at the very end, with all four packages to re-check.
-        - **Option C: accept compile-only Windows evidence and let the next ordinary CI run on `main` supply the real Windows run.** Pros: no machine work. Cons: CI runs Windows only after merge, so a problem would be found after it lands. It also weakens acceptance criterion 4.
-
-        I recommend **Option A**. macOS and Linux are fully clean, so this is probably a formality. But it is the only check that can catch a test that silently disappears on Windows, and acceptance criterion 4 asks for it.
+        I recommend **Option A**. macOS and Linux are fully clean, so this is probably a formality. But the before-and-after list comparison is the only check that can catch a test that silently disappears on Windows, and the spec asks for it.
     - |-
-        **Still open from Phase 2: confirm that the migration manifest is the one authoritative record of where each test moved.**
+        **Still open from Phase 2: confirm that the four migration manifests are the one authoritative record of where each test moved.**
 
-        All four packages now rely on one: `claudine-cli-migration.json`, `darkmatter-migration.json`, `darkmatter-cli-migration.json`, and `biscuit-terminal-migration.json` in the feature folder. Each records, for every old test program, the new program and module it moved into. Every before/after check reads only that file, and every check came back identical. Each file has a few hand-recorded additions, each with a written reason: the new layout-guard test in each package, and one reviewed warning in `darkmatter`.
+        `claudine-cli-migration.json`, `darkmatter-migration.json`, `darkmatter-cli-migration.json`, and `biscuit-terminal-migration.json` (in the feature folder) record, for every old test program, the new program and module it moved into. Every check reads only these files. That includes the new `acceptance/metadata-check.py`, which confirms Cargo's real test targets match them exactly. `acceptance.md` links them as the evidence for criterion 1.
 
-        - **Option A: approve the manifest as the only authority (recommended).** Pros: one record, and every check is mechanical. Cons: a mistake in the manifest reaches every check, but the before/after comparison names any test that lands in the wrong place.
-        - **Option B: also require a hand-reviewed table per package.** Pros: a person reads every row. Cons: more than 3,800 rows across four packages, and a second record that can drift from the first.
+        - **Option A: approve the manifests as the only authority (recommended).** Pros: one record, and every check is mechanical. Cons: a mistake in a manifest reaches every check, but the before/after comparison names any test that lands in the wrong place.
+        - **Option B: also require a hand-reviewed table per package.** Pros: a person reads every row. Cons: over 3,800 rows, and a second record that can drift from the first.
 
-        I recommend **Option A**. Phase 8's acceptance document links these four files as the evidence, so a decision is needed before then.
+        I recommend **Option A**.
 message_to_agent: |-
-    Phase 7 (docs sweep) is done. Read the log's "## Phase 7" section. Result: `baseline/consumer-sweep.py --after` reports 0 active `--test <old-binary>` hits. It reads the old per-file names from the four `*-migration.json` manifests. Its output is `baseline/test-selector-consumers-after.md` and regenerates byte-identical. The 4 remaining in-flight-spec hits are execution records, each annotated with a record date in `baseline/test-selector-consumers.md` ("Phase 7 annotation"). The rust-testing skill now has "Consolidated Integration-Test Binaries", with a two-sided process-isolation subsection that an independent reviewer passed. Link that skill diff as the acceptance-11 evidence.
+    Phase 8 (the last) is done except for items that need evidence nobody has yet. Read the log's "## Phase 8" section and `acceptance.md`.
 
-    For Phase 8:
-    - Windows and WSL2 are still PENDING for all four packages. They are blocked on `build-win-native` `W:` free space (36 GiB at Phase 6, under the 50 GiB preflight), which was not re-measured in Phase 7. Check `human_review_items` first. Procedure: on-host `consolidation.py capture` of base and migrated trees, then `compare` with darwin + linux + windows captures, then `just cross-check <pkg> --os windows` and `--os wsl`. Each package's base revision is in its phase's log section (biscuit-terminal: `beca6c368`).
-    - `just test` passes in claudine (7,334) and biscuit-terminal (3,263) after this phase's edits. So does `just lint` in both.
-    - One open follow-up, not a Phase 8 blocker: claudine's `l1/test_placement.rs` still carries its own copy of the layout-gate logic, not `test_toolkit::test_layout`. Switching it changes manifest `additions`, so it is the author's call.
-    - `build-linux`'s cross-check lock was held by `feat-nightly-perf` through Phase 6. Use the private-clone procedure in the `os` skill if it still is.
+    - `acceptance.md` walks all 12 criteria. Pending: criterion 4, native-Windows on-host listings and WSL2 (`W:` on `build-win-native` at 36.77 GB, under the 50 GiB preflight; `build-win` SSH reset at key exchange), and criterion 10, CI observations (the branch is unpushed, so no ordinary run exists).
+    - The plan's "Producer observations" task is deliberately unchecked. When the first ordinary run selects the packages (this branch's PR, or the push to `main`), fill `ci-observations.md` using its "How to harvest" section. Never trigger a run just for this.
+    - To close criterion 4 once `W:` has 50 GiB or more free: for each package run on-host `scripts/ci/consolidation.py capture` on the base tree and the migrated tree (bases: claudine-cli `9621882ae`, darkmatter `048e44f7a`, darkmatter-cli `cb9a3d38b`, biscuit-terminal `beca6c368`). Then `compare` with the committed darwin and linux captures, and run `just cross-check <pkg> --os windows` and `--os wsl`. Update `acceptance.md` §4 and its `pending` frontmatter.
+    - New re-runnable checks: `acceptance/metadata-check.py` (Cargo targets vs manifests; exits 1 on a mismatch) and `acceptance/body-diff.py` (criterion 5 review aid; writes `acceptance/body-diff.md`).
+    - Final sweep: `just test claudine darkmatter biscuit-terminal` 18,818/18,819, lint and check-canonical green. The 1 failure and the 1 stranded tier-coverage test in darkmatter are pre-existing (Phase 4, proven on base) and belong to separate defects, not this spec.
+    - Do not move the spec to `_completed`; that is the author's action after review.
 ---
 
 # Consolidate compatible integration tests into shared binaries
