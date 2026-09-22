@@ -65,9 +65,10 @@ sanity:
 
 # Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
 # headless-browser, real-resource) are excluded here and run via their own
-# recipes (`test-l2`, `test-browser`). The `browser_render` and
-# `level2_render_tree_terminal` binary names are themselves matched by the
-# `browser_`/`level2_` filter terms, so the whole binary is skipped.
+# recipes (`test-l2`, `test-browser`). Their test binaries need
+# `terminal-tests`/`browser-tests`, which this recipe does not enable, and their
+# module names (`level2_render_tree_terminal::`, `browser_render::`) also match
+# the `level2_`/`browser_` filter terms.
 test *args="":
     #!/usr/bin/env bash
     set -euo pipefail

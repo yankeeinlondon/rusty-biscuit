@@ -1,7 +1,7 @@
 # Immutable fixture manifest — 2026-07-15 performance follow-up (AD-A).
 # Single authority for fixture identity. Regenerate with
 # `bash generate.sh` then `DM_BENCH_EMIT=1 cargo nextest run -p darkmatter
-# --test benchmark_fixtures`. Verified by benchmark_fixtures.rs.
+# --test l1 benchmark_fixtures::`. Verified by benchmark_fixtures.rs.
 generator:
   version: 1.3.0
   command: bash generate.sh

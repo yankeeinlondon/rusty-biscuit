@@ -115,7 +115,7 @@ A page with no prompted link gets no Popover CSS at all.
 ## Cross-browser verification
 
 **Chromium is the only automatically-verified engine.** Automated
-headless-Chrome tests (`darkmatter/lib/tests/browser_render.rs`) assert against
+headless-Chrome tests (`darkmatter/lib/tests/browser/browser_render.rs`) assert against
 *computed* styles, live geometry, and browser-dispatched input:
 
 - `browser_prompted_link_popover_reveals_on_focus` — `display:block`, hidden by
