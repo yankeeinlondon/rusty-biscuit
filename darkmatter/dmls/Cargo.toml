@@ -3,6 +3,7 @@ name = "dmls"
 description = "Darkmatter Language Server"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 
 [lib]
 name = "dmls"
@@ -69,14 +70,23 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 # dev-dependency feature, so no non-test build of dmls compiles it.
 darkmatter = { path = "../lib", features = ["work-counters"] }
 tempfile = "3"
-# Level-2 editor tests (tests/level2_editor_neovim.rs): tier gating and the
-# tmux terminal harness for real-rendering SGR capture.
+# Level-2 editor tests (tests/level2/level2_editor_neovim.rs): tier gating and
+# the tmux terminal harness for real-rendering SGR capture. `test-toolkit` also
+# backs the Level 1 layout gate (`tests/l1/test_layout.rs`).
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 wait-timeout = "0.2"
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "level2_editor_neovim"
+name = "l1"
+path = "tests/l1/main.rs"
+
+[[test]]
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and dmls owns the
