@@ -1,0 +1,86 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"terminal-tests\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "schematic/gen/tests/l1/artifact_drift.rs",
+      "old": "schematic/gen/tests/artifact_drift.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/e2e_generation.rs",
+      "old": "schematic/gen/tests/e2e_generation.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/http_client.rs",
+      "old": "schematic/gen/tests/http_client.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/openapi_import_test.rs",
+      "old": "schematic/gen/tests/openapi_import_test.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/openapi_strict_completeness.rs",
+      "old": "schematic/gen/tests/openapi_strict_completeness.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/path_substitution.rs",
+      "old": "schematic/gen/tests/path_substitution.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/postman_artifact_validation.rs",
+      "old": "schematic/gen/tests/postman_artifact_validation.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/postman_golden.rs",
+      "old": "schematic/gen/tests/postman_golden.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/postman_schema.rs",
+      "old": "schematic/gen/tests/postman_schema.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/postman_var_consistency.rs",
+      "old": "schematic/gen/tests/postman_var_consistency.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/query_param_detection.rs",
+      "old": "schematic/gen/tests/query_param_detection.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/query_params_codegen.rs",
+      "old": "schematic/gen/tests/query_params_codegen.rs"
+    },
+    {
+      "new": "schematic/gen/tests/l1/ws_codegen.rs",
+      "old": "schematic/gen/tests/ws_codegen.rs"
+    },
+    {
+      "new": "schematic/gen/tests/level2/terminal_capture.rs",
+      "old": "schematic/gen/tests/terminal_capture.rs"
+    }
+  ],
+  "package": "schematic-gen",
+  "path_repairs": {
+    "schematic/gen/tests/l1/postman_artifact_validation.rs": [
+      "fixtures/postman/v2.1.0-collection.schema.json \u2192 ../fixtures/postman/v2.1.0-collection.schema.json"
+    ],
+    "schematic/gen/tests/l1/postman_golden.rs": [
+      "fixtures/postman/v2.1.0-collection.schema.json \u2192 ../fixtures/postman/v2.1.0-collection.schema.json"
+    ],
+    "schematic/gen/tests/l1/postman_schema.rs": [
+      "fixtures/postman/v2.1.0-collection.schema.json \u2192 ../fixtures/postman/v2.1.0-collection.schema.json"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "schematic/gen/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 13
+    },
+    "schematic/gen/tests/level2/main.rs": {
+      "declares_common": false,
+      "modules": 1
+    }
+  },
+  "version": 1
+}

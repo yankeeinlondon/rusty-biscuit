@@ -1,0 +1,38 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "schematic-gen",
+  "review": [
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        20
+      ],
+      "new_dir": "schematic/gen/tests/l1",
+      "old_dir": "schematic/gen/tests",
+      "path": "schematic/gen/tests/l1/postman_artifact_validation.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        40
+      ],
+      "new_dir": "schematic/gen/tests/l1",
+      "old_dir": "schematic/gen/tests",
+      "path": "schematic/gen/tests/l1/postman_golden.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        28
+      ],
+      "new_dir": "schematic/gen/tests/l1",
+      "old_dir": "schematic/gen/tests",
+      "path": "schematic/gen/tests/l1/postman_schema.rs"
+    }
+  ],
+  "version": 1
+}

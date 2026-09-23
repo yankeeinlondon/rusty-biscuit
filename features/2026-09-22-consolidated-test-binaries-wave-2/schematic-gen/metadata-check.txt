@@ -1,0 +1,2 @@
+schematic-gen: 2 Cargo test targets, 2 declared, 14 old targets mapped
+PASS
