@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/cli/tests/integration_test.rs
+expression: stdout
+---
+Left side                                 Right side

@@ -139,7 +139,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # past the default 30s termination ceiling. Keep the override test-specific so
 # other L2 tests still detect hangs at the default deadline.
 [[profile.default.overrides]]
-filter = 'test(=level2_render_tree_style_in_wezterm)'
+filter = 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
@@ -261,7 +261,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # command-dense real-terminal test exceed CI's 30s termination ceiling on
 # Linux.
 [[profile.ci.overrides]]
-filter = 'test(=level2_render_tree_style_in_wezterm)'
+filter = 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: Chrome teardown fits the global 5s window,
