@@ -45,6 +45,8 @@ And the findings from the review have now been implemented in the source code.
 - use the 'rust', 'rust-testing', and 'rust-devops' skills
 - use the 'cli' skill for knowledge about 'clap' and associated crates we use for the CLI as well as best practices and standards we adhere to in this repo
 
+::file "../_test-tiers.md"
+
 ## Task
 
 Your task is to review the _implementation_ of the review findings found in '{{review}}' and ensure that test coverage for the new implementation is strong.

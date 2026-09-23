@@ -4941,7 +4941,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     .expect("copy the drift-guarded implement-plan fixture");
     // The target transcludes these shipped snippets from its parent
     // directory; they are prose only, so the shipped bytes serve as-is.
-    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md"] {
+    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md", "_test-tiers.md"] {
         fs::copy(
             repo_root.join("prompts").join(snippet),
             root.join(snippet),
@@ -5053,7 +5053,7 @@ exit 0
         .nth(2)
         .expect("repository root is two levels above claudine/cli");
     // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`,
-    // `../_os.md`, and `../_set_spec_schema.md`, so it lives one directory down
+    // `../_os.md`, `../_set_spec_schema.md`, and `../_test-tiers.md`, so it lives one directory down
     // and the snippets sit beside that directory, inside the workspace.
     fs::create_dir_all(root.join("_implement")).unwrap();
     let md_file = root.join("_implement/implement-plan.md");
@@ -5062,7 +5062,7 @@ exit 0
         &md_file,
     )
     .expect("copy the shipped implement-plan prompt");
-    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md"] {
+    for snippet in ["_no_formatting.md", "_os.md", "_set_spec_schema.md", "_test-tiers.md"] {
         fs::copy(
             repo_root.join("prompts").join(snippet),
             root.join(snippet),

@@ -287,7 +287,7 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
             .join("prompts/_implement/implement-suggestions.md"),
         include_str!("../../../../prompts/_implement/implement-suggestions.md"),
     );
-    // The shipped route transcludes these two snippets; without them the
+    // The shipped route transcludes these snippets; without them the
     // redirect fails on a missing file instead of reaching its assertions.
     write(
         &fixture.cwd().join("prompts/_no_formatting.md"),
@@ -296,6 +296,10 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     write(
         &fixture.cwd().join("prompts/_os.md"),
         include_str!("../../../../prompts/_os.md"),
+    );
+    write(
+        &fixture.cwd().join("prompts/_test-tiers.md"),
+        include_str!("../../../../prompts/_test-tiers.md"),
     );
     write(
         &fixture.cwd().join("prompts/_implement/implement-plan.md"),

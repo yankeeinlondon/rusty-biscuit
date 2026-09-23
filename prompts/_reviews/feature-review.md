@@ -135,6 +135,8 @@ A feature MAY be marked production-ready only when each user-observable requirem
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
 test is at the wrong level under "Findings" with severity at least "high".
 
+::file "../_test-tiers.md"
+
 ## Closure
 
 ### Review Frontmatter

@@ -52,6 +52,8 @@ conducted to determine how well the current implementation meets the requirement
 
 ::file "../_no_formatting.md"
 
+::file "../_test-tiers.md"
+
 ## Task
 
 Your task is to implement phase {{phase}} of the plan found in '@{{plan}}'.
