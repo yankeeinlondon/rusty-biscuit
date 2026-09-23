@@ -244,3 +244,14 @@ into the store, and the next unwrapped rebuild fails with "output file ... is no
 - When copying a single changed file to a standing clone for a quick check,
   `scp` it and then confirm `git status --short` on the remote shows only that
   file before running.
+- Do not run a `--os windows` leg while a `--os wsl` leg is compiling. The two
+  hosts are one physical machine, and on 2026-09-23 a first `claudine` build
+  in a new Windows clone ran out of commit memory while the guest built the
+  same package: `The paging file is too small for this operation to complete.
+  (os error 1455)` on `libstd`/`libtest` rmeta. That clone's `target\` was
+  left poisoned, and the retry failed with `E0463: can't find crate for
+  claudine`. Run the legs one after the other, and discard (or let `cross-check`
+  prune) a clone whose build hit 1455 before trusting its next result.
+- In zsh, `"$BUILD_LINUX:scratch/x"` applies the `:s` history modifier and
+  mangles the destination (`build-linuxap-…`). Brace the variable:
+  `"${BUILD_LINUX}:scratch/x"`.
