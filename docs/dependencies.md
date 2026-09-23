@@ -116,6 +116,9 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
+- `tree-hugger` uses `test-toolkit` only as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
 - `messenger/lib` depends on `darkmatter`, `biscuit-file` (only
   `file-reference`), `biscuit-hash`, and `serde_path_to_error` only through its
   opt-in `research` feature (`messenger::research`: typed loading and semantic
