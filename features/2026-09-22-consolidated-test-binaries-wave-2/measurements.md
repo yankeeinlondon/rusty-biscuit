@@ -79,3 +79,23 @@ drops the name from a package ID whose directory has the same name
 now matches both spellings, and the `dmls` before run was repeated. The
 figures from Phase 3 are unaffected, because none of those packages has the
 short spelling.
+
+## Phase 5
+
+Same protocol and host. The before checkout was a detached worktree of
+`8255ee228` (`/tmp/w2p5-base`, removed afterward). Each package was built with its
+CI feature union.
+
+| Package | Features | Test executables | Executable bytes | Clean test build | Warm edit (test) | R8 trigger |
+|---|---|---:|---:|---:|---:|---|
+| `sniff-cli` before | `test-fixtures` | 11 | 75.3 MB | 84 s | 3.47 s (`install_plan_vim_renders_text_output`) | |
+| `sniff-cli` after | `test-fixtures` | **2** | **50.7 MB** | 84 s | 3.33 s | no (−0.14 s) |
+| `biscuit-tui-cli` before | `terminal-tests` | 15 | 32.8 MB | 9 s | 1.10 s (`top_level_help_uses_canonical_public_names`) | |
+| `biscuit-tui-cli` after | `terminal-tests` | **3** | **10.3 MB** | 7 s | 1.18 s | no (+0.08 s) |
+
+Across the two packages, the test executables go from 26 to 5, and from 108.1 MB to
+61.0 MB (−43.6%). Neither package reached the R8 trigger. The same caveat applies:
+each edit figure is one warm observation on a shared host.
+
+Across all ten packages of this wave (Phases 3–5), the test executables go from 136 to
+18.

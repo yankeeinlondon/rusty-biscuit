@@ -20,6 +20,7 @@ packages:
     - test-toolkit
     - biscuit-test-harness
     - renderable
+    - darkmatter
 source_files_during_phase_1:
     - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/pre-existing.sh
     - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-input-probe.py
@@ -307,6 +308,71 @@ skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-test-harness/SKILL.md
     - .claude/skills/os/macos.md
     - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+    - biscuit-tui/cli/Cargo.toml
+    - biscuit-tui/cli/tests/l1/boolean_switch_output.rs
+    - biscuit-tui/cli/tests/l1/choose_cli.rs
+    - biscuit-tui/cli/tests/l1/choose_many_output.rs
+    - biscuit-tui/cli/tests/l1/choose_one_output.rs
+    - biscuit-tui/cli/tests/l1/completions.rs
+    - biscuit-tui/cli/tests/l1/completions_shell.rs
+    - biscuit-tui/cli/tests/l1/exit_codes.rs
+    - biscuit-tui/cli/tests/l1/help_contract.rs
+    - biscuit-tui/cli/tests/l1/input_table_output.rs
+    - biscuit-tui/cli/tests/l1/keyboard_protocol.rs
+    - biscuit-tui/cli/tests/l1/main.rs
+    - biscuit-tui/cli/tests/l1/test_layout.rs
+    - biscuit-tui/cli/tests/l1/text_area_input_output.rs
+    - biscuit-tui/cli/tests/l1/text_input_output.rs
+    - biscuit-tui/cli/tests/level2/main.rs
+    - biscuit-tui/cli/tests/level2/terminal_render.rs
+    - biscuit-tui/cli/tests/level2/windows_captured_stdout.rs
+    - biscuit-tui/cli/tests/level3/level3_chord_select.rs
+    - biscuit-tui/cli/tests/level3/main.rs
+    - biscuit-tui/justfile
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/test-input-check.py
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - sniff/cli/Cargo.toml
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/cli_process_fixture.rs
+    - sniff/cli/tests/l1/install_interview_cli.rs
+    - sniff/cli/tests/l1/install_plan.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/
+    - sniff/cli/tests/l1/spawn_site_guard.rs
+    - sniff/cli/tests/l1/test_layout.rs
+    - sniff/cli/tests/l1/tty.rs
+    - sniff/cli/tests/level2/level2_cicd_styling.rs
+    - sniff/cli/tests/level2/level2_git_status_styling.rs
+    - sniff/cli/tests/level2/level2_perf_tree_rendering.rs
+    - sniff/cli/tests/level2/level2_recent_commits_rendering.rs
+    - sniff/cli/tests/level2/main.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_5:
+    - biscuit-tui/cli/README.md
+    - docs/dependencies.md
+    - biscuit-tui/lib/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+docs_created_during_phase_5:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/metadata-check-all-ten.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-after.txt
+skills_files_updated_during_phase_5:
+    - .claude/skills/os/windows.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/sniff/SKILL.md
 ---
 
 # Implementation Plan — Consolidated Test Binaries, Wave 2
@@ -1067,14 +1133,20 @@ Hazards:
 - The `snapshots` target and `tests/snapshots/` need an insta mapping.
 - The package shares the `sniff-windows-l1` group.
 
-- [ ] **SPP 1–2** — before-evidence for `()` and `(test-fixtures)`, and
+- [x] **SPP 1–2** — before-evidence for `()` and `(test-fixtures)`, and
       `sniff-cli-migration.json` with the two L2 targets.
-- [ ] **SPP 3–4** — move, including a mechanical snapshot move under
+- [x] **SPP 3–4** — move, including a mechanical snapshot move under
       `INSTA_UPDATE=no`, and the layout gate.
-- [ ] **SPP 5–9** — `check-metadata` shows `level2` with no
+- [x] **SPP 5–9** — `check-metadata` shows `level2` with no
       `required-features`. The `spawn_site_guard` scan diff is written to
       `guard-scans-after.md`, and `check-snapshots` passes.
+      *(Under R14, `check-metadata` shows `level2` with exactly
+      `required-features = ["test-fixtures"]`, and the `()` comparison shows
+      `level2_recent_commits_rendering` with zero tests before and after.)*
 - [ ] **SPP 10–11** — commit and remote legs.
+      *(Remote legs done and passing (see the Phase 5 log). The phase
+      instructions forbid committing, so the R12 commit series is left to the
+      separate commit step.)*
 
 ### Wave 2 — `biscuit-tui-cli` (15 → 3: `l1`, `level2`, `level3`)
 
@@ -1088,25 +1160,35 @@ Hazards:
 - The L3 tier steals focus. Run it only per its existing opt-in, never
   unattended.
 
-- [ ] **SPP 1–2** — before-evidence for `()` and `(terminal-tests)`, and
+- [x] **SPP 1–2** — before-evidence for `()` and `(terminal-tests)`, and
       `biscuit-tui-cli-migration.json` recording the alias.
-- [ ] **SPP 3–4** — move and layout gate.
-- [ ] **SPP 5–9** — check these:
+- [x] **SPP 3–4** — move and layout gate.
+- [x] **SPP 5–9** — check these:
       - The comparison shows no test newly selected by the `real` tier.
       - `check-tier-coverage biscuit-tui` is clean.
       - `captured_stdout_receives_only_value_no_tui_bytes` is in the L1
         selected set under `(terminal-tests)` on the Windows capture and
         platform-absent on macOS and Linux.
       - L2 passes without focus on tmux, WezTerm, and Kitty.
+      *(tmux and WezTerm are required and pass, 21/21. Kitty has no usable
+      instance on this host (`os` skill, `macos.md`), as in Phase 4; identity
+      for its tests is proven by `compare`.)*
 - [ ] **SPP 10–11** — commit, Linux, and WSL2. The Windows run shows
       `windows_captured_stdout` compiled with `terminal-tests` and run
       (spec criterion 1; relies on S3).
+      *(Remote legs done and passing (see the Phase 5 log). The phase
+      instructions forbid committing, so the R12 commit series is left to the
+      separate commit step.)*
 
 ### Checkpoint
 
 - [ ] All ten packages are migrated and committed. Every spec §3 hazard has a
       disposition backed by evidence.
-- [ ] `check-metadata` passes across all ten manifests together.
+      *(All ten are migrated, and every hazard has its evidence (see the Phase 5
+      log). Phase 5's two packages are not committed: the commit step is
+      separate.)*
+- [x] `check-metadata` passes across all ten manifests together.
+      *(`metadata-check-all-ten.txt`: PASS, 18 targets.)*
 
 ## Phase 6 — Documentation, Acceptance, and Closeout
 

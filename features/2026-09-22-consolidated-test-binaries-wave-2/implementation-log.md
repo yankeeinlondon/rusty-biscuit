@@ -151,6 +151,10 @@ packages:
     - dmls
     - biscuit-test-harness
     - renderable
+    - sniff-cli
+    - biscuit-tui-cli
+    - test-toolkit
+    - darkmatter
 source_files_during_phase_4:
     - .config/nextest.toml
     - Cargo.lock
@@ -301,6 +305,71 @@ skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-test-harness/SKILL.md
     - .claude/skills/os/macos.md
     - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+    - biscuit-tui/cli/Cargo.toml
+    - biscuit-tui/cli/tests/l1/boolean_switch_output.rs
+    - biscuit-tui/cli/tests/l1/choose_cli.rs
+    - biscuit-tui/cli/tests/l1/choose_many_output.rs
+    - biscuit-tui/cli/tests/l1/choose_one_output.rs
+    - biscuit-tui/cli/tests/l1/completions.rs
+    - biscuit-tui/cli/tests/l1/completions_shell.rs
+    - biscuit-tui/cli/tests/l1/exit_codes.rs
+    - biscuit-tui/cli/tests/l1/help_contract.rs
+    - biscuit-tui/cli/tests/l1/input_table_output.rs
+    - biscuit-tui/cli/tests/l1/keyboard_protocol.rs
+    - biscuit-tui/cli/tests/l1/main.rs
+    - biscuit-tui/cli/tests/l1/test_layout.rs
+    - biscuit-tui/cli/tests/l1/text_area_input_output.rs
+    - biscuit-tui/cli/tests/l1/text_input_output.rs
+    - biscuit-tui/cli/tests/level2/main.rs
+    - biscuit-tui/cli/tests/level2/terminal_render.rs
+    - biscuit-tui/cli/tests/level2/windows_captured_stdout.rs
+    - biscuit-tui/cli/tests/level3/level3_chord_select.rs
+    - biscuit-tui/cli/tests/level3/main.rs
+    - biscuit-tui/justfile
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/test-input-check.py
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - sniff/cli/Cargo.toml
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/cli_process_fixture.rs
+    - sniff/cli/tests/l1/install_interview_cli.rs
+    - sniff/cli/tests/l1/install_plan.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/
+    - sniff/cli/tests/l1/spawn_site_guard.rs
+    - sniff/cli/tests/l1/test_layout.rs
+    - sniff/cli/tests/l1/tty.rs
+    - sniff/cli/tests/level2/level2_cicd_styling.rs
+    - sniff/cli/tests/level2/level2_git_status_styling.rs
+    - sniff/cli/tests/level2/level2_perf_tree_rendering.rs
+    - sniff/cli/tests/level2/level2_recent_commits_rendering.rs
+    - sniff/cli/tests/level2/main.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_5:
+    - biscuit-tui/cli/README.md
+    - docs/dependencies.md
+    - biscuit-tui/lib/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+docs_created_during_phase_5:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/metadata-check-all-ten.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-after.txt
+skills_files_updated_during_phase_5:
+    - .claude/skills/os/windows.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/sniff/SKILL.md
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -902,3 +971,244 @@ See `measurements.md`. Test executables went from 65 to 10, and from
 | Only structural edits | `body-diff` 0 `other` lines (`<pkg>/body-diff.md`) |
 | `body-diff` accepts exactly the dispositioned identity repair | `BodyDiffTests.test_a_dispositioned_identity_repair_is_structural`, `test_an_identity_repair_without_a_disposition_fails`, `test_a_dispositioned_file_still_fails_on_a_body_change` |
 | Windows and WSL2 still build and pass | `<pkg>/cross-check-{windows,wsl}.txt` |
+
+## Phase 5
+
+Phase 5 (hazard packages) ran at `8255ee228` on the macOS dev host, with Phase 4's R12
+series already committed. It migrated `sniff-cli` (11 → 2) and `biscuit-tui-cli` (15 → 3),
+in the spec's order. Nothing was committed, per the phase instructions. Each package's R12
+series (manifest and evidence, structural move, area docs) is left to the separate commit
+step. So are the two toolkit changes below, which R12 makes their own commit, landing before
+`sniff-cli`'s evidence commit (its `body-diff` needs the first one).
+
+### Before-side
+
+- Fresh macOS captures of both packages compare identical to `selfproof/capture-a`
+  (`compare --require-identical-digests`). The only notes are Phases 3–4's three R10
+  override rewrites, which `plan` accepts because the captures were taken after them.
+- Linux before-captures came from a private `--shared` scratch clone on `build-linux`: the
+  standing clone at `7685d1ac2`, plus a bundle `7685d1ac2..8255ee228`, with
+  `RUSTC_WRAPPER="" KACHE_AUTO=0`. The after side applied one patch (57 paths) built with a
+  temporary `GIT_INDEX_FILE`. The clone, bundle, and patch were deleted afterward.
+- The before-measurements ran in a detached worktree of `8255ee228`, removed afterward.
+- **R14 held.** Without `test-fixtures`, `sniff-cli::level2_recent_commits_rendering` lists
+  0 tests on both hosts, and `plan`'s inventory records its inner
+  `#![cfg(feature = "test-fixtures")]` as the file's leading attribute, so it gates every
+  item. The ruled two-target shape stands.
+
+### Per package
+
+| Step | `sniff-cli` | `biscuit-tui-cli` |
+|---|---|---|
+| Targets | `l1`, `level2` (`test-fixtures`) | `l1`, `level2` (`terminal-tests`), `level3` (`terminal-tests`) |
+| `plan` extras | `ruled_targets`: `level2_recent_commits_rendering` → `level2` (R14) | alias `real_terminal_render` → `terminal_render` **derived by `plan`** (5 `real` verdicts would change); `ruled_targets`: `real_terminal_render`, `windows_captured_stdout` → `level2` (R4) |
+| `move` | 11 modules; 10 `mod common;` → `use crate::common;` (`tty`'s keeps `#[cfg(unix)]`); `#[path]` to `../common/source_scan.rs`; 4 `test-fixtures` cfgs on the `level2` declarations | 15 modules; `#[cfg(unix)] mod terminal_render;`, `#[cfg(windows)] mod windows_captured_stdout;` (inner cfg kept, `keep_inner_cfg`), `#[cfg(target_os = "macos")] mod level3_chord_select;` |
+| Manual edits | `Cargo.toml`; 12 snapshots moved byte for byte (`snapshot-mapping.json`); `spawn_site_guard` key → `"l1/spawn_site_guard.rs"` (R19) | `Cargo.toml` (+ unconditional `biscuit-test-harness` dev-dependency, below); `test-pty` recipe (R19); `choose_cli`/`keyboard_protocol` file-local `common` removed; `#[allow(clippy::module_inception)]` on `mod keyboard_protocol;`; R17 path in `test-toolkit` |
+| Layout gate | ≥ 16 files (names `common/source_scan.rs`) | ≥ 22 files (names all three roots and `common/real_terminal/mod.rs`) |
+| Red/green | `layout-guard.md`: red, red, green | same |
+| `check-attributes` | 0 | 0 (2 `crate_path` dispositions) |
+| `check-proptest` / `check-snapshots` | clean / 12 of 12, byte-identical | clean / n/a |
+| `check-metadata` | PASS (`level2` requires exactly `test-fixtures`, R14) | PASS |
+| `body-diff` (other lines) | 0 (32 structural; needs the `path_key` disposition) | 0 (27 structural, 4 byte-identical) |
+| `compare` darwin / linux / darwin-linux | identical ×3 | identical ×3 (platform-absent evaluated) |
+| Test-input probe | 8 → 8 (renamed snapshot probe) | 0 → 0 (control; plus the new gate's own `Cargo.toml` row) |
+| Linux L1 (scratch clone, CI features) | 857/857 | 412/412 |
+
+`check-metadata` over all ten manifests together: PASS, 18 targets
+(`metadata-check-all-ten.txt`).
+
+### Remote legs (R16: `cross-check`, no `--features`, one leg at a time)
+
+| Package | Windows (`build-win-native`) | WSL2 |
+|---|---|---|
+| `sniff-cli` | 853/853 | 857/857 |
+| `biscuit-tui-cli` | 393/393, **`windows_captured_stdout` named PASS** | 412/412 |
+
+Every leg ran in archive mode with the package's CI feature union, and had 0 `FAIL` lines.
+The Windows and WSL2 legs never overlapped. `sniff-cli`'s Windows run lacks four Unix-only
+integration tests (`tty::os_subcommand_runs_in_pty`, `install_plan::install_plan_force_rebuilds_cache`,
+`install_plan::install_plan_populates_cache_file`, and
+`cli_process_fixture::canonical_checkout_containment_rejects_symlink_spelling`), in files the
+move changed only structurally. Every other test name appears in both runs. The `sniff-cli` legs ran before `biscuit-tui-cli`'s move started; no
+`sniff-cli` file changed after them. The `biscuit-tui-cli` legs ran after its last source
+edit. No leg published a receipt, because the tree is not a committed head.
+
+### Hazards and dispositions
+
+- **Spec hazard 3 / R14 (`sniff-cli`'s L2 contracts):** one `level2` target with exactly
+  `required-features = ["test-fixtures"]`. The `()` comparison shows
+  `level2_recent_commits_rendering` with 0 tests before and after on both hosts, and the
+  `(test-fixtures)` comparison shows its 2 tests unchanged. The plan's "`level2` with no
+  `required-features`" check is superseded by R14 (annotated in the plan).
+- **`spawn_site_guard` (path-keyed guard):** `guard-scans-after.md` lists the scan set by
+  path. The six former files are the same once their `l1/` directory is removed. The only
+  additions are the two roots and the layout gate, which spawn nothing. Guard output is
+  unchanged: 0 spawn sites, the same 4 PATH-escape sites at the same lines. **The old key
+  would have failed silently, not loudly:** with it temporarily restored, the guard scans
+  itself and still passes with identical totals, because its sanitizer blanks its own
+  string-literal fixtures. The repair keeps the guard's stated rule.
+- **`sniff-cli` snapshots:** `check-snapshots --emit-mapping`, then a byte-for-byte move
+  (sha256 checked), then `--mapping`: 12 of 12. Every snapshot test passes under
+  `INSTA_UPDATE=no`, and no `.snap.new` exists.
+- **`sniff-windows-l1` (`override-ci-2`):** identical identity set in every comparison.
+- **F4 (`real_terminal_render` → `terminal_render`):** `plan` derived the alias. The `real`
+  selector picks 0 tests before and after on both hosts, so no test is newly selected by
+  the stub `real` tier, and `check-tier-coverage biscuit-tui` reports 0 stranded. A `//`
+  comment on the declaration says why the module is not named after its old target.
+- **Spec hazard 2 (`level3_chord_select`):** keeps its name, since all four of its tests
+  carry `level3_`. It stays `#[cfg(target_os = "macos")]` in `level3`, and its tests are
+  listed only on darwin under `terminal-tests`, before and after. L3 was not run: it takes
+  desktop focus and is opt-in only.
+- **F5/R4 (`windows_captured_stdout`):** joins `level2` as a `#[cfg(windows)]` module and
+  keeps its inner `#![cfg(windows)]` (R17). `windows-captured-stdout.md` shows it absent
+  from every macOS and Linux listing, before and after, and the Windows leg's PASS line
+  `biscuit-tui-cli::level2 windows_captured_stdout::captured_stdout_receives_only_value_no_tui_bytes`,
+  selected by the L1 filter. That is spec criterion 1 for this hazard.
+- **F6 (seven `level2_*` tests in feature-less files):** they stay in `l1` (R6), and
+  `compare` shows the L1 and L2 sets unchanged (L2 under `()` still selects the same 7).
+- **R17 (`test-toolkit` reads the moved file):**
+  `tools/test-toolkit/tests/ci_workflow_contracts.rs:7053` now reads
+  `biscuit-tui/cli/tests/level2/windows_captured_stdout.rs`. Its test passes, and
+  `test-toolkit`'s whole L1 passes (347/347).
+- **R19 `test-pty`:** `recipe-rewrite.txt` shows each rewritten line listing the same tests
+  as before (4, 15, 4). One run of the recipe: `completions_shell::` 15/15 and
+  `choose_cli::pty::` 4/4 pass. `keyboard_protocol::` has 3 of 4 failing, **the same three
+  failing identically on the unmigrated base** (`test-pty-keyboard-base.log.gz`). They are
+  env-gated (`RUN_PTY_TESTS=1`) and never run in CI. See "For the author".
+- **`crate::common` in `choose_cli`/`keyboard_protocol`:** the mover turned each file's
+  `#[path = "common/mod.rs"] mod common;` into `use crate::common;`. Both files name
+  `common` only as `crate::common::pty::…`, so the import was unused (a warning, and an
+  error under the lint's `-D warnings`). The import is removed. That matches S2 ("the
+  files' own `mod common;` must be removed"). `crate::common` now resolves to the `l1`
+  root's single copy. Both are recorded as `crate_path` dispositions.
+- **`clippy::module_inception`:** `keyboard_protocol.rs` nests `mod keyboard_protocol { … }`.
+  As a module named `keyboard_protocol`, that trips the lint under `just lint`. Renaming would
+  change 2 test identities, so `#[allow(clippy::module_inception)]` goes on the declaration
+  in `l1/main.rs`, with a comment saying why. The file body is untouched. The repository
+  precedent is `biscuit-terminal/lib/src/components/{prose,table}/mod.rs`.
+- **Layout gate without the harness:** `biscuit-tui-cli` had `biscuit-test-harness` only as
+  an optional dependency behind `terminal-tests`, so the feature-less `l1` could not use
+  `manifest_dir!()`. `env!("CARGO_MANIFEST_DIR")` names the producer's checkout in an
+  archive run (`rust-testing`), so it adds an unconditional dev-dependency, keeping the
+  optional one (R7's pattern). `Cargo.lock` is unchanged, because the edge already existed.
+  It is documented in `Cargo.toml` and `docs/dependencies.md`. `biscuit-tui` has no area
+  dependency doc, and none was created for one line (R7's `tree-hugger` precedent).
+
+### Toolkit change 1: `body-diff` accepts a dispositioned path-key repair
+
+`sniff-cli`'s R19 self-exclusion key (`"spawn_site_guard.rs"` → `"l1/spawn_site_guard.rs"`)
+is structural by ruling, but `body-diff` counted it as `other` and exited 1. Waiving the gate
+would hide real body changes in that file. Instead, following Phase 4's identity-repair
+pattern:
+
+- `scripts/ci/consolidation.py`: `PATH_KEY_DISPOSITION = "path_key"`, a disposition-only kind
+  (no detector finds it). In a file with that disposition, `_body_normalize` masks exactly
+  the module's own `"<target>/` prefix at the start of a string literal. `diff_body`,
+  `body_diff`, and the report header carry it.
+- `scripts/ci/test_consolidation.py` (99 → 103 tests), with the acceptance test written red
+  first:
+  - `test_a_dispositioned_path_key_repair_is_structural`;
+  - `test_a_path_key_repair_without_a_disposition_fails`;
+  - `test_a_path_key_disposition_rejects_another_targets_prefix`;
+  - `test_a_path_key_disposition_still_fails_on_a_changed_path`.
+
+### Toolkit change 2: the suite's host-tool gates use `tool_guard.require_tools`
+
+`just test test-toolkit` failed one test that was **already failing at `8255ee228`**
+(checked in the base worktree):
+`ci_workflow_contracts::no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard`. It
+rejects `skipUnless(shutil.which(…))`, and Phase 2's `test_consolidation.py` (`ebd261004`)
+had three such gates, plus two `skipUnless(JUST …)` gates that dodged the check only in
+spelling. All five now call `require_tools(…, enforced_by=CI_LOCAL)`. `CI_LOCAL` names
+`just ci-local`'s ci-infra self-tests, the only place the suite runs. Non-tool conditions
+(the wave-1 manifests and the Phase 1 baseline) stay as plain `skipUnless`. On this host
+nothing skips before or after. All ten ci-local Python suites pass, and `py_compile -W error`
+and `ruff --select F,E9,B` are clean.
+
+### Evidence tooling fix: `measure/test-input-check.py`
+
+It assumed the probe file does not move. `sniff-cli`'s probe is a snapshot the move renames,
+so the script takes an optional after-path (from `snapshot-mapping.json`). The probe also
+enumerates `git ls-files`, and the moved files are untracked, so both packages' probes ran
+against a temporary `GIT_INDEX_FILE` (the checkout's index was untouched). Both
+`test-inputs.md` files say so.
+
+### Suites (macOS; compared with `baseline/pre-existing.md`)
+
+| Area | `just test` | `just test-l2` | `just lint` | `check-tier-coverage` | `check-canonical` |
+|---|---|---|---|---|---|
+| `sniff` | ✅ 2826 (2825 + gate) | ✅ 6 (tmux required: 6) | ✅ | ✅ 0 stranded | ✅ |
+| `biscuit-tui` | ✅ 992 (991 + gate) | ✅ 21 (tmux + WezTerm required: 21) | ✅ (after the `module_inception` allow) | ✅ 0 stranded | ✅ |
+| `test-toolkit` (R17) | ✅ 347 (`just test test-toolkit`, after change 2) | — | — | — | — |
+
+All suites ran with `INSTA_UPDATE=no`, and no `.snap.new` exists. Kitty has no usable
+instance on this host (`os` skill, `macos.md`), so it is not claimed. Identity for its tests
+is proven by `compare`. Logs are gzipped under each package's `suites/`.
+
+### Docs (SPP 9)
+
+- `sniff-cli`: `.claude/skills/sniff/SKILL.md:206` and `.claude/skills/rust-testing/SKILL.md:777`
+  (the guard path), and `darkmatter/lib/tests/l1/context_functions.rs:234` (a comment naming
+  a `sniff-cli` test by file).
+- `biscuit-tui-cli`: `cli/README.md` (harness paragraph and five commands, which now name
+  `--features terminal-tests`, required by those targets all along; the old
+  "Level 3 … `--test real_terminal_render`" command now points at `level3`, where the L3
+  tests have lived since `36656dc34`), `lib/README.md:201`, the `choose_cli` and
+  `completions_shell` run-hint comments, the `test-l3` recipe comment in
+  `biscuit-tui/justfile`, and `Cargo.toml`'s `windows` dev-dependency comment.
+- `os` skill (`windows.md`): the moved path, plus one sentence on why an L1 test lives in
+  the `level2` binary (R4).
+- Left as history: `.claude/skills/rust-testing/SKILL.md:140` (a past-tense account of the
+  file's old `#[ignore]` era), dated reviews and plans under `features/` and `_completed/`,
+  `tree-hugger/fixes/2026-08-03-portable-paths-at-machine-boundaries/spec.md:179` (a dated
+  survey that also lists wave 1's old paths), and
+  `darkmatter/features/_unscheduled/wezterm-sgr-race-test-fixes/spec.md:199` (another spec's
+  record). `common/pty.rs:48` names `choose_cli.rs` and `keyboard_protocol.rs`, which still
+  exist under those names.
+
+### Measurements
+
+See `measurements.md`. Test executables went from 26 to 5, and from 108.1 MB to 61.0 MB.
+The largest warm-edit change was +0.08 s, so R8's trigger was never reached. Across the
+wave's ten packages, the test executables went from 136 to 18.
+
+### For the author (outside scope, not acted on)
+
+- `biscuit-tui`'s `just test-pty`: three `keyboard_protocol` PTY tests
+  (`bare_ctrl_shows_hotkey_badges`, `chord_fallback_still_works`,
+  `dumb_terminal_chord_fallback_works`) fail on this host before and after the move. The
+  child produces no selection output, or only reset sequences. They run only with
+  `RUN_PTY_TESTS=1`, so nothing in CI sees them. The recipe also stops at its first failing
+  line, so its other two lines never run after a failure.
+- `spawn_site_guard`'s self-exclusion is untested: a wrong key passes silently (above).
+
+### Deviations from the SPP, and why
+
+- **No commits** (phase instructions). As in Phases 3–4, the remote legs ran against the
+  working tree. `biscuit-tui-cli`'s structural move started after `sniff-cli`'s Windows leg
+  had shipped its bundle and started building remotely, not after its commit. The two
+  packages share no file, and no `sniff-cli` file changed after its legs.
+- **One Linux before/after pair for both packages**, from one scratch clone.
+- **Toolkit change 2 fixes a failure this feature introduced in Phase 2** and that Phase 4's
+  suites did not run. It is in scope because the toolkit is this feature's, and
+  `test-toolkit`'s L1 has to pass for R17.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Evidence / test |
+|---|---|
+| Every former test keeps its identity, tier, feature, and platform reachability | `compare` four-way, darwin/linux/darwin-linux, every selector and both feature sets (`<pkg>/comparison-*.md`) |
+| A `tests/` file no root declares fails the build gate | `<pkg>::l1 test_layout::every_test_source_is_compiled_by_a_declared_target`, red on a stray root and on an undeclared module, then green (`<pkg>/layout-guard.md`) |
+| R14: one `level2` contract, with no test compiled where it was not before | `()` comparison (`level2_recent_commits_rendering`: 0 before and after), `check-metadata` |
+| F4: no test enters the stub `real` tier | `real` selector 0 → 0 in every comparison; `check-tier-coverage biscuit-tui` 0 stranded |
+| F5: the Windows-only L1 test still compiles and runs on Windows only | `biscuit-tui-cli/windows-captured-stdout.md` (absent on macOS and Linux; Windows PASS line) |
+| R17: the cross-package reader still finds the file | `test-toolkit::ci_workflow_contracts the_windows_captured_stdout_test_is_discoverable_as_ordinary_l1`, and `test-toolkit` L1 347/347 |
+| R19: the path-keyed guard scans the same files | `sniff-cli/guard-scans-after.md`; guard output identical (0 spawn sites, 4 escapes) |
+| R19: the `test-pty` recipe selects the same tests | `biscuit-tui-cli/recipe-rewrite.txt` (4, 15, 4); `test-pty-run.log.gz` |
+| Snapshots are still read | `sniff-cli/snapshot-check.json` (12/12, byte-identical); all 14 `snapshots::` tests pass |
+| CI's test-input narrowing selects the same tests | `<pkg>/test-inputs.md` (8 → 8; 0 → 0) |
+| Manifests match Cargo | `check-metadata` PASS per package and across all ten (`metadata-check-all-ten.txt`) |
+| Only structural edits | `body-diff` 0 `other` lines (`<pkg>/body-diff.md`) |
+| `body-diff` accepts exactly a dispositioned path-key repair | `BodyDiffTests.test_a_dispositioned_path_key_repair_is_structural`, `test_a_path_key_repair_without_a_disposition_fails`, `test_a_path_key_disposition_rejects_another_targets_prefix`, `test_a_path_key_disposition_still_fails_on_a_changed_path` |
+| The suite's host-tool gates use the shared guard | `test-toolkit::ci_workflow_contracts no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard` (red at `8255ee228`, green now) |
+| Windows, WSL2, and Linux still build and pass | `<pkg>/cross-check-{windows,wsl}.txt`, `<pkg>/linux-l1-summary.txt` |

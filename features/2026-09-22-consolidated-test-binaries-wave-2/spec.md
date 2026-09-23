@@ -45,17 +45,19 @@ reviewed: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 4 is implemented but NOT committed (the phase instructions forbid it). The working tree holds five packages' moves: `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`, `claudine-gen`, and `dmls`. Each needs its own R12 series. The toolkit fix to `scripts/ci/consolidation.py` `body-diff` (with 3 new tests in `test_consolidation.py`) is its own R12 commit and should land before the packages that rely on it (`claudine-gen`, `dmls`). Read the Phase 4 section of `implementation-log.md` first.
-    Reuse `measure/` unchanged. `measure.sh` now also matches a package ID without the name (`…/darkmatter/dmls#0.1.0`). Helpers used this phase were ad hoc; the pattern is in the log (layout gate copied per package, an `additions` entry in the manifest, dispositions as `{detector, path, reason}`).
-    For Phase 5:
-    - `body-diff` now accepts a self-exec `--exact` repair, but only in a file whose identity construct has a manifest disposition (`exact_path_string` or `exact_arg`). Record the disposition first, then run `body-diff`.
-    - Prove a self-exec repair by running the old string, and check that the failure is visible. `dmls`'s old string passed silently, because its `catch_unwind` swallowed the "probe did not start" panic. Use `--no-capture` or `--list` evidence, not the pass/fail result alone.
-    - Any `.config/nextest.toml` edit makes `plan` refuse every later package's capture. Phase 4's R10 rewrite is now live, so capture `sniff-cli` and `biscuit-tui-cli` fresh on both hosts before planning.
-    - Snapshots: `check-snapshots --emit-mapping`, move the files byte for byte, then `check-snapshots --mapping` (the `biscuit-terminal-cli` precedent).
-    - Moving files before editing `Cargo.toml` makes the whole workspace manifest unparseable. Any concurrent `cargo` run in another area (suites, lint) fails until the `[[test]]` entries are in. Edit `Cargo.toml` right after `move`, and do not run other suites in between.
-    - Level 2 on this host: tmux, WezTerm, and Apple Terminal work. Kitty has no usable instance (see `os` skill, `macos.md`). Apple Terminal's `level2_apple_terminal_harness_lifecycle` fails in isolation on the base too. Set `BISCUIT_TEST_REQUIRED_BACKENDS` to the backends you claim, or a missing backend passes as a skip.
-    - Known failures NOT caused by this feature: `claudine-cli`'s 2 `shipped_prompt_route_drift` failures (unchanged).
-    - For the author, not blocking: `schematic/justfile` `check-drift` selects no test before or after the move; `dmls` `child_guard_reaps_process_during_unwind` cannot tell a probe that never started from its simulated panic.
+    Phase 5 is implemented but NOT committed (the phase instructions forbid it). The working tree holds two packages' moves, `sniff-cli` (11 → 2) and `biscuit-tui-cli` (15 → 3), plus two toolkit changes and one evidence-tool fix. Read the Phase 5 section of `implementation-log.md` first.
+    Commit order (R12):
+    - Toolkit commit 1: `scripts/ci/consolidation.py` + `test_consolidation.py`, the `path_key` disposition in `body-diff` (4 new tests). It must land before `sniff-cli`'s evidence, whose `body-diff` needs it.
+    - Toolkit commit 2: `test_consolidation.py`'s five host-tool gates now call `tool_guard.require_tools`. This fixes `test-toolkit::ci_workflow_contracts no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard`, which was already red at `8255ee228` (Phase 2's `ebd261004` introduced it). If one commit is preferred for both toolkit changes, that is fine; they touch the same test file.
+    - Then each package's series: manifest and evidence, structural move, area docs. The `biscuit-tui-cli` structural move includes `tools/test-toolkit/tests/ci_workflow_contracts.rs` (R17), `biscuit-tui/justfile` `test-pty` (R19), and its new unconditional `biscuit-test-harness` dev-dependency. `docs/dependencies.md` gained one line for that dev-dependency. `darkmatter/lib/tests/l1/context_functions.rs:234` is a comment-only docs change for `sniff-cli`.
+    - `measure/test-input-check.py` gained an optional after-path argument (evidence tooling).
+    For Phase 6:
+    - Expected workspace total: 236 − 136 + 18 = 118 integration-test targets. `check-metadata` across all ten manifests already passes (`metadata-check-all-ten.txt`).
+    - `baseline/test-input-probe.py` enumerates `git ls-files`. On an uncommitted tree it misses moved files; use a temporary `GIT_INDEX_FILE` (`git add -A <paths>`) or run it after the commits.
+    - Left as history in the docs pass: `.claude/skills/rust-testing/SKILL.md:140` (a past-tense account naming `biscuit-tui/cli/tests/windows_captured_stdout.rs`). The consumer sweep `--after` will list it; annotate it or update it, your call.
+    - Level 2 on this host: tmux and WezTerm work; Kitty has no usable instance (`os` skill, `macos.md`). L3 was not run (it takes focus).
+    - Known failures NOT caused by this feature: `claudine-cli`'s 2 `shipped_prompt_route_drift` failures (unchanged), and 3 env-gated `biscuit-tui-cli` `keyboard_protocol` PTY tests under `just test-pty` (identical on the base; not in CI).
+    - For the author, not blocking: the `test-pty` failures above; `sniff-cli`'s `spawn_site_guard` self-exclusion key is untested (a wrong key passes silently); plus Phase 4's two items (`schematic/justfile` `check-drift`, `dmls` `child_guard_reaps_process_during_unwind`).
 ---
 
 # Consolidate integration tests in the ten remaining double-digit packages
