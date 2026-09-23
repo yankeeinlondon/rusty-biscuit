@@ -708,6 +708,7 @@ documentation:
     - .claude/skills/darkmatter/SKILL.md
 completed_phase: 6
 implemented: true
+implementation_1: "2026-09-23T16:27:50-07:00"
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -1698,3 +1699,72 @@ Pre-existing failures:
   - The `sniff-cli` move commit's subject says "3 binaries"; it has 2 (R14).
 - **Not done by the agent, by rule:** moving the spec to `_completed`, or running
   `just complete`.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-23T16:27:50-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-22-consolidated-test-binaries-wave-2/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'The Claudine Level 1 area gate still fails' at 16:28:04
+    - discovery: `git show 9d44e7988` adds only `::file ../_test-tiers.md` (after the spec NOTE block, line 121) to `prompts/_implement/implement-plan.md`; the fixture already carried the earlier `227e18c59` transclusion at the Completion section, so the shipped prompt now transcludes `_test-tiers.md` twice (lines 121 and 187) and the commit message's claim that the fixture "already mirrors the new line" is wrong
+    - mirrored the line-121 transclusion into `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`; `diff` against the shipped file now shows only the documented `say:`/`effect:`/`shell:` removals
+    - refreshed `claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json` via the documented `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli shipped_prompt_route_drift::` recipe; the frontmatter hash is unchanged, and the body hash is now `9086e47509578e0a`, matching `md hash prompts/_implement/implement-plan.md`
+    - completed: `just test` in `claudine/` is green: 7,320 passed, 0 failed, 9 skipped; `just lint` in `claudine/` exits 0 (its only warning is the macOS linker `__eh_frame` note)
+    - updated `acceptance.md` criterion 8 (heading, `claudine` row, and the failure paragraph, which now records the refresh) and the `message_to_agent` known-failures sentence in `spec.md`
+    - open for the author (not changed): the shipped `implement-plan.md` now transcludes `_test-tiers.md` twice (lines 121 and 187); dropping the line-187 copy would need the fixture and pin refreshed again
+- work completed for 'The Claudine Level 1 area gate still fails' at 16:30:41
+- starting the work on 'CI input narrowing assumes a level2 binary contains no Level 1 tests' at 16:30:41
+    - discovery: a narrowed unit is always intersected with the L1 tier expression (`_tier_filter` ANDs `BISCUIT_TEST_NARROW` onto it), so a binary-wide unit in a mixed-tier binary cannot pull `level2_*` tests into an L1 cell. What the binary-name shortcut actually prevented was the opposite failure: narrowed cells run with `--no-tests=fail`, so a unit that selects nothing turns the cell red
+    - discovery: a narrowed cell's package record takes `test_args` from `feature_args` (`[package.metadata.ci.tests]` `features`/`all-features`). Every live `level2` target's `required-features` is in its package's CI features today. `claudine-cli::real` and the two `real_provider` targets are not, and only the removed binary-name prefix kept them from getting units
+    - completed: removed `NON_L1_BINARIES` from `scripts/ci/test_inputs.py`. `_unit` now reads tier from the test path alone, and returns `None` for a target whose `required-features` the CI feature contract (plus `default`, closed over the feature table) does not enable. That target's embeds still count as product source
+    - completed: a module-wide reference is dropped when all the tests it can reach are outside L1. It can reach the tests under its module, or, for a helper module with no tests, every test in its binary. Only targets with such a reference are tokenized a second time. Planning one document costs +0.01–0.05 s; a scan of all 9,024 references costs +1.3 s
+    - live delta over every tracked non-source file, old vs new: the only change is that 1,118 `darkmatter-cli::level2` `common::baseline`/`common::layout` references now get units. That binary holds L1 tests (`harness_integrity`), so this is correct. The `biscuit-terminal-cli` `level2_image`/`level2_cursor_and_hygiene` controls still resolve to no unit
+    - completed: 8 regression tests in `scripts/ci/test_affected_scope.py`: 7 in `TestInputIndexTests` (a mixed-tier `level2` binary, a crate-root helper in it and in an all-Level 2 binary, required-features enabled or left off, and an embed in an unbuilt bin) plus 1 planner test in `TestInputSelectionTests`. 4 fail against the old module. Removing the helper-module check fails 2, and removing the `built_for_l1` check fails 1
+    - completed: every `scripts/ci/test_*.py` suite passes (14 suites). `just _test repo-deps`: 449 passed. `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior`, which reads the edited skill, passes. No Python linter is configured for `scripts/ci`
+    - completed: added a paragraph to `docs/cicd/test-inputs.md`, a sentence to the `rust-testing` skill, and a dated superseded note to `baseline/test-inputs.md`. `rulings.md` R15 was left alone as a historical ruling
+    - open (pre-existing, not changed): a helper module with no tests of its own, such as `common::layout`, gets `test(/^common::layout::/)`, which selects nothing. Its callers in other modules are not selected. Today another unit keeps those cells from being empty
+- work completed for 'CI input narrowing assumes a level2 binary contains no Level 1 tests' at 16:45:05
+- starting the work on 'Two consolidated crate roots describe the wrong test tier' at 16:45:05
+    - discovery: `diagrams` and `prose_cells` are aliases of the former `level2_diagrams` and `level2_prose_cells` targets (`biscuit-terminal-cli-migration.json`), and `windows_captured_stdout` is an unmarked L1 module; the two `//!` headers wrongly called every module Level 2 and said each kept its old target name
+    - the orchestrator made the edit directly, since the change is comment-only (19 lines)
+    - rewrote `biscuit-tui/cli/tests/level2/main.rs` and `biscuit-terminal/cli/tests/level2/main.rs` crate-root docs: each binary states its `terminal-tests` feature contract, says tier selection follows the test path, and names its aliases
+    - completed: `just test` in `biscuit-tui` (992 passed, 7 skipped) and `biscuit-terminal` (3,264 passed, 55 skipped); `just lint` is clean in both
+- work completed for 'Two consolidated crate roots describe the wrong test tier' at 16:45:47
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in about 20 minutes (16:27:50 to 16:45:47). During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- open item for the author, found while fixing finding 1 but outside its scope: `prompts/_implement/implement-plan.md` now transcludes `_test-tiers.md` twice (lines 121 and 187)
+- existing gap noted while fixing finding 2 and left unchanged: a unit narrowed to a helper module that has no tests of its own (e.g. `common::layout`) selects nothing, so tests in other modules that call it are not selected; today another unit always keeps those cells from being empty
+
+The files changed in this cycle are:
+
+- `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+- `claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json`
+- `scripts/ci/test_inputs.py`
+- `scripts/ci/test_affected_scope.py`
+- `docs/cicd/test-inputs.md`
+- `.claude/skills/rust-testing/SKILL.md`
+- `biscuit-tui/cli/tests/level2/main.rs`
+- `biscuit-terminal/cli/tests/level2/main.rs`
+- `features/2026-09-22-consolidated-test-binaries-wave-2/acceptance.md`
+- `features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-inputs.md`
+- `features/2026-09-22-consolidated-test-binaries-wave-2/spec.md` (`message_to_agent`)
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-23T16:52:16-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-22-consolidated-test-binaries-wave-2/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'CI input narrowing drops Level 1 callers of a shared helper' at 16:52:30
+        - discovery: the module-scoped unit is unsound for any helper, not only one whose module tests are all Level 2. A `pub` helper, or a private one wrapped by a `pub` one, can be called from any module of its binary, so `test(/^render::/)` also misses `captured::uses_guide` when `render` holds L1 tests of its own. Only a call graph could narrow it, so the scan now gives every reference outside a test function a binary-wide unit
+        - completed: `scripts/ci/test_inputs.py`: `_unit` returns `binary_id(<binary>)` for any reference outside a test function (the module-name tier check is gone too). `scan` drops the unit only when the binary holds no L1 test (`_has_l1_test`, replacing `_unreachable_from_l1`), so a unit still always selects at least one L1 test. This also closes the pre-existing `common::layout` gap from iteration 1
+        - completed: 5 regression tests in `scripts/ci/test_affected_scope.py`, all failing against the pre-fix module. `TestInputIndexTests` gains review-2's shape (`render::guide()` reading `docs/guide.md`, `render::level2_uses_guide`, and the L1 caller `captured::uses_guide`), which now resolves to `binary_id(pkg::level2)`, and a helper in a binary with no tests, which gets no unit. `TestInputSelectionTests` gains the planner regression: a `docs/guide.md` change schedules one `ubuntu-latest` L1 cell. A new `narrowed_selection` helper evaluates the cell's `test_filter` against a listing, intersected with the L1 tier, and shows that it selects `captured::uses_guide` and nothing else
+        - completed: 2 existing tests changed. `test_a_literal_in_a_helper_names_its_module` became `…_names_its_binary`: the unit is now the binary, and the fixture gained an L1 caller in another module, because a binary with no tests now gets no unit. `test_level2_tests_in_a_mixed_tier_binary_are_still_not_units` now expects `binary_id(pkg::level2)` for the `render` helper: the binary's L1 tests may call it
+        - live delta over all 8,809 tracked non-source files (9,024 references, old vs new): no reference loses its unit. 5,617 module-scoped units become binary-wide, and 10 `biscuit-terminal-cli` references in `level2_cursor_and_hygiene` go from no unit to `binary_id(biscuit-terminal-cli::level2)`. The widest cells are unit-test helpers in the `darkmatter` (1,059 references, about 6,000 L1 tests) and `claudine` (24, about 4,200) library binaries. The cost is test run time in one Linux cell; the archive build is the same
+        - completed: `cargo nextest list` with the L1 tier filter confirms both live widened units select tests: `binary_id(biscuit-terminal-cli::level2)` selects 59 and `binary_id(darkmatter-cli::level2)` selects 4 (`harness_integrity`)
+        - completed: updated the unit description in `docs/cicd/test-inputs.md` and the `rust-testing` skill, and added a dated review-2 superseded note to `baseline/test-inputs.md`. The per-package `test-inputs.md` evidence tables and `fixes/2026-09-22-test-input-blind-spot/spec.md` still show `test(/^<module>::/)` units. They are left as historical records
