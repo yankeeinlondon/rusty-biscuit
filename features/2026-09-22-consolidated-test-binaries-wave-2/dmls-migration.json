@@ -1,0 +1,884 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "darkmatter/dmls",
+  "dispositions": [
+    {
+      "detector": "exact_arg",
+      "path": "darkmatter/dmls/tests/l1/stdio_subprocess.rs",
+      "reason": "R19 identity repair: the self-exec `--exact` argument (:85) now names `stdio_subprocess::child_guard_cancellation_probe`. Load-bearing but silent: with the old string the consolidated binary selects 0 tests, the probe never starts, and the test passes vacuously because its `catch_unwind` also swallows the 'did not start' panic; with the new string the probe runs (`dmls/exact-repair.txt`)"
+    }
+  ],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L1-include-slow": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "darkmatter/dmls/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "level1_graph_index",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/level1_graph_index.rs",
+      "old_binary_id": "dmls::level1_graph_index",
+      "old_path": "darkmatter/dmls/tests/level1_graph_index.rs",
+      "old_target": "level1_graph_index",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level1_graph_index::cross_file_link_edges_resolve_through_discovery",
+          "old": "cross_file_link_edges_resolve_through_discovery"
+        },
+        {
+          "new": "level1_graph_index::generated_corpus_indexes_without_panic",
+          "old": "generated_corpus_indexes_without_panic"
+        },
+        {
+          "new": "level1_graph_index::invalidation_matrix_edit_delete_rename",
+          "old": "invalidation_matrix_edit_delete_rename"
+        },
+        {
+          "new": "level1_graph_index::wiki_basename_index_flags_ambiguity",
+          "old": "wiki_basename_index_flags_ambiguity"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "level1_wiki",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/level1_wiki.rs",
+      "old_binary_id": "dmls::level1_wiki",
+      "old_path": "darkmatter/dmls/tests/level1_wiki.rs",
+      "old_target": "level1_wiki",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level1_wiki::wiki_alias_preserved",
+          "old": "wiki_alias_preserved"
+        },
+        {
+          "new": "level1_wiki::wiki_ambiguous_across_roots",
+          "old": "wiki_ambiguous_across_roots"
+        },
+        {
+          "new": "level1_wiki::wiki_backlinks_reach_the_target",
+          "old": "wiki_backlinks_reach_the_target"
+        },
+        {
+          "new": "level1_wiki::wiki_case_sensitive_and_no_dash_equivalence",
+          "old": "wiki_case_sensitive_and_no_dash_equivalence"
+        },
+        {
+          "new": "level1_wiki::wiki_doubled_extension_and_confusing_info",
+          "old": "wiki_doubled_extension_and_confusing_info"
+        },
+        {
+          "new": "level1_wiki::wiki_heading_exact_and_slug_fallback",
+          "old": "wiki_heading_exact_and_slug_fallback"
+        },
+        {
+          "new": "level1_wiki::wiki_percent_decode_and_literal_spaces",
+          "old": "wiki_percent_decode_and_literal_spaces"
+        },
+        {
+          "new": "level1_wiki::wiki_portability_collision_detected",
+          "old": "wiki_portability_collision_detected"
+        },
+        {
+          "new": "level1_wiki::wiki_same_directory_wins_over_unique",
+          "old": "wiki_same_directory_wins_over_unique"
+        },
+        {
+          "new": "level1_wiki::wiki_suffix_and_root_relative",
+          "old": "wiki_suffix_and_root_relative"
+        },
+        {
+          "new": "level1_wiki::wiki_unresolved_unsupported_empty_and_percent",
+          "old": "wiki_unresolved_unsupported_empty_and_percent"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "lsp_session",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/lsp_session.rs",
+      "old_binary_id": "dmls::lsp_session",
+      "old_path": "darkmatter/dmls/tests/lsp_session.rs",
+      "old_target": "lsp_session",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "lsp_session::a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix",
+          "old": "a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix"
+        },
+        {
+          "new": "lsp_session::a_frontmatter_less_document_never_reports_unknown_identifiers",
+          "old": "a_frontmatter_less_document_never_reports_unknown_identifiers"
+        },
+        {
+          "new": "lsp_session::aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved",
+          "old": "aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved"
+        },
+        {
+          "new": "lsp_session::an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote",
+          "old": "an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote"
+        },
+        {
+          "new": "lsp_session::an_unshipped_topic_doc_yields_no_dead_link_on_either_surface",
+          "old": "an_unshipped_topic_doc_yields_no_dead_link_on_either_surface"
+        },
+        {
+          "new": "lsp_session::backslash_escaped_foreign_template_examples_have_no_expression_diagnostics",
+          "old": "backslash_escaped_foreign_template_examples_have_no_expression_diagnostics"
+        },
+        {
+          "new": "lsp_session::bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema",
+          "old": "bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema"
+        },
+        {
+          "new": "lsp_session::bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes",
+          "old": "bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes"
+        },
+        {
+          "new": "lsp_session::broken_link_diagnostic_updates_on_edit",
+          "old": "broken_link_diagnostic_updates_on_edit"
+        },
+        {
+          "new": "lsp_session::cancelled_request_answers_request_cancelled",
+          "old": "cancelled_request_answers_request_cancelled"
+        },
+        {
+          "new": "lsp_session::claudine_extension_is_pure_config",
+          "old": "claudine_extension_is_pure_config"
+        },
+        {
+          "new": "lsp_session::client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic",
+          "old": "client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic"
+        },
+        {
+          "new": "lsp_session::code_action_creates_missing_wiki_note",
+          "old": "code_action_creates_missing_wiki_note"
+        },
+        {
+          "new": "lsp_session::config_reload_reindexes_wiki_roots",
+          "old": "config_reload_reindexes_wiki_roots"
+        },
+        {
+          "new": "lsp_session::ctx_completion_shape_under_utf16_astral_prefix",
+          "old": "ctx_completion_shape_under_utf16_astral_prefix"
+        },
+        {
+          "new": "lsp_session::dash_separated_key_carries_its_replacement_and_quick_fix",
+          "old": "dash_separated_key_carries_its_replacement_and_quick_fix"
+        },
+        {
+          "new": "lsp_session::default_negotiation_is_utf16",
+          "old": "default_negotiation_is_utf16"
+        },
+        {
+          "new": "lsp_session::dsl_directive_name_completion",
+          "old": "dsl_directive_name_completion"
+        },
+        {
+          "new": "lsp_session::dsl_overlay_navigation_hover_and_diagnostics",
+          "old": "dsl_overlay_navigation_hover_and_diagnostics"
+        },
+        {
+          "new": "lsp_session::dsl_quoted_shell_block_body_disallowed_command_is_diagnosed",
+          "old": "dsl_quoted_shell_block_body_disallowed_command_is_diagnosed"
+        },
+        {
+          "new": "lsp_session::dsl_shell_block_benign_body_has_no_security_diagnostic",
+          "old": "dsl_shell_block_benign_body_has_no_security_diagnostic"
+        },
+        {
+          "new": "lsp_session::dsl_shell_block_body_disallowed_command_is_diagnosed",
+          "old": "dsl_shell_block_body_disallowed_command_is_diagnosed"
+        },
+        {
+          "new": "lsp_session::dsl_shell_block_body_hover_shows_policy_verdict",
+          "old": "dsl_shell_block_body_hover_shows_policy_verdict"
+        },
+        {
+          "new": "lsp_session::dsl_valid_document_has_no_dsl_diagnostics",
+          "old": "dsl_valid_document_has_no_dsl_diagnostics"
+        },
+        {
+          "new": "lsp_session::eager_and_required_hover_independently_on_both_surfaces",
+          "old": "eager_and_required_hover_independently_on_both_surfaces"
+        },
+        {
+          "new": "lsp_session::eager_schema_fixture_is_clean_and_catalog_driven",
+          "old": "eager_schema_fixture_is_clean_and_catalog_driven"
+        },
+        {
+          "new": "lsp_session::formatting_is_byte_equivalent_to_library_cleanup",
+          "old": "formatting_is_byte_equivalent_to_library_cleanup"
+        },
+        {
+          "new": "lsp_session::frontmatter_extensionless_file_navigation",
+          "old": "frontmatter_extensionless_file_navigation"
+        },
+        {
+          "new": "lsp_session::frontmatter_nested_file_navigation",
+          "old": "frontmatter_nested_file_navigation"
+        },
+        {
+          "new": "lsp_session::frontmatter_nested_schema_intelligence",
+          "old": "frontmatter_nested_schema_intelligence"
+        },
+        {
+          "new": "lsp_session::frontmatter_schema_intelligence",
+          "old": "frontmatter_schema_intelligence"
+        },
+        {
+          "new": "lsp_session::frontmatter_union_file_navigation",
+          "old": "frontmatter_union_file_navigation"
+        },
+        {
+          "new": "lsp_session::frontmatter_union_nested_schema_intelligence",
+          "old": "frontmatter_union_nested_schema_intelligence"
+        },
+        {
+          "new": "lsp_session::frontmatter_union_value_completion",
+          "old": "frontmatter_union_value_completion"
+        },
+        {
+          "new": "lsp_session::function_call_hover_known_and_unknown",
+          "old": "function_call_hover_known_and_unknown"
+        },
+        {
+          "new": "lsp_session::function_completion_shape",
+          "old": "function_completion_shape"
+        },
+        {
+          "new": "lsp_session::git_catalog_descriptors_reach_lsp_completion_and_hover",
+          "old": "git_catalog_descriptors_reach_lsp_completion_and_hover"
+        },
+        {
+          "new": "lsp_session::heading_rename_rewrites_references",
+          "old": "heading_rename_rewrites_references"
+        },
+        {
+          "new": "lsp_session::initialize_advertises_period_completion_trigger",
+          "old": "initialize_advertises_period_completion_trigger"
+        },
+        {
+          "new": "lsp_session::initialize_open_change_shutdown",
+          "old": "initialize_open_change_shutdown"
+        },
+        {
+          "new": "lsp_session::interpolated_transclusion_target_does_not_report_broken_path",
+          "old": "interpolated_transclusion_target_does_not_report_broken_path"
+        },
+        {
+          "new": "lsp_session::interpolation_ctx_hover_matches_frontmatter_block",
+          "old": "interpolation_ctx_hover_matches_frontmatter_block"
+        },
+        {
+          "new": "lsp_session::interpolation_ctx_hover_surfaces_through_index_access",
+          "old": "interpolation_ctx_hover_surfaces_through_index_access"
+        },
+        {
+          "new": "lsp_session::kebab_identifier_navigation_resolves_at_every_cursor_position",
+          "old": "kebab_identifier_navigation_resolves_at_every_cursor_position"
+        },
+        {
+          "new": "lsp_session::layer0_provider_round_trips",
+          "old": "layer0_provider_round_trips"
+        },
+        {
+          "new": "lsp_session::malformed_buffer_retains_nested_and_escaped_semantic_owners",
+          "old": "malformed_buffer_retains_nested_and_escaped_semantic_owners"
+        },
+        {
+          "new": "lsp_session::malformed_buffer_retains_structural_ownership_of_untouched_keys",
+          "old": "malformed_buffer_retains_structural_ownership_of_untouched_keys"
+        },
+        {
+          "new": "lsp_session::markdown_autolink_hover_survives_standalone_schema_arbitration",
+          "old": "markdown_autolink_hover_survives_standalone_schema_arbitration"
+        },
+        {
+          "new": "lsp_session::meta_schema_compact_explicit_pair_union_keeps_schema_assistance",
+          "old": "meta_schema_compact_explicit_pair_union_keeps_schema_assistance"
+        },
+        {
+          "new": "lsp_session::meta_schema_completion_matches_complete_structural_pointers",
+          "old": "meta_schema_completion_matches_complete_structural_pointers"
+        },
+        {
+          "new": "lsp_session::meta_schema_completion_owner_and_ancestors_come_from_the_ast",
+          "old": "meta_schema_completion_owner_and_ancestors_come_from_the_ast"
+        },
+        {
+          "new": "lsp_session::meta_schema_completion_reads_parser_state_for_partially_authored_values",
+          "old": "meta_schema_completion_reads_parser_state_for_partially_authored_values"
+        },
+        {
+          "new": "lsp_session::meta_schema_explicit_mapping_pairs_retain_last_good_assistance",
+          "old": "meta_schema_explicit_mapping_pairs_retain_last_good_assistance"
+        },
+        {
+          "new": "lsp_session::meta_schema_hover_covers_entries_nested_under_semantic_owners",
+          "old": "meta_schema_hover_covers_entries_nested_under_semantic_owners"
+        },
+        {
+          "new": "lsp_session::meta_schema_hover_covers_pattern_keys_inline_and_standalone",
+          "old": "meta_schema_hover_covers_pattern_keys_inline_and_standalone"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase1_schema_hover_uses_nominal_type",
+          "old": "meta_schema_phase1_schema_hover_uses_nominal_type"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase6_shipped_schema_activation_and_current_error",
+          "old": "meta_schema_phase6_shipped_schema_activation_and_current_error"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase7_inline_hover_completion_and_diagnostics",
+          "old": "meta_schema_phase7_inline_hover_completion_and_diagnostics"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase7_shipped_schema_provider_path",
+          "old": "meta_schema_phase7_shipped_schema_provider_path"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic",
+          "old": "meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic"
+        },
+        {
+          "new": "lsp_session::meta_schema_phase7_standalone_pure_and_tagged_completion",
+          "old": "meta_schema_phase7_standalone_pure_and_tagged_completion"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_block_plain_flow_indicator_retains_last_good",
+          "old": "meta_schema_standalone_block_plain_flow_indicator_retains_last_good"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_flow_completion_locates_the_cursor_structurally",
+          "old": "meta_schema_standalone_flow_completion_locates_the_cursor_structurally"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit",
+          "old": "meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit",
+          "old": "meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_scalar_reference_completion",
+          "old": "meta_schema_standalone_scalar_reference_completion"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_scalar_reference_completion_survives_malformed_edit",
+          "old": "meta_schema_standalone_scalar_reference_completion_survives_malformed_edit"
+        },
+        {
+          "new": "lsp_session::meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit",
+          "old": "meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit"
+        },
+        {
+          "new": "lsp_session::mixed_semantic_union_completion_merges_sibling_arm_candidates",
+          "old": "mixed_semantic_union_completion_merges_sibling_arm_candidates"
+        },
+        {
+          "new": "lsp_session::mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure",
+          "old": "mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure"
+        },
+        {
+          "new": "lsp_session::nullable_transclusion_diagnostic_matrix",
+          "old": "nullable_transclusion_diagnostic_matrix"
+        },
+        {
+          "new": "lsp_session::original_voip_schema_definitions_are_clean",
+          "old": "original_voip_schema_definitions_are_clean"
+        },
+        {
+          "new": "lsp_session::period_trigger_outside_interpolation_offers_nothing",
+          "old": "period_trigger_outside_interpolation_offers_nothing"
+        },
+        {
+          "new": "lsp_session::referenced_schema_conversion_error_keeps_origin_and_reference_fallback",
+          "old": "referenced_schema_conversion_error_keeps_origin_and_reference_fallback"
+        },
+        {
+          "new": "lsp_session::rename_refuses_ambiguous_heading",
+          "old": "rename_refuses_ambiguous_heading"
+        },
+        {
+          "new": "lsp_session::repairing_trigger_payload_clears_open_envelope_immediately",
+          "old": "repairing_trigger_payload_clears_open_envelope_immediately"
+        },
+        {
+          "new": "lsp_session::schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics",
+          "old": "schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics"
+        },
+        {
+          "new": "lsp_session::schema_definition_errors_are_independent_and_property_ranged",
+          "old": "schema_definition_errors_are_independent_and_property_ranged"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_capability_is_gated_on_client_support",
+          "old": "semantic_tokens_capability_is_gated_on_client_support"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_config_applies_without_refresh_capability",
+          "old": "semantic_tokens_config_applies_without_refresh_capability"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_crlf_multiline_splits_per_line",
+          "old": "semantic_tokens_crlf_multiline_splits_per_line"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii",
+          "old": "semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_family_precedence_full_and_range",
+          "old": "semantic_tokens_family_precedence_full_and_range"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_full_directive_token_classes",
+          "old": "semantic_tokens_full_directive_token_classes"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_full_interpolations_ordinary_inert_and_multiline",
+          "old": "semantic_tokens_full_interpolations_ordinary_inert_and_multiline"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved",
+          "old": "semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_master_switch_toggles_and_requests_refresh",
+          "old": "semantic_tokens_master_switch_toggles_and_requests_refresh"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_range_is_full_intersected",
+          "old": "semantic_tokens_range_is_full_intersected"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop",
+          "old": "semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop"
+        },
+        {
+          "new": "lsp_session::semantic_tokens_wiki_enable_suppresses_only_f4",
+          "old": "semantic_tokens_wiki_enable_suppresses_only_f4"
+        },
+        {
+          "new": "lsp_session::server_rescan_fallback_tracks_unopened_files_on_save",
+          "old": "server_rescan_fallback_tracks_unopened_files_on_save"
+        },
+        {
+          "new": "lsp_session::server_rescan_publishes_and_clears_unopened_trigger_envelope_diagnostic",
+          "old": "server_rescan_publishes_and_clears_unopened_trigger_envelope_diagnostic"
+        },
+        {
+          "new": "lsp_session::server_worker_finishes_before_workspace_release_during_unwind",
+          "old": "server_worker_finishes_before_workspace_release_during_unwind"
+        },
+        {
+          "new": "lsp_session::single_arm_semantic_type_keeps_its_specialized_diagnostic",
+          "old": "single_arm_semantic_type_keeps_its_specialized_diagnostic"
+        },
+        {
+          "new": "lsp_session::standalone_inner_definition_diagnostics_address_punctuated_keys",
+          "old": "standalone_inner_definition_diagnostics_address_punctuated_keys"
+        },
+        {
+          "new": "lsp_session::standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged",
+          "old": "standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged"
+        },
+        {
+          "new": "lsp_session::standalone_reference_declarations_match_the_shared_declaration_parser",
+          "old": "standalone_reference_declarations_match_the_shared_declaration_parser"
+        },
+        {
+          "new": "lsp_session::strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only",
+          "old": "strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only"
+        },
+        {
+          "new": "lsp_session::strict_mode_reports_every_absent_required_property_at_any_required_count",
+          "old": "strict_mode_reports_every_absent_required_property_at_any_required_count"
+        },
+        {
+          "new": "lsp_session::structural_paths_survive_quoted_and_punctuated_frontmatter_keys",
+          "old": "structural_paths_survive_quoted_and_punctuated_frontmatter_keys"
+        },
+        {
+          "new": "lsp_session::supplied_invalid_eager_values_are_diagnosed_on_the_value_range",
+          "old": "supplied_invalid_eager_values_are_diagnosed_on_the_value_range"
+        },
+        {
+          "new": "lsp_session::tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_authored",
+          "old": "tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_authored"
+        },
+        {
+          "new": "lsp_session::trigger_failure_transfer_republishes_open_envelope_for_either_open_order",
+          "old": "trigger_failure_transfer_republishes_open_envelope_for_either_open_order"
+        },
+        {
+          "new": "lsp_session::trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope",
+          "old": "trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope"
+        },
+        {
+          "new": "lsp_session::union_arms_and_nested_properties_disclose_eager_without_presence",
+          "old": "union_arms_and_nested_properties_disclose_eager_without_presence"
+        },
+        {
+          "new": "lsp_session::unknown_identifier_fires_in_every_operand_position_at_warning_severity",
+          "old": "unknown_identifier_fires_in_every_operand_position_at_warning_severity"
+        },
+        {
+          "new": "lsp_session::unknown_identifiers_in_block_and_multi_line_expression_values_warn_at_their_own_ranges",
+          "old": "unknown_identifiers_in_block_and_multi_line_expression_values_warn_at_their_own_ranges"
+        },
+        {
+          "new": "lsp_session::vocabulary_link_resolves_from_a_document_outside_the_topic_directory",
+          "old": "vocabulary_link_resolves_from_a_document_outside_the_topic_directory"
+        },
+        {
+          "new": "lsp_session::wiki_link_navigation_diagnostics_and_completion",
+          "old": "wiki_link_navigation_diagnostics_and_completion"
+        },
+        {
+          "new": "lsp_session::will_rename_files_updates_and_refuses",
+          "old": "will_rename_files_updates_and_refuses"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "mapping_only_corpus",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/mapping_only_corpus.rs",
+      "old_binary_id": "dmls::mapping_only_corpus",
+      "old_path": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+      "old_target": "mapping_only_corpus",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "mapping_only_corpus::mapping_only_corpus_contains_no_sequences",
+          "old": "mapping_only_corpus_contains_no_sequences"
+        },
+        {
+          "new": "mapping_only_corpus::mapping_only_corpus_diagnostics_match_pre_descent_baseline",
+          "old": "mapping_only_corpus_diagnostics_match_pre_descent_baseline"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "no_side_effects",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/no_side_effects.rs",
+      "old_binary_id": "dmls::no_side_effects",
+      "old_path": "darkmatter/dmls/tests/no_side_effects.rs",
+      "old_target": "no_side_effects",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "no_side_effects::dsl_requests_spawn_no_processes_and_open_no_sockets",
+          "old": "dsl_requests_spawn_no_processes_and_open_no_sockets"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "packaging_contract",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/packaging_contract.rs",
+      "old_binary_id": "dmls::packaging_contract",
+      "old_path": "darkmatter/dmls/tests/packaging_contract.rs",
+      "old_target": "packaging_contract",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "packaging_contract::dist_recipe_and_zed_extension_agree_on_archive_names",
+          "old": "dist_recipe_and_zed_extension_agree_on_archive_names"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "stdio_subprocess",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/stdio_subprocess.rs",
+      "old_binary_id": "dmls::stdio_subprocess",
+      "old_path": "darkmatter/dmls/tests/stdio_subprocess.rs",
+      "old_target": "stdio_subprocess",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "stdio_subprocess::child_guard_cancellation_probe",
+          "old": "child_guard_cancellation_probe"
+        },
+        {
+          "new": "stdio_subprocess::child_guard_reaps_process_during_unwind",
+          "old": "child_guard_reaps_process_during_unwind"
+        },
+        {
+          "new": "stdio_subprocess::native_binary_speaks_lsp_over_stdio",
+          "old": "native_binary_speaks_lsp_over_stdio"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "strict_mode_recovery_spike",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs",
+      "old_binary_id": "dmls::strict_mode_recovery_spike",
+      "old_path": "darkmatter/dmls/tests/strict_mode_recovery_spike.rs",
+      "old_target": "strict_mode_recovery_spike",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "strict_mode_recovery_spike::spike_recovery_model_independent_refreshes_do_not_strand_each_other",
+          "old": "spike_recovery_model_independent_refreshes_do_not_strand_each_other"
+        },
+        {
+          "new": "strict_mode_recovery_spike::spike_recovery_model_rejects_late_results_and_suppresses_all_dependent_surfaces",
+          "old": "spike_recovery_model_rejects_late_results_and_suppresses_all_dependent_surfaces"
+        },
+        {
+          "new": "strict_mode_recovery_spike::spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation",
+          "old": "spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "suggest_constraint_phase1",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs",
+      "old_binary_id": "dmls::suggest_constraint_phase1",
+      "old_path": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+      "old_target": "suggest_constraint_phase1",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_bare_block_array_dash",
+          "old": "suggest_phase1_bare_block_array_dash"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_block_array_dash_space",
+          "old": "suggest_phase1_block_array_dash_space"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_block_array_partial_value",
+          "old": "suggest_phase1_block_array_partial_value"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_completion_positions",
+          "old": "suggest_phase1_completion_positions"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_decoy_field_does_not_steal_diagnostic_span",
+          "old": "suggest_phase1_decoy_field_does_not_steal_diagnostic_span"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_inline_warning_has_exact_argument_range",
+          "old": "suggest_phase1_inline_warning_has_exact_argument_range"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_invalid_sibling_omitted_from_completion",
+          "old": "suggest_phase1_invalid_sibling_omitted_from_completion"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_nested_property_from_later_root_arm",
+          "old": "suggest_phase1_nested_property_from_later_root_arm"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_numeric_prefix_uses_decoded_text",
+          "old": "suggest_phase1_numeric_prefix_uses_decoded_text"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_pure_whole_file_reference_completion",
+          "old": "suggest_phase1_pure_whole_file_reference_completion"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_root_union_filters_invalid_from_later_arm",
+          "old": "suggest_phase1_root_union_filters_invalid_from_later_arm"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_standalone_ranges",
+          "old": "suggest_phase1_standalone_ranges"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_tagged_whole_file_reference_completion",
+          "old": "suggest_phase1_tagged_whole_file_reference_completion"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase1_union_selection_and_raw_schema_exclusion",
+          "old": "suggest_phase1_union_selection_and_raw_schema_exclusion"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase5_close_clears_diagnostics",
+          "old": "suggest_phase5_close_clears_diagnostics"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase5_inline_warning_removed_after_correction",
+          "old": "suggest_phase5_inline_warning_removed_after_correction"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase5_malformed_tagged_envelope_error",
+          "old": "suggest_phase5_malformed_tagged_envelope_error"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase5_schema_remains_active_alongside_warnings",
+          "old": "suggest_phase5_schema_remains_active_alongside_warnings"
+        },
+        {
+          "new": "suggest_constraint_phase1::suggest_phase5_standalone_warning_not_duplicated_on_consumer",
+          "old": "suggest_phase5_standalone_warning_not_duplicated_on_consumer"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::l1",
+      "inner_cfg": [],
+      "module": "zed_extension_contract",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/l1/zed_extension_contract.rs",
+      "old_binary_id": "dmls::zed_extension_contract",
+      "old_path": "darkmatter/dmls/tests/zed_extension_contract.rs",
+      "old_target": "zed_extension_contract",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "zed_extension_contract::zed_extension_manifest_and_crate_shape_are_loadable",
+          "old": "zed_extension_manifest_and_crate_shape_are_loadable"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "dmls::level2",
+      "inner_cfg": [],
+      "module": "level2_editor_neovim",
+      "nested_root": false,
+      "new_path": "darkmatter/dmls/tests/level2/level2_editor_neovim.rs",
+      "old_binary_id": "dmls::level2_editor_neovim",
+      "old_path": "darkmatter/dmls/tests/level2_editor_neovim.rs",
+      "old_target": "level2_editor_neovim",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_editor_neovim::level2_neovim_decodes_semantic_token_families_and_positions",
+          "old": "level2_neovim_decodes_semantic_token_families_and_positions"
+        },
+        {
+          "new": "level2_editor_neovim::level2_neovim_semantic_tokens_config_toggle_repaints_live",
+          "old": "level2_neovim_semantic_tokens_config_toggle_repaints_live"
+        },
+        {
+          "new": "level2_editor_neovim::level2_neovim_tmux_renders_recipe_colors_and_repaints",
+          "old": "level2_neovim_tmux_renders_recipe_colors_and_repaints"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "dmls",
+  "ruled_targets": [],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "level1_graph_index",
+        "level1_wiki",
+        "lsp_session",
+        "mapping_only_corpus",
+        "no_side_effects",
+        "packaging_contract",
+        "stdio_subprocess",
+        "strict_mode_recovery_spike",
+        "suggest_constraint_phase1",
+        "zed_extension_contract"
+      ],
+      "name": "l1",
+      "path": "darkmatter/dmls/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level2_editor_neovim"
+      ],
+      "name": "level2",
+      "path": "darkmatter/dmls/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}

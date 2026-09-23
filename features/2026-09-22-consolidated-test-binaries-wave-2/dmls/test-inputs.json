@@ -1,0 +1,58 @@
+{
+  "probe": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+  "before_rows": [
+    {
+      "package": "dmls",
+      "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+      "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+      "line": 35,
+      "embedded": false,
+      "unit": "binary_id(dmls::mapping_only_corpus)"
+    },
+    {
+      "package": "dmls",
+      "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+      "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+      "line": 36,
+      "embedded": false,
+      "unit": "binary_id(dmls::mapping_only_corpus)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "dmls",
+      "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+      "source": "darkmatter/dmls/tests/l1/mapping_only_corpus.rs",
+      "line": 35,
+      "embedded": false,
+      "unit": "binary_id(dmls::l1) & test(/^mapping_only_corpus::/)"
+    },
+    {
+      "package": "dmls",
+      "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+      "source": "darkmatter/dmls/tests/l1/mapping_only_corpus.rs",
+      "line": 36,
+      "embedded": false,
+      "unit": "binary_id(dmls::l1) & test(/^mapping_only_corpus::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(dmls::mapping_only_corpus)": [
+      "dmls::mapping_only_corpus mapping_only_corpus_contains_no_sequences",
+      "dmls::mapping_only_corpus mapping_only_corpus_diagnostics_match_pre_descent_baseline"
+    ]
+  },
+  "after_units": {
+    "binary_id(dmls::l1) & test(/^mapping_only_corpus::/)": [
+      "dmls::l1 mapping_only_corpus::mapping_only_corpus_contains_no_sequences",
+      "dmls::l1 mapping_only_corpus::mapping_only_corpus_diagnostics_match_pre_descent_baseline"
+    ]
+  },
+  "before_mapped": [
+    "dmls::l1 mapping_only_corpus::mapping_only_corpus_contains_no_sequences",
+    "dmls::l1 mapping_only_corpus::mapping_only_corpus_diagnostics_match_pre_descent_baseline"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

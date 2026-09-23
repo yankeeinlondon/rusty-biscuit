@@ -1,0 +1,2 @@
+dmls L1 on build-linux (scratch clone at 5a396aeb5 + the Phase 4 working-tree patch; RUSTC_WRAPPER='' KACHE_AUTO=0; CI features)
+     Summary [   1.365s] 740 tests run: 740 passed, 9 skipped

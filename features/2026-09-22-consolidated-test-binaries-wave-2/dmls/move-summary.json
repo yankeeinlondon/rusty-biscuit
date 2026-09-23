@@ -1,0 +1,84 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"terminal-tests\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "darkmatter/dmls/tests/l1/level1_graph_index.rs",
+      "old": "darkmatter/dmls/tests/level1_graph_index.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/level1_wiki.rs",
+      "old": "darkmatter/dmls/tests/level1_wiki.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/lsp_session.rs",
+      "old": "darkmatter/dmls/tests/lsp_session.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/mapping_only_corpus.rs",
+      "old": "darkmatter/dmls/tests/mapping_only_corpus.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/no_side_effects.rs",
+      "old": "darkmatter/dmls/tests/no_side_effects.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/packaging_contract.rs",
+      "old": "darkmatter/dmls/tests/packaging_contract.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/stdio_subprocess.rs",
+      "old": "darkmatter/dmls/tests/stdio_subprocess.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs",
+      "old": "darkmatter/dmls/tests/strict_mode_recovery_spike.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs",
+      "old": "darkmatter/dmls/tests/suggest_constraint_phase1.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/l1/zed_extension_contract.rs",
+      "old": "darkmatter/dmls/tests/zed_extension_contract.rs"
+    },
+    {
+      "new": "darkmatter/dmls/tests/level2/level2_editor_neovim.rs",
+      "old": "darkmatter/dmls/tests/level2_editor_neovim.rs"
+    }
+  ],
+  "package": "dmls",
+  "path_repairs": {
+    "darkmatter/dmls/tests/l1/lsp_session.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "darkmatter/dmls/tests/l1/no_side_effects.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs": [
+      "mod common; \u2192 use crate::common;",
+      "fixtures/suggest_constraint/inline.md \u2192 ../fixtures/suggest_constraint/inline.md",
+      "fixtures/suggest_constraint/pure.yaml \u2192 ../fixtures/suggest_constraint/pure.yaml",
+      "fixtures/suggest_constraint/tagged.yaml \u2192 ../fixtures/suggest_constraint/tagged.yaml",
+      "fixtures/suggest_constraint/completion.md \u2192 ../fixtures/suggest_constraint/completion.md",
+      "fixtures/suggest_constraint/unions.md \u2192 ../fixtures/suggest_constraint/unions.md",
+      "fixtures/suggest_constraint/raw-schema.json \u2192 ../fixtures/suggest_constraint/raw-schema.json",
+      "fixtures/suggest_constraint/raw-consumer.md \u2192 ../fixtures/suggest_constraint/raw-consumer.md"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "darkmatter/dmls/tests/l1/main.rs": {
+      "declares_common": true,
+      "modules": 10
+    },
+    "darkmatter/dmls/tests/level2/main.rs": {
+      "declares_common": false,
+      "modules": 1
+    }
+  },
+  "version": 1
+}
