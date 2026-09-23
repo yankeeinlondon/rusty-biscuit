@@ -2,7 +2,7 @@
 
 Throughout this repo we utilize the `kind` to formalize what _kind_ of document the document is. This formalism is enforced with a schema defined for this repo at schemas/kind.yaml:
 
-::code schemas/kind-document.yaml
+::code claudine/features/2026-09-21-schema-enhancements/drafts/kind-document.yaml
 
 > Note: this schema uses [SimplifiedSchema](^darkmatter/docs/topics/schemas/index.md) grammar
 
