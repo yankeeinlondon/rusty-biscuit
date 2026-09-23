@@ -1,7 +1,9 @@
 //! Runtime provenance uses the binaries actually shipped. External libraries
-//! are pinned to their observed content identity (Mach-O UUID for shared-cache
-//! images). This deliberately rejects upgrades until compatibility is proved;
-//! a runner label or a package installation declaration is never that proof.
+//! are recorded by their observed content identity (Mach-O UUID for shared-cache
+//! images). A consumer whose libraries all resolve but differ in content (a
+//! runner image update) is warned, not refused: running the tests is the
+//! compatibility proof, and a runner label or a package installation
+//! declaration is never that proof. A library that does not resolve is refused.
 
 use super::*;
 use std::io::Read;
