@@ -1,0 +1,3 @@
+Linux L1 on build-linux, private --shared scratch clone at 8255ee228 plus the Phase 5 patch (57 paths), RUSTC_WRAPPER="" KACHE_AUTO=0
+cargo nextest run --locked -p biscuit-tui-cli --features terminal-tests -E "$(just _tier_filter L1 biscuit-tui-cli)"
+     Summary [   0.121s] 412 tests run: 412 passed, 18 skipped
