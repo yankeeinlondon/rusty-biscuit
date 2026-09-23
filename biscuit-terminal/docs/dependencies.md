@@ -225,9 +225,9 @@
   enables the tier gate for the library and CLI integration targets. The harness
   crate is separately an unconditional `[dev-dependencies]` entry of both
   packages, so L1 targets can call its `manifest_dir!()` without the feature.
-  The library's `test-toolkit` is likewise an unconditional dev-dependency, for
-  the Level 1 layout gate (`tests/l1/test_layout.rs`); it adds no crate the
-  test build did not already compile.
+  `test-toolkit` is likewise an unconditional dev-dependency of both packages,
+  for each one's Level 1 layout gate (`tests/l1/test_layout.rs`); it adds no
+  crate the test build did not already compile.
 - `browser-tests` enables the headless-browser harness used by computed-style
   tests. Browser-only items are cfg-gated inside the mixed parity target.
 
