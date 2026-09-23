@@ -1,0 +1,16 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: "normalize_topics_table(&run_stdout(&[\"topics\"]))"
+---
+| hardware | filesystem | software |
+| --- | --- | --- |
+| cpu | git | editors |
+| gpu | repo | utilities |
+| memory | language | language-package-managers |
+| storage |  | os-package-managers |
+| audio-devices |  | tts-clients |
+|  |  | terminal-apps |
+|  |  | audio-players |
+|  |  | agents |
+|  |  | notification-helpers |
+|  |  | test-runners |

@@ -1,0 +1,31 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: stable_topology_json(&json)
+---
+{
+  "is_monorepo": true,
+  "monorepo_layers": [
+    {
+      "authority": "pnpm-workspaces",
+      "orchestrators": [
+        "nx"
+      ],
+      "packages": [
+        "apps/api",
+        "apps/web"
+      ],
+      "provenance": "globbed"
+    }
+  ],
+  "monorepo_standards": [
+    {
+      "confidence": "inferred",
+      "standard": "nx"
+    },
+    {
+      "confidence": "marker-confirmed",
+      "standard": "pnpm-workspaces"
+    }
+  ],
+  "package_count": 2
+}

@@ -1,0 +1,27 @@
+---
+source: sniff/cli/tests/snapshots.rs
+expression: "run_stdout(&[\"--completions\", \"--help\"])"
+---
+Shell completions
+
+Usage:
+  sniff --completions <SHELL>
+
+Available shells:
+  bash, elvish, fish, powershell, zsh
+
+Setup commands:
+  Bash (add to ~/.bashrc):
+    source <(COMPLETE=bash sniff)
+
+  Zsh (add to ~/.zshrc):
+    source <(COMPLETE=zsh sniff)
+
+  Fish (add to ~/.config/fish/config.fish):
+    COMPLETE=fish sniff | source
+
+  PowerShell (add to $PROFILE):
+    $env:COMPLETE = "powershell"; sniff | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
+
+  Elvish (add to ~/.elvish/rc.elv):
+    eval (E:COMPLETE=elvish sniff | slurp)
