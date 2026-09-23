@@ -313,6 +313,7 @@ COMPLETION_REJECTIONS = (
     "completion-companion-incomplete",
     "completion-companion-failed",
     "completion-backend-unproven",
+    "completion-test-stranded",
 )
 
 #: Why a producer refused a dispatch row before running anything. A row carries

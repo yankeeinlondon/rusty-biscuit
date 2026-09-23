@@ -5,7 +5,7 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-c5ce954ede8d2d45
+hash: 61d07be7e22c9f45-974174a243c5f3c6
 last_updated: 2026-09-22
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -555,7 +555,13 @@ it does not earn. `renderable` had 16 such tests: excluded from L1, and its
 `just check-tier-coverage` now fails on exactly that combination — a stub
 `test-<tier>` recipe in an area where tests still match that tier. It builds the
 stubbing areas' test binaries, so it is deliberately not wired into `test`,
-`lint`, or a hook; run it when tier markers or tier recipes change.
+`lint`, or a hook; run it when tier markers or tier recipes change. CI makes
+the same check at no build cost: every L1 producer's expected-test listing
+already holds the tests its filter excluded, and `completion.py` refuses one
+that carries a marker for a stubbed tier (`completion-test-stranded`). A marker
+on a *module* counts too — darkmatter's `real_shells` module stranded seven
+tests until 2026-09-23. `prompts/_test-tiers.md` states these rules for
+implementation and review prompts.
 
 An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
 expressions and must anchor them too — `_tier_filter` cannot reach inside an

@@ -269,7 +269,8 @@
       "completion-expected-empty",
       "completion-companion-incomplete",
       "completion-companion-failed",
-      "completion-backend-unproven"
+      "completion-backend-unproven",
+      "completion-test-stranded"
     ]
   },
   "cell_contract": {
@@ -451,7 +452,8 @@
       "completion-expected-empty",
       "completion-companion-incomplete",
       "completion-companion-failed",
-      "completion-backend-unproven"
+      "completion-backend-unproven",
+      "completion-test-stranded"
     ],
     "tier_markers": [
       "level2_",
