@@ -370,6 +370,344 @@ skills_files_updated_during_phase_5:
     - .claude/skills/os/windows.md
     - .claude/skills/rust-testing/SKILL.md
     - .claude/skills/sniff/SKILL.md
+source_files_during_phase_6:
+    - claudine/lib/src/stream/protocol/kimi/tests.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/consumer-sweep.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance/final-sweep.sh
+docs_updated_during_phase_6:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+docs_created_during_phase_6:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/ci-observations.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/workspace-metadata.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-selector-consumers-after.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance/final-sweep-logs/
+skills_files_updated_during_phase_6:
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+source_code:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/pre-existing.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-input-probe.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-input-listings.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/consumer-sweep.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s2-scan.py
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.py
+    - tree-hugger/lib/Cargo.toml
+    - claudine/lib/Cargo.toml
+    - sniff/lib/Cargo.toml
+    - .config/nextest.toml
+    - Cargo.lock
+    - sniff/lib/benches/support/bench_ids.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/boundary_lint.rs
+    - claudine/lib/tests/l1/canonical_dispatch.rs
+    - claudine/lib/tests/l1/deprecated_compatibility.rs
+    - claudine/lib/tests/l1/diagnostic_detail_conformance.rs
+    - claudine/lib/tests/l1/kimi_wire.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/model_catalog_integration.rs
+    - claudine/lib/tests/l1/opencode_stderr_lifecycle.rs
+    - claudine/lib/tests/l1/protocol_fixture_replay.rs
+    - claudine/lib/tests/l1/semantic_fidelity.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/lib/tests/l1/test_layout.rs
+    - claudine/lib/tests/l1/tts_phase1_contract.rs
+    - claudine/lib/tests/l1/tts_phase5_contract.rs
+    - claudine/lib/tests/l1/typed_stream_protocols.rs
+    - sniff/lib/tests/l1/bench_fixtures.rs
+    - sniff/lib/tests/l1/bench_ids_sync.rs
+    - sniff/lib/tests/l1/bench_plans.rs
+    - sniff/lib/tests/l1/benchmark_workloads.rs
+    - sniff/lib/tests/l1/focused_provider.rs
+    - sniff/lib/tests/l1/git_parity.rs
+    - sniff/lib/tests/l1/host_capability_cache.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/merge_conflict_prediction.rs
+    - sniff/lib/tests/l1/network_primitives.rs
+    - sniff/lib/tests/l1/program_installable.rs
+    - sniff/lib/tests/l1/program_serialization.rs
+    - sniff/lib/tests/l1/recent_commits.rs
+    - sniff/lib/tests/l1/remote_observation.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - sniff/lib/tests/l1/remote_resolution.rs
+    - sniff/lib/tests/l1/test_layout.rs
+    - sniff/lib/tests/l1/uv_with_install_plan.rs
+    - sniff/lib/tests/l1/windows_app_paths_orphan.rs
+    - sniff/lib/tests/l1/windows_find_program_priority.rs
+    - tree-hugger/lib/tests/l1/adapter_tests.rs
+    - tree-hugger/lib/tests/l1/cache_tests.rs
+    - tree-hugger/lib/tests/l1/corpus_tests.rs
+    - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+    - tree-hugger/lib/tests/l1/main.rs
+    - tree-hugger/lib/tests/l1/phase1_diagnostics.rs
+    - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+    - tree-hugger/lib/tests/l1/query_compile.rs
+    - tree-hugger/lib/tests/l1/resolver_tests.rs
+    - tree-hugger/lib/tests/l1/test_layout.rs
+    - tree-hugger/lib/tests/l1/tree_file.rs
+    - tree-hugger/lib/tests/l1/tree_package.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/measure.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/layout-guard.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/test-input-check.py
+    - biscuit-file/lib/Cargo.toml
+    - biscuit-file/lib/tests/l1-fetch/fetch_integration.rs
+    - biscuit-file/lib/tests/l1-fetch/main.rs
+    - biscuit-file/lib/tests/l1/completion_round_trip.rs
+    - biscuit-file/lib/tests/l1/detailed_resolution.rs
+    - biscuit-file/lib/tests/l1/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/l1/implicit_relative.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/parse_count.rs
+    - biscuit-file/lib/tests/l1/precedence_flip.rs
+    - biscuit-file/lib/tests/l1/reference_grammar.rs
+    - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+    - biscuit-file/lib/tests/l1/resolution_context.rs
+    - biscuit-file/lib/tests/l1/round_trip.rs
+    - biscuit-file/lib/tests/l1/span_compat.rs
+    - biscuit-file/lib/tests/l1/test_layout.rs
+    - biscuit-file/lib/tests/l1/yaml_corpus.rs
+    - biscuit-file/lib/tests/l1/yaml_mutation.rs
+    - biscuit-file/lib/tests/l1/yaml_safety.rs
+    - biscuit-file/lib/tests/proptest-regressions/yaml_mutation.txt
+    - biscuit-terminal/cli/Cargo.toml
+    - biscuit-terminal/cli/tests/l1/about.rs
+    - biscuit-terminal/cli/tests/l1/dir_targets.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/cli/tests/l1/main.rs
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__columns_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__list_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padleft_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padright_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_styled_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__quote_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/test_layout.rs
+    - biscuit-terminal/cli/tests/level2/diagrams.rs
+    - biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+    - biscuit-terminal/cli/tests/level2/level2_container_fenced_code.rs
+    - biscuit-terminal/cli/tests/level2/level2_cursor_and_hygiene.rs
+    - biscuit-terminal/cli/tests/level2/level2_image.rs
+    - biscuit-terminal/cli/tests/level2/level2_layout.rs
+    - biscuit-terminal/cli/tests/level2/level2_prose_styling.rs
+    - biscuit-terminal/cli/tests/level2/level2_render_tree_style.rs
+    - biscuit-terminal/cli/tests/level2/level2_status_block.rs
+    - biscuit-terminal/cli/tests/level2/level2_style_everywhere_matrix.rs
+    - biscuit-terminal/cli/tests/level2/main.rs
+    - biscuit-terminal/cli/tests/level2/prose_cells.rs
+    - biscuit-test-harness/src/bin/broker.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/gen/tests/l1/drift.rs
+    - claudine/gen/tests/l1/fixtures_provenance.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/l1/signals_sidecar_mirror.rs
+    - claudine/gen/tests/l1/signals_validation.rs
+    - claudine/gen/tests/l1/steering_check.rs
+    - claudine/gen/tests/l1/test_layout.rs
+    - claudine/gen/tests/l1/vocabulary.rs
+    - claudine/gen/tests/level2/level2_report_terminal.rs
+    - claudine/gen/tests/level2/main.rs
+    - claudine/lib/src/provider/tests.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/fixtures/editor_neovim/init.lua
+    - darkmatter/dmls/tests/fixtures/editor_neovim/probe.lua
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/packaging_contract.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/dmls/tests/l1/test_layout.rs
+    - darkmatter/dmls/tests/l1/zed_extension_contract.rs
+    - darkmatter/dmls/tests/level2/level2_editor_neovim.rs
+    - darkmatter/dmls/tests/level2/main.rs
+    - schematic/gen/Cargo.toml
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/postman_artifact_validation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/gen/tests/l1/postman_schema.rs
+    - schematic/gen/tests/l1/postman_var_consistency.rs
+    - schematic/gen/tests/l1/query_param_detection.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/gen/tests/l1/test_layout.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/level2/main.rs
+    - schematic/gen/tests/level2/terminal_capture.rs
+    - schematic/justfile
+    - biscuit-tui/cli/Cargo.toml
+    - biscuit-tui/cli/tests/l1/boolean_switch_output.rs
+    - biscuit-tui/cli/tests/l1/choose_cli.rs
+    - biscuit-tui/cli/tests/l1/choose_many_output.rs
+    - biscuit-tui/cli/tests/l1/choose_one_output.rs
+    - biscuit-tui/cli/tests/l1/completions.rs
+    - biscuit-tui/cli/tests/l1/completions_shell.rs
+    - biscuit-tui/cli/tests/l1/exit_codes.rs
+    - biscuit-tui/cli/tests/l1/help_contract.rs
+    - biscuit-tui/cli/tests/l1/input_table_output.rs
+    - biscuit-tui/cli/tests/l1/keyboard_protocol.rs
+    - biscuit-tui/cli/tests/l1/main.rs
+    - biscuit-tui/cli/tests/l1/test_layout.rs
+    - biscuit-tui/cli/tests/l1/text_area_input_output.rs
+    - biscuit-tui/cli/tests/l1/text_input_output.rs
+    - biscuit-tui/cli/tests/level2/main.rs
+    - biscuit-tui/cli/tests/level2/terminal_render.rs
+    - biscuit-tui/cli/tests/level2/windows_captured_stdout.rs
+    - biscuit-tui/cli/tests/level3/level3_chord_select.rs
+    - biscuit-tui/cli/tests/level3/main.rs
+    - biscuit-tui/justfile
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - sniff/cli/Cargo.toml
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/cli_process_fixture.rs
+    - sniff/cli/tests/l1/install_interview_cli.rs
+    - sniff/cli/tests/l1/install_plan.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/
+    - sniff/cli/tests/l1/spawn_site_guard.rs
+    - sniff/cli/tests/l1/test_layout.rs
+    - sniff/cli/tests/l1/tty.rs
+    - sniff/cli/tests/level2/level2_cicd_styling.rs
+    - sniff/cli/tests/level2/level2_git_status_styling.rs
+    - sniff/cli/tests/level2/level2_perf_tree_rendering.rs
+    - sniff/cli/tests/level2/level2_recent_commits_rendering.rs
+    - sniff/cli/tests/level2/main.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+    - claudine/lib/src/stream/protocol/kimi/tests.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance/final-sweep.sh
+documentation:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/rulings.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s1-feature-sets.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s2-hazards.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s2-scan-output.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s3-cross-check.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spikes/s4-deps.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/pre-existing.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/skip-baseline.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-inputs.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-selector-consumers.md
+    - darkmatter/fixes/_unscheduled/proptest-regressions-after-consolidation/spec.md
+    - .claude/skills/os/build-hosts.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/dry-run.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/r18-proptest-scratch.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-metadata-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-darkmatter-proptest-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-b.SHA256SUMS
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-a/
+    - tree-hugger/lib/README.md
+    - docs/comment-quality.md
+    - docs/dependencies.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after-edit.log
+    - .claude/skills/sniff/network.md
+    - .claude/skills/tree-hugger/query-system.md
+    - biscuit-file/docs/dependencies.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-test-harness/README.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/research/signals/fixtures/README.md
+    - claudine/docs/research/signals/fixtures/provenance.yaml
+    - claudine/docs/topics/provider-metadata.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - renderable/docs/layout-and-style.md
+    - schematic/docs/dependencies.md
+    - schematic/gen/tests/fixtures/postman/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/dmls-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/dmls/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-file-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-file-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-terminal-cli-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-terminal-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-gen-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-gen-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/dmls-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/dmls-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/schematic-gen-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/schematic-gen-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/
+    - .claude/skills/biscuit-test-harness/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/schematic-define/SKILL.md
+    - biscuit-tui/cli/README.md
+    - biscuit-tui/lib/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/metadata-check-all-ten.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-cli-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-tui-cli-after.txt
+    - .claude/skills/os/windows.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/sniff/SKILL.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/ci-observations.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/workspace-metadata.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-selector-consumers-after.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/acceptance/final-sweep-logs/
+    - .claude/skills/darkmatter/SKILL.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -1212,3 +1550,151 @@ wave's ten packages, the test executables went from 136 to 18.
 | `body-diff` accepts exactly a dispositioned path-key repair | `BodyDiffTests.test_a_dispositioned_path_key_repair_is_structural`, `test_a_path_key_repair_without_a_disposition_fails`, `test_a_path_key_disposition_rejects_another_targets_prefix`, `test_a_path_key_disposition_still_fails_on_a_changed_path` |
 | The suite's host-tool gates use the shared guard | `test-toolkit::ci_workflow_contracts no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard` (red at `8255ee228`, green now) |
 | Windows, WSL2, and Linux still build and pass | `<pkg>/cross-check-{windows,wsl}.txt`, `<pkg>/linux-l1-summary.txt` |
+
+## Phase 6
+
+Phase 6 (documentation, acceptance, and closeout) ran at `35295e442` on the macOS dev host.
+By then the separate commit step had landed the whole R12 series for Phases 2–5: 58 commits,
+every one with a good signature (`git log --format=%G?` is `G`). The only `E` entries in
+`origin/fix/ci-build-feature-divergence..HEAD` are GitHub's merges of PRs #94 and #95, which
+are not this feature's. No commit message has an agent-attribution trailer. Nothing in
+Phase 6 was committed, per the phase instructions.
+
+### Wave 1 — cross-cutting updates
+
+**Active-doc sweep.** `baseline/consumer-sweep.py` gained `--after`, following wave 1's
+script. Cargo no longer has the old per-file target names, so they come from the ten
+`*-migration.json` manifests. Other packages keep their own targets, so a name another
+package shares still marks a hit ambiguous. `--after` also adds:
+
+- a record date for each historical file (its dated directory, else its last commit);
+- a `self` summary by file, instead of 1,230 rows;
+- `AFTER_DISPOSITIONS`, a reviewed table saying why each remaining active or in-flight hit
+  stays. A hit without an entry prints as **undispositioned**.
+
+The first run found 7 active hits, 3 in-flight hits, and 5 active file-path references:
+
+| Hit | Disposition |
+|---|---|
+| `darkmatter/dmls/tests/common/mod.rs:2,5,26–28` called the three LSP modules "binaries" and "targets" | **Fixed** (comment-only). It now says "the `l1` integration binary's LSP modules". The `dead_code` rationale ("each consuming binary uses a different subset") no longer held in one binary, so it was reworded. The allow is still needed: removed, `cargo check -p dmls --tests` warns on `LspFixture::workspace` and `workspace_path`. |
+| `claudine/lib/src/stream/protocol/kimi/tests.rs:8` "the `protocol_fixture_replay` integration test" | **Fixed** (comment-only): "the `l1` integration binary's `protocol_fixture_replay` module" |
+| `.claude/skills/os/wsl.md:91` `claudine-gen::steering_check` | Historical: a dated account ("Proven non-vacuous on 2026-09-09") |
+| `.github/workflows/sniff-performance.yml:102`, `claudine/docs/topics/performance-testing.md:134` "the `bench_ids_sync` integration test" | Accurate: it is still a test module, not a selector. Left unchanged, so no CI-infra cell is scheduled for a comment. The claudine doc's claim that this test covers claudine's benches is pre-existing drift, outside this feature |
+| `.claude/skills/rust-testing/SKILL.md:140` (old `windows_captured_stdout.rs` path) | Historical: a past-tense account (Phase 5's call) |
+| `sniff/docs/cli/repo_{recent-commits,source-code-changes}.md` (old `sniff/lib/tests/*.rs` paths) | Historical: sample command output quoting an old commit's file list |
+| `claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md:565,826`, `fixes/2026-09-22-test-input-blind-spot/spec.md:335` | In-flight spec records; their authors own them at landing |
+
+Result: `baseline/test-selector-consumers-after.md`. It has 0 `--test <old>` selectors
+outside historical records and this feature's own evidence, 0 undispositioned hits, and 0
+ambiguous active hits. It lists 912 + 500 historical hits in 185 files, each with its record
+date. `py_compile -W error` and `ruff --select F,E9,B` are clean.
+
+**Skill drift.**
+
+- `rust-testing/SKILL.md`, "Consolidated Integration-Test Binaries": the section said only
+  wave 1's four packages were consolidated ("Other packages still use Cargo's per-file
+  discovery"). That was stale. It now names all fourteen packages and says
+  `autotests = false` is the marker. It adds the rules this wave ruled:
+  - target names, and where an L1 test that needs a feature goes (R3, R4, with
+    `l1-fetch` and `windows_captured_stdout` as examples);
+  - neutral aliases (R5: `terminal_render`, `prose_cells`);
+  - proptest seeds' new location (R18).
+- `darkmatter/SKILL.md`: three wave-1 test paths (`cli/tests/help.rs`,
+  `lib/tests/semantic_results_never_persist.rs`,
+  `lib/tests/dasherized_identifier_corpus.rs`) now point into `l1/`. Each target file and
+  the named test exist.
+- Area skills for the ten packages: a scan of every `tests/*.rs` path in the `sniff`,
+  `claudine`, `biscuit-file`, `tree-hugger`, `biscuit-tui`, `biscuit-terminal`,
+  `darkmatter`, `os`, and `rust-testing` skills found no other path that fails to exist.
+  Exceptions:
+  - `claudine/timeline.md:28` is a dated entry;
+  - `rust-testing/SKILL.md:140` is historical;
+  - `rust-testing/integration-tests.md` and `SKILL.md:609–610` are generic examples;
+  - `rust-testing/wezterm-harness-pitfalls.md:121` names
+    `darkmatter/cli/tests/level2_layout.rs`, which was deleted by `0ec6b3af5` before either
+    wave. That is pre-existing drift, left alone.
+- `os` skill: Phase 6 ran no remote leg, so it has no new Windows or WSL2 fact.
+
+**Dependencies.** All five of R7's `test-toolkit` entries are in `docs/dependencies.md` and
+are accurate against each `Cargo.toml`. So is Phase 5's `biscuit-tui-cli`
+`biscuit-test-harness` line. The area docs (`biscuit-file`, `schematic`, `biscuit-terminal`,
+`claudine`) carry theirs. No change was needed.
+
+### Wave 2 — acceptance
+
+- **Workspace metadata** (`workspace-metadata.txt`): 118 integration-test targets (236 at
+  `208051f75`). No package has 10 or more. The largest are `biscuit-clipboard-cli` and
+  `worktree-cli` (8 each). The ten packages hold 18 targets. This matches the plan's
+  prediction exactly.
+- **Final sweep** (`acceptance/final-sweep.sh`, the baseline script's recipes, with
+  `INSTA_UPDATE=no`): all 40 runs pass except `claudine`'s `just test`. Its failures are the
+  baseline's two `claudine-cli::l1 shipped_prompt_route_drift` tests. The `--no-fail-fast`
+  re-run gives 7,318 passed and the same 2 failed. The cause is unchanged: the shipped
+  prompt's `_test-tiers` transclusion, now committed as `9d44e7988`, without a fixture or pin
+  refresh. Every L1 count is the baseline plus one layout gate per migrated package. Every
+  L2 count equals the baseline. `check-tier-coverage` reports 0 stranded in all eight areas,
+  and `check-canonical` passes 8 of 8. No `.snap.new` file exists. The sweep ran with the two
+  comment edits above already in place, so both areas' `test` and `lint` cover them.
+- **`acceptance.md`**: walks first-feature criteria 1–8 and 10–12 and new criteria 4–6, and
+  links each one to its evidence. Criterion 10 is pending. `ci-observations.md` holds the
+  table and the harvest procedure. No run was triggered: the branch is 60 commits ahead of
+  its remote, and the latest `ci` run (`35900378816`) predates the migrations.
+- **Status**: the spec is now `status: implemented`, `implemented: true`, and
+  `implemented_by: claude/opus`. It stays in `features/`.
+- **Plan checkboxes**: the Phase 2–5 "commit" boxes left open by earlier phases are now
+  checked. Each note names the evidence and move commits, with good signatures.
+
+### Requirement-to-test mapping
+
+Phase 6 changes no behavior. The two source edits are comment-only. Each requirement maps to
+a check that was run:
+
+| Requirement | Check |
+|---|---|
+| No active `--test <old>` selector; every remaining hit has a disposition | `consumer-sweep.py --after` → `baseline/test-selector-consumers-after.md` (0 undispositioned) |
+| The comment edits compile and lint clean | `darkmatter` and `claudine` `just test` / `just lint` in the final sweep |
+| The `dead_code` allow in dmls `common` is still needed (so the reworded rationale is true) | `cargo check -p dmls --tests` with the allow removed: 2 warnings (then restored) |
+| New criterion 5: no package with ≥ 10 targets | `cargo metadata` → `workspace-metadata.txt` |
+| New criterion 6 and first-feature criterion 8 | `acceptance/final-sweep-logs/summary.tsv` and logs |
+| Commits signed | `git log --format=%G?` over the branch's unpushed range |
+
+Skipped: Level 3 (it takes focus and is opt-in) and Kitty L2 (no usable instance on this host).
+
+Pre-existing failures:
+- `claudine-cli`'s two `shipped_prompt_route_drift` tests (above).
+- `claudine`'s two native-Windows lib tests (Phase 3). Phase 6 did not re-run them.
+
+### Suggested commit split (R12; the commit step decides)
+
+1. `docs(skills): …`: `.claude/skills/rust-testing/SKILL.md` and
+   `.claude/skills/darkmatter/SKILL.md`.
+2. `docs(darkmatter): …` and `docs(claudine): …` (comment-only):
+   `darkmatter/dmls/tests/common/mod.rs` and
+   `claudine/lib/src/stream/protocol/kimi/tests.rs`. They can be one comment-only commit.
+3. `planning(repo): …`: this feature directory. That is `consumer-sweep.py --after`,
+   `baseline/test-selector-consumers-after.md`, `workspace-metadata.txt`, `acceptance.md`,
+   `acceptance/`, `ci-observations.md`, `plan.md`, `spec.md`, and this log.
+
+### Handoff note for the reviewer
+
+- **Read first:** `acceptance.md`. It is one page per criterion and links every artifact.
+  The per-package evidence directories share one layout, described in R9.
+- **What to check by reading, not by tool:**
+  - Criterion 5: the `body-diff.md` "structural" lines. Each non-trivial one is a manifest
+    disposition, listed in `acceptance.md` §5.
+  - The three neutral aliases (R5).
+  - The `rust-testing` skill's new paragraphs.
+- **Pending:** first-feature criterion 10 (CI observations). Fill `ci-observations.md` from
+  the first ordinary run that selects these packages.
+- **For the author, outside scope:**
+  - Refresh the `claudine-cli` shipped-prompt fixture and pin for `9d44e7988`.
+  - `claudine`'s two Windows path-spelling unit tests.
+  - `biscuit-tui`'s `test-pty` keyboard failures (Phase 5).
+  - `spawn_site_guard`'s untested self-exclusion (Phase 5).
+  - Phase 4's `schematic` `check-drift` and `dmls` `child_guard_reaps_process_during_unwind`
+    notes.
+  - The stale `wezterm-harness-pitfalls.md:121` path.
+  - The `claudine` performance doc's `bench_ids_sync` step.
+  - The `sniff-cli` move commit's subject says "3 binaries"; it has 2 (R14).
+- **Not done by the agent, by rule:** moving the spec to `_completed`, or running
+  `just complete`.

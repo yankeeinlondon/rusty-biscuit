@@ -1,6 +1,6 @@
 ---
 area: repo
-status: planned
+status: implemented
 created: 2026-09-22
 owner: Ken Snyder <ken@ken.net>
 origin: follow-on to 2026-09-21-consolidated-test-binaries — every remaining package with ten or more integration-test binaries, 2026-09-22
@@ -42,22 +42,14 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-implemented: false
+implemented: true
+implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-    Phase 5 is implemented but NOT committed (the phase instructions forbid it). The working tree holds two packages' moves, `sniff-cli` (11 → 2) and `biscuit-tui-cli` (15 → 3), plus two toolkit changes and one evidence-tool fix. Read the Phase 5 section of `implementation-log.md` first.
-    Commit order (R12):
-    - Toolkit commit 1: `scripts/ci/consolidation.py` + `test_consolidation.py`, the `path_key` disposition in `body-diff` (4 new tests). It must land before `sniff-cli`'s evidence, whose `body-diff` needs it.
-    - Toolkit commit 2: `test_consolidation.py`'s five host-tool gates now call `tool_guard.require_tools`. This fixes `test-toolkit::ci_workflow_contracts no_ci_python_suite_gates_a_host_tool_outside_the_shared_guard`, which was already red at `8255ee228` (Phase 2's `ebd261004` introduced it). If one commit is preferred for both toolkit changes, that is fine; they touch the same test file.
-    - Then each package's series: manifest and evidence, structural move, area docs. The `biscuit-tui-cli` structural move includes `tools/test-toolkit/tests/ci_workflow_contracts.rs` (R17), `biscuit-tui/justfile` `test-pty` (R19), and its new unconditional `biscuit-test-harness` dev-dependency. `docs/dependencies.md` gained one line for that dev-dependency. `darkmatter/lib/tests/l1/context_functions.rs:234` is a comment-only docs change for `sniff-cli`.
-    - `measure/test-input-check.py` gained an optional after-path argument (evidence tooling).
-    For Phase 6:
-    - Expected workspace total: 236 − 136 + 18 = 118 integration-test targets. `check-metadata` across all ten manifests already passes (`metadata-check-all-ten.txt`).
-    - `baseline/test-input-probe.py` enumerates `git ls-files`. On an uncommitted tree it misses moved files; use a temporary `GIT_INDEX_FILE` (`git add -A <paths>`) or run it after the commits.
-    - Left as history in the docs pass: `.claude/skills/rust-testing/SKILL.md:140` (a past-tense account naming `biscuit-tui/cli/tests/windows_captured_stdout.rs`). The consumer sweep `--after` will list it; annotate it or update it, your call.
-    - Level 2 on this host: tmux and WezTerm work; Kitty has no usable instance (`os` skill, `macos.md`). L3 was not run (it takes focus).
-    - Known failures NOT caused by this feature: `claudine-cli`'s 2 `shipped_prompt_route_drift` failures (unchanged), and 3 env-gated `biscuit-tui-cli` `keyboard_protocol` PTY tests under `just test-pty` (identical on the base; not in CI).
-    - For the author, not blocking: the `test-pty` failures above; `sniff-cli`'s `spawn_site_guard` self-exclusion key is untested (a wrong key passes silently); plus Phase 4's two items (`schematic/justfile` `check-drift`, `dmls` `child_guard_reaps_process_during_unwind`).
+    All six phases are implemented. The tree is at "implementation complete, ready for review". Phase 6 is NOT committed (the phase instructions forbid it); its changes are listed in the Phase 6 section of `implementation-log.md`, with a suggested commit split.
+    Start with `acceptance.md`: every first-feature criterion (1–8, 10–12) and new criteria 4–6, each linked to its evidence file. The one pending item is first-feature criterion 10 (CI observations); `ci-observations.md` holds the empty table and the harvest procedure. No run was triggered for it.
+    Known failures, none caused by this feature: `claudine-cli`'s 2 `shipped_prompt_route_drift` tests (the committed prompt change `9d44e7988` needs its fixture and hash pin refreshed), and `claudine`'s 2 native-Windows lib unit tests (Phase 3; path spelling).
+    Do not move the spec to `_completed`; that is the author's step after review.
 ---
 
 # Consolidate integration tests in the ten remaining double-digit packages
