@@ -49,7 +49,101 @@ docs_created_during_phase_2:
     - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-b.SHA256SUMS
     - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-a/
 skills_files_updated_during_phase_2: []
-packages: []
+source_files_during_phase_3:
+    - tree-hugger/lib/Cargo.toml
+    - claudine/lib/Cargo.toml
+    - sniff/lib/Cargo.toml
+    - .config/nextest.toml
+    - Cargo.lock
+    - sniff/lib/benches/support/bench_ids.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/boundary_lint.rs
+    - claudine/lib/tests/l1/canonical_dispatch.rs
+    - claudine/lib/tests/l1/deprecated_compatibility.rs
+    - claudine/lib/tests/l1/diagnostic_detail_conformance.rs
+    - claudine/lib/tests/l1/kimi_wire.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/model_catalog_integration.rs
+    - claudine/lib/tests/l1/opencode_stderr_lifecycle.rs
+    - claudine/lib/tests/l1/protocol_fixture_replay.rs
+    - claudine/lib/tests/l1/semantic_fidelity.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/lib/tests/l1/test_layout.rs
+    - claudine/lib/tests/l1/tts_phase1_contract.rs
+    - claudine/lib/tests/l1/tts_phase5_contract.rs
+    - claudine/lib/tests/l1/typed_stream_protocols.rs
+    - sniff/lib/tests/l1/bench_fixtures.rs
+    - sniff/lib/tests/l1/bench_ids_sync.rs
+    - sniff/lib/tests/l1/bench_plans.rs
+    - sniff/lib/tests/l1/benchmark_workloads.rs
+    - sniff/lib/tests/l1/focused_provider.rs
+    - sniff/lib/tests/l1/git_parity.rs
+    - sniff/lib/tests/l1/host_capability_cache.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/merge_conflict_prediction.rs
+    - sniff/lib/tests/l1/network_primitives.rs
+    - sniff/lib/tests/l1/program_installable.rs
+    - sniff/lib/tests/l1/program_serialization.rs
+    - sniff/lib/tests/l1/recent_commits.rs
+    - sniff/lib/tests/l1/remote_observation.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - sniff/lib/tests/l1/remote_resolution.rs
+    - sniff/lib/tests/l1/test_layout.rs
+    - sniff/lib/tests/l1/uv_with_install_plan.rs
+    - sniff/lib/tests/l1/windows_app_paths_orphan.rs
+    - sniff/lib/tests/l1/windows_find_program_priority.rs
+    - tree-hugger/lib/tests/l1/adapter_tests.rs
+    - tree-hugger/lib/tests/l1/cache_tests.rs
+    - tree-hugger/lib/tests/l1/corpus_tests.rs
+    - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+    - tree-hugger/lib/tests/l1/main.rs
+    - tree-hugger/lib/tests/l1/phase1_diagnostics.rs
+    - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+    - tree-hugger/lib/tests/l1/query_compile.rs
+    - tree-hugger/lib/tests/l1/resolver_tests.rs
+    - tree-hugger/lib/tests/l1/test_layout.rs
+    - tree-hugger/lib/tests/l1/tree_file.rs
+    - tree-hugger/lib/tests/l1/tree_package.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/measure.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/layout-guard.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/test-input-check.py
+docs_updated_during_phase_3:
+    - tree-hugger/lib/README.md
+    - docs/comment-quality.md
+    - docs/dependencies.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+docs_created_during_phase_3:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after-edit.log
+skills_files_updated_during_phase_3:
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/sniff/network.md
+    - .claude/skills/tree-hugger/query-system.md
+packages:
+    - tree-hugger
+    - claudine
+    - sniff
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -235,3 +329,165 @@ toolkit commit is left to the separate commit step.
   - the snapshot moves;
   - the `spawn_site_guard` key; and
   - the self-exec `--exact` strings.
+
+## Phase 3
+
+Phase 3 (single-contract packages) ran at `c02e691d9` on the macOS dev host.
+It migrated `tree-hugger` (10 → 1), `claudine` (15 → 1), and `sniff` (20 → 1)
+into one `l1` binary each. Nothing was committed, per the phase instructions.
+R12's commit series (manifest and evidence, structural move, area docs) is
+left to the separate commit step, one package at a time.
+
+### Before-side
+
+- Fresh macOS captures (SPP 1) are byte-identical to `selfproof/capture-a`
+  (`compare --require-identical-digests`: identical for all three). Nothing in
+  the three crates, their justfiles, or `.config/nextest.toml` changed between
+  `9d44e7988` and `c02e691d9`.
+- Linux before-captures came from a private `--shared` scratch clone on
+  `build-linux` (`os` skill procedure): the standing clone at `7685d1ac2`,
+  plus a bundle `7685d1ac2..HEAD`, checked out at `c02e691d9`, with
+  `RUSTC_WRAPPER="" KACHE_AUTO=0`. One base serves all three packages because
+  they share it. The clone, bundle, and patch were deleted afterward.
+- Each `plan` output equals the one from `capture-a` (checked for `sniff` with
+  a JSON diff). No alias was emitted: the two `*_spike` targets carry no tier
+  marker, as projected.
+
+### Per package
+
+| Step | `tree-hugger` | `claudine` | `sniff` |
+|---|---|---|---|
+| `move` | 10 modules, 41 `include_str!` repairs in 2 files | 15 modules, 2 repairs (`#[path]` into `darkmatter/features/…/spike/model.rs`, one fixture literal) | 19 modules, 6 bench-support `#[path]` repairs, `integration`'s `mod fixtures;` → `#[path = "../fixtures.rs"]` (R19) |
+| `Cargo.toml` | `autotests = false`, `[[test]] l1`, **new** unconditional `test-toolkit` dev-dependency (R7) | `autotests = false`, `[[test]] l1` (`test-toolkit` was already a dev-dependency) | `autotests = false`, `[[test]] l1` (already had `test-toolkit`) |
+| Module `cfg`s | none | none | `feature = "remote"` ×2, `feature = "network"`, `target_os = "windows"` ×2, all carried onto the `mod` lines |
+| Layout gate | `tests/l1/test_layout.rs`, ≥ 12 files | `tests/l1/test_layout.rs`, ≥ 17 files | `tests/l1/test_layout.rs`, ≥ 22 files, names `tests/fixtures.rs` and both Windows modules |
+| Red/green | `layout-guard.md`: red (stray), red (orphan), green | same | same |
+| `check-attributes` / `check-proptest` / `check-metadata` | 0 failures (2 reviewed path-sensitive files, both compile) / clean / PASS | 0 / clean / PASS | 0 / clean / PASS |
+| `body-diff` (other lines) | 0 (82 structural) | 0 (4 structural) | 0 (23 structural, 2 comment) |
+| `compare` darwin / linux / darwin-linux | identical / identical / identical | identical / identical / identical | identical / identical / identical (all 3 feature sets; platform-absent evaluated) |
+| Test-input probe | 89 → 89 (`binary_id(tree-hugger::l1) & test(/^tree_file::/)`) | 7 + 1 → 7 + 1 | 3 → 3 |
+| Overrides | none | `claudine-l1` group (`override-ci-1`): identical 4342-test identity set | R10 rewrite in `.config/nextest.toml`: `override-rewrite.txt` shows the new filter matches exactly 1 test and the old spelling 0; `sniff-windows-l1` (`override-ci-2`) identical |
+| Windows (`cross-check`) | 484/484 | 4300/4302: 2 lib unit-test failures (below); every `claudine::l1` test passed | 1937/1937, **both Windows-only modules named PASS** |
+| WSL2 (`cross-check`) | 484/484 | 4343/4343 | 1946/1946 |
+| Linux L1 (scratch clone) | 484/484 | 4339/4343: 4 lib unit-test failures, proven pre-existing (below) | 1946/1946 (`remote`) |
+
+The compare runs report `override-ci-3 was rewritten` as a note wherever the
+after capture used the new `.config/nextest.toml`. That is R10's rewrite, and
+the identity it selects is unchanged.
+
+### Hazards and dispositions
+
+- **`claudine` `boundary_lint`**: not a path-keyed test guard. It reads
+  production files by fixed paths under `claudine/lib/src`, `claudine/cli/src`,
+  and `darkmatter/lib/src`, and never scans `tests/`, so the move changes its
+  scan set by nothing. There is no `guard-scans-after.md` for any Phase 3
+  package, because none has a path guard over test files.
+- **`claudine-cli`'s `test_placement.rs`** walks only `claudine/cli/tests` for
+  the layout rule, and it runs only when `claudine-cli` is tested. So it was
+  not extended: `claudine` got its own gate in its own `l1`. Otherwise a
+  `claudine`-only change would never run it.
+- **`sniff` Windows-only files**: `check-attributes` confirmed both
+  `#![cfg(target_os = "windows")]` moved onto the declarations. The Windows
+  leg names both tests as run (`sniff/cross-check-windows.txt`).
+- **`sniff` `bench_*`**: ordinary test targets. They moved like the rest.
+- **`sniff` `real_` tests** stay inside L1 modules (R6). The area's
+  `check-tier-coverage` reports 0 stranded.
+
+### Suites (macOS; compared with `baseline/pre-existing.md`)
+
+| Area | `just test` | `just test-l2` | `just lint` | `check-tier-coverage` | `check-canonical` |
+|---|---|---|---|---|---|
+| `tree-hugger` | ✅ 586 passed (585 + gate) | ✅ 3 | ✅ | ✅ 0 stranded | ✅ |
+| `claudine` | 7317 passed, 2 failed: the **same two** pre-existing `claudine-cli::l1 shipped_prompt_route_drift` failures (baseline 7316 + 2) | ✅ 237 + 3 | ✅ | ✅ 0 stranded | ✅ |
+| `sniff` | ✅ 2825 passed (2824 + gate) | ✅ 6 | ✅ | ✅ 0 stranded | ✅ |
+
+All suites ran with `INSTA_UPDATE=no`. No `.snap.new` exists. Logs are
+gzipped under each package's `suites/`.
+
+### Failures not attributable to the migration
+
+- **`claudine` on `build-linux`, 4 lib unit tests**
+  (`composition::sequence::task::tests::group_framing::{a_members_body_output_lands_on_the_data_channel_not_the_status_one, a_serial_group_uses_the_invisible_bar_at_the_same_left_edge, every_member_task_opens_and_closes_exactly_one_stream, every_body_line_carries_its_own_tasks_bar}`).
+  **Proven pre-existing**: with the patch stashed in the scratch clone (0
+  dirty paths, `c02e691d9`), the same four fail (`claudine/linux-l1-summary.txt`).
+  They pass on macOS and WSL2, so they look specific to that host's
+  non-interactive SSH session.
+- **`claudine` on native Windows, 2 lib unit tests**
+  (`composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message`:
+  expected `B:\…\src`, got `B:/…/src`;
+  `composition::sequence::task::tests::side_effect_tasks::a_failed_nested_mapping_set_projects_one_path_and_commits_nothing`:
+  an `unknown_root` error). **Not proven on the base.** Both live in the
+  `claudine` lib-test binary, which is compiled only from `claudine/lib/src`
+  and its dependencies. `git status claudine/lib/src` is empty, and the test
+  targets the move changes are not part of that binary, so the move cannot
+  reach them. A base run from a clean worktree
+  (`claudine/cross-check-windows-base.txt`) first failed with `os error 1455`
+  (paging file exhausted while the WSL guest on the same machine was
+  building). The retry then failed on the poisoned `target\` (`E0463`). The
+  lesson is now in the `os` skill (`build-hosts.md`, Remote-process hygiene).
+  A later leg pruned the stale clone. **For the author:** both look like real
+  Windows path-spelling defects in `claudine`. They are outside this feature's
+  scope and are not filed.
+
+### Docs (SPP 9)
+
+- `tree-hugger/lib/README.md`: test paths now `tests/l1/…`, plus one sentence
+  saying a new file must be declared in `tests/l1/main.rs`.
+- `.claude/skills/tree-hugger/query-system.md`, `.claude/skills/sniff/network.md`:
+  moved test paths.
+- `docs/comment-quality.md:293`: `claudine/lib/tests/l1/canonical_dispatch.rs`.
+- `sniff/lib/tests/l1/remote_providers.rs:11`: `--test remote_providers` →
+  `--test l1 remote_providers::`. It selects the same 70 tests.
+- `sniff/lib/benches/support/bench_ids.rs:7,11,74`: comment paths.
+- `docs/dependencies.md`: `tree-hugger`'s dev-only `test-toolkit` (R7).
+  `Cargo.lock` gains only that edge, and no new crate. `tree-hugger` has no
+  area dependency doc, and none was created (R7).
+- Left as history: `playa/docs/{plans,specs}/2026-04-29-*` (dated plans),
+  `tree-hugger/reviews/…`, `sniff/docs/cli/repo_*.md` (sample CLI output of
+  past commits), and `fixes/2026-09-22-test-input-blind-spot/spec.md:335`
+  (another active spec's measurement record, which names
+  `claudine::boundary_lint`). Module-name prose (`bench_ids_sync`,
+  `protocol_fixture_replay`) is still correct.
+
+### Measurements
+
+See `measurements.md`. Test executables went from 45 to 3, and from
+1,488.8 MB to 362.6 MB. The warm edit changed by +0.21 s, +0.38 s, and
++0.56 s, so R8's trigger was never reached.
+
+### Deviations from the SPP, and why
+
+- **No commits** (phase instructions). So R13's "remote legs against a
+  committed revision" could not hold literally. Each `cross-check` shipped the
+  working tree at its start. Every leg's banner names its synthetic revision.
+  A leg's package does not depend on the other two packages' test files:
+  `claudine` depends only on `sniff`'s library, and test targets are not part
+  of a library build. So a later package's edits could not change an earlier
+  leg's evidence. No structural edit started while a leg was being bundled.
+- **One Linux before/after pair for all three packages**, taken from one
+  scratch clone. The after patch covered `tree-hugger/lib`, `claudine/lib`,
+  `sniff/lib`, and `.config/nextest.toml`. Cargo regenerated the same
+  `Cargo.lock` edge there.
+- **`cross-check` output was redirected, not `tee`d** for `claudine` and
+  `sniff`. The files are the same evidence.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Evidence / test |
+|---|---|
+| Every former test keeps its identity, tier, feature, and platform reachability | `compare` four-way, darwin/linux/darwin-linux, every selector and feature set (`<pkg>/comparison-*.md`) |
+| A `tests/` file no root declares fails the build gate | `<pkg>::l1 test_layout::every_test_source_is_compiled_by_a_declared_target`, shown red on a stray root and an undeclared module, then green (`<pkg>/layout-guard.md`) |
+| Windows-only modules still compile and run on Windows | `sniff/cross-check-windows.txt` PASS lines for `windows_app_paths_orphan::orphaned_hkcu_entry_is_filtered` and `windows_find_program_priority::path_wins_over_fallbacks_for_cmd` |
+| CI's `threads-required` override still hits its test | `sniff/override-rewrite.txt` (1 match; old spelling 0) plus `compare`'s `override-ci-3` row |
+| CI's test-input narrowing still selects the same tests | `<pkg>/test-inputs.md` (the planner's own index, re-run) |
+| Manifests match Cargo | `check-metadata` PASS (`<pkg>/metadata-check.txt`) |
+| Only structural edits | `body-diff` 0 `other` lines (`<pkg>/body-diff.md`) |
+
+### New files (evidence tooling)
+
+- `measure/measure.sh`: count, bytes, and warm edit (R8).
+- `measure/layout-guard.sh`: red/green proof.
+- `measure/test-input-check.py`: the after probe with the manifest mapping.
+
+All three are reusable unchanged in Phases 4–5. `shellcheck` and
+`ruff --select F,E9,B` are clean.

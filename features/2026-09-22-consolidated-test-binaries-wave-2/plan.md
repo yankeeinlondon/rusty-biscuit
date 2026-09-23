@@ -64,6 +64,97 @@ docs_created_during_phase_2:
     - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-b.SHA256SUMS
     - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-a/
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - tree-hugger/lib/Cargo.toml
+    - claudine/lib/Cargo.toml
+    - sniff/lib/Cargo.toml
+    - .config/nextest.toml
+    - Cargo.lock
+    - sniff/lib/benches/support/bench_ids.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/boundary_lint.rs
+    - claudine/lib/tests/l1/canonical_dispatch.rs
+    - claudine/lib/tests/l1/deprecated_compatibility.rs
+    - claudine/lib/tests/l1/diagnostic_detail_conformance.rs
+    - claudine/lib/tests/l1/kimi_wire.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/model_catalog_integration.rs
+    - claudine/lib/tests/l1/opencode_stderr_lifecycle.rs
+    - claudine/lib/tests/l1/protocol_fixture_replay.rs
+    - claudine/lib/tests/l1/semantic_fidelity.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/lib/tests/l1/test_layout.rs
+    - claudine/lib/tests/l1/tts_phase1_contract.rs
+    - claudine/lib/tests/l1/tts_phase5_contract.rs
+    - claudine/lib/tests/l1/typed_stream_protocols.rs
+    - sniff/lib/tests/l1/bench_fixtures.rs
+    - sniff/lib/tests/l1/bench_ids_sync.rs
+    - sniff/lib/tests/l1/bench_plans.rs
+    - sniff/lib/tests/l1/benchmark_workloads.rs
+    - sniff/lib/tests/l1/focused_provider.rs
+    - sniff/lib/tests/l1/git_parity.rs
+    - sniff/lib/tests/l1/host_capability_cache.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/merge_conflict_prediction.rs
+    - sniff/lib/tests/l1/network_primitives.rs
+    - sniff/lib/tests/l1/program_installable.rs
+    - sniff/lib/tests/l1/program_serialization.rs
+    - sniff/lib/tests/l1/recent_commits.rs
+    - sniff/lib/tests/l1/remote_observation.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - sniff/lib/tests/l1/remote_resolution.rs
+    - sniff/lib/tests/l1/test_layout.rs
+    - sniff/lib/tests/l1/uv_with_install_plan.rs
+    - sniff/lib/tests/l1/windows_app_paths_orphan.rs
+    - sniff/lib/tests/l1/windows_find_program_priority.rs
+    - tree-hugger/lib/tests/l1/adapter_tests.rs
+    - tree-hugger/lib/tests/l1/cache_tests.rs
+    - tree-hugger/lib/tests/l1/corpus_tests.rs
+    - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+    - tree-hugger/lib/tests/l1/main.rs
+    - tree-hugger/lib/tests/l1/phase1_diagnostics.rs
+    - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+    - tree-hugger/lib/tests/l1/query_compile.rs
+    - tree-hugger/lib/tests/l1/resolver_tests.rs
+    - tree-hugger/lib/tests/l1/test_layout.rs
+    - tree-hugger/lib/tests/l1/tree_file.rs
+    - tree-hugger/lib/tests/l1/tree_package.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/measure.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/layout-guard.sh
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/test-input-check.py
+docs_updated_during_phase_3:
+    - tree-hugger/lib/README.md
+    - docs/comment-quality.md
+    - docs/dependencies.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+docs_created_during_phase_3:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/sniff/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/tree-hugger-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-after-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-before-edit.log
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/sniff-after-edit.log
+skills_files_updated_during_phase_3:
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/sniff/network.md
+    - .claude/skills/tree-hugger/query-system.md
 ---
 
 # Implementation Plan — Consolidated Test Binaries, Wave 2
@@ -613,11 +704,14 @@ their distinct hazards and checklist.
 Hazards: this is the first new ground for the promoted `move`, and
 `test-toolkit` is a new dev-dependency (R7).
 
-- [ ] **SPP 1–2** — before-evidence and `tree-hugger-migration.json`.
-- [ ] **SPP 3–4** — move to `tests/l1/` and add the dev-dependency, with the
+- [x] **SPP 1–2** — before-evidence and `tree-hugger-migration.json`.
+- [x] **SPP 3–4** — move to `tests/l1/` and add the dev-dependency, with the
       `docs/dependencies.md` entries per S4. Add the layout gate.
-- [ ] **SPP 5–9** — checks, suites, consumers, after-measurement, docs.
+- [x] **SPP 5–9** — checks, suites, consumers, after-measurement, docs.
 - [ ] **SPP 10–11** — commit, Linux compare, Windows, WSL2.
+      *(Remote legs done and passing (see the log). The phase instructions
+      forbid committing, so the R12 commit series is left to the separate
+      commit step.)*
 
 ### Wave 2 — `claudine` (15 → 1)
 
@@ -630,13 +724,16 @@ Hazards:
 - The package-level `claudine-l1` CI test group must still match the same
   identities.
 
-- [ ] **SPP 1–2** — before-evidence and `claudine-migration.json`.
-- [ ] **SPP 3–4** — move and layout gate. Check whether
+- [x] **SPP 1–2** — before-evidence and `claudine-migration.json`.
+- [x] **SPP 3–4** — move and layout gate. Check whether
       `claudine/cli/tests/l1/test_placement.rs` scans `claudine/lib`. If it
       does, extend it rather than adding a second gate.
-- [ ] **SPP 5–9** — include the `boundary_lint` scan diff and the
+- [x] **SPP 5–9** — include the `boundary_lint` scan diff and the
       `claudine-l1` override listing.
 - [ ] **SPP 10–11** — commit, Linux, Windows, WSL2.
+      *(Remote legs done and passing (see the log; Windows has 2 lib unit-test failures that the move cannot reach). The phase instructions
+      forbid committing, so the R12 commit series is left to the separate
+      commit step.)*
 
 ### Wave 3 — `sniff` (20 → 1)
 
@@ -651,24 +748,32 @@ Hazards:
 - `real_` tests stay in L1 files (R6) and are exercised by the live
   `test-real` with `--features network`.
 
-- [ ] **SPP 1–2** — before-evidence for `()`, `(remote)`, and `(network)`,
+- [x] **SPP 1–2** — before-evidence for `()`, `(remote)`, and `(network)`,
       and `sniff-migration.json`.
-- [ ] **SPP 3–4** — move and layout gate. Check that `check-attributes`
+- [x] **SPP 3–4** — move and layout gate. Check that `check-attributes`
       carries both Windows `cfg`s onto their declarations.
-- [ ] **SPP 5–9** — include the override rewrite listing exactly one test in
+- [x] **SPP 5–9** — include the override rewrite listing exactly one test in
       the `ci` profile, and `sniff-windows-l1` group identity equality.
 - [ ] **SPP 10–11** — commit, Linux, and WSL2. The Windows run's evidence
       names both Windows-only modules' tests as run.
+      *(Remote legs done and passing (see the log). The phase instructions
+      forbid committing, so the R12 commit series is left to the separate
+      commit step.)*
 
 ### Checkpoint
 
 - [ ] Three packages are migrated and committed, each with complete R9
       evidence. Four-way identity is equal on macOS, Linux, and both
       together.
-- [ ] Windows and WSL2 pass for all three, and `sniff`'s Windows-only modules
+      *(Migrated with complete R9 evidence, and identity is equal on all three
+      views. Not committed: the commit step is separate.)*
+- [x] Windows and WSL2 pass for all three, and `sniff`'s Windows-only modules
       are shown run.
-- [ ] The tooling held on new ground. Any toolkit fix it needed is its own
-      commit, with a fixture test.
+      *(`claudine` on Windows: every `claudine::l1` test passed. The two
+      failures are lib unit tests under `claudine/lib/src`, which the move
+      does not touch; see the Phase 3 log.)*
+- [x] The tooling held on new ground. Any toolkit fix it needed is its own
+      commit, with a fixture test. *(None was needed.)*
 
 ## Phase 4 — Two-Contract Packages
 
