@@ -1011,4 +1011,49 @@ belong here.
   forward-looking lists often split the same way — a "doc sweep"
   listing both library comment paths and README/justfile paths is
   the cue to ship two commits, not one.
+- A module whose name matches the package's test-file glob is a
+  feature module, not a test file. In
+  `2026-09-22-test-input-blind-spot`, `scripts/ci/test_inputs.py` is
+  the static file-to-test index (imported as `import test_inputs` by
+  `affected_scope.py`); it shares the `scripts/ci/test_*.py` prefix
+  with the actual test modules (`test_affected_scope.py`,
+  `test_completion.py`, etc.), so a glob-based group agent will
+  mistake it for a test file and route it into the wrong commit.
+  Pre-flight `git show :<path> | head -3` distinguishes them: a
+  feature module opens with a module-level docstring describing what
+  it does for the planner, while a test module opens with
+  `import unittest` (or imports from it) and defines test classes.
+  When a staged `.py` file in `scripts/ci/` has the `test_` prefix
+  but is imported by another module, it is a sibling feature module
+  and belongs with its dependents, not with the test files.
+- A schema amendment that adds an OPTIONAL field can ship without a
+  `RESOLVED_PLAN_SCHEMA_VERSION` bump, and the amendment is one atomic
+  commit across the same files the journal's bump rule names. In
+  `2026-09-22-test-input-blind-spot`, the new optional `test_filter`
+  on `CELL_FIELDS` and `RECEIPT_CELL_FIELDS` (plus its
+  contract.json mirror, its cell_contract.py threading, and its
+  docs/cicd/schema-versions.md entry) landed as one `fix(repo):`
+  commit because absence still means exactly what every existing
+  version-7 plan meant (the whole tier) and a plan is only ever read
+  by the code at the head it was resolved for, so no reader meets
+  the field without understanding it. The bump-rule's "schema,
+  contract.json, ci-rollup, and every hand-built plan fixture" rule
+  applies just the same — splitting the consumer from the field
+  leaves the contract without a reader, and splitting the field
+  from the consumer leaves the reader without a contract.
+- A spec.md that lands in the same batch as its implementation is
+  `planning(<area>):` with `status: implemented` already set, NOT a
+  "schedule" event. In `2026-09-22-test-input-blind-spot`, the spec
+  was authored with `status: implemented`, `implemented: true`, and
+  `implemented_by` already populated when the planning commit
+  landed; the commit subject was `planning(repo): record
+  <name> fix design and measurement spikes`, not
+  `planning(repo): schedule <name>`, because no future work was
+  scheduled — the spec and its spike scripts document what the
+  sibling `fix`/`test`/`docs` commits had already done. The
+  spec/spike cross-reference still requires the atomic combine
+  (the planning rule's "spec/plan/spike cross-references must
+  resolve within that one commit" applies), and the body should
+  name which sibling commits the spec's
+  `scripts/ci/test_inputs.py`-style references resolve against.
 
