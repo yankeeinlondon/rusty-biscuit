@@ -7680,6 +7680,26 @@ class TestInputSelectionTests(unittest.TestCase):
         ]
         self.assertEqual("execute", l1[0]["execution"])
 
+    def test_a_narrowed_reverse_dependent_is_selected_not_reported(self) -> None:
+        # The shape that blocked the merge of PR 92: `claudine` depends on the
+        # changed `darkmatter` AND its tests read a changed document. It must
+        # hold one record and not also be an unchanged dependent reported
+        # nowhere, which the plan schema refuses.
+        self.metadata["resolve"]["nodes"] = [
+            {"id": "reader", "deps": [{"pkg": "other", "dep_kinds": [{"kind": None}]}]},
+            {"id": "other", "deps": []},
+        ]
+        plan = self.plan(["other/lib/src/lib.rs", "docs/guide.md"])
+        self.assertNotIn("reader", plan["reverse_dependencies"])
+        self.assertEqual(
+            [("reader", "ubuntu-latest", "L1")],
+            [
+                (cell["package"], cell["environment"], cell["gate"])
+                for cell in plan["cells"]
+                if cell.get("test_filter")
+            ],
+        )
+
     def test_the_cell_contract_hands_the_filter_to_the_producer(self) -> None:
         plan = self.plan(["docs/guide.md"])
         contract = producer_contracts(plan, "reader")[("ubuntu-latest", "L1")]

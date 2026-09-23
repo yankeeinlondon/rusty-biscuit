@@ -72,7 +72,10 @@ source. For each reference it finds:
 - **In test code:** the package gets **one** L1 cell on `ubuntu-latest` whose
   `test_filter` names exactly the tests that read the file. No lint, no compile
   check, no other operating system, no dependent packages. If the plan already
-  runs that package's whole L1 suite, nothing is added.
+  runs that package's whole L1 suite, nothing is added. If the package is also
+  an unchanged dependent of a changed one, it is not compiled a second time in
+  that package's dependents check: its own test build already compiles it
+  against the change.
 
 The test job intersects the filter with the tier's own selection
 (`BISCUIT_TEST_NARROW` in `just/devops.just`), so it can only narrow, never

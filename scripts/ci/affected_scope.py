@@ -3521,12 +3521,28 @@ def calculate_scope(
     # everything, so it attributes none.
     affected_ids = set(packages) if full_scope else source_ids | suite_ids
     packages_by_name = {package["name"]: package for package in packages.values()}
+    # A dependent a changed test input will select (`select_test_inputs`) builds
+    # its own test archive against the changed package, which is the seam; it
+    # must not be compiled a second time, or reported as selected nowhere.
+    input_reader_ids = (
+        {
+            ids_by_package_name[reference.package]
+            for reference in references
+            if not reference.product
+            and reference.unit is not None
+            and policy[reference.package]["gates"]
+            and "L1" in policy[reference.package]["tiers"]
+        }
+        if any(entry["name"] == TEST_INPUT_ENVIRONMENT for entry in cell_environments)
+        else set()
+    )
 
     def attributed_dependents(package_id: str) -> list[str]:
         return sorted(
             packages[dependent]["name"]
             for dependent in reverse_map[package_id]
             if dependent not in affected_ids
+            and dependent not in input_reader_ids
             # A `gates = false` member is a governed "CI launches nothing for
             # this package"; compiling it here would launch something.
             and policy[packages[dependent]["name"]]["gates"]
@@ -3679,6 +3695,9 @@ def calculate_scope(
         metadata,
         accepted,
     )
+    # As for the guard owner above: a package a changed test input selected now
+    # holds a record, so it is no longer an unchanged dependent reported nowhere.
+    reverse_ids = reverse_ids - input_ids
 
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
