@@ -242,11 +242,11 @@ ci-local *args="":
             path_args+=("${argument}")
         done < "${diff_arguments}"
         rm -f "${diff_arguments}"
-        # The tail is `--deleted <path>` pairs, then `--`, then the changed
-        # paths; stepping the pairs finds the separator without assuming any
-        # path's spelling.
+        # The tail is `--deleted <path>` and `--renamed-from <path>` pairs,
+        # then `--`, then the changed paths; stepping the pairs finds the
+        # separator without assuming any path's spelling.
         separator=0
-        while (( separator < ${#path_args[@]} )) && [[ "${path_args[separator]}" == "--deleted" ]]; do
+        while (( separator < ${#path_args[@]} )) && [[ "${path_args[separator]}" == "--deleted" || "${path_args[separator]}" == "--renamed-from" ]]; do
             separator=$(( separator + 2 ))
         done
         changed_count=$(( ${#path_args[@]} - separator - 1 ))
@@ -533,7 +533,9 @@ ci-local *args="":
     # is skipped and named. Without a plan every gate of every package runs.
     running_cells=""
     if [[ -n "${plan_in}" ]]; then
-        running_cells="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "\(.package)/\(.gate)"' "${plan_file}")"
+        # A narrowed test-input cell runs through its own step below, never as
+        # the package's whole tier.
+        running_cells="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | select((.test_filter // "") == "") | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "\(.package)/\(.gate)"' "${plan_file}")"
         echo "Cells for ${local_environment} from the supplied plan:"
         jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end' "${plan_file}"
         echo "------------------------------------------------"
@@ -621,6 +623,33 @@ ci-local *args="":
             else
                 abort_if_interrupted "$?"
                 failed+=("test ${package}")
+            fi
+        fi
+        # A changed test input's narrowed L1 cell (docs/cicd/test-inputs.md).
+        # It is planned on ubuntu-latest, but its question does not depend on
+        # the OS, so this host answers it before the push. The report stages
+        # with the others: `record-cells` records it WITH its filter, and a
+        # published exact-tree receipt then satisfies the planned cell instead
+        # of CI running it. It never stands in for this host's whole tier.
+        narrow_filter=""
+        if [[ -s "${plan_file}" ]]; then
+            narrow_filter="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "L1" and .execution == "execute") | .test_filter // empty] | first // ""' "${plan_file}")"
+        fi
+        if (( run_test == 1 )) && [[ -n "${narrow_filter}" ]]; then
+            narrow_note=" — narrowed to the tests that read the changed file(s)"
+            # The filter can name a `slow_` test only where the package keeps
+            # them in L1, and then only this tells `_tier_filter` so.
+            narrow_slow=""
+            if [[ "$(jq -r '.l1_include_slow // false' <<< "${record}")" == "true" ]]; then
+                narrow_slow=1
+            fi
+            # shellcheck disable=SC2086
+            if BISCUIT_TEST_NARROW="${narrow_filter}" BISCUIT_L1_INCLUDE_SLOW="${narrow_slow}" \
+                just _test "${package}" --no-fail-fast ${test_args}; then
+                passed+=("test-input ${package}${narrow_note}")
+            else
+                abort_if_interrupted "$?"
+                failed+=("test-input ${package}")
             fi
         fi
         if (( run_l2 == 1 )) && [[ " ${gates} " == *" test "* ]] && cell_runs_here "${package}" L2; then

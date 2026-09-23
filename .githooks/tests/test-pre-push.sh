@@ -1175,8 +1175,16 @@ test_the_committed_scope_declares_deletions_and_omits_rename_sources() {
     # Its SOURCE is the unexpectedly-missing path this fixture exists to rule
     # out: it is gone from the tree, so planning it as changed would hand the
     # guard an absence nothing explains, and declaring it deleted would claim
-    # a removal the diff never reported.
-    assert_not_contains "rename source excluded" "$tmpdir/planner.log" "README.md" || return 1
+    # a removal the diff never reported. It reaches the planner only as the
+    # old name the test-input search looks for.
+    assert_contains "rename source declared" "$tmpdir/planner.log" \
+        "--renamed-from README.md" || return 1
+    assert_not_contains "rename source not deleted" "$tmpdir/planner.log" \
+        "--deleted README.md" || return 1
+    if sed -n 's/.* -- //p' "$tmpdir/planner.log" | tr ' ' '\n' | grep -qxF README.md; then
+        echo "  expected the changed paths after '--' NOT to include README.md" >&2
+        return 1
+    fi
 }
 
 test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip() {

@@ -1003,6 +1003,8 @@ _backend_proof command:
 # keeps `slow_` tests inside L1 instead of excluding them, which is darkmatter's
 # declared L1 contract (`l1-include-slow` in `[package.metadata.ci.tests]`).
 # The explicit `BISCUIT_TEST_FILTER` override wins over both.
+# `BISCUIT_TEST_NARROW` (a planned test-input cell's `test_filter`) is then
+# intersected with whichever of those applies; it never widens the tier.
 #
 # ## A tier marker is a prefix, not a substring
 #
@@ -1026,7 +1028,13 @@ _tier_filter tier pkg="":
             elif [[ "${BISCUIT_L1_INCLUDE_SLOW:-}" == "1" ]]; then
                 filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
             fi
-            printf '%s\n' "${BISCUIT_TEST_FILTER:-${filter}}"
+            filter="${BISCUIT_TEST_FILTER:-${filter}}"
+            # A changed test input's cell runs only the tests that read it,
+            # intersected with — never replacing — the tier's own expression.
+            if [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+                filter="(${filter}) & (${BISCUIT_TEST_NARROW})"
+            fi
+            printf '%s\n' "${filter}"
             ;;
         sanity)  printf '%s\n' "${base}" ;;
         L2|l2)       printf '%s\n' 'test(/(^|::)level2_/)' ;;
@@ -1215,7 +1223,21 @@ _test pkg *args="": _storage_preflight
                 run_args+=("${kept_arg}")
             done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
         fi
-        "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
+        # A narrowed cell names the tests it exists to run; selecting none of
+        # them means the planner's filter no longer matches the tree, which
+        # must fail rather than pass having run nothing.
+        no_tests=pass
+        if [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+            no_tests=fail
+        fi
+        # Consumed: `filter` already carries it. Left exported, it would reach
+        # every recipe a test spawns — `repo-deps`' archive fixtures run
+        # `just _test` themselves — and narrow THEIR selection to nothing.
+        unset BISCUIT_TEST_NARROW
+        "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests="${no_tests}" ${run_args[@]+"${run_args[@]}"} || exit_code=$?
+    elif [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+        echo -e "❌ {{ red }}BISCUIT_TEST_NARROW requires cargo-nextest{{ reset }}; cargo test cannot apply a filterset" >&2
+        exit_code=1
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
         skip_args=(--skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_)
