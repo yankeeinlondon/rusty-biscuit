@@ -1,0 +1,126 @@
+# Identity comparison: identical
+
+## `biscuit-terminal`
+
+Migration manifest applied: yes
+
+| Host | Feature set | Selector | Present | Selected | Excluded | Ignored | Differences |
+|---|---|---|---:|---:|---:|---:|---|
+| linux | `browser-tests` | `L1` | 2860 | 2804 | 54 | 2 | none |
+| linux | `browser-tests` | `L2` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `L3` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `browser` | 2860 | 54 | 2804 | 2 | none |
+| linux | `browser-tests` | `override-ci-0` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-1` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-2` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-3` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-4` | 2860 | 82 | 2776 | 2 | none |
+| linux | `browser-tests` | `override-ci-5` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-6` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-7` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-ci-8` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-0` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-1` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-2` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-3` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-4` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-5` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `override-default-6` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `real` | 2860 | 0 | 2858 | 2 | none |
+| linux | `browser-tests` | `sanity` | 2860 | 2804 | 54 | 2 | none |
+| linux | `image` | `L1` | 2994 | 2939 | 53 | 2 | none |
+| linux | `image` | `L2` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `L3` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `browser` | 2994 | 53 | 2939 | 2 | none |
+| linux | `image` | `override-ci-0` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-1` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-2` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-3` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-4` | 2994 | 81 | 2911 | 2 | none |
+| linux | `image` | `override-ci-5` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-6` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-7` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-ci-8` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-0` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-1` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-2` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-3` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-4` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-5` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `override-default-6` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `real` | 2994 | 0 | 2992 | 2 | none |
+| linux | `image` | `sanity` | 2994 | 2939 | 53 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `L1` | 2999 | 2939 | 58 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `L2` | 2999 | 2 | 2995 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `L3` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `browser` | 2999 | 56 | 2941 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-0` | 2999 | 2 | 2995 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-1` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-2` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-3` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-4` | 2999 | 84 | 2913 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-5` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-6` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-7` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-ci-8` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-0` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-1` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-2` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-3` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-4` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-5` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `override-default-6` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `real` | 2999 | 0 | 2997 | 2 | none |
+| linux | `image+terminal-tests+browser-tests` | `sanity` | 2999 | 2939 | 58 | 2 | none |
+| linux | `none` | `L1` | 2857 | 2804 | 51 | 2 | none |
+| linux | `none` | `L2` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `L3` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `browser` | 2857 | 51 | 2804 | 2 | none |
+| linux | `none` | `override-ci-0` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-1` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-2` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-3` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-4` | 2857 | 79 | 2776 | 2 | none |
+| linux | `none` | `override-ci-5` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-6` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-7` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-ci-8` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-0` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-1` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-2` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-3` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-4` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-5` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `override-default-6` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `real` | 2857 | 0 | 2855 | 2 | none |
+| linux | `none` | `sanity` | 2857 | 2804 | 51 | 2 | none |
+| linux | `terminal-tests` | `L1` | 2859 | 2804 | 53 | 2 | none |
+| linux | `terminal-tests` | `L2` | 2859 | 2 | 2855 | 2 | none |
+| linux | `terminal-tests` | `L3` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `browser` | 2859 | 51 | 2806 | 2 | none |
+| linux | `terminal-tests` | `override-ci-0` | 2859 | 2 | 2855 | 2 | none |
+| linux | `terminal-tests` | `override-ci-1` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-2` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-3` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-4` | 2859 | 79 | 2778 | 2 | none |
+| linux | `terminal-tests` | `override-ci-5` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-6` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-7` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-ci-8` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-0` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-1` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-2` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-3` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-4` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-5` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `override-default-6` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `real` | 2859 | 0 | 2857 | 2 | none |
+| linux | `terminal-tests` | `sanity` | 2859 | 2804 | 53 | 2 | none |
+
+Platform-absent:
+
+- `browser-tests`: not-evaluated (hosts: linux) — captures from one host only; platform-absent needs the other hosts' captures
+- `image`: not-evaluated (hosts: linux) — captures from one host only; platform-absent needs the other hosts' captures
+- `image+terminal-tests+browser-tests`: not-evaluated (hosts: linux) — captures from one host only; platform-absent needs the other hosts' captures
+- `none`: not-evaluated (hosts: linux) — captures from one host only; platform-absent needs the other hosts' captures
+- `terminal-tests`: not-evaluated (hosts: linux) — captures from one host only; platform-absent needs the other hosts' captures

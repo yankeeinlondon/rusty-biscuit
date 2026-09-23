@@ -65,6 +65,7 @@ The document that describes everything one run will do. Field contract:
 | 5 | On `main`: the required `archive_guard` scan scope and `change_inventory.deleted`. The planner is the only component that knows which files an event put in scope, so the guard reads its scope from the plan instead of choosing between an empty scan and a full one. | `2026-09-19-less-brittle` |
 | 5, 6 (unreleased) | On the direct-cell-execution branch: one dispatch row per executing cell, so every execution input has to come from the plan. Adds `skip_policy`, area `execution_path`, per-cell `profile` and `requires_node` (5), then an executing L2 cell's `backends` (6). Never reached `main` under these numbers. | `2026-09-19-direct-cell-execution` |
 | 7 | The union of `main`'s 5 and the branch's 6. The optional per-cell `companions_only` (a lint cell whose required work is its companions) arrives with it. | both of the above |
+| 7 (amended) | The optional per-cell `test_filter`: an L1 cell narrowed to the tests that read a changed file. No bump, because absence means exactly what every version-7 plan already meant — the whole tier — and a plan is only ever read by the code at the head it was resolved for, so no reader meets the field without understanding it. | `2026-09-22-test-input-blind-spot` |
 
 A scope receipt from any earlier generation misses once as `scope-schema`.
 
@@ -78,6 +79,7 @@ under `refs/notes/ci-local/<environment>` and read by
 |---|---|---|
 | 1 | Whole-environment receipt: exact-tree only, pass only, with no per-cell measurements and no gate-input equivalence. Still read, never written, never upgraded in place. Its missing measurements render as `not recorded (v1 receipt)`. | `2026-09-11-cicd-cleanup` |
 | 2 | Keyed per `{package, environment, gate}`. `strict` and `warn` publish a complete run whether it passed or failed; only passing cells qualify for reuse. Live since 2026-09-12. | `2026-09-11-cicd-cleanup` |
+| 2 (amended) | The optional per-cell `test_filter`: the narrowing a test-input run applied. Such a cell satisfies only the plan cell with the same filter, on the exact tree, from any host (`docs/cicd/test-inputs.md`). No bump: a reader that predates it would see an ordinary L1 cell on the host's environment, and the only such reader is the same head's code. | `2026-09-22-test-input-blind-spot` |
 
 Every plan bump since has left this at 2 on purpose.
 

@@ -29,7 +29,7 @@
 //! `!` are inert in CommonMark inline parsing — `!` is only special as the
 //! image lead-in `![`, which the marker never forms). See
 //! `renderable/features/2026-05-26-inline-span/phase-1-prototype-notes.md` and
-//! the prototype `darkmatter/lib/tests/inline_envelope_prototype.rs`.
+//! the prototype `darkmatter/lib/tests/l1/inline_envelope_prototype.rs`.
 //!
 //! The marker is deliberately **pipe-free**. The earlier `{{|TOKEN|}}` form
 //! injected raw `|` bytes into the rewritten source; inside a GFM table cell

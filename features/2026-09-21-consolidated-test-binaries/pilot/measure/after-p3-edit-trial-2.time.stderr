@@ -1,0 +1,32 @@
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `claudine-cli` (bin "claudine") generated 1 warning
+   Compiling claudine-cli v0.1.0 (/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/claudine/cli)
+warning: `claudine-cli` (bin "claudine" test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.04s
+────────────
+ Nextest run ID 9cb05df0-ccda-4c60-896c-2fe8b48d7e75 with nextest profile: default
+    Starting 1 test across 4 binaries (3006 tests skipped)
+        PASS [   0.085s] (1/1) claudine-cli::l1 agent_cwd::handle_rejects_present_non_absolute_agent_cwd
+────────────
+     Summary [   0.087s] 1 test run: 1 passed, 3006 skipped
+        2.77 real         3.43 user         2.31 sys
+          1779875840  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              270971  page reclaims
+                1394  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   9  messages sent
+                   9  messages received
+                  11  signals received
+                1418  voluntary context switches
+               12220  involuntary context switches
+           773758443  instructions retired
+           245978448  cycles elapsed
+            46465624  peak memory footprint

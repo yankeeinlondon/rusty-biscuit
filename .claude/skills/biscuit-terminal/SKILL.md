@@ -101,6 +101,11 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
 - Internal `terminal-tests` and `browser-tests` features expose only their
   corresponding integration targets and harness dependencies. Ordinary local
   L1 keeps both disabled; tier recipes and CI enable them explicitly.
+- The library's integration tests build as two binaries (`autotests = false`):
+  `lib/tests/l1/` and `lib/tests/level2/` (`terminal-tests`). Each former test
+  file is a module, so select one with `--test l1 <module>::`, never
+  `--test <module>`. A new file must be declared in its root's `main.rs`;
+  `lib/tests/l1/test_layout.rs` fails otherwise.
 
 See `biscuit-test-harness/README.md` and the `cli` skill for the full testing
 workflow.

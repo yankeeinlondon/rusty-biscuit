@@ -1632,6 +1632,42 @@ class ShippedSelectionTests(unittest.TestCase):
         self.assertIn(f"canonical {gate} selection", problems[0], why)
         self.assertIn(f"{gate} expects", problems[0], "the refusal names the gate's own shape")
 
+    NARROW = "(binary_id(claudine::l1) & test(=docs::wording_holds))"
+
+    def narrowed_problems(self, expression: str, narrow: str | None) -> list[str]:
+        cell = {"environment": "ubuntu-latest", "gate": "L1", "profile": "ci", "package": self.PACKAGE}
+        if narrow is not None:
+            cell["test_filter"] = narrow
+        return completion.selection_problems(
+            {"filter": expression, "profile": "ci", "test_args": ""}, cell
+        )
+
+    def test_a_narrowed_cell_accepts_the_shipped_intersection(self):
+        # fixes/2026-09-22-test-input-blind-spot: `_tier_filter` intersects the
+        # plan's `test_filter`, and the listing records what it applied.
+        shipped = self.tier_filter("L1", self.PACKAGE, BISCUIT_TEST_NARROW=self.NARROW)
+        self.assertEqual([], self.narrowed_problems(shipped, self.NARROW))
+        self.assertEqual(
+            [],
+            self.narrowed_problems(f"package({self.PACKAGE}) & ({shipped})", self.NARROW),
+            "archive mode wraps the intersection in the package scope",
+        )
+
+    def test_a_narrowing_the_plan_did_not_schedule_is_refused(self):
+        shipped = self.tier_filter("L1", self.PACKAGE, BISCUIT_TEST_NARROW=self.NARROW)
+        # The same expression under an ordinary cell is an ad hoc narrowing.
+        self.assertTrue(self.narrowed_problems(shipped, None))
+        # A narrowed cell whose listing applied another filter, or none.
+        other = "(binary_id(claudine::l1) & test(=docs::another))"
+        self.assertTrue(self.narrowed_problems(shipped, other))
+        self.assertTrue(self.narrowed_problems(self.tier_filter("L1", self.PACKAGE), self.NARROW))
+
+    def test_a_narrowing_does_not_excuse_a_wrong_tier_expression(self):
+        wrong = f"(test(/(^|::)level2_/)) & ({self.NARROW})"
+        problems = self.narrowed_problems(wrong, self.NARROW)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("canonical L1 selection", problems[0])
+
     def test_every_shipped_tier_expression_is_canonical_for_its_own_tier(self):
         # `sanity`, `L3`, and `real` are not plan gates, but the rule is keyed
         # on the tier name `_tier_filter` takes, so each shipped expression is

@@ -246,6 +246,10 @@ def contract(plan: dict[str, Any], row: dict[str, str], head: str) -> dict[str, 
         "profile": cell.get("profile", ""),
         "target_kinds": json.dumps(cell["target_kinds"]),
         "test_args": package["test_args"],
+        # A changed test input's narrowed L1 cell: the tests that read it. The
+        # job hands it to `_tier_filter` as `BISCUIT_TEST_NARROW`, so the gate
+        # and its expected-test listing narrow identically.
+        "test_filter": cell.get("test_filter", ""),
         "check_args": package["check_args"],
         "dependents_check_args": seam.get("check_args", ""),
         "dependents": json.dumps(seam.get("dependents", [])),

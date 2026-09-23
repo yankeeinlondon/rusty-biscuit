@@ -285,7 +285,7 @@ is what keeps them behind the `level3_` nextest filterset **and** the
 unannounced on someone's desktop.
 
 Claudine enforces this at L1 via
-`cli/tests/test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files`,
+`cli/tests/l1/test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files`,
 which scans comment-stripped test sources. Copy that guard into other
 areas that grow L3 coverage.
 

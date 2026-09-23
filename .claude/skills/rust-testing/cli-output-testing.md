@@ -9,7 +9,7 @@ Rust CLIs should test more than success or failure. High-value coverage usually 
 
 ## Shared Pattern
 
-Put common tempdir, config, git, executable, and ANSI helpers in `tests/common/mod.rs`, then import them from each integration test crate with `mod common;`.
+Put common tempdir, config, git, executable, and ANSI helpers in `tests/common/mod.rs`. In a package with per-file test targets, each integration test crate declares `mod common;`. In a package with consolidated binaries, the crate root declares it once (`#[path = "../common/mod.rs"] mod common;`) and modules `use crate::common;` (see "Consolidated Integration-Test Binaries" in `SKILL.md`).
 
 ## Output Channels
 

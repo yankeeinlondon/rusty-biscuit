@@ -41,6 +41,12 @@
   reported by name and scheduled nowhere. The package's passing local L1 on
   an environment satisfies its check cell there, so the pushing host's OS is
   not compile-checked again; a check cell that compiles dependents always runs.
+- **A changed file schedules the code that reads it, and nothing more.** A
+  non-source change selects no package, except where compiled code names the
+  path: embedded into shipped code it is that package's source; read by a
+  test it adds one `{package, ubuntu-latest, L1}` cell narrowed to exactly
+  those tests. Spell a test's repository reads in the forms the `rust-testing`
+  skill lists. See `docs/cicd/test-inputs.md`.
 - **Producers prove their cells; each area audits its planned coverage.** Each
   executing cell is one dispatch row, and its producer compares its own
   expected-test listing with its reports and uploads a completion record
@@ -85,6 +91,9 @@
   `BISCUIT_CI_CONSTRAINTS_DIR`. Review `just ci-local --plan` before pushing.
   The hook enforces those bans; CI does not read the store and cannot silently
   skip required coverage because of a local constraint.
+- A receipt counts only for its own environment, with one exception: a
+  narrowed test-input cell is satisfied by an exact-tree run carrying the same
+  filter from any host (`docs/cicd/test-inputs.md`).
 
 ## Just Runner
 

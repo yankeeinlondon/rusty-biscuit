@@ -1,0 +1,35 @@
+//! Layout gate (`2026-09-21-consolidated-test-binaries`, acceptance 12): with
+//! `autotests = false`, a `tests/` file that no declared `[[test]]` root
+//! reaches is never compiled, so its tests would silently never run.
+
+use test_toolkit::test_layout::{collect_test_sources, layout_violations};
+
+#[test]
+fn every_test_source_is_compiled_by_a_declared_target() {
+    let crate_root = biscuit_test_harness::manifest_dir!();
+    let manifest = std::fs::read_to_string(crate_root.join("Cargo.toml")).expect("read Cargo.toml");
+    let files = collect_test_sources(&crate_root).expect("scan tests/");
+
+    // Non-vacuity: the walk read the real suite, including both roots, the
+    // feature-gated `common` helper, the helper the spawn guard includes by
+    // path, and the Level 2 module whose name is a neutral alias.
+    assert!(files.len() > 50, "scanned only {} test source file(s)", files.len());
+    for expected in [
+        "tests/l1/main.rs",
+        "tests/l1/spawn_site_guard.rs",
+        "tests/level2/main.rs",
+        "tests/level2/harness_integrity.rs",
+        "tests/common/mod.rs",
+        "tests/common/level2.rs",
+        "tests/common/source_scan.rs",
+    ] {
+        assert!(files.contains_key(expected), "{expected} was not scanned");
+    }
+
+    let violations = layout_violations(&manifest, &files);
+    assert!(
+        violations.is_empty(),
+        "test sources outside every declared test target:\n{}",
+        violations.join("\n")
+    );
+}

@@ -1,3 +1,7 @@
+---
+implemented: true
+---
+
 # Metadata Enhancements
 
 ```mermaid

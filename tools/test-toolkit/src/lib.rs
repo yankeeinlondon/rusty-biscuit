@@ -50,11 +50,19 @@
 //! token-aware scan of the repository's Rust source for compile-time paths that
 //! do not survive relocation. `tests/archive_path_guard.rs` drives it against
 //! the real checkout.
+//!
+//! ## Consolidated test layout
+//!
+//! [`test_layout`] is the layout gate for a package that declares its test
+//! binaries explicitly (`autotests = false`): every `tests/` source must be
+//! reached from a declared `[[test]]` root. Each such package calls it from a
+//! test inside its own Level 1 binary.
 
 pub mod archive_guard;
 pub mod backend;
 pub mod evidence;
 pub mod spool;
+pub mod test_layout;
 
 pub use spool::LockedAudioSpool;
 

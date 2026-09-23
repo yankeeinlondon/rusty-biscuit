@@ -365,7 +365,7 @@ at the top of each `windows_wait_loop` call.
 
 > **Verification gap (all-OS rule).** The development host is macOS. The
 > Windows path is **cross-compile-checked**
-> (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --test level3_wrap_ctrl_c`).
+> (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --features terminal-tests --test level3`).
 > The package now exposes a Windows-host runtime gate,
 > `just test-windows-ctrl-c`, and the path-filtered CI workflow
 > `.github/workflows/claudine-windows-ctrl-c.yml` runs the same ignored
@@ -430,7 +430,7 @@ its own group so the event never reaches the test runner.
 
 On the macOS dev host this test is **cross-compile-checked** for
 `x86_64-pc-windows-gnu`
-(`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --test level3_wrap_ctrl_c`)
+(`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --features terminal-tests --test level3`)
 but its **runtime pass has not yet been recorded**. The test stays `#[ignore]`d
 in normal suites because it needs a Windows host with an attached console. The
 path-filtered CI gate runs it for relevant PRs and pushes to `main`; run the

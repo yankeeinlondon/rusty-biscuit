@@ -165,7 +165,13 @@ ownership. A cell whose `area` disagrees with its package record is invalid.
   is what the producer sets `BISCUIT_TEST_REQUIRED_BACKENDS` to and what
   `completion.py` demands a `backend-proofs.json` entry for. A gap, reused, or
   prohibited cell carries none; the GUI backends stay in the package record
-  only.
+  only. An executing L1 cell a changed test input selected carries
+  `test_filter`: the nextest filterset naming exactly the tests that read the
+  file, which the producer intersects with the tier expression
+  (`BISCUIT_TEST_NARROW`). Only an exact-tree receipt cell carrying the same
+  filter, from any host, satisfies it
+  ([`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md)). Optional;
+  absent means the whole tier.
 - `skip_policy` — the snapshot of [`ci-baseline.toml`](../ci-baseline.toml)'s
   approved exact-skip budget: `source` and `content_hash` say which file was
   read and what it hashed to, and `entries[]` carries the approvals that apply

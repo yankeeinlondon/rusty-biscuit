@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "cross-agent abstraction and meta-agent harness"
+# Integration tests are one binary per execution contract, declared below;
+# see `2026-09-21-consolidated-test-binaries`.
+autotests = false
 
 [[bin]]
 name = "claudine"
@@ -130,170 +133,23 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # is available on every target.
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 
-# Spawns the `claudine-fake-goose` fixture binary above.
 [[test]]
-name = "sequence_budget"
-required-features = ["test-fixtures"]
-
-# Installs the `claudine-fake-goose` fixture as its marker provider on Windows.
-[[test]]
-name = "wrap_compose_validation"
-required-features = ["test-fixtures"]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level2_ac2_worktree_compose"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level2_ac28_lifecycle_lazy_roots"
+name = "level3"
+path = "tests/level3/main.rs"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level2_auto_complete_chooser"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_auto_complete_operation_file"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_explicit_operation_file_miss"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_context_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_dry_run_approval_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_dry_run_metadata_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_file_resolution_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_incomplete_subagents_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_inline_compose_mismatch_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_interrupt_feedback_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_invalid_file_reference_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_lifecycle_action_forms"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_initialize_generated_transclusion"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_lifecycle_control"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_lifecycle_dispatch"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_lifecycle_loop"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_malformed_frontmatter_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_perf_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_prompt_reporting_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_provided_partial_file_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_provider_overlay_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_windows_provided_partial_file_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_removed_validation_key_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_schema_parse_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_sequence_task_stream_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_stalled_generation_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_typed_error_render_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_wrap_ctrl_c_loop_wedge_tmux"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_wrap_ctrl_c_tmux"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level3_auto_complete_chooser"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level3_linux_sequence_ctrl_c"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level3_sequence_ctrl_c"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level3_windows_sequence_ctrl_c"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level3_wrap_ctrl_c"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "real_opencode_yolo_subagent"
-required-features = ["real-tests"]
-
-[[test]]
-name = "real_inline_write_grant"
-required-features = ["real-tests"]
-
-[[test]]
-name = "real_pi_steering"
+name = "real"
+path = "tests/real/main.rs"
 required-features = ["real-tests"]
 
 # CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests

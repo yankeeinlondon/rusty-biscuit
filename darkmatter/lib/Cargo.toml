@@ -5,6 +5,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 readme = "README.md"
+autotests = false
 repository = "https://github.com/yankeeinlondon/dockhand"
 keywords = ["markdown", "terminal", "syntax-highlighting", "mermaid", "themes"]
 categories = ["text-processing", "visualization"]
@@ -180,21 +181,32 @@ wiremock = "0.6"
 name = "html_to_png"
 required-features = ["browser-tests"]
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "browser_render"
-required-features = ["browser-tests"]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level3_popover"
-required-features = ["browser-tests"]
-
-[[test]]
-name = "level2_render_tree_terminal"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level3_image_painting"
+name = "level3-terminal"
+path = "tests/level3-terminal/main.rs"
 required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3-browser"
+path = "tests/level3-browser/main.rs"
+required-features = ["browser-tests"]
+
+[[test]]
+name = "browser"
+path = "tests/browser/main.rs"
+required-features = ["browser-tests"]
 
 [[bench]]
 name = "schema_validation"

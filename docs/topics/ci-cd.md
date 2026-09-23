@@ -42,7 +42,8 @@ packages. On a clean checkout the gates run FROM the reviewed plan described nex
 that qualifying prior passing evidence already covers is skipped, a cell whose newest prior
 evidence is a failure is rerun, and lint runs as always; a dirty checkout or an
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` override replans from the working tree for wider feedback and
-publishes nothing. A docs-only push gates nothing. Before any gate, the hook reviews every branch update
+publishes nothing. A docs-only push gates nothing unless a test reads a changed document, in which
+case it runs that test alone ([test inputs](../cicd/test-inputs.md)). Before any gate, the hook reviews every branch update
 the push carries, in order — each revision's COMMITTED tree (its own planner, manifests, and
 policy, in a temporary worktree unless it is the clean checkout), never the working tree — applies
 published evidence to it, prints it, and refuses on a recorded execution constraint scoped to that
@@ -260,7 +261,9 @@ Per-package policy — L2/browser tier ownership, native libraries, Cargo featur
 and companion suites — lives in each package's `[package.metadata.ci]`; environment capabilities
 live in `.github/ci/environments.json`. Documentation, manifests, lockfiles, Just recipes, and
 workflow configuration select no package jobs, and `workflow_dispatch` remains the explicit
-full-workspace path. See [testing-strategy.md](../testing-strategy.md).
+full-workspace path. The exception is a file compiled code reads: embedded into shipped code it
+is that package's source, and read by a test it schedules one Linux L1 cell narrowed to exactly
+those tests; see [test inputs](../cicd/test-inputs.md). See [testing-strategy.md](../testing-strategy.md).
 
 **CI's own suites have owners.** Two ordinary workspace members hold them: `repo-deps`
 (`scripts/`) owns the merge-gate and plan binaries' Nextest suites plus the `scripts/ci/test_*.py`

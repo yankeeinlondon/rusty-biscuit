@@ -873,6 +873,26 @@ belong here.
     close (222f7612d + f9d74abc5 + 11e2c4e95 + 09b9f9d5f, four
     commits: three parallel test commits then the planning close)
     for the canonical 2-package, test-only-phase shape.
+- The `docs_created_during_phase_N` list is not strictly bound to the
+    planning close the way `source_files_during_phase_N` is. A
+    `docs_created` entry can ship in any commit that lands BEFORE the
+    planning close — the typical case is a `feat(<area>):` that produces
+    a self-proof README + noop-comparison.{json,md} report alongside
+    the toolkit, with the planning close later recording "Phase N
+    created these docs". The README and report are outputs of the feat,
+    not the planning, so folding them into the planning commit would
+    hide them from `git log -- <path>` when readers trace the file's
+    provenance. The only constraint that survives is the same one
+    already stated above: every `docs_created_during_phase_N` path
+    must be in HEAD at the moment the planning close lands. See the
+    consolidated-test-binaries Phase 2 close
+    (`3b0babe20 feat(repo-deps): ship consolidation toolkit with noop
+    selfproof` then `e63d49255 planning(repo): record Phase 2 close
+    for consolidated-test-binaries feature`) for the canonical
+    shape: toolkit ships with `selfproof/README.md` and
+    `selfproof/noop-comparison.{json,md}`; planning close records them
+    in `docs_created_during_phase_2` and adds them as final-wave
+    references in `spec.md message_to_agent`.
 - A pre-implementation spec review — flipping `reviewed: false` to `true`
   on a still-`draft-spec` fix without adding a `review-N.md` file or
   bumping `review_iterations` past 0 — is a separate shape from the
@@ -888,8 +908,188 @@ belong here.
   reviewer's findings" rather than "cycle N is closed". `status` stays
   `draft-spec`, `implemented` stays `false`, and `review_iterations`
   does NOT bump — the bump arrives when the implementation lands and a
-  real `review-N.md` flips `implemented: true`. Mixing this with a
+  real    `review-N.md` flips `implemented: true`. Mixing this with a
   cycle-close body overstates the work; splitting it from the eventual
   cycle-close is correct because the cycle close carries
   `implemented: true` and an `next:` pointer, which the spec-only
   review does not yet have.
+- A structural move that retires per-file selectors (e.g. test
+  consolidation that turns N per-file test binaries into one consolidated
+  target) has more path dependents than the structural commit alone. The
+  "comment-only and doc-only changes go in a separate commit from the
+  structural move" guidance (AGENTS.md scope discipline) still applies,
+  but the dependent docs churn is large enough to need an audience-scoped
+  split — each bucket targets a different reviewer audience and a
+  different `docs(<area>):` scope:
+
+  - Library/component source `//!`/`///` comments (1:1 path swaps in
+    inline module docs) ship in `docs(<library-area>):`.
+  - Area docs, area prompts, and area justfile recipes (spec §11
+    "active area pass") ship together in `docs(<area>):`. This is
+    the right bucket for any `--test <old-binary>` selector the
+    retirement invalidates and for any provider-metadata string a test
+    asserts on (e.g. `dispatch-inventory.json`'s `regenerate` line —
+    the R9 hand-edit). The recipe and the regenerate string share the
+    same audience, so splitting them is wrong.
+  - Cross-area skills ship in `docs(skills):` (no area scope) — skill
+    files are read by every agent, not just the package-area maintainer,
+    so the recipient audience is the whole repo.
+  - Cross-package config (`.config/nextest.toml` override filter
+    rewrites, anything keyed on the old identity) ships INSIDE the
+    feat commit because the rewrite exists to make the new module
+    graph runnable under the existing test harness — it is part of
+    the move, not commentary on it.
+
+  Worked example: 2026-09-21-consolidated-test-binaries Phase 3
+  (`4287deb0c feat(claudine-cli): consolidate 139 integration tests...`,
+  `093788b57 docs(claudine): refresh test path references in
+  source-code comments`, `6198b0dc1 docs(claudine): refresh test path
+  references in area docs, prompts, and recipes`, `84afc4e78
+  docs(skills): refresh test path references and record kache
+  really-off in the os skill`, then `93ed5c710 planning(repo): record
+  Phase 3 close`). The feat commit absorbed 145 renames + 4 new
+  `tests/<target>/main.rs` + `.config/nextest.toml` slow-timeout
+  override rewrite + 3 snapshot renames + the one-stale-comment
+  prune in `tests/common/mod.rs`; the three docs commits split by
+  audience, not by file type.
+
+- When a structural move introduces a NEW tier-named directory (e.g.
+  `tests/level2/`) that did not exist before, a path-keyed guard whose
+  `excluded` predicate scopes by file-name prefix (`level2_*`,
+  `level3_*`, `browser_*`, `real_*`, `slow_*`) silently picks up
+  files under that directory: the leading-segment name (`level2/`)
+  matches the prefix without its trailing underscore, so a renamed
+  R2-aliased module (`level2/harness_integrity.rs`) and the new
+  crate root (`level2/main.rs`) both join the governed population.
+  The predicate extension — also skipping any leading segment whose
+  name equals a prefix's underscore-stripped form — belongs INSIDE
+  the same commit as the guard rename, because that commit is what
+  introduces the directory that defeats the old predicate. Shown red
+  first with `tier_naming_decides_what_the_guard_governs` /
+  `the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site`
+  in darkmatter-cli's `1456c1ede` Phase 5 close; the same hazard is
+  pre-called for `biscuit-terminal`'s Phase 6 in the spec's
+  `message_to_agent`. The journal's separate "path-sensitive guards
+  also move with the sources" rule is the rename side; this is the
+  *predicate extension* side, which the rename-only rule does not
+  cover.
+
+- A helper file that is ALSO a test target has its identities claimed
+  by every binary that declared it. In `biscuit-terminal`'s Phase 6
+  (`c63c3861f`), `tests/parity_helpers.rs` was both a test binary
+  (24 unit tests in its `mod tests`) AND a helper that 18 parity
+  modules declared with `mod parity_helpers;`, so each old binary
+  ran its own copy of those 24 tests at
+  `<parity_file>::parity_helpers::tests::*` (432 identities). The
+  migration manifest keeps those identities, so the feat commit
+  keeps the duplicates: `parity_helpers` is an `l1` module and
+  every parity module declares
+  `#[allow(clippy::duplicate_mod)] #[path = "parity_helpers.rs"] mod
+  parity_helpers;`. The `allow` lives only on the 18 copies (the
+  root declaration still lints), `clippy -D warnings` passes, and a
+  comment on the root declaration says why. Deduplicating to
+  `use crate::parity_helpers;` would have removed 432 test
+  identities — a spec §3 behavior change — so it is a deliberate
+  follow-up test change, not a structural edit. The duplicate-copy
+  decision must be recorded in the migration manifest alongside the
+  layout-gate `addition`, because `consolidation.py compare` would
+  otherwise flag the kept copies as unmapped-missing on any
+  dedup-intent mutation. This shape is unique to packages where a
+  helper module's `#[cfg(test)] mod tests` was claimed as part of
+  the consuming test target's identity; do not generalize it as a
+  pattern to copy.
+
+- Promoting a previously feature-gated dep to unconditional
+  `[dev-dependencies]` may add zero crates to the graph. In
+  `biscuit-terminal`'s Phase 6, `test-toolkit` was only an optional
+  `terminal-tests` dependency before; the new L1 layout gate
+  (`tests/l1/test_layout.rs`) needs it under `none` too, so
+  `Cargo.toml` adds `test-toolkit = { path = "..." }` to
+  `[dev-dependencies]`. `Cargo.lock` is unchanged (`--locked`
+  builds pass), because every transitive dep of `test-toolkit` was
+  already built by the test build under the `terminal-tests`
+  feature. The `docs(dependencies.md)` update for the new entry is
+  the audit trail; the lockfile staying put is the verification that
+  the change was purely a dev-dep reclassification. Pre-flight
+  `git diff --cached -- Cargo.lock` (or `cargo check --tests
+  --locked`) after staging the manifest change, before the feat
+  commit lands, catches a forgotten transitive that would otherwise
+  silently grow the test-build graph.
+
+- When a previously conditional recipe branch loses its
+  discriminator, the discriminator-drop is a single-line semantic
+  group that still ships in `docs(<area>):`. In `renderable/justfile`
+  `drift-report` (Phase 6, `f3c52bdd8`), the recipe had a per-crate
+  `case` branch added in Phase 4 when only darkmatter had
+  consolidated; biscuit-terminal's Phase 6 collapse lets the recipe
+  drop the branch and use `--test l1 render_comparison::` for both
+  crates. The body of the `docs(renderable):` commit says the
+  *unification* explicitly, not just "refreshed paths", so the
+  refactor is visible in `git log -p -- renderable/justfile` rather
+  than looking like a routine selector tweak. A multi-area recipe
+  whose per-crate branches can never collapse (because the contracts
+  still differ) stays branched, and that is fine.
+
+- `docs(<area>):` may appear twice in one batch even when there is
+  only one package in scope, split by audience. Phase 6 dispatched
+  both `a1b665902 docs(biscuit-terminal): refresh test path
+  references in source-code comments` (2 lib `//!` paths) and
+  `d8af9fc12 docs(biscuit-terminal): refresh test path references
+  in area docs` (README + `docs/dependencies.md`) in parallel
+  Wave 1. The two commits had disjoint paths and identical scope;
+  the split is the same "audience, not file type" rule the Phase 3
+  worked example records for two `docs(claudine):` commits in one
+  phase. The shape generalizes: any package whose consolidation
+  touches both `lib/**` inline `///` doc-comments AND
+  area-level surfaces (README, `docs/`, justfile) is two
+  audience-scoped `docs(<area>):` commits in the same batch, even
+  when one area, even when parallelizable. The spec's `message_to_agent`
+  forward-looking lists often split the same way — a "doc sweep"
+  listing both library comment paths and README/justfile paths is
+  the cue to ship two commits, not one.
+- A module whose name matches the package's test-file glob is a
+  feature module, not a test file. In
+  `2026-09-22-test-input-blind-spot`, `scripts/ci/test_inputs.py` is
+  the static file-to-test index (imported as `import test_inputs` by
+  `affected_scope.py`); it shares the `scripts/ci/test_*.py` prefix
+  with the actual test modules (`test_affected_scope.py`,
+  `test_completion.py`, etc.), so a glob-based group agent will
+  mistake it for a test file and route it into the wrong commit.
+  Pre-flight `git show :<path> | head -3` distinguishes them: a
+  feature module opens with a module-level docstring describing what
+  it does for the planner, while a test module opens with
+  `import unittest` (or imports from it) and defines test classes.
+  When a staged `.py` file in `scripts/ci/` has the `test_` prefix
+  but is imported by another module, it is a sibling feature module
+  and belongs with its dependents, not with the test files.
+- A schema amendment that adds an OPTIONAL field can ship without a
+  `RESOLVED_PLAN_SCHEMA_VERSION` bump, and the amendment is one atomic
+  commit across the same files the journal's bump rule names. In
+  `2026-09-22-test-input-blind-spot`, the new optional `test_filter`
+  on `CELL_FIELDS` and `RECEIPT_CELL_FIELDS` (plus its
+  contract.json mirror, its cell_contract.py threading, and its
+  docs/cicd/schema-versions.md entry) landed as one `fix(repo):`
+  commit because absence still means exactly what every existing
+  version-7 plan meant (the whole tier) and a plan is only ever read
+  by the code at the head it was resolved for, so no reader meets
+  the field without understanding it. The bump-rule's "schema,
+  contract.json, ci-rollup, and every hand-built plan fixture" rule
+  applies just the same — splitting the consumer from the field
+  leaves the contract without a reader, and splitting the field
+  from the consumer leaves the reader without a contract.
+- A spec.md that lands in the same batch as its implementation is
+  `planning(<area>):` with `status: implemented` already set, NOT a
+  "schedule" event. In `2026-09-22-test-input-blind-spot`, the spec
+  was authored with `status: implemented`, `implemented: true`, and
+  `implemented_by` already populated when the planning commit
+  landed; the commit subject was `planning(repo): record
+  <name> fix design and measurement spikes`, not
+  `planning(repo): schedule <name>`, because no future work was
+  scheduled — the spec and its spike scripts document what the
+  sibling `fix`/`test`/`docs` commits had already done. The
+  spec/spike cross-reference still requires the atomic combine
+  (the planning rule's "spec/plan/spike cross-references must
+  resolve within that one commit" applies), and the body should
+  name which sibling commits the spec's
+  `scripts/ci/test_inputs.py`-style references resolve against.
+

@@ -204,6 +204,17 @@ def selection_problems(selection: Any, cell: dict[str, Any]) -> list[str]:
         ]
 
     expression = selection["filter"]
+    narrow = cell.get("test_filter")
+    if isinstance(expression, str) and narrow:
+        stripped = without_narrowing(expression, narrow)
+        if stripped is None:
+            problems.append(
+                "completion-manifest-selection: the cell is narrowed to the tests "
+                "that read its changed inputs, and the listing did not select with "
+                f"'(<tier expression>) & ({narrow})'"
+            )
+            return problems
+        expression = stripped
     if not isinstance(expression, str) or not expression.strip():
         problems.append(
             "completion-manifest-selection: the listing recorded no filter "
@@ -238,6 +249,45 @@ def selection_problems(selection: Any, cell: dict[str, Any]) -> list[str]:
             "which moves ignored tests into the expected set"
         )
     return problems
+
+
+def without_narrowing(expression: str, narrow: str) -> str | None:
+    """`expression` with a planned test-input narrowing removed, or `None`.
+
+    The narrowing is the one the plan scheduled, applied the one way
+    `_tier_filter` applies it: `(<tier expression>) & (<narrow>)`, possibly
+    inside the archive-mode package scope. What is left must then pass as the
+    tier's canonical selection, so this admits exactly one extra conjunct —
+    the plan's own — and nothing else.
+    """
+    suffix = f"& ({narrow})"
+    at = expression.find(suffix)
+    if at < 0 or expression.find(suffix, at + 1) >= 0:
+        return None
+    head = expression[:at].rstrip()
+    if not head.endswith(")"):
+        return None
+    open_index = _opening(head, len(head) - 1)
+    if open_index is None:
+        return None
+    return (
+        expression[:open_index]
+        + head[open_index + 1 : -1]
+        + expression[at + len(suffix) :]
+    )
+
+
+def _opening(text: str, close_index: int) -> int | None:
+    """Index of the parenthesis opening the one closing at `close_index`, or None."""
+    depth = 0
+    for index in range(close_index, -1, -1):
+        if text[index] == ")":
+            depth += 1
+        elif text[index] == "(":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
 
 
 def predicates(expression: str) -> list[tuple[str, str]]:

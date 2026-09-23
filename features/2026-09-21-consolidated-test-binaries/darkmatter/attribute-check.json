@@ -1,0 +1,112 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "darkmatter",
+  "review": [
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        31
+      ],
+      "new_dir": "darkmatter/lib/tests/l1",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/l1/as_block_error_registry.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        18,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35
+      ],
+      "new_dir": "darkmatter/lib/tests/l1/error_snapshots",
+      "old_dir": "darkmatter/lib/tests/error_snapshots",
+      "path": "darkmatter/lib/tests/l1/error_snapshots/mod.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        9,
+        13,
+        17,
+        21
+      ],
+      "new_dir": "darkmatter/lib/tests/l1",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/l1/inline_document_text.rs"
+    },
+    {
+      "detector": "current_exe_list",
+      "kind": "identity-dispositioned",
+      "lines": [
+        9
+      ],
+      "path": "darkmatter/lib/tests/l1/interpolation_literal_pipeline.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        200
+      ],
+      "new_dir": "darkmatter/lib/tests/l1",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/l1/predict_conflicts.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        639
+      ],
+      "new_dir": "darkmatter/lib/tests/l1",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/l1/schema_phase_validation.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        274,
+        275
+      ],
+      "new_dir": "darkmatter/lib/tests/l1",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/l1/suggest_constraint_phase1.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65
+      ],
+      "new_dir": "darkmatter/lib/tests/level2",
+      "old_dir": "darkmatter/lib/tests",
+      "path": "darkmatter/lib/tests/level2/level2_render_tree_terminal.rs"
+    }
+  ],
+  "version": 1
+}

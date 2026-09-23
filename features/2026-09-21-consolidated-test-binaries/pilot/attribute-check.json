@@ -1,0 +1,101 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "claudine-cli",
+  "review": [
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        283,
+        288,
+        294,
+        298,
+        302,
+        348,
+        1121,
+        1159,
+        1196,
+        1223
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/compose_caller_file_provenance.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        45
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/error_guards.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        518
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/sequence_schema.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        443,
+        641
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/shipped_prompt_contract.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        791
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/test_placement.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        501,
+        725,
+        790,
+        800
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/test_placement.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        582,
+        593,
+        605
+      ],
+      "new_dir": "claudine/cli/tests/l1",
+      "old_dir": "claudine/cli/tests",
+      "path": "claudine/cli/tests/l1/wrap_compose_validation.rs"
+    },
+    {
+      "detector": "current_exe_list",
+      "kind": "identity-dispositioned",
+      "lines": [
+        324
+      ],
+      "path": "claudine/cli/tests/level2/level2_provider_overlay_capture.rs"
+    }
+  ],
+  "version": 1
+}

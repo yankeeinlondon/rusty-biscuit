@@ -1,0 +1,388 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "biscuit-terminal",
+  "review": [
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        33
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/filesystem_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        32
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/filesystem_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        41
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/graph_expression_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        40
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/graph_expression_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        27
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        26
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        8
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/inline_content_matrix.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        7
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/inline_content_matrix.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        10
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/list_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        9
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/list_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        29
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/mermaid_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        28
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/mermaid_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        19
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/metrics_tree_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        18
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/metrics_tree_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        38
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/ordered_list_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        37
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/ordered_list_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        14
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/progress_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        13
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/progress_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        8
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/prose_cells_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        7
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/prose_cells_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        10
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/section_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        9
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/section_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        20
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/status_block_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        19
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/status_block_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        24
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/status_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        23
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/status_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        20
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/table_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        19
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/table_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        29
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/terminal_image_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        28
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/terminal_image_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        15
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/text_block_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        14
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/text_block_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        18
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/todo_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        17
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/todo_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        24
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        23
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        28
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/unordered_list_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        27
+      ],
+      "new_dir": "biscuit-terminal/lib/tests/l1",
+      "old_dir": "biscuit-terminal/lib/tests",
+      "path": "biscuit-terminal/lib/tests/l1/unordered_list_parity.rs"
+    }
+  ],
+  "version": 1
+}

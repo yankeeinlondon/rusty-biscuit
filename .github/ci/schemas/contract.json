@@ -80,7 +80,8 @@
       "build": false,
       "profile": false,
       "requires_node": false,
-      "backends": false
+      "backends": false,
+      "test_filter": false
     },
     "build": {
       "key": true,
@@ -184,7 +185,8 @@
       "report": true,
       "failed_tests": false,
       "failure_detail_truncated": false,
-      "build": false
+      "build": false,
+      "test_filter": false
     },
     "cell_build": {
       "key": true,

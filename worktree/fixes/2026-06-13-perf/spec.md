@@ -2,6 +2,7 @@
 date: 2026-06-13
 agent: "${env.AGENT}"
 reviewed: true
+implemented: true
 status: "ready for planning and implementation"
 ---
 
@@ -14,7 +15,7 @@ non-main worktree issues roughly **30+** `git` invocations, many of them
 redundant and many serial when they could be parallel.
 
 Each `git` invocation carries ~30–80 ms of pure fork/exec + config-load
-overhead on macOS *before* any real work. At 30 spawns that is 1–2.5 s of
+overhead on macOS _before_ any real work. At 30 spawns that is 1–2.5 s of
 unavoidable overhead alone, on top of the actual graph traversal and (out of
 scope here) the biscuit-terminal image rasterization.
 
@@ -36,13 +37,13 @@ subprocess counts. "Parallel" means dispatched across `std::thread::scope` in
 
 ### A. `list_worktrees` (`worktree/lib/src/worktree.rs:132`) — reasonably parallel
 
-| Call                                                    | Where       | Count        | Mode     |
-| ------------------------------------------------------- | ----------- | ------------ | -------- |
-| `git worktree list --porcelain`                         | worktree.rs:133 | 1         | serial   |
-| `git symbolic-ref …origin/HEAD` (`default_branch`)      | worktree.rs:59  | 1         | serial   |
-| `git status --porcelain` per worktree (`dirty_status`)  | worktree.rs:253 | N         | parallel |
-| `git rev-list --count` per non-main (`ahead_behind`)    | worktree.rs:302 | N-1       | parallel |
-| `git merge-tree --write-tree` (only if diverged)        | worktree.rs:322 | 0..N-1    | parallel |
+| Call                                                   | Where           | Count  | Mode     |
+| ------------------------------------------------------ | --------------- | ------ | -------- |
+| `git worktree list --porcelain`                        | worktree.rs:133 | 1      | serial   |
+| `git symbolic-ref …origin/HEAD` (`default_branch`)     | worktree.rs:59  | 1      | serial   |
+| `git status --porcelain` per worktree (`dirty_status`) | worktree.rs:253 | N      | parallel |
+| `git rev-list --count` per non-main (`ahead_behind`)   | worktree.rs:302 | N-1    | parallel |
+| `git merge-tree --write-tree` (only if diverged)       | worktree.rs:322 | 0..N-1 | parallel |
 
 This block is already well-structured: per-worktree work is parallelized and
 `dirty_status` runs concurrently on a sub-thread. `merge-tree` is correctly
@@ -51,14 +52,14 @@ surfacing the `default_branch` result to downstream callers (see B).
 
 ### B. Graph generation (`worktree/cli/src/commands/list.rs:27` → `git_graph.rs`) — redundant + serial
 
-| Issue | Detail |
-| --- | --- |
-| **Graph data computed even when no image can render** | `graph_instructions(&statuses)` runs unconditionally (list.rs:27). The `fits` check (list.rs:38) tests terminal *width* only; `image_terminal` and its `ImageSupport` detection are built afterward (list.rs:44). On any non-image terminal (plain SSH, piped output, unlisted emulator) **all** graph git calls run and are then thrown away. |
-| **`default_branch()` called 3× per run** | `list_worktrees` (worktree.rs:135), `graph_instructions` (list.rs:58), `render_verbose` (list.rs:93). Each spawns `git symbolic-ref` (+ possible `git rev-parse` fallbacks). Result is identical across the three calls. |
-| **`merge-base` called 3× for the same branch pair** | `worktree_graph` (`worktree/cli/src/commands/git_graph.rs:226`), `merge_base_commit` (`git_graph.rs:14`), `branch_commits_detail` (`git_graph.rs:21`). In verbose non-main mode all three execute for the identical `<default, current>` pair. |
-| **`short_sha()` spawns a subprocess to truncate a string** | `git_graph.rs:218`. `git rev-parse --short <sha>` is only used to match the `%h` shape emitted by `git log --format=%h`; the fallback already does pure truncation. Called once per branch in `base_graph` (`git_graph.rs:283`). |
-| **`base_graph` per-branch queries are serial** | `git_graph.rs:275-295` iterates branches sequentially; each iteration runs `git merge-base` + `git rev-parse --short` + `git log` (3 serial subprocesses × N branches). `list_worktrees` already demonstrates the `thread::scope` pattern this should follow. |
-| **Graph + verbose query overlapping data independently** | `graph_instructions` (list.rs:27) and `render_verbose` (list.rs:51) run back-to-back but each issue their own `git log` / `git merge-base` for overlapping commit sets. A single gather pass would collapse ~4 calls into shared structure. |
+| Issue                                                      | Detail                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Graph data computed even when no image can render**      | `graph_instructions(&statuses)` runs unconditionally (list.rs:27). The `fits` check (list.rs:38) tests terminal _width_ only; `image_terminal` and its `ImageSupport` detection are built afterward (list.rs:44). On any non-image terminal (plain SSH, piped output, unlisted emulator) **all** graph git calls run and are then thrown away. |
+| **`default_branch()` called 3× per run**                   | `list_worktrees` (worktree.rs:135), `graph_instructions` (list.rs:58), `render_verbose` (list.rs:93). Each spawns `git symbolic-ref` (+ possible `git rev-parse` fallbacks). Result is identical across the three calls.                                                                                                                       |
+| **`merge-base` called 3× for the same branch pair**        | `worktree_graph` (`worktree/cli/src/commands/git_graph.rs:226`), `merge_base_commit` (`git_graph.rs:14`), `branch_commits_detail` (`git_graph.rs:21`). In verbose non-main mode all three execute for the identical `<default, current>` pair.                                                                                                 |
+| **`short_sha()` spawns a subprocess to truncate a string** | `git_graph.rs:218`. `git rev-parse --short <sha>` is only used to match the `%h` shape emitted by `git log --format=%h`; the fallback already does pure truncation. Called once per branch in `base_graph` (`git_graph.rs:283`).                                                                                                               |
+| **`base_graph` per-branch queries are serial**             | `git_graph.rs:275-295` iterates branches sequentially; each iteration runs `git merge-base` + `git rev-parse --short` + `git log` (3 serial subprocesses × N branches). `list_worktrees` already demonstrates the `thread::scope` pattern this should follow.                                                                                  |
+| **Graph + verbose query overlapping data independently**   | `graph_instructions` (list.rs:27) and `render_verbose` (list.rs:51) run back-to-back but each issue their own `git log` / `git merge-base` for overlapping commit sets. A single gather pass would collapse ~4 calls into shared structure.                                                                                                    |
 
 ### C. Minor
 
@@ -223,8 +224,8 @@ feature; production CLI output and public API should not expose debug counters.
 ## Non-Goals
 
 - **Out of scope:** Mermaid/SVG rasterization performance in `biscuit-terminal`
-  / `biscuit-visualized`. This is the single largest wall-clock cost *when a
-  graph actually renders*, but it is not owned by this package and will be
+  / `biscuit-visualized`. This is the single largest wall-clock cost _when a
+  graph actually renders_, but it is not owned by this package and will be
   addressed separately.
 - **Out of scope:** Changing the semantics of the "dirty" badge (e.g. whether
   untracked `??` files count as dirty). `dirty_status` already uses

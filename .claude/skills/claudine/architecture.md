@@ -69,7 +69,7 @@ claudine/lib/src/
 
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
-**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
+**Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/l1/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
 
 **Child-process environment guard.** `child_environment` captures one absolute
 process-entry launch directory. Ordinary invocations ignore inherited
@@ -625,7 +625,7 @@ preflight, including all early catch chains; the executor independently rejects
 initialization shells. Only `Direct`/`ProxyTarget` entries take a bootstrap read. The
 post-compose steps (hints, lifecycle parse, C3 stamping, static guards) live in
 one `effective_surface` helper shared by all three reads, and `compose_bootstrap`
-is a reasoned `COMPOSE_WITH_ALLOWLIST` entry in `cli/tests/composition_seams.rs`.
+is a reasoned `COMPOSE_WITH_ALLOWLIST` entry in `cli/tests/l1/composition_seams.rs`.
 
 The command coordinator (`compose/prep.rs`) calls it for every live document
 whose authored frontmatter has an `initialize` key
@@ -662,7 +662,7 @@ files. Overlay null-removal still applies to the authored layer because an
 override object cannot represent an absent key; non-null overlay values also
 travel through the caller layer so this resolution distinction is preserved.
 
-Two `cli/tests/composition_seams.rs` guards hold these lines mechanically: the
+Two `cli/tests/l1/composition_seams.rs` guards hold these lines mechanically: the
 `compose_with` allowlist (four sanctioned composer sites) and the ambient-capture
 ban. The ambient `ComposeContext::capture()` baseline is empty; sequence
 template preflight now captures one anchored context and reuses it through
@@ -767,13 +767,13 @@ to any error path must satisfy, and the guards that check them (`just test`,
    `code → disposition` stays 1:1; if two failures need different dispositions
    they are different codes.
 
-**Adding an exception.** Both allowlists (`cli/tests/error_guards/*.toml`) key on
+**Adding an exception.** Both allowlists (`cli/tests/l1/error_guards/*.toml`) key on
 an enclosing **symbol** and require a `tag` and a substantive `reason`.
 `retained` is permanent; any other tag is burn-down debt a follow-up spec closes.
 A stale entry fails its own guard.
 
 **Where the guards named above live.** Every guard that reads the production
-sources is an arm of `SCAN_GUARDS` in `cli/tests/error_guards.rs`, evaluated by
+sources is an arm of `SCAN_GUARDS` in `cli/tests/l1/error_guards.rs`, evaluated by
 the single passive corpus test `production_sources_pass_every_scan_backed_guard`
 — they keep the names used here, and a failure reports them by name, but they
 are no longer separate `#[test]` functions. The `syn` parse of `lib/src` +
@@ -793,7 +793,7 @@ claims in these doc comments are exactly the kind that drift.
 
 **Inline tests** (`#[cfg(test)] mod tests { … }`) are the default for small files. Once a file exceeds **~800 production lines** or its test module exceeds **~300 lines**, move tests to a sibling file declared via `#[cfg(test)] mod tests;` at the bottom of the parent. This pattern is already established in `lib/src/provider/`, `cli/…/wrap/composition/`, and `cli/…/wrap/exec/wiring/`.
 
-`claudine-cli/tests/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and inline-test modules written as `#[cfg(...test...)] mod ... { ... }` separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Private modules and the supported Rust visibility forms (`pub`, `pub(crate)`, and `pub(super)`) are all recognized and governed by the same thresholds. Exceptions must be file-specific and explain why co-location materially clarifies a private invariant; stale or rationale-free entries fail the gate. The analyzer does not currently enforce a separate numeric ceiling for exceptions.
+`claudine-cli/tests/l1/test_placement.rs` enforces this convention as a Level 1 package-area structural test. It scans every source tree in the Claudine family, counts production and inline-test modules written as `#[cfg(...test...)] mod ... { ... }` separately with a Rust-aware lexer, excludes generated sources only through explicit path/header rules, and rejects stale path-specific exceptions. Private modules and the supported Rust visibility forms (`pub`, `pub(crate)`, and `pub(super)`) are all recognized and governed by the same thresholds. Exceptions must be file-specific and explain why co-location materially clarifies a private invariant; stale or rationale-free entries fail the gate. The analyzer does not currently enforce a separate numeric ceiling for exceptions.
 
 ## Skill Linking
 

@@ -770,14 +770,14 @@ file-based sinks (shells swallow stderr on completion and stdout is
 reserved for candidates).
 
 For end-to-end latency, the harness at
-`claudine/cli/tests/completion_perf.rs`
+`claudine/cli/tests/l1/completion_perf.rs`
 spawns a fresh `claudine` process per iteration against a fixture
 that mirrors the rusty-biscuit scale (~72 packages, ~2000 markdown
 files). Run it explicitly:
 
 ```sh
-cargo test -p claudine-cli --test completion_perf --release \
-  -- --ignored --nocapture --test-threads=1
+# in claudine/; --no-capture also runs the cases one at a time
+just test-cli completion_perf:: --release --run-ignored only --no-capture
 ```
 
 The harness records p50/p95/p99 across `compose`, `compose pla`, and

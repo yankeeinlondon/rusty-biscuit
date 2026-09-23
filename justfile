@@ -952,7 +952,7 @@ install-kache:
     echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
     echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
     echo "  never mix   : a target/ is always wrapped or never wrapped; standing"
-    echo "                ci-verification clones are never wrapped"
+    echo "                cross-check clones are never wrapped"
 
 # Exists because activation is HOST policy and the repository therefore cannot
 # see it: `kache init` writes `$CARGO_HOME/config.toml` and affects every Rust

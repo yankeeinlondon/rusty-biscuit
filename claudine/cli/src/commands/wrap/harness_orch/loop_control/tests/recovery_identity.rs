@@ -9,9 +9,9 @@
 //!
 //! These rows pin what the forwarded profile then decides. The wiring itself is
 //! guarded at the source level by
-//! `cli/tests/composition_seams.rs::classification_reads_no_invocation_fixed_launch_identity`,
+//! `cli/tests/l1/composition_seams.rs::classification_reads_no_invocation_fixed_launch_identity`,
 //! and end to end by the `level2_lifecycle_switch_*` rows in
-//! `cli/tests/level2_lifecycle_control.rs`.
+//! `cli/tests/level2/level2_lifecycle_control.rs`.
 
 use super::*;
 

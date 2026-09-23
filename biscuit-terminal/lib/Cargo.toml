@@ -3,6 +3,7 @@ name = "biscuit-terminal"
 description = "A set of utilities for making working in the terminal more rewarding"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 license = "AGPL-3.0-only"
 readme = "README.md"
 repository = "https://github.com/yankeeinlondon/rusty-biscuit"
@@ -78,7 +79,7 @@ libc = "0.2"
 [dev-dependencies]
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
-# feature so the terminal perf-gate test (`tests/perf_gate.rs`) can observe the
+# feature so the terminal perf-gate test (`tests/l1/perf_gate.rs`) can observe the
 # `NodeAttrs::data` access counter while folding a corpus. The feature is unioned
 # into test/bench builds only; normal `cargo build` keeps it off.
 renderable = { path = "../../renderable", features = ["hint-access-counter"] }
@@ -91,10 +92,22 @@ proptest = "1.5"
 serial_test = "3"
 tempfile = "3"
 tracing-test = "0.2"
+# The Level 1 layout gate (`tests/l1/test_layout.rs`) calls
+# `test_toolkit::test_layout`. The optional normal dependency above only
+# exists under `terminal-tests`.
+test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "level2_terminal_osc_wezterm"
+name = "l1"
+path = "tests/l1/main.rs"
+
+[[test]]
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 [[bench]]

@@ -1,7 +1,7 @@
 //! Cross-platform bookkeeping tests for the interrupt coordinator.
 //!
 //! Split from `coordinator.rs` to keep the module within the package area's
-//! inline-test size budget (`claudine-cli/tests/test_placement.rs`).
+//! inline-test size budget (`claudine-cli/tests/l1/test_placement.rs`).
 
 use super::*;
 

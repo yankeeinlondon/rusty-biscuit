@@ -1,3 +1,7 @@
+---
+implemented: true
+---
+
 # God Files — Draft Specification
 
 > Status: **Draft** · Area: `tree-hugger` (lib + cli) · Date: 2026-04-05
@@ -22,16 +26,16 @@ running both in parallel and analyzing only the small set of candidates.
 A "god file" is a source file whose **effective lines of code (SLOC)** cross a
 risk threshold. SLOC excludes blank lines and comment-only lines.
 
-| Band            | Effective SLOC | Meaning                                |
-|-----------------|----------------|----------------------------------------|
-| (not a candidate) | `< 400`      | Ignored / dropped.                     |
-| **Moderate risk** | `400 – 999`  | Potential problem.                     |
-| **High risk**     | `>= 1000`    | High-risk refactoring candidate.       |
+| Band              | Effective SLOC | Meaning                          |
+| ----------------- | -------------- | -------------------------------- |
+| (not a candidate) | `< 400`        | Ignored / dropped.               |
+| **Moderate risk** | `400 – 999`    | Potential problem.               |
+| **High risk**     | `>= 1000`      | High-risk refactoring candidate. |
 
 Scope is limited to **programming languages** only. All 16 currently-supported
 tree-hugger grammars are programming languages (Rust, JavaScript, TypeScript,
 Go, Python, Java, C#, C, C++, Swift, Scala, PHP, Perl, Bash, Zsh, Lua). CSS and
-HTML are explicitly *not* programming languages, but they are also not currently
+HTML are explicitly _not_ programming languages, but they are also not currently
 supported grammars, so no file is excluded today. To future-proof against
 markup grammars being added, the library gains an
 `ProgrammingLanguage::is_programming_language() -> bool` predicate (returns
@@ -46,7 +50,7 @@ These decisions are settled and drive the design below.
    (physical − blank − comment-only lines, derived from the parse tree) is the
    **authoritative** metric that decides final risk classification.
 2. **Re-filter (both bands).** After SLOC is computed, files are reclassified at
-   *both* boundaries: a file under 400 effective lines is **dropped**; a file
+   _both_ boundaries: a file under 400 effective lines is **dropped**; a file
    whose physical lines were `>= 1000` but whose SLOC is `< 1000` is **demoted**
    high → moderate. The reported number always matches the risk reasoning.
 3. **Cache API — interior mutability (`&self`).** `OnceCell`-backed caches so
@@ -104,7 +108,7 @@ impl GodFiles {
 - `OnceCell` (single-threaded `std::cell::OnceCell`) is sufficient because the
   caches are filled once behind `&self` within a command. If a `Sync` variant is
   later required (sharing a `GodFiles` across threads), swap to `OnceLock`.
-- The expensive *inner* work (walking, counting, parsing) uses `rayon`
+- The expensive _inner_ work (walking, counting, parsing) uses `rayon`
   internally; the `OnceCell` only guards the memoized result.
 - `candidates()` returning `&Vec<PathBuf>` matches the requested
   `.candidates() -> &Vec<Path>` API (using owned `PathBuf` rather than borrowed
@@ -192,34 +196,34 @@ pub enum RefactorHint {
 
 1. Ensure `candidates()` is populated.
 2. In parallel, for each candidate: `TreeFile::new(path)` → derive:
-   - **Effective SLOC.** Walk the parse tree's comment nodes (per-language
-     `comments.scm`) to mark comment-only lines; mark blank lines from source;
-     `effective_sloc = physical − blank − comment_only`. (A line containing both
-     code and a trailing comment counts as code.)
-   - **Re-filter:** drop if `effective_sloc < 400`; otherwise band by SLOC.
-   - **Blocks.** From `symbols()` / `symbol_records()`, compute per-symbol SLOC
-     over its span, rank desc, apply top-N + floor, set `blocks_truncated`.
-   - **Structural shape.** `top_level_symbol_count` = symbols with no container;
-     `kind_histogram` tallies `SymbolKind` across top-level symbols.
-   - **Max nesting depth.** Deepest block-nesting via a single tree walk.
-   - **Coupling/debt.** `import_fan_out` = `imported_symbols().len()`;
-     `todo_fixme_count` from comment text; `comment_density` from comment lines.
-   - **Container call-outs.** For each container symbol, count structural members
-     (exclude `Variable`/`Field`/`Parameter`); attach `ContainerCallout` when
-     `> MANY_MEMBERS_THRESHOLD`.
-   - **Refactor hints.** Rule-based synthesis from the signals above.
+    - **Effective SLOC.** Walk the parse tree's comment nodes (per-language
+      `comments.scm`) to mark comment-only lines; mark blank lines from source;
+      `effective_sloc = physical − blank − comment_only`. (A line containing both
+      code and a trailing comment counts as code.)
+    - **Re-filter:** drop if `effective_sloc < 400`; otherwise band by SLOC.
+    - **Blocks.** From `symbols()` / `symbol_records()`, compute per-symbol SLOC
+      over its span, rank desc, apply top-N + floor, set `blocks_truncated`.
+    - **Structural shape.** `top_level_symbol_count` = symbols with no container;
+      `kind_histogram` tallies `SymbolKind` across top-level symbols.
+    - **Max nesting depth.** Deepest block-nesting via a single tree walk.
+    - **Coupling/debt.** `import_fan_out` = `imported_symbols().len()`;
+      `todo_fixme_count` from comment text; `comment_density` from comment lines.
+    - **Container call-outs.** For each container symbol, count structural members
+      (exclude `Variable`/`Field`/`Parameter`); attach `ContainerCallout` when
+      `> MANY_MEMBERS_THRESHOLD`.
+    - **Refactor hints.** Rule-based synthesis from the signals above.
 3. Sort results: **High before Moderate**, then by `effective_sloc` desc within
    each band; store in the cache.
 
 ### 4.5 Constants (tunable, documented)
 
-| Constant                  | Default | Purpose                                  |
-|---------------------------|---------|------------------------------------------|
-| `MODERATE_MIN_SLOC`       | 400     | Lower bound of moderate band.            |
-| `HIGH_MIN_SLOC`           | 1000    | Lower bound of high band.                |
-| `MAX_BLOCKS`              | 8       | Cap on listed symbol blocks per file.    |
-| `MIN_BLOCK_SLOC`          | 15      | Floor below which a symbol is not listed.|
-| `MANY_MEMBERS_THRESHOLD`  | 10      | Member count above which a container is called out. |
+| Constant                 | Default | Purpose                                             |
+| ------------------------ | ------- | --------------------------------------------------- |
+| `MODERATE_MIN_SLOC`      | 400     | Lower bound of moderate band.                       |
+| `HIGH_MIN_SLOC`          | 1000    | Lower bound of high band.                           |
+| `MAX_BLOCKS`             | 8       | Cap on listed symbol blocks per file.               |
+| `MIN_BLOCK_SLOC`         | 15      | Floor below which a symbol is not listed.           |
+| `MANY_MEMBERS_THRESHOLD` | 10      | Member count above which a container is called out. |
 
 ## 5. CLI Design
 
@@ -271,13 +275,13 @@ where `{section}` is `High risk` or `Moderate risk`.
 **Nested under each file item:**
 
 - `- the largest blocks in this file are composed by these symbols:`
-  - one line per `SymbolBlock`: kind + name + line span + SLOC, with the
-    `doc_summary` appended inline (dimmed) for context when present.
-  - when `many_members` is set, a `(N members)` note plus an indented
-    sub-list of notable members.
-  - a final `- …and {blocks_truncated} more` line when truncated.
+    - one line per `SymbolBlock`: kind + name + line span + SLOC, with the
+      `doc_summary` appended inline (dimmed) for context when present.
+    - when `many_members` is set, a `(N members)` note plus an indented
+      sub-list of notable members.
+    - a final `- …and {blocks_truncated} more` line when truncated.
 - a compact **signals** line: `top-level symbols: {n} · max depth: {d} ·
-  imports: {f} · TODO/FIXME: {t} · comments: {density%}`.
+imports: {f} · TODO/FIXME: {t} · comments: {density%}`.
 - each `RefactorHint` as a short dimmed bullet (e.g.
   `- likely refactor: one symbol holds {share%} of the code — extract methods`).
 
@@ -347,4 +351,7 @@ High risk
   with comment-node detection; refine if corpus shows skew.
 - Optional severity sort by a blended score (SLOC × depth × coupling) instead of
   pure SLOC — deferred.
+
+```
+
 ```

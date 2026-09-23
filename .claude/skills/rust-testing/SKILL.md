@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-585d42d315b87712
-last_updated: 2026-09-16
+hash: 61d07be7e22c9f45-c5ce954ede8d2d45
+last_updated: 2026-09-22
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -561,13 +561,86 @@ An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
 expressions and must anchor them too — `_tier_filter` cannot reach inside an
 override.
 
-**Narrowing a recipe to one test binary** is `--test <stem>` through the
-recipe's `*args` (`just test-cli --test context_command`): it leaves the
-tier filterset alone. `-E 'binary(x)'` does not survive the recipes' two-layer
-argument interpolation, and `BISCUIT_TEST_FILTER` replaces the tier expression
-outright. Where a public `test-l2` fans out to a second package (claudine's
-also runs `claudine-gen`), narrow by calling the shared recipe directly:
-`just _test_l2 <pkg> --features terminal-tests --test <stem>`.
+**Narrowing a recipe to one subject** is a positional test-name filter through
+the recipe's `*args`: `just test-cli context_command::` in `claudine/`. The
+recipe keeps the tier's `-E` expression, and nextest runs only tests that match
+**both** the expression and the name (checked on nextest 0.9.136: an L2
+expression plus an L1-only module selects nothing). Keep the trailing `::` so
+the filter names the module, not every test path that contains the word. In a
+package with consolidated binaries (next section), the former per-file target
+is now that module, so this is how you select it. `--test <old-file-stem>`
+names a target that no longer exists. `-E 'binary(x)'` does not survive the
+recipes' two-layer argument interpolation, and `BISCUIT_TEST_FILTER` replaces
+the tier expression outright. Where a public `test-l2` fans out to a second
+package (claudine's also runs `claudine-gen`), narrow by calling the shared
+recipe directly: `just _test_l2 <pkg> --features terminal-tests <module>::`.
+Outside a recipe, `cargo nextest run -p <pkg> --test l1 <module>::` selects the
+consolidated binary and the module. It carries no tier expression, so the
+module's tests from every tier compiled into that binary run.
+
+## Consolidated Integration-Test Binaries
+
+`claudine-cli`, `darkmatter`, `darkmatter-cli`, and `biscuit-terminal` no
+longer build one executable per `tests/*.rs` file. Each builds **one test
+binary per execution contract** (`2026-09-21-consolidated-test-binaries`).
+Other packages still use Cargo's per-file discovery.
+
+```text
+tests/
+  common/mod.rs          # shared helpers, compiled once per binary
+  l1/main.rs             # crate root: `#[path = "../common/mod.rs"] mod common;`, then one `mod` per former target
+  l1/context_command.rs  # a former target, now module `context_command`
+  level2/main.rs         # declared with required-features = ["terminal-tests"]
+```
+
+- **Discovery is explicit.** The package sets `autotests = false` and lists
+  every root as a `[[test]]` with a `path` (Cargo does not discover
+  `tests/l1/main.rs` on its own). A new `tests/foo.rs`, an undeclared
+  `tests/x/main.rs`, or a module file that no `mod` reaches compiles into
+  nothing, so its tests never run. A layout gate inside each package's `l1`
+  binary fails on all three: claudine's `test_placement.rs`, and elsewhere
+  `test_layout.rs`, which calls `test_toolkit::test_layout`.
+- **Adding a test file** means adding `mod <name>;` to the right root, with
+  any OS `cfg` on that declaration (`#[cfg(unix)] mod compose_cli;`). An OS
+  condition never makes a new binary. Modules reach helpers through
+  `crate::common`, not their own `mod common;`.
+- **The module name is the old target name** and is the first segment of every
+  test path: `claudine-cli::l1 context_command::<test>`. Tier markers still apply to
+  the name, so a module named `level2_*` would put all its tests in Level 2.
+  Check the name against `_tier_filter` before choosing it.
+- **The feature boundary.** Tests share a binary only when tier, the exact
+  `required-features` set, harness mode, and target-wide settings all match.
+  A consolidation never unions features. Darkmatter keeps
+  `level3-terminal` and `level3-browser` separate for this reason, and
+  `harness = false` targets (benches) do not move.
+- **Snapshots follow `module_path!()`.** An insta assertion in
+  `tests/l1/layout_matrix.rs` reads `tests/l1/snapshots/l1__layout_matrix__*.snap`.
+  Moving a module therefore moves its snapshots. Move them byte-for-byte and
+  run with `INSTA_UPDATE=no`. Never regenerate to go green.
+- **Legacy shape, not a pattern.** biscuit-terminal's
+  `tests/l1/parity_helpers.rs` is compiled once as its own module and again
+  privately inside 18 parity modules (`#[allow(clippy::duplicate_mod)]
+  #[path = "parity_helpers.rs"]`). Each former binary ran its own copy of
+  its unit tests, and the move kept those test identities. New helpers go in
+  `common/` or beside their one user and are declared once.
+
+### Process isolation is a nextest guarantee, not a Rust one
+
+Nextest runs **each test case in its own process**, even when cases share a
+binary. So under the canonical recipes a consolidated binary shares nothing
+between cases that per-file binaries did not share: mutable statics, the
+current directory, environment changes, `SetStdHandle` rewiring, `atexit`
+handlers, and `serial_test` state all stay per-case. One exception: code that
+runs before libtest picks a case (a global constructor or allocator) runs in
+every one of those processes.
+
+**`cargo test` breaks that contract.** Its harness runs every case of a binary
+in one process on parallel threads. Consolidation puts up to a hundred formerly
+separate crates into one such process. A test that sets an env var or changes
+directory then races every sibling it now shares a binary with. Run a migrated
+suite only through the Nextest-backed recipes (or `cargo nextest` directly).
+Never present `cargo test` in docs or recipes as an equivalent way to run one.
+`cargo test --doc` is unaffected: doctests are not integration-test binaries.
 
 ## Leaked Process Detection
 
@@ -631,6 +704,31 @@ producer) and what each stage cost. A cell that could not run at all is
 `MISSING — blocked by build <key>`: its archive never arrived, and that is an
 infrastructure failure, never a test result and never baseline-eligible.
 
+## A Test That Reads a Repository File Is Scheduled By It
+
+A change to a Markdown doc, YAML schema, or fixture selects no package, so the
+planner finds the tests that read it from their source
+and runs exactly those — on Linux in CI, or on the pushing host, whose
+exact-tree run satisfies the CI cell. It
+recognizes a read only in forms it can resolve without running anything, so
+spell yours in one of them or the file's next edit will not run your test:
+
+- **Embed it** — `include_str!("../../docs/x.md")` also makes a missing file a
+  compile error rather than a runtime one.
+- **Join it onto a root in the same expression** —
+  `manifest_dir!().join("tests/fixtures/x.json")`,
+  `repo_root().join("darkmatter/docs/x.md")`, or a name the same file binds to
+  one (`let root = repo_root();`, `fn docs() -> PathBuf { manifest_dir!().join("docs") }`).
+  `.parent()` steps are followed. A root-anchored directory counts for every
+  file under it.
+- **Or write the full repository-relative path** as a literal (a table of
+  documents walked later), in a file that reads through a root somewhere.
+
+Paths assembled from `format!`, a value computed at run time, or a helper
+defined in another file are invisible, and a literal joined onto a tempdir is
+correctly treated as a fixture, not a read. The why and the evidence rules are
+in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
+
 ## Environment Contract
 
 | Variable                             | Purpose                                                                                                        |
@@ -670,7 +768,7 @@ reference implementation:
 | Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
 | Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | each area's `cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
+| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine and darkmatter, `cli/tests/spawn_site_guard.rs` in sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
 
 **Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
 live-child test needs a `std::process::Command` — and hand-building one

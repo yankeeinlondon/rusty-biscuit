@@ -96,6 +96,12 @@ throughout the rest of the document.
   each test in its own process, supports name-based filtering, and produces
   machine-readable reports. Prefer the `just` recipes over invoking nextest
   directly; the recipes carry the filter expressions and environment setup.
+  Some packages compile all of a tier's integration tests into one binary
+  (`tests/l1/`, `tests/level2/`, ...). The process-per-test guarantee is what
+  keeps those tests from sharing environment variables, working directories,
+  or statics, so `cargo test`, which runs a binary's tests in one process, is
+  not an equivalent way to run them. To run one subject, pass its module name
+  to the recipe, for example `just test-cli context_command::` in `claudine/`.
 
 ## What kinds of testing we do
 

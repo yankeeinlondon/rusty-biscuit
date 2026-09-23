@@ -1,0 +1,35 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `claudine-cli` (bin "claudine") generated 1 warning
+   Compiling claudine-cli v0.1.0 (/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/claudine/cli)
+warning: `claudine-cli` (bin "claudine" test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.85s
+────────────
+ Nextest run ID 740dc100-f27b-4f45-8788-b73038864d3a with nextest profile: default
+    Starting 1 test across 137 binaries (3002 tests skipped)
+        PASS [   0.341s] (1/1) claudine-cli::agent_cwd handle_rejects_present_non_absolute_agent_cwd
+────────────
+     Summary [   0.350s] 1 test run: 1 passed, 3002 skipped
+       14.99 real         8.00 user         5.39 sys
+          1253752832  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              484970  page reclaims
+               60037  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 155  messages sent
+                 141  messages received
+                 155  signals received
+                5327  voluntary context switches
+               88375  involuntary context switches
+          1218204555  instructions retired
+           656968090  cycles elapsed
+            49234496  peak memory footprint

@@ -68,7 +68,7 @@ The reference implementation is `PageBlockError::UnterminatedBlock` in
 ## Snapshot Tests
 
 Every `BlockError` variant is exercised by an integration test under
-`darkmatter/lib/tests/error_snapshots/`. The tests:
+`darkmatter/lib/tests/l1/error_snapshots/`. The tests:
 
 1. Construct the variant with a representative payload.
 2. Render it via `BlockError::report_block_error_optimistic(Some(80))`.
@@ -82,7 +82,7 @@ To accept new snapshots locally:
 
 ```bash
 cd darkmatter
-INSTA_UPDATE=always cargo test -p darkmatter --test error_snapshots
+INSTA_UPDATE=always cargo nextest run -p darkmatter --test l1 error_snapshots::
 ```
 
 CI runs `cargo test` without `INSTA_UPDATE`, so any drift in rendered
@@ -97,7 +97,7 @@ output fails the build.
    header, frontmatter snapshot, and source excerpt.
 3. Escape any user-supplied strings (`replace('_', "\\_")` etc.) before
    embedding them in Prose markup.
-4. Add a snapshot test under `darkmatter/lib/tests/error_snapshots/`.
+4. Add a snapshot test under `darkmatter/lib/tests/l1/error_snapshots/`.
 5. Confirm the rendered output passes `just test` and `just lint` in the
    `darkmatter` package area.
 

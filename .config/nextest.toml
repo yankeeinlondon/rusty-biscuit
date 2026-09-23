@@ -69,7 +69,7 @@ leak-timeout = { period = "30s", result = "fail" }
 # 2026-09-08), which is close enough that ordinary contention would otherwise
 # mark a healthy run slow and a loaded runner could reach the 30s kill.
 [[profile.default.overrides]]
-filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # The sequence-budget end-to-end fixtures spawn real `claudine` sequence
@@ -80,7 +80,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # killed at the default 30s ceiling. Their own deadlines are 60s and 40s, so
 # the 90s leash lets a loaded run finish while a genuine hang still trips it.
 [[profile.default.overrides]]
-filter = 'binary_id(claudine-cli::sequence_budget)'
+filter = 'binary_id(claudine-cli::l1) & test(/^sequence_budget::/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # Proptest-driven acceptance test exploring many randomized compose conditions.
@@ -110,7 +110,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # it replaced cost nearly as much, because the capture dominates regardless of
 # how many variables are read.
 [[profile.default.overrides]]
-filter = 'test(=every_catalog_variable_survives_ambient_options)'
+filter = 'test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # These merge-regression tests intentionally perform several complete compose
@@ -239,7 +239,7 @@ retries = 0
 # today; it stays so the contract survives a change to that default rather than
 # silently inheriting a tighter one.
 [[profile.ci.overrides]]
-filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+filter = 'test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: the randomized-conditions proptest can approach
@@ -254,7 +254,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # captures, which is the comparison it performs. CI uses the same measured WSL
 # allowance.
 [[profile.ci.overrides]]
-filter = 'test(=every_catalog_variable_survives_ambient_options)'
+filter = 'test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: WezTerm CLI capture round trips make this

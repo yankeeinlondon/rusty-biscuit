@@ -53,9 +53,9 @@ whole-file byte identity uses `biscuit-hash` xxHash. No ad hoc hashing.
 1. Edit `generate.sh` and bump `generator.version` (in the script and the
    `benchmark_fixtures.rs` emitter).
 2. `bash generate.sh` — rewrites `fixtures/` deterministically.
-3. `DM_BENCH_EMIT=1 cargo nextest run -p darkmatter --test benchmark_fixtures` —
+3. `DM_BENCH_EMIT=1 cargo nextest run -p darkmatter --test l1 benchmark_fixtures::` —
    rewrites `manifest.yaml` from the new bytes.
-4. `cargo nextest run -p darkmatter --test benchmark_fixtures` — verifies.
+4. `cargo nextest run -p darkmatter --test l1 benchmark_fixtures::` — verifies.
 
 A checkpoint-specific fixture may be added only by registering and hashing it
 here **before** that checkpoint captures its baseline.

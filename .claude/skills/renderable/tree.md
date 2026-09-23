@@ -214,7 +214,7 @@ accessor that reaches back into the bag for a first-class hint fails the gate.
 
 The gate covers **every** fold: `renderable`'s own test folds the corpus through
 the Markdown, browser-fragment, and browser-streaming renderers; `biscuit-terminal`
-folds it through the terminal renderer (`tests/perf_gate.rs`). The counter is
+folds it through the terminal renderer (`tests/l1/perf_gate.rs`). The counter is
 active under `cfg(test)` and under renderable's test-only `hint-access-counter`
 feature, which `biscuit-terminal` enables from `[dev-dependencies]` so its
 out-of-crate test can observe the counter. The feature is never enabled in a

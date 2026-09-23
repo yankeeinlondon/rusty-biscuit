@@ -1,0 +1,6 @@
+# darkmatter L1 on build-linux (private --shared clone), base 048e44f7a + Phase 4 working-tree patch
+# cargo nextest run -p darkmatter --features effects-instrumentation --no-fail-fast -E "$(just _tier_filter L1 darkmatter)"  (INSTA_UPDATE=no, RUSTC_WRAPPER="")
+        FAIL [   0.009s] (6211/6494) darkmatter::l1 schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes
+        FAIL [   0.014s] (5987/6494) darkmatter::l1 horizontal_rule_integration::tests::test_custom_weight_thick_differs_from_thin
+     Summary [  16.246s] 6494 tests run: 6492 passed, 2 failed, 7 skipped
+# Both failures are pre-existing: horizontal_rule_integration fails 3/3 on the unmigrated base as its own binary on this host; schema_phase_validation reads a doc deleted by aa1f03c70 (fails on every host).

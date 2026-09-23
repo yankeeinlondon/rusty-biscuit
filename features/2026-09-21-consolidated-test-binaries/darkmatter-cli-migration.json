@@ -1,0 +1,3511 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12: the layout gate inside the l1 binary (plan Phase 5 Wave 2), calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "darkmatter/cli",
+  "dispositions": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L1-include-slow": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-2": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-3": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-4": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-5": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-6": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "darkmatter/cli/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "clean",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/clean.rs",
+      "old_binary_id": "darkmatter-cli::clean",
+      "old_path": "darkmatter/cli/tests/clean.rs",
+      "old_target": "clean",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "clean::test_clean_line_width_modes_preserve_mixed_document_structure",
+          "old": "test_clean_line_width_modes_preserve_mixed_document_structure"
+        },
+        {
+          "new": "clean::test_clean_save_rejects_stdin",
+          "old": "test_clean_save_rejects_stdin"
+        },
+        {
+          "new": "clean::test_clean_subcommand_compact_preserves_ten_digit_prose_boundary",
+          "old": "test_clean_subcommand_compact_preserves_ten_digit_prose_boundary"
+        },
+        {
+          "new": "clean::test_clean_subcommand_file",
+          "old": "test_clean_subcommand_file"
+        },
+        {
+          "new": "clean::test_clean_subcommand_fixed_width_keeps_reference_definitions_intact",
+          "old": "test_clean_subcommand_fixed_width_keeps_reference_definitions_intact"
+        },
+        {
+          "new": "clean::test_clean_subcommand_fixed_width_reflows_to_target_width",
+          "old": "test_clean_subcommand_fixed_width_reflows_to_target_width"
+        },
+        {
+          "new": "clean::test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_marker",
+          "old": "test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_marker"
+        },
+        {
+          "new": "clean::test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose",
+          "old": "test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose"
+        },
+        {
+          "new": "clean::test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping",
+          "old": "test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping"
+        },
+        {
+          "new": "clean::test_clean_subcommand_indent",
+          "old": "test_clean_subcommand_indent"
+        },
+        {
+          "new": "clean::test_clean_subcommand_indent_eight_preserves_structure",
+          "old": "test_clean_subcommand_indent_eight_preserves_structure"
+        },
+        {
+          "new": "clean::test_clean_subcommand_indent_eight_uses_exact_nested_columns",
+          "old": "test_clean_subcommand_indent_eight_uses_exact_nested_columns"
+        },
+        {
+          "new": "clean::test_clean_subcommand_list_modes_match_library_contract",
+          "old": "test_clean_subcommand_list_modes_match_library_contract"
+        },
+        {
+          "new": "clean::test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_items",
+          "old": "test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_items"
+        },
+        {
+          "new": "clean::test_clean_subcommand_preserves_markers_in_protected_bodies",
+          "old": "test_clean_subcommand_preserves_markers_in_protected_bodies"
+        },
+        {
+          "new": "clean::test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph",
+          "old": "test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph"
+        },
+        {
+          "new": "clean::test_clean_subcommand_preserves_nested_lists_inside_blockquotes",
+          "old": "test_clean_subcommand_preserves_nested_lists_inside_blockquotes"
+        },
+        {
+          "new": "clean::test_clean_subcommand_preserves_quoted_marker_looking_indented_code",
+          "old": "test_clean_subcommand_preserves_quoted_marker_looking_indented_code"
+        },
+        {
+          "new": "clean::test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines",
+          "old": "test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines"
+        },
+        {
+          "new": "clean::test_clean_subcommand_rejects_invalid_indent",
+          "old": "test_clean_subcommand_rejects_invalid_indent"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_fixed_width_reports_delta",
+          "old": "test_clean_subcommand_save_fixed_width_reports_delta"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_in_place_reports_delta",
+          "old": "test_clean_subcommand_save_in_place_reports_delta"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks",
+          "old": "test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read",
+          "old": "test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff",
+          "old": "test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff"
+        },
+        {
+          "new": "clean::test_clean_subcommand_save_verbose_reports_fixed_width_visual_delta",
+          "old": "test_clean_subcommand_save_verbose_reports_fixed_width_visual_delta"
+        },
+        {
+          "new": "clean::test_clean_subcommand_stdin",
+          "old": "test_clean_subcommand_stdin"
+        },
+        {
+          "new": "clean::test_clean_subcommand_strips_incidental_newlines_by_default",
+          "old": "test_clean_subcommand_strips_incidental_newlines_by_default"
+        },
+        {
+          "new": "clean::test_save_shorthand_cleans_in_place_and_reports_delta",
+          "old": "test_save_shorthand_cleans_in_place_and_reports_delta"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "clean_frontmatter",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/clean_frontmatter.rs",
+      "old_binary_id": "darkmatter-cli::clean_frontmatter",
+      "old_path": "darkmatter/cli/tests/clean_frontmatter.rs",
+      "old_target": "clean_frontmatter",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "clean_frontmatter::test_clean_applies_body_cleanup_alongside_frontmatter_repair",
+          "old": "test_clean_applies_body_cleanup_alongside_frontmatter_repair"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_clean_document_writes_nothing_to_stderr",
+          "old": "test_clean_clean_document_writes_nothing_to_stderr"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_does_not_suggest_repairs_it_applied",
+          "old": "test_clean_does_not_suggest_repairs_it_applied"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_empty_frontmatter_succeeds",
+          "old": "test_clean_empty_frontmatter_succeeds"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_fenced_yaml_body_block_produces_no_diagnostics",
+          "old": "test_clean_fenced_yaml_body_block_produces_no_diagnostics"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_file_preserves_trimmed_delimiters_and_their_line_endings",
+          "old": "test_clean_file_preserves_trimmed_delimiters_and_their_line_endings"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_file_repairs_bom_frontmatter",
+          "old": "test_clean_file_repairs_bom_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_file_repairs_lone_cr_frontmatter",
+          "old": "test_clean_file_repairs_lone_cr_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_ignores_yaml_in_fenced_body_blocks",
+          "old": "test_clean_ignores_yaml_in_fenced_body_blocks"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_implicit_stdin_repairs_reserved_indicator_scalar",
+          "old": "test_clean_implicit_stdin_repairs_reserved_indicator_scalar"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_is_idempotent_across_fixture_classes",
+          "old": "test_clean_is_idempotent_across_fixture_classes"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_leaves_fenced_yaml_body_block_byte_identical",
+          "old": "test_clean_leaves_fenced_yaml_body_block_byte_identical"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_leaves_unconstrained_ambiguous_scalar_byte_identical",
+          "old": "test_clean_leaves_unconstrained_ambiguous_scalar_byte_identical"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_no_frontmatter_is_unchanged",
+          "old": "test_clean_no_frontmatter_is_unchanged"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_output_is_idempotent",
+          "old": "test_clean_output_is_idempotent"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_preserves_untouched_frontmatter_ranges",
+          "old": "test_clean_preserves_untouched_frontmatter_ranges"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_repairs_reserved_indicator_scalar",
+          "old": "test_clean_repairs_reserved_indicator_scalar"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_reports_each_suggestion_once_across_both_syntax_passes",
+          "old": "test_clean_reports_each_suggestion_once_across_both_syntax_passes"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_omits_repair_notice_for_valid_frontmatter",
+          "old": "test_clean_save_omits_repair_notice_for_valid_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_preserves_trimmed_delimiters_and_their_line_endings",
+          "old": "test_clean_save_preserves_trimmed_delimiters_and_their_line_endings"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_repairs_bom_frontmatter",
+          "old": "test_clean_save_repairs_bom_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_repairs_lone_cr_frontmatter",
+          "old": "test_clean_save_repairs_lone_cr_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_repairs_reserved_indicator_scalar",
+          "old": "test_clean_save_repairs_reserved_indicator_scalar"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_save_reports_frontmatter_repair_rather_than_no_changes",
+          "old": "test_clean_save_reports_frontmatter_repair_rather_than_no_changes"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings",
+          "old": "test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_stdin_repairs_bom_frontmatter",
+          "old": "test_clean_stdin_repairs_bom_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_stdin_repairs_lone_cr_frontmatter",
+          "old": "test_clean_stdin_repairs_lone_cr_frontmatter"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_stdin_repairs_reserved_indicator_scalar",
+          "old": "test_clean_stdin_repairs_reserved_indicator_scalar"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_suggestions_go_to_stderr_with_exit_zero",
+          "old": "test_clean_suggestions_go_to_stderr_with_exit_zero"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_unrepairable_stdin_exits_one_with_error_on_stderr",
+          "old": "test_clean_unrepairable_stdin_exits_one_with_error_on_stderr"
+        },
+        {
+          "new": "clean_frontmatter::test_clean_unrepairable_yaml_exits_one_and_leaves_file_untouched",
+          "old": "test_clean_unrepairable_yaml_exits_one_and_leaves_file_untouched"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "clean_json",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/clean_json.rs",
+      "old_binary_id": "darkmatter-cli::clean_json",
+      "old_path": "darkmatter/cli/tests/clean_json.rs",
+      "old_target": "clean_json",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "clean_json::test_json_bom_repair_is_audited_in_document_coordinates",
+          "old": "test_json_bom_repair_is_audited_in_document_coordinates"
+        },
+        {
+          "new": "clean_json::test_json_changed_reports_body_only_cleanup",
+          "old": "test_json_changed_reports_body_only_cleanup"
+        },
+        {
+          "new": "clean_json::test_json_combines_syntax_and_schema_diagnostics",
+          "old": "test_json_combines_syntax_and_schema_diagnostics"
+        },
+        {
+          "new": "clean_json::test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited",
+          "old": "test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited"
+        },
+        {
+          "new": "clean_json::test_json_diagnostic_shape_is_fully_pinned",
+          "old": "test_json_diagnostic_shape_is_fully_pinned"
+        },
+        {
+          "new": "clean_json::test_json_empty_frontmatter_is_present_with_empty_span",
+          "old": "test_json_empty_frontmatter_is_present_with_empty_span"
+        },
+        {
+          "new": "clean_json::test_json_envelope_has_exactly_the_documented_top_level_fields",
+          "old": "test_json_envelope_has_exactly_the_documented_top_level_fields"
+        },
+        {
+          "new": "clean_json::test_json_multi_diagnostic_ordering_is_deterministic",
+          "old": "test_json_multi_diagnostic_ordering_is_deterministic"
+        },
+        {
+          "new": "clean_json::test_json_no_frontmatter_envelope_is_null_and_empty",
+          "old": "test_json_no_frontmatter_envelope_is_null_and_empty"
+        },
+        {
+          "new": "clean_json::test_json_report_only_diagnostic_has_empty_repairs_array",
+          "old": "test_json_report_only_diagnostic_has_empty_repairs_array"
+        },
+        {
+          "new": "clean_json::test_json_schema_span_uses_authored_crlf_coordinates",
+          "old": "test_json_schema_span_uses_authored_crlf_coordinates"
+        },
+        {
+          "new": "clean_json::test_json_schema_span_uses_authored_lone_cr_coordinates",
+          "old": "test_json_schema_span_uses_authored_lone_cr_coordinates"
+        },
+        {
+          "new": "clean_json::test_json_span_columns_are_byte_indexed",
+          "old": "test_json_span_columns_are_byte_indexed"
+        },
+        {
+          "new": "clean_json::test_json_spans_are_projected_into_document_coordinates",
+          "old": "test_json_spans_are_projected_into_document_coordinates"
+        },
+        {
+          "new": "clean_json::test_json_stacked_syntax_and_schema_spans_index_authored_lexemes",
+          "old": "test_json_stacked_syntax_and_schema_spans_index_authored_lexemes"
+        },
+        {
+          "new": "clean_json::test_json_stdin_reports_null_path",
+          "old": "test_json_stdin_reports_null_path"
+        },
+        {
+          "new": "clean_json::test_json_suppresses_document_and_human_rendering_on_stdout",
+          "old": "test_json_suppresses_document_and_human_rendering_on_stdout"
+        },
+        {
+          "new": "clean_json::test_json_unrepairable_frontmatter_exits_one_with_envelope",
+          "old": "test_json_unrepairable_frontmatter_exits_one_with_envelope"
+        },
+        {
+          "new": "clean_json::test_json_with_save_suppresses_delta_report",
+          "old": "test_json_with_save_suppresses_delta_report"
+        },
+        {
+          "new": "clean_json::test_json_with_save_writes_file_and_prints_envelope",
+          "old": "test_json_with_save_writes_file_and_prints_envelope"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "clean_schema",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/clean_schema.rs",
+      "old_binary_id": "darkmatter-cli::clean_schema",
+      "old_path": "darkmatter/cli/tests/clean_schema.rs",
+      "old_target": "clean_schema",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "clean_schema::test_absent_and_empty_frontmatter_perform_no_schema_work",
+          "old": "test_absent_and_empty_frontmatter_perform_no_schema_work"
+        },
+        {
+          "new": "clean_schema::test_absent_frontmatter_never_resolves_the_schema_override",
+          "old": "test_absent_frontmatter_never_resolves_the_schema_override"
+        },
+        {
+          "new": "clean_schema::test_baseline_schema_flag_drives_schema_proven_quoting",
+          "old": "test_baseline_schema_flag_drives_schema_proven_quoting"
+        },
+        {
+          "new": "clean_schema::test_baseline_schema_flags_conflict",
+          "old": "test_baseline_schema_flags_conflict"
+        },
+        {
+          "new": "clean_schema::test_default_baseline_is_active_and_no_baseline_schema_disables_it",
+          "old": "test_default_baseline_is_active_and_no_baseline_schema_disables_it"
+        },
+        {
+          "new": "clean_schema::test_document_inline_schema_drives_quoting",
+          "old": "test_document_inline_schema_drives_quoting"
+        },
+        {
+          "new": "clean_schema::test_document_root_union_schema_drives_quoting",
+          "old": "test_document_root_union_schema_drives_quoting"
+        },
+        {
+          "new": "clean_schema::test_document_schema_file_reference_drives_quoting",
+          "old": "test_document_schema_file_reference_drives_quoting"
+        },
+        {
+          "new": "clean_schema::test_matching_trigger_schema_drives_quoting",
+          "old": "test_matching_trigger_schema_drives_quoting"
+        },
+        {
+          "new": "clean_schema::test_no_baseline_schema_suppresses_quoting",
+          "old": "test_no_baseline_schema_suppresses_quoting"
+        },
+        {
+          "new": "clean_schema::test_no_trigger_schemas_disables_discovery",
+          "old": "test_no_trigger_schemas_disables_discovery"
+        },
+        {
+          "new": "clean_schema::test_nonmatching_trigger_schema_is_inert",
+          "old": "test_nonmatching_trigger_schema_is_inert"
+        },
+        {
+          "new": "clean_schema::test_save_shorthand_uses_default_schema_state_and_repairs",
+          "old": "test_save_shorthand_uses_default_schema_state_and_repairs"
+        },
+        {
+          "new": "clean_schema::test_schema_flag_replaces_document_schema_layer",
+          "old": "test_schema_flag_replaces_document_schema_layer"
+        },
+        {
+          "new": "clean_schema::test_schema_flag_supplies_schema_to_document_without_one",
+          "old": "test_schema_flag_supplies_schema_to_document_without_one"
+        },
+        {
+          "new": "clean_schema::test_stdin_does_not_discover_repository_trigger_schemas",
+          "old": "test_stdin_does_not_discover_repository_trigger_schemas"
+        },
+        {
+          "new": "clean_schema::test_stdin_honors_schema_flag",
+          "old": "test_stdin_honors_schema_flag"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "code_block",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/code_block.rs",
+      "old_binary_id": "darkmatter-cli::code_block",
+      "old_path": "darkmatter/cli/tests/code_block.rs",
+      "old_target": "code_block",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "code_block::code_block_code_theme_env_changes_html_output_without_flag",
+          "old": "code_block_code_theme_env_changes_html_output_without_flag"
+        },
+        {
+          "new": "code_block::code_block_content_flag_treats_input_as_literal",
+          "old": "code_block_content_flag_treats_input_as_literal"
+        },
+        {
+          "new": "code_block::code_block_explicit_file_flag_treats_input_as_path",
+          "old": "code_block_explicit_file_flag_treats_input_as_path"
+        },
+        {
+          "new": "code_block::code_block_falls_back_to_literal_when_path_does_not_exist",
+          "old": "code_block_falls_back_to_literal_when_path_does_not_exist"
+        },
+        {
+          "new": "code_block::code_block_file_flag_reads_existing_file",
+          "old": "code_block_file_flag_reads_existing_file"
+        },
+        {
+          "new": "code_block::code_block_help_lists_all_options",
+          "old": "code_block_help_lists_all_options"
+        },
+        {
+          "new": "code_block::code_block_highlight_invalid_range_errors",
+          "old": "code_block_highlight_invalid_range_errors"
+        },
+        {
+          "new": "code_block::code_block_highlight_inverted_range_errors",
+          "old": "code_block_highlight_inverted_range_errors"
+        },
+        {
+          "new": "code_block::code_block_highlight_non_numeric_errors",
+          "old": "code_block_highlight_non_numeric_errors"
+        },
+        {
+          "new": "code_block::code_block_highlight_range_changes_panel_background",
+          "old": "code_block_highlight_range_changes_panel_background"
+        },
+        {
+          "new": "code_block::code_block_html_output_emits_pre_code_class",
+          "old": "code_block_html_output_emits_pre_code_class"
+        },
+        {
+          "new": "code_block::code_block_html_output_escapes_special_chars",
+          "old": "code_block_html_output_escapes_special_chars"
+        },
+        {
+          "new": "code_block::code_block_html_output_matches_fenced_markdown_fence",
+          "old": "code_block_html_output_matches_fenced_markdown_fence"
+        },
+        {
+          "new": "code_block::code_block_language_alias_resolves",
+          "old": "code_block_language_alias_resolves"
+        },
+        {
+          "new": "code_block::code_block_line_numbering_renders_gutter",
+          "old": "code_block_line_numbering_renders_gutter"
+        },
+        {
+          "new": "code_block::code_block_markdown_output_emits_fence_with_language",
+          "old": "code_block_markdown_output_emits_fence_with_language"
+        },
+        {
+          "new": "code_block::code_block_markdown_output_preserves_highlight",
+          "old": "code_block_markdown_output_preserves_highlight"
+        },
+        {
+          "new": "code_block::code_block_markdown_output_preserves_title_and_line_numbering",
+          "old": "code_block_markdown_output_preserves_title_and_line_numbering"
+        },
+        {
+          "new": "code_block::code_block_renders_file_inferred_from_extension",
+          "old": "code_block_renders_file_inferred_from_extension"
+        },
+        {
+          "new": "code_block::code_block_renders_literal_content_with_language_flag",
+          "old": "code_block_renders_literal_content_with_language_flag"
+        },
+        {
+          "new": "code_block::code_block_renders_rust_file_with_explicit_language",
+          "old": "code_block_renders_rust_file_with_explicit_language"
+        },
+        {
+          "new": "code_block::code_block_subcommand_appears_in_top_level_help",
+          "old": "code_block_subcommand_appears_in_top_level_help"
+        },
+        {
+          "new": "code_block::code_block_terminal_output_contains_ansi",
+          "old": "code_block_terminal_output_contains_ansi"
+        },
+        {
+          "new": "code_block::code_block_theme_env_changes_terminal_output_without_flag",
+          "old": "code_block_theme_env_changes_terminal_output_without_flag"
+        },
+        {
+          "new": "code_block::code_block_theme_flag_wins_over_theme_env",
+          "old": "code_block_theme_flag_wins_over_theme_env"
+        },
+        {
+          "new": "code_block::code_block_theme_override_changes_html_output",
+          "old": "code_block_theme_override_changes_html_output"
+        },
+        {
+          "new": "code_block::code_block_theme_override_changes_terminal_output",
+          "old": "code_block_theme_override_changes_terminal_output"
+        },
+        {
+          "new": "code_block::code_block_title_appears_in_header_row",
+          "old": "code_block_title_appears_in_header_row"
+        },
+        {
+          "new": "code_block::code_block_unknown_language_renders_as_text",
+          "old": "code_block_unknown_language_renders_as_text"
+        },
+        {
+          "new": "code_block::code_block_yml_alias_resolves_to_yaml",
+          "old": "code_block_yml_alias_resolves_to_yaml"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_array_rendering",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_array_rendering.rs",
+      "old_binary_id": "darkmatter-cli::compose_array_rendering",
+      "old_path": "darkmatter/cli/tests/compose_array_rendering.rs",
+      "old_target": "compose_array_rendering",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_array_rendering::compose_body_renders_bare_array_as_compact_json",
+          "old": "compose_body_renders_bare_array_as_compact_json"
+        },
+        {
+          "new": "compose_array_rendering::compose_keeps_as_line_separated_newline_joined",
+          "old": "compose_keeps_as_line_separated_newline_joined"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_base_schema",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_base_schema.rs",
+      "old_binary_id": "darkmatter-cli::compose_base_schema",
+      "old_path": "darkmatter/cli/tests/compose_base_schema.rs",
+      "old_target": "compose_base_schema",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_base_schema::compose_custom_baseline_schema_overrides_default_baseline",
+          "old": "compose_custom_baseline_schema_overrides_default_baseline"
+        },
+        {
+          "new": "compose_base_schema::compose_default_baseline_rejects_custom_ctx_keys",
+          "old": "compose_default_baseline_rejects_custom_ctx_keys"
+        },
+        {
+          "new": "compose_base_schema::compose_document_schema_precedence_is_preserved",
+          "old": "compose_document_schema_precedence_is_preserved"
+        },
+        {
+          "new": "compose_base_schema::compose_explicit_baseline_schema_wins_over_no_baseline_schema_env",
+          "old": "compose_explicit_baseline_schema_wins_over_no_baseline_schema_env"
+        },
+        {
+          "new": "compose_base_schema::compose_generated_ctx_reference_succeeds_without_authored_ctx",
+          "old": "compose_generated_ctx_reference_succeeds_without_authored_ctx"
+        },
+        {
+          "new": "compose_base_schema::compose_no_baseline_schema_disables_default_baseline",
+          "old": "compose_no_baseline_schema_disables_default_baseline"
+        },
+        {
+          "new": "compose_base_schema::compose_no_baseline_schema_env_disables_default_baseline",
+          "old": "compose_no_baseline_schema_env_disables_default_baseline"
+        },
+        {
+          "new": "compose_base_schema::compose_unknown_frontmatter_keys_remain_allowed",
+          "old": "compose_unknown_frontmatter_keys_remain_allowed"
+        },
+        {
+          "new": "compose_base_schema::compose_uses_darkmatter_base_schema_by_default",
+          "old": "compose_uses_darkmatter_base_schema_by_default"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_basic",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_basic.rs",
+      "old_binary_id": "darkmatter-cli::compose_basic",
+      "old_path": "darkmatter/cli/tests/compose_basic.rs",
+      "old_target": "compose_basic",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_basic::test_compose_basic",
+          "old": "test_compose_basic"
+        },
+        {
+          "new": "compose_basic::test_compose_frontmatter_flag_emits_single_block_with_nested_quotes",
+          "old": "test_compose_frontmatter_flag_emits_single_block_with_nested_quotes"
+        },
+        {
+          "new": "compose_basic::test_compose_markdown_plus_renders_disclosure_as_details",
+          "old": "test_compose_markdown_plus_renders_disclosure_as_details"
+        },
+        {
+          "new": "compose_basic::test_compose_output_html",
+          "old": "test_compose_output_html"
+        },
+        {
+          "new": "compose_basic::test_compose_runs_frontmatter_shell_with_nested_quotes",
+          "old": "test_compose_runs_frontmatter_shell_with_nested_quotes"
+        },
+        {
+          "new": "compose_basic::test_compose_strips_frontmatter",
+          "old": "test_compose_strips_frontmatter"
+        },
+        {
+          "new": "compose_basic::test_compose_strips_frontmatter_when_values_contain_shell_substitution",
+          "old": "test_compose_strips_frontmatter_when_values_contain_shell_substitution"
+        },
+        {
+          "new": "compose_basic::test_compose_with_state",
+          "old": "test_compose_with_state"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_interpolation",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_interpolation.rs",
+      "old_binary_id": "darkmatter-cli::compose_interpolation",
+      "old_path": "darkmatter/cli/tests/compose_interpolation.rs",
+      "old_target": "compose_interpolation",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_double_pipe_fallback",
+          "old": "test_compose_frontmatter_double_pipe_fallback"
+        },
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_double_pipe_with_set_value",
+          "old": "test_compose_frontmatter_double_pipe_with_set_value"
+        },
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_interpolation_basic",
+          "old": "test_compose_frontmatter_interpolation_basic"
+        },
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_interpolation_ctx_in_frontmatter_only",
+          "old": "test_compose_frontmatter_interpolation_ctx_in_frontmatter_only"
+        },
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_interpolation_nested_state",
+          "old": "test_compose_frontmatter_interpolation_nested_state"
+        },
+        {
+          "new": "compose_interpolation::test_compose_frontmatter_nested_quotes_in_interpolation",
+          "old": "test_compose_frontmatter_nested_quotes_in_interpolation"
+        },
+        {
+          "new": "compose_interpolation::test_compose_invalid_file_reference_reports_cause_not_mechanism",
+          "old": "test_compose_invalid_file_reference_reports_cause_not_mechanism"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_layout",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_layout.rs",
+      "old_binary_id": "darkmatter-cli::compose_layout",
+      "old_path": "darkmatter/cli/tests/compose_layout.rs",
+      "old_target": "compose_layout",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_layout::test_compose_compact",
+          "old": "test_compose_compact"
+        },
+        {
+          "new": "compose_layout::test_compose_loose",
+          "old": "test_compose_loose"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_page_blocks",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_page_blocks.rs",
+      "old_binary_id": "darkmatter-cli::compose_page_blocks",
+      "old_path": "darkmatter/cli/tests/compose_page_blocks.rs",
+      "old_target": "compose_page_blocks",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_page_blocks::test_compose_motivating_spec_ternary_absent_when_spec_missing",
+          "old": "test_compose_motivating_spec_ternary_absent_when_spec_missing"
+        },
+        {
+          "new": "compose_page_blocks::test_compose_motivating_spec_ternary_resolves_when_spec_present",
+          "old": "test_compose_motivating_spec_ternary_resolves_when_spec_present"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_perf",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_perf.rs",
+      "old_binary_id": "darkmatter-cli::compose_perf",
+      "old_path": "darkmatter/cli/tests/compose_perf.rs",
+      "old_target": "compose_perf",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_perf::test_compose_perf_emits_report_to_stderr",
+          "old": "test_compose_perf_emits_report_to_stderr"
+        },
+        {
+          "new": "compose_perf::test_compose_without_perf_no_report_on_stderr",
+          "old": "test_compose_without_perf_no_report_on_stderr"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_refs_and_missing",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_refs_and_missing.rs",
+      "old_binary_id": "darkmatter-cli::compose_refs_and_missing",
+      "old_path": "darkmatter/cli/tests/compose_refs_and_missing.rs",
+      "old_target": "compose_refs_and_missing",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_refs_and_missing::test_block_rendering_transclusion_cycle_non_tty",
+          "old": "test_block_rendering_transclusion_cycle_non_tty"
+        },
+        {
+          "new": "compose_refs_and_missing::test_block_rendering_transclusion_cycle_tty",
+          "old": "test_block_rendering_transclusion_cycle_tty"
+        },
+        {
+          "new": "compose_refs_and_missing::test_compose_object_ctx_collision_emits_warning",
+          "old": "test_compose_object_ctx_collision_emits_warning"
+        },
+        {
+          "new": "compose_refs_and_missing::test_compose_scalar_ctx_with_allow_override_succeeds",
+          "old": "test_compose_scalar_ctx_with_allow_override_succeeds"
+        },
+        {
+          "new": "compose_refs_and_missing::test_compose_scalar_ctx_without_allow_override_fails",
+          "old": "test_compose_scalar_ctx_without_allow_override_fails"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_remote_caching",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_remote_caching.rs",
+      "old_binary_id": "darkmatter-cli::compose_remote_caching",
+      "old_path": "darkmatter/cli/tests/compose_remote_caching.rs",
+      "old_target": "compose_remote_caching",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_remote_caching::mock_http_server_without_expected_request_shuts_down_within_bound",
+          "old": "mock_http_server_without_expected_request_shuts_down_within_bound"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_invalid_remote_freshness_fails_fast",
+          "old": "test_compose_invalid_remote_freshness_fails_fast"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_preserves_rendered_remote_links",
+          "old": "test_compose_preserves_rendered_remote_links"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_allowed_host_fetches_url",
+          "old": "test_compose_remote_allowed_host_fetches_url"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_deny_all_fails_without_request",
+          "old": "test_compose_remote_deny_all_fails_without_request"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_epilogue_deny_all_fails_without_request",
+          "old": "test_compose_remote_epilogue_deny_all_fails_without_request"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_expression_function_denied_host_reads_false",
+          "old": "test_compose_remote_expression_function_denied_host_reads_false"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_expression_function_reads_url",
+          "old": "test_compose_remote_expression_function_reads_url"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_fallback_serves_stale_cache_on_failure",
+          "old": "test_compose_remote_fallback_serves_stale_cache_on_failure"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_prologue_allowed_host_fetches_url",
+          "old": "test_compose_remote_prologue_allowed_host_fetches_url"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_refresh_revalidates_cached_url",
+          "old": "test_compose_remote_refresh_revalidates_cached_url"
+        },
+        {
+          "new": "compose_remote_caching::test_compose_remote_ttl_serves_cached_url_without_second_request",
+          "old": "test_compose_remote_ttl_serves_cached_url_without_second_request"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_schema",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_schema.rs",
+      "old_binary_id": "darkmatter-cli::compose_schema",
+      "old_path": "darkmatter/cli/tests/compose_schema.rs",
+      "old_target": "compose_schema",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_schema::compose_and_schema_validate_agree_on_same_document",
+          "old": "compose_and_schema_validate_agree_on_same_document"
+        },
+        {
+          "new": "compose_schema::compose_block_includes_source_path",
+          "old": "compose_block_includes_source_path"
+        },
+        {
+          "new": "compose_schema::compose_fails_fast_with_schema_block_before_shell_expansion",
+          "old": "compose_fails_fast_with_schema_block_before_shell_expansion"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_caller_value_wins_over_optional_materialization",
+          "old": "compose_frontmatter_caller_value_wins_over_optional_materialization"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_materialized_null_is_stable_after_write_and_recompose",
+          "old": "compose_frontmatter_materialized_null_is_stable_after_write_and_recompose"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_materializes_optional_parameters_as_ordered_nulls",
+          "old": "compose_frontmatter_materializes_optional_parameters_as_ordered_nulls"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_boolish_normalization",
+          "old": "compose_frontmatter_serializes_boolish_normalization"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_numberlike_normalization",
+          "old": "compose_frontmatter_serializes_numberlike_normalization"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_real_boolean",
+          "old": "compose_frontmatter_serializes_real_boolean"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_real_number",
+          "old": "compose_frontmatter_serializes_real_number"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_root_union_write_back",
+          "old": "compose_frontmatter_serializes_root_union_write_back"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_string_reverse_coercion",
+          "old": "compose_frontmatter_serializes_string_reverse_coercion"
+        },
+        {
+          "new": "compose_schema::compose_frontmatter_serializes_typed_array",
+          "old": "compose_frontmatter_serializes_typed_array"
+        },
+        {
+          "new": "compose_schema::compose_renders_summary_for_schema_preparation_failure",
+          "old": "compose_renders_summary_for_schema_preparation_failure"
+        },
+        {
+          "new": "compose_schema::compose_with_required_property_supplied_succeeds",
+          "old": "compose_with_required_property_supplied_succeeds"
+        },
+        {
+          "new": "compose_schema::compose_without_an_effective_schema_does_not_synthesize_frontmatter",
+          "old": "compose_without_an_effective_schema_does_not_synthesize_frontmatter"
+        },
+        {
+          "new": "compose_schema::first_frontmatter_interpolation_precedes_optional_materialization",
+          "old": "first_frontmatter_interpolation_precedes_optional_materialization"
+        },
+        {
+          "new": "compose_schema::materialized_optional_parameter_is_known_to_strict_subtree_compose",
+          "old": "materialized_optional_parameter_is_known_to_strict_subtree_compose"
+        },
+        {
+          "new": "compose_schema::optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions",
+          "old": "optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions"
+        },
+        {
+          "new": "compose_schema::shipped_plan_prompt_anchors_caller_file_from_package_area",
+          "old": "shipped_plan_prompt_anchors_caller_file_from_package_area"
+        },
+        {
+          "new": "compose_schema::shipped_plan_prompt_anchors_caller_file_from_repository_root",
+          "old": "shipped_plan_prompt_anchors_caller_file_from_repository_root"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_schema_file_rewrite",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_schema_file_rewrite.rs",
+      "old_binary_id": "darkmatter-cli::compose_schema_file_rewrite",
+      "old_path": "darkmatter/cli/tests/compose_schema_file_rewrite.rs",
+      "old_target": "compose_schema_file_rewrite",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_schema_file_rewrite::compose_frontmatter_shows_resolved_repo_relative_spec",
+          "old": "compose_frontmatter_shows_resolved_repo_relative_spec"
+        },
+        {
+          "new": "compose_schema_file_rewrite::compose_write_back_persists_rewritten_value_as_fixpoint",
+          "old": "compose_write_back_persists_rewritten_value_as_fixpoint"
+        },
+        {
+          "new": "compose_schema_file_rewrite::review_feature_fixture_dirname_and_review_file_agree_after_rewrite",
+          "old": "review_feature_fixture_dirname_and_review_file_agree_after_rewrite"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_shell",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_shell.rs",
+      "old_binary_id": "darkmatter-cli::compose_shell",
+      "old_path": "darkmatter/cli/tests/compose_shell.rs",
+      "old_target": "compose_shell",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_shell::test_compose_allow_shell_timeout_emits_warning",
+          "old": "test_compose_allow_shell_timeout_emits_warning"
+        },
+        {
+          "new": "compose_shell::test_compose_file_unapproved_command_fails_with_guidance",
+          "old": "test_compose_file_unapproved_command_fails_with_guidance"
+        },
+        {
+          "new": "compose_shell::test_compose_shell_reports_discovered_commands_without_executing",
+          "old": "test_compose_shell_reports_discovered_commands_without_executing"
+        },
+        {
+          "new": "compose_shell::test_compose_stdin_unapproved_command_fails_with_guidance",
+          "old": "test_compose_stdin_unapproved_command_fails_with_guidance"
+        },
+        {
+          "new": "compose_shell::test_compose_timeout_flag_fails_timed_out_shell",
+          "old": "test_compose_timeout_flag_fails_timed_out_shell"
+        },
+        {
+          "new": "compose_shell::test_compose_with_blacklisted_command_fails",
+          "old": "test_compose_with_blacklisted_command_fails"
+        },
+        {
+          "new": "compose_shell::test_compose_with_nonexistent_command_fails",
+          "old": "test_compose_with_nonexistent_command_fails"
+        },
+        {
+          "new": "compose_shell::test_compose_with_whitelisted_command_succeeds",
+          "old": "test_compose_with_whitelisted_command_succeeds"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_state_set",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_state_set.rs",
+      "old_binary_id": "darkmatter-cli::compose_state_set",
+      "old_path": "darkmatter/cli/tests/compose_state_set.rs",
+      "old_target": "compose_state_set",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_state_set::test_compose_invalid_state",
+          "old": "test_compose_invalid_state"
+        },
+        {
+          "new": "compose_state_set::test_compose_set_and_state_combined",
+          "old": "test_compose_set_and_state_combined"
+        },
+        {
+          "new": "compose_state_set::test_compose_set_invalid_json",
+          "old": "test_compose_set_invalid_json"
+        },
+        {
+          "new": "compose_state_set::test_compose_set_requires_json_object",
+          "old": "test_compose_set_requires_json_object"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_basic_file_input",
+          "old": "test_compose_shorthand_basic_file_input"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_basic_stdin",
+          "old": "test_compose_shorthand_basic_stdin"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_duplicate_keys_last_write_wins",
+          "old": "test_compose_shorthand_duplicate_keys_last_write_wins"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_empty_key_errors",
+          "old": "test_compose_shorthand_empty_key_errors"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_empty_value",
+          "old": "test_compose_shorthand_empty_value"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_json5_value",
+          "old": "test_compose_shorthand_json5_value"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_multiple_non_setter_tokens_error",
+          "old": "test_compose_shorthand_multiple_non_setter_tokens_error"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_multiple_setters_mixed_types",
+          "old": "test_compose_shorthand_multiple_setters_mixed_types"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_numeric_leading_key_is_treated_as_input_path",
+          "old": "test_compose_shorthand_numeric_leading_key_is_treated_as_input_path"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_participates_in_validation",
+          "old": "test_compose_shorthand_participates_in_validation"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_path_escape_hatch",
+          "old": "test_compose_shorthand_path_escape_hatch"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_setter_before_file_input",
+          "old": "test_compose_shorthand_setter_before_file_input"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_wins_over_set",
+          "old": "test_compose_shorthand_wins_over_set"
+        },
+        {
+          "new": "compose_state_set::test_compose_shorthand_wins_over_state",
+          "old": "test_compose_shorthand_wins_over_state"
+        },
+        {
+          "new": "compose_state_set::test_compose_state_requires_json_object",
+          "old": "test_compose_state_requires_json_object"
+        },
+        {
+          "new": "compose_state_set::test_compose_with_set_adds_missing_keys",
+          "old": "test_compose_with_set_adds_missing_keys"
+        },
+        {
+          "new": "compose_state_set::test_compose_with_set_overwrites_frontmatter",
+          "old": "test_compose_with_set_overwrites_frontmatter"
+        },
+        {
+          "new": "compose_state_set::test_set_overlay_child_interpolation",
+          "old": "test_set_overlay_child_interpolation"
+        },
+        {
+          "new": "compose_state_set::test_set_overlay_permissive_invalid_warns",
+          "old": "test_set_overlay_permissive_invalid_warns"
+        },
+        {
+          "new": "compose_state_set::test_set_overlay_permissive_reassigned_warns_and_rightmost_wins",
+          "old": "test_set_overlay_permissive_reassigned_warns_and_rightmost_wins"
+        },
+        {
+          "new": "compose_state_set::test_set_overlay_strict_rejects_invalid",
+          "old": "test_set_overlay_strict_rejects_invalid"
+        },
+        {
+          "new": "compose_state_set::test_set_overlay_strict_rejects_reassigned",
+          "old": "test_set_overlay_strict_rejects_reassigned"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_terminal_detection",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_terminal_detection.rs",
+      "old_binary_id": "darkmatter-cli::compose_terminal_detection",
+      "old_path": "darkmatter/cli/tests/compose_terminal_detection.rs",
+      "old_target": "compose_terminal_detection",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_terminal_detection::compose_redirected_does_not_spawn_appearance_defaults",
+          "old": "compose_redirected_does_not_spawn_appearance_defaults"
+        },
+        {
+          "new": "compose_terminal_detection::compose_verbose_perf_performs_single_terminal_detection",
+          "old": "compose_verbose_perf_performs_single_terminal_detection"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "compose_transclusion",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/compose_transclusion.rs",
+      "old_binary_id": "darkmatter-cli::compose_transclusion",
+      "old_path": "darkmatter/cli/tests/compose_transclusion.rs",
+      "old_target": "compose_transclusion",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "compose_transclusion::compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory",
+          "old": "compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory"
+        },
+        {
+          "new": "compose_transclusion::test_compose_env_var_substitution_one_warning",
+          "old": "test_compose_env_var_substitution_one_warning"
+        },
+        {
+          "new": "compose_transclusion::test_compose_html_spaced_attributes",
+          "old": "test_compose_html_spaced_attributes"
+        },
+        {
+          "new": "compose_transclusion::test_compose_link_relative_same_repo",
+          "old": "test_compose_link_relative_same_repo"
+        },
+        {
+          "new": "compose_transclusion::test_compose_link_transcluded_child",
+          "old": "test_compose_link_transcluded_child"
+        },
+        {
+          "new": "compose_transclusion::test_compose_set_variables_available_during_validation",
+          "old": "test_compose_set_variables_available_during_validation"
+        },
+        {
+          "new": "compose_transclusion::test_compose_state_variables_available_during_validation",
+          "old": "test_compose_state_variables_available_during_validation"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "delta",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/delta.rs",
+      "old_binary_id": "darkmatter-cli::delta",
+      "old_path": "darkmatter/cli/tests/delta.rs",
+      "old_target": "delta",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "delta::delta_golden_code_block_language_changed",
+          "old": "delta_golden_code_block_language_changed"
+        },
+        {
+          "new": "delta::delta_golden_code_block_modified",
+          "old": "delta_golden_code_block_modified"
+        },
+        {
+          "new": "delta::delta_golden_frontmatter_change",
+          "old": "delta_golden_frontmatter_change"
+        },
+        {
+          "new": "delta::delta_golden_frontmatter_scalar_type_change",
+          "old": "delta_golden_frontmatter_scalar_type_change"
+        },
+        {
+          "new": "delta::delta_golden_moved_section",
+          "old": "delta_golden_moved_section"
+        },
+        {
+          "new": "delta::delta_golden_no_change",
+          "old": "delta_golden_no_change"
+        },
+        {
+          "new": "delta::delta_golden_preamble_change",
+          "old": "delta_golden_preamble_change"
+        },
+        {
+          "new": "delta::delta_golden_section_added",
+          "old": "delta_golden_section_added"
+        },
+        {
+          "new": "delta::delta_golden_section_modified",
+          "old": "delta_golden_section_modified"
+        },
+        {
+          "new": "delta::delta_golden_section_removed",
+          "old": "delta_golden_section_removed"
+        },
+        {
+          "new": "delta::delta_golden_verbose_content_only_no_frontmatter_block",
+          "old": "delta_golden_verbose_content_only_no_frontmatter_block"
+        },
+        {
+          "new": "delta::delta_golden_verbose_frontmatter_and_content",
+          "old": "delta_golden_verbose_frontmatter_and_content"
+        },
+        {
+          "new": "delta::delta_golden_verbose_no_change",
+          "old": "delta_golden_verbose_no_change"
+        },
+        {
+          "new": "delta::delta_golden_whitespace_only",
+          "old": "delta_golden_whitespace_only"
+        },
+        {
+          "new": "delta::test_delta_subcommand_json_output",
+          "old": "test_delta_subcommand_json_output"
+        },
+        {
+          "new": "delta::test_delta_subcommand_output",
+          "old": "test_delta_subcommand_output"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "get_set_rm",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/get_set_rm.rs",
+      "old_binary_id": "darkmatter-cli::get_set_rm",
+      "old_path": "darkmatter/cli/tests/get_set_rm.rs",
+      "old_target": "get_set_rm",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "get_set_rm::test_get_compact_array",
+          "old": "test_get_compact_array"
+        },
+        {
+          "new": "get_set_rm::test_get_compact_object",
+          "old": "test_get_compact_object"
+        },
+        {
+          "new": "get_set_rm::test_get_compact_scalar_unchanged",
+          "old": "test_get_compact_scalar_unchanged"
+        },
+        {
+          "new": "get_set_rm::test_get_from_file",
+          "old": "test_get_from_file"
+        },
+        {
+          "new": "get_set_rm::test_get_json5_output",
+          "old": "test_get_json5_output"
+        },
+        {
+          "new": "get_set_rm::test_get_malformed_frontmatter_renders_status_block_with_offending_line",
+          "old": "test_get_malformed_frontmatter_renders_status_block_with_offending_line"
+        },
+        {
+          "new": "get_set_rm::test_get_missing_property_returns_empty_string",
+          "old": "test_get_missing_property_returns_empty_string"
+        },
+        {
+          "new": "get_set_rm::test_get_multiple_properties_returns_object",
+          "old": "test_get_multiple_properties_returns_object"
+        },
+        {
+          "new": "get_set_rm::test_get_multiple_with_missing_includes_empty_string",
+          "old": "test_get_multiple_with_missing_includes_empty_string"
+        },
+        {
+          "new": "get_set_rm::test_get_no_frontmatter_returns_empty_string",
+          "old": "test_get_no_frontmatter_returns_empty_string"
+        },
+        {
+          "new": "get_set_rm::test_get_raw_array_one_per_line",
+          "old": "test_get_raw_array_one_per_line"
+        },
+        {
+          "new": "get_set_rm::test_get_raw_null_returns_empty",
+          "old": "test_get_raw_null_returns_empty"
+        },
+        {
+          "new": "get_set_rm::test_get_raw_number",
+          "old": "test_get_raw_number"
+        },
+        {
+          "new": "get_set_rm::test_get_raw_object_key_value_lines",
+          "old": "test_get_raw_object_key_value_lines"
+        },
+        {
+          "new": "get_set_rm::test_get_raw_string_unquoted",
+          "old": "test_get_raw_string_unquoted"
+        },
+        {
+          "new": "get_set_rm::test_get_rejects_duplicate_keys_through_the_normal_cli_path",
+          "old": "test_get_rejects_duplicate_keys_through_the_normal_cli_path"
+        },
+        {
+          "new": "get_set_rm::test_get_requires_at_least_one_prop",
+          "old": "test_get_requires_at_least_one_prop"
+        },
+        {
+          "new": "get_set_rm::test_get_single_property_array",
+          "old": "test_get_single_property_array"
+        },
+        {
+          "new": "get_set_rm::test_get_single_property_number",
+          "old": "test_get_single_property_number"
+        },
+        {
+          "new": "get_set_rm::test_get_single_property_string",
+          "old": "test_get_single_property_string"
+        },
+        {
+          "new": "get_set_rm::test_get_tab_indented_frontmatter_property_is_populated",
+          "old": "test_get_tab_indented_frontmatter_property_is_populated"
+        },
+        {
+          "new": "get_set_rm::test_get_toml_output",
+          "old": "test_get_toml_output"
+        },
+        {
+          "new": "get_set_rm::test_get_yaml_output",
+          "old": "test_get_yaml_output"
+        },
+        {
+          "new": "get_set_rm::test_set_adds_new_property_via_stdin",
+          "old": "test_set_adds_new_property_via_stdin"
+        },
+        {
+          "new": "get_set_rm::test_set_boolean_value",
+          "old": "test_set_boolean_value"
+        },
+        {
+          "new": "get_set_rm::test_set_creates_frontmatter_when_none_exists",
+          "old": "test_set_creates_frontmatter_when_none_exists"
+        },
+        {
+          "new": "get_set_rm::test_set_json_array_value",
+          "old": "test_set_json_array_value"
+        },
+        {
+          "new": "get_set_rm::test_set_numeric_value",
+          "old": "test_set_numeric_value"
+        },
+        {
+          "new": "get_set_rm::test_set_preserves_body_content",
+          "old": "test_set_preserves_body_content"
+        },
+        {
+          "new": "get_set_rm::test_set_string_value_via_stdin",
+          "old": "test_set_string_value_via_stdin"
+        },
+        {
+          "new": "get_set_rm::test_set_updates_file_in_place",
+          "old": "test_set_updates_file_in_place"
+        },
+        {
+          "new": "get_set_rm::test_set_without_save_does_not_mutate_file",
+          "old": "test_set_without_save_does_not_mutate_file"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "graph",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/graph.rs",
+      "old_binary_id": "darkmatter-cli::graph",
+      "old_path": "darkmatter/cli/tests/graph.rs",
+      "old_target": "graph",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "graph::graph_json_follow_baseline",
+          "old": "graph_json_follow_baseline"
+        },
+        {
+          "new": "graph::graph_json_local_baseline",
+          "old": "graph_json_local_baseline"
+        },
+        {
+          "new": "graph::graph_json_validate_baseline",
+          "old": "graph_json_validate_baseline"
+        },
+        {
+          "new": "graph::test_graph_basic",
+          "old": "test_graph_basic"
+        },
+        {
+          "new": "graph::test_graph_file_not_found",
+          "old": "test_graph_file_not_found"
+        },
+        {
+          "new": "graph::test_graph_follow",
+          "old": "test_graph_follow"
+        },
+        {
+          "new": "graph::test_graph_follow_epilogue",
+          "old": "test_graph_follow_epilogue"
+        },
+        {
+          "new": "graph::test_graph_follow_multiple_prologues",
+          "old": "test_graph_follow_multiple_prologues"
+        },
+        {
+          "new": "graph::test_graph_follow_toc_linking",
+          "old": "test_graph_follow_toc_linking"
+        },
+        {
+          "new": "graph::test_graph_follow_validate_child_broken_link",
+          "old": "test_graph_follow_validate_child_broken_link"
+        },
+        {
+          "new": "graph::test_graph_help",
+          "old": "test_graph_help"
+        },
+        {
+          "new": "graph::test_graph_json_output",
+          "old": "test_graph_json_output"
+        },
+        {
+          "new": "graph::test_graph_validate_invalid",
+          "old": "test_graph_validate_invalid"
+        },
+        {
+          "new": "graph::test_graph_validate_valid",
+          "old": "test_graph_validate_valid"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "hash",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/hash.rs",
+      "old_binary_id": "darkmatter-cli::hash",
+      "old_path": "darkmatter/cli/tests/hash.rs",
+      "old_target": "hash",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "hash::test_hash_body_only",
+          "old": "test_hash_body_only"
+        },
+        {
+          "new": "hash::test_hash_body_whitespace_insensitive",
+          "old": "test_hash_body_whitespace_insensitive"
+        },
+        {
+          "new": "hash::test_hash_default_outputs_two_hashes",
+          "old": "test_hash_default_outputs_two_hashes"
+        },
+        {
+          "new": "hash::test_hash_deterministic",
+          "old": "test_hash_deterministic"
+        },
+        {
+          "new": "hash::test_hash_from_file",
+          "old": "test_hash_from_file"
+        },
+        {
+          "new": "hash::test_hash_frontmatter_only",
+          "old": "test_hash_frontmatter_only"
+        },
+        {
+          "new": "hash::test_hash_frontmatter_reordering",
+          "old": "test_hash_frontmatter_reordering"
+        },
+        {
+          "new": "hash::test_hash_no_frontmatter",
+          "old": "test_hash_no_frontmatter"
+        },
+        {
+          "new": "hash::test_hash_strict_frontmatter_differs_from_normalized",
+          "old": "test_hash_strict_frontmatter_differs_from_normalized"
+        },
+        {
+          "new": "hash::test_hash_strict_whitespace_sensitive",
+          "old": "test_hash_strict_whitespace_sensitive"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "hash_directory",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/hash_directory.rs",
+      "old_binary_id": "darkmatter-cli::hash_directory",
+      "old_path": "darkmatter/cli/tests/hash_directory.rs",
+      "old_target": "hash_directory",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "hash_directory::test_hash_directory_body_only",
+          "old": "test_hash_directory_body_only"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_default",
+          "old": "test_hash_directory_default"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_deterministic",
+          "old": "test_hash_directory_deterministic"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_differs_from_single_file",
+          "old": "test_hash_directory_differs_from_single_file"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_frontmatter_only",
+          "old": "test_hash_directory_frontmatter_only"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_honors_ignore_properties",
+          "old": "test_hash_directory_honors_ignore_properties"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_ignores_managed_keys",
+          "old": "test_hash_directory_ignores_managed_keys"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_ignores_non_markdown",
+          "old": "test_hash_directory_ignores_non_markdown"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_includes_vendored_dirs",
+          "old": "test_hash_directory_includes_vendored_dirs"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_malformed_frontmatter_exits_one",
+          "old": "test_hash_directory_malformed_frontmatter_exits_one"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_rejects_save",
+          "old": "test_hash_directory_rejects_save"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_rejects_structured_kind",
+          "old": "test_hash_directory_rejects_structured_kind"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_skips_hidden_dirs",
+          "old": "test_hash_directory_skips_hidden_dirs"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_strict",
+          "old": "test_hash_directory_strict"
+        },
+        {
+          "new": "hash_directory::test_hash_directory_vendored_membership_matches_plain_dir",
+          "old": "test_hash_directory_vendored_membership_matches_plain_dir"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "hash_kind_save_diff",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/hash_kind_save_diff.rs",
+      "old_binary_id": "darkmatter-cli::hash_kind_save_diff",
+      "old_path": "darkmatter/cli/tests/hash_kind_save_diff.rs",
+      "old_target": "hash_kind_save_diff",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "hash_kind_save_diff::test_hash_diff_changed_exits_two",
+          "old": "test_hash_diff_changed_exits_two"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_diff_detailed_bad_section_level_exits_one",
+          "old": "test_hash_diff_detailed_bad_section_level_exits_one"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_diff_malformed_stored_hash_exits_one",
+          "old": "test_hash_diff_malformed_stored_hash_exits_one"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_diff_no_stored_hash_exits_two",
+          "old": "test_hash_diff_no_stored_hash_exits_two"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_diff_unchanged_exits_zero",
+          "old": "test_hash_diff_unchanged_exits_zero"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_env_property_override",
+          "old": "test_hash_env_property_override"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_ignore_properties_excludes_key",
+          "old": "test_hash_ignore_properties_excludes_key"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_conflicts_with_body",
+          "old": "test_hash_kind_conflicts_with_body"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_detailed_outputs_nested_yaml",
+          "old": "test_hash_kind_detailed_outputs_nested_yaml"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_fm_matches_frontmatter_flag",
+          "old": "test_hash_kind_fm_matches_frontmatter_flag"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_structured_outputs_four_parts",
+          "old": "test_hash_kind_structured_outputs_four_parts"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_structured_strict_outputs_four_parts",
+          "old": "test_hash_kind_structured_strict_outputs_four_parts"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_kind_structured_strict_respects_key_order",
+          "old": "test_hash_kind_structured_strict_respects_key_order"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_and_diff_conflict",
+          "old": "test_hash_save_and_diff_conflict"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_detailed_value_preserves_authored_neighbors",
+          "old": "test_hash_save_detailed_value_preserves_authored_neighbors"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_failure_does_not_modify_flow_mapping",
+          "old": "test_hash_save_failure_does_not_modify_flow_mapping"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_flow_root_no_write_matrix_covers_newlines",
+          "old": "test_hash_save_flow_root_no_write_matrix_covers_newlines"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_honors_quoted_custom_property",
+          "old": "test_hash_save_honors_quoted_custom_property"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_preservation_matrix_covers_representations_and_newlines",
+          "old": "test_hash_save_preservation_matrix_covers_representations_and_newlines"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_preserves_raw_frontmatter_and_is_idempotent",
+          "old": "test_hash_save_preserves_raw_frontmatter_and_is_idempotent"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_requires_file_not_stdin",
+          "old": "test_hash_save_requires_file_not_stdin"
+        },
+        {
+          "new": "hash_kind_save_diff::test_hash_save_writes_baseline_and_exits_zero",
+          "old": "test_hash_save_writes_baseline_and_exits_zero"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "help",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/help.rs",
+      "old_binary_id": "darkmatter-cli::help",
+      "old_path": "darkmatter/cli/tests/help.rs",
+      "old_target": "help",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "help::test_completions_bash",
+          "old": "test_completions_bash"
+        },
+        {
+          "new": "help::test_completions_fish",
+          "old": "test_completions_fish"
+        },
+        {
+          "new": "help::test_completions_zsh",
+          "old": "test_completions_zsh"
+        },
+        {
+          "new": "help::test_help_flag",
+          "old": "test_help_flag"
+        },
+        {
+          "new": "help::test_list_themes",
+          "old": "test_list_themes"
+        },
+        {
+          "new": "help::test_removed_flags_are_rejected",
+          "old": "test_removed_flags_are_rejected"
+        },
+        {
+          "new": "help::test_subcommand_rejects_render_options",
+          "old": "test_subcommand_rejects_render_options"
+        },
+        {
+          "new": "help::test_version_flag",
+          "old": "test_version_flag"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "layout_alignment",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/layout_alignment.rs",
+      "old_binary_id": "darkmatter-cli::layout_alignment",
+      "old_path": "darkmatter/cli/tests/layout_alignment.rs",
+      "old_target": "layout_alignment",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "layout_alignment::layout_parsed_line_numbers_flag_values",
+          "old": "layout_parsed_line_numbers_flag_values"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_align_lists_broadcast_then_granular_override",
+          "old": "layout_resolved_align_lists_broadcast_then_granular_override"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_alignment_global_then_component_specific",
+          "old": "layout_resolved_alignment_global_then_component_specific"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_fill_global_then_component_specific",
+          "old": "layout_resolved_fill_global_then_component_specific"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_fill_lists_broadcast_then_granular_override",
+          "old": "layout_resolved_fill_lists_broadcast_then_granular_override"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_margin_axis_then_side",
+          "old": "layout_resolved_margin_axis_then_side"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_margin_shorthand_then_top_override",
+          "old": "layout_resolved_margin_shorthand_then_top_override"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_max_width",
+          "old": "layout_resolved_max_width"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_mt_alone_does_not_set_other_sides",
+          "old": "layout_resolved_mt_alone_does_not_set_other_sides"
+        },
+        {
+          "new": "layout_alignment::layout_resolved_padding_axis_then_side",
+          "old": "layout_resolved_padding_axis_then_side"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "layout_fill",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/layout_fill.rs",
+      "old_binary_id": "darkmatter-cli::layout_fill",
+      "old_path": "darkmatter/cli/tests/layout_fill.rs",
+      "old_target": "layout_fill",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "layout_fill::block_quote_max_width_caps_terminal_render_wrap_width",
+          "old": "block_quote_max_width_caps_terminal_render_wrap_width"
+        },
+        {
+          "new": "layout_fill::cli_align_tables_overrides_frontmatter_table_alignment",
+          "old": "cli_align_tables_overrides_frontmatter_table_alignment"
+        },
+        {
+          "new": "layout_fill::cli_global_fill_overrides_frontmatter_table_max_width",
+          "old": "cli_global_fill_overrides_frontmatter_table_max_width"
+        },
+        {
+          "new": "layout_fill::component_overrides_component_specific_alignment_claims_one_bucket",
+          "old": "component_overrides_component_specific_alignment_claims_one_bucket"
+        },
+        {
+          "new": "layout_fill::component_overrides_component_specific_fill_claims_one_bucket",
+          "old": "component_overrides_component_specific_fill_claims_one_bucket"
+        },
+        {
+          "new": "layout_fill::component_overrides_global_alignment_claims_every_bucket",
+          "old": "component_overrides_global_alignment_claims_every_bucket"
+        },
+        {
+          "new": "layout_fill::component_overrides_global_fill_claims_every_bucket",
+          "old": "component_overrides_global_fill_claims_every_bucket"
+        },
+        {
+          "new": "layout_fill::frontmatter_block_quote_max_width_reaches_page",
+          "old": "frontmatter_block_quote_max_width_reaches_page"
+        },
+        {
+          "new": "layout_fill::frontmatter_images_alignment_and_fill_reach_page",
+          "old": "frontmatter_images_alignment_and_fill_reach_page"
+        },
+        {
+          "new": "layout_fill::frontmatter_table_alignment_reaches_page_when_no_cli_flag",
+          "old": "frontmatter_table_alignment_reaches_page_when_no_cli_flag"
+        },
+        {
+          "new": "layout_fill::frontmatter_table_max_width_reaches_page_when_no_cli_flag",
+          "old": "frontmatter_table_max_width_reaches_page_when_no_cli_flag"
+        },
+        {
+          "new": "layout_fill::no_style_frontmatter_leaves_cli_layout_state_intact",
+          "old": "no_style_frontmatter_leaves_cli_layout_state_intact"
+        },
+        {
+          "new": "layout_fill::style_fixture_renders_html_with_fill_override",
+          "old": "style_fixture_renders_html_with_fill_override"
+        },
+        {
+          "new": "layout_fill::style_fixture_renders_with_align_tables_override",
+          "old": "style_fixture_renders_with_align_tables_override"
+        },
+        {
+          "new": "layout_fill::style_frontmatter_html_emits_component_layout_css",
+          "old": "style_frontmatter_html_emits_component_layout_css"
+        },
+        {
+          "new": "layout_fill::style_prop_fixture_html_emits_table_layout_css",
+          "old": "style_prop_fixture_html_emits_table_layout_css"
+        },
+        {
+          "new": "layout_fill::style_prop_fixture_resolves_to_expected_page_margins",
+          "old": "style_prop_fixture_resolves_to_expected_page_margins"
+        },
+        {
+          "new": "layout_fill::style_prop_fixture_resolves_to_expected_table_layout",
+          "old": "style_prop_fixture_resolves_to_expected_table_layout"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "layout_flags",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/layout_flags.rs",
+      "old_binary_id": "darkmatter-cli::layout_flags",
+      "old_path": "darkmatter/cli/tests/layout_flags.rs",
+      "old_target": "layout_flags",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "layout_flags::layout_align_component_overrides_global",
+          "old": "layout_align_component_overrides_global"
+        },
+        {
+          "new": "layout_flags::layout_alignment_global_accepted",
+          "old": "layout_alignment_global_accepted"
+        },
+        {
+          "new": "layout_flags::layout_combined_margin_padding_bg",
+          "old": "layout_combined_margin_padding_bg"
+        },
+        {
+          "new": "layout_flags::layout_fill_component_specific_accepted",
+          "old": "layout_fill_component_specific_accepted"
+        },
+        {
+          "new": "layout_flags::layout_fill_full_accepted",
+          "old": "layout_fill_full_accepted"
+        },
+        {
+          "new": "layout_flags::layout_fill_indent_max_explicit_accepted",
+          "old": "layout_fill_indent_max_explicit_accepted"
+        },
+        {
+          "new": "layout_flags::layout_fill_negative_rejected",
+          "old": "layout_fill_negative_rejected"
+        },
+        {
+          "new": "layout_flags::layout_fill_pad_fixed_accepted",
+          "old": "layout_fill_pad_fixed_accepted"
+        },
+        {
+          "new": "layout_flags::layout_fill_pad_percent_accepted",
+          "old": "layout_fill_pad_percent_accepted"
+        },
+        {
+          "new": "layout_flags::layout_fill_percent_over_100_rejected",
+          "old": "layout_fill_percent_over_100_rejected"
+        },
+        {
+          "new": "layout_flags::layout_fill_unknown_kind_rejected",
+          "old": "layout_fill_unknown_kind_rejected"
+        },
+        {
+          "new": "layout_flags::layout_line_numbers_false_accepted",
+          "old": "layout_line_numbers_false_accepted"
+        },
+        {
+          "new": "layout_flags::layout_line_numbers_flag_accepted",
+          "old": "layout_line_numbers_flag_accepted"
+        },
+        {
+          "new": "layout_flags::layout_line_numbers_true_accepted",
+          "old": "layout_line_numbers_true_accepted"
+        },
+        {
+          "new": "layout_flags::layout_margin_aliases_work",
+          "old": "layout_margin_aliases_work"
+        },
+        {
+          "new": "layout_flags::layout_margin_negative_rejected",
+          "old": "layout_margin_negative_rejected"
+        },
+        {
+          "new": "layout_flags::layout_margin_shorthand_overrides_axis_and_side",
+          "old": "layout_margin_shorthand_overrides_axis_and_side"
+        },
+        {
+          "new": "layout_flags::layout_max_width_positive_accepted",
+          "old": "layout_max_width_positive_accepted"
+        },
+        {
+          "new": "layout_flags::layout_max_width_zero_rejected",
+          "old": "layout_max_width_zero_rejected"
+        },
+        {
+          "new": "layout_flags::layout_no_flags_preserves_existing_behavior",
+          "old": "layout_no_flags_preserves_existing_behavior"
+        },
+        {
+          "new": "layout_flags::layout_padding_shorthand_overrides_axis_and_side",
+          "old": "layout_padding_shorthand_overrides_axis_and_side"
+        },
+        {
+          "new": "layout_flags::layout_page_background_alias_works",
+          "old": "layout_page_background_alias_works"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_accepted",
+          "old": "layout_page_bg_accepted"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_color_hex_accepted",
+          "old": "layout_page_bg_color_hex_accepted"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_color_invalid_rejected",
+          "old": "layout_page_bg_color_invalid_rejected"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_color_rgb_triple_accepted",
+          "old": "layout_page_bg_color_rgb_triple_accepted"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_color_special_keyword_accepted",
+          "old": "layout_page_bg_color_special_keyword_accepted"
+        },
+        {
+          "new": "layout_flags::layout_page_bg_color_tailwind_accepted",
+          "old": "layout_page_bg_color_tailwind_accepted"
+        },
+        {
+          "new": "layout_flags::layout_width_flag_rejected",
+          "old": "layout_width_flag_rejected"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "layout_style_frontmatter",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/layout_style_frontmatter.rs",
+      "old_binary_id": "darkmatter-cli::layout_style_frontmatter",
+      "old_path": "darkmatter/cli/tests/layout_style_frontmatter.rs",
+      "old_target": "layout_style_frontmatter",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "layout_style_frontmatter::style_cli_margin_overrides_frontmatter",
+          "old": "style_cli_margin_overrides_frontmatter"
+        },
+        {
+          "new": "layout_style_frontmatter::style_fixture_cli_pipe_smoke_passes",
+          "old": "style_fixture_cli_pipe_smoke_passes"
+        },
+        {
+          "new": "layout_style_frontmatter::style_fixture_html_document_has_non_empty_ordered_head",
+          "old": "style_fixture_html_document_has_non_empty_ordered_head"
+        },
+        {
+          "new": "layout_style_frontmatter::style_fixture_renders_html_successfully",
+          "old": "style_fixture_renders_html_successfully"
+        },
+        {
+          "new": "layout_style_frontmatter::style_fixture_strict_style_passes_on_schema_clean_doc",
+          "old": "style_fixture_strict_style_passes_on_schema_clean_doc"
+        },
+        {
+          "new": "layout_style_frontmatter::style_non_strict_renders_with_unknown_key",
+          "old": "style_non_strict_renders_with_unknown_key"
+        },
+        {
+          "new": "layout_style_frontmatter::style_strict_style_fails_on_deprecated_key",
+          "old": "style_strict_style_fails_on_deprecated_key"
+        },
+        {
+          "new": "layout_style_frontmatter::style_strict_style_fails_on_unknown_key",
+          "old": "style_strict_style_fails_on_unknown_key"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "md_process_fixture",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/md_process_fixture.rs",
+      "old_binary_id": "darkmatter-cli::md_process_fixture",
+      "old_path": "darkmatter/cli/tests/md_process_fixture.rs",
+      "old_target": "md_process_fixture",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "md_process_fixture::a_containment_variable_cannot_be_declared_as_a_rendering_input",
+          "old": "a_containment_variable_cannot_be_declared_as_a_rendering_input"
+        },
+        {
+          "new": "md_process_fixture::a_declared_behavior_input_out_ranks_the_inherited_value_and_the_scrub",
+          "old": "a_declared_behavior_input_out_ranks_the_inherited_value_and_the_scrub"
+        },
+        {
+          "new": "md_process_fixture::a_rendering_declaration_of_an_application_input_names_the_right_method",
+          "old": "a_rendering_declaration_of_an_application_input_names_the_right_method"
+        },
+        {
+          "new": "md_process_fixture::a_symlink_spelled_workspace_inside_the_checkout_is_rejected",
+          "old": "a_symlink_spelled_workspace_inside_the_checkout_is_rejected"
+        },
+        {
+          "new": "md_process_fixture::a_workspace_inside_the_checkout_is_rejected_by_naming_the_temp_dir_variable",
+          "old": "a_workspace_inside_the_checkout_is_rejected_by_naming_the_temp_dir_variable"
+        },
+        {
+          "new": "md_process_fixture::ambient_context_escape_pins_the_cwd_to_a_test_built_directory",
+          "old": "ambient_context_escape_pins_the_cwd_to_a_test_built_directory"
+        },
+        {
+          "new": "md_process_fixture::ambient_context_escape_rejects_a_directory_outside_the_workspace",
+          "old": "ambient_context_escape_rejects_a_directory_outside_the_workspace"
+        },
+        {
+          "new": "md_process_fixture::ambient_context_escape_rejects_a_directory_that_does_not_exist",
+          "old": "ambient_context_escape_rejects_a_directory_that_does_not_exist"
+        },
+        {
+          "new": "md_process_fixture::both_command_surfaces_clear_the_environment_the_same_way",
+          "old": "both_command_surfaces_clear_the_environment_the_same_way"
+        },
+        {
+          "new": "md_process_fixture::both_command_surfaces_hand_the_child_the_same_environment",
+          "old": "both_command_surfaces_hand_the_child_the_same_environment"
+        },
+        {
+          "new": "md_process_fixture::copy_tree_relocates_shipped_content_byte_for_byte",
+          "old": "copy_tree_relocates_shipped_content_byte_for_byte"
+        },
+        {
+          "new": "md_process_fixture::default_command_pins_cwd_home_and_the_minimal_path",
+          "old": "default_command_pins_cwd_home_and_the_minimal_path"
+        },
+        {
+          "new": "md_process_fixture::every_variable_the_spawn_contract_owns_is_classified_as_protected",
+          "old": "every_variable_the_spawn_contract_owns_is_classified_as_protected"
+        },
+        {
+          "new": "md_process_fixture::fake_only_path_escape_carries_the_fixture_bin_alone",
+          "old": "fake_only_path_escape_carries_the_fixture_bin_alone"
+        },
+        {
+          "new": "md_process_fixture::host_path_escape_prepends_the_fixture_bin_to_the_host_path",
+          "old": "host_path_escape_prepends_the_fixture_bin_to_the_host_path"
+        },
+        {
+          "new": "md_process_fixture::hostile_inherited_environment_leaves_the_fixture_defaults_unchanged",
+          "old": "hostile_inherited_environment_leaves_the_fixture_defaults_unchanged"
+        },
+        {
+          "new": "md_process_fixture::inherit_no_env_keeps_the_defaults_and_restores_windows_console_plumbing",
+          "old": "inherit_no_env_keeps_the_defaults_and_restores_windows_console_plumbing"
+        },
+        {
+          "new": "md_process_fixture::inherited_families_do_not_reach_the_child_and_fixture_defaults_win",
+          "old": "inherited_families_do_not_reach_the_child_and_fixture_defaults_win"
+        },
+        {
+          "new": "md_process_fixture::initialize_repository_is_repository_local_and_ignores_host_git_configuration",
+          "old": "initialize_repository_is_repository_local_and_ignores_host_git_configuration"
+        },
+        {
+          "new": "md_process_fixture::path_is_composed_by_the_builder_not_declared",
+          "old": "path_is_composed_by_the_builder_not_declared"
+        },
+        {
+          "new": "md_process_fixture::topology_builders_keep_references_relative",
+          "old": "topology_builders_keep_references_relative"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "render_basic",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/render_basic.rs",
+      "old_binary_id": "darkmatter-cli::render_basic",
+      "old_path": "darkmatter/cli/tests/render_basic.rs",
+      "old_target": "render_basic",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "render_basic::render_accepts_code_block_flag",
+          "old": "render_accepts_code_block_flag"
+        },
+        {
+          "new": "render_basic::render_rejects_invalid_code_block_value",
+          "old": "render_rejects_invalid_code_block_value"
+        },
+        {
+          "new": "render_basic::test_block_rendering_transclusion_cycle_non_tty",
+          "old": "test_block_rendering_transclusion_cycle_non_tty"
+        },
+        {
+          "new": "render_basic::test_block_rendering_transclusion_cycle_tty",
+          "old": "test_block_rendering_transclusion_cycle_tty"
+        },
+        {
+          "new": "render_basic::test_file_not_found",
+          "old": "test_file_not_found"
+        },
+        {
+          "new": "render_basic::test_file_rendering",
+          "old": "test_file_rendering"
+        },
+        {
+          "new": "render_basic::test_line_numbers_html_output",
+          "old": "test_line_numbers_html_output"
+        },
+        {
+          "new": "render_basic::test_output_html",
+          "old": "test_output_html"
+        },
+        {
+          "new": "render_basic::test_output_html_alias_browser",
+          "old": "test_output_html_alias_browser"
+        },
+        {
+          "new": "render_basic::test_output_json_alias_ast",
+          "old": "test_output_json_alias_ast"
+        },
+        {
+          "new": "render_basic::test_output_markdown_alias_text",
+          "old": "test_output_markdown_alias_text"
+        },
+        {
+          "new": "render_basic::test_output_markdown_plus_renders_disclosure_as_html_details",
+          "old": "test_output_markdown_plus_renders_disclosure_as_html_details"
+        },
+        {
+          "new": "render_basic::test_render_default_backward_compat",
+          "old": "test_render_default_backward_compat"
+        },
+        {
+          "new": "render_basic::test_render_explicit",
+          "old": "test_render_explicit"
+        },
+        {
+          "new": "render_basic::test_render_explicit_with_output",
+          "old": "test_render_explicit_with_output"
+        },
+        {
+          "new": "render_basic::test_show_option_with_markdown_output",
+          "old": "test_show_option_with_markdown_output"
+        },
+        {
+          "new": "render_basic::test_stdin_rendering_auto_non_tty_outputs_markdown",
+          "old": "test_stdin_rendering_auto_non_tty_outputs_markdown"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "rm",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/rm.rs",
+      "old_binary_id": "darkmatter-cli::rm",
+      "old_path": "darkmatter/cli/tests/rm.rs",
+      "old_target": "rm",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "rm::test_rm_nonexistent_key_fails",
+          "old": "test_rm_nonexistent_key_fails"
+        },
+        {
+          "new": "rm::test_rm_partial_nonexistent_fails",
+          "old": "test_rm_partial_nonexistent_fails"
+        },
+        {
+          "new": "rm::test_rm_preserves_body_content",
+          "old": "test_rm_preserves_body_content"
+        },
+        {
+          "new": "rm::test_rm_removes_multiple_properties",
+          "old": "test_rm_removes_multiple_properties"
+        },
+        {
+          "new": "rm::test_rm_removes_single_property",
+          "old": "test_rm_removes_single_property"
+        },
+        {
+          "new": "rm::test_rm_requires_at_least_one_prop",
+          "old": "test_rm_requires_at_least_one_prop"
+        },
+        {
+          "new": "rm::test_rm_with_json_output",
+          "old": "test_rm_with_json_output"
+        },
+        {
+          "new": "rm::test_rm_with_verbose_output",
+          "old": "test_rm_with_verbose_output"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "schema_about",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/schema_about.rs",
+      "old_binary_id": "darkmatter-cli::schema_about",
+      "old_path": "darkmatter/cli/tests/schema_about.rs",
+      "old_target": "schema_about",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "schema_about::schema_about_accepts_code_block_flag",
+          "old": "schema_about_accepts_code_block_flag"
+        },
+        {
+          "new": "schema_about::schema_about_code_block_dark_and_light_differ",
+          "old": "schema_about_code_block_dark_and_light_differ"
+        },
+        {
+          "new": "schema_about::schema_about_describes_semantic_meta_types",
+          "old": "schema_about_describes_semantic_meta_types"
+        },
+        {
+          "new": "schema_about::schema_about_emits_table_stripes_when_color_is_enabled",
+          "old": "schema_about_emits_table_stripes_when_color_is_enabled"
+        },
+        {
+          "new": "schema_about::schema_about_exits_zero",
+          "old": "schema_about_exits_zero"
+        },
+        {
+          "new": "schema_about::schema_about_is_documentation_only",
+          "old": "schema_about_is_documentation_only"
+        },
+        {
+          "new": "schema_about::schema_about_lists_every_supported_type_keyword",
+          "old": "schema_about_lists_every_supported_type_keyword"
+        },
+        {
+          "new": "schema_about::schema_about_mentions_inline_object_rules",
+          "old": "schema_about_mentions_inline_object_rules"
+        },
+        {
+          "new": "schema_about::schema_about_prints_simplified_schema_reference",
+          "old": "schema_about_prints_simplified_schema_reference"
+        },
+        {
+          "new": "schema_about::schema_about_rejects_invalid_code_block_value",
+          "old": "schema_about_rejects_invalid_code_block_value"
+        },
+        {
+          "new": "schema_about::schema_about_renders_the_shipped_eager_descriptor_verbatim",
+          "old": "schema_about_renders_the_shipped_eager_descriptor_verbatim"
+        },
+        {
+          "new": "schema_about::schema_about_uses_readable_terminal_components",
+          "old": "schema_about_uses_readable_terminal_components"
+        },
+        {
+          "new": "schema_about::schema_about_verbose_prints_advanced_sections_as_readable_lists",
+          "old": "schema_about_verbose_prints_advanced_sections_as_readable_lists"
+        },
+        {
+          "new": "schema_about::schema_about_verbose_prints_context_and_expression_sections",
+          "old": "schema_about_verbose_prints_context_and_expression_sections"
+        },
+        {
+          "new": "schema_about::verbose_schema_about_projects_shipped_git_context_descriptors",
+          "old": "verbose_schema_about_projects_shipped_git_context_descriptors"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "schema_detect",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/schema_detect.rs",
+      "old_binary_id": "darkmatter-cli::schema_detect",
+      "old_path": "darkmatter/cli/tests/schema_detect.rs",
+      "old_target": "schema_detect",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "schema_detect::schema_detect_json_emits_json_schema",
+          "old": "schema_detect_json_emits_json_schema"
+        },
+        {
+          "new": "schema_detect::schema_detect_merge_promotes_required",
+          "old": "schema_detect_merge_promotes_required"
+        },
+        {
+          "new": "schema_detect::schema_detect_no_merge_emits_per_file_headers",
+          "old": "schema_detect_no_merge_emits_per_file_headers"
+        },
+        {
+          "new": "schema_detect::schema_detect_unparseable_frontmatter_exits_3",
+          "old": "schema_detect_unparseable_frontmatter_exits_3"
+        },
+        {
+          "new": "schema_detect::schema_detect_yaml_emits_simplified_schema",
+          "old": "schema_detect_yaml_emits_simplified_schema"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "schema_triggers",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/schema_triggers.rs",
+      "old_binary_id": "darkmatter-cli::schema_triggers",
+      "old_path": "darkmatter/cli/tests/schema_triggers.rs",
+      "old_target": "schema_triggers",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "schema_triggers::compose_honors_triggers_and_raw_mode",
+          "old": "compose_honors_triggers_and_raw_mode"
+        },
+        {
+          "new": "schema_triggers::compose_re_resolves_trigger_after_shell_value_becomes_concrete",
+          "old": "compose_re_resolves_trigger_after_shell_value_becomes_concrete"
+        },
+        {
+          "new": "schema_triggers::dialect_family_has_identical_compose_validate_and_trace_activation",
+          "old": "dialect_family_has_identical_compose_validate_and_trace_activation"
+        },
+        {
+          "new": "schema_triggers::schema_validate_honors_triggers_and_raw_mode",
+          "old": "schema_validate_honors_triggers_and_raw_mode"
+        },
+        {
+          "new": "schema_triggers::schema_validate_re_resolves_after_assignments",
+          "old": "schema_validate_re_resolves_after_assignments"
+        },
+        {
+          "new": "schema_triggers::sibling_only_bare_reference_suggests_explicit_relative_path",
+          "old": "sibling_only_bare_reference_suggests_explicit_relative_path"
+        },
+        {
+          "new": "schema_triggers::triggers_command_prints_shared_trace",
+          "old": "triggers_command_prints_shared_trace"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "schema_validate",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/schema_validate.rs",
+      "old_binary_id": "darkmatter-cli::schema_validate",
+      "old_path": "darkmatter/cli/tests/schema_validate.rs",
+      "old_target": "schema_validate",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "schema_validate::schema_validate_assignment_applies_to_multiple_files",
+          "old": "schema_validate_assignment_applies_to_multiple_files"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_coerces_to_string_for_string_typed_property",
+          "old": "schema_validate_assignment_coerces_to_string_for_string_typed_property"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_failing_value_still_exits_1",
+          "old": "schema_validate_assignment_failing_value_still_exits_1"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_keeps_boolean_for_boolean_typed_property",
+          "old": "schema_validate_assignment_keeps_boolean_for_boolean_typed_property"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_nested_dot_notation",
+          "old": "schema_validate_assignment_nested_dot_notation"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_overrides_existing_value",
+          "old": "schema_validate_assignment_overrides_existing_value"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_parses_flow_sequence",
+          "old": "schema_validate_assignment_parses_flow_sequence"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_parses_yaml_scalar_types",
+          "old": "schema_validate_assignment_parses_yaml_scalar_types"
+        },
+        {
+          "new": "schema_validate::schema_validate_assignment_satisfies_required_property",
+          "old": "schema_validate_assignment_satisfies_required_property"
+        },
+        {
+          "new": "schema_validate::schema_validate_bad_baseline_exits_2",
+          "old": "schema_validate_bad_baseline_exits_2"
+        },
+        {
+          "new": "schema_validate::schema_validate_baseline_from_env_var",
+          "old": "schema_validate_baseline_from_env_var"
+        },
+        {
+          "new": "schema_validate::schema_validate_baseline_from_flag",
+          "old": "schema_validate_baseline_from_flag"
+        },
+        {
+          "new": "schema_validate::schema_validate_failing_returns_exit_1",
+          "old": "schema_validate_failing_returns_exit_1"
+        },
+        {
+          "new": "schema_validate::schema_validate_invalid_assignment_yaml_returns_usage_error",
+          "old": "schema_validate_invalid_assignment_yaml_returns_usage_error"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_carries_description_field",
+          "old": "schema_validate_json_carries_description_field"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_description_is_null_when_absent",
+          "old": "schema_validate_json_description_is_null_when_absent"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_format_emits_ndjson",
+          "old": "schema_validate_json_format_emits_ndjson"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_format_reports_problems",
+          "old": "schema_validate_json_format_reports_problems"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_reports_arm_index_for_root_union",
+          "old": "schema_validate_json_reports_arm_index_for_root_union"
+        },
+        {
+          "new": "schema_validate::schema_validate_json_reports_structured_bare_sidecar_advisory",
+          "old": "schema_validate_json_reports_structured_bare_sidecar_advisory"
+        },
+        {
+          "new": "schema_validate::schema_validate_multiple_files_aggregates_failure",
+          "old": "schema_validate_multiple_files_aggregates_failure"
+        },
+        {
+          "new": "schema_validate::schema_validate_no_schema_no_baseline_is_vacuous_success",
+          "old": "schema_validate_no_schema_no_baseline_is_vacuous_success"
+        },
+        {
+          "new": "schema_validate::schema_validate_path_with_equals_disambiguated_by_dot_slash",
+          "old": "schema_validate_path_with_equals_disambiguated_by_dot_slash"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_does_not_render_root_label_as_markup",
+          "old": "schema_validate_pretty_does_not_render_root_label_as_markup"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_omits_sub_line_when_no_description",
+          "old": "schema_validate_pretty_omits_sub_line_when_no_description"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_prefixes_root_union_problems_with_arm_index",
+          "old": "schema_validate_pretty_prefixes_root_union_problems_with_arm_index"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_reports_bare_sidecar_advisory_without_failing",
+          "old": "schema_validate_pretty_reports_bare_sidecar_advisory_without_failing"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_reports_line_for_type_mismatch",
+          "old": "schema_validate_pretty_reports_line_for_type_mismatch"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_reports_source_line_for_problem",
+          "old": "schema_validate_pretty_reports_source_line_for_problem"
+        },
+        {
+          "new": "schema_validate::schema_validate_pretty_surfaces_property_description",
+          "old": "schema_validate_pretty_surfaces_property_description"
+        },
+        {
+          "new": "schema_validate::schema_validate_quiet_suppresses_bare_sidecar_advisory",
+          "old": "schema_validate_quiet_suppresses_bare_sidecar_advisory"
+        },
+        {
+          "new": "schema_validate::schema_validate_quiet_suppresses_success_lines",
+          "old": "schema_validate_quiet_suppresses_success_lines"
+        },
+        {
+          "new": "schema_validate::schema_validate_unparseable_frontmatter_exits_3",
+          "old": "schema_validate_unparseable_frontmatter_exits_3"
+        },
+        {
+          "new": "schema_validate::schema_validate_unresolved_document_schema_exits_2",
+          "old": "schema_validate_unresolved_document_schema_exits_2"
+        },
+        {
+          "new": "schema_validate::schema_validate_unresolved_document_schema_outranks_validation_failure",
+          "old": "schema_validate_unresolved_document_schema_outranks_validation_failure"
+        },
+        {
+          "new": "schema_validate::schema_validate_valid_inline_succeeds",
+          "old": "schema_validate_valid_inline_succeeds"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "schema_validate_baseline",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/schema_validate_baseline.rs",
+      "old_binary_id": "darkmatter-cli::schema_validate_baseline",
+      "old_path": "darkmatter/cli/tests/schema_validate_baseline.rs",
+      "old_target": "schema_validate_baseline",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical",
+          "old": "schema_validate_legacy_json_output_is_byte_identical"
+        },
+        {
+          "new": "schema_validate_baseline::schema_validate_legacy_pretty_output_is_byte_identical",
+          "old": "schema_validate_legacy_pretty_output_is_byte_identical"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "spawn_site_guard",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/spawn_site_guard.rs",
+      "old_binary_id": "darkmatter-cli::spawn_site_guard",
+      "old_path": "darkmatter/cli/tests/spawn_site_guard.rs",
+      "old_target": "spawn_site_guard",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "spawn_site_guard::a_declared_input_is_not_an_isolation_escape",
+          "old": "a_declared_input_is_not_an_isolation_escape"
+        },
+        {
+          "new": "spawn_site_guard::a_file_that_never_builds_a_fixture_command_is_outside_the_isolation_gate",
+          "old": "a_file_that_never_builds_a_fixture_command_is_outside_the_isolation_gate"
+        },
+        {
+          "new": "spawn_site_guard::a_second_run_replaces_the_previous_census_instead_of_appending",
+          "old": "a_second_run_replaces_the_previous_census_instead_of_appending"
+        },
+        {
+          "new": "spawn_site_guard::an_unwritable_destination_warns_instead_of_failing_the_guard",
+          "old": "an_unwritable_destination_warns_instead_of_failing_the_guard"
+        },
+        {
+          "new": "spawn_site_guard::deleting_a_spawn_entry_is_what_widens_the_isolation_population",
+          "old": "deleting_a_spawn_entry_is_what_widens_the_isolation_population"
+        },
+        {
+          "new": "spawn_site_guard::detector_finds_every_spawn_form_as_executable_code",
+          "old": "detector_finds_every_spawn_form_as_executable_code"
+        },
+        {
+          "new": "spawn_site_guard::detector_ignores_prose_neighbors_and_other_binaries",
+          "old": "detector_ignores_prose_neighbors_and_other_binaries"
+        },
+        {
+          "new": "spawn_site_guard::detector_treats_the_builders_raw_command_path_as_a_sanctioned_form",
+          "old": "detector_treats_the_builders_raw_command_path_as_a_sanctioned_form"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_finds_every_escape_as_executable_code",
+          "old": "isolation_detector_finds_every_escape_as_executable_code"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_flags_a_home_config_cache_anchor_taken_back_after_build",
+          "old": "isolation_detector_flags_a_home_config_cache_anchor_taken_back_after_build"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_flags_an_undeclared_darkmatter_application_input",
+          "old": "isolation_detector_flags_an_undeclared_darkmatter_application_input"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_flags_an_undeclared_rendering_input",
+          "old": "isolation_detector_flags_an_undeclared_rendering_input"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_flags_git_plumbing_taken_back_after_build",
+          "old": "isolation_detector_flags_git_plumbing_taken_back_after_build"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_ignores_prose_neighbors_and_path_qualified_lookalikes",
+          "old": "isolation_detector_ignores_prose_neighbors_and_path_qualified_lookalikes"
+        },
+        {
+          "new": "spawn_site_guard::isolation_detector_reads_a_raw_fixture_command_like_an_assert_cmd_one",
+          "old": "isolation_detector_reads_a_raw_fixture_command_like_an_assert_cmd_one"
+        },
+        {
+          "new": "spawn_site_guard::l1_tests_spawn_md_through_the_fixture_builder",
+          "old": "l1_tests_spawn_md_through_the_fixture_builder"
+        },
+        {
+          "new": "spawn_site_guard::migrated_l1_tests_keep_the_isolation_the_builder_gave_them",
+          "old": "migrated_l1_tests_keep_the_isolation_the_builder_gave_them"
+        },
+        {
+          "new": "spawn_site_guard::reconciliation_reports_unlisted_sites_stale_and_unexplained_entries",
+          "old": "reconciliation_reports_unlisted_sites_stale_and_unexplained_entries"
+        },
+        {
+          "new": "spawn_site_guard::the_artifact_carries_per_file_counts_the_reason_rollup_and_the_totals",
+          "old": "the_artifact_carries_per_file_counts_the_reason_rollup_and_the_totals"
+        },
+        {
+          "new": "spawn_site_guard::the_artifact_is_written_even_when_the_staging_directory_does_not_exist",
+          "old": "the_artifact_is_written_even_when_the_staging_directory_does_not_exist"
+        },
+        {
+          "new": "spawn_site_guard::the_isolation_gate_governs_the_fixture_self_tests_and_only_those",
+          "old": "the_isolation_gate_governs_the_fixture_self_tests_and_only_those"
+        },
+        {
+          "new": "spawn_site_guard::the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site",
+          "old": "the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site"
+        },
+        {
+          "new": "spawn_site_guard::tier_naming_decides_what_the_guard_governs",
+          "old": "tier_naming_decides_what_the_guard_governs"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "toc",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/toc.rs",
+      "old_binary_id": "darkmatter-cli::toc",
+      "old_path": "darkmatter/cli/tests/toc.rs",
+      "old_target": "toc",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "toc::test_toc_subcommand_ignores_tab_indented_frontmatter",
+          "old": "test_toc_subcommand_ignores_tab_indented_frontmatter"
+        },
+        {
+          "new": "toc::test_toc_subcommand_json_output",
+          "old": "test_toc_subcommand_json_output"
+        },
+        {
+          "new": "toc::test_toc_subcommand_output",
+          "old": "test_toc_subcommand_output"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::l1",
+      "inner_cfg": [],
+      "module": "validate_refs",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/l1/validate_refs.rs",
+      "old_binary_id": "darkmatter-cli::validate_refs",
+      "old_path": "darkmatter/cli/tests/validate_refs.rs",
+      "old_target": "validate_refs",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "validate_refs::validate_refs_graph_dot",
+          "old": "validate_refs_graph_dot"
+        },
+        {
+          "new": "validate_refs::validate_refs_graph_mermaid",
+          "old": "validate_refs_graph_mermaid"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_datauri_baseline",
+          "old": "validate_refs_json_datauri_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_errors_baseline",
+          "old": "validate_refs_json_errors_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_fragment_baseline",
+          "old": "validate_refs_json_fragment_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_inline_baseline",
+          "old": "validate_refs_json_inline_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_local_baseline",
+          "old": "validate_refs_json_local_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_output",
+          "old": "validate_refs_json_output"
+        },
+        {
+          "new": "validate_refs::validate_refs_json_remote_baseline",
+          "old": "validate_refs_json_remote_baseline"
+        },
+        {
+          "new": "validate_refs::validate_refs_nonzero_exit_on_errors",
+          "old": "validate_refs_nonzero_exit_on_errors"
+        },
+        {
+          "new": "validate_refs::validate_refs_text_output",
+          "old": "validate_refs_text_output"
+        },
+        {
+          "new": "validate_refs::validate_refs_with_fragments",
+          "old": "validate_refs_with_fragments"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_code_block_styling",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_code_block_styling.rs",
+      "old_binary_id": "darkmatter-cli::level2_code_block_styling",
+      "old_path": "darkmatter/cli/tests/level2_code_block_styling.rs",
+      "old_target": "level2_code_block_styling",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_code_block_styling::level2_align_code_block_center_indents_more_than_left",
+          "old": "level2_align_code_block_center_indents_more_than_left"
+        },
+        {
+          "new": "level2_code_block_styling::level2_cli_code_theme_overrides_style_page_code_theme",
+          "old": "level2_cli_code_theme_overrides_style_page_code_theme"
+        },
+        {
+          "new": "level2_code_block_styling::level2_code_block_clears_inherited_dim_before_theme_colors",
+          "old": "level2_code_block_clears_inherited_dim_before_theme_colors"
+        },
+        {
+          "new": "level2_code_block_styling::level2_code_block_fill_pad_adds_left_indent",
+          "old": "level2_code_block_fill_pad_adds_left_indent"
+        },
+        {
+          "new": "level2_code_block_styling::level2_code_block_inverts_to_light_in_dark_terminal",
+          "old": "level2_code_block_inverts_to_light_in_dark_terminal"
+        },
+        {
+          "new": "level2_code_block_styling::level2_code_block_max_fill_constrains_body_width",
+          "old": "level2_code_block_max_fill_constrains_body_width"
+        },
+        {
+          "new": "level2_code_block_styling::level2_code_block_respects_right_margin",
+          "old": "level2_code_block_respects_right_margin"
+        },
+        {
+          "new": "level2_code_block_styling::level2_default_code_block_inverts_background_and_foreground",
+          "old": "level2_default_code_block_inverts_background_and_foreground"
+        },
+        {
+          "new": "level2_code_block_styling::level2_no_trailing_blank_offset_after_code",
+          "old": "level2_no_trailing_blank_offset_after_code"
+        },
+        {
+          "new": "level2_code_block_styling::level2_style_page_code_theme_changes_terminal_rendering",
+          "old": "level2_style_page_code_theme_changes_terminal_rendering"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_disclosure_blocks",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_disclosure_blocks.rs",
+      "old_binary_id": "darkmatter-cli::level2_disclosure_blocks",
+      "old_path": "darkmatter/cli/tests/level2_disclosure_blocks.rs",
+      "old_target": "level2_disclosure_blocks",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_disclosure_blocks::level2_disclosure_body_renders_as_dim_italic_block_quote",
+          "old": "level2_disclosure_body_renders_as_dim_italic_block_quote"
+        },
+        {
+          "new": "level2_disclosure_blocks::level2_disclosure_honors_frontmatter_style_color_width_alignment",
+          "old": "level2_disclosure_honors_frontmatter_style_color_width_alignment"
+        },
+        {
+          "new": "level2_disclosure_blocks::level2_disclosure_honors_inline_opener_color_and_width",
+          "old": "level2_disclosure_honors_inline_opener_color_and_width"
+        },
+        {
+          "new": "level2_disclosure_blocks::level2_disclosure_inline_width_overrides_frontmatter_max_width",
+          "old": "level2_disclosure_inline_width_overrides_frontmatter_max_width"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_errors",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_errors.rs",
+      "old_binary_id": "darkmatter-cli::level2_errors",
+      "old_path": "darkmatter/cli/tests/level2_errors.rs",
+      "old_target": "level2_errors",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_errors::level2_error_excerpt_contains_gutter_and_dimming",
+          "old": "level2_error_excerpt_contains_gutter_and_dimming"
+        },
+        {
+          "new": "level2_errors::level2_error_header_contains_osc8_hyperlink",
+          "old": "level2_error_header_contains_osc8_hyperlink"
+        },
+        {
+          "new": "level2_errors::level2_invalid_file_reference_renders_did_you_mean_suggestion",
+          "old": "level2_invalid_file_reference_renders_did_you_mean_suggestion"
+        },
+        {
+          "new": "level2_errors::level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link",
+          "old": "level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link"
+        },
+        {
+          "new": "level2_errors::level2_invalid_file_reference_with_schema_reports_file_path",
+          "old": "level2_invalid_file_reference_with_schema_reports_file_path"
+        },
+        {
+          "new": "level2_errors::level2_schema_validation_block_renders_per_problem_description",
+          "old": "level2_schema_validation_block_renders_per_problem_description"
+        },
+        {
+          "new": "level2_errors::level2_schema_validation_block_renders_styled_link_and_bullet",
+          "old": "level2_schema_validation_block_renders_styled_link_and_bullet"
+        },
+        {
+          "new": "level2_errors::level2_stale_directory_reference_renders_did_you_mean_suggestion",
+          "old": "level2_stale_directory_reference_renders_did_you_mean_suggestion"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_frontmatter_images",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_frontmatter_images.rs",
+      "old_binary_id": "darkmatter-cli::level2_frontmatter_images",
+      "old_path": "darkmatter/cli/tests/level2_frontmatter_images.rs",
+      "old_target": "level2_frontmatter_images",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_frontmatter_images::level2_hyperlink_color_applies_inside_table",
+          "old": "level2_hyperlink_color_applies_inside_table"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_image_fallback_text_respects_alignment",
+          "old": "level2_image_fallback_text_respects_alignment"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_local_hyperlink_color_differs_from_remote_in_terminal",
+          "old": "level2_local_hyperlink_color_differs_from_remote_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_frontmatter_images_alignment_indents_fallback_text",
+          "old": "level2_style_frontmatter_images_alignment_indents_fallback_text"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_hyperlinks_exact_width_truncates_label_in_terminal",
+          "old": "level2_style_hyperlinks_exact_width_truncates_label_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal",
+          "old": "level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_hyperlinks_width_pads_label_in_terminal",
+          "old": "level2_style_hyperlinks_width_pads_label_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_images_exact_width_truncates_long_alt_in_terminal",
+          "old": "level2_style_images_exact_width_truncates_long_alt_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_images_local_style_colors_fallback_in_terminal",
+          "old": "level2_style_images_local_style_colors_fallback_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_images_local_style_width_alignment_in_terminal",
+          "old": "level2_style_images_local_style_width_alignment_in_terminal"
+        },
+        {
+          "new": "level2_frontmatter_images::level2_style_images_truncation_does_not_bleed_color_in_terminal",
+          "old": "level2_style_images_truncation_does_not_bleed_color_in_terminal"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_frontmatter_tables",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_frontmatter_tables.rs",
+      "old_binary_id": "darkmatter-cli::level2_frontmatter_tables",
+      "old_path": "darkmatter/cli/tests/level2_frontmatter_tables.rs",
+      "old_target": "level2_frontmatter_tables",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_frontmatter_tables::level2_blockquote_center_alignment_indents_more_than_left",
+          "old": "level2_blockquote_center_alignment_indents_more_than_left"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_blockquote_indent_fill_caps_wrap_width",
+          "old": "level2_blockquote_indent_fill_caps_wrap_width"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_style_fixture_applies_top_and_left_margins_in_real_terminal",
+          "old": "level2_style_fixture_applies_top_and_left_margins_in_real_terminal"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_style_frontmatter_block_quote_max_width_caps_wrap_width",
+          "old": "level2_style_frontmatter_block_quote_max_width_caps_wrap_width"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_style_frontmatter_table_max_width_caps_visible_row",
+          "old": "level2_style_frontmatter_table_max_width_caps_visible_row"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_style_frontmatter_table_right_alignment_pushes_row_to_right_edge",
+          "old": "level2_style_frontmatter_table_right_alignment_pushes_row_to_right_edge"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_table_center_alignment_indents_more_than_left",
+          "old": "level2_table_center_alignment_indents_more_than_left"
+        },
+        {
+          "new": "level2_frontmatter_tables::level2_table_max_fill_constrains_visible_width",
+          "old": "level2_table_max_fill_constrains_visible_width"
+        }
+      ]
+    },
+    {
+      "alias": {
+        "from": "level2_harness_integrity",
+        "reason": [
+          "L1: assert_shim_resolves_to_built_accepts_valid_link matches before, mismatches as level2_harness_integrity::assert_shim_resolves_to_built_accepts_valid_link",
+          "L1: assert_shim_resolves_to_built_rejects_foreign_link matches before, mismatches as level2_harness_integrity::assert_shim_resolves_to_built_rejects_foreign_link",
+          "L1: md_shim_path_is_absolute_temp_dir_link matches before, mismatches as level2_harness_integrity::md_shim_path_is_absolute_temp_dir_link",
+          "L1: md_shim_resolves_to_cargo_built_binary matches before, mismatches as level2_harness_integrity::md_shim_resolves_to_cargo_built_binary",
+          "sanity: assert_shim_resolves_to_built_accepts_valid_link matches before, mismatches as level2_harness_integrity::assert_shim_resolves_to_built_accepts_valid_link"
+        ]
+      },
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "harness_integrity",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/harness_integrity.rs",
+      "old_binary_id": "darkmatter-cli::level2_harness_integrity",
+      "old_path": "darkmatter/cli/tests/level2_harness_integrity.rs",
+      "old_target": "level2_harness_integrity",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "harness_integrity::assert_shim_resolves_to_built_accepts_valid_link",
+          "old": "assert_shim_resolves_to_built_accepts_valid_link"
+        },
+        {
+          "new": "harness_integrity::assert_shim_resolves_to_built_rejects_foreign_link",
+          "old": "assert_shim_resolves_to_built_rejects_foreign_link"
+        },
+        {
+          "new": "harness_integrity::md_shim_path_is_absolute_temp_dir_link",
+          "old": "md_shim_path_is_absolute_temp_dir_link"
+        },
+        {
+          "new": "harness_integrity::md_shim_resolves_to_cargo_built_binary",
+          "old": "md_shim_resolves_to_cargo_built_binary"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_horizontal_rules",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_horizontal_rules.rs",
+      "old_binary_id": "darkmatter-cli::level2_horizontal_rules",
+      "old_path": "darkmatter/cli/tests/level2_horizontal_rules.rs",
+      "old_target": "level2_horizontal_rules",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_alignment_center_offsets_rule_from_left_in_real_terminal",
+          "old": "level2_style_hr_alignment_center_offsets_rule_from_left_in_real_terminal"
+        },
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_bg_color_emits_background_sgr_in_real_terminal",
+          "old": "level2_style_hr_bg_color_emits_background_sgr_in_real_terminal"
+        },
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_color_emits_sgr_in_real_terminal",
+          "old": "level2_style_hr_color_emits_sgr_in_real_terminal"
+        },
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_kind_waves_renders_in_real_terminal",
+          "old": "level2_style_hr_kind_waves_renders_in_real_terminal"
+        },
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_weight_thick_differs_from_thin_in_real_terminal",
+          "old": "level2_style_hr_weight_thick_differs_from_thin_in_real_terminal"
+        },
+        {
+          "new": "level2_horizontal_rules::level2_style_hr_width_caps_visible_columns_in_real_terminal",
+          "old": "level2_style_hr_width_caps_visible_columns_in_real_terminal"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_layout_dimensions",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_layout_dimensions.rs",
+      "old_binary_id": "darkmatter-cli::level2_layout_dimensions",
+      "old_path": "darkmatter/cli/tests/level2_layout_dimensions.rs",
+      "old_target": "level2_layout_dimensions",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_layout_dimensions::level2_color_depth_none_preserves_visible_layout",
+          "old": "level2_color_depth_none_preserves_visible_layout"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_end_to_end_layout_dimensions",
+          "old": "level2_end_to_end_layout_dimensions"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_line_numbers_false_omits_gutter",
+          "old": "level2_line_numbers_false_omits_gutter"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_line_numbers_true_renders_gutter",
+          "old": "level2_line_numbers_true_renders_gutter"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_margin_renders_blank_top_rows",
+          "old": "level2_margin_renders_blank_top_rows"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_max_width_caps_visible_content_columns",
+          "old": "level2_max_width_caps_visible_content_columns"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_page_bg_pronounced_emits_bg_sgr",
+          "old": "level2_page_bg_pronounced_emits_bg_sgr"
+        },
+        {
+          "new": "level2_layout_dimensions::level2_page_bg_subtle_emits_bg_sgr",
+          "old": "level2_page_bg_subtle_emits_bg_sgr"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_ordered_lists",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_ordered_lists.rs",
+      "old_binary_id": "darkmatter-cli::level2_ordered_lists",
+      "old_path": "darkmatter/cli/tests/level2_ordered_lists.rs",
+      "old_target": "level2_ordered_lists",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_ordered_lists::level2_cli_align_lists_broadcast_indents_in_real_terminal",
+          "old": "level2_cli_align_lists_broadcast_indents_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_cli_align_ul_granular_indents_only_ul_in_real_terminal",
+          "old": "level2_cli_align_ul_granular_indents_only_ul_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_list_center_alignment_indents_more_than_left",
+          "old": "level2_list_center_alignment_indents_more_than_left"
+        },
+        {
+          "new": "level2_ordered_lists::level2_list_max_fill_caps_wrap_width",
+          "old": "level2_list_max_fill_caps_wrap_width"
+        },
+        {
+          "new": "level2_ordered_lists::level2_style_li_alignment_right_aligns_body_in_real_terminal",
+          "old": "level2_style_li_alignment_right_aligns_body_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_style_ol_alignment_right_indents_more_than_left_in_real_terminal",
+          "old": "level2_style_ol_alignment_right_indents_more_than_left_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_style_ul_left_margin_offsets_bullet_in_real_terminal",
+          "old": "level2_style_ul_left_margin_offsets_bullet_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_style_ul_left_margin_plus_max_width_stack_in_real_terminal",
+          "old": "level2_style_ul_left_margin_plus_max_width_stack_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_style_ul_max_width_caps_wrap_width_in_real_terminal",
+          "old": "level2_style_ul_max_width_caps_wrap_width_in_real_terminal"
+        },
+        {
+          "new": "level2_ordered_lists::level2_ul_color_inherits_into_li_body",
+          "old": "level2_ul_color_inherits_into_li_body"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_schema_about",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_schema_about.rs",
+      "old_binary_id": "darkmatter-cli::level2_schema_about",
+      "old_path": "darkmatter/cli/tests/level2_schema_about.rs",
+      "old_target": "level2_schema_about",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_schema_about::level2_schema_about_constraint_table_renders_striped_row",
+          "old": "level2_schema_about_constraint_table_renders_striped_row"
+        },
+        {
+          "new": "level2_schema_about::level2_schema_about_dark_terminal_uses_light_code_theme",
+          "old": "level2_schema_about_dark_terminal_uses_light_code_theme"
+        },
+        {
+          "new": "level2_schema_about::level2_schema_about_light_terminal_uses_dark_code_theme",
+          "old": "level2_schema_about_light_terminal_uses_dark_code_theme"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "darkmatter-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_schema_validate",
+      "nested_root": false,
+      "new_path": "darkmatter/cli/tests/level2/level2_schema_validate.rs",
+      "old_binary_id": "darkmatter-cli::level2_schema_validate",
+      "old_path": "darkmatter/cli/tests/level2_schema_validate.rs",
+      "old_target": "level2_schema_validate",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_schema_validate::level2_schema_validate_pretty_renders_dimmed_description_sub_line",
+          "old": "level2_schema_validate_pretty_renders_dimmed_description_sub_line"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "darkmatter-cli",
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "clean",
+        "clean_frontmatter",
+        "clean_json",
+        "clean_schema",
+        "code_block",
+        "compose_array_rendering",
+        "compose_base_schema",
+        "compose_basic",
+        "compose_interpolation",
+        "compose_layout",
+        "compose_page_blocks",
+        "compose_perf",
+        "compose_refs_and_missing",
+        "compose_remote_caching",
+        "compose_schema",
+        "compose_schema_file_rewrite",
+        "compose_shell",
+        "compose_state_set",
+        "compose_terminal_detection",
+        "compose_transclusion",
+        "delta",
+        "get_set_rm",
+        "graph",
+        "hash",
+        "hash_directory",
+        "hash_kind_save_diff",
+        "help",
+        "layout_alignment",
+        "layout_fill",
+        "layout_flags",
+        "layout_style_frontmatter",
+        "md_process_fixture",
+        "render_basic",
+        "rm",
+        "schema_about",
+        "schema_detect",
+        "schema_triggers",
+        "schema_validate",
+        "schema_validate_baseline",
+        "spawn_site_guard",
+        "toc",
+        "validate_refs"
+      ],
+      "name": "l1",
+      "path": "darkmatter/cli/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level2_code_block_styling",
+        "level2_disclosure_blocks",
+        "level2_errors",
+        "level2_frontmatter_images",
+        "level2_frontmatter_tables",
+        "harness_integrity",
+        "level2_horizontal_rules",
+        "level2_layout_dimensions",
+        "level2_ordered_lists",
+        "level2_schema_about",
+        "level2_schema_validate"
+      ],
+      "name": "level2",
+      "path": "darkmatter/cli/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}

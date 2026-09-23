@@ -3,7 +3,7 @@
 These files are the **exact** minified ESM runtime of Mermaid, pinned to the
 version in `darkmatter::mermaid::MERMAID_VERSION` (`11.6.0`). They exist so the
 Browser-tier test `browser_mermaid_real_engine_renders_and_themes`
-(`darkmatter/lib/tests/browser_render.rs`) can run the **real** pinned engine
+(`darkmatter/lib/tests/browser/browser_render.rs`) can run the **real** pinned engine
 against a **loopback-only** static server — proving Mermaid 11.6.0 actually
 exports the API shape the bootstrap calls, accepts the resolver's
 `themeVariables`, parses the diagram, and produces a themed SVG. The handwritten

@@ -155,7 +155,20 @@ Compare against that, never against `to_string_lossy()`.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
-  `inline_compose_hash.rs`.
+  `inline_compose_hash.rs`. This is not only a test concern: Claudine delivers
+  the composed prompt as one `-t` argument, so a real npm-installed
+  `goose.cmd`/`claude.cmd` on a user's `PATH` fails the same way. The
+  `wrap_compose_validation` stub was still a `.cmd` until 2026-09-22, and the
+  first native-Windows run of `claudine-cli` is what found it.
+- **An SSH session's processes are already inside a Job Object**, and that Job
+  forbids nesting, so `AssignProcessToJobObject` returns
+  `ERROR_ACCESS_DENIED` (`Access is denied. (0x80070005)`, the `windows`
+  crate's HRESULT spelling, not `os error 5`). Anything that treats that call
+  as fatal cannot run under SSH at all: it failed every `sequence_budget`
+  launch until `windows_wait_loop` was made to degrade to terminating the
+  child alone (2026-09-22). Verify a host with `IsProcessInJob` before
+  blaming the code. Tests that spawn through a Job therefore behave
+  differently over `just cross-check` than in an interactive session.
 - **Overriding `USERPROFILE` alone breaks the per-user known folders.**
   `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
   which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and

@@ -153,8 +153,7 @@ pub(crate) mod review_router;
 pub(crate) mod source_scan;
 pub(crate) mod wrap;
 
-// Re-exported so a call site keeps saying `common::helper_command`; the
-// definitions live in their own file for the binaries that include it alone.
+// Re-exported so a call site keeps saying `common::helper_command`.
 pub use host_tools::{GIT_PLUMBING_VARS, helper_command};
 
 use std::ffi::{OsStr, OsString};

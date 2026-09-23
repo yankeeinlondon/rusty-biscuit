@@ -626,6 +626,13 @@ CELL_FIELDS: dict[str, bool] = {
     #: each — reading the package-wide list instead is what refused every
     #: mixed-backend cell before schema version 6.
     "backends": False,
+    #: On an L1 cell a changed test input selected: the nextest filterset naming
+    #: exactly the tests that read it. The producer intersects it with the
+    #: tier's own expression (`BISCUIT_TEST_NARROW`) in both the gate and its
+    #: expected-test listing. Such a cell is satisfied only by an exact-tree
+    #: receipt cell carrying the same filter, from any host
+    #: (docs/cicd/test-inputs.md). Optional: absent means the whole tier.
+    "test_filter": False,
 }
 
 #: One immutable compile configuration, its native owner, and every result cell
@@ -715,6 +722,10 @@ RECEIPT_CELL_FIELDS: dict[str, bool] = {
     #: compiled in place has no archive to name, and because every receipt
     #: written before archives existed must stay readable.
     "build": False,
+    #: The narrowing a test-input run applied (docs/cicd/test-inputs.md). A
+    #: cell carrying it proves only those tests, and only on its exact tree;
+    #: it never stands in for the whole tier.
+    "test_filter": False,
 }
 
 #: What a receipt cell's `build` names: the PLANNED key and the producer's
@@ -1929,6 +1940,17 @@ def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
                 f"malformed-receipt: {label} is companions-only and names no "
                 "companion, so it would run nothing at all"
             )
+    if "test_filter" in entry:
+        if not isinstance(entry["test_filter"], str) or not entry["test_filter"].strip():
+            problems.append(
+                f"malformed-receipt: {label} carries an empty test_filter, which "
+                "would narrow the tier to nothing"
+            )
+        if entry.get("gate") != "L1" or execution not in ("execute", "reuse"):
+            problems.append(
+                f"malformed-receipt: {label} carries a test_filter, which only an "
+                "L1 cell that runs or reuses a selection has to narrow"
+            )
     return problems
 
 
@@ -1974,6 +1996,15 @@ def validate_receipt(document: Any) -> list[str]:
     seen: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in document["cells"]:
         problems += _keys("receipt cell", entry, RECEIPT_CELL_FIELDS)
+        if "test_filter" in entry and (
+            not isinstance(entry["test_filter"], str)
+            or not entry["test_filter"].strip()
+            or entry.get("gate") != "L1"
+        ):
+            problems.append(
+                f"malformed-receipt: {label} carries a test_filter, which only a "
+                "non-empty L1 narrowing may be"
+            )
         if not isinstance(entry, dict) or "package" not in entry or "gate" not in entry:
             continue
         label = f"receipt cell {entry['package']}/{document['environment']}/{entry['gate']}"

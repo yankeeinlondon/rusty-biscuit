@@ -695,6 +695,7 @@ jobs:
         env:
           BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
           BISCUIT_L1_INCLUDE_SLOW: ${{ steps.cell.outputs.l1_include_slow }}
+          BISCUIT_TEST_NARROW: ${{ steps.cell.outputs.test_filter }}
           BISCUIT_CI_COMPANION_SUITES: ${{ steps.cell.outputs.companion_suites }}
           ARCHIVE_FILE: ${{ steps.verified.outputs.archive_file }}
           ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
@@ -758,6 +759,7 @@ jobs:
           RUNNER_TOOLS: ${{ steps.cell.outputs.runner_tools }}
           REQUIRED_BACKENDS: ${{ steps.cell.outputs.backends }}
           BISCUIT_L1_INCLUDE_SLOW: ${{ steps.cell.outputs.l1_include_slow }}
+          BISCUIT_TEST_NARROW: ${{ steps.cell.outputs.test_filter }}
           # A PROVISIONED capability hard-fails when missing; every other cell
           # (and every developer host) skips loudly and exits 0.
           BISCUIT_FRONTEND_REQUIRED: ${{ steps.cell.outputs.requires_node == 'true' && '1' || '' }}

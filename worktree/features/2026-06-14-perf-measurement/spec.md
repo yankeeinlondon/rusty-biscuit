@@ -2,6 +2,7 @@
 date: 2026-06-14
 agent: "${env.AGENT}"
 reviewed: true
+implemented: true
 status: "ready for planning and implementation"
 ---
 
@@ -9,7 +10,7 @@ status: "ready for planning and implementation"
 
 The prior performance spec (`worktree/fixes/2026-06-13-perf/spec.md`) optimized
 the `wt list` pipeline and added a performance-testing contract
-(`worktree/docs/performance-testing.md`). That contract documents the *intended*
+(`worktree/docs/performance-testing.md`). That contract documents the _intended_
 Criterion bench surfaces but the benches themselves were explicitly deferred.
 Meanwhile, the `bench` recipe in `worktree/justfile` is a documented no-op, and
 users have no runtime diagnostic to answer "why is `wt list` slow?" without
@@ -69,28 +70,28 @@ layers of complexity worth skipping for worktree's scale.
 
 **Adopt:**
 
-| Pattern | Why |
-| --- | --- |
-| Stderr-only output | Perf is metadata, not data. `wt list` already writes the status table and graph to stderr (stdout is reserved for the `cd:` protocol in `wt go`). Consistent. |
-| Single reconciling tree (`Performance` root) | A tree whose Structural children + `unattributed` remainder = wall-clock is honest and readable. |
-| `MetricsTree` component from `biscuit-terminal` | Don't reinvent rendering. The component already handles unit alignment, share-of-wall-clock column, connectors, and `NO_COLOR` degradation. |
-| `BlockQuote` wrapper with colored border | Visually distinct from command output. |
-| `--perf` is opt-in, off by default | No stage-timing or report-render overhead when not used; only the top-of-main timestamp is unconditional. |
-| Per-stage `Instant` capture threaded from process start | One wall-clock zero point; stages measured as deltas. |
-| Help text: "Emit a performance report to stderr after command completion." | Matches claudine's idiom; clear and concise. |
+| Pattern                                                                    | Why                                                                                                                                                           |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stderr-only output                                                         | Perf is metadata, not data. `wt list` already writes the status table and graph to stderr (stdout is reserved for the `cd:` protocol in `wt go`). Consistent. |
+| Single reconciling tree (`Performance` root)                               | A tree whose Structural children + `unattributed` remainder = wall-clock is honest and readable.                                                              |
+| `MetricsTree` component from `biscuit-terminal`                            | Don't reinvent rendering. The component already handles unit alignment, share-of-wall-clock column, connectors, and `NO_COLOR` degradation.                   |
+| `BlockQuote` wrapper with colored border                                   | Visually distinct from command output.                                                                                                                        |
+| `--perf` is opt-in, off by default                                         | No stage-timing or report-render overhead when not used; only the top-of-main timestamp is unconditional.                                                     |
+| Per-stage `Instant` capture threaded from process start                    | One wall-clock zero point; stages measured as deltas.                                                                                                         |
+| Help text: "Emit a performance report to stderr after command completion." | Matches claudine's idiom; clear and concise.                                                                                                                  |
 
 **Skip (over-engineering for worktree's scale):**
 
-| Claudine feature | Why skip |
-| --- | --- |
-| Pre-clap `scan_perf_bootstrap` | Claudine scans raw argv before clap to time arg parsing and gate perf by subcommand kind. Worktree's arg parsing is negligible (~µs vs 700ms gather) and there is only one perf-relevant command. Just capture `Instant::now()` at the top of `main()`. |
-| `PerfCommandKind` enum + per-kind gating | Claudine supports 4 command shapes (wrapper, compose, inline-compose, sequence). Worktree has one shape (`list`). |
-| `NodeRole::Breakdown` | Claudine needs Breakdown because composition stages overlap (parallel capture work double-counts). Worktree's stages are strictly sequential — every child is `Structural`. |
-| `debug_assert_reconciles` TR-1 walker | Claudine has a debug-only assertion that the tree reconciles at every node. For a simple sequential pipeline with only Structural children, reconciliation is trivially `Σ children + unattributed = parent`. |
-| `mark_dominant_leaf` (HOT marker) | Nice touch, but adds a tree-walk pass for marginal value at this scale. Follow-up. |
-| `prune_unattributed_noise` | Claudine prunes sub-1ms remainders. At worktree's scale (ms-to-seconds), noise is invisible. |
-| `SequencePerfAccumulator` | No sequences in worktree. |
-| Composition perf integration (`ComposePerfReport`) | Not applicable. |
+| Claudine feature                                   | Why skip                                                                                                                                                                                                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pre-clap `scan_perf_bootstrap`                     | Claudine scans raw argv before clap to time arg parsing and gate perf by subcommand kind. Worktree's arg parsing is negligible (~µs vs 700ms gather) and there is only one perf-relevant command. Just capture `Instant::now()` at the top of `main()`. |
+| `PerfCommandKind` enum + per-kind gating           | Claudine supports 4 command shapes (wrapper, compose, inline-compose, sequence). Worktree has one shape (`list`).                                                                                                                                       |
+| `NodeRole::Breakdown`                              | Claudine needs Breakdown because composition stages overlap (parallel capture work double-counts). Worktree's stages are strictly sequential — every child is `Structural`.                                                                             |
+| `debug_assert_reconciles` TR-1 walker              | Claudine has a debug-only assertion that the tree reconciles at every node. For a simple sequential pipeline with only Structural children, reconciliation is trivially `Σ children + unattributed = parent`.                                           |
+| `mark_dominant_leaf` (HOT marker)                  | Nice touch, but adds a tree-walk pass for marginal value at this scale. Follow-up.                                                                                                                                                                      |
+| `prune_unattributed_noise`                         | Claudine prunes sub-1ms remainders. At worktree's scale (ms-to-seconds), noise is invisible.                                                                                                                                                            |
+| `SequencePerfAccumulator`                          | No sequences in worktree.                                                                                                                                                                                                                               |
+| Composition perf integration (`ComposePerfReport`) | Not applicable.                                                                                                                                                                                                                                         |
 
 ### Worktree pipeline stages to measure
 
@@ -98,14 +99,14 @@ The `wt list` pipeline decomposes into strictly sequential stages with no
 overlap. Each is a `Structural` child of the root; `unattributed` absorbs the
 gap.
 
-| Stage | Where | Owned by | Notes |
-| --- | --- | --- | --- |
-| pre-dispatch | arg parsing + completion check in `main.rs` / `run()` | worktree-cli | Small (~µs). |
-| list gather | `list_worktrees()` (`worktree/lib/src/worktree.rs:161`) | worktree (lib) | Dominant cost on non-image terminals (~700ms in `rusty-biscuit`). |
-| graph gather | `gather_extras()` → `gather_data()` (`worktree/cli/src/commands/list.rs:90-177`) | worktree-cli | Image-capable terminals only; skips entirely on non-image. |
-| table render | `build_status_table()` + `table.render()` (`list.rs:296-312`) | worktree-cli | Pure CPU; uses `biscuit-terminal` Table. |
-| graph image render | `MermaidDiagram::new()` + `diagram.render()` (`list.rs:71-72`) | biscuit-terminal | External package. Mermaid → SVG → PNG → terminal protocol. Include in report but label clearly. |
-| verbose render | `render_verbose()` (`list.rs:213-259`) | worktree-cli | `--verbose` only. |
+| Stage              | Where                                                                            | Owned by         | Notes                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------- |
+| pre-dispatch       | arg parsing + completion check in `main.rs` / `run()`                            | worktree-cli     | Small (~µs).                                                                                    |
+| list gather        | `list_worktrees()` (`worktree/lib/src/worktree.rs:161`)                          | worktree (lib)   | Dominant cost on non-image terminals (~700ms in `rusty-biscuit`).                               |
+| graph gather       | `gather_extras()` → `gather_data()` (`worktree/cli/src/commands/list.rs:90-177`) | worktree-cli     | Image-capable terminals only; skips entirely on non-image.                                      |
+| table render       | `build_status_table()` + `table.render()` (`list.rs:296-312`)                    | worktree-cli     | Pure CPU; uses `biscuit-terminal` Table.                                                        |
+| graph image render | `MermaidDiagram::new()` + `diagram.render()` (`list.rs:71-72`)                   | biscuit-terminal | External package. Mermaid → SVG → PNG → terminal protocol. Include in report but label clearly. |
+| verbose render     | `render_verbose()` (`list.rs:213-259`)                                           | worktree-cli     | `--verbose` only.                                                                               |
 
 ## Requirements
 
@@ -139,22 +140,22 @@ for finer-grained Criterion coverage.
 **Steps:**
 
 1. In `worktree/lib/Cargo.toml`:
-   - Add `bench = false` to `[lib]` to disable the default bench harness.
-   - Add `criterion = { version = "0.5", features = ["html_reports"] }` to
-     `[dev-dependencies]`.
-   - Add `[[bench]] name = "list_status" harness = false`.
+    - Add `bench = false` to `[lib]` to disable the default bench harness.
+    - Add `criterion = { version = "0.5", features = ["html_reports"] }` to
+      `[dev-dependencies]`.
+    - Add `[[bench]] name = "list_status" harness = false`.
 
 2. Create `worktree/lib/benches/list_status.rs`:
-   - One benchmark group (`list_status`) with hierarchical benchmark IDs.
-   - Use `iter_batched_ref` so the gather result is not cloned per iteration.
-   - Benchmark IDs:
-     - `list_status/warm` — `list_worktrees()` end-to-end in the ambient repo.
-       Uses `Throughput::Elements(1)` so the report shows calls/sec.
-   - Include a module-level doc comment stating that the bench runs in the
-     ambient `rusty-biscuit` checkout and that baseline numbers drift as the
-     repo grows (document the caveat; the host-state preflight and
-     host-derived baseline from the shared `/just` infrastructure mitigate
-     cross-host comparison issues).
+    - One benchmark group (`list_status`) with hierarchical benchmark IDs.
+    - Use `iter_batched_ref` so the gather result is not cloned per iteration.
+    - Benchmark IDs:
+        - `list_status/warm` — `list_worktrees()` end-to-end in the ambient repo.
+          Uses `Throughput::Elements(1)` so the report shows calls/sec.
+    - Include a module-level doc comment stating that the bench runs in the
+      ambient `rusty-biscuit` checkout and that baseline numbers drift as the
+      repo grows (document the caveat; the host-state preflight and
+      host-derived baseline from the shared `/just` infrastructure mitigate
+      cross-host comparison issues).
 
 3. The bench must not panic if the ambient directory is not a git repo. Check
    `list_worktrees()` once outside the benchmark closure and skip the group if
@@ -172,23 +173,23 @@ the shared helpers for the canonical before/after workflow.
 
 1. Replace `worktree/justfile:118-120` (the no-op `bench`) with:
 
-   ```just
-   # Criterion benches for worktree gather performance.
-   bench *args="":
-       @just _bench {{ LIBRARY }} {{ args }}
-   ```
+    ```just
+    # Criterion benches for worktree gather performance.
+    bench *args="":
+        @just _bench {{ LIBRARY }} {{ args }}
+    ```
 
 2. Add `bench-save` and `bench-compare` recipes:
 
-   ```just
-   # Save the current bench run as this host's baseline (run before a change).
-   bench-save *args="":
-       @just _bench_save {{ LIBRARY }} {{ args }}
+    ```just
+    # Save the current bench run as this host's baseline (run before a change).
+    bench-save *args="":
+        @just _bench_save {{ LIBRARY }} {{ args }}
 
-   # Compare the current bench run against this host's saved baseline.
-   bench-compare *args="":
-       @just _bench_compare {{ LIBRARY }} {{ args }}
-   ```
+    # Compare the current bench run against this host's saved baseline.
+    bench-compare *args="":
+        @just _bench_compare {{ LIBRARY }} {{ args }}
+    ```
 
 3. The shared `_bench` recipe already runs `_bench_preflight` (battery, memory,
    load check) and `_bench_id` (host-derived baseline name), so no additional
@@ -226,118 +227,115 @@ CLI (`claudine/cli/src/perf.rs`).
 
 **Implementation steps:**
 
-1. In `worktree/cli/src/args.rs`, add the flag to `Cli`:
+1.  In `worktree/cli/src/args.rs`, add the flag to `Cli`:
 
-   ```rust
-   /// Emit a performance report to stderr after command completion.
-   #[arg(long, global = true)]
-   pub perf: bool,
-   ```
+    ```rust
+    /// Emit a performance report to stderr after command completion.
+    #[arg(long, global = true)]
+    pub perf: bool,
+    ```
 
-2. Create `worktree/cli/src/perf.rs`:
+2.  Create `worktree/cli/src/perf.rs`:
+    - A `PerfCollector` struct that captures per-stage `Duration`s and the
+      process-start `Instant`. Simpler than claudine's `CommandPerfCollector`
+      because there are no substages, no composition perf, and no agent perf.
 
-   - A `PerfCollector` struct that captures per-stage `Duration`s and the
-     process-start `Instant`. Simpler than claudine's `CommandPerfCollector`
-     because there are no substages, no composition perf, and no agent perf.
+        ```rust
+        pub(crate) struct PerfCollector {
+            process_start: Instant,
+            stages: Vec<(&'static str, Duration)>,
+        }
+        ```
 
-     ```rust
-     pub(crate) struct PerfCollector {
-         process_start: Instant,
-         stages: Vec<(&'static str, Duration)>,
-     }
-     ```
+    - `PerfCollector::new(process_start)` — start with an empty stage list.
+    - `PerfCollector::record(&mut self, name: &'static str, elapsed: Duration)`
+      — append a stage timing.
+    - `PerfCollector::emit(&self)` — build the tree and render to stderr.
 
-   - `PerfCollector::new(process_start)` — start with an empty stage list.
-   - `PerfCollector::record(&mut self, name: &'static str, elapsed: Duration)`
-     — append a stage timing.
-   - `PerfCollector::emit(&self)` — build the tree and render to stderr.
+    - A `PerfNode` type (simplified from claudine — no `NodeRole` enum needed
+      since all children are Structural):
 
-   - A `PerfNode` type (simplified from claudine — no `NodeRole` enum needed
-     since all children are Structural):
+        ```rust
+        struct PerfNode {
+            label: String,
+            total: Duration,
+            children: Vec<PerfNode>,
+        }
+        ```
 
-     ```rust
-     struct PerfNode {
-         label: String,
-         total: Duration,
-         children: Vec<PerfNode>,
-     }
-     ```
+    - A `build_perf_tree` function that assembles the tree:
+        - Root: `Performance` with `total = process_start.elapsed()`.
+        - Children: one `Structural` node per recorded stage.
+        - Append `unattributed` = `max(0, total - Σ stages)`.
 
-   - A `build_perf_tree` function that assembles the tree:
-     - Root: `Performance` with `total = process_start.elapsed()`.
-     - Children: one `Structural` node per recorded stage.
-     - Append `unattributed` = `max(0, total - Σ stages)`.
+    - A `render_perf_report` function that projects `PerfNode` into
+      `biscuit_terminal::components::metrics_tree::MetricNode` and renders via
+      `MetricsTree` inside a `BlockQuote` with a colored left border. Use the
+      same `BlockQuote` + `MetricsTree` pattern as claudine's
+      `render_perf_report` (`claudine/cli/src/perf.rs:1185`).
 
-   - A `render_perf_report` function that projects `PerfNode` into
-     `biscuit_terminal::components::metrics_tree::MetricNode` and renders via
-     `MetricsTree` inside a `BlockQuote` with a colored left border. Use the
-     same `BlockQuote` + `MetricsTree` pattern as claudine's
-     `render_perf_report` (`claudine/cli/src/perf.rs:1185`).
+3.  In `worktree/cli/src/main.rs`:
+    - Capture `let process_start = std::time::Instant::now();` at the very top
+      of `main()`, before anything else (before `CompleteEnv`, before `run()`).
+    - Pass `process_start` and `cli.perf` down to the `list` command.
+    - Add `mod perf;` so the CLI binary can use `worktree/cli/src/perf.rs`.
 
-3. In `worktree/cli/src/main.rs`:
-   - Capture `let process_start = std::time::Instant::now();` at the very top
-     of `main()`, before anything else (before `CompleteEnv`, before `run()`).
-   - Pass `process_start` and `cli.perf` down to the `list` command.
-   - Add `mod perf;` so the CLI binary can use `worktree/cli/src/perf.rs`.
+4.  In `worktree/cli/src/commands/list.rs`: - Change `run()` signature to accept `perf: bool` and `process_start:
+Instant`. - When `perf` is true, wrap each pipeline stage in a timing capture:
 
-4. In `worktree/cli/src/commands/list.rs`:
-   - Change `run()` signature to accept `perf: bool` and `process_start:
-     Instant`.
-   - When `perf` is true, wrap each pipeline stage in a timing capture:
+            ```rust
+            pub fn run(
+                width_spec: Option<&str>,
+                verbose: bool,
+                perf: bool,
+                process_start: Instant,
+            ) -> Result<(), WorktreeError> {
+                let mut collector = if perf {
+                    Some(PerfCollector::new(process_start))
+                } else {
+                    None
+                };
 
-     ```rust
-     pub fn run(
-         width_spec: Option<&str>,
-         verbose: bool,
-         perf: bool,
-         process_start: Instant,
-     ) -> Result<(), WorktreeError> {
-         let mut collector = if perf {
-             Some(PerfCollector::new(process_start))
-         } else {
-             None
-         };
+                record(
+                    &mut collector,
+                    "pre-dispatch",
+                    process_start.elapsed(),
+                );
 
-         record(
-             &mut collector,
-             "pre-dispatch",
-             process_start.elapsed(),
-         );
+                let t0 = Instant::now();
+                let list = list_worktrees()?;
+                record(&mut collector, "list gather", t0.elapsed());
 
-         let t0 = Instant::now();
-         let list = list_worktrees()?;
-         record(&mut collector, "list gather", t0.elapsed());
+                // ... graph gather, table render, image render, verbose render ...
 
-         // ... graph gather, table render, image render, verbose render ...
+                if let Some(ref c) = collector {
+                    c.emit();
+                }
+                Ok(())
+            }
+            ```
 
-         if let Some(ref c) = collector {
-             c.emit();
-         }
-         Ok(())
-     }
-     ```
+        - The `pre-dispatch` stage is recorded as the elapsed time from
+          `process_start` to the first line of `list::run()`. It covers completion
+          environment handling, clap parsing, global-option extraction, and command
+          dispatch. Because it is recorded before `list_worktrees()`, it does not
+          double-count the gather stage.
 
-   - The `pre-dispatch` stage is recorded as the elapsed time from
-     `process_start` to the first line of `list::run()`. It covers completion
-     environment handling, clap parsing, global-option extraction, and command
-     dispatch. Because it is recorded before `list_worktrees()`, it does not
-     double-count the gather stage.
+        - The `emit()` call must be the last thing before `Ok(())`. `emit()` should
+          sample `total = process_start.elapsed()` before rendering the
+          `MetricsTree`, so the perf report's own render time is excluded from the
+          measured total.
 
-   - The `emit()` call must be the last thing before `Ok(())`. `emit()` should
-     sample `total = process_start.elapsed()` before rendering the
-     `MetricsTree`, so the perf report's own render time is excluded from the
-     measured total.
+        - **Graph image render labeling**: When the graph image render stage is
+          present, label it `graph image render (biscuit-terminal)` so the report
+          makes clear that stage's cost is owned by an external package, not
+          worktree. This matches the exclusion documented in
+          `worktree/docs/performance-testing.md`.
 
-   - **Graph image render labeling**: When the graph image render stage is
-     present, label it `graph image render (biscuit-terminal)` so the report
-     makes clear that stage's cost is owned by an external package, not
-     worktree. This matches the exclusion documented in
-     `worktree/docs/performance-testing.md`.
-
-5. When `perf` is false, the `PerfCollector` is `None`, stage timers are not
-   captured, and the report is not rendered. The only unconditional cost is
-   the top-of-main `Instant::now()` required to make `pre-dispatch` honest when
-   perf is enabled.
+5.  When `perf` is false, the `PerfCollector` is `None`, stage timers are not
+    captured, and the report is not rendered. The only unconditional cost is
+    the top-of-main `Instant::now()` required to make `pre-dispatch` honest when
+    perf is enabled.
 
 **Non-image terminal behavior**: On a non-image terminal, the graph gather and
 graph image render stages are skipped entirely (per the prior optimization's
@@ -362,35 +360,35 @@ Add a `## Performance` section to the README documenting:
 
 2. Content sketch:
 
-   ~~~markdown
-   ## Performance
+    ````markdown
+    ## Performance
 
-   `wt list` is optimized for the `rusty-biscuit` monorepo (48 workspace
-   members). The pipeline resolves the default branch once, gathers per-worktree
-   status in parallel, and skips the graph path entirely on non-image terminals.
+    `wt list` is optimized for the `rusty-biscuit` monorepo (48 workspace
+    members). The pipeline resolves the default branch once, gathers per-worktree
+    status in parallel, and skips the graph path entirely on non-image terminals.
 
-   ### Runtime diagnostic
+    ### Runtime diagnostic
 
-   `wt list --perf` emits a per-stage timing report to stderr showing where
-   wall-clock time is spent (pre-dispatch, list gather, graph gather, table
-   render, image render). The report uses a reconciling tree so stage timings
-   plus unattributed time sum to the total wall-clock.
+    `wt list --perf` emits a per-stage timing report to stderr showing where
+    wall-clock time is spent (pre-dispatch, list gather, graph gather, table
+    render, image render). The report uses a reconciling tree so stage timings
+    plus unattributed time sum to the total wall-clock.
 
-   ### Dev-time benchmarks
+    ### Dev-time benchmarks
 
-   `just bench` runs Criterion benches against the ambient checkout and writes
-   an HTML report to `target/criterion/report/index.html`. For before/after
-   comparison:
+    `just bench` runs Criterion benches against the ambient checkout and writes
+    an HTML report to `target/criterion/report/index.html`. For before/after
+    comparison:
 
-   ```sh
-   just bench-save          # before a change
-   # ... make your change ...
-   just bench-compare       # criterion renders +/- regressions
-   ```
+    ```sh
+    just bench-save          # before a change
+    # ... make your change ...
+    just bench-compare       # criterion renders +/- regressions
+    ```
 
-   See `docs/performance-testing.md` for the full performance contract,
-   including which surfaces are benchmarked and which are excluded.
-   ~~~
+    See `docs/performance-testing.md` for the full performance contract,
+    including which surfaces are benchmarked and which are excluded.
+    ````
 
 3. Do not add benchmark numbers to the README — they drift. The README links
    to the perf docs and tells users how to run the benches themselves.
@@ -404,33 +402,33 @@ Criterion benches now exist and the `bench` recipe is wired.
 
 1. Replace the `## Bench Recipe` section content:
 
-   ~~~markdown
-   ## Bench Recipe
+    ````markdown
+    ## Bench Recipe
 
-   Criterion benches live in `worktree/lib/benches/list_status.rs` and cover
-   the `list_worktrees()` gather stage. Run via the shared `/just` bench
-   infrastructure:
+    Criterion benches live in `worktree/lib/benches/list_status.rs` and cover
+    the `list_worktrees()` gather stage. Run via the shared `/just` bench
+    infrastructure:
 
-   ```sh
-   just -d worktree bench             # run benches, generate HTML report
-   just -d worktree bench -- --open   # auto-open the report in a browser
-   just -d worktree bench-save        # save baseline before a change
-   just -d worktree bench-compare     # compare after a change
-   ```
+    ```sh
+    just -d worktree bench             # run benches, generate HTML report
+    just -d worktree bench -- --open   # auto-open the report in a browser
+    just -d worktree bench-save        # save baseline before a change
+    just -d worktree bench-compare     # compare after a change
+    ```
 
-   The HTML report is at `target/criterion/report/index.html`. The shared
-   `_bench_preflight` recipe gates on host state (battery, memory, load) and
-   `_bench_id` derives a host-specific baseline name so results from one
-   machine cannot be silently compared against another.
+    The HTML report is at `target/criterion/report/index.html`. The shared
+    `_bench_preflight` recipe gates on host state (battery, memory, load) and
+    `_bench_id` derives a host-specific baseline name so results from one
+    machine cannot be silently compared against another.
 
-   ### Runtime `--perf` flag
+    ### Runtime `--perf` flag
 
-   `wt list --perf` emits a per-stage timing report to stderr. It is a runtime
-   diagnostic for users, complementing the dev-time Criterion benches. The
-   report covers all pipeline stages that actually ran (pre-dispatch, list
-   gather, graph gather, table render, graph image render, verbose render) even
-   when Criterion only covers the library-owned gather stage.
-   ~~~
+    `wt list --perf` emits a per-stage timing report to stderr. It is a runtime
+    diagnostic for users, complementing the dev-time Criterion benches. The
+    report covers all pipeline stages that actually ran (pre-dispatch, list
+    gather, graph gather, table render, graph image render, verbose render) even
+    when Criterion only covers the library-owned gather stage.
+    ````
 
 2. Update the `## Measurement Methodology` section to cross-reference the
    `--perf` flag as an additional measurement surface alongside the `perf_*`
@@ -439,33 +437,30 @@ Criterion benches now exist and the `bench` recipe is wired.
 3. Because `worktree/docs/performance-testing.md` has a `hash` frontmatter
    property, rehash it after editing with the Darkmatter CLI:
 
-   ```sh
-   md hash worktree/docs/performance-testing.md
-   ```
+    ```sh
+    md hash worktree/docs/performance-testing.md
+    ```
 
 ### R6 — Add tests for the `--perf` flag
 
 Add Level 1 tests for the `--perf` flag:
 
 1. **Integration test** (`worktree/cli/tests/perf_flag.rs`):
-   - `wt list --perf` exits 0 and writes timing output to stderr.
-   - Assert stderr contains known stage labels (`"Performance"`,
-     `"pre-dispatch"`, `"list gather"`, `"table render"`).
-   - Assert stdout is empty (perf output is stderr-only).
-   - Assert the report shape is present. Do not assert exact durations or parse
-     percentage values from terminal-styled output; those vary by host, width,
-     and terminal capabilities.
+    - `wt list --perf` exits 0 and writes timing output to stderr.
+    - Assert stderr contains known stage labels (`"Performance"`,
+      `"pre-dispatch"`, `"list gather"`, `"table render"`).
+    - Assert stdout is empty (perf output is stderr-only).
+    - Assert the report shape is present. Do not assert exact durations or parse
+      percentage values from terminal-styled output; those vary by host, width,
+      and terminal capabilities.
 
-2. **Unit test** (`worktree/cli/src/perf.rs`):
-   - `build_perf_tree` produces a tree whose `Σ Structural children +
-     unattributed = root total` within a tolerance.
-   - `record` appends stages in order.
-   - Empty collector (no stages recorded) produces a tree with only
-     `unattributed`.
+2. **Unit test** (`worktree/cli/src/perf.rs`): - `build_perf_tree` produces a tree whose `Σ Structural children +
+unattributed = root total` within a tolerance. - `record` appends stages in order. - Empty collector (no stages recorded) produces a tree with only
+   `unattributed`.
 
 3. **Non-image regression**: `wt list --perf` on a non-image terminal
    (env vars stripped) produces a report with no `graph gather` or `graph
-   image render` stage, while still showing `pre-dispatch`, `list gather`, and
+image render` stage, while still showing `pre-dispatch`, `list gather`, and
    `table render`.
 
 4. **Error-path regression**: a failing `wt list --perf` invocation, such as

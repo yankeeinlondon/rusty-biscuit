@@ -1175,8 +1175,16 @@ test_the_committed_scope_declares_deletions_and_omits_rename_sources() {
     # Its SOURCE is the unexpectedly-missing path this fixture exists to rule
     # out: it is gone from the tree, so planning it as changed would hand the
     # guard an absence nothing explains, and declaring it deleted would claim
-    # a removal the diff never reported.
-    assert_not_contains "rename source excluded" "$tmpdir/planner.log" "README.md" || return 1
+    # a removal the diff never reported. It reaches the planner only as the
+    # old name the test-input search looks for.
+    assert_contains "rename source declared" "$tmpdir/planner.log" \
+        "--renamed-from README.md" || return 1
+    assert_not_contains "rename source not deleted" "$tmpdir/planner.log" \
+        "--deleted README.md" || return 1
+    if sed -n 's/.* -- //p' "$tmpdir/planner.log" | tr ' ' '\n' | grep -qxF README.md; then
+        echo "  expected the changed paths after '--' NOT to include README.md" >&2
+        return 1
+    fi
 }
 
 test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip() {
@@ -2172,9 +2180,16 @@ stage_ci_local_harness() {
     printf 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n' >"$harness/justfile"
     cp "$REPO_ROOT/scripts/ci/constraints.py" "$harness/scripts/ci/constraints.py"
     # The recipe's self-test loop: no-op stubs, since this fixture tests the
-    # recipe's scheduling, not those suites.
-    local suite
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
+    # recipe's scheduling, not those suites. The list is read from the recipe
+    # itself: a hand-kept copy fell behind when `test_consolidation.py` joined
+    # the loop, and every plan-fed fixture then failed on a missing file.
+    local suite suites
+    suites="$(sed -n 's/^[[:space:]]*for suite in \(test_[^;]*\); do$/\1/p' "$CI_LOCAL_RECIPE" | head -n 1)"
+    if [ -z "$suites" ]; then
+        echo "  could not read the self-test suite list from $CI_LOCAL_RECIPE" >&2
+        return 1
+    fi
+    for suite in $suites; do
         : >"$harness/scripts/ci/$suite"
     done
     cat >"$harness/scripts/ci/affected_scope.py" <<EOF

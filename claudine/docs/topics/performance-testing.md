@@ -43,8 +43,8 @@ The shell completion harness builds a monorepo-scale fixture (~48 packages, ~200
 # Build first (the harness spawns the claudine binary)
 cargo build -p claudine-cli
 
-# Run the harness
-cargo test -p claudine-cli --test completion_perf -- --ignored --nocapture
+# Run the harness (in claudine/)
+just test-cli completion_perf:: --run-ignored only --no-capture
 ```
 
 The harness validates against spec targets:
@@ -60,7 +60,7 @@ Enable detailed tracing during the run for per-phase breakdowns:
 ```bash
 CLAUDINE_COMPLETION_PROFILE=1 \
 RUST_LOG=claudine::completion=trace \
-cargo test -p claudine-cli --test completion_perf -- --ignored --nocapture
+just test-cli completion_perf:: --run-ignored only --no-capture
 ```
 
 ### Run the Sequence Performance Integration Tests
@@ -68,7 +68,7 @@ cargo test -p claudine-cli --test completion_perf -- --ignored --nocapture
 These tests validate that `claudine sequence --perf` produces a correctly aggregated performance report, including startup timings propagation and partial-report behavior on fail-fast.
 
 ```bash
-cargo test -p claudine-cli --test sequence_perf
+just test-cli sequence_perf::   # in claudine/
 ```
 
 Unlike the completion harness, these run as regular integration tests (not `#[ignore]`d) since they validate report structure, not latency numbers.

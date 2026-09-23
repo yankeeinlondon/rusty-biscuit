@@ -390,7 +390,7 @@ fn resource_support_provider_matches_provider() {
 /// string literals are rare and handled at the call site.
 ///
 /// The package-wide `Provider` dispatch guard now lives in
-/// `claudine-cli/tests/dispatch_inventory.rs` (Phase I unified both crates into
+/// `claudine-cli/tests/l1/dispatch_inventory.rs` (Phase I unified both crates into
 /// one inventory-based, site-level guard). This helper survives only for the
 /// [`detect_from_payload_has_no_provider_specific_branches`] source scan.
 fn strip_comments(src: &str) -> String {

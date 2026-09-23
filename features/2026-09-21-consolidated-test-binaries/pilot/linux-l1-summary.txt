@@ -1,0 +1,4 @@
+        FAIL [   0.055s] ( 635/2763) claudine-cli::l1 sequence_groups::parallel_body_lines_carry_their_own_tasks_bar_color
+        FAIL [   0.059s] ( 642/2763) claudine-cli::l1 sequence_groups::serial_and_parallel_group_frames_share_one_left_edge
+        FAIL [   0.070s] ( 638/2763) claudine-cli::l1 sequence_groups::parallel_group_members_are_attributed_across_both_channels
+     Summary [  15.326s] 2763 tests run: 2760 passed, 3 failed, 9 skipped

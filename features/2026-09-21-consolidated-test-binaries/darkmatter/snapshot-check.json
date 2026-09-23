@@ -1,0 +1,267 @@
+{
+  "failures": [],
+  "kind": "consolidation-snapshot-check",
+  "moved": 200,
+  "package": "darkmatter",
+  "readers": {
+    "cutover_reference": {
+      "asserting_functions": {
+        "reference_block_quote_width_and_left": "running",
+        "reference_centered_table": "running",
+        "reference_list_left_margin": "running",
+        "reference_page_background_pronounced": "running",
+        "reference_page_margin_and_padding": "running",
+        "reference_table_max_width": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 12
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "error_snapshots": {
+      "asserting_functions": {
+        "compose_delegates_inner_block": "running",
+        "condition_delegates_inner_block": "running",
+        "condition_eval_shows_expr_and_state_hint": "running",
+        "condition_parse_lists_operators_and_helpers": "running",
+        "cycle_detected_lists_chain": "running",
+        "empty_href_has_actionable_hint": "running",
+        "empty_source_has_actionable_hint": "running",
+        "eval_points_at_state": "running",
+        "file_reference_shows_hint": "running",
+        "invalid_assignment_shows_raw_and_reason": "running",
+        "invalid_color_lists_accepted_formats": "running",
+        "invalid_custom_property_hints_at_dashes": "running",
+        "invalid_declaration_shows_input": "running",
+        "invalid_decoding_lists_accepted_values": "running",
+        "invalid_fetch_priority_lists_accepted_values": "running",
+        "invalid_frontmatter_assignment_shows_cta": "running",
+        "invalid_integer_hints_at_whole_number": "running",
+        "invalid_loading_lists_accepted_values": "running",
+        "invalid_multi_sizing_shows_token_count_hint": "running",
+        "invalid_property_name_shows_name": "running",
+        "invalid_raw_value_hints_at_semicolons": "running",
+        "invalid_reassigned_frontmatter_property_shows_cta": "running",
+        "invalid_reference_shows_reference": "running",
+        "invalid_referrer_policy_lists_all_accepted_values_when_no_match": "running",
+        "invalid_referrer_policy_suggests_close_match": "running",
+        "invalid_sizing_hints_at_accepted_tokens": "running",
+        "invalid_style_delegates_stylesheet_block": "running",
+        "invalid_target_lists_accepted_values": "running",
+        "io_error_shows_kind": "running",
+        "json_error_includes_position": "running",
+        "malformed_html_includes_message": "running",
+        "malformed_markdown_includes_message_input_and_caret": "running",
+        "malformed_markdown_without_context_still_renders_message": "running",
+        "max_depth_exceeded_shows_limit": "running",
+        "missing_href_has_href_hint": "running",
+        "missing_source_context_escapes_markup": "running",
+        "missing_source_context_has_hint": "running",
+        "missing_source_context_shows_reference_and_line": "running",
+        "missing_source_mentions_src_and_srcset": "running",
+        "non_text_code_source_shows_path": "running",
+        "parse_directive_has_syntax_hint": "running",
+        "parse_directive_shows_line_and_hint": "running",
+        "parse_directive_shows_line_and_syntax_hint": "running",
+        "parse_lists_operators_and_helpers": "running",
+        "property_value_type_mismatch_shows_expected_actual_and_example": "running",
+        "reassigned_property_shows_property_name": "running",
+        "relevel_shows_message": "running",
+        "schema_validation_format_failure_renders_block": "running",
+        "schema_validation_missing_required_renders_block": "running",
+        "schema_validation_multiple_problems_renders_block": "running",
+        "schema_validation_preparation_failure_renders_summary": "running",
+        "schema_validation_preparation_failure_with_description_renders_summary": "running",
+        "schema_validation_root_union_arm_index_renders_block": "running",
+        "schema_validation_wrong_type_renders_block": "running",
+        "unmatched_end_hints_at_block": "running",
+        "unrecognized_format_hints_at_markdown_and_html": "running",
+        "unrecognized_format_mentions_html_and_markdown": "running",
+        "unsupported_file_type_shows_path": "running",
+        "unsupported_reference_type_escapes_markup": "running",
+        "unsupported_reference_type_shows_value": "running",
+        "unterminated_block_shows_opening_line": "running",
+        "url_error_has_scheme_hint": "running",
+        "url_execution_disabled_shows_url": "running",
+        "url_parse_error_has_scheme_hint": "running",
+        "validation_shows_message": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 71
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "horizontal_rule_snapshots": {
+      "asserting_functions": {
+        "test_snapshot_complex_document": "running",
+        "test_snapshot_markdown_to_html": "running",
+        "test_snapshot_markdown_to_terminal": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 25
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "layout_matrix": {
+      "asserting_functions": {
+        "layout_matrix_snapshots": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 11
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "layout_snapshots": {
+      "asserting_functions": {
+        "end_to_end_example_snapshot": "running",
+        "pronounced_background_snapshot": "running",
+        "zero_config_prose_snapshot": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 3
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "render_tree_hr_snapshots": {
+      "asserting_functions": {
+        "render_tree_hr_html_snapshots": "running",
+        "render_tree_hr_markdown_snapshots": "running",
+        "render_tree_hr_terminal_snapshots": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 12
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "render_tree_roundtrip": {
+      "asserting_functions": {
+        "render_tree_code_block_round_trip": "running",
+        "render_tree_document_json_surface": "running",
+        "render_tree_frontmatter_is_not_extracted_by_body_fold": "running",
+        "render_tree_headings_round_trip": "running",
+        "render_tree_html_round_trip": "running",
+        "render_tree_inline_styles_round_trip": "running",
+        "render_tree_links_images_round_trip": "running",
+        "render_tree_lists_round_trip": "running",
+        "render_tree_paragraph_round_trip": "running",
+        "render_tree_table_round_trip": "running",
+        "render_tree_task_list_round_trip": "running",
+        "render_tree_unsupported_math_or_definition_folds_to_plain_text": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 12
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "schemas_convert_snapshots": {
+      "asserting_functions": {
+        "snapshot_array_string_with_pattern_and_array_constraints": "running",
+        "snapshot_array_with_description": "running",
+        "snapshot_atom_any": "running",
+        "snapshot_atom_boolean": "running",
+        "snapshot_atom_boolish": "running",
+        "snapshot_atom_date": "running",
+        "snapshot_atom_datetime": "running",
+        "snapshot_atom_email": "running",
+        "snapshot_atom_enum_members": "running",
+        "snapshot_atom_file_array_min_items": "running",
+        "snapshot_atom_file_bare": "running",
+        "snapshot_atom_file_match": "running",
+        "snapshot_atom_number": "running",
+        "snapshot_atom_number_integer_with_min": "running",
+        "snapshot_atom_numberlike": "running",
+        "snapshot_atom_object": "running",
+        "snapshot_atom_string": "running",
+        "snapshot_atom_string_min_max": "running",
+        "snapshot_atom_string_not_empty": "running",
+        "snapshot_atom_string_pattern": "running",
+        "snapshot_atom_time": "running",
+        "snapshot_atom_url_bare": "running",
+        "snapshot_atom_url_scheme": "running",
+        "snapshot_atom_with_description": "running",
+        "snapshot_default_and_required_atoms": "running",
+        "snapshot_enum_with_default_and_required": "running",
+        "snapshot_full_document_schema": "running",
+        "snapshot_inline_object_array": "running",
+        "snapshot_inline_object_as_union_arm": "running",
+        "snapshot_inline_object_bare": "running",
+        "snapshot_inline_object_constrained_array": "running",
+        "snapshot_inline_object_empty": "running",
+        "snapshot_inline_object_mixed_with_string_fallback": "running",
+        "snapshot_inline_object_multi_line": "running",
+        "snapshot_inline_object_nested": "running",
+        "snapshot_inline_object_required_value": "running",
+        "snapshot_property_union_basic": "running",
+        "snapshot_property_union_hoists_matching_default": "running",
+        "snapshot_property_union_hoists_required": "running",
+        "snapshot_root_union_inline_only": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 40
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "style_features_phase5": {
+      "asserting_functions": {
+        "full_page_standalone_document_snapshot": "running",
+        "mermaid_body_only_wrapper_snapshot": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 2
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "suggest_constraint_phase3": {
+      "asserting_functions": {
+        "conversion_snapshot_covers_valid_and_invalid_metadata": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 1
+      },
+      "statement": "every moved snapshot is read by a running test"
+    },
+    "tree_features_characterization": {
+      "asserting_functions": {
+        "char_component_color_current_with_opacity": "running",
+        "char_component_color_half_opacity": "running",
+        "char_component_color_inherit_with_opacity": "running",
+        "char_component_color_opaque": "running",
+        "char_component_color_transparent_with_opacity": "running",
+        "char_hyperlink_exact_width_pads": "running",
+        "char_hyperlink_max_width_truncates": "running",
+        "char_list_item_center_alignment": "running",
+        "char_list_item_right_alignment": "running",
+        "char_local_image_styling": "running",
+        "char_structured_link_attributes": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 11
+      },
+      "statement": "every moved snapshot is read by a running test"
+    }
+  },
+  "unaffected": 1,
+  "version": 1
+}

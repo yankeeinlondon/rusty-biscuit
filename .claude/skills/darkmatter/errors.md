@@ -111,7 +111,7 @@ Reference implementation:
 ## Snapshot Tests
 
 Every `BlockError` variant is exercised by an integration test under
-`darkmatter/lib/tests/error_snapshots/`.
+`darkmatter/lib/tests/l1/error_snapshots/`.
 Tests:
 
 1. Construct the variant with a representative payload.
@@ -125,7 +125,7 @@ Accepting new snapshots locally:
 
 ```bash
 cd darkmatter
-INSTA_UPDATE=always cargo test -p darkmatter --test error_snapshots
+INSTA_UPDATE=always cargo nextest run -p darkmatter --test l1 error_snapshots::
 ```
 
 CI runs `cargo test` without `INSTA_UPDATE`, so any drift in rendered
@@ -140,9 +140,9 @@ output fails the build.
    header, frontmatter snapshot, and source excerpt.
 3. Escape any user-supplied strings (`replace('_', "\\_")` etc.) before
    embedding them in Prose markup.
-4. Add a snapshot test under `darkmatter/lib/tests/error_snapshots/`,
+4. Add a snapshot test under `darkmatter/lib/tests/l1/error_snapshots/`,
    including both `assert_contains_all` and `insta::assert_snapshot!`.
-5. Run `INSTA_UPDATE=always cargo test -p darkmatter --test error_snapshots`
+5. Run `INSTA_UPDATE=always cargo nextest run -p darkmatter --test l1 error_snapshots::`
    to baseline the new snapshot, then review it.
 6. Confirm the rendered output passes `just test` and `just lint` in the
    `darkmatter` package area.

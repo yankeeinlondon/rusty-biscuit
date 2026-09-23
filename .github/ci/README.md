@@ -173,6 +173,11 @@ and other CI configuration select no package jobs; CI's own suites run in their
 owning packages' cells (see [CI's own tooling](#cis-own-tooling)). Only an explicit `workflow_dispatch` full-scope run
 selects every package.
 
+The one exception is a file compiled code reads: embedded into shipped code it
+is that package's source, and read by a test it schedules one narrowed
+`{package, ubuntu-latest, L1}` cell, which an exact-tree local run from any host
+may satisfy. See [`docs/cicd/test-inputs.md`](../../docs/cicd/test-inputs.md).
+
 Source classification is path based: `build.rs` and package-owned files with a
 known programming or web-source extension select their owning package. A gate
 absent from `gates` schedules no job.
@@ -1258,10 +1263,12 @@ removed. A deleted path is still in its bucket — it changed — and the extra
 list is what lets a reader tell it from a path that is simply absent, which
 `git diff --name-only` cannot express. Every boundary therefore takes
 `git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`
-into `--deleted <path>... -- <changed path>...`: the scope step of `ci.yml`,
-`just/ci-local.just` (which unions untracked files, never deletions), and
-`.githooks/pre-push`. A rename's destination is the changed path; its source is
-reported nowhere, being neither a declared removal nor a file left to read.
+into `--deleted <path>... --renamed-from <path>... -- <changed path>...`: the
+scope step of `ci.yml`, `just/ci-local.just` (which unions untracked files,
+never deletions), and `.githooks/pre-push`. A rename's destination is the
+changed path; its source is neither a declared removal nor a file left to read,
+so it enters neither list and is passed as `--renamed-from` for the test-input
+search alone.
 
 It is a sibling of `change_class`, not a replacement: `classify_preflight()`
 still returns `change_class` and that is still what sets preflight breadth.

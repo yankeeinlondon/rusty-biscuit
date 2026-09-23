@@ -4,7 +4,7 @@
 //!
 //! The Style Everywhere feature (`renderable/features/2026-06-30-style-everywhere`)
 //! pins these three `renderable::style::Style` properties as Level-1 invariants
-//! in `biscuit-terminal/lib/tests/layout_matrix.rs`. Level 1 proves the
+//! in `biscuit-terminal/lib/tests/l1/layout_matrix.rs`. Level 1 proves the
 //! renderer's own byte stream carries the SGR / glyph; these Level-2 tests
 //! prove the styling survives the round-trip through a real terminal
 //! emulator's display + capture path — the user-visible result the review

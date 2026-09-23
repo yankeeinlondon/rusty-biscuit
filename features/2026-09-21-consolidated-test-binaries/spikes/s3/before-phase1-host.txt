@@ -1,0 +1,62 @@
+## snapshot: start (2026-09-22T00:32:52Z)
+uptime: 17:32  up 9 days,  2:09, 3 users, load averages: 10.82 51.86 62.48
+{
+  "arch": "arm64",
+  "brand": "Apple M4 Max",
+  "logical_cores": 16,
+  "physical_cores": 16,
+  "simd": {
+    "avx": false,
+    "avx2": false,
+    "avx512bw": false,
+    "avx512f": false,
+    "avx512vl": false,
+    "fma": false,
+    "neon": true,
+    "sse": false,
+    "sse2": false,
+    "sse3": false,
+    "sse4_1": false,
+    "sse4_2": false,
+    "ssse3": false
+  }
+}
+{
+  "available_bytes": 88817745920,
+  "free_swap": 0,
+  "total_bytes": 137438953472,
+  "total_swap": 0,
+  "used_bytes": 88214863872,
+  "used_swap": 0
+}
+## snapshot: end (2026-09-22T00:38:41Z)
+uptime: 17:38  up 9 days,  2:15, 3 users, load averages: 57.11 57.49 60.64
+{
+  "arch": "arm64",
+  "brand": "Apple M4 Max",
+  "logical_cores": 16,
+  "physical_cores": 16,
+  "simd": {
+    "avx": false,
+    "avx2": false,
+    "avx512bw": false,
+    "avx512f": false,
+    "avx512vl": false,
+    "fma": false,
+    "neon": true,
+    "sse": false,
+    "sse2": false,
+    "sse3": false,
+    "sse4_1": false,
+    "sse4_2": false,
+    "ssse3": false
+  }
+}
+{
+  "available_bytes": 88862703616,
+  "free_swap": 0,
+  "total_bytes": 137438953472,
+  "total_swap": 0,
+  "used_bytes": 89304809472,
+  "used_swap": 0
+}

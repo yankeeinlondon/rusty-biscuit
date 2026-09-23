@@ -401,6 +401,12 @@ def verify_cells(
 
             exact = document["tree"] == head_tree
             for cell in terminal_cells:
+                if cell.get("test_filter"):
+                    _resolve_narrowed(
+                        cell, plan, environment, exact, note_commit, document,
+                        wanted, resolved, accepted, rejections,
+                    )
+                    continue
                 key = (cell["package"], environment, cell["gate"])
                 if key not in wanted or key in resolved:
                     continue
@@ -433,6 +439,54 @@ def verify_cells(
                 )
 
     return accepted, rejections
+
+
+def _resolve_narrowed(
+    cell: dict[str, Any],
+    plan: dict[str, Any],
+    environment: str,
+    exact: bool,
+    note_commit: str,
+    document: dict[str, Any],
+    wanted: set[tuple[str, str, str]],
+    resolved: set[tuple[str, str, str]],
+    accepted: list[dict[str, Any]],
+    rejections: list[str],
+) -> None:
+    """Credit a narrowed test-input receipt cell to the plan cell it ran for.
+
+    The one place a receipt stands in for another environment
+    (docs/cicd/test-inputs.md). It qualifies only for a plan cell with the
+    identical package, gate, and `test_filter`, and only on the head's exact
+    tree: the changed file is not a gate input, so no equivalence rule can
+    vouch for an older run. The accepted entry is keyed by the PLAN's
+    environment, while its evidence names the host ref it came from.
+    """
+    targets = [
+        planned
+        for planned in plan["cells"]
+        if planned.get("test_filter") == cell["test_filter"]
+        and planned["package"] == cell["package"]
+        and planned["gate"] == cell["gate"]
+    ]
+    for planned in targets:
+        key = (planned["package"], planned["environment"], planned["gate"])
+        if key not in wanted or key in resolved:
+            continue
+        label = "/".join(key)
+        if not exact:
+            rejections.append(
+                f"gate-inputs-changed: {label} was narrowed to its test inputs on "
+                f"{note_commit[:9]}, and a narrowed run proves only its exact tree"
+            )
+            continue
+        resolved.add(key)
+        if cell["outcome"] == "fail":
+            continue
+        entry = _accepted_cell(cell, planned["environment"], "local", note_commit, document)
+        entry["evidence"]["ref"] = f"{NOTES_PREFIX}/{environment}"
+        entry["measurements"] += f", narrowed, on {environment}"
+        accepted.append(entry)
 
 
 def _accepted_cell(
@@ -848,10 +902,23 @@ def record_cells(
     stage = Path(stage_dir)
     proven = executed_backends(stage)
     required = required_backends(stage)
-    cells = [
-        receipt_cell(record, stage, plan, head_sha, proven, required)
-        for record in staged_records(stage)
-    ]
+    # A narrowed test-input cell may be planned on another environment than
+    # this host's: its question does not depend on the OS, so the run is
+    # recorded here WITH its filter, and verification credits it to the plan's
+    # cell only (docs/cicd/test-inputs.md). Without the filter it would read as
+    # this host's whole tier.
+    narrowed = {
+        (cell["package"], cell["gate"]): cell["test_filter"]
+        for cell in plan["cells"]
+        if cell.get("test_filter")
+    }
+    cells = []
+    for record in staged_records(stage):
+        cell = receipt_cell(record, stage, plan, head_sha, proven, required)
+        narrow = narrowed.get((record["package"], record["tier"]))
+        if narrow:
+            cell["test_filter"] = narrow
+        cells.append(cell)
     if not cells:
         raise ValueError(
             f"the run staged no L1/L2/browser report under {stage_dir}; there is "

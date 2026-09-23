@@ -1050,6 +1050,8 @@ _backend_proof command:
 # keeps `slow_` tests inside L1 instead of excluding them, which is darkmatter's
 # declared L1 contract (`l1-include-slow` in `[package.metadata.ci.tests]`).
 # The explicit `BISCUIT_TEST_FILTER` override wins over both.
+# `BISCUIT_TEST_NARROW` (a planned test-input cell's `test_filter`) is then
+# intersected with whichever of those applies; it never widens the tier.
 #
 # ## A tier marker is a prefix, not a substring
 #
@@ -1073,7 +1075,13 @@ _tier_filter tier pkg="":
             elif [[ "${BISCUIT_L1_INCLUDE_SLOW:-}" == "1" ]]; then
                 filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
             fi
-            printf '%s\n' "${BISCUIT_TEST_FILTER:-${filter}}"
+            filter="${BISCUIT_TEST_FILTER:-${filter}}"
+            # A changed test input's cell runs only the tests that read it,
+            # intersected with — never replacing — the tier's own expression.
+            if [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+                filter="(${filter}) & (${BISCUIT_TEST_NARROW})"
+            fi
+            printf '%s\n' "${filter}"
             ;;
         sanity)  printf '%s\n' "${base}" ;;
         L2|l2)       printf '%s\n' 'test(/(^|::)level2_/)' ;;
@@ -1262,7 +1270,21 @@ _test pkg *args="": _storage_preflight
                 run_args+=("${kept_arg}")
             done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
         fi
-        "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
+        # A narrowed cell names the tests it exists to run; selecting none of
+        # them means the planner's filter no longer matches the tree, which
+        # must fail rather than pass having run nothing.
+        no_tests=pass
+        if [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+            no_tests=fail
+        fi
+        # Consumed: `filter` already carries it. Left exported, it would reach
+        # every recipe a test spawns — `repo-deps`' archive fixtures run
+        # `just _test` themselves — and narrow THEIR selection to nothing.
+        unset BISCUIT_TEST_NARROW
+        "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests="${no_tests}" ${run_args[@]+"${run_args[@]}"} || exit_code=$?
+    elif [[ -n "${BISCUIT_TEST_NARROW:-}" ]]; then
+        echo -e "❌ {{ red }}BISCUIT_TEST_NARROW requires cargo-nextest{{ reset }}; cargo test cannot apply a filterset" >&2
+        exit_code=1
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
         skip_args=(--skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_)
@@ -2540,7 +2562,8 @@ _readme_files:
 #   just status --recent-all    the same, every package area, grouped
 #
 # The summary sits last because that is the only line `just --list` shows.
-# feature and fix status; --recent / --recent-all narrow to the last 7 days
+# feature and fix status; --recent / --recent-all narrow to the last 7 days,
+# skipping listings dated older than that whose spec says `implemented: true`
 status subject="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2648,12 +2671,20 @@ status subject="":
 # `scope` is `area` for the current package area, `all` for every package area
 # in the repo, each under its own heading and silent when it has nothing.
 #
-# Python rather than find/stat: the listing's *newest* mtime is what decides
-# and what is displayed, and `stat`'s format flags differ between BSD and GNU,
-# so a shell version would not behave the same on macOS, Linux and Windows.
+# Listings dated more than the window ago whose spec frontmatter says
+# `implemented: true` are skipped: another spec's implementation touching
+# their files is reporting noise, not activity.
+#
+# "Touched" comes from git, not filesystem mtimes: `git worktree add` and
+# branch checkouts rewrite mtimes wholesale, which made every listing in a
+# fresh checkout report as recent. A file counts when a commit on HEAD touched
+# it inside the window, or it is dirty/untracked with an mtime inside the
+# window.
 _status_recent scope="area":
     #!/usr/bin/env python3
+    import datetime
     import os
+    import re
     import subprocess
     import sys
     import time
@@ -2670,6 +2701,7 @@ _status_recent scope="area":
     CYAN = "\033[36m"
 
     now = time.time()
+    today = datetime.date.today()
     cutoff = now - RECENT_DAYS * 86400
     window = "last " + str(RECENT_DAYS) + " days"
 
@@ -2681,6 +2713,22 @@ _status_recent scope="area":
         except OSError:
             return ""
         return done.stdout.strip() if done.returncode == 0 else ""
+
+    root = sniff("root")
+    if not root:
+        done = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+        )
+        root = done.stdout.strip() if done.returncode == 0 else os.getcwd()
+
+    def git(*args):
+        try:
+            done = subprocess.run(
+                ["git", "-C", root, *args], capture_output=True, text=True
+            )
+        except OSError:
+            return ""
+        return done.stdout if done.returncode == 0 else ""
 
     def age(mtime):
         secs = max(0, int(now - mtime))
@@ -2694,12 +2742,70 @@ _status_recent scope="area":
         target = "file://" + os.path.abspath(path)
         return "\033]8;;" + target + "\033\\" + label + "\033]8;;\033\\"
 
+    LISTING_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
+
+    def listing_date(name):
+        match = LISTING_DATE.match(name)
+        if not match:
+            return None
+        try:
+            return datetime.date.fromisoformat(match.group(1))
+        except ValueError:
+            return None
+
+    def implemented(listing_dir):
+        spec = os.path.join(listing_dir, "spec.md")
+        try:
+            with open(spec, encoding="utf-8", errors="replace") as handle:
+                if handle.readline().strip() != "---":
+                    return False
+                for line in handle:
+                    stripped = line.strip()
+                    if stripped == "---":
+                        return False
+                    if stripped.startswith("implemented:"):
+                        return stripped.split(":", 1)[1].strip().lower() == "true"
+        except OSError:
+            return False
+        return False
+
+    # First log occurrence wins: the log is newest-first, so a file's initial
+    # sighting is its newest in-window commit. Merge commits print a bare `@ts`
+    # line with no paths. Dirty/untracked files count by their mtime — real
+    # edits, unlike checkout-forged mtimes — but only inside the window.
+    def recent_files():
+        changed = {}
+        stamp = None
+        since = datetime.datetime.fromtimestamp(cutoff).isoformat(timespec="seconds")
+        log = git("log", "--since=" + since, "--pretty=format:@%ct", "--name-only")
+        for line in log.splitlines():
+            if line.startswith("@"):
+                try:
+                    stamp = float(line[1:])
+                except ValueError:
+                    stamp = None
+            elif line and stamp is not None and line not in changed:
+                changed[line] = stamp
+        for line in git("status", "--porcelain").splitlines():
+            path = line[3:]
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            if not path:
+                continue
+            try:
+                stamp = os.stat(os.path.join(root, path)).st_mtime
+            except OSError:
+                stamp = now
+            if stamp >= cutoff and stamp > changed.get(path, 0.0):
+                changed[path] = stamp
+        return changed
+
     # Every cell is padded on its own so `·` and `ago` line up down the whole
     # report, not just within one heading: (name, count, unit, age).
     def cells(row):
         return (row[1], str(row[3]), "file" if row[3] == 1 else "files", age(row[4]))
 
-    def scan(area_dir):
+    def scan(area_dir, changed):
         rows = []
         for kind in ("features", "fixes"):
             base = os.path.join(area_dir, kind)
@@ -2708,24 +2814,33 @@ _status_recent scope="area":
             for entry in os.scandir(base):
                 if not entry.is_dir() or entry.name.startswith(("_", ".")):
                     continue
+                # Excluded only when BOTH hold: the dated name is older than
+                # the window, and the spec says `implemented: true`. Either
+                # alone keeps the listing in the report.
+                started = listing_date(entry.name)
+                if (
+                    started is not None
+                    and (today - started).days > RECENT_DAYS
+                    and implemented(entry.path)
+                ):
+                    continue
                 count = 0
                 newest = 0.0
                 newest_file = ""
-                for root, dirs, files in os.walk(entry.path):
+                for walk_root, dirs, files in os.walk(entry.path):
                     dirs[:] = [d for d in dirs if not d.startswith(".")]
                     for name in files:
                         if name.startswith("."):
                             continue
-                        path = os.path.join(root, name)
-                        try:
-                            mtime = os.stat(path).st_mtime
-                        except OSError:
-                            continue
-                        if mtime < cutoff:
+                        path = os.path.join(walk_root, name)
+                        stamp = changed.get(
+                            os.path.relpath(path, root).replace(os.sep, "/")
+                        )
+                        if stamp is None:
                             continue
                         count += 1
-                        if mtime > newest:
-                            newest = mtime
+                        if stamp > newest:
+                            newest = stamp
                             newest_file = os.path.relpath(path, entry.path)
                 if count:
                     rows.append(
@@ -2774,7 +2889,7 @@ _status_recent scope="area":
         print()
 
     if SCOPE == "area":
-        rows = scan(os.getcwd())
+        rows = scan(os.getcwd(), recent_files())
         title(sniff("area") or os.path.basename(os.getcwd()))
         if rows:
             block(rows, widths(rows), "  ", BOLD + BLUE + UNDERLINE, True)
@@ -2786,7 +2901,6 @@ _status_recent scope="area":
         print("_status_recent: scope must be `area` or `all`", file=sys.stderr)
         sys.exit(2)
 
-    root = sniff("root") or os.getcwd()
     areas = [a for a in sniff("package-areas", "--list").splitlines() if a.strip()]
     if not areas:
         print("_status_recent: `sniff repo package-areas` found none", file=sys.stderr)
@@ -2794,9 +2908,10 @@ _status_recent scope="area":
 
     # Scanned in full before anything prints: the columns are sized across
     # every area so one heading's long name does not shift its neighbours.
+    changed = recent_files()
     found = []
     for area in areas:
-        rows = scan(root if area == "root" else os.path.join(root, area))
+        rows = scan(root if area == "root" else os.path.join(root, area), changed)
         if rows:
             found.append((area, rows))
 

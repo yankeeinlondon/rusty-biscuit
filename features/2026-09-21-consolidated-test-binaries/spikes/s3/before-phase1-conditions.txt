@@ -1,0 +1,16 @@
+series=before-phase1
+revision=c0f911f5a43b869bccf4b822a9c83a6114f27dc1
+dirty=0
+toolchain=rustc 1.98.1 (48a229cea 2026-09-01)
+cargo=cargo 1.98.1 (797e8a9bc 2026-08-05)
+nextest=cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)
+host=aarch64-apple-darwin
+profile=test (dev)
+features=terminal-tests
+jobs=16
+linker=default (Apple clang version 21.0.0 (clang-2100.3.34.2))
+rustc_wrapper=unset
+target_dir=/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//s3-before-phase1-target.QFD3bh (fresh)
+edit_file=claudine/cli/tests/agent_cwd.rs
+edit_test=handle_rejects_present_non_absolute_agent_cwd
+l1_filter=!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))

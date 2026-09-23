@@ -118,7 +118,7 @@ The ruling of 2026-09-09 in
 store and `target/` share an APFS volume; **Linux on only when the clone probe
 passes** (ZFS with block cloning is the expected case); **Windows and WSL off**.
 A `target/` is always wrapped or never wrapped — a read-only hard-link restore
-breaks the next unwrapped rebuild — and the standing `ci-verification` clones on
+breaks the next unwrapped rebuild — and the standing `cross-check` clones on
 the build hosts are never wrapped.
 
 If kache prints storage-layout advice on a non-clone volume, do **not** take its

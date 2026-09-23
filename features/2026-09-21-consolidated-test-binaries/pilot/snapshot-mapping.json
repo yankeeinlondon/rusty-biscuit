@@ -1,0 +1,40 @@
+{
+  "kind": "consolidation-snapshot-mapping",
+  "version": 1,
+  "package": "claudine-cli",
+  "moved": [
+    {
+      "old": "claudine/cli/tests/snapshots/wrap_basics__help_lists_wrapper_subcommands.snap",
+      "new": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap",
+      "sha256": "e5b16563221fa94da3c3bff23e8a1f0b85ccc117ec4ce850b83fc139b327088e"
+    },
+    {
+      "old": "claudine/cli/tests/snapshots/wrap_basics__wrapper_help_includes_expected_flags.snap",
+      "new": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_help_includes_expected_flags.snap",
+      "sha256": "81d293d4038238a9d515207c989b0ee5af2b1e1147c94d94d518f96ad474d288"
+    },
+    {
+      "old": "claudine/cli/tests/snapshots/wrap_basics__wrapper_reports_removed_sensitive_env_names.snap",
+      "new": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap",
+      "sha256": "fa5dbb40cc65d53d6d88e3fcc13e7f36d4ceabf16b5bc9c60605782172d9f91b"
+    }
+  ],
+  "unaffected": [
+    {
+      "path": "claudine/cli/claudine/cli/tests/snapshots/wrap_commands__wrapper_help_includes_expected_flags.snap",
+      "sha256": "10c2f491ae00055e3ba3efe879a9a85226b4742fe38237ffa10270fd3ba94362"
+    },
+    {
+      "path": "claudine/cli/claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap",
+      "sha256": "fd392f7f1a5391fa628777509d451788e9273047cc4d4ff3e99fb10f88786284"
+    },
+    {
+      "path": "claudine/cli/src/commands/config_tui/tabs/snapshots/claudine__commands__config_tui__tabs__services__tests__services_tab_buffer.snap",
+      "sha256": "6f1a17851ccabd342fa5e0d5621b8346376607ace6da4c3f086287278c6978a4"
+    },
+    {
+      "path": "claudine/cli/src/commands/config_tui/widgets/snapshots/claudine__commands__config_tui__widgets__modal__tests__list_modal_buffer.snap",
+      "sha256": "35df2dd3006159fbe9c59524020a528157b8646cd5d4a82d82d5e388c14b881e"
+    }
+  ]
+}

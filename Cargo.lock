@@ -13678,8 +13678,10 @@ dependencies = [
  "serial_test",
  "sysinfo",
  "tempfile",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "unicode-ident",
 ]
 
 [[package]]

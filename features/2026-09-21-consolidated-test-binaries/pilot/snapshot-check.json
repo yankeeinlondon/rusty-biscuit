@@ -1,0 +1,25 @@
+{
+  "failures": [],
+  "kind": "consolidation-snapshot-check",
+  "moved": 3,
+  "package": "claudine-cli",
+  "readers": {
+    "wrap_basics": {
+      "asserting_functions": {
+        "help_lists_wrapper_subcommands": "running",
+        "wrapper_reports_removed_sensitive_env_names": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [
+        "claudine/cli/tests/snapshots/wrap_basics__wrapper_help_includes_expected_flags.snap"
+      ],
+      "snapshots": {
+        "running": 2,
+        "unresolved": 1
+      },
+      "statement": "0 of 3 moved snapshots are read only by #[ignore]d tests and 1 have no attributable reader; those are proven by rule and byte hash only, not by a passing run"
+    }
+  },
+  "unaffected": 4,
+  "version": 1
+}
