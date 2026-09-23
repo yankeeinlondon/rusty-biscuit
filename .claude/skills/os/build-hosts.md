@@ -83,8 +83,18 @@ matches the local one, errors when its host is undeclared, and `all` errors
 when nothing but the local OS is declared rather than passing silently. The
 `wsl` host runs CI's nextest archive mode with the builder target directory
 hidden, so it catches the class of failure that only the `wsl2-ubuntu` CI
-leg sees; feature flags are routed to the archive build and everything else
-to the run.
+leg sees. By default every host builds the package's declared CI features
+(`[package.metadata.ci.tests] features`, not `local-features`) and runs the L1
+filter. A Cargo build flag (`--features`, `--all-features`,
+`--no-default-features`) cannot be honored in archive mode, so passing one
+switches *every* host to plain `cargo nextest run` with no tier filter and no
+receipt; every other argument goes to the run.
+
+Per-test results appear only as PASS lines in the live output. The run keeps
+no JUnit report locally, and `--no-tests=pass` means a green leg does not prove
+a `cfg`-gated test ran. To show that a Windows-only test compiled and ran, tee
+the output (`./scripts/cross-check.sh <pkg> --os windows 2>&1 | tee <file>`)
+and cite its PASS line.
 
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
