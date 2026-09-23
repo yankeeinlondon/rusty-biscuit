@@ -2180,9 +2180,16 @@ stage_ci_local_harness() {
     printf 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n' >"$harness/justfile"
     cp "$REPO_ROOT/scripts/ci/constraints.py" "$harness/scripts/ci/constraints.py"
     # The recipe's self-test loop: no-op stubs, since this fixture tests the
-    # recipe's scheduling, not those suites.
-    local suite
-    for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py; do
+    # recipe's scheduling, not those suites. The list is read from the recipe
+    # itself: a hand-kept copy fell behind when `test_consolidation.py` joined
+    # the loop, and every plan-fed fixture then failed on a missing file.
+    local suite suites
+    suites="$(sed -n 's/^[[:space:]]*for suite in \(test_[^;]*\); do$/\1/p' "$CI_LOCAL_RECIPE" | head -n 1)"
+    if [ -z "$suites" ]; then
+        echo "  could not read the self-test suite list from $CI_LOCAL_RECIPE" >&2
+        return 1
+    fi
+    for suite in $suites; do
         : >"$harness/scripts/ci/$suite"
     done
     cat >"$harness/scripts/ci/affected_scope.py" <<EOF
