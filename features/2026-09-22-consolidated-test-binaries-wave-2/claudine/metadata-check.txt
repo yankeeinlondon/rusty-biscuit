@@ -1,0 +1,2 @@
+claudine: 1 Cargo test targets, 1 declared, 15 old targets mapped
+PASS

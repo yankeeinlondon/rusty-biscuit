@@ -1,0 +1,110 @@
+cross-check: claudine @ origin/HEAD (208051f75) + 95 changed file(s) as 68848b6f0
+os: windows(build-win-native)   extra nextest args: shipped_implement_plan_prepares_with_unset_optional_commit_message a_failed_nested_mapping_set_projects_one_path_and_commits_nothing
+mode: archive — planned keys:
+  windows  1e67571ba52bc725 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\shazam--w2-base
+
+== windows (build-win-native, archive 1e67571ba52bc725 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: d031a0d6c013fcbafb1880b5e1d59212c3de5c2c
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 1.78s
+   Compiling claudine v0.1.0 (B:\coding\shazam--w2-base\rusty-biscuit\claudine\lib)
+error[E0463]: can't find crate for `claudine`
+ --> claudine\lib\tests\model_catalog_integration.rs:5:5
+  |
+5 | use claudine::config::claudine_config::{
+  |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\agent_errors_fleet.rs:14:5
+   |
+14 | use claudine::composition::{
+   |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+ --> claudine\lib\tests\strict_mode_provenance_spike.rs:7:5
+  |
+7 | use claudine::composition::runtime_state::{RuntimeMutationError, RuntimeSnapshot, RuntimeState};
+  |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+ --> claudine\lib\tests\lifecycle_control_flow_spike.rs:5:5
+  |
+5 | use claudine::composition::lifecycle::actions::RetryBackoff;
+  |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\opencode_stderr_lifecycle.rs:14:5
+   |
+14 | use claudine::stream::logs::StderrIngestOutcome;
+   |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\kimi_wire.rs:10:5
+   |
+10 | use claudine::provider::Provider;
+   |     ^^^^^^^^ can't find crate
+
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\protocol_fixture_replay.rs:22:5
+   |
+22 | use claudine::stream::protocol::kimi::*;
+   |     ^^^^^^^^ can't find crate
+
+For more information about this error, try `rustc --explain E0463`.
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\diagnostic_detail_conformance.rs:24:5
+   |
+24 | use claudine::hook_adapters::AdapterError;
+   |     ^^^^^^^^ can't find crate
+
+error: could not compile `claudine` (test "model_catalog_integration") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error[E0463]: can't find crate for `claudine`
+ --> claudine\lib\tests\typed_stream_protocols.rs:8:5
+  |
+8 | use claudine::stream::protocol::claude::ClaudeEvent;
+  |     ^^^^^^^^ can't find crate
+
+error: could not compile `claudine` (test "agent_errors_fleet") due to 1 previous error
+error: could not compile `claudine` (test "kimi_wire") due to 1 previous error
+error: could not compile `claudine` (test "lifecycle_control_flow_spike") due to 1 previous error
+error: could not compile `claudine` (test "opencode_stderr_lifecycle") due to 1 previous error
+error: could not compile `claudine` (test "strict_mode_provenance_spike") due to 1 previous error
+error[E0463]: can't find crate for `claudine`
+  --> claudine\lib\tests\semantic_fidelity.rs:17:5
+   |
+17 | use claudine::events::EnvironmentContext;
+   |     ^^^^^^^^ can't find crate
+
+error: could not compile `claudine` (test "protocol_fixture_replay") due to 1 previous error
+error: could not compile `claudine` (test "diagnostic_detail_conformance") due to 1 previous error
+error: could not compile `claudine` (test "typed_stream_protocols") due to 1 previous error
+error: could not compile `claudine` (test "semantic_fidelity") due to 1 previous error
+error[E0463]: can't find crate for `claudine`
+ --> claudine\lib\tests\canonical_dispatch.rs:3:5
+  |
+3 | use claudine::actions::HookAction;
+  |     ^^^^^^^^ can't find crate
+
+error: could not compile `claudine` (test "canonical_dispatch") due to 1 previous error
+error: crate `icu_properties` required to be available in rlib format, but was not found in this form
+
+error: could not compile `claudine` (lib test) due to 1 previous error
+error: command `'C:\Users\ken\.rustup\toolchains\1.98.1-x86_64-pc-windows-msvc\bin\cargo.exe' test --no-run --message-format json-render-diagnostics --package claudine --profile test --target x86_64-pc-windows-msvc` exited with code 101
+1 of 1 build(s) failed on `windows-latest`. Each key is attempted on its own, so the rows below report every one; a failed key blocks only the cells that named it.
+┌──────────┬──────────────────┬─────────┬─────────┬──────────┬───────┐
+│ Package  │ Key              │ Result  │ Digest  │ Binaries │ Bytes │
+├──────────┼──────────────────┼─────────┼─────────┼──────────┼───────┤
+│ claudine │ 1e67571ba52bc725 │ failure │ compile │ -        │ -     │
+└──────────┴──────────────────┴─────────┴─────────┴──────────┴───────┘
+
+cross-check summary for claudine:
+  windows  FAIL
