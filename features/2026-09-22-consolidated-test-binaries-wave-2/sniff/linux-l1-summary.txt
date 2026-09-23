@@ -1,0 +1,3 @@
+# sniff L1 on build-linux (c02e691d9 + Phase 3 patch, RUSTC_WRAPPER="" KACHE_AUTO=0)
+$ cargo nextest run -p sniff --features remote --no-fail-fast -E "$(just _tier_filter L1 sniff)"
+Summary: 1946 tests run: 1946 passed, 29 skipped

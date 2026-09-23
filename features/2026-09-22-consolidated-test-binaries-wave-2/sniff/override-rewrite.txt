@@ -1,0 +1,10 @@
+# R10: the rewritten sniff override matches exactly one test (ci profile, CI features: remote)
+
+$ cargo nextest list -p sniff --features remote --profile ci -E 'test(=integration::test_detect_completes_in_reasonable_time)'
+sniff::l1 integration::test_detect_completes_in_reasonable_time
+matched: 1
+
+$ cargo nextest list -p sniff --features remote --profile ci -E 'test(=test_detect_completes_in_reasonable_time)'
+matched: 0
+
+The second (old) spelling matches nothing after the move: left unrewritten, the override would silently apply to no test.
