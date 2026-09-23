@@ -203,7 +203,7 @@ Level 1 `sniff-cli` integration tests obtain the binary through
 `cli/tests/common::SniffCliFixture`. Its default command pins disposable
 cwd/home/config/cache/install roots and a bounded PATH; use the named
 `host_path` and `fake_only_path` PATH escapes with a call-site `//` comment
-naming the tool observed or the absence proved — `cli/tests/spawn_site_guard.rs`
+naming the tool observed or the absence proved — `cli/tests/l1/spawn_site_guard.rs`
 scans for one and fails the suite without it. The `ambient_context` CWD escape
 needs no comment: it accepts only a directory the test built, inside the fixture
 workspace (builder form) or the system temporary root (fluent forms), and

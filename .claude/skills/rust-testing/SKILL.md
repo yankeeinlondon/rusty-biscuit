@@ -774,7 +774,7 @@ reference implementation:
 | Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
 | Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine and darkmatter, `cli/tests/spawn_site_guard.rs` in sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
+| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine, darkmatter, and sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
 
 **Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
 live-child test needs a `std::process::Command` — and hand-building one
