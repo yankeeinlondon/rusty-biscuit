@@ -1202,6 +1202,7 @@ dependencies = [
  "serde_yaml_ng",
  "serial_test",
  "tempfile",
+ "test-toolkit",
  "thiserror 2.0.18",
  "tokio",
  "toml 1.1.2+spec-1.1.0",
