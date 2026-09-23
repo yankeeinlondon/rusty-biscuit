@@ -7978,5 +7978,49 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
         self.assertIn("test_filter", toolkit[("ubuntu-latest", "L1")])
 
 
+
+class ArgumentsFileTests(unittest.TestCase):
+    """`--arguments-file`: the diff's argument tail without argv's limits.
+
+    The pre-push hook used to pipe it through `xargs`, and BSD `xargs` splits
+    at 5,000 arguments: the PR 92/93 merge (5,439) ran the planner twice, and
+    the second run saw a deleted path as changed.
+    """
+
+    def tail(self, *parts: bytes) -> Path:
+        handle = tempfile.NamedTemporaryFile(delete=False, suffix=".args")
+        handle.write(b"".join(part + b"\0" for part in parts))
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return Path(handle.name)
+
+    def test_the_tail_is_appended_after_the_other_arguments(self) -> None:
+        tail = self.tail(b"--deleted", b"gone.md", b"--", b"gone.md", b"kept.rs")
+        self.assertEqual(
+            ["--event", "push", "--deleted", "gone.md", "--", "gone.md", "kept.rs"],
+            affected_scope.expand_arguments_file(
+                ["--event", "push", "--arguments-file", str(tail)]
+            ),
+        )
+
+    def test_a_tail_larger_than_xargs_passes_keeps_every_declaration(self) -> None:
+        paths = [f"docs/{index}.md".encode() for index in range(6000)]
+        tail = self.tail(b"--deleted", paths[0], b"--", *paths)
+        expanded = affected_scope.expand_arguments_file(["--arguments-file", str(tail)])
+        self.assertEqual(["--deleted", "docs/0.md", "--"], expanded[:3])
+        self.assertEqual(6000, len(expanded) - 3)
+
+    def test_the_planner_reads_a_deletion_from_the_file(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        tail = self.tail(b"--deleted", b"docs/comment-quality.md", b"--", b"docs/comment-quality.md")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "ci" / "affected_scope.py"),
+             "--resolved-plan", "--arguments-file", str(tail)],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        inventory = json.loads(result.stdout)["change_inventory"]
+        self.assertEqual(["docs/comment-quality.md"], inventory["deleted"])
+
+
 if __name__ == "__main__":
     unittest.main()

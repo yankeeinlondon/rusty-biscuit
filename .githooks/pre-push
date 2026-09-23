@@ -373,11 +373,13 @@ resolve_trigger_contexts() {
 # path set; CI plans `--all` for it.
 #
 # `--name-status` rather than `--name-only`, so a deletion reaches the planner
-# as one: `diff_scope.py` writes `--deleted <path>... -- <changed path>...`,
-# which is also why an empty diff needs no branch of its own here — the tail
-# is never empty, so `xargs` runs on every platform. This is POSIX `sh` and
-# cannot read NUL-delimited records, hence the two files rather than a
-# pipeline: each step's own failure is then visible without `pipefail`.
+# as one: `diff_scope.py` writes `--deleted <path>... -- <changed path>...`.
+# This is POSIX `sh` and cannot read NUL-delimited records, so the planner
+# reads that tail itself (`--arguments-file`). Not `xargs`: BSD `xargs` passes
+# at most 5,000 arguments per run and silently runs the planner again on the
+# rest, whose plan then lists deleted paths as changed and overwrites the
+# first (the PR 92/93 merge). Two files rather than a pipeline, so each step's
+# own failure is visible without `pipefail`.
 plan_trigger_scope() {
     if is_zero_oid "$SCOPE_BASE"; then
         (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
@@ -386,9 +388,9 @@ plan_trigger_scope() {
         git diff --name-status -z "$SCOPE_BASE" "$TRIGGER_SHA" -- >"$SCOPE_DIFF_FILE" || return 1
         python3 "$TRIGGER_ROOT/scripts/ci/diff_scope.py" \
             <"$SCOPE_DIFF_FILE" >"$SCOPE_ARGS_FILE" || return 1
-        (cd "$TRIGGER_ROOT" && xargs -0 python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
-            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA") \
-            <"$SCOPE_ARGS_FILE"
+        (cd "$TRIGGER_ROOT" && python3 scripts/ci/affected_scope.py --event "$SCOPE_EVENT" \
+            --plan-out "$SCOPE_PLAN_FILE" --base "$SCOPE_BASE" --head "$TRIGGER_SHA" \
+            --arguments-file "$SCOPE_ARGS_FILE")
     fi
 }
 

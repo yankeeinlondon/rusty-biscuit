@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
 import subprocess
 import sys
@@ -4723,6 +4724,29 @@ def legacy_scope_document(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def expand_arguments_file(argv: Sequence[str]) -> list[str]:
+    """`argv` with `--arguments-file FILE` replaced by FILE's NUL-delimited tokens.
+
+    The tokens are appended after every other argument, because they are the
+    `--deleted … --renamed-from … -- <path>…` tail `diff_scope.py` writes. A
+    file, not argv, because a large diff outgrows what `xargs` passes in one
+    invocation: BSD `xargs` stops at 5,000 arguments and silently runs the
+    planner again on the rest, which then sees changed paths without their
+    `--deleted` declarations (the PR 92/93 merge, 5,439 arguments).
+    """
+    arguments = list(argv)
+    if "--arguments-file" not in arguments:
+        return arguments
+    index = arguments.index("--arguments-file")
+    if index + 1 >= len(arguments):
+        raise SystemExit("affected_scope: --arguments-file needs a path")
+    source = Path(arguments[index + 1])
+    tokens = source.read_bytes().split(b"\0")
+    if tokens and tokens[-1] == b"":
+        tokens.pop()
+    return arguments[:index] + arguments[index + 2 :] + [os.fsdecode(token) for token in tokens]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="select the full workspace")
@@ -4828,8 +4852,16 @@ def parse_args() -> argparse.Namespace:
             "tests that still name it"
         ),
     )
+    parser.add_argument(
+        "--arguments-file",
+        metavar="FILE",
+        help=(
+            "read the diff's argument tail (`diff_scope.py`'s NUL-delimited "
+            "output) from FILE instead of argv"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
-    args = parser.parse_args()
+    args = parser.parse_args(expand_arguments_file(sys.argv[1:]))
     if args.apply_to and (
         args.all or args.files or args.constraints or args.deleted or args.renamed_from
         or args.event or args.all_environments or args.proven_event

@@ -411,14 +411,23 @@ def apply(plan: dict, accepted: list, rejections: list) -> dict:
 
 
 def main() -> None:
+    # The real planner's `--arguments-file`: the diff's NUL-delimited tail,
+    # appended after the other arguments, so the log records what was planned.
+    argv = sys.argv[1:]
+    if "--arguments-file" in argv:
+        index = argv.index("--arguments-file")
+        tokens = Path(argv[index + 1]).read_bytes().split(b"\0")
+        if tokens and tokens[-1] == b"":
+            tokens.pop()
+        argv = argv[:index] + argv[index + 2 :] + [token.decode() for token in tokens]
     log = os.environ.get("TEST_PLANNER_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as handle:
-            handle.write(" ".join(sys.argv[1:]) + "\n")
+            handle.write(" ".join(argv) + "\n")
             handle.write(f"root {ROOT} cwd {Path.cwd()}\n")
     if os.environ.get("TEST_PLANNER_FAIL") == "1":
         raise SystemExit("stub planner: calculation failed on request")
-    options = sys.argv[1:]
+    options = argv
     paths = None
     if "--" in options:
         paths = options[options.index("--") + 1 :]
