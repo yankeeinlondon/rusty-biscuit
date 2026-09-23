@@ -1,0 +1,30 @@
+kind: schema
+description: provides the types for communication actions
+types:
+    communication:
+        message: string -> send a message to your configured chat application
+        say: string -> communicate using TTS
+        effect: |-
+            enum(
+                air-reverse-burst, air-woosh, air-zoom-vacuum, arrow-whoosh, bicycle-horn, bong,
+                bottle-cork, bullet, cartoon-accent1, cartoon-accent10, cartoon-accent11,
+                cartoon-accent12, cartoon-accent2, cartoon-accent3, cartoon-accent4, cartoon-accent5,
+                cartoon-accent6, cartoon-accent7, cartoon-accent8, cartoon-accent9, cartoon-cry, click,
+                confirmation, creepy-dark-logo, crowd-applause, crowd-applause-recital,
+                crowd-applause-stadium, crowd-laugh, crowd-laugh-applause, dit-hit-1, dit-hit-2,
+                doorbell, doorbell-2, drop-1, drop-2, drop-3, drop-4, electronic-hit-fx1,
+                electronic-hit-fx2, electronic-hit-fx3, electronic-hit-fx4, electronic-hit-fx5,
+                electronic-hit-fx6, elemental-magic-spell-impact, epic-orchestra-transition, error-1,
+                error-2, female-astonished-gasp, glass-1, glass-2, glass-3, glass-4, high-down, high-up,
+                maximize-1, maximize-2, maximize-3, maximize-4, maximize-5, minimize-1, minimize-2,
+                minimize-3, mouseclick, mysterious-bass, phase-jump-1, phase-jump-2, phase-jump-3,
+                phase-jump-4, phase-jump-5, phaser-down-1, phaser-down-2, phaser-down-3, pluck-1,
+                pluck-2, question-1, question-2, retro-game, sad-trombone, select-1, select-2, select-3,
+                select-4, small-group-cheer, sneeze, space-alarm, switch-1, switch-2, two-tone
+            ) -> play a sound effect
+        notify: string -> Send message to OS's desktop notification system
+        stdout: string -> report to STDOUT in the caller's terminal
+        stderr: string -> report to STDERR in the caller's terminal
+        info: string -> report an **info** level log entry to caller's terminal
+        warn: string -> report an **warn** level log entry to caller's terminal
+        success: string -> report a **success** level log entry to caller's terminal

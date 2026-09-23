@@ -2288,6 +2288,10 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
         return Ok(Value::Null);
     }
     let name = require_string_expr("has_skill", &args[0])?;
+    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
+    if name.is_empty() {
+        return Ok(Value::Bool(false));
+    }
     if !validate_skill_name(name) {
         return Err(expression_other(
             "has_skill",
@@ -2315,6 +2319,10 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let name = require_string_expr("has_local_skill", &args[0])?;
+    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
+    if name.is_empty() {
+        return Ok(Value::Bool(false));
+    }
     if !validate_skill_name(name) {
         return Err(expression_other(
             "has_local_skill",
@@ -5041,6 +5049,16 @@ mod tests {
             assert!(has_skill_fn(&[json!("foo/bar")], &ctx).is_err());
             assert!(has_skill_fn(&[json!("..")], &ctx).is_err());
             assert!(has_skill_fn(&[json!(".")], &ctx).is_err());
+        }
+
+        #[test]
+        fn has_skill_empty_name_returns_false() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(has_skill_fn(&[json!("")], &ctx).unwrap(), json!(false));
+            assert_eq!(
+                has_local_skill_fn(&[json!("")], &ctx).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]

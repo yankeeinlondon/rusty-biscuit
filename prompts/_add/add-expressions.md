@@ -55,7 +55,7 @@ host discovery; load `rust` and `rust-testing` when you write code and tests.
 
 ## Background: How the Expression Engine Is Organized
 
-::file {{ctx.repo_root}}/claudine/docs/topics/context/expression-engine.md exclude="## How the*"
+::file {{ctx.repo_root}}/claudine/docs/topics/state-management/expression-engine.md exclude="## How the*"
 
 The Darkmatter expressions topic is the authoritative language reference. Its "Namespaces"
 and "Authoring a New Expression Function" sections are transcluded here; read its

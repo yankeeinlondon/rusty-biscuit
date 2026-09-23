@@ -1,0 +1,52 @@
+kind: schema
+description: schema for `err` in lifecycle events
+types:
+    err:
+        code: string(required) ->
+        category: |-
+            enum(
+                composition,
+                cap,
+                timeout,
+                provider,
+                document,
+                vcs,
+                io,
+                config,
+                usage,
+                runaway,
+                auth,
+                internal;
+                required
+            ) -> Coarse domain where error derives from
+        disposition: |-
+            enum(
+                transient,
+                throttled,
+                correctable,
+                needs_input,
+                unrecoverable
+            ; required) -> Generic remediation strategy
+        origin: |-
+            enum(
+                provider,
+                author,
+                caller,
+                environment,
+                internal
+            ; require) -> Who remediates
+        severity: |-
+            enum(
+                info,
+                warning,
+                error
+            ; required) -> operator facing severity
+        detail: |-
+            object(required) -> per-instance payload; the fields that vary per occurrence
+        msg: string(required) -> concise, notification-safe rendering of the selected error
+        cause: object -> the next registered diagnostic below the selected one
+        is_transient: boolean(required)
+        is_throttled: boolean(required)
+        is_correctable: boolean(required)
+        reset_at: string -> RFC 339 timestamp
+        retry_after_ms: number -> suggested wait time

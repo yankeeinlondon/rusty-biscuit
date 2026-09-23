@@ -1,0 +1,15 @@
+kind: schema
+description: schema's for all global variables defined in Darkmatter
+$schema:
+    doc: "doc@./partials/doc.yaml -> The `doc` schema which forms the Frontmatter's base schema in Darkmatter"
+    # eagerly loaded context
+    ctx: context@./partials/context-variables.yaml -> Context about the environment the document is operating in.
+    # lazily loaded context
+    current: context@./partials/context-variables.yaml -> Lazily loaded context about the environment the document is operating in.
+    # eagerly loaded ENV variables
+    env: object
+
+    # global error object
+    err: err@./partials/error.yaml
+    # timing / perf tracking
+    tracking: tracking@./partials/tracking.yaml

@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 const PAGES: &[(&str, &[&str])] = &[
     (
         // The user page AC29 names for the eager/lazy pairing: every clause.
-        "claudine/docs/topics/context/context-variables.md",
+        "claudine/docs/topics/state-management/context-variables.md",
         &[
             "| `ctx.<key>` | Eager",
             "| `current.<key>` | Lazy — the same key as `ctx.<key>`",

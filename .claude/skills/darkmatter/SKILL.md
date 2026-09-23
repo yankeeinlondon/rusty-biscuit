@@ -30,6 +30,15 @@ extension.
 
 ## Choose the owning surface
 
+Documentation under `docs/` becomes the authority when implementation lands.
+Write author-facing guidance for humans in the surrounding document's style;
+put necessary implementation details in supporting documents under `docs/` and
+link to those. Never link a document in `docs/` to a specification or a
+feature/fix design document. Keep temporary implementation-status notes explicit
+without making readers consult planning artifacts. Preserve documented file
+locations; an unimplemented grammar is not a reason to move schema definitions
+away from their references or replace their content with placeholders.
+
 | Work | Start with |
 |---|---|
 | Compose APIs, stages, expressions, file resolution, cache | [compose.md](compose.md) |
@@ -104,6 +113,15 @@ Important contracts:
 
 Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
 suggestions, triggers, and DMLS schema behavior.
+
+The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
+It declares all globals, including `doc`, and imports types from `partials/`.
+Runtime migration is pending: do not confuse the existing embedded document
+baseline with this global catalog. The planned document baseline is its resolved
+`doc` definition; `ctx` and `current` share a context type, and there is no
+`current_env`. Register the global catalog explicitly rather than auto-applying
+its root as frontmatter properties.
+
 
 ## Remote and cache safety
 

@@ -707,6 +707,27 @@ Skill found
     assert!(composed.content().contains("Skill found"));
 }
 
+/// The repository `system-prompt.md` shape: at a monorepo root `ctx.area` is
+/// `""`, and gating a block on `has_skill(area)` must skip it, not fail compose.
+#[test]
+fn regression_page_block_with_has_skill_of_empty_name() {
+    let content = r#"---
+area: ""
+---
+::block when="has_skill(area)"
+Skill found
+::end-block
+::block when="has_local_skill(area)"
+Local skill found
+::end-block
+Composed"#;
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert!(composed.content().contains("Composed"));
+    assert!(!composed.content().contains("Skill found"));
+    assert!(!composed.content().contains("Local skill found"));
+}
+
 #[test]
 fn regression_remainder_by_zero_is_fatal_without_fail_fast() {
     let content = r#"---

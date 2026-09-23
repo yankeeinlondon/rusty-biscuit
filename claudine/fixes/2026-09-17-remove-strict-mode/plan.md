@@ -1,4 +1,6 @@
 ---
+status: superseded
+superseded: 2026-09-19
 total_phases: 7
 created: 2026-09-17
 phase: 1
@@ -7,6 +9,15 @@ yolo: "true"
 ---
 
 # Remove Strict Mode and Centralize Expression Binding — Implementation Plan
+
+> **Superseded — do not execute this plan.** This 2026-09-17 plan predates the
+> subsequent human design rulings and the two completed spikes. Its API choices,
+> migration counts, schema ordering and recovery assumptions are historical.
+> [design.md](design.md), [design-contracts.md](design-contracts.md), and
+> [migration-inventory.md](migration-inventory.md) contain the current design
+> work. Replace this plan only after the pending rulings and independent design
+> review are complete and the human approves the design. The remaining text is
+> retained solely as historical planning evidence.
 
 ## Work Summary and Definition of Success
 

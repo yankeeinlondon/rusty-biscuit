@@ -203,7 +203,7 @@ Supported variable forms:
 - simple keys: `draft`
 - kebab-case keys: `spec-name`, `doc.spec-name`
 - nested keys: `user.role`
-- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](./context-variables.md)
+- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](state-management/context-variables.md)
 - environment keys: `env.AGENT`, `env.HOME`
 
 ### Dot Access
@@ -249,7 +249,7 @@ namespace.
 | Namespace | Resolves to | Observed |
 | --- | --- | --- |
 | `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
-| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) | eager, captured once per request |
+| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
 | `env.*` | process environment variables, from the snapshot frozen at capture | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 | `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
@@ -1167,4 +1167,4 @@ it never leaks an unresolved `{{ … }}` literal.
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)
-- [Context Variables](./context-variables.md)
+- [Context Variables](state-management/context-variables.md)

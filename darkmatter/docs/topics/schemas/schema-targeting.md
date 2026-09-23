@@ -12,12 +12,13 @@ require explicit migration to preserve their meaning. The full predicate family
 listed in [Authoring Schemas](./authoring-schemas.md#schema-triggers) is in scope;
 its exact syntax and observation/refresh contracts remain under design review.
 
-Matching uses pre-captured facts and the
-[passive activation function policy](./authoring-schemas.md#passive-activation-expressions).
-External observations belong in explicit predicates with literal arguments,
-not filesystem or remote-reading expression calls. Unsupported function calls
-fail preparation even in inactive branches; eligible computations retain normal
-short-circuit behavior.
+Trigger matching is passive: it checks whether a schema applies without running
+commands or starting runtime actions. Use expressions for document values and
+dedicated conditions for files or host information. Read
+[Passive Activation Expressions](./authoring-schemas.md#passive-activation-expressions)
+for the authoring rules, or
+[How Schema Activation Is Evaluated](./schema-activation.md) for the shared
+evaluation and failure-handling details.
 
 An activated trigger's schema takes precedence over always-on schema
 definitions and the Darkmatter base schema, but the document's own `$schema`
@@ -59,7 +60,7 @@ In the example:
 
 
 The draft schema for a `schema-trigger` is defined in `SimplifiedSchema` grammar
-in [schema-target.yaml](../../schema-drafts/schema-target.yaml). Its filename also
+in [schema-target.yaml](../../../../claudine/features/2026-09-21-schema-enhancements/drafts/schema-target.yaml). Its filename also
 retains the earlier terminology; its unfinished predicate grammar is not an
 implemented contract.
 

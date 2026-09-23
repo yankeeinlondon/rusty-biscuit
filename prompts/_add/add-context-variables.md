@@ -57,7 +57,7 @@ The Claudine topic below is the user-facing contract. Its implementation section
 than the code; the "Wiring Recipe" that follows it is what the code does today and wins on
 conflict.
 
-::file {{ctx.repo_root}}/claudine/docs/topics/context/context-variables.md exclude="## How the type system works" exclude="## How values are captured" exclude="## How to add a context variable" exclude="## Drift control for context variables"
+::file {{ctx.repo_root}}/claudine/docs/topics/state-management/context-variables.md exclude="## How the type system works" exclude="## How values are captured" exclude="## How to add a context variable" exclude="## Drift control for context variables"
 
 ::file {{ctx.repo_root}}/darkmatter/docs/topics/context-variables.md exclude="## Information Provided" exclude="## Overcoming*"
 

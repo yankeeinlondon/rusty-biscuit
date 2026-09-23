@@ -96,7 +96,7 @@ approval rather than disappearing and later revealing unapproved content.
 - **Context Variables**
 
     - there are a certain set of properties that will always be provided to a page as the `ctx` frontmatter value
-    - Details on all of the available information provided is found in the document: [Context Variables](../topics/context-variables.md)
+    - Details on all of the available information provided is found in the document: [Context Variables](../topics/state-management/context-variables.md)
 
 - **Environment Variables**
 

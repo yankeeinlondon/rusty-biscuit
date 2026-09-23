@@ -5,12 +5,12 @@
 # contracts and group encoding still require design agreement.
 kind: schema
 name: schema-trigger
-description: provides the draft schema definition for a schema-trigger file
+description: provides the draft schema definition for a **Schema Trigger** file
 $schema:
     kind: const(schema-trigger) -> unique identifier
     name: string(required) -> a dasherized name (no whitespace) for this schema-trigger
-    match: matcher[]
-    $schema: schema -> the _inline_ or _file reference_ to the schema that will be activated when all match conditions are met
+    match: matcher[](required;min(1))
+    $schema: schema(required) -> the _inline_ or _file reference_ to the schema that will be activated when all match conditions are met
     types: schema -> optionally allowing for types to be defined that the `$schema` property can then leverage
 types:
     condition:
