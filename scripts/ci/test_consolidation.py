@@ -17,10 +17,12 @@ import gzip
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -389,6 +391,66 @@ class PlanTests(unittest.TestCase):
             self.assertEqual([{"old": "level3_ctrl_c", "new": "level3_win::level3_ctrl_c"}], module["tests"])
 
 
+class SharedAndRuledPlanTests(unittest.TestCase):
+    def plan(self, targets: list[dict], captures: list[dict], ruled: dict | None = None) -> tool.PlanResult:
+        with mock.patch.dict(tool.RULED_TARGETS, {"pkg": ruled} if ruled else {}, clear=True):
+            return tool.plan_package("pkg", inventory_of(targets), captures_of(*captures), FIXTURE_FILTERS, repo=Path(tempfile.gettempdir()))
+
+    def test_shared_common_tests_are_recorded_once_and_force_no_alias(self) -> None:
+        # The biscuit-terminal-cli shape: every level2_ file compiles a copy of common's unit tests.
+        suites = {"level2_a": ["level2_x", "common::geometry::tests::y"], "level2_b": ["level2_z", "common::geometry::tests::y"]}
+        targets = [{"name": name, "required_features": ["t"], "declares_mod_common": True} for name in suites]
+        result = self.plan(targets, [make_capture("pkg", suites, features=("t",))])
+        self.assertEqual([], result.failures)
+        self.assertEqual([], [m["old_target"] for m in result.manifest["modules"] if m["alias"]])
+        self.assertEqual([{"target": "level2", "test": "common::geometry::tests::y", "old_binary_ids": ["pkg::level2_a", "pkg::level2_b"]}],
+                         result.manifest["shared_tests"])
+        self.assertEqual([{"old": "level2_x", "new": "level2_a::level2_x"}], result.manifest["modules"][0]["tests"])
+        # Without `mod common;` the same path is the module's own and projects under it, forcing an alias.
+        own = self.plan([dict(t, declares_mod_common=False) for t in targets], [make_capture("pkg", suites, features=("t",))])
+        self.assertEqual(["level2_a", "level2_b"], [m["old_target"] for m in own.manifest["modules"] if m["alias"]])
+
+    def test_a_ruled_l1_target_joins_the_named_target(self) -> None:
+        targets = [{"name": "alpha"}, {"name": "level2_x", "required_features": ["t"]}, {"name": "win_only", "required_features": ["t"]}]
+        captures = [make_capture("pkg", {"alpha": ["plain"]}), make_capture("pkg", {"alpha": ["plain"], "level2_x": ["level2_y"], "win_only": ["w"]}, features=("t",))]
+        default = self.plan(targets, captures)
+        self.assertEqual({"l1", "l1-t", "level2"}, {t["name"] for t in default.manifest["targets"]})
+        ruled = self.plan(targets, captures, {"win_only": ("level2", "R4")})
+        self.assertEqual([], ruled.failures)
+        self.assertEqual({"l1": [], "level2": ["t"]}, {t["name"]: t["required_features"] for t in ruled.manifest["targets"]})
+        self.assertEqual(["level2_x", "win_only"], [t for t in ruled.manifest["targets"] if t["name"] == "level2"][0]["modules"])
+        self.assertEqual([{"old_target": "win_only", "target": "level2", "ruling": "R4"}], ruled.manifest["ruled_targets"])
+
+    def test_joining_a_target_with_more_features_needs_no_test_without_them(self) -> None:
+        # The sniff-cli shape (R14): no manifest feature, but an inner cfg empties the binary without it.
+        targets = [{"name": "level2_gated"}, {"name": "level2_x", "required_features": ["t"]}]
+        empty = [make_capture("pkg", {"level2_gated": []}), make_capture("pkg", {"level2_gated": ["level2_g"], "level2_x": ["level2_y"]}, features=("t",))]
+        result = self.plan(targets, empty, {"level2_gated": ("level2", "R14")})
+        self.assertEqual([], result.failures)
+        self.assertEqual({"level2": ["t"]}, {t["name"]: t["required_features"] for t in result.manifest["targets"]})
+        listed = [make_capture("pkg", {"level2_gated": ["level2_g"]}), empty[1]]
+        failures = self.plan(targets, listed, {"level2_gated": ("level2", "R14")}).failures
+        self.assertTrue(any("lists tests without ['t'] (feature sets ['none'])" in f for f in failures), failures)
+        unproven = self.plan(targets, empty[1:], {"level2_gated": ("level2", "R14")}).failures
+        self.assertTrue(any("no capture lacks ['t']" in f for f in unproven), unproven)
+
+    def test_a_ruled_target_may_not_gain_compilation_where_it_had_none(self) -> None:
+        targets = [{"name": "alpha"}, {"name": "gated", "required_features": ["t"]}]
+        captures = [make_capture("pkg", {"alpha": ["plain"], "gated": ["g"]}, features=("t",))]
+        failures = self.plan(targets, captures, {"gated": ("l1", "bad")}).failures
+        self.assertTrue(any("requires ['t'], which target 'l1' does not" in f for f in failures), failures)
+
+    def test_a_ruled_helper_must_have_no_tests_and_every_ruling_must_name_a_target(self) -> None:
+        targets = [{"name": "integration"}, {"name": "fixtures"}]
+        result = self.plan(targets, [make_capture("pkg", {"integration": ["t"], "fixtures": []})], {"fixtures": (None, "R19")})
+        self.assertEqual([], result.failures)
+        self.assertEqual(["integration"], [m["old_target"] for m in result.manifest["modules"]])
+        self.assertEqual([{"old_target": "fixtures", "old_path": "pkg/tests/fixtures.rs", "ruling": "R19"}], result.manifest["dropped_targets"])
+        failures = self.plan(targets, [make_capture("pkg", {"integration": ["t"], "fixtures": ["f"]})], {"fixtures": (None, "R19")}).failures
+        self.assertTrue(any("ruled a helper, not a module (R19), but lists tests ['f']" in f for f in failures), failures)
+        failures = self.plan(targets, [make_capture("pkg", {"integration": ["t"], "fixtures": []})], {"ghost": ("l1", "x")}).failures
+        self.assertTrue(any("RULED_TARGETS names 'ghost'" in f for f in failures), failures)
+
 def manifest_for(package: str, modules: list[tuple[str, str, str]], additions: list[dict] | None = None) -> dict:
     """(old target, consolidated target, module) rows."""
     return {
@@ -506,6 +568,28 @@ class CompareTests(unittest.TestCase):
     def test_required_digests_fail_on_any_listing_change(self) -> None:
         report = self.compare([make_capture("pkg", self.BEFORE)], [make_capture("pkg", self.AFTER)], require_identical_digests=True)
         self.assertTrue(any("listing digest differs" in f for f in report["failures"]))
+
+    SHARED_BEFORE = {"level2_a": ["level2_x", "common::y"], "level2_b": ["level2_z", "common::y"]}
+    SHARED_AFTER = {"level2": ["level2_a::level2_x", "level2_b::level2_z", "common::y"]}
+
+    def shared_manifest(self, shared: bool = True) -> dict:
+        manifest = manifest_for("pkg", [("level2_a", "level2", "level2_a"), ("level2_b", "level2", "level2_b")])
+        manifest["shared_tests"] = [{"target": "level2", "test": "common::y", "old_binary_ids": ["pkg::level2_a", "pkg::level2_b"]}] if shared else []
+        return manifest
+
+    def test_shared_common_copies_fold_into_the_consolidated_identity(self) -> None:
+        report = self.compare([make_capture("pkg", self.SHARED_BEFORE)], [make_capture("pkg", self.SHARED_AFTER)], manifest=self.shared_manifest())
+        self.assertEqual([], report["failures"])
+        present = report["packages"]["pkg"]["cells"][0]["selectors"]["L1"]["sets"]["present"]
+        self.assertEqual((3, 3), (present["before"], present["after"]), "two copies are one identity")
+        unshared = self.compare([make_capture("pkg", self.SHARED_BEFORE)], [make_capture("pkg", self.SHARED_AFTER)], manifest=self.shared_manifest(False))
+        self.assertTrue(any("common::y is not mapped" in f for f in unshared["failures"]), unshared["failures"])
+
+    def test_shared_copies_that_disagree_fail(self) -> None:
+        before = make_capture("pkg", self.SHARED_BEFORE)
+        before["suites"]["pkg::level2_b"]["tests"]["common::y"]["ignored"] = True
+        report = self.compare([before], [make_capture("pkg", self.SHARED_AFTER)], manifest=self.shared_manifest())
+        self.assertTrue(any("copies of shared test common::y disagree" in f for f in report["failures"]), report["failures"])
 
     def test_cli_exit_codes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stderr(io.StringIO()):
@@ -754,6 +838,374 @@ class CheckSnapshotsTests(unittest.TestCase):
         self.assertEqual({"matrix": "ignored", "matrix_browser": "running", "code_block": "running"}, readers["asserting_functions"])
 
 
+class PackageTableTests(unittest.TestCase):
+    def test_the_wave_2_feature_sets_are_the_ruled_table(self) -> None:
+        # 2026-09-22-consolidated-test-binaries-wave-2 rulings R1 (from spikes/s1-feature-sets.md).
+        self.assertEqual({
+            "tree-hugger": ((),),
+            "claudine": ((),),
+            "sniff": ((), ("remote",), ("network",)),
+            "sniff-cli": ((), ("test-fixtures",)),
+            "biscuit-file": ((), ("fetch",)),
+            "schematic-gen": ((), ("terminal-tests",)),
+            "biscuit-terminal-cli": ((), ("terminal-tests",)),
+            "claudine-gen": ((), ("terminal-tests",)),
+            "dmls": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
+            "biscuit-tui-cli": ((), ("terminal-tests",)),
+        }, {package: tool.PACKAGE_FEATURE_SETS[package] for package in tool.WAVE_2_PACKAGES})
+        self.assertEqual(set(tool.PACKAGES), set(tool.PACKAGE_FEATURE_SETS))
+
+    def test_an_unlisted_package_is_refused_before_any_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(tool.ToolError, "no feature sets are known for worktree-cli"):
+                tool.capture_package("worktree-cli", Path(temporary), repo=Path(temporary))
+            self.assertEqual([], list(Path(temporary).iterdir()), "nothing was written")
+        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(2, tool.main(["inventory", "--package", "worktree-cli"]))
+        self.assertIn("worktree-cli not in PACKAGES", stderr.getvalue())
+
+
+@unittest.skipUnless(shutil.which("cargo"), "cargo is not installed")
+class ShippedPackageTableTests(unittest.TestCase):
+    """Every wave-2 feature set against the package's real `Cargo.toml`.
+
+    Wave-1 rows are that feature's frozen record and are not re-validated
+    here: `claudine-cli`'s CI union gained `test-fixtures` after it closed.
+    """
+
+    def test_every_listed_set_names_declared_features_and_holds_the_ci_union(self) -> None:
+        metadata = tool.cargo_metadata()
+        manifests = {p["name"]: Path(p["manifest_path"]) for p in metadata["packages"]}
+        for package in tool.WAVE_2_PACKAGES:
+            sets = tool.PACKAGE_FEATURE_SETS[package]
+            with self.subTest(package=package):
+                self.assertIn(package, manifests)
+                declared = set(tool.tomllib.loads(manifests[package].read_text()).get("features", {}))
+                for features in sets:
+                    self.assertLessEqual(set(features), declared, f"{features} names an undeclared feature")
+                ci_union = set(tool.package_ci_tests(manifests[package]).get("features", []))
+                self.assertIn(ci_union, [set(s) for s in sets], "capture refuses a package whose CI union is not listed")
+
+
+class ProptestPathTests(unittest.TestCase):
+    def test_resolution_follows_the_nearest_crate_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            tests = Path(temporary) / "pkg" / "tests"
+            (tests / "l1" / "nested").mkdir(parents=True)
+            self.assertEqual(tests / "yaml.proptest-regressions", tool.proptest_regression_path(tests / "yaml.rs"),
+                             "no lib.rs/main.rs above a top-level test file: the sibling fallback")
+            (tests / "l1" / "main.rs").write_text("")
+            self.assertEqual(tests / "proptest-regressions" / "yaml.txt", tool.proptest_regression_path(tests / "l1" / "yaml.rs"))
+            self.assertEqual(tests / "proptest-regressions" / "nested" / "mod.txt", tool.proptest_regression_path(tests / "l1" / "nested" / "mod.rs"))
+
+
+class MoveFixture(unittest.TestCase):
+    """A package with every construct `move` repairs, before and after."""
+
+    FILES = {
+        "pkg/tests/alpha.rs": '//! Unix only.\n#![cfg(unix)]\n\nmod common;\nconst Q: &str = include_str!("fixtures/q.txt");\n#[test]\nfn plain() {}\n',
+        "pkg/tests/level2_prose.rs": ('#[path = "common/mod.rs"]\nmod common;\n#[path = "../benches/support/b.rs"]\nmod b;\n'
+                                      'const Q: &[u8] = include_bytes!("/abs/q.txt");\n#[test]\nfn plain() {}\n'),
+        "pkg/tests/beta.rs": "mod helper;\n#[test]\nfn plain() {}\n",
+        "pkg/tests/gamma.rs": "#[cfg(unix)]\nmod common;\n#[test]\nfn plain() {}\n",
+        "pkg/tests/nested/main.rs": "mod child;\n",
+        "pkg/tests/nested/child.rs": 'const Q: &str = include_str!("../fixtures/q.txt");\n#[test]\nfn n() {}\n',
+        "pkg/tests/yaml.rs": "proptest::proptest! {}\n",
+        "pkg/tests/yaml.proptest-regressions": "cc 0123abcd # shrinks to x = 0\n",
+        "pkg/tests/windows_only.rs": "//! Windows.\n#![cfg(windows)]\n\n#[test]\nfn w() {}\n",
+        "pkg/tests/solo.rs": "#[test]\nfn level3_s() {}\n",
+        "pkg/tests/common/mod.rs": "pub fn shared() {}\n",
+        "pkg/tests/helper.rs": "pub fn help() {}\n",
+        "pkg/tests/fixtures/q.txt": "q\n",
+        "pkg/benches/support/b.rs": "",
+    }
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="consolidation-move-")
+        root = Path(self.temporary.name)
+        self.repo, self.before = root / "repo", root / "before"
+        for path, text in self.FILES.items():
+            for base in (self.repo, self.before):
+                (base / path).parent.mkdir(parents=True, exist_ok=True)
+                (base / path).write_text(text)
+        row = lambda old, target, module, **extra: {
+            "old_target": old, "old_binary_id": f"pkg::{old}", "old_path": f"pkg/tests/{old}.rs", "nested_root": False,
+            "target": target, "binary_id": f"pkg::{target}", "module": module, "new_path": f"pkg/tests/{target}/{module}.rs",
+            "alias": None, "inner_cfg": [], **extra}
+        self.manifest = {
+            "package": "pkg", "manifest": "pkg/Cargo.toml", "crate_dir": "pkg", "dispositions": [], "additions": [],
+            "targets": [
+                {"name": "l1", "path": "pkg/tests/l1/main.rs", "tier": "L1", "required_features": [],
+                 "modules": ["yaml", "nested", "gamma", "beta", "alpha"]},
+                {"name": "level2", "path": "pkg/tests/level2/main.rs", "tier": "L2", "required_features": ["t"],
+                 "modules": ["windows_only", "prose"]},
+                {"name": "level3", "path": "pkg/tests/level3/main.rs", "tier": "L3", "required_features": ["t"], "modules": ["solo"]},
+            ],
+            "modules": [
+                row("alpha", "l1", "alpha", inner_cfg=["unix"]),
+                row("beta", "l1", "beta"),
+                row("gamma", "l1", "gamma"),
+                dict(row("nested", "l1", "nested"), old_path="pkg/tests/nested/main.rs", new_path="pkg/tests/l1/nested/mod.rs", nested_root=True),
+                row("yaml", "l1", "yaml"),
+                row("level2_prose", "level2", "prose", alias={"from": "level2_prose", "reason": ["L1: plain matches before"]}),
+                row("windows_only", "level2", "windows_only", inner_cfg=["windows"], keep_inner_cfg=True),
+                row("solo", "level3", "solo"),
+            ],
+        }
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def text(self, relative: str) -> str:
+        return (self.repo / relative).read_text()
+
+    def move(self) -> dict:
+        return tool.move_package(self.manifest, repo=self.repo)
+
+
+class MoveTests(MoveFixture):
+    def test_files_move_and_relative_constructs_keep_their_targets(self) -> None:
+        summary = self.move()
+        for row in self.manifest["modules"]:
+            self.assertFalse((self.repo / row["old_path"]).exists(), row["old_path"])
+            self.assertTrue((self.repo / row["new_path"]).is_file(), row["new_path"])
+        self.assertEqual('//! Unix only.\nuse crate::common;\nconst Q: &str = include_str!("../fixtures/q.txt");\n#[test]\nfn plain() {}\n',
+                         self.text("pkg/tests/l1/alpha.rs"))
+        self.assertEqual('#[path = "../helper.rs"]\nmod helper;\n#[test]\nfn plain() {}\n', self.text("pkg/tests/l1/beta.rs"))
+        self.assertEqual("#[cfg(unix)]\nuse crate::common;\n#[test]\nfn plain() {}\n", self.text("pkg/tests/l1/gamma.rs"))
+        self.assertEqual("mod child;\n", self.text("pkg/tests/l1/nested/mod.rs"), "a nested root's own children move with it")
+        self.assertEqual('const Q: &str = include_str!("../../fixtures/q.txt");\n#[test]\nfn n() {}\n', self.text("pkg/tests/l1/nested/child.rs"))
+        self.assertEqual({"old": "pkg/tests/alpha.rs", "new": "pkg/tests/l1/alpha.rs"}, summary["moved"][0])
+        self.assertEqual(["fixtures/q.txt → ../fixtures/q.txt", "mod common; → use crate::common;"],
+                         sorted(summary["path_repairs"]["pkg/tests/l1/alpha.rs"]))
+
+    def test_an_alias_from_the_manifest_becomes_the_module_name(self) -> None:
+        summary = self.move()
+        self.assertFalse((self.repo / "pkg/tests/level2/level2_prose.rs").exists())
+        self.assertEqual('mod common;\n#[path = "../../benches/support/b.rs"]\nmod b;\nconst Q: &[u8] = include_bytes!("/abs/q.txt");\n#[test]\nfn plain() {}\n'
+                         .replace("mod common;", "use crate::common;"), self.text("pkg/tests/level2/prose.rs"))
+        root = self.text("pkg/tests/level2/main.rs")
+        self.assertIn("\nmod prose;\n", root)
+        self.assertNotIn("level2_prose", root)
+        self.assertEqual(["../benches/support/b.rs → ../../benches/support/b.rs", "mod common; → use crate::common;"],
+                         sorted(summary["path_repairs"]["pkg/tests/level2/prose.rs"]), "a dropped #[path] is not logged as repaired")
+
+    def test_roots_declare_common_only_where_used_and_modules_in_rustfmt_order(self) -> None:
+        self.move()
+        l1 = self.text("pkg/tests/l1/main.rs")
+        self.assertTrue(l1.startswith("//! Level 1 integration tests for `pkg`, one test binary per\n"), l1)
+        self.assertIn("never compiles; `test_layout.rs` rejects one.\n", l1)
+        self.assertTrue(l1.endswith('\n#[path = "../common/mod.rs"]\nmod common;\n\n#[cfg(unix)]\nmod alpha;\nmod beta;\nmod gamma;\nmod nested;\nmod yaml;\n'), l1)
+        self.assertTrue(self.text("pkg/tests/level2/main.rs").endswith('mod common;\n\nmod prose;\n#[cfg(windows)]\nmod windows_only;\n'))
+        level3 = self.text("pkg/tests/level3/main.rs")
+        self.assertTrue(level3.startswith("//! Level 3 (`t`) integration tests"), level3)
+        self.assertNotIn("mod common;", level3, "no module of level3 uses common")
+
+    @unittest.skipUnless(shutil.which("rustfmt"), "rustfmt is not installed")
+    def test_a_generated_root_is_already_rustfmt_clean(self) -> None:
+        self.manifest["targets"][0]["modules"] += ["Zed", "a10", "a2", "a_b", "ab"]
+        for name in ("Zed", "a10", "a2", "a_b", "ab"):
+            self.manifest["modules"].append(dict(self.manifest["modules"][1], old_target=name, old_path=f"pkg/tests/{name}.rs",
+                                                 module=name, new_path=f"pkg/tests/l1/{name}.rs"))
+            (self.repo / f"pkg/tests/{name}.rs").write_text("")
+        self.move()
+        completed = subprocess.run(["rustfmt", "--check", "--edition", "2024", str(self.repo / "pkg/tests/l1/main.rs")],
+                                   capture_output=True, text=True)
+        # rustfmt also visits the child modules; only the root's own diff matters here.
+        self.assertNotIn("l1/main.rs", completed.stdout, completed.stdout)
+
+    def test_the_inner_cfg_is_kept_only_where_the_row_says_so(self) -> None:
+        self.move()
+        self.assertEqual("//! Windows.\n#![cfg(windows)]\n\n#[test]\nfn w() {}\n", self.text("pkg/tests/level2/windows_only.rs"))
+        self.assertNotIn("#![cfg", self.text("pkg/tests/l1/alpha.rs"))
+
+    def test_proptest_seeds_move_to_where_proptest_reads_them(self) -> None:
+        summary = self.move()
+        seed = self.repo / "pkg/tests/proptest-regressions/yaml.txt"
+        self.assertEqual(self.FILES["pkg/tests/yaml.proptest-regressions"], seed.read_text())
+        self.assertFalse((self.repo / "pkg/tests/yaml.proptest-regressions").exists())
+        self.assertFalse((self.repo / "pkg/tests/l1/yaml.proptest-regressions").exists(), "beside the module is where wave 1 went wrong")
+        self.assertEqual(seed, tool.proptest_regression_path(self.repo / "pkg/tests/l1/yaml.rs"))
+        self.assertEqual([{"old": "pkg/tests/yaml.proptest-regressions", "new": "pkg/tests/proptest-regressions/yaml.txt"}],
+                         summary["proptest_relocated"])
+
+    def test_the_cargo_entries_carry_exact_required_features(self) -> None:
+        entries = self.move()["cargo_test_entries"]
+        self.assertIn('[[test]]\nname = "l1"\npath = "tests/l1/main.rs"\n\n', entries)
+        self.assertIn('[[test]]\nname = "level2"\npath = "tests/level2/main.rs"\nrequired-features = ["t"]\n', entries)
+
+    def test_the_moved_tree_passes_every_after_check(self) -> None:
+        self.move()
+        before = tool.SourceReader(root=self.before)
+        attributes = tool.check_attributes(self.manifest, before, repo=self.repo)
+        self.assertEqual([], attributes["failures"])
+        self.assertIn({"path": "pkg/tests/level2/windows_only.rs", "kind": "inner-cfg-duplicated", "attribute": "cfg(windows)"},
+                      attributes["review"])
+        self.assertEqual([], tool.check_proptest(self.manifest, before, repo=self.repo)["failures"])
+        self.assertEqual([], tool.body_diff(self.manifest, before, tool.SourceReader(root=self.repo))["failures"])
+
+    def test_refusals_leave_the_tree_untouched(self) -> None:
+        cases = {
+            "destination already exists": lambda: (self.repo / "pkg/tests/l1").mkdir() or (self.repo / "pkg/tests/l1/beta.rs").write_text(""),
+            "resolves to no file": lambda: (self.repo / "pkg/tests/helper.rs").unlink(),
+            "expected one #!\\[cfg\\(unix\\)\\]": lambda: (self.repo / "pkg/tests/alpha.rs").write_text("mod common;\n"),
+            "declares modules with no manifest row": lambda: self.manifest["targets"][2]["modules"].append("ghost"),
+        }
+        for message, breakage in cases.items():
+            with self.subTest(message=message):
+                self.tearDown()
+                self.setUp()
+                breakage()
+                with self.assertRaisesRegex(tool.ToolError, message):
+                    self.move()
+                self.assertTrue((self.repo / "pkg/tests/gamma.rs").is_file(), "nothing moved")
+                self.assertFalse((self.repo / "pkg/tests/l1/main.rs").exists(), "no root written")
+
+    def test_cli_move_writes_a_summary(self) -> None:
+        manifest = Path(self.temporary.name) / "manifest.json"
+        manifest.write_text(json.dumps(self.manifest))
+        original = tool.REPO_ROOT
+        tool.REPO_ROOT = self.repo
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = tool.main(["move", str(manifest), "--out", str(Path(self.temporary.name) / "summary.json")])
+        finally:
+            tool.REPO_ROOT = original
+        self.assertEqual(0, code, stderr.getvalue())
+        self.assertEqual("consolidation-move", json.loads((Path(self.temporary.name) / "summary.json").read_text())["kind"])
+        self.assertIn('name = "level3"', stderr.getvalue())
+
+
+class CheckProptestTests(MoveFixture):
+    def check(self) -> dict:
+        return tool.check_proptest(self.manifest, tool.SourceReader(root=self.before), repo=self.repo)
+
+    def test_a_seed_left_beside_its_module_is_never_replayed(self) -> None:
+        # The wave-1 darkmatter shape: moved next to the module, where proptest no longer looks.
+        self.move()
+        (self.repo / "pkg/tests/proptest-regressions/yaml.txt").rename(self.repo / "pkg/tests/l1/yaml.proptest-regressions")
+        failures = self.check()["failures"]
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn("pkg/tests/l1/yaml.proptest-regressions: no test source resolves to this seed file", failures[0])
+
+    def test_changed_or_lost_seeds_fail(self) -> None:
+        self.move()
+        seed = self.repo / "pkg/tests/proptest-regressions/yaml.txt"
+        seed.write_text("cc regenerated\n")
+        self.assertTrue(any("move byte for byte" in f for f in self.check()["failures"]))
+        seed.unlink()
+        self.assertTrue(any("nothing" in f for f in self.check()["failures"]))
+
+    def test_a_correct_relocation_is_reported(self) -> None:
+        self.move()
+        report = self.check()
+        self.assertEqual([], report["failures"])
+        self.assertEqual([{"old": "pkg/tests/yaml.proptest-regressions", "new": "pkg/tests/proptest-regressions/yaml.txt"}], report["relocated"])
+
+
+class BodyDiffTests(MoveFixture):
+    def diff(self) -> dict:
+        return tool.body_diff(self.manifest, tool.SourceReader(root=self.before), tool.SourceReader(root=self.repo))
+
+    def test_structural_edits_pass_and_are_counted(self) -> None:
+        self.move()
+        report = self.diff()
+        self.assertEqual([], report["failures"])
+        self.assertEqual(9, report["files"], "8 module files plus the nested root's child")
+        self.assertGreater(report["changed_lines"]["structural"], 0)
+        self.assertEqual(0, report["changed_lines"]["other"])
+
+    def test_a_body_change_fails_with_the_line(self) -> None:
+        self.move()
+        path = self.repo / "pkg/tests/l1/nested/child.rs"
+        path.write_text(path.read_text().replace("fn n() {}", "fn n() { assert!(false); }"))
+        report = self.diff()
+        self.assertEqual(1, len(report["failures"]), report["failures"])
+        self.assertIn("pkg/tests/nested/child.rs → pkg/tests/l1/nested/child.rs", report["failures"][0])
+        self.assertIn("+ fn n() { assert!(false); }", report["details"])
+        self.assertIn("## Failures", tool.render_body_diff_markdown(report, "base", "the working tree"))
+
+    def test_a_missing_module_fails(self) -> None:
+        self.move()
+        (self.repo / "pkg/tests/l1/beta.rs").unlink()
+        self.assertTrue(any("missing on one side" in f for f in self.diff()["failures"]))
+
+
+class CheckMetadataTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="consolidation-metadata-")
+        self.repo = Path(self.temporary.name)
+        (self.repo / "pkg").mkdir()
+        (self.repo / "pkg/Cargo.toml").write_text('[package]\nname = "pkg"\nautotests = false\n')
+        self.manifest = {
+            "package": "pkg", "manifest": "pkg/Cargo.toml",
+            "targets": [{"name": "l1", "path": "pkg/tests/l1/main.rs", "required_features": []},
+                        {"name": "level2", "path": "pkg/tests/level2/main.rs", "required_features": ["b", "a"]}],
+            "modules": [{"old_target": "alpha", "target": "l1"}, {"old_target": "level2_x", "target": "level2"}],
+        }
+        self.targets = [("l1", "pkg/tests/l1/main.rs", []), ("level2", "pkg/tests/level2/main.rs", ["a", "b"])]
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def check(self) -> list[str]:
+        metadata = {"packages": [{"name": "pkg", "targets": [
+            {"name": name, "kind": ["test"], "src_path": str(self.repo / path), "required-features": features}
+            for name, path, features in self.targets] + [{"name": "pkg", "kind": ["lib"], "src_path": str(self.repo / "pkg/src/lib.rs")}]}]}
+        return tool.check_metadata([self.manifest], metadata, repo=self.repo)[1]
+
+    def test_matching_targets_pass(self) -> None:
+        self.assertEqual([], self.check())
+
+    def test_each_mismatch_is_named(self) -> None:
+        cases = {
+            "declared target absent from Cargo ('level2'": lambda: self.targets.pop(),
+            "undeclared Cargo test target ('stray'": lambda: self.targets.append(("stray", "pkg/tests/stray.rs", [])),
+            "undeclared Cargo test target ('level2', 'pkg/tests/level2/main.rs', ('a',))": lambda: self.targets.__setitem__(1, ("level2", "pkg/tests/level2/main.rs", ["a"])),
+            "`autotests = false` missing": lambda: (self.repo / "pkg/Cargo.toml").write_text('[package]\nname = "pkg"\n'),
+            "old target alpha maps to 2 modules": lambda: self.manifest["modules"].append({"old_target": "alpha", "target": "l1"}),
+            "maps to unknown target level9": lambda: self.manifest["modules"].append({"old_target": "gone", "target": "level9"}),
+        }
+        for message, breakage in cases.items():
+            with self.subTest(message=message):
+                self.tearDown()
+                self.setUp()
+                breakage()
+                failures = self.check()
+                self.assertTrue(any(message in f for f in failures), failures)
+
+    def test_cli_exit_codes(self) -> None:
+        manifest = self.repo / "m.json"
+        manifest.write_text(json.dumps(self.manifest))
+        metadata = self.repo / "metadata.json"
+        original = tool.REPO_ROOT
+        tool.REPO_ROOT = self.repo
+        try:
+            for targets, expected in ((self.targets, 0), (self.targets[:1], 1)):
+                metadata.write_text(json.dumps({"packages": [{"name": "pkg", "targets": [
+                    {"name": n, "kind": ["test"], "src_path": str(self.repo / p), "required-features": f} for n, p, f in targets]}]}))
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(expected, tool.main(["check-metadata", "--manifest", str(manifest), "--metadata", str(metadata)]))
+        finally:
+            tool.REPO_ROOT = original
+
+
+def wave_1_manifests() -> list[Path]:
+    return sorted((REPO / "features").glob("**/2026-09-21-consolidated-test-binaries/*-migration.json"))
+
+
+@unittest.skipUnless(shutil.which("cargo") and wave_1_manifests(), "needs cargo and the wave-1 migration manifests")
+class ShippedWave1MetadataTests(unittest.TestCase):
+    """The ported `check-metadata` holds on the four packages wave 1 migrated."""
+
+    def test_the_wave_1_manifests_still_match_cargo(self) -> None:
+        manifests = [json.loads(path.read_text()) for path in wave_1_manifests()]
+        self.assertEqual(["biscuit-terminal", "claudine-cli", "darkmatter", "darkmatter-cli"], sorted(m["package"] for m in manifests))
+        summary, failures = tool.check_metadata(manifests, tool.cargo_metadata())
+        self.assertEqual([], failures)
+        self.assertEqual(4, len(summary))
+
+
 @unittest.skipUnless(JUST and baseline_dir(), "needs just and the Phase 1 baseline of 2026-09-21-consolidated-test-binaries")
 class ShippedArtifactPlanTests(unittest.TestCase):
     """`plan` over the real Phase 1 inventory and before-listings.
@@ -799,6 +1251,73 @@ class ShippedArtifactPlanTests(unittest.TestCase):
                 moved = sum(len(t["modules"]) for t in result.manifest["targets"])
                 self.assertEqual(len(self.inventory["packages"][package]["test_targets"]), moved, "every old target maps to exactly one module")
 
+
+
+def wave_2_selfproof() -> Path | None:
+    found = sorted((REPO / "features").glob("**/2026-09-22-consolidated-test-binaries-wave-2/selfproof"))
+    return found[0] if found and (found[0] / "inventory.json").is_file() and (found[0] / "capture-a").is_dir() else None
+
+
+@unittest.skipUnless(wave_2_selfproof(), "needs the Phase 2 self-proof of 2026-09-22-consolidated-test-binaries-wave-2")
+class ShippedWave2PlanTests(unittest.TestCase):
+    """`plan` over the frozen wave-2 inventory and capture, with the filters each capture recorded.
+
+    Nothing here reads the live tree, so the result does not drift as the
+    packages migrate. The expected shapes are the plan's target table and
+    rulings R3, R4, R5, R10, R14, and R19.
+    """
+
+    EXPECTED = {
+        "tree-hugger": ({"l1": []}, {}),
+        "claudine": ({"l1": []}, {}),
+        "sniff": ({"l1": []}, {}),
+        "biscuit-file": ({"l1": [], "l1-fetch": ["fetch"]}, {}),
+        "schematic-gen": ({"l1": [], "level2": ["terminal-tests"]}, {}),
+        "biscuit-terminal-cli": ({"l1": [], "level2": ["terminal-tests"]}, {"level2_prose_cells": "prose_cells", "level2_diagrams": "diagrams"}),
+        "claudine-gen": ({"l1": [], "level2": ["terminal-tests"]}, {}),
+        "dmls": ({"l1": [], "level2": ["terminal-tests"]}, {}),
+        "sniff-cli": ({"l1": [], "level2": ["test-fixtures"]}, {}),
+        "biscuit-tui-cli": ({"l1": [], "level2": ["terminal-tests"], "level3": ["terminal-tests"]}, {"real_terminal_render": "terminal_render"}),
+    }
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        base = wave_2_selfproof()
+        cls.inventory = json.loads((base / "inventory.json").read_text())
+        cls.captures = tool.load_captures([base / "capture-a"])
+        cls.results = {}
+        for package in cls.EXPECTED:
+            capture = next(c for (_h, p, _fs), c in sorted(cls.captures.items()) if p == package)
+            filters = {selector: meta["filter"] for selector, meta in capture["selectors"].items()}
+            cls.results[package] = tool.plan_package(package, cls.inventory, cls.captures, filters)
+
+    def test_every_package_plans_to_the_ruled_targets_and_aliases(self) -> None:
+        for package, (targets, aliases) in self.EXPECTED.items():
+            with self.subTest(package=package):
+                result = self.results[package]
+                self.assertEqual([], result.failures)
+                self.assertEqual(targets, {t["name"]: t["required_features"] for t in result.manifest["targets"]})
+                self.assertEqual(aliases, {m["old_target"]: m["module"] for m in result.manifest["modules"] if m["alias"]})
+                mapped = len(result.manifest["modules"]) + len(result.manifest["dropped_targets"])
+                self.assertEqual(len(self.inventory["packages"][package]["test_targets"]), mapped, "every old target is a module or a ruled helper")
+        self.assertEqual(18, sum(len(self.EXPECTED[p][0]) for p in self.EXPECTED), "the plan's expected total")
+
+    def test_the_two_exact_overrides_are_rewrites(self) -> None:
+        suggested = {package: sorted({r["suggested_filter"] for r in result.manifest["override_rewrites"]})
+                     for package, result in self.results.items() if result.manifest["override_rewrites"]}
+        self.assertEqual({
+            "sniff": ["test(=integration::test_detect_completes_in_reasonable_time)"],
+            "biscuit-terminal-cli": ["test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)"],
+        }, suggested)
+
+    def test_rulings_and_shared_tests_are_recorded(self) -> None:
+        self.assertEqual(["fixtures"], [d["old_target"] for d in self.results["sniff"].manifest["dropped_targets"]])
+        self.assertEqual({"real_terminal_render": "level2", "windows_captured_stdout": "level2"},
+                         {r["old_target"]: r["target"] for r in self.results["biscuit-tui-cli"].manifest["ruled_targets"]})
+        shared = self.results["biscuit-terminal-cli"].manifest["shared_tests"]
+        self.assertEqual(10, len(shared))
+        self.assertTrue(all(len(entry["old_binary_ids"]) == 9 and entry["test"].startswith("common::pane_geometry::tests::") for entry in shared))
+        self.assertEqual([], [p for p, r in self.results.items() if p != "biscuit-terminal-cli" and r.manifest["shared_tests"]])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
