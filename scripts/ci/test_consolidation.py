@@ -27,9 +27,12 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import consolidation as tool  # noqa: E402
+from tool_guard import require_tools  # noqa: E402
 
 REPO = tool.REPO_ROOT
-JUST = shutil.which("just")
+#: `just/ci-local.just` runs this suite and nothing else does (the toolkit is
+#: local-only by ruling, `2026-09-21-consolidated-test-binaries` R1).
+CI_LOCAL = "`just ci-local`'s ci-infra self-tests, the only place this suite runs"
 
 #: Fixture copies shaped like the canonical expressions. Production code never
 #: holds these; it asks `just _tier_filter`.
@@ -128,9 +131,11 @@ class FilterEvaluatorTests(unittest.TestCase):
                 tool.parse_filter(text)
 
 
-@unittest.skipUnless(JUST, "just is not installed")
 class ShippedFilterCorpusTests(unittest.TestCase):
     """Every filter a capture or plan will read parses and evaluates."""
+
+    def setUp(self) -> None:
+        require_tools("just", enforced_by=CI_LOCAL)
 
     def test_every_tier_and_override_filter_parses(self) -> None:
         filters = {tier: tool.tier_filter(tier, "claudine-cli") for tier in tool.TIER_SELECTORS}
@@ -865,13 +870,15 @@ class PackageTableTests(unittest.TestCase):
         self.assertIn("worktree-cli not in PACKAGES", stderr.getvalue())
 
 
-@unittest.skipUnless(shutil.which("cargo"), "cargo is not installed")
 class ShippedPackageTableTests(unittest.TestCase):
     """Every wave-2 feature set against the package's real `Cargo.toml`.
 
     Wave-1 rows are that feature's frozen record and are not re-validated
     here: `claudine-cli`'s CI union gained `test-fixtures` after it closed.
     """
+
+    def setUp(self) -> None:
+        require_tools("cargo", enforced_by=CI_LOCAL)
 
     def test_every_listed_set_names_declared_features_and_holds_the_ci_union(self) -> None:
         metadata = tool.cargo_metadata()
@@ -1001,8 +1008,8 @@ class MoveTests(MoveFixture):
         self.assertTrue(level3.startswith("//! Level 3 (`t`) integration tests"), level3)
         self.assertNotIn("mod common;", level3, "no module of level3 uses common")
 
-    @unittest.skipUnless(shutil.which("rustfmt"), "rustfmt is not installed")
     def test_a_generated_root_is_already_rustfmt_clean(self) -> None:
+        require_tools("rustfmt", enforced_by=CI_LOCAL)
         self.manifest["targets"][0]["modules"] += ["Zed", "a10", "a2", "a_b", "ab"]
         for name in ("Zed", "a10", "a2", "a_b", "ab"):
             self.manifest["modules"].append(dict(self.manifest["modules"][1], old_target=name, old_path=f"pkg/tests/{name}.rs",
@@ -1157,6 +1164,35 @@ class BodyDiffTests(MoveFixture):
         report = self.diff()
         self.assertIn('+ let args = ["--exact", "beta::other_probe"];', report["details"])
 
+    def plant_path_key(self, after_line: str) -> None:
+        """`beta` excludes itself from a scan by its path under `tests/`; the move adds `l1/` (R19)."""
+        (self.before / "pkg/tests/beta.rs").write_text('mod helper;\nconst SELF: &str = "beta.rs";\n#[test]\nfn plain() {}\n')
+        self.move()
+        moved = self.repo / "pkg/tests/l1/beta.rs"
+        moved.write_text(moved.read_text().replace("#[test]", f"{after_line}\n#[test]", 1))
+
+    def test_a_dispositioned_path_key_repair_is_structural(self) -> None:
+        self.plant_path_key('const SELF: &str = "l1/beta.rs";')
+        self.manifest["dispositions"].append({"path": "pkg/tests/l1/beta.rs", "detector": "path_key", "reason": "R19"})
+        report = self.diff()
+        self.assertEqual([], report["failures"])
+        self.assertEqual(0, report["changed_lines"]["other"])
+        self.assertGreater(report["changed_lines"]["structural"], 0)
+
+    def test_a_path_key_repair_without_a_disposition_fails(self) -> None:
+        self.plant_path_key('const SELF: &str = "l1/beta.rs";')
+        self.assertIn('+ const SELF: &str = "l1/beta.rs";', self.diff()["details"])
+
+    def test_a_path_key_disposition_rejects_another_targets_prefix(self) -> None:
+        self.plant_path_key('const SELF: &str = "level2/beta.rs";')
+        self.manifest["dispositions"].append({"path": "pkg/tests/l1/beta.rs", "detector": "path_key", "reason": "R19"})
+        self.assertIn('+ const SELF: &str = "level2/beta.rs";', self.diff()["details"])
+
+    def test_a_path_key_disposition_still_fails_on_a_changed_path(self) -> None:
+        self.plant_path_key('const SELF: &str = "l1/gamma.rs";')
+        self.manifest["dispositions"].append({"path": "pkg/tests/l1/beta.rs", "detector": "path_key", "reason": "R19"})
+        self.assertIn('+ const SELF: &str = "l1/gamma.rs";', self.diff()["details"])
+
 
 class CheckMetadataTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1221,9 +1257,12 @@ def wave_1_manifests() -> list[Path]:
     return sorted((REPO / "features").glob("**/2026-09-21-consolidated-test-binaries/*-migration.json"))
 
 
-@unittest.skipUnless(shutil.which("cargo") and wave_1_manifests(), "needs cargo and the wave-1 migration manifests")
+@unittest.skipUnless(wave_1_manifests(), "needs the wave-1 migration manifests")
 class ShippedWave1MetadataTests(unittest.TestCase):
     """The ported `check-metadata` holds on the four packages wave 1 migrated."""
+
+    def setUp(self) -> None:
+        require_tools("cargo", enforced_by=CI_LOCAL)
 
     def test_the_wave_1_manifests_still_match_cargo(self) -> None:
         manifests = [json.loads(path.read_text()) for path in wave_1_manifests()]
@@ -1233,7 +1272,7 @@ class ShippedWave1MetadataTests(unittest.TestCase):
         self.assertEqual(4, len(summary))
 
 
-@unittest.skipUnless(JUST and baseline_dir(), "needs just and the Phase 1 baseline of 2026-09-21-consolidated-test-binaries")
+@unittest.skipUnless(baseline_dir(), "needs the Phase 1 baseline of 2026-09-21-consolidated-test-binaries")
 class ShippedArtifactPlanTests(unittest.TestCase):
     """`plan` over the real Phase 1 inventory and before-listings.
 
@@ -1245,6 +1284,7 @@ class ShippedArtifactPlanTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        require_tools("just", enforced_by=CI_LOCAL)
         base = baseline_dir()
         cls.inventory = json.loads((base / "inventory.json").read_text())
         cls.captures = tool.load_captures([base / "listings"])
