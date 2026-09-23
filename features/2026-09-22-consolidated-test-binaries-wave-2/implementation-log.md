@@ -144,6 +144,163 @@ packages:
     - tree-hugger
     - claudine
     - sniff
+    - biscuit-file
+    - schematic-gen
+    - biscuit-terminal-cli
+    - claudine-gen
+    - dmls
+    - biscuit-test-harness
+    - renderable
+source_files_during_phase_4:
+    - .config/nextest.toml
+    - Cargo.lock
+    - biscuit-file/lib/Cargo.toml
+    - biscuit-file/lib/tests/l1-fetch/fetch_integration.rs
+    - biscuit-file/lib/tests/l1-fetch/main.rs
+    - biscuit-file/lib/tests/l1/completion_round_trip.rs
+    - biscuit-file/lib/tests/l1/detailed_resolution.rs
+    - biscuit-file/lib/tests/l1/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/l1/implicit_relative.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/parse_count.rs
+    - biscuit-file/lib/tests/l1/precedence_flip.rs
+    - biscuit-file/lib/tests/l1/reference_grammar.rs
+    - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+    - biscuit-file/lib/tests/l1/resolution_context.rs
+    - biscuit-file/lib/tests/l1/round_trip.rs
+    - biscuit-file/lib/tests/l1/span_compat.rs
+    - biscuit-file/lib/tests/l1/test_layout.rs
+    - biscuit-file/lib/tests/l1/yaml_corpus.rs
+    - biscuit-file/lib/tests/l1/yaml_mutation.rs
+    - biscuit-file/lib/tests/l1/yaml_safety.rs
+    - biscuit-file/lib/tests/proptest-regressions/yaml_mutation.txt
+    - biscuit-terminal/cli/Cargo.toml
+    - biscuit-terminal/cli/tests/l1/about.rs
+    - biscuit-terminal/cli/tests/l1/dir_targets.rs
+    - biscuit-terminal/cli/tests/l1/integration_test.rs
+    - biscuit-terminal/cli/tests/l1/main.rs
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__columns_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__list_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padleft_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padright_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_styled_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__quote_snapshot.snap
+    - biscuit-terminal/cli/tests/l1/test_layout.rs
+    - biscuit-terminal/cli/tests/level2/diagrams.rs
+    - biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+    - biscuit-terminal/cli/tests/level2/level2_container_fenced_code.rs
+    - biscuit-terminal/cli/tests/level2/level2_cursor_and_hygiene.rs
+    - biscuit-terminal/cli/tests/level2/level2_image.rs
+    - biscuit-terminal/cli/tests/level2/level2_layout.rs
+    - biscuit-terminal/cli/tests/level2/level2_prose_styling.rs
+    - biscuit-terminal/cli/tests/level2/level2_render_tree_style.rs
+    - biscuit-terminal/cli/tests/level2/level2_status_block.rs
+    - biscuit-terminal/cli/tests/level2/level2_style_everywhere_matrix.rs
+    - biscuit-terminal/cli/tests/level2/main.rs
+    - biscuit-terminal/cli/tests/level2/prose_cells.rs
+    - biscuit-test-harness/src/bin/broker.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/gen/tests/l1/drift.rs
+    - claudine/gen/tests/l1/fixtures_provenance.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/l1/signals_sidecar_mirror.rs
+    - claudine/gen/tests/l1/signals_validation.rs
+    - claudine/gen/tests/l1/steering_check.rs
+    - claudine/gen/tests/l1/test_layout.rs
+    - claudine/gen/tests/l1/vocabulary.rs
+    - claudine/gen/tests/level2/level2_report_terminal.rs
+    - claudine/gen/tests/level2/main.rs
+    - claudine/lib/src/provider/tests.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/fixtures/editor_neovim/init.lua
+    - darkmatter/dmls/tests/fixtures/editor_neovim/probe.lua
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/packaging_contract.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/dmls/tests/l1/strict_mode_recovery_spike.rs
+    - darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/dmls/tests/l1/test_layout.rs
+    - darkmatter/dmls/tests/l1/zed_extension_contract.rs
+    - darkmatter/dmls/tests/level2/level2_editor_neovim.rs
+    - darkmatter/dmls/tests/level2/main.rs
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/measure.sh
+    - schematic/gen/Cargo.toml
+    - schematic/gen/tests/l1/artifact_drift.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/path_substitution.rs
+    - schematic/gen/tests/l1/postman_artifact_validation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/gen/tests/l1/postman_schema.rs
+    - schematic/gen/tests/l1/postman_var_consistency.rs
+    - schematic/gen/tests/l1/query_param_detection.rs
+    - schematic/gen/tests/l1/query_params_codegen.rs
+    - schematic/gen/tests/l1/test_layout.rs
+    - schematic/gen/tests/l1/ws_codegen.rs
+    - schematic/gen/tests/level2/main.rs
+    - schematic/gen/tests/level2/terminal_capture.rs
+    - schematic/justfile
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+docs_updated_during_phase_4:
+    - biscuit-file/docs/dependencies.md
+    - biscuit-terminal/docs/dependencies.md
+    - biscuit-test-harness/README.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/research/signals/fixtures/README.md
+    - claudine/docs/research/signals/fixtures/provenance.yaml
+    - claudine/docs/topics/provider-metadata.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/smoke-checklist.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - docs/dependencies.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measurements.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+    - renderable/docs/layout-and-style.md
+    - schematic/docs/dependencies.md
+    - schematic/gen/tests/fixtures/postman/README.md
+docs_created_during_phase_4:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/dmls-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/dmls/
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-file-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-file-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-terminal-cli-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/biscuit-terminal-cli-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-gen-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/claudine-gen-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/dmls-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/dmls-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/schematic-gen-after.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/measure/schematic-gen-before.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen-migration.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-test-harness/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/schematic-define/SKILL.md
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -491,3 +648,257 @@ See `measurements.md`. Test executables went from 45 to 3, and from
 
 All three are reusable unchanged in Phases 4–5. `shellcheck` and
 `ruff --select F,E9,B` are clean.
+
+## Phase 4
+
+Phase 4 (two-contract packages) ran at `5a396aeb5` on the macOS dev host, with
+Phase 3's R12 series already committed. It migrated `biscuit-file` (15 → 2),
+`schematic-gen` (14 → 2), `biscuit-terminal-cli` (14 → 2), `claudine-gen`
+(11 → 2), and `dmls` (11 → 2), in the spec's order. Nothing was committed, per
+the phase instructions. Each package's R12 series (manifest and evidence,
+structural move, area docs) is left to the separate commit step. So is the
+toolkit fix below, which R12 makes its own commit.
+
+### Before-side
+
+- Fresh macOS captures of all five packages were identical to
+  `selfproof/capture-a` (`compare --require-identical-digests`). The only notes
+  were Phase 3's `sniff` override rewrite.
+- Linux before-captures came from one private `--shared` scratch clone on
+  `build-linux`: the standing clone at `7685d1ac2`, plus a bundle
+  `7685d1ac2..5a396aeb5`, with `RUSTC_WRAPPER="" KACHE_AUTO=0`.
+- **Recaptured after `biscuit-terminal-cli`'s R10 rewrite.** `plan` refuses a
+  capture whose recorded override filters differ from the live
+  `.config/nextest.toml`. So `claudine-gen` and `dmls` were captured again on
+  both hosts after that edit (Linux: the scratch clone plus that one file).
+  Their "before" follows `biscuit-terminal-cli`'s move, which is R13's order
+  anyway. Old and new captures compare identical, and the only notes are the
+  two rewritten overrides.
+- The before-measurements ran in a detached worktree of `5a396aeb5`, which was
+  removed afterward.
+
+### Per package
+
+| Step | `biscuit-file` | `schematic-gen` | `biscuit-terminal-cli` | `claudine-gen` | `dmls` |
+|---|---|---|---|---|---|
+| Targets | `l1`, `l1-fetch` (`fetch`) | `l1`, `level2` (`terminal-tests`) | `l1`, `level2` (`terminal-tests`) | `l1`, `level2` (`terminal-tests`) | `l1`, `level2` (`terminal-tests`) |
+| `plan` extras | none | `ruled_targets`: `terminal_capture` → `level2` (R4, F2) | aliases `prose_cells`, `diagrams` **derived by `plan`**; both R10 rewrites; 10 `shared_tests` (F15) | none | none (`level1_*` projected as non-markers) |
+| `move` | 15 modules; seed `yaml_mutation.proptest-regressions` → `tests/proptest-regressions/yaml_mutation.txt` | 14 modules; 3 `include_bytes!` repairs | 14 modules; 9 `mod common;` → `use crate::common;`; `level2` declares `common` | 11 modules; `#![cfg(unix)]` → `#[cfg(unix)] mod level2_report_terminal;` | 11 modules; 4 `common` rewrites; 7 `include_str!` repairs |
+| Manual edits | `Cargo.toml`; stale `fetch_integration` `[[test]]` removed | `Cargo.toml`; `test-e2e` recipe (R19) | `Cargo.toml`; 7 snapshots moved (`snapshot-mapping.json`); R10 in both profiles | `Cargo.toml`; `--exact` identity repair (R19) | `Cargo.toml`; `--exact` identity repair (R19) |
+| `test-toolkit` dev-dep (R7) | new | new (optional one kept) | new (optional one kept) | new (optional one kept) | already present |
+| Layout gate | ≥ 18 files | ≥ 17 | ≥ 19 (names `common/`) | ≥ 14 | ≥ 15 (names `common/`) |
+| Red/green | `layout-guard.md`: red, red, green | same | same | same | same |
+| `check-attributes` | 0 | 0 (2 `crate_path` dispositions, R19) | 0 | 0 (`crate_path` + `exact_path_string` dispositions) | 0 (`exact_arg` disposition) |
+| `check-proptest` / `check-snapshots` | 1 seed relocated byte for byte / n/a | clean / n/a | clean / 7 of 7 | clean / n/a | clean / n/a |
+| `check-metadata` | PASS | PASS | PASS | PASS | PASS |
+| `body-diff` (other lines) | 0 (15 byte-identical) | 0 (6 structural, 4 comment) | 0 (18 structural) | 0 (4 structural, 7 comment) | 0 (24 structural) |
+| `compare` darwin / linux / darwin-linux | identical ×3 | identical ×3 | identical ×3 (R10 notes only) | identical ×3 | identical ×3 (every set, both slow states) |
+| Test-input probe | 13 → 13 | 14 → 14 (golden `complex_auth.json`) | 1 → 1 | 10 → 10 | 2 → 2 |
+| Linux L1 (scratch clone, CI features) | 778/778 | 559/559 | 377/377 | 181/181 | 740/740 |
+
+`check-metadata` over all eight migrated manifests together: PASS.
+
+### Remote legs (R16: `cross-check`, no `--features`, one leg at a time)
+
+| Package | Windows (`build-win-native`) | WSL2 |
+|---|---|---|
+| `biscuit-file` | 784/784 | 778/778 |
+| `schematic-gen` | 559/559 | 559/559 |
+| `biscuit-terminal-cli` | 374/374 | 377/377 |
+| `claudine-gen` | 181/181 | 181/181 |
+| `dmls` | 742/742 | 740/740 |
+
+Every leg ran in archive mode with the package's CI feature union, and had 0
+`FAIL` lines. The Windows and WSL2 legs never overlapped (`os` skill, 1455
+lesson). The count differences are platform `cfg`s in files the move left
+byte-identical. `biscuit-terminal-cli`'s three missing Windows tests are its
+three `#[cfg(not(windows))]` tests (`about::test_about_warp_json_…`,
+`integration_test::test_actual_terminal_query_integration`,
+`integration_test::test_graph_expression_meta_outputs_render_metadata_in_a_pty`).
+`claudine-gen`'s `level2` module is `#[cfg(unix)]`.
+
+Each leg shipped the working tree as a synthetic commit over
+`origin/fix/ci-build-feature-divergence` (`1879dd880`), named in its
+`cross-check:` banner. No source file changed after the first leg started;
+only evidence under this feature directory did. So the ten legs describe one
+source tree. As in Phase 3, no receipt was published, because the tree is not
+a committed head.
+
+### Hazards and dispositions
+
+- **F2 (`schematic-gen` `terminal_capture`)**: `plan`'s `ruled_targets` puts it
+  in `level2` with `terminal-tests`. All three of its tests are `level2_*`, so
+  the disposition is **moot, no L1 test**. `compare` confirms the L1 set is
+  unchanged.
+- **F3 (`biscuit-terminal-cli`)**: `plan` derived both aliases from the
+  projection (its manifest records the tests that would have changed tier).
+  `biscuit-terminal-cli/l1-tier-in-level2.txt` lists the L1-tier tests in the
+  `level2` binary under `terminal-tests`: 59 = 43 `prose_cells` + 6 `diagrams`
+  + 10 `common::pane_geometry`.
+- **F15 (`common::pane_geometry`, 90 → 10)**: accepted as recommended. One
+  `common` per root, so the nine per-binary copies fold into 10 `level2`
+  identities, and `compare` checks the copies agreed.
+- **R10**: `biscuit-terminal-cli/override-rewrite.txt` shows the new filter
+  matching exactly one test in `default` and in `ci`, and the old spelling
+  matching none.
+- **R19 recipes**: `schematic/justfile` `test-e2e` →
+  `--test l1 -- --ignored e2e_generation::`. It selects the same three ignored
+  tests before and after (`schematic-gen/recipe-rewrite.txt`), and one run
+  passed 3/3 (`test-e2e-run.log.gz`).
+- **R19 `crate::` in string literals**: recorded as `crate_path` dispositions
+  (`e2e_generation.rs:214`, `http_client.rs:471`, `pipeline.rs:166`).
+- **R19 self-exec identity strings**:
+  - `claudine-gen`: with the old string, both tmux tests fail (1 passed,
+    2 failed); with the new one, 3/3 pass (`exact-{old,new}-string.log.gz`).
+  - `dmls`: **the miss would be silent, not loud** (S2 predicted "fails
+    loudly"). With the old string the consolidated binary selects 0 tests, the
+    probe never starts, and `child_guard_reaps_process_during_unwind` still
+    passes. Its `catch_unwind` swallows the "cancellation probe did not start"
+    panic as if it were the simulated one. `dmls/exact-repair.txt` shows both
+    sides with `--no-capture`. The repair is made. The test's inability to tell
+    the two panics apart is a pre-existing weakness, outside this feature's
+    structural-only scope (recorded for the author below).
+- **`biscuit-file` `test-minimal`**: passes. It runs only lib `path_text` tests,
+  so the move cannot reach it.
+- **`fetch_integration`**: keeps exactly `required-features = ["fetch"]` as
+  `l1-fetch`.
+
+### Toolkit fix: `body-diff` and R19 identity repairs
+
+`body-diff` exits 1 on any `other` line. R19 permits the self-exec `--exact`
+repair as structural, but `body-diff` counted it as `other`, so `claudine-gen`
+could not pass. `dmls` would have hit the same. Waiving the gate would have hidden
+real body changes in those files. Instead, `body_diff` now masks the module's
+own `<module>::` prefix on each line, **only** in files whose
+identity-sensitive construct has a manifest disposition. Any other change in
+those files still fails.
+
+- `scripts/ci/consolidation.py`: `_body_normalize`, `diff_body`, `body_diff`,
+  and the report header.
+- `scripts/ci/test_consolidation.py` (96 → 99 tests), written red first:
+  - `test_a_dispositioned_identity_repair_is_structural`;
+  - `test_an_identity_repair_without_a_disposition_fails`;
+  - `test_a_dispositioned_file_still_fails_on_a_body_change`.
+- All ten `ci-local` Python suites pass. `py_compile -W error` and
+  `ruff --select F,E9,B` are clean.
+
+### Evidence tooling fix: `measure/measure.sh`
+
+It counted 0 test executables for `dmls`. Cargo writes a package ID as
+`…/darkmatter/dmls#0.1.0` when the directory name equals the package name, and
+the script matched only `#dmls@`. It now matches both spellings (`shellcheck`
+clean). `dmls` was re-measured.
+
+### Suites (macOS; compared with `baseline/pre-existing.md`)
+
+| Area | `just test` | `just test-l2` | `just lint` | `check-tier-coverage` | `check-canonical` |
+|---|---|---|---|---|---|
+| `biscuit-file` | ✅ 840 (839 + gate); `test-minimal` ✅ | n/a (stub) | ✅ | ✅ 0 stranded | ✅ |
+| `schematic` | ✅ 1700 (1699 + gate) | ✅ 3 (tmux) | ✅ | ✅ 0 stranded | ✅ |
+| `biscuit-terminal` | ✅ 3264 (3263 + gate) | ✅ 2 + 76 | ✅ | ✅ 0 stranded | ✅ |
+| `claudine` | 7318 passed (7317 + gate), 2 failed: the **same two** pre-existing `claudine-cli::l1 shipped_prompt_route_drift` failures | ✅ 237 + 3 | ✅ | ✅ 0 stranded | ✅ |
+| `darkmatter` | ✅ 8491 (8490 + gate) | ✅ 18 + 69 + 3 | ✅ | ✅ 0 stranded | ✅ |
+
+All suites ran with `INSTA_UPDATE=no`, and no `.snap.new` exists. The first
+`claudine` `lint` and `check-tier-coverage` runs failed only because they
+overlapped the `dmls` move, before `dmls/Cargo.toml` named the new roots. The
+reruns above are clean. Logs are gzipped under each package's `suites/`.
+
+**`biscuit-terminal-cli` L2 backends.** `just test-l2` passed 76/76, but a
+missing backend skips while printing PASS. So the L2 set was run again with
+`BISCUIT_TEST_REQUIRED_BACKENDS`:
+
+- With `tmux,wezterm,apple-terminal` required: 75 passed, 1 failed.
+  `level2_apple_terminal_harness_lifecycle` captured only the host's `bash-3.2$`
+  prompt. It fails the same way in isolation on the unmigrated base (twice),
+  and it passed inside the full run. This is the `os` skill's "shell prompt
+  inside a captured L2 frame" (host state, not a repo defect).
+- Kitty has no remote-control instance on this host. A background instance
+  started without focus (`open -g`) gave a pane a few columns wide: 20 of 25
+  failed after, and 19 of 25 on the unmigrated base, with a varying set. So
+  Kitty gives no discriminating evidence here. Identity for all 25 Kitty tests
+  is proven by `compare`. See `suites/test-l2-kitty-README.txt`.
+
+### Docs (SPP 9)
+
+- `schematic`: `artifact_drift.rs` and `postman_golden.rs` module docs,
+  `tests/fixtures/postman/README.md`, `docs/dependencies.md`, and
+  `.claude/skills/schematic-define/SKILL.md` (three `--test l1
+  e2e_generation::…` commands).
+- `biscuit-terminal-cli`: `biscuit-test-harness/README.md` and
+  `.claude/skills/biscuit-test-harness/SKILL.md` (four commands),
+  `biscuit-test-harness/src/bin/broker.rs:187` (comment),
+  `renderable/docs/layout-and-style.md:405`, and
+  `biscuit-terminal/docs/dependencies.md`. The old commands omitted
+  `--features terminal-tests`, which that target has always required, so they
+  already failed. The new ones name it, and they list the 15
+  `level2_prose_styling::` tests.
+- `claudine-gen`: `Cargo.toml` CI-policy comment,
+  `docs/research/signals/fixtures/{README.md,provenance.yaml}` (a YAML comment;
+  the test parses the file), `docs/topics/provider-metadata.md`,
+  `lib/src/provider/tests.rs:183,254` (R17's prose reference), and
+  `claudine/docs/dependencies.md`.
+- `dmls`: `Cargo.toml` comment, `README.md`, `docs/{features,hover}.md`,
+  `docs/editors/smoke-checklist.md`, `src/overlay/expressions.rs:1566`, and the
+  header comments of `tests/fixtures/editor_neovim/{init,probe}.lua`.
+- `biscuit-file`: `Cargo.toml` CI-policy comment, and an area
+  `docs/dependencies.md` "Development Only" entry.
+- Repository `docs/dependencies.md`: one line each for `biscuit-file`,
+  `biscuit-terminal-cli`, `claudine-gen`, and `schematic-gen`. `Cargo.lock`
+  gains only the dev edges and no new crate.
+- Left as history: dated plans and reviews,
+  `claudine/fixes/2026-09-17-remove-strict-mode/*`,
+  `darkmatter/fixes/2026-09-20-alias-projection-port/spec.md:117-143` (another
+  spec's record of test names), the `os` skill's dated `claudine-gen::steering_check`
+  record, and each moved snapshot's `source:` header (the snapshots move byte
+  for byte).
+
+- `os` skill (`macos.md`): a background, minimized Kitty is not an L2 host
+  (the Kitty finding above), and how to stop one.
+
+### Measurements
+
+See `measurements.md`. Test executables went from 65 to 10, and from
+941.8 MB to 371.0 MB. The largest warm-edit change was +0.89 s
+(`biscuit-file`), so R8's trigger was never reached.
+
+### For the author (outside scope, not acted on)
+
+- `schematic/justfile` `check-drift` (`cargo test -p schematic-gen
+  artifact_drift -- --ignored`) selects **no test**, before and after,
+  because none of `artifact_drift`'s tests is `#[ignore]`
+  (`schematic-gen/recipe-rewrite.txt`). S2 called it "still works". The drift
+  tests do run in ordinary L1.
+- `dmls` `child_guard_reaps_process_during_unwind` cannot tell a probe that
+  never started from the simulated panic (see above).
+
+### Deviations from the SPP, and why
+
+- **No commits** (phase instructions). As in Phase 3, the remote legs ran
+  against the working tree. R13's "N+1's structural move waits for N's remote
+  legs" was relaxed the same way Phase 3 relaxed it. The five packages share
+  no test file, and every leg ran after the last structural edit, so each leg
+  saw the final tree for its package.
+- **One Linux before/after pair for all five packages**, from one scratch
+  clone. `claudine-gen` and `dmls` were re-captured before their plan (see
+  Before-side). The after patch was built with a temporary `GIT_INDEX_FILE`
+  (120 paths). The clone, bundle, and patch were deleted afterward.
+- **`cross-check` output was redirected, not `tee`d.** The files are the same
+  evidence.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Evidence / test |
+|---|---|
+| Every former test keeps its identity, tier, feature, and platform reachability | `compare` four-way, darwin/linux/darwin-linux, every selector and feature set, both `dmls` slow states (`<pkg>/comparison-*.md`) |
+| A `tests/` file no root declares fails the build gate | `<pkg>::l1 test_layout::every_test_source_is_compiled_by_a_declared_target`, red on a stray root and an undeclared module, then green (`<pkg>/layout-guard.md`) |
+| F3's 49 unmarked tests stay L1 in CI's L1 cell | `biscuit-terminal-cli/l1-tier-in-level2.txt` (59 = 43 + 6 + 10), plus `compare`'s L1 row under `(terminal-tests)` |
+| R10 override still hits its test | `biscuit-terminal-cli/override-rewrite.txt` (1 match per profile; old spelling 0) |
+| Self-exec probes still select their probe | `claudine-gen/exact-{old,new}-string.log.gz` (red, then green); `dmls/exact-repair.txt` (0 tests, then 1) |
+| Recipes that named an old target | `schematic-gen/recipe-rewrite.txt` (same 3 tests), `test-e2e-run.log.gz` (3/3) |
+| Snapshots and proptest seeds are still read | `biscuit-terminal-cli/snapshot-check.json` (7/7, byte-identical, and `l1` passes); `biscuit-file/proptest-check.json` |
+| CI's test-input narrowing selects the same tests | `<pkg>/test-inputs.md` |
+| Manifests match Cargo | `check-metadata` PASS (`<pkg>/metadata-check.txt`; eight manifests together) |
+| Only structural edits | `body-diff` 0 `other` lines (`<pkg>/body-diff.md`) |
+| `body-diff` accepts exactly the dispositioned identity repair | `BodyDiffTests.test_a_dispositioned_identity_repair_is_structural`, `test_an_identity_repair_without_a_disposition_fails`, `test_a_dispositioned_file_still_fails_on_a_body_change` |
+| Windows and WSL2 still build and pass | `<pkg>/cross-check-{windows,wsl}.txt` |

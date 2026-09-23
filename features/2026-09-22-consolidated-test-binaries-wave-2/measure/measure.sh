@@ -66,7 +66,10 @@ for line in sys.stdin:
         continue
     if message.get("reason") != "compiler-artifact" or message["target"]["kind"] != ["test"]:
         continue
-    if "#" + package + "@" not in message["package_id"]:
+    # Cargo drops the name from a package ID whose directory has the same name
+    # (…/darkmatter/dmls#0.1.0), so match both spellings.
+    package_id = message["package_id"]
+    if "#" + package + "@" not in package_id and not package_id.split("#")[0].endswith("/" + package):
         continue
     executable = message.get("executable")
     if executable:

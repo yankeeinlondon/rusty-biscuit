@@ -48,3 +48,34 @@ Across the three packages, the test executables go from 45 to 3, and from
 needed the full protocol. Each edit figure is a single warm observation on a
 loaded, shared host (1-minute load between 3.8 and 8.7), so a difference under
 a second is within noise.
+
+## Phase 4
+
+Same protocol and host. The before checkout was a detached worktree of
+`5a396aeb5` (`/tmp/w2-base`, removed afterward). Each package was built with its
+CI feature union.
+
+| Package | Features | Test executables | Executable bytes | Clean test build | Warm edit (test) | R8 trigger |
+|---|---|---:|---:|---:|---:|---|
+| `biscuit-file` before | `fetch` | 15 | 107.3 MB | 17 s | 1.20 s (`toml_json_round_trip_basic`) | |
+| `biscuit-file` after | `fetch` | **2** | **39.9 MB** | 17 s | 2.09 s | no (+0.89 s) |
+| `schematic-gen` before | `terminal-tests` | 14 | 178.2 MB | 39 s | 1.46 s (`single_path_param_struct_has_field`) | |
+| `schematic-gen` after | `terminal-tests` | **2** | **60.5 MB** | 41 s | 1.38 s | no (−0.08 s) |
+| `biscuit-terminal-cli` before | `terminal-tests` | 14 | 47.3 MB | 57 s | 1.50 s (`test_about_kitty_plain_renders_report`) | |
+| `biscuit-terminal-cli` after | `terminal-tests` | **2** | **12.8 MB** | 53 s | 1.55 s | no (+0.05 s) |
+| `claudine-gen` before | `terminal-tests` | 11 | 322.1 MB | 99 s | 1.55 s (`every_research_vocabulary_projects_to_runtime_strings`) | |
+| `claudine-gen` after | `terminal-tests` | **2** | **198.3 MB** | 72 s | 1.77 s | no (+0.22 s) |
+| `dmls` before | `terminal-tests,effects-instrumentation` | 11 | 286.9 MB | 91 s | 1.19 s (`dist_recipe_and_zed_extension_agree_on_archive_names`) | |
+| `dmls` after | `terminal-tests,effects-instrumentation` | **2** | **59.5 MB** | 75 s | 1.71 s | no (+0.52 s) |
+
+Across the five packages, the test executables go from 65 to 10, and from
+941.8 MB to 371.0 MB (−60.6%). No package reached the R8 trigger. The same
+caveat applies as in Phase 3: each edit figure is one warm observation on a
+loaded, shared host, and the after runs overlapped other local builds.
+
+`measure.sh` counted 0 executables for `dmls` on its first before run. Cargo
+drops the name from a package ID whose directory has the same name
+(`…/darkmatter/dmls#0.1.0`), and the script matched only `#dmls@`. The script
+now matches both spellings, and the `dmls` before run was repeated. The
+figures from Phase 3 are unaffected, because none of those packages has the
+short spelling.

@@ -45,19 +45,17 @@ reviewed: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 3 is implemented but NOT committed (the phase instructions forbid it). The working tree holds three packages' moves: `tree-hugger`, `claudine`, and `sniff`. Each needs its own R12 series (manifest and evidence, structural move, area docs). The toolkit commit is already in (`ebd261004`). Read the Phase 3 section of `implementation-log.md` first.
-    Reusable tooling now lives in `measure/`. Use it unchanged in Phases 4–5:
-    - `measure/measure.sh <pkg> <tests-dir> <before|after> measure <edit-test> [CI features]` gives the count, bytes, and R8 warm edit. Run "before" from a detached worktree of the base (`git worktree add --detach /tmp/w2-base HEAD`), and remove it afterward.
-    - `measure/layout-guard.sh <pkg> <crate-dir> <pkg>/layout-guard.md [features]` gives red, red, green.
-    - `measure/test-input-check.py <pkg>` re-runs the planner's probe and maps the before set through the manifest. It exits 1 on any difference.
-    - The layout gate is `tests/l1/test_layout.rs`, copied per package with a `>=` file count and named expected paths. Add `mod test_layout;` to the root in rustfmt order, and an `additions` entry to the manifest. Without that entry, `compare` fails on the new identity.
-    Lessons from Phase 3:
-    - Never start a `--os windows` leg while a `--os wsl` leg is compiling. They are one machine, and a claudine build died with `os error 1455`, leaving a poisoned target (now in the `os` skill).
-    - In zsh, write `"${BUILD_LINUX}:path"`, never `"$BUILD_LINUX:path"`.
-    - For Linux, one private scratch clone per phase works well: bundle `<standing clone tip>..HEAD`, check out HEAD, capture before for every package in the phase, then apply a working-tree patch built with a temporary `GIT_INDEX_FILE` and capture after. Run L1 there too. To prove a Linux failure pre-existing, `git stash` inside the scratch clone (its own stash, not ours).
-    - Known failures NOT caused by this feature: `claudine` lib unit tests on `build-linux` (4 `group_framing` tests, proven pre-existing) and on native Windows (2 path-spelling tests, not provable on the base; see the log). `claudine-cli`'s 2 `shipped_prompt_route_drift` failures are still the author's uncommitted `prompts/_implement` edits.
-    - `.config/nextest.toml` now carries R10's `sniff` rewrite. `plan` refuses a capture whose recorded override filters differ from the live file. So recapture every Phase 4 package fresh; `selfproof/capture-a` is now stale for override selectors.
-    Still open for Phase 4 (not blocking): the F15 fold of `biscuit-terminal-cli`'s 90 → 10 `common::pane_geometry` identities. Recommended: accept it and record it as the disposition. R16 (never pass `--features` to cross-check) and R7 (unconditional `test-toolkit` dev-dependency for `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`, and `claudine-gen`, each with a `docs/dependencies.md` line) still bind.
+    Phase 4 is implemented but NOT committed (the phase instructions forbid it). The working tree holds five packages' moves: `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`, `claudine-gen`, and `dmls`. Each needs its own R12 series. The toolkit fix to `scripts/ci/consolidation.py` `body-diff` (with 3 new tests in `test_consolidation.py`) is its own R12 commit and should land before the packages that rely on it (`claudine-gen`, `dmls`). Read the Phase 4 section of `implementation-log.md` first.
+    Reuse `measure/` unchanged. `measure.sh` now also matches a package ID without the name (`…/darkmatter/dmls#0.1.0`). Helpers used this phase were ad hoc; the pattern is in the log (layout gate copied per package, an `additions` entry in the manifest, dispositions as `{detector, path, reason}`).
+    For Phase 5:
+    - `body-diff` now accepts a self-exec `--exact` repair, but only in a file whose identity construct has a manifest disposition (`exact_path_string` or `exact_arg`). Record the disposition first, then run `body-diff`.
+    - Prove a self-exec repair by running the old string, and check that the failure is visible. `dmls`'s old string passed silently, because its `catch_unwind` swallowed the "probe did not start" panic. Use `--no-capture` or `--list` evidence, not the pass/fail result alone.
+    - Any `.config/nextest.toml` edit makes `plan` refuse every later package's capture. Phase 4's R10 rewrite is now live, so capture `sniff-cli` and `biscuit-tui-cli` fresh on both hosts before planning.
+    - Snapshots: `check-snapshots --emit-mapping`, move the files byte for byte, then `check-snapshots --mapping` (the `biscuit-terminal-cli` precedent).
+    - Moving files before editing `Cargo.toml` makes the whole workspace manifest unparseable. Any concurrent `cargo` run in another area (suites, lint) fails until the `[[test]]` entries are in. Edit `Cargo.toml` right after `move`, and do not run other suites in between.
+    - Level 2 on this host: tmux, WezTerm, and Apple Terminal work. Kitty has no usable instance (see `os` skill, `macos.md`). Apple Terminal's `level2_apple_terminal_harness_lifecycle` fails in isolation on the base too. Set `BISCUIT_TEST_REQUIRED_BACKENDS` to the backends you claim, or a missing backend passes as a skip.
+    - Known failures NOT caused by this feature: `claudine-cli`'s 2 `shipped_prompt_route_drift` failures (unchanged).
+    - For the author, not blocking: `schematic/justfile` `check-drift` selects no test before or after the move; `dmls` `child_guard_reaps_process_during_unwind` cannot tell a probe that never started from its simulated panic.
 ---
 
 # Consolidate integration tests in the ten remaining double-digit packages

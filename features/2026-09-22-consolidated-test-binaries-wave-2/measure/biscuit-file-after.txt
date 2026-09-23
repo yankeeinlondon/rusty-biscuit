@@ -1,0 +1,15 @@
+package: biscuit-file
+series: after
+revision: 5a396aeb5 (dirty paths under biscuit-file/lib: 20)
+features: fetch
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+nextest: cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)
+wrapper: RUSTC_WRAPPER='' (kache off)
+load at start: 9.54 16.15 12.99
+test executables: 2
+test executable bytes: 39865752
+clean test build wall: 17 s
+edit file: biscuit-file/lib/tests/l1/round_trip.rs
+edit command: cargo nextest run --locked -p biscuit-file --features fetch --target-dir /var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//w2-measure-biscuit-file-after.MAXjHt --color=never -E !(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/)) --no-tests=fail toml_json_round_trip_basic
+warm edit-to-one-module wall: 2.09 s
+load at end: 22.25 18.57 13.96
