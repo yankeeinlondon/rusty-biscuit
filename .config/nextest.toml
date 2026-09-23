@@ -226,7 +226,7 @@ test-group = 'sniff-windows-l1'
 # avoid turning unrelated contention into a gate failure. Local runs favor
 # throughput and leave it under the normal scheduler.
 [[profile.ci.overrides]]
-filter = 'test(=test_detect_completes_in_reasonable_time)'
+filter = 'test(=integration::test_detect_completes_in_reasonable_time)'
 threads-required = "num-cpus"
 
 # The browser tier runs serially (see `_test_browser`) but does not retry.
