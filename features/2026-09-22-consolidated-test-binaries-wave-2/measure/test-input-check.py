@@ -11,7 +11,11 @@ Exit 0 when every before test is selected after and nothing else is; exit 1
 otherwise. Writes the evidence to `<package>/test-inputs.md` and
 `<package>/test-inputs.json`.
 
-Usage: test-input-check.py <package>
+A probe file the move itself renames (`sniff-cli`'s insta snapshot) is named
+on the after side by the optional second argument, taken from the package's
+`snapshot-mapping.json`.
+
+Usage: test-input-check.py <package> [<after probe path>]
 """
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ _spec.loader.exec_module(listings)
 def main() -> int:
     package = sys.argv[1]
     probe = listings.PROBES[package]
+    after_probe = sys.argv[2] if len(sys.argv) > 2 else probe
     manifest = json.loads((FEATURE / f"{package}-migration.json").read_text())
     rename = {
         f"{row['old_binary_id']} {test['old']}": f"{row['binary_id']} {test['new']}"
@@ -49,7 +54,7 @@ def main() -> int:
         subprocess.run([sys.executable, str(FEATURE / "baseline" / "test-input-probe.py"), "--json", str(probe_json)],
                        cwd=REPO, check=True, capture_output=True, text=True)
         after_all = json.loads(probe_json.read_text())
-    after_rows = [r for r in after_all if r["package"] == package and r["path"] == probe]
+    after_rows = [r for r in after_all if r["package"] == package and r["path"] == after_probe]
 
     tier = subprocess.check_output(["just", "_tier_filter", "L1", package], cwd=REPO, text=True).strip()
     features = listings.ci_features(package)
@@ -75,7 +80,7 @@ def main() -> int:
     out_dir = FEATURE / package
     out_dir.mkdir(exist_ok=True)
     (out_dir / "test-inputs.json").write_text(json.dumps({
-        "probe": probe, "before_rows": before_rows, "after_rows": after_rows,
+        "probe": probe, "after_probe": after_probe, "before_rows": before_rows, "after_rows": after_rows,
         "before_units": before_sets, "after_units": after_sets,
         "before_mapped": before_mapped, "missing": missing, "extra": extra, "identical": ok,
     }, indent=2) + "\n")
@@ -87,7 +92,7 @@ def main() -> int:
         "lists each unit with `cargo nextest list -E '(<unit>) & (<L1 tier filter>)'` under the CI",
         f"feature union (`{','.join(features) or 'none'}`).",
         "",
-        f"Probe path: `{probe}`",
+        f"Probe path: `{probe}`" + (f" (after the move: `{after_probe}`)" if after_probe != probe else ""),
         "",
         "| Side | Reference (source:line) | Unit | Tests selected |",
         "|---|---|---|---:|",
