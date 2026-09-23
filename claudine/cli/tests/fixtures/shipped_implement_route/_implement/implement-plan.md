@@ -175,6 +175,8 @@ Before declaring the phase complete, report the requirement-to-test mapping,
 the exact targeted tests added, the broader gates run, and every skipped or
 pre-existing failure.
 
+::file "../_test-tiers.md"
+
 ## Completion
 
 You are done when:

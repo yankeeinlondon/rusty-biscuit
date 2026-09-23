@@ -461,3 +461,4 @@ so an unreadable input is never reported as an invented test failure.
 | `completion-expected-empty` | nothing expected and no plan-recorded reason |
 | `completion-companion-incomplete` / `completion-companion-failed` | a declared suite did not complete, or failed |
 | `completion-backend-unproven` | a declared L2 backend that nothing proves drove a test |
+| `completion-test-stranded` | an L1 listing excluded a test by a tier marker (`level2_`, `level3_`, `browser_`, `real_`, on any path segment) whose area's `test-<tier>` recipe is a stub, so it runs in no tier |

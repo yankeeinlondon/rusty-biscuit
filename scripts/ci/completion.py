@@ -522,6 +522,74 @@ def manifest_problems(
     return problems
 
 
+#: The name markers that take a test out of L1, and the area recipe that is the
+#: only thing putting it back into some tier. Mirrors `_tier_filter` and
+#: `_check_tier_coverage` in `just/devops.just`.
+TIER_MARKERS = {"level2_": "l2", "level3_": "l3", "browser_": "browser", "real_": "real"}
+
+
+def stub_recipe(justfile_text: str, recipe: str) -> bool:
+    """Whether `recipe`'s every non-blank body line says "not applicable".
+
+    The same rule `_check_tier_coverage` applies: the body runs from the header
+    line to the first line back at column 0.
+    """
+    lines = justfile_text.splitlines()
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.startswith(f"{recipe}:") or line.startswith(f"{recipe} ")
+        ),
+        None,
+    )
+    if start is None:
+        return False
+    body = []
+    for line in lines[start + 1 :]:
+        if line and not line[0].isspace():
+            break
+        if line.strip():
+            body.append(line)
+    return bool(body) and all("not applicable" in line for line in body)
+
+
+def stranded_problems(
+    listing: dict[str, Any], cell: dict[str, Any], root: Path
+) -> list[str]:
+    """Every test this L1 listing excluded by a tier marker whose recipe is a stub.
+
+    A marker takes a test out of L1 unconditionally, and only the area's
+    `test-<tier>` recipe runs it anywhere else. When that recipe is a stub the
+    test runs in no tier, and nothing else reports it: L1 never saw it and the
+    stub exits 0. The listing already holds every excluded identity, so this
+    costs no build. An area without its own justfile is not judged, as in
+    `just check-tier-coverage`.
+    """
+    if cell["gate"] != "L1":
+        return []
+    justfile = root / cell["area"] / "justfile"
+    if not justfile.is_file():
+        return []
+    text = justfile.read_text(encoding="utf-8")
+    stubbed = {tier for tier in TIER_MARKERS.values() if stub_recipe(text, f"test-{tier}")}
+    if not stubbed:
+        return []
+    problems = []
+    for identity in listing.get("excluded", []):
+        segments = str(identity).split("::")
+        for marker, tier in TIER_MARKERS.items():
+            if tier in stubbed and any(segment.startswith(marker) for segment in segments):
+                problems.append(
+                    f"completion-test-stranded: {identity} carries the `{marker}` marker, "
+                    f"so L1 excludes it, and {cell['area']}'s `test-{tier}` is a stub, so "
+                    "it runs in no tier; rename it (or the module) so it carries no "
+                    "marker, or give the area a real recipe"
+                )
+                break
+    return problems
+
+
 def declared_problems(manifest: dict[str, Any], cell: dict[str, Any]) -> list[str]:
     """Every reason the producer's declared work differs from the plan's.
 
@@ -945,6 +1013,9 @@ def validate(args: argparse.Namespace, today: date | None = None) -> dict[str, A
         problems += manifest_problems(manifest, cell, package, args.target)
         if problems:
             raise Refused(problems)
+        problems += stranded_problems(
+            manifest["packages"][package_name], cell, args.root
+        )
 
         stage = staging_root(args.artifacts, cell)
         observed, reports = observed_outcomes(stage, staged_entries(stage, cell))
@@ -991,6 +1062,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--run", default="")
     parser.add_argument("--attempt", type=int, default=1)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path("."),
+        help="the checkout whose area justfiles decide which tier recipes are stubs",
+    )
     return parser.parse_args(argv)
 
 

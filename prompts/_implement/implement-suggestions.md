@@ -177,3 +177,5 @@ Now your task is to:
 ::end-block
 
 ::file "../_os.md"
+
+::file "../_test-tiers.md"

@@ -225,3 +225,10 @@ with these changes:
 5. **New:** after the last package, `cargo metadata` shows no workspace package
    with ten or more integration-test targets, and the acceptance record gives
    the new workspace total.
+6. **New:** no package ends with a stranded test. A module alias or a former
+   target name that starts with a tier marker can move tests out of L1 into a
+   tier whose recipe is a stub, where they run nowhere. `just
+   check-tier-coverage <area>` is clean for every area touched, and CI's L1
+   producers refuse any that remain (`completion-test-stranded`, added
+   2026-09-23). The expectations implementers follow are in
+   `prompts/_test-tiers.md`.

@@ -35,6 +35,8 @@ initialize:
 
 ::file "../_os.md"
 
+::file "../_test-tiers.md"
+
 ## Task
 
 > **Review:** {{target}}

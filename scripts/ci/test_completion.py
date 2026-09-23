@@ -2281,5 +2281,69 @@ class FixtureSelfCheckTests(unittest.TestCase):
             self.assertIn("skip_policy", document)
 
 
+
+class StrandedTierTests(unittest.TestCase):
+    """A tier-marked test excluded from L1 while its area's tier recipe is a stub.
+
+    Such a test runs in no tier: L1 never sees it and the stub exits 0. Eight
+    darkmatter tests sat there (a `real_shells` module, and a PR 92 test named
+    `real_shipped_…`), found only by the unwired `just check-tier-coverage`.
+    """
+
+    JUSTFILE = (
+        "test:\n    @just _test pkg\n\n"
+        "test-l2:\n    @just _test_l2 pkg\n\n"
+        "test-real:\n    @echo \"test-real: not applicable for pkg\"\n\n"
+        "lint:\n    @just _lint pkg\n"
+    )
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        (self.root / "pkg").mkdir()
+        (self.root / "pkg" / "justfile").write_text(self.JUSTFILE, encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def cell(self, gate: str = "L1") -> dict:
+        return {"package": "pkg", "area": "pkg", "environment": "ubuntu-latest", "gate": gate}
+
+    def test_the_stub_rule_matches_the_recipe_body_only(self) -> None:
+        self.assertTrue(completion.stub_recipe(self.JUSTFILE, "test-real"))
+        self.assertFalse(completion.stub_recipe(self.JUSTFILE, "test-l2"))
+        self.assertFalse(completion.stub_recipe(self.JUSTFILE, "test-browser"))
+
+    def test_a_marked_test_behind_a_stub_is_refused(self) -> None:
+        listing = {"excluded": ["pkg::l1::schema::real_shipped_schema_parses"]}
+        problems = completion.stranded_problems(listing, self.cell(), self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertTrue(problems[0].startswith("completion-test-stranded:"))
+        self.assertIn("rename", problems[0])
+
+    def test_a_marker_on_a_module_segment_counts(self) -> None:
+        listing = {"excluded": ["pkg::probe::tests::real_shells::fish_classifies"]}
+        self.assertEqual(1, len(completion.stranded_problems(listing, self.cell(), self.root)))
+
+    def test_a_marked_test_with_a_real_recipe_is_not_stranded(self) -> None:
+        listing = {"excluded": ["pkg::level2::level2_renders"]}
+        self.assertEqual([], completion.stranded_problems(listing, self.cell(), self.root))
+
+    def test_only_l1_excludes_by_marker(self) -> None:
+        listing = {"excluded": ["pkg::l1::real_shipped_schema_parses"]}
+        self.assertEqual([], completion.stranded_problems(listing, self.cell("L2"), self.root))
+
+    def test_an_area_without_a_justfile_is_not_judged(self) -> None:
+        cell = {**self.cell(), "area": "elsewhere"}
+        listing = {"excluded": ["pkg::real_x"]}
+        self.assertEqual([], completion.stranded_problems(listing, cell, self.root))
+
+    def test_the_shipped_darkmatter_justfile_still_stubs_test_real(self) -> None:
+        # The configuration that stranded the eight; if darkmatter gains a real
+        # `test-real`, this fixture should move to an area that still stubs.
+        text = (ROOT / "darkmatter" / "justfile").read_text(encoding="utf-8")
+        self.assertTrue(completion.stub_recipe(text, "test-real"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
