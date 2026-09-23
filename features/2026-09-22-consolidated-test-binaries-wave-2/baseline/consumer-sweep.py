@@ -8,6 +8,11 @@ That sweep matched `--test <name>` only; this one also matches nextest
 backticked name a test binary or target.
 
 Run from the repository root. Writes Markdown to stdout.
+
+`--after` (Phase 6) re-runs the sweep once the packages are migrated. The old
+per-file target names are no longer Cargo targets, so they are read from the
+ten committed migration manifests instead, and each historical hit is listed
+with its record date.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 FEATURE = "2026-09-22-consolidated-test-binaries-wave-2"
 PACKAGES = {
@@ -58,6 +64,55 @@ HISTORICAL = [
     (re.compile(r"^tools/test-audit/fixtures/claudine-compat/"), "frozen replay fixture (its README forbids live edits)"),
 ]
 IN_FLIGHT = re.compile(r"(^|/)(features|fixes)/\d{4}-\d{2}-\d{2}-[^/]+/")
+FEATURE_DIR = Path(__file__).resolve().parent.parent
+# `--after` only: why each remaining non-historical hit stays, keyed by
+# (file, old target). A hit with no entry is printed as "undispositioned".
+AFTER_DISPOSITIONS = {
+    (".claude/skills/os/wsl.md", "steering_check"):
+        "historical: a dated account (\"Proven non-vacuous on 2026-09-09\") of the binary as it was then",
+    (".github/workflows/sniff-performance.yml", "bench_ids_sync"):
+        "accurate: names the test module (`l1::bench_ids_sync`), not a selector",
+    ("claudine/docs/topics/performance-testing.md", "bench_ids_sync"):
+        "accurate: names the test module (`sniff`'s `l1::bench_ids_sync`), not a selector; the step's "
+        "claim that it covers claudine's benches is pre-existing drift, out of scope",
+    ("claudine/lib/src/stream/protocol/kimi/tests.rs", "protocol_fixture_replay"):
+        "accurate: rewritten in Phase 6 to name the `l1` binary's module",
+    (".claude/skills/rust-testing/SKILL.md", "windows_captured_stdout"):
+        "historical: a past-tense account of the file's old `#[ignore]` era (Phase 5)",
+    ("sniff/docs/cli/repo_recent-commits.md", "bench_ids_sync"):
+        "historical: sample command output quoting an old commit's file list",
+    ("sniff/docs/cli/repo_recent-commits.md", "uv_with_install_plan"):
+        "historical: sample command output quoting an old commit's file list",
+    ("sniff/docs/cli/repo_source-code-changes.md", "bench_ids_sync"):
+        "historical: sample command output quoting an old commit's file list",
+    ("sniff/docs/cli/repo_source-code-changes.md", "uv_with_install_plan"):
+        "historical: sample command output quoting an old commit's file list",
+    ("claudine/fixes/2026-07-13-rendezvous-local-ipc/plan.md", "drift"):
+        "in-flight spec record (2026-07-13); its author owns the command at landing time",
+    ("fixes/2026-09-22-test-input-blind-spot/spec.md", "boundary_lint"):
+        "in-flight spec record (2026-09-22): a measurement taken against the old binary",
+}
+DATED = re.compile(r"(\d{4}-\d{2}-\d{2})-[^/]+/")
+
+
+def old_targets() -> dict[str, list[str]]:
+    """Package -> its old per-file target names, from the migration manifests."""
+    targets: dict[str, list[str]] = {}
+    for package in PACKAGES:
+        manifest = json.loads((FEATURE_DIR / f"{package}-migration.json").read_text())
+        targets[package] = sorted({module["old_target"] for module in manifest["modules"]})
+    return targets
+
+
+def record_date(path: str) -> str:
+    """The date a historical record carries: its dated directory, else its last commit."""
+    dated = DATED.findall(path)
+    if dated:
+        return dated[-1]
+    out = subprocess.run(
+        ["git", "log", "-1", "--format=%cs", "--", path], check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    return out or "untracked"
 
 
 def classify(path: str, line: str) -> tuple[str, str]:
@@ -88,6 +143,7 @@ def classify(path: str, line: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    after = "--after" in sys.argv[1:]
     meta = json.loads(subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1", "--color=never"],
         check=True, capture_output=True, text=True,
@@ -106,6 +162,16 @@ def main() -> int:
         pkg_area[package["name"]] = package["manifest_path"].split(root, 1)[1].split("/", 1)[0] + "/"
         if package["name"] in PACKAGES:
             targets[package["name"]] = names
+    if after:
+        # Migrated packages now expose only consolidated targets; their old
+        # names come from the manifests, while other packages keep theirs so
+        # same-named targets elsewhere still mark a hit ambiguous.
+        for packages in owners.values():
+            packages.difference_update(PACKAGES)
+        targets = old_targets()
+        for package, names in targets.items():
+            for name in names:
+                owners[name].add(package)
 
     files = subprocess.run(["git", "ls-files"], check=True, capture_output=True, text=True).stdout.split("\n")
     rows = []
@@ -192,17 +258,26 @@ def main() -> int:
     rev = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
     print("---")
-    print("kind: baseline")
+    print("kind: evidence" if after else "kind: baseline")
     print(f"feature: {FEATURE}")
     print("created: 2026-09-23")
     print(f"rev: {rev}")
-    print("generator: baseline/consumer-sweep.py")
+    if after:
+        print("plan_phase: 6")
+    print("generator: baseline/consumer-sweep.py" + (" --after" if after else ""))
     print("---")
     print()
-    print("# Test-selector consumer sweep (before any wave-2 migration)")
-    print()
-    print("Every reference, in git-tracked text files, to a current integration-test")
-    print("target of the ten wave-2 packages, in one of these forms:")
+    if after:
+        print("# Test-selector consumer re-sweep (after all ten migrations)")
+        print()
+        print("Every reference, in git-tracked text files, to an old per-file")
+        print("integration-test target of the ten wave-2 packages, as recorded in the ten")
+        print("`*-migration.json` manifests, in one of these forms:")
+    else:
+        print("# Test-selector consumer sweep (before any wave-2 migration)")
+        print()
+        print("Every reference, in git-tracked text files, to a current integration-test")
+        print("target of the ten wave-2 packages, in one of these forms:")
     print()
     print("- `--test <name>` (cargo test, cargo nextest, cargo check, just pass-through)")
     print("- nextest `binary(<name>)` (also `=`/`~` matchers)")
@@ -227,7 +302,7 @@ def main() -> int:
     print("- other dated `features/`/`fixes/` directories → **in-flight-spec**; reviewed at landing")
     print("- everything else (recipes, skills, docs, prompts, config, scripts, source comments) → **active**; the migration worklist")
     print()
-    print("## Targets in scope")
+    print("## Old targets in scope (from the migration manifests)" if after else "## Targets in scope")
     print()
     print("| Package | Manifest | Targets | Names |")
     print("|---|---|---:|---|")
@@ -260,6 +335,9 @@ def main() -> int:
         print(f"| `{pkg}` | {per_pkg.get(pkg, 0)} |")
     print()
 
+    def disposition(path: str, name: str) -> str:
+        return AFTER_DISPOSITIONS.get((path, name), "**undispositioned**")
+
     def table(title: str, items: list, with_note: bool) -> None:
         print(f"## {title} ({len(items)})")
         print()
@@ -267,21 +345,34 @@ def main() -> int:
             print("None.")
             print()
             return
-        head = "| File:line | Target | Package | Form | Why |" + (" Note |" if with_note else "") + " Line |"
+        head = "| File:line | Target | Package | Form | Why |" + (" Note |" if with_note else "") + (" Disposition |" if after else "") + " Line |"
         print(head)
         print("|" + "---|" * (head.count("|") - 1))
         for _, path, number, name, pkg, form, why, note, text in sorted(items, key=lambda r: (r[1], r[2])):
             text = text.replace("|", "\\|")
             if len(text) > 140:
                 text = text[:137] + "…"
-            cells = [f"`{path}:{number}`", f"`{name}`", pkg, form, why] + ([note] if with_note else []) + [f"`{text}`"]
+            cells = [f"`{path}:{number}`", f"`{name}`", pkg, form, why] + ([note] if with_note else []) + ([disposition(path, name)] if after else []) + [f"`{text}`"]
             print("| " + " | ".join(cells) + " |")
         print()
 
     table("active — confirmed", active, False)
     table("active — ambiguous (confirm before rewriting)", [r for r in by_kind.get("active", []) if is_ambiguous(r)], True)
     table("in-flight-spec", by_kind.get("in-flight-spec", []), True)
-    table("self", by_kind.get("self", []), True)
+    if after:
+        # Old names in this feature's own evidence are the before-side record.
+        print(f"## self ({len(by_kind.get('self', []))}, by file)")
+        print()
+        self_counts: dict[str, int] = defaultdict(int)
+        for row in by_kind.get("self", []):
+            self_counts[row[1]] += 1
+        print("| File | Hits |")
+        print("|---|---:|")
+        for path in sorted(self_counts):
+            print(f"| `{path}` | {self_counts[path]} |")
+        print()
+    else:
+        table("self", by_kind.get("self", []), True)
 
     print(f"## active — file-path references (informational, {len(path_rows)})")
     print()
@@ -290,16 +381,31 @@ def main() -> int:
     print("same worklist, but they are not counted in the selector totals above.")
     print()
     if path_rows:
-        print("| File:line | Target | Package | Why | Line |")
-        print("|---|---|---|---|---|")
+        print("| File:line | Target | Package | Why |" + (" Disposition |" if after else "") + " Line |")
+        print("|---|---|---|---|" + ("---|" if after else "") + "---|")
         for path, number, name, pkg, why, text in sorted(path_rows):
             text = text.replace("|", "\\|")
             if len(text) > 140:
                 text = text[:137] + "…"
-            print(f"| `{path}:{number}` | `{name}` | {pkg} | {why} | `{text}` |")
+            extra = f" {disposition(path, name)} |" if after else ""
+            print(f"| `{path}:{number}` | `{name}` | {pkg} | {why} |{extra} `{text}` |")
     else:
         print("None.")
     print()
+    if after:
+        print("## historical (by file; never rewritten)")
+        print()
+        counts_after: dict[str, int] = defaultdict(int)
+        for row in by_kind.get("historical", []):
+            counts_after[row[1]] += 1
+        if not counts_after:
+            print("None.")
+        else:
+            print("| File | Hits | Record date |")
+            print("|---|---:|---|")
+            for path in sorted(counts_after):
+                print(f"| `{path}` | {counts_after[path]} | {record_date(path)} |")
+        return 0
     print("## Reviewer notes")
     print()
     print("- `tools/test-toolkit/tests/ci_workflow_contracts.rs` reads")
