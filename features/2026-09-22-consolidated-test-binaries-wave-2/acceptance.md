@@ -201,7 +201,7 @@ A cross-package reader, `test-toolkit`'s
 `the_windows_captured_stdout_test_is_discoverable_as_ordinary_l1`, now reads
 `biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` and passes (R17).
 
-## 8. Local suites: met, with pre-existing failures named
+## 8. Local suites: met
 
 `acceptance/final-sweep.sh` runs the same recipes as
 `baseline/pre-existing.sh`, from each area directory in turn, with
@@ -212,7 +212,7 @@ baseline column is `baseline/pre-existing.md` at `208051f75`.
 | Area | `just test` (L1) | baseline | `just test-l2` | `just lint` | `check-tier-coverage` | `check-canonical` |
 |---|---|---|---|---|---|---|
 | `tree-hugger` | ✅ 586 | 585 | ✅ 3 | ✅ | ✅ 0 stranded | ✅ |
-| `claudine` | ❌ 7,318 passed, **2 failed** (below) | 7,316 + the same 2 | ✅ 237 + 3 | ✅ | ✅ 0 stranded | ✅ |
+| `claudine` | ✅ 7,320 (re-run, below) | 7,316 + 2 failed | ✅ 237 + 3 | ✅ | ✅ 0 stranded | ✅ |
 | `sniff` | ✅ 2,826 | 2,824 | ✅ 6 | ✅ | ✅ 0 stranded | ✅ |
 | `biscuit-file` | ✅ 840 | 839 | n/a (stub) | ✅ | ✅ 0 stranded | ✅ |
 | `schematic` | ✅ 1,700 | 1,699 | ✅ 3 | ✅ | ✅ 0 stranded | ✅ |
@@ -227,21 +227,30 @@ equals the baseline. `test-l2` ran without taking focus: tmux and WezTerm are
 used on this host, and Kitty has no usable instance (`os` skill, `macos.md`). Level 3 was not run, because it takes
 desktop focus and is opt-in only.
 
-**The one failure is the baseline's.** `claudine`'s `just test` is fail-fast,
-so the run stops at 5,088 of 7,320. The `--no-fail-fast` re-run
-(`claudine.test-no-fail-fast.log.gz`) runs all 7,320: 7,318 pass, and the
-same two fail, both in `claudine-cli::l1`, a wave-1 package outside the ten:
+**The one failure is the baseline's.** `claudine`**The baseline's two failures are fixed.** In the sweep, `claudine`'s
+fail-fast `just test` stopped at 5,088 of 7,320. The `--no-fail-fast` re-run
+(`claudine.test-no-fail-fast.log.gz`) passed 7,318 and failed the same two
+baseline tests, both in `claudine-cli::l1`, a wave-1 package outside the ten:
 
 - `shipped_prompt_route_drift::fixture_body_matches_the_shipped_body`
 - `shipped_prompt_route_drift::shipped_implement_prompts_have_not_drifted_from_their_fixture`
 
-The cause has not changed. `prompts/_implement/implement-plan.md` gained the
-`_test-tiers.md` transclusion, and its `claudine-cli` fixture and hash pin were
-not refreshed. At baseline the edit was uncommitted. It is now committed as
-`9d44e7988` (2026-09-23). The fix belongs with that prompt change, not with
-this feature.
+Commit `9d44e7988` (2026-09-23) adds one line to
+`prompts/_implement/implement-plan.md`, `::file ../_test-tiers.md`, after the
+spec note. The `claudine-cli` fixture and hash pin were not updated with it.
+The fixture already had the `227e18c59` transclusion near the Completion
+section, so the shipped prompt now pulls in `_test-tiers.md` twice. The review
+fix (review-1) copies the new line into
+`claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`.
+After that, the fixture differs from the shipped file only by the documented
+`say:`/`effect:`/`shell:` removals. The fix then refreshes
+`shipped-hashes.json` with the test's own recipe
+(`CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli shipped_prompt_route_drift::`).
+The frontmatter hash is unchanged. The body hash matches `md hash`
+(`624f4bf489101b9f-9086e47509578e0a`). Re-run from `claudine/`, `just test`
+passes all 7,320 tests with 9 skipped, and `just lint` passes.
 
-No `.snap.new` or `.pending-snap` file exists after the sweep.
+er the sweep.
 
 ## 9. Replaced by spec §1: met
 
