@@ -138,11 +138,11 @@ local-only; a remote URL there fails loudly.
   the one class `--cache-root` / `ComposeOptions::with_cache_root(...)` may
   persist (R36, the fix's Q1). Local transclusion stays run-local even after
   `ContentPolicy`. `docs/topics/caching.md` is the user-facing contract, and
-  `cli/tests/help.rs::test_compose_help_states_the_transport_cache_boundary`
+  `cli/tests/l1/help.rs::test_compose_help_states_the_transport_cache_boundary`
   pins the `md compose --help` wording. The semantic-result persistence path was deleted, not kept
   dormant: `RunLocalCache` is memory-only, `CacheAccessMode` governs run-local
   reuse only, and `CacheStats` has no persistent counters (transport activity
-  is `RemoteFetchStats`). `lib/tests/semantic_results_never_persist.rs` pins
+  is `RemoteFetchStats`). `lib/tests/l1/semantic_results_never_persist.rs` pins
   this: `RunLocalCache` may not name `FileStore`/`RemoteFetchRuntime`,
   `FileStore` is allowlisted (exact counts) to the remote transport cache, and
   the deleted symbols may not reappear. Update its allowlist deliberately when
@@ -237,7 +237,7 @@ test through the normal invocation path. Persisted values require a repeated
 read/write/read round trip.
 
 The expression-grammar corpus gate is
-`lib/tests/dasherized_identifier_corpus.rs`. It walks root `prompts/`,
+`lib/tests/l1/dasherized_identifier_corpus.rs`. It walks root `prompts/`,
 `.claude/commands/`, `darkmatter/prompts/`, and `claudine/prompts/` through
 the library's own extractors: `ExpressionFinder`,
 `scan_darkmatter_directives`, `parse_frontmatter_shell_value_spanned`, and
