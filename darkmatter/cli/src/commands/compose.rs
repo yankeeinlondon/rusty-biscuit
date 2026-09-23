@@ -200,7 +200,7 @@ pub fn run_compose(
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
     let launch_package_area = launch_repo_structure.as_ref().and_then(|repo| {
         repo.package_area_label_for_dir(&launch_dir).map(|area| {
-            if area.as_ref() == "root" {
+            if area.is_empty() {
                 repo.root.clone()
             } else {
                 repo.root.join(area.as_ref())
@@ -262,7 +262,7 @@ pub fn run_compose(
                 let source_package_area = source_repo_structure.as_ref().and_then(|repo| {
                     resolved.parent().and_then(|source_dir| {
                         repo.package_area_label_for_dir(source_dir).map(|area| {
-                            if area.as_ref() == "root" {
+                            if area.is_empty() {
                                 repo.root.clone()
                             } else {
                                 repo.root.join(area.as_ref())
@@ -291,23 +291,21 @@ pub fn run_compose(
         },
     );
 
-    // Demand-driven context capture: scan document (body + frontmatter values)
-    // for ctx.* references and only capture the groups actually needed.
-    // Shared between validation and compose.
+    // The request boundary (D3): one demand-driven context capture for the
+    // document plus the request's repository observation, both anchored on the
+    // launch directory and fixed before validation, pre-flight, and compose
+    // run against the same options.
     let ctx_start = perf.then(Instant::now);
-    let shared_context = {
-        darkmatter::markdown::compose::ComposeContext::capture_for_document(&launch_dir, &md)
-    };
+    let mut options = ComposeOptions::for_document(&launch_dir, &md);
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
     // Keep a cheap Arc clone for perf report context timings
-    let options_ctx_ref = shared_context.clone();
+    let options_ctx_ref = options.context().clone();
 
     // ── Parse --state and --set early ────────────────────────────────────
     // These must be available before reference validation so that
     // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
-    let mut options = ComposeOptions::new_with_context(shared_context);
     options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
     options = options.with_trigger_schemas(!no_trigger_schemas);
 
@@ -473,6 +471,7 @@ pub fn run_compose(
         // pre-flight collector that authorization uses.
         let preflight = md.compose_preflight(&options)?;
         print_shell_command_report(&preflight.entries);
+        print_icmp_effect_report(&preflight.icmp_probes);
         drop(options_ctx_ref);
         return Ok(());
     }
@@ -767,6 +766,36 @@ fn print_shell_command_report(
             escape_table_cell(&command.normalized),
             escape_table_cell(&command.source_file.display().to_string()),
             escape_table_cell(&command.origin.to_string()),
+        );
+    }
+}
+
+/// Reports the ICMP probes the document graph could send.
+///
+/// Printed alongside the shell approval candidates because both answer the
+/// same question: which effects would a compose run perform. `Granted` is
+/// whether an existing `--allow-host` entry already permits the target; an
+/// ungranted probe is the one that needs a new grant.
+fn print_icmp_effect_report(probes: &[darkmatter::markdown::compose::PlannedIcmpProbe]) {
+    println!();
+    if probes.is_empty() {
+        println!("No ICMP probes discovered.");
+        return;
+    }
+
+    println!("ICMP probes discovered: {}", probes.len());
+    println!();
+    println!("| Function | Target | Timeout (ms) | Attempts | Granted |");
+    println!("| --- | --- | --- | --- | --- |");
+
+    for probe in probes {
+        println!(
+            "| {} | {} | {} | {} | {} |",
+            escape_table_cell(&probe.function),
+            escape_table_cell(&probe.target.to_string()),
+            probe.timeout.as_millis(),
+            probe.attempts,
+            probe.granted,
         );
     }
 }

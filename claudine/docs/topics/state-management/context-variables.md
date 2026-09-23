@@ -86,6 +86,52 @@ Arrays remain arrays inside expressions, even though the values report displays
 their elements separated by commas. You can use indexing and collection
 functions on them.
 
+## Binding time: eager `ctx`, lazy `current`
+
+`ctx` and `current` are the same data structure, and so are `env` and
+`current_env`; they differ only in *when* each key is evaluated.
+
+| Surface | Binding |
+|---------|---------|
+| `ctx.<key>` | Eager — captured once at the start of the run and shared by the whole run |
+| `current.<key>` | Lazy — the same key as `ctx.<key>`, observed when the reference is reached |
+| `env.<key>` | Eager — the frozen invocation snapshot |
+| `current_env.<key>` | Lazy — the same key as `env.<key>`, reread from the live process environment when the reference is reached |
+
+The spelling is a direct mirror: write `current.branch` for the live value of
+`ctx.branch` and `current_env.HOME` for the live value of `env.HOME`. `current`
+does not contain a `ctx` member and `current_env` does not contain an `env`
+member; a nested path under either root names no member and fails as an
+unknown path.
+
+**Fixed versus refreshable.** Lazy does not mean everything can change.
+Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and
+the rest of the repository keys) are fixed by the request's repository
+observation, captured once when the request is created, so `current.repo`
+always reads what `ctx.repo` does. Only mutable Git and filesystem facts
+refresh at reference time: `branch`, recent history (`recent_commits`),
+`dirty_files` and the other working-tree keys, and every `current_env.<key>`.
+The invocation directory and the root document's identity (`cwd`, `self`,
+`hash`, `id`, `sid`) are request-owned and never refresh either.
+
+**Variable and function pairs.** Expression functions are evaluated lazily, at
+call time. When a context variable and a function share a name they share one
+definition and one output format: the variable is the eager snapshot and the
+function is the lazy, parameterized form. `ctx.recent_commits` holds the last
+10 commits captured at the start of the run; `recent_commits(count)` walks the
+newest `count` commits when the call is reached. Both are projected from one
+descriptor entry, so `claudine context` and `claudine context --expressions`
+cannot drift.
+
+Under Claudine, `current` and `current_env` are Darkmatter reserved roots
+served by the invocation's refresh capability: a key that capability does not
+hold renders `null` with a `PartialRuntimeCapture` diagnostic rather than
+probing the host. Their primary use is inside lifecycle events, where state may
+have changed since launch — see
+[Lifecycle — Binding Time: Early vs Late](../lifecycle.md#binding-time-early-vs-late)
+and
+[Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context).
+
 ## Use project information in a prompt
 
 The repository context comes from where the workflow was launched. A prompt

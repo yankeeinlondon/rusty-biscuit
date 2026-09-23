@@ -63,7 +63,7 @@ sanity:
 
 # run tests for biscuit-file packages
 test *args="":
-    @just _test_all "biscuit-file biscuit-file-cli" {{args}}
+    @just _test_all "biscuit-file --features fetch; biscuit-file-cli" {{args}}
     @just test-minimal {{args}}
 
 # Proves the path→text boundary is genuinely unfeatured.

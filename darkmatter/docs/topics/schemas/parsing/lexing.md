@@ -27,22 +27,52 @@ token stream.
 ## Identifiers
 
 An identifier starts with a character where `char::is_alphabetic()` is true, or
-`_`. It continues with `char::is_alphanumeric()` or `_`.
+`_`. It continues with `char::is_alphanumeric()` or `_`, or with a `-` under the
+rule below.
 
 These are the **Unicode** predicates, not the ASCII ones, so `café` and `größe`
 are valid identifiers. Digits may appear after the first character (`foo4`) but
 never at the start — which is why a bare `4` is unambiguously a number and never
 a property reference.
 
-Characters that are **not** identifier characters therefore end an identifier,
-`-` among them. `spec-name` is not one token; it lexes as `spec`, `Minus`,
-`name`, and the parser builds a subtraction. This is the single most common
-authoring surprise in the language, because kebab-case keys are ordinary in
-YAML. Reach such a key with bracket access instead:
+### `-` inside an identifier
+
+A `-` continues an identifier if and only if the lexer is already
+**mid-identifier** and the character after the `-` continues an identifier.
+Otherwise `-` is the `Minus` operator. What follows the dash decides, not what
+precedes it, so kebab-case frontmatter keys are ordinary identifiers:
+
+| Expression | Lexes as |
+| --- | --- |
+| `spec-name`, `depends-on`, `phase-2`, `iteration-1` | one `Variable` |
+| `doc.spec-name` | one `Variable("doc.spec-name")` — every dotted segment follows the rule |
+| `false-1`, `true-value` | one `Variable` — only the exact words `true` and `false` are booleans |
+| `a - b`, `a -b`, `a- b` | subtraction |
+| `4-2`, `f(x)-1`, `arr[0]-1`, `"x"-1` | subtraction — the left operand is not an identifier |
+| `foo--bar` | `foo - (-bar)` — the second `-` cannot continue an identifier |
+| `spec-` | `spec` then a dangling `Minus`, a parse error |
+
+The rule lives in `read_variable`, not in the identifier character class. A
+number is read by `read_number`, which never joins a `-`; that is what keeps
+`4-2` a subtraction without any lookbehind.
+
+Arithmetic whose left operand is an identifier or boolean therefore needs
+whitespace before the minus: write `{{ iteration - 1 }}`, not
+`{{ iteration-1 }}`. The unspaced form is a reference to a key named
+`iteration-1`; when no such key exists, composition warns with
+`dm.expression.unknown_identifier` (see
+[Interpolation § Missing Variables](../../inline/interpolation.md#missing-variables)).
+
+Bracket access still reaches any key the identifier grammar cannot spell — one
+containing `.` or `--`, or starting with a digit, or ending in `-`:
 
 ```md
-{{ doc['spec-name'] }}
+{{ doc['release.channel'] }}  {{ doc['2fa-enabled'] }}
 ```
+
+Editor-side code that finds the identifier partial before a cursor must use
+`expression::identifier_prefix_start`, which applies the same rule to text that
+is still being typed. Adding `-` to a character class would merge `foo--bar`.
 
 ### Dotted paths fold into one token
 

@@ -555,7 +555,7 @@ mod tests {
             packages: Some(vec![Package {
                 path: PathBuf::from("/repo/lib"),
                 relative: "lib".to_string(),
-                package_area: "root".to_string(),
+                package_area: String::new(),
                 name: "lib".to_string(),
                 ..Package::default()
             }]),

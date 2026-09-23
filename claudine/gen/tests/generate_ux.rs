@@ -80,6 +80,16 @@ fn full_fixture() -> Fixture {
     for slug in claudine_gen::provider_slugs() {
         copy_file(&format!("lib/src/provider/{slug}/data.rs"));
     }
+    let agentic_rel = "darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli_generated.rs";
+    let agentic_to = dir.path().join(agentic_rel);
+    fs::create_dir_all(agentic_to.parent().unwrap()).unwrap();
+    fs::copy(
+        real.parent()
+            .expect("area lives under the workspace root")
+            .join(agentic_rel),
+        agentic_to,
+    )
+    .unwrap();
     let artifact_rel = "unchained-ai/artifacts/models-catalog.json";
     let artifact_to = dir.path().join(artifact_rel);
     fs::create_dir_all(artifact_to.parent().unwrap()).unwrap();
@@ -164,9 +174,33 @@ antigravity: clean (inputs match the committed data.rs)\n\
 catalog.json: clean (inputs match the committed catalog)\n\
 signals generated.rs: clean (inputs match the committed tables)\n\
 stream vocabulary.rs: clean (inputs match the committed tables)\n\
+darkmatter agentic_cli_generated.rs: clean (roster matches the committed has_agentic_cli names)\n\
 families generated.rs: clean (26 family keys compiled)\n\
 roster: every active entry has a wired Provider variant"
     );
+}
+
+/// AC19 through the normal invocation path: renaming a roster alias drifts
+/// the Darkmatter `has_agentic_cli` table, `check` exits non-zero and names
+/// it, and `generate --yes` writes it back to convergence.
+#[test]
+fn roster_alias_rename_drifts_the_darkmatter_name_table_until_regenerated() {
+    let fixture = full_fixture();
+    let roster = fixture.path().join("docs/providers.yaml");
+    let text = fs::read_to_string(&roster).unwrap();
+    assert!(text.contains("\"kimi_code\""), "fixture expectation drifted");
+    fs::write(&roster, text.replace("\"kimi_code\"", "\"kimi_cli\"")).unwrap();
+
+    let output = run_gen(fixture.path(), &["check"]);
+    assert!(!output.status.success(), "a stale name table must fail check");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("darkmatter agentic_cli_generated.rs: DRIFT"), "{stdout}");
+
+    let output = run_gen(fixture.path(), &["generate", "--yes"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let table = fs::read_to_string(claudine_gen::agentic_clis_path(fixture.path())).unwrap();
+    assert!(table.contains("(\"kimi_cli\", \"KimiCli\")") && !table.contains("\"kimi_code\""));
+    assert!(run_gen(fixture.path(), &["check"]).status.success());
 }
 
 /// The `mapping` mode is machine-facing: pure JSON on stdout, never routed

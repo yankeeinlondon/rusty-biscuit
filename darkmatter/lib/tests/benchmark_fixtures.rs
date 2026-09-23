@@ -1,7 +1,7 @@
 //! Guards the performance follow-up's benchmark fixture manifest.
 //!
 //! The immutable fixture manifest at
-//! `darkmatter/features/2026-07-15-performance-followup/benchmarks/manifest.yaml`
+//! `darkmatter/benchmarks/manifest.yaml`
 //! is the single authority for fixture identity (Architecture Decision A). This
 //! test recomputes every recorded identity from the committed fixture bytes and
 //! asserts they still match — so a fixture edit that would silently invalidate a
@@ -25,10 +25,10 @@ use darkmatter::markdown::compose::remote::discover_remote_urls_from_expressions
 use darkmatter::markdown::{Markdown, extract_headings};
 use serde::{Deserialize, Serialize};
 
-/// Absolute path to the feature-local `benchmarks/` directory.
+/// Absolute path to the area-owned `darkmatter/benchmarks/` directory.
 fn benchmarks_dir() -> PathBuf {
     manifest_dir!()
-        .join("../features/2026-07-15-performance-followup/benchmarks")
+        .join("../benchmarks")
 }
 
 fn manifest_path() -> PathBuf {

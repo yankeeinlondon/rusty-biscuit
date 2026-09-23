@@ -1,11 +1,11 @@
 //! End-to-end enforcement of `claudine sequence --budget-ledger`.
 //!
-//! Every test drives the real `claudine` binary against a fake `goose`
-//! provider compiled from Rust source, so the same fixtures run on macOS,
-//! Linux, native Windows, and WSL2 (a `.cmd` shim cannot carry Claudine's
-//! prompt argument on Windows). The fake records each launch in a directory
-//! and behaves according to a per-launch plan, so assertions count real
-//! provider processes rather than trusting the ledger's own arithmetic.
+//! Every test drives the real `claudine` binary against the package's
+//! `claudine-fake-goose` fixture binary (`tests/bin/fake_goose`), so the same
+//! fixtures run on macOS, Linux, native Windows, and WSL2. The fake records
+//! each launch in a directory and behaves according to a per-launch plan, so
+//! assertions count real provider processes rather than trusting the ledger's
+//! own arithmetic.
 //!
 //! No credentials, network, audio, or terminal windows are involved.
 
@@ -14,7 +14,6 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use common::{CliProcessFixture, strip_ansi};
@@ -22,78 +21,6 @@ use serde_json::Value;
 
 const EXHAUSTED: i32 = 76;
 const BLOCKED: i32 = 77;
-
-/// Behaviors, one per launch (1-based), separated by commas; launches past
-/// the end of the plan succeed:
-///
-/// - `ok` exits 0;
-/// - `fail` exits 7;
-/// - `sleep:<ms>` sleeps, then exits 0;
-/// - `hang` sleeps for ten minutes.
-///
-/// Each launch writes `launch-<n>.txt` (its prompt) and `pid-<n>.txt` into
-/// `FAKE_DIR`, and `done-<n>.txt` only when it exits on its own.
-const FAKE_GOOSE: &str = r#"
-use std::{env, fs, thread, time::Duration};
-
-fn main() {
-    let dir = std::path::PathBuf::from(env::var_os("FAKE_DIR").expect("FAKE_DIR"));
-    fs::create_dir_all(&dir).unwrap();
-    let mut n = 1;
-    while fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("pid-{n}.txt"))).is_err() {
-        n += 1;
-    }
-    fs::write(dir.join(format!("pid-{n}.txt")), std::process::id().to_string()).unwrap();
-    let mut prompt = String::new();
-    let mut previous = None;
-    for argument in env::args().skip(1) {
-        if previous.as_deref() == Some("-t") {
-            prompt = argument.clone();
-        }
-        previous = Some(argument);
-    }
-    fs::write(dir.join(format!("launch-{n}.txt")), &prompt).unwrap();
-    let plan = env::var("FAKE_PLAN").unwrap_or_default();
-    let step = plan.split(',').nth(n - 1).unwrap_or("ok").trim().to_string();
-    let code = if step == "fail" {
-        7
-    } else if step == "hang" {
-        thread::sleep(Duration::from_secs(600));
-        0
-    } else if let Some(ms) = step.strip_prefix("sleep:") {
-        thread::sleep(Duration::from_millis(ms.parse().unwrap()));
-        0
-    } else {
-        0
-    };
-    fs::write(dir.join(format!("done-{n}.txt")), code.to_string()).unwrap();
-    std::process::exit(code);
-}
-"#;
-
-fn fake_goose_binary() -> &'static Path {
-    static BINARY: OnceLock<PathBuf> = OnceLock::new();
-    BINARY.get_or_init(|| {
-        let dir = tempfile::Builder::new()
-            .prefix("claudine-budget-fake-")
-            .tempdir()
-            .unwrap()
-            .keep();
-        let source = dir.join("goose.rs");
-        fs::write(&source, FAKE_GOOSE).unwrap();
-        let output = dir.join(format!("goose{}", std::env::consts::EXE_SUFFIX));
-        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-        let status = std::process::Command::new(rustc)
-            .args(["--edition=2024", "-O"])
-            .arg(&source)
-            .arg("-o")
-            .arg(&output)
-            .status()
-            .expect("rustc must be available to build the fake provider");
-        assert!(status.success(), "failed to compile the fake goose provider");
-        output
-    })
-}
 
 struct Rig {
     fixture: CliProcessFixture,
@@ -106,7 +33,7 @@ impl Rig {
         let target = fixture
             .bin_dir()
             .join(format!("goose{}", std::env::consts::EXE_SUFFIX));
-        fs::copy(fake_goose_binary(), &target).unwrap();
+        fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-goose"), &target).unwrap();
         let fake_dir = fixture.cwd().join("fake");
         Self { fixture, fake_dir }
     }

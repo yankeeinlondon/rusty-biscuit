@@ -657,13 +657,9 @@ fn run_loop_lifecycle_emitting_terminal(
             *invocations.borrow_mut() += 1;
             // Emit the terminal `Success` signal so the loop gate's
             // `finalize` is enabled (it requires a recorded terminal
-            // emission). The owned `timing`/`current` outlive the borrowed
-            // context within this closure body.
-            let (timing, current) = capture_loop_lifecycle_globals(
-                prompt_path.parent(),
-                lifecycle_ctx.launch_area,
-                loop_start,
-            );
+            // emission). The owned `timing` outlives the borrowed context
+            // within this closure body.
+            let timing = capture_loop_lifecycle_timing(loop_start);
             let success_ctx = build_loop_stack_context(
                 LifecycleSignal::Success,
                 &ctx.frontmatter,
@@ -674,7 +670,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 prompt_path.parent(),
                 None,
                 Some(&timing),
-                Some(&current),
+                None,
             );
             guard.execute_event(LifecycleSignal::Success, &success_ctx);
             Ok(LoopIterationOutput::success("ran"))

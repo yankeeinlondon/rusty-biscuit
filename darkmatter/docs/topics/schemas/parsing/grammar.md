@@ -139,23 +139,31 @@ grammatical.
 ## What the language server sees
 
 DMLS parses with the same `parse_spanned` / `parse_condition_spanned` entry
-points, so the editor's AST is byte-for-byte the compose pipeline's AST. It adds
-two static checks the runtime does not perform, both over that AST:
+points, so the editor's AST is byte-for-byte the compose pipeline's AST. It
+reports two diagnostics over that AST:
 
-| Diagnostic code | Fires on |
-| --- | --- |
-| `dm.expression.malformed` | a `ParseError`, ranged from the error position to the end of the interpolation |
-| `dm.expression.unknown_identifier` | an identifier matching no frontmatter key, schema property, `ctx.*`, `env.*`, or function |
+| Diagnostic code | Severity | Fires on |
+| --- | --- | --- |
+| `dm.expression.malformed` | Warning | a `ParseError`, ranged from the error position to the end of the interpolation |
+| `dm.expression.unknown_identifier` | Warning | a variable whose root matches no frontmatter key, schema property, reserved namespace, or runtime context name |
 
-The unknown-identifier check currently inspects only the expression's **root**
-identifier — a bare variable, or the base of a member/index chain. An identifier
-in an operand position (inside a binary expression, a ternary branch, or a
-function argument) is not checked, so a typo there produces no editor
-diagnostic. The same limitation applies to the frontmatter-value variant of the
-check.
+The unknown-identifier check visits **every** variable in the expression, each
+at its own span: a bare variable, the root of a member or index chain, a binary
+operand, both ternary branches, a function argument, and a fallback's right-hand
+side. It runs over body interpolations and over Expression-typed frontmatter
+values alike. The walk is the library's `expression::static_variable_reads`,
+the static twin of the runtime classifier, so the editor suppresses exactly what
+compose suppresses — a fallback primary, a ternary condition and the branches it
+guards, and a direct absence-predicate argument. The one difference is
+reachability: compose warns only for the branch it evaluates, while the editor
+checks both. A document without frontmatter is exempt, because its names may
+come from `--set` values the editor cannot see.
+
+A subtraction chain that spells a known key — `foo--bar` when the frontmatter
+has `foo--bar` — is reported once as a dash-separated key, with a quick-fix that
+rewrites it to a reference the grammar can read, such as `doc['foo--bar']`.
 
 These editor diagnostics are the earliest place an authoring mistake surfaces.
-They are not the last: a malformed or unevaluatable expression must also fail
-composition on every surface — see
-[index.md § Failure handling](./index.md#failure-handling), including the
-known deviation in body interpolation.
+They are not the last: a malformed or unevaluatable expression also fails
+composition on every surface, and an unknown identifier also warns at compose
+time — see [index.md § Failure handling](./index.md#failure-handling).

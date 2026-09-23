@@ -68,6 +68,28 @@ pub struct ResolutionContext {
     /// functions. Populated by production surfaces; tests can inject values
     /// directly via [`Self::with_ctx_value`].
     pub(crate) ctx_values: Map<String, Value>,
+    /// Package topology and interface addresses retained by the request's
+    /// context capture, read by `package()`, `package_area()`, `ipv4()`, and
+    /// `ipv6()`.
+    pub(crate) observations: crate::markdown::compose::context::capture::CapturedObservations,
+    /// Login-shell authority for `has_alias`, `has_builtin_function`,
+    /// `has_user_function`, and `can_execute`, built from the request's
+    /// captured environment. The default authority never launches a shell.
+    pub(crate) shell_probe: crate::markdown::compose::shell_expansion::probe::ShellProbe,
+    /// The calling pipeline behind `as_markdown`. Only the compose request's
+    /// frontmatter and body builders carry one; every other surface leaves it
+    /// `Unavailable`.
+    pub(crate) nested_compose: crate::markdown::compose::nested::NestedComposeSlot,
+    /// ICMP effect authority for `ping` and `ping_under`, carrying the
+    /// request's grants, transport, and denial-warning sink. The default
+    /// authority grants nothing, so a surface that was not given one cannot
+    /// send a packet.
+    pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
+    /// Refresh authority for the lazy `current` root, carrying the invocation's
+    /// capability to observe one mutable fact now. The default holds no
+    /// provider, so a surface that was not given one fails closed instead of
+    /// probing the host.
+    pub(crate) current: crate::markdown::compose::context::CurrentAuthority,
     /// Injectable home directory for skill-root discovery. When `None`,
     /// skill lookups fall back to `dirs::home_dir()`.
     pub(crate) home_dir: Option<PathBuf>,
@@ -93,6 +115,11 @@ impl ResolutionContext {
             remote_fetch: None,
             provider_queries: Arc::new(Mutex::new(HashMap::new())),
             ctx_values: Map::new(),
+            observations: Default::default(),
+            shell_probe: Default::default(),
+            nested_compose: Default::default(),
+            icmp: Default::default(),
+            current: Default::default(),
             home_dir: None,
             file_resolution_context: None,
             caller_file_provenance: HashMap::new(),
@@ -136,6 +163,17 @@ impl ResolutionContext {
     #[must_use]
     pub fn with_ctx_value(mut self, key: &str, value: Value) -> Self {
         self.ctx_values.insert(key.to_string(), value);
+        self
+    }
+
+    /// Injects captured observations for hermetic function tests.
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) fn with_observations(
+        mut self,
+        observations: crate::markdown::compose::context::capture::CapturedObservations,
+    ) -> Self {
+        self.observations = observations;
         self
     }
 
@@ -559,6 +597,11 @@ mod tests {
             remote_fetch: Some(rt),
             provider_queries: Default::default(),
             ctx_values: Map::new(),
+            observations: Default::default(),
+            shell_probe: Default::default(),
+            nested_compose: Default::default(),
+            icmp: Default::default(),
+            current: Default::default(),
             home_dir: None,
             file_resolution_context: None,
             caller_file_provenance: HashMap::new(),
@@ -592,6 +635,11 @@ mod tests {
             remote_fetch: Some(rt),
             provider_queries: Default::default(),
             ctx_values: Map::new(),
+            observations: Default::default(),
+            shell_probe: Default::default(),
+            nested_compose: Default::default(),
+            icmp: Default::default(),
+            current: Default::default(),
             home_dir: None,
             file_resolution_context: None,
             caller_file_provenance: HashMap::new(),

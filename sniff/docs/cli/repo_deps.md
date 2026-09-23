@@ -63,7 +63,7 @@ Builds a Mermaid `flowchart TD` diagram from the workspace dependency data and r
 The diagram structure:
 
 - Packages are grouped into **subgraphs** by their `package_area` (e.g., `subgraph sniff`)
-- A single root-level package (`package_area == "root"`) is emitted as a plain node without a subgraph
+- A single root-level package (`package_area == ""`) is emitted as a plain node without a subgraph; several share a subgraph labeled `(root)`
 - Each package is a labeled node: `n0["package-name"]`
 - Edges are drawn from each package to each of its `depends_on` entries: `n0 --> n1`
 - Only edges where both the source and target are present in the (possibly filtered) package list are drawn

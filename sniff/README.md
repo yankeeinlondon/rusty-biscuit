@@ -29,7 +29,7 @@ A comprehensive Rust library for system detection:
 
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone, NTP status
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
-- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup (TTL-cached)
+- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses (scope-preserving), WAN IP lookup (TTL-cached), default IPv4/IPv6 gateways, CGNAT/Tailscale detection, and unprivileged ICMP echo probes
 - **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
 - **Programs Module**: Detect installed software across 10 categories, with installation support for 8, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
@@ -104,7 +104,7 @@ sniff hardware --json
 |----------|-------------|
 | **OS** | Distribution, kernel, architecture, package managers, locale, timezone, NTP |
 | **Hardware** | CPU (SIMD), GPU (Metal), memory, storage, audio devices |
-| **Network** | Interfaces, IPv4/IPv6 addresses, WAN IP |
+| **Network** | Interfaces, IPv4/IPv6 addresses, WAN IP, default gateways, ICMP probes |
 | **Filesystem** | Git repos, monorepos, languages, file types, docs, blast radius, justfiles |
 | **Programs** | Editors, utilities, package managers, TTS, terminals, audio, AI tools, test runners |
 | **Services** | System services across 10+ init systems |

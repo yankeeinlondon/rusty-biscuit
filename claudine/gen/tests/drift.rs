@@ -1,7 +1,7 @@
 //! Drift tests over the REAL committed inputs.
 //!
 //! The provider-data drift test and the CLI `check` subcommand share
-//! [`claudine_gen::check_area`]. The catalog, families, signals, and vocabulary
+//! [`claudine_gen::check_area`]. The catalog, families, signals, vocabulary, and agentic CLI
 //! drift tests use their artifact's production check function. For every
 //! provider slug, `generate(committed inputs)` must byte-equal the committed
 //! `lib/src/provider/<slug>/data.rs`.
@@ -10,8 +10,8 @@ use std::path::Path;
 
 use biscuit_hash::xx_hash_bytes;
 use claudine_gen::{
-    CheckOutcome, check_area, check_catalog, check_families, check_signals, check_vocabulary,
-    generate_all, provider_slugs,
+    CheckOutcome, check_agentic_clis, check_area, check_catalog, check_families, check_signals,
+    check_vocabulary, generate_all, provider_slugs,
 };
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -124,6 +124,25 @@ fn committed_vocabulary_matches_regenerated_inputs() {
         ),
         CheckOutcome::MissingCommitted { path } => panic!(
             "committed vocabulary.rs missing at {} — run `claudine-gen generate`",
+            path.display()
+        ),
+    }
+}
+
+/// build_agentic_clis(committed roster) == committed Darkmatter
+/// lib/src/markdown/compose/expression/functions/agentic_cli_generated.rs
+/// (every roster entry, `skip_research` included; AC19).
+#[test]
+fn committed_agentic_clis_match_regenerated_roster() {
+    match check_agentic_clis(area()).expect("agentic CLI name generation must succeed") {
+        CheckOutcome::Clean => {}
+        CheckOutcome::Drift { details } => panic!(
+            "drift between docs/providers.yaml and darkmatter's agentic_cli_generated.rs — \
+             run `claudine-gen generate`:\n{}",
+            details.join("\n")
+        ),
+        CheckOutcome::MissingCommitted { path } => panic!(
+            "committed agentic_cli_generated.rs missing at {} — run `claudine-gen generate`",
             path.display()
         ),
     }

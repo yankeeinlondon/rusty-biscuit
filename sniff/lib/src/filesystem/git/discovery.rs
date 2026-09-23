@@ -532,8 +532,14 @@ pub(crate) fn committed_file_changes_with_cache(
     let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
 
     let mut platform = old_tree.changes().map_err(|e| SniffError::git("diff", e))?;
+    // Against the empty tree every change is an addition, so there is no
+    // deleted rename source and no modified copy source. The tracker would
+    // still pair every addition with every other, which is quadratic in the
+    // tree size — a shallow CI checkout's boundary commit spent tens of
+    // seconds here in a debug build.
+    let rewrites = parent_tree.is_some().then(committed_rewrites);
     platform.options(|opts| {
-        opts.track_path().track_rewrites(Some(committed_rewrites()));
+        opts.track_path().track_rewrites(rewrites);
     });
 
     // Line counts need `cache`, which the traversal holds mutably, so changes
@@ -1419,6 +1425,25 @@ mod committed_file_change_tests {
             vec![
                 record("README.md", DeltaKind::Added, None, Some((1, 0))),
                 record("src/lib.rs", DeltaKind::Added, None, Some((2, 0))),
+            ]
+        );
+    }
+
+    /// A commit diffed against the empty tree has no rewrite source, so
+    /// identical files stay independent additions rather than copies.
+    #[test]
+    fn initial_commit_never_reports_a_rewrite() {
+        let fx = Fixture::new();
+        let root = fx.commit(
+            &[],
+            &[("a.txt", Some(TEN_LINES.as_bytes())), ("b.txt", Some(TEN_LINES.as_bytes()))],
+        );
+
+        assert_eq!(
+            fx.changes(root).unwrap(),
+            vec![
+                record("a.txt", DeltaKind::Added, None, Some((10, 0))),
+                record("b.txt", DeltaKind::Added, None, Some((10, 0))),
             ]
         );
     }

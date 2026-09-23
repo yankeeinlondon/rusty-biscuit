@@ -126,7 +126,8 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),
   variable → frontmatter-key definition, and malformed / unknown-identifier
-  diagnostics (a schema-declared property counts as known).
+  diagnostics (every operand is checked; a schema-declared property counts as
+  known).
 - **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
   the composed `{{ … }}` output with an inertness note, the content produces
   no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
@@ -181,8 +182,9 @@ Refactoring and formatting that respect workspace-wide references:
   support; see the matrix below.)
 - **Code actions** (diagnostic-driven): create the missing file / wiki note,
   add a missing required schema key, migrate a deprecated `style:` key,
-  close an unclosed `::block`, and wrap a malformed `{{ … }}` in an
-  interpolation literal (`{{{ … }}}`).
+  close an unclosed `::block`, wrap a malformed `{{ … }}` in an
+  interpolation literal (`{{{ … }}}`), and replace a subtraction that spells a
+  frontmatter key (`foo--bar`) with a reference to it (`doc['foo--bar']`).
 - **Formatting** — whole-document formatting that is byte-equivalent to the
   `md clean` cleanup sequence, with optional reflow to a fixed width.
 

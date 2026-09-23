@@ -72,6 +72,20 @@ pub(crate) struct PreparedSchemas {
     schemas: Option<DarkmatterSchemas>,
 }
 
+impl PreparedSchemas {
+    /// The effective schema for `markdown` in its current state: document
+    /// `$schema`, baseline, and matched triggers. `None` when there is none or
+    /// it cannot be resolved; the validation stage owns reporting that.
+    pub(crate) fn effective_for(
+        &self,
+        markdown: &Markdown,
+    ) -> Option<crate::markdown::schemas::EffectiveSchema> {
+        self.schemas
+            .as_ref()
+            .and_then(|schemas| schemas.effective_for(markdown).ok().flatten())
+    }
+}
+
 /// Caller-file values projected from the captured launch context.
 #[derive(Default)]
 pub(crate) struct CallerProjection {

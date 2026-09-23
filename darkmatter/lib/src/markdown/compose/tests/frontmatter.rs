@@ -484,12 +484,12 @@ fn dm2_subtree_resolves_injected_eager_and_lazy_globals() {
         InjectedGlobal::eager(serde_json::json!({"msg": "disk full"})),
     );
     globals.insert(
-        "current".to_string(),
-        InjectedGlobal::lazy(|| serde_json::json!({"ctx": {"today": "2026-06-24"}})),
+        "snapshot".to_string(),
+        InjectedGlobal::lazy(|| serde_json::json!({"today": "2026-06-24"})),
     );
 
     let result = compose_subtree(
-        &serde_json::json!("phase {{phase}} failed: {{err.msg}} on {{current.ctx.today}}"),
+        &serde_json::json!("phase {{phase}} failed: {{err.msg}} on {{snapshot.today}}"),
         &state,
         globals,
         SubtreeStrictness::Lenient,
@@ -596,14 +596,14 @@ fn dm2_subtree_lazy_global_only_evaluated_when_referenced() {
     let count_for_closure = count.clone();
     let mut globals = HashMap::new();
     globals.insert(
-        "current".to_string(),
+        "snapshot".to_string(),
         InjectedGlobal::lazy(move || {
             count_for_closure.fetch_add(1, Ordering::SeqCst);
             serde_json::json!({"phase": 1})
         }),
     );
 
-    // String does NOT reference `current`: closure must not run.
+    // String does NOT reference `snapshot`: closure must not run.
     let result = compose_subtree(
         &serde_json::json!("no reference"),
         &state,
@@ -628,16 +628,16 @@ fn dm2_subtree_lazy_global_evaluated_at_most_once() {
     let count_for_closure = count.clone();
     let mut globals = HashMap::new();
     globals.insert(
-        "current".to_string(),
+        "snapshot".to_string(),
         InjectedGlobal::lazy(move || {
             count_for_closure.fetch_add(1, Ordering::SeqCst);
             serde_json::json!({"phase": 7})
         }),
     );
 
-    // Two references to `current.phase`: closure runs at most once.
+    // Two references to `snapshot.phase`: closure runs at most once.
     let result = compose_subtree(
-        &serde_json::json!("{{current.phase}} then {{current.phase}}"),
+        &serde_json::json!("{{snapshot.phase}} then {{snapshot.phase}}"),
         &state,
         globals,
         SubtreeStrictness::Lenient,

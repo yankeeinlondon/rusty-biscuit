@@ -5,6 +5,6 @@ expression: "normalize_snapshot_paths(&stdout, &path)"
 
 Repository (cargo / 2 packages)
 
-- root
+- (root)
     - pkg-a v0.1.0 (pkg-a) [Rust]
     - pkg-b v0.1.0 (pkg-b) [Rust]

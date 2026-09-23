@@ -144,13 +144,21 @@ fn compose_prompt_markdown(
             ComposeContext::capture_for_content(&base_dir, raw_text)
         }
     };
+    // Transcluded prompt fragments grow the snapshot from the evidence that
+    // produced it: launch evidence for the shared bundle, host discovery for
+    // the ambient capture above.
+    let authority = match shared_ctx {
+        Some(SharedComposeContext {
+            invocation: Some(invocation),
+            ..
+        }) => invocation.compose_context_authority(),
+        Some(_) => darkmatter::markdown::compose::ContextAuthority::CallerSupplied,
+        None => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
+    };
+    let options = ComposeOptions::new_with_context(ctx).with_context_authority(authority);
     let mut options = match source_path(source) {
-        Some(path) => crate::composition::bind_agent_workspace(
-            ComposeOptions::new_with_context(ctx),
-            path,
-            shell_cwd,
-        ),
-        None => ComposeOptions::new_with_context(ctx),
+        Some(path) => crate::composition::bind_agent_workspace(options, path, shell_cwd),
+        None => options,
     };
     if let Some(invocation) = shared_ctx.and_then(|shared| shared.invocation.as_ref()) {
         invocation.record_compose_operation();

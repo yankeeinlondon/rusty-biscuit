@@ -308,7 +308,7 @@ fn package_area_for_source(
         .ok()
         .flatten()?;
     let area = repo.package_area_label_for_dir(source_dir)?;
-    Some(if area.as_ref() == "root" {
+    Some(if area.is_empty() {
         root.to_path_buf()
     } else {
         root.join(area.as_ref())

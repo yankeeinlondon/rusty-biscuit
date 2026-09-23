@@ -43,10 +43,10 @@ fn ternary_condition_uses_read_side_functions_with_context() {
     .with_resolution_context(Some(rc));
 
     assert!(
-        evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx()).unwrap()
+        evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx(), &mut Vec::new()).unwrap()
     );
     assert!(
-        !evaluate_ternary_condition("file_exists('nope.toml')", &state, "k", &test_ctx()).unwrap()
+        !evaluate_ternary_condition("file_exists('nope.toml')", &state, "k", &test_ctx(), &mut Vec::new()).unwrap()
     );
 }
 
@@ -61,7 +61,7 @@ fn ternary_condition_without_context_fails_loudly() {
         ComposeContext::fixed_for_testing(),
     );
     assert!(
-        evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx()).is_err()
+        evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx(), &mut Vec::new()).is_err()
     );
 }
 

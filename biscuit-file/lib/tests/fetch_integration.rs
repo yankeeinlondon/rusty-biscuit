@@ -1,7 +1,7 @@
 //! HTTP mock server integration tests for the fetch primitive.
 
 use biscuit_file::{
-    Conditional, FetchError, FetchPolicy, HostPattern, PolicyClient, fetch, fetch_blocking,
+    Conditional, FetchError, FetchPolicy, HostPattern, PolicyClient, fetch, fetch_blocking, post,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -46,6 +46,93 @@ async fn fetch_200_returns_body_and_headers() {
     assert_eq!(resp.cache_control.as_deref(), Some("max-age=3600"));
     assert!(resp.is_success());
     assert!(!resp.is_not_modified());
+}
+
+/// Mounts a response that sends `max-age=3600` and `no-store` as two separate
+/// `Cache-Control` field lines.
+async fn mount_split_cache_control(server: &MockServer, http_method: &str, route: &str) {
+    Mock::given(method(http_method))
+        .and(path(route))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("secret")
+                .append_header("cache-control", "max-age=3600")
+                .append_header("cache-control", "no-store"),
+        )
+        .mount(server)
+        .await;
+}
+
+/// Returns the raw `Cache-Control` field lines the server puts on the wire, so
+/// a test can prove the fixture really splits them rather than folding them.
+async fn wire_cache_control_lines(
+    server: &MockServer,
+    http_method: &str,
+    route: &str,
+) -> Vec<String> {
+    let address = *server.address();
+    let request = format!(
+        "{http_method} {route} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+    );
+    let raw = tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).unwrap();
+        String::from_utf8_lossy(&raw).into_owned()
+    })
+    .await
+    .unwrap();
+    let head = raw.split("\r\n\r\n").next().unwrap_or_default();
+    head.lines()
+        .filter(|line| line.to_ascii_lowercase().starts_with("cache-control:"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fetch_combines_split_cache_control_lines_in_wire_order() {
+    let (server, client, policy) = setup_server().await;
+    mount_split_cache_control(&server, "GET", "/split").await;
+    assert_eq!(
+        wire_cache_control_lines(&server, "GET", "/split")
+            .await
+            .len(),
+        2,
+        "fixture must emit two separate Cache-Control lines"
+    );
+
+    let url = url::Url::parse(&format!("{}/split", server.uri())).unwrap();
+    let resp = fetch(&client, &url, &policy, &Conditional::default())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.cache_control.as_deref(),
+        Some("max-age=3600, no-store")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn post_combines_split_cache_control_lines_in_wire_order() {
+    let (server, client, policy) = setup_server().await;
+    mount_split_cache_control(&server, "POST", "/split").await;
+    assert_eq!(
+        wire_cache_control_lines(&server, "POST", "/split")
+            .await
+            .len(),
+        2,
+        "fixture must emit two separate Cache-Control lines"
+    );
+
+    let url = url::Url::parse(&format!("{}/split", server.uri())).unwrap();
+    let resp = post(&client, &url, &policy, "payload").await.unwrap();
+
+    assert_eq!(
+        resp.cache_control.as_deref(),
+        Some("max-age=3600, no-store")
+    );
 }
 
 #[tokio::test]

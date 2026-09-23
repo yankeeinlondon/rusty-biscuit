@@ -1,16 +1,15 @@
 //! Cache key generation for compose pipeline artifacts.
 //!
 //! Provides content-aware hashing using `biscuit_hash` xxHash functions.
-//! All hashes are `u64` values suitable for cache keys, manifest fields,
-//! and Merkle-style closure hash computation.
+//! All hashes are `u64` values suitable for run-local cache keys and remote
+//! transport-cache entry keys.
 
-use biscuit_hash::{HashVariant, xx_hash, xx_hash_bytes, xx_hash_variant};
+use biscuit_hash::{xx_hash, xx_hash_bytes};
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-use super::types::DependencyRef;
 use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::{ComposeContext, ComposeOptions};
 
@@ -18,7 +17,7 @@ use crate::markdown::compose::{ComposeContext, ComposeOptions};
 
 /// Generates a cache key from a filesystem path (canonicalized).
 ///
-/// Used by Phase 1 run-local cache and as the `source_id` for persistent cache.
+/// Used by the run-local cache and as the `source_id` of run-local keys.
 pub(crate) fn compose_cache_key(source_path: &Path) -> String {
     std::fs::canonicalize(source_path)
         .unwrap_or_else(|_| source_path.to_path_buf())
@@ -31,54 +30,7 @@ pub(crate) fn source_id_hash(canonical_source: &str) -> u64 {
     xx_hash(canonical_source)
 }
 
-// ── Content hashing ────────────────────────────────────────────────
-
-/// Hash of raw file bytes (detects any byte-level change).
-pub(crate) fn raw_bytes_hash(content: &[u8]) -> u64 {
-    xx_hash_bytes(content)
-}
-
-/// Semantic hash of a markdown body.
-///
-/// Normalizes by trimming blocks and stripping leading/trailing whitespace
-/// per line, so pure formatting changes (indentation, trailing spaces)
-/// don't invalidate the cache.
-pub(crate) fn body_semantic_hash(body: &str) -> u64 {
-    xx_hash_variant(
-        body,
-        vec![
-            HashVariant::BlockTrimming,
-            HashVariant::LeadingWhitespace,
-            HashVariant::TrailingWhitespace,
-        ],
-    )
-}
-
-/// Template hash of a markdown body (more aggressive normalization).
-///
-/// In addition to semantic normalization, collapses interior whitespace
-/// and removes blank lines entirely. Useful for detecting when the
-/// "shape" of a document changes while ignoring all whitespace variance.
-pub(crate) fn body_template_hash(body: &str) -> u64 {
-    xx_hash_variant(
-        body,
-        vec![
-            HashVariant::BlockTrimming,
-            HashVariant::LeadingWhitespace,
-            HashVariant::TrailingWhitespace,
-            HashVariant::InteriorWhitespace,
-            HashVariant::BlankLine,
-        ],
-    )
-}
-
-// ── Structured data hashing ────────────────────────────────────────
-
-/// Hash of a frontmatter map using canonical JSON with sorted keys.
-pub(crate) fn frontmatter_hash(fm: &Map<String, Value>) -> u64 {
-    let canonical = canonical_json_sorted(&Value::Object(fm.clone()));
-    xx_hash(&canonical)
-}
+// ── Structured data hashing ──────────────────────────────────────
 
 /// Hash of the effective state (merged frontmatter + external state).
 ///
@@ -101,19 +53,10 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
 /// volatile per-second fields (`now`, `utc`, `time`, `timestamp`, etc.)
 /// and volatile system state (`memory_used`, `memory_avail`).
 pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
-    // Clone the values map and remove volatile fields
     let mut values = ctx.values().clone();
-    // Per-second volatile fields
-    values.remove("now");
-    values.remove("now_utc");
-    values.remove("utc");
-    values.remove("time");
-    values.remove("time_military");
-    values.remove("timestamp");
-    values.remove("timestamp_ms");
-    // Volatile system state
-    values.remove("memory_used");
-    values.remove("memory_avail");
+    for key in VOLATILE_CONTEXT_KEYS {
+        values.remove(*key);
+    }
 
     let canonical = canonical_json_sorted(&Value::Object(values));
     let mut parts = vec![canonical];
@@ -127,6 +70,20 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
 
     xx_hash(&parts.join("\0"))
 }
+
+/// Per-second clock fields and volatile system state that would otherwise
+/// re-key a stable document on every run.
+const VOLATILE_CONTEXT_KEYS: &[&str] = &[
+    "now",
+    "now_utc",
+    "utc",
+    "time",
+    "time_military",
+    "timestamp",
+    "timestamp_ms",
+    "memory_used",
+    "memory_avail",
+];
 
 /// Precomputed per-transclusion-phase state identity.
 ///
@@ -216,42 +173,6 @@ pub(crate) fn set_overlay_hash(
     }
 
     xx_hash(&parts.join("\0"))
-}
-
-// ── Merkle closure hash ────────────────────────────────────────────
-
-/// Computes a Merkle-style closure hash from a self-hash and dependency hashes.
-///
-/// The closure hash captures the complete state of a document and all its
-/// transitive dependencies. If any dependency changes, the closure hash changes.
-pub(crate) fn closure_hash(self_hash: u64, deps: &[DependencyRef]) -> u64 {
-    let mut data = Vec::with_capacity(8 + deps.len() * 16);
-    data.extend_from_slice(&self_hash.to_le_bytes());
-    for dep in deps {
-        data.extend_from_slice(&dep.source_id_hash.to_le_bytes());
-        data.extend_from_slice(&dep.closure_hash.to_le_bytes());
-    }
-    xx_hash_bytes(&data)
-}
-
-/// Computes a combined entry key from multiple hash dimensions.
-///
-/// Used to look up a composed document manifest: combines source identity,
-/// content state, options, and context into a single key.
-pub(crate) fn compose_entry_key(
-    source_id: u64,
-    body_semantic: u64,
-    state: u64,
-    context: u64,
-    options: u64,
-) -> u64 {
-    let mut data = Vec::with_capacity(40);
-    data.extend_from_slice(&source_id.to_le_bytes());
-    data.extend_from_slice(&body_semantic.to_le_bytes());
-    data.extend_from_slice(&state.to_le_bytes());
-    data.extend_from_slice(&context.to_le_bytes());
-    data.extend_from_slice(&options.to_le_bytes());
-    xx_hash_bytes(&data)
 }
 
 // ── Operation entry key ──────────────────────────────────────────────
@@ -377,103 +298,6 @@ mod tests {
         let h1 = source_id_hash("/foo/bar/doc.md");
         let h2 = source_id_hash("/foo/bar/other.md");
         assert_ne!(h1, h2);
-    }
-
-    #[test]
-    fn body_semantic_hash_ignores_whitespace() {
-        let body1 = "# Hello\n\nWorld\n";
-        let body2 = "  # Hello  \n\n  World  \n\n";
-        assert_eq!(body_semantic_hash(body1), body_semantic_hash(body2));
-    }
-
-    #[test]
-    fn body_semantic_hash_sensitive_to_content() {
-        let body1 = "# Hello\nWorld";
-        let body2 = "# Hello\nDifferent";
-        assert_ne!(body_semantic_hash(body1), body_semantic_hash(body2));
-    }
-
-    #[test]
-    fn body_template_hash_more_aggressive() {
-        // Template hash collapses interior whitespace and blank lines
-        let body1 = "# Hello\n\n\nWorld";
-        let body2 = "# Hello\nWorld";
-        assert_eq!(body_template_hash(body1), body_template_hash(body2));
-    }
-
-    #[test]
-    fn frontmatter_hash_ignores_key_order() {
-        let mut fm1 = Map::new();
-        fm1.insert("alpha".into(), Value::from(1));
-        fm1.insert("beta".into(), Value::from(2));
-
-        let mut fm2 = Map::new();
-        fm2.insert("beta".into(), Value::from(2));
-        fm2.insert("alpha".into(), Value::from(1));
-
-        assert_eq!(frontmatter_hash(&fm1), frontmatter_hash(&fm2));
-    }
-
-    #[test]
-    fn frontmatter_hash_sensitive_to_values() {
-        let mut fm1 = Map::new();
-        fm1.insert("key".into(), Value::from("value1"));
-
-        let mut fm2 = Map::new();
-        fm2.insert("key".into(), Value::from("value2"));
-
-        assert_ne!(frontmatter_hash(&fm1), frontmatter_hash(&fm2));
-    }
-
-    #[test]
-    fn closure_hash_changes_with_deps() {
-        let self_hash = 12345u64;
-        let deps1 = vec![DependencyRef {
-            artifact_class:
-                crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
-            entry_key: 1,
-            source_id_hash: 100,
-            closure_hash: 200,
-        }];
-        let deps2 = vec![DependencyRef {
-            artifact_class:
-                crate::markdown::compose::cache::types::ArtifactClass::ComposeDocumentCore,
-            entry_key: 1,
-            source_id_hash: 100,
-            closure_hash: 300, // Different closure hash
-        }];
-
-        assert_ne!(
-            closure_hash(self_hash, &deps1),
-            closure_hash(self_hash, &deps2)
-        );
-    }
-
-    #[test]
-    fn closure_hash_no_deps_uses_self() {
-        let h1 = closure_hash(12345, &[]);
-        let h2 = closure_hash(12345, &[]);
-        assert_eq!(h1, h2);
-
-        let h3 = closure_hash(99999, &[]);
-        assert_ne!(h1, h3);
-    }
-
-    #[test]
-    fn compose_entry_key_deterministic() {
-        let k1 = compose_entry_key(1, 2, 3, 4, 5);
-        let k2 = compose_entry_key(1, 2, 3, 4, 5);
-        assert_eq!(k1, k2);
-    }
-
-    #[test]
-    fn compose_entry_key_sensitive_to_each_dimension() {
-        let base = compose_entry_key(1, 2, 3, 4, 5);
-        assert_ne!(base, compose_entry_key(99, 2, 3, 4, 5)); // source_id
-        assert_ne!(base, compose_entry_key(1, 99, 3, 4, 5)); // body_semantic
-        assert_ne!(base, compose_entry_key(1, 2, 99, 4, 5)); // state
-        assert_ne!(base, compose_entry_key(1, 2, 3, 99, 5)); // context
-        assert_ne!(base, compose_entry_key(1, 2, 3, 4, 99)); // options
     }
 
     #[test]
@@ -638,8 +462,11 @@ mod tests {
     /// string-join encoding onto the typed, length-delimited encoder under a
     /// new cache-key domain (perf-followup Phase 4 / AD-B Checkpoint 4). This
     /// freezes the pre-migration default value so a regression that silently
-    /// restored value-compatibility — which would let a stale persistent entry
-    /// keyed under the old encoding be read back — fails loudly.
+    /// restored value-compatibility fails loudly. The original risk, a stale
+    /// persistent entry keyed under the old encoding being read back, left with
+    /// the semantic-result store (R18); `options_hash` now keys run-local
+    /// entries only, so this pins the encoding domain rather than on-disk
+    /// compatibility.
     ///
     /// The compose-cache fingerprint excludes the runtime context (that is a
     /// separate cache dimension), so `ComposeOptions::new()` is deterministic
@@ -653,7 +480,7 @@ mod tests {
             options_hash(&ComposeOptions::new()),
             LEGACY_DEFAULT_OPTIONS_HASH,
             "the new cache domain must not reproduce the legacy string-join hash, \
-             or a persistent entry keyed under the old encoding could be read back"
+             so the encoding domain stays distinct"
         );
         // Determinism guard: the value is context-independent and stable.
         assert_eq!(

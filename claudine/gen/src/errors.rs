@@ -173,6 +173,9 @@ pub enum GenError {
     #[error("provider `{slug}` error-vocabulary generation failed: {message}")]
     VocabularyGenInvalid { slug: String, message: String },
 
+    #[error("roster `{path}` cannot produce the `has_agentic_cli` name table: {message}")]
+    AgenticCliRosterInvalid { path: PathBuf, message: String },
+
     #[error("signals doc `{path}`: {message}")]
     SignalDocInvalid { path: PathBuf, message: String },
 

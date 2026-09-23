@@ -28,7 +28,7 @@ initialize:
     stack:
         # `current`, not `ctx`: this asks what is staged now. `ctx` is the start-of-run
         # snapshot, which predates any staging an earlier stage of the same run did.
-        - when: "length(current.ctx.staged_files) == 0"
+        - when: "length(current.staged_files) == 0"
           action:
               - message: "🤨  there were no staged files to commit in {{ctx.repo}}!"
               - stop

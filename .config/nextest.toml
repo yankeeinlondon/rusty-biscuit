@@ -72,6 +72,17 @@ leak-timeout = { period = "30s", result = "fail" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The sequence-budget end-to-end fixtures spawn real `claudine` sequence
+# workers whose steps sleep (`sleep:3000`, a ten-minute `hang` that the ledger
+# must stop) and then wait on ledgers, pid files, and shared locks. Isolated
+# they take 0.5–4.2s each; inside the full `claudine-cli` L1 run on a host at
+# load ~72 (four agent sessions plus a cold rebuild, 2026-09-20) all ten were
+# killed at the default 30s ceiling. Their own deadlines are 60s and 40s, so
+# the 90s leash lets a loaded run finish while a genuine hang still trips it.
+[[profile.default.overrides]]
+filter = 'binary_id(claudine-cli::sequence_budget)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # Proptest-driven acceptance test exploring many randomized compose conditions.
 # Finishes in ~7s isolated but is squeezed toward (and past) the default 30s
 # termination ceiling under full parallel `just test darkmatter` load. Give it

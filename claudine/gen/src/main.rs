@@ -216,6 +216,18 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 )
             );
 
+            let agentic_clis = claudine_gen::check_agentic_clis(&area)?;
+            drifted |= !matches!(agentic_clis, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "darkmatter agentic_cli_generated.rs",
+                    "(roster matches the committed has_agentic_cli names)",
+                    &agentic_clis,
+                )
+            );
+
             let family_count = claudine_gen::compiled_family_keys(&generations).len();
             let families = claudine_gen::check_families(&area, &generations)?;
             drifted |= !matches!(families, CheckOutcome::Clean);
@@ -377,6 +389,7 @@ fn run_generate(
     let signals = claudine_gen::build_signals(area)?;
     let families = claudine_gen::build_families(area, &generations)?;
     let vocabulary = claudine_gen::build_vocabulary(area)?;
+    let agentic_clis = claudine_gen::build_agentic_clis(area)?;
     print!(
         "{}",
         report::families_count(term, claudine_gen::compiled_family_keys(&generations).len())
@@ -403,9 +416,12 @@ fn run_generate(
         area,
         &scope,
         &generations,
-        &signals,
-        &families,
-        &vocabulary,
+        claudine_gen::FullScopeArtifacts {
+            signals: &signals,
+            families: &families,
+            vocabulary: &vocabulary,
+            agentic_clis: &agentic_clis,
+        },
         &mut decide,
     )?;
 

@@ -7,7 +7,7 @@ Repository (2 layers)
 
 - cargo — 2 packages
 - pnpm workspaces — 2 packages
-- root
+- (root)
     - js-a v0.1.0 (js-a)
     - js-b v0.1.0 (js-b)
     - rust-a v0.1.0 (rust-a) [Rust]

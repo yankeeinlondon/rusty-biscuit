@@ -18,6 +18,9 @@
 //! the overlay keeps the previous good tree for completion/hover continuity
 //! while surfacing the current parse error as a diagnostic.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::span::SourceSpan;
 use rlsp_yaml_parser::loader::{self, LoadError};
@@ -134,6 +137,16 @@ pub struct FmEntry {
     /// The scalar value text, when [`kind`](Self::kind) is
     /// [`FmValueKind::Scalar`].
     pub scalar: Option<String>,
+    /// For an [`FmValueKind::Alias`], the text of the scalar it resolves to:
+    /// the last `&name` scalar defined before it. `None` when that node is a
+    /// collection. Every alias of one definition shares this allocation.
+    pub alias_target: Option<Arc<str>>,
+    /// For an [`FmValueKind::Alias`], the document offset where the scalar
+    /// behind [`alias_target`](Self::alias_target) is authored, after its tag
+    /// and anchor. `None` for a collection, and when the anchor has more than
+    /// one definition before the alias: such an alias is analyzed on its own
+    /// token.
+    pub alias_target_start: Option<usize>,
     /// The authored scalar style, when [`kind`](Self::kind) is
     /// [`FmValueKind::Scalar`].
     pub scalar_style: Option<FmScalarStyle>,
@@ -506,7 +519,7 @@ fn lower(root: Option<&Node<YamlSpan>>, base: usize, block_span: SourceSpan) -> 
     let root_span = match root {
         Some(Node::Mapping { entries: pairs, loc, .. }) => {
             let parent = Parent { pointer: "", dotted: "", index: None, depth: 0 };
-            lower_mapping(pairs, base, &parent, &mut entries);
+            lower_mapping(pairs, base, &parent, &mut HashMap::new(), &mut entries);
             shift(*loc, base)
         }
         // A non-mapping root (a bare scalar, or an empty document) carries no
@@ -525,13 +538,18 @@ struct Parent<'a> {
 }
 
 /// Lowers one mapping's entries, recursing into nested collections.
+///
+/// `anchors` holds each anchor's definition as of the node being lowered, in
+/// document order, so an alias reads the last definition before it.
 fn lower_mapping(
     pairs: &[(Node<YamlSpan>, Node<YamlSpan>)],
     base: usize,
     parent: &Parent<'_>,
+    anchors: &mut HashMap<String, AnchorDefinition>,
     out: &mut Vec<FmEntry>,
 ) {
     for (key_node, value_node) in pairs {
+        record_anchors(key_node, anchors);
         let Node::Scalar { value: key, loc: key_loc, .. } = key_node else {
             // Non-scalar keys (complex keys) are not addressable by dotted path;
             // skip them rather than invent a pointer.
@@ -544,12 +562,65 @@ fn lower_mapping(
             key,
             FmEntryRole::MappingProperty,
             Some(shift(*key_loc, base)),
+            anchors,
             out,
         );
     }
 }
 
+/// The node an anchor name currently resolves to.
+struct AnchorDefinition {
+    /// The node's text, when it is a scalar, shared by every alias of it.
+    text: Option<Arc<str>>,
+    /// YAML-relative offset of the node, which the parser reports after the
+    /// node's tag and anchor.
+    start: usize,
+    /// An earlier node already defined the same name.
+    redefined: bool,
+}
+
+/// Records the anchor `node` itself defines.
+fn record_anchor(node: &Node<YamlSpan>, anchors: &mut HashMap<String, AnchorDefinition>) {
+    if let Some(name) = node.anchor() {
+        let (text, loc) = match node {
+            Node::Scalar { value, loc, .. } => (Some(Arc::from(value.as_str())), loc),
+            Node::Mapping { loc, .. } | Node::Sequence { loc, .. } | Node::Alias { loc, .. } => {
+                (None, loc)
+            }
+        };
+        let definition = AnchorDefinition {
+            text,
+            start: loc.start as usize,
+            redefined: anchors.contains_key(name),
+        };
+        anchors.insert(name.to_string(), definition);
+    }
+}
+
+/// Records every anchor in `node`'s subtree, in document order.
+fn record_anchors(node: &Node<YamlSpan>, anchors: &mut HashMap<String, AnchorDefinition>) {
+    record_anchor(node, anchors);
+    match node {
+        Node::Mapping { entries, .. } => {
+            for (key, value) in entries {
+                record_anchors(key, anchors);
+                record_anchors(value, anchors);
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                record_anchors(item, anchors);
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
+    }
+}
+
 /// Lowers one entry and, when its value is a collection, its children.
+///
+/// An alias is resolved against `anchors` *before* this node's own anchor is
+/// recorded, so it sees exactly the definitions authored before it.
+#[allow(clippy::too_many_arguments)]
 fn lower_entry(
     value_node: &Node<YamlSpan>,
     base: usize,
@@ -557,6 +628,7 @@ fn lower_entry(
     key: &str,
     role: FmEntryRole,
     key_span: Option<SourceSpan>,
+    anchors: &mut HashMap<String, AnchorDefinition>,
     out: &mut Vec<FmEntry>,
 ) {
     let pointer = format!("{}/{}", parent.pointer, encode_pointer_segment(key));
@@ -569,6 +641,14 @@ fn lower_entry(
         },
     );
     let (kind, scalar, scalar_style, tagged) = classify(value_node);
+    let definition = match value_node {
+        Node::Alias { name, .. } => anchors.get(name),
+        _ => None,
+    };
+    let alias_target = definition.and_then(|definition| definition.text.clone());
+    let alias_target_start = definition
+        .filter(|definition| definition.text.is_some() && !definition.redefined)
+        .map(|definition| base + definition.start);
     let index = out.len();
     out.push(FmEntry {
         pointer: pointer.clone(),
@@ -579,11 +659,16 @@ fn lower_entry(
         value_span: value_span(value_node, base),
         kind,
         scalar,
+        alias_target,
+        alias_target_start,
         scalar_style,
         tagged,
         parent: parent.index,
         depth: parent.depth,
     });
+    // Every collection is lowered below, so each node records its own anchor
+    // here, once, in document order.
+    record_anchor(value_node, anchors);
     let children = Parent {
         pointer: &pointer,
         dotted: &dotted,
@@ -591,7 +676,7 @@ fn lower_entry(
         depth: parent.depth + 1,
     };
     match value_node {
-        Node::Mapping { entries: nested, .. } => lower_mapping(nested, base, &children, out),
+        Node::Mapping { entries: nested, .. } => lower_mapping(nested, base, &children, anchors, out),
         Node::Sequence { items, .. } => {
             for (item_index, item) in items.iter().enumerate() {
                 lower_entry(
@@ -601,6 +686,7 @@ fn lower_entry(
                     &item_index.to_string(),
                     FmEntryRole::SequenceItem { index: item_index },
                     None,
+                    anchors,
                     out,
                 );
             }
@@ -756,6 +842,52 @@ mod tests {
         assert_eq!(&text[title.value_span.clone()], "Hello");
         assert_eq!(title.scalar.as_deref(), Some("Hello"));
         assert_eq!(title.kind, FmValueKind::Scalar);
+    }
+
+    #[test]
+    fn test_an_alias_resolves_to_the_last_scalar_anchor_defined_before_it() {
+        let text = concat!(
+            "---\n",
+            "list:\n  - &item first\n",
+            "early: *item\n",
+            "nested:\n  inner: &item second\n",
+            "late: *item\n",
+            "map: &shape\n  a: 1\n",
+            "collection: *shape\n",
+            "redefined: &item third\n",
+            "---\n",
+        );
+        let ast = ast(text);
+        let target = |key: &str| {
+            let entry = ast.entry_by_dotted(key).unwrap();
+            assert_eq!((entry.kind, entry.scalar.as_deref()), (FmValueKind::Alias, None));
+            entry.alias_target.clone()
+        };
+        assert_eq!(target("early").as_deref(), Some("first"));
+        assert_eq!(target("late").as_deref(), Some("second"));
+        assert_eq!(target("collection"), None);
+        assert_eq!(ast.entry_by_dotted("redefined").unwrap().alias_target, None);
+
+        // Only a single definition before the alias carries its start; the
+        // redefinition after `early` does not count against it.
+        let start = |key: &str| ast.entry_by_dotted(key).unwrap().alias_target_start;
+        assert_eq!(start("early"), text.find("first"));
+        assert_eq!(start("late"), None);
+        assert_eq!(start("collection"), None);
+        assert_eq!(start("redefined"), None);
+    }
+
+    #[test]
+    fn test_an_alias_target_start_skips_the_nodes_tag_and_anchor() {
+        for text in [
+            "---\nnaïve: &a !!str 'café x'\nblock:\n  - !!str &b |-\n    y\none: *a\ntwo: *b\n---\n",
+            "---\r\nnaïve: &a !!str 'café x'\r\nblock:\r\n  - !!str &b |-\r\n    y\r\none: *a\r\ntwo: *b\r\n---\r\n",
+        ] {
+            let ast = ast(text);
+            let start = |key: &str| ast.entry_by_dotted(key).unwrap().alias_target_start;
+            assert_eq!(start("one"), text.find("'café"));
+            assert_eq!(start("two"), text.find("|-"));
+        }
     }
 
     #[test]

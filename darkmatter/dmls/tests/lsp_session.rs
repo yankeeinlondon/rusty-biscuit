@@ -1649,6 +1649,70 @@ const DSL_DOC: &str = "---\ntitle: Guide\n---\n\n# Guide\n\n::file ./intro.md\n\
 const INTRO_DOC: &str = "# Intro\n\nWelcome.\n";
 
 #[test]
+fn interpolated_transclusion_target_does_not_report_broken_path() {
+    let workspace = LspWorkspace::new();
+    let text = "---\n$schema:\n  log: file\n---\n\n::file {{log}}\n";
+    let path = workspace.path().join("nullable.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let broken: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.broken_path"))
+        .collect();
+    assert!(broken.is_empty(), "interpolated targets must not report broken_path: {diagnostics:?}");
+    fixture.shutdown();
+}
+
+#[test]
+fn nullable_transclusion_diagnostic_matrix() {
+    let workspace = LspWorkspace::new();
+    let text = "---\n$schema:\n  optional: file\n  guarded: file\n  outer: file\n  required: 'file(required)'\n  defaulted: \"file(default('fallback.md'))\"\n---\n\n::file {{optional}}\n\n::block when=\"file_exists(guarded)\"\n::file {{guarded}}\n::end-block\n\n::block when=\"file_exists(outer)\"\n::block when=\"true\"\n::file {{outer}}\n::end-block\n::end-block\n\n::file {{required}}\n::file {{defaulted}}\n::file prefix-{{optional}}.md\n::file {{optional || required}}\n::file missing.md\n";
+    let path = workspace.path().join("matrix.md");
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+    let broken: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.broken_path"))
+        .collect();
+    assert_eq!(
+        broken.len(),
+        1,
+        "interpolated targets must not report broken_path: {diagnostics:?}"
+    );
+    assert_eq!(broken[0]["range"], range_of(text, "missing.md"));
+
+    let nullable: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.transclusion.nullable_target"))
+        .collect();
+    assert_eq!(nullable.len(), 2, "unexpected nullable diagnostics: {diagnostics:?}");
+    for (diagnostic, (expression, root)) in nullable.iter().zip([
+        ("{{optional}}", "optional"),
+        ("{{defaulted}}", "defaulted"),
+    ]) {
+        assert_eq!(diagnostic["source"], json!("darkmatter.compose"));
+        assert_eq!(diagnostic["severity"], json!(2));
+        assert_eq!(diagnostic["range"], range_of(text, expression));
+        assert_eq!(
+            diagnostic["message"],
+            json!(format!(
+                "`{root}` may be null here; a null `::file` target transcludes nothing. Guard with `::block when=\"file_exists({root})\"`, bind a non-null value, or make the parameter required."
+            ))
+        );
+    }
+    fixture.shutdown();
+}
+
+#[test]
 fn dsl_overlay_navigation_hover_and_diagnostics() {
     let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("guide.md"), DSL_DOC).unwrap();
@@ -2607,6 +2671,105 @@ fn function_completion_shape() {
     fixture.shutdown();
 }
 
+/// Dasherized identifiers. Line 8 holds a kebab name; lines 9 and 10 hold
+/// dashes the lexer must not join (spaced subtraction and `foo--bar`).
+const KEBAB_NAVIGATION_DOC: &str = "---\nspec-name: alpha\nfoo: fval\nbar: bval\na: aval\nb: bval2\n---\n\nK: {{ spec-name }}\nS: {{ a - b }}\nD: {{ foo--bar }}\n";
+
+fn completion_edit_start(fixture: &mut LspFixture<'_>, uri: &str, line: u32, character: u32, label: &str) -> Option<Value> {
+    let completions = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character }
+            }),
+        )
+        .result
+        .expect("completions");
+    completions
+        .as_array()
+        .expect("completion array")
+        .iter()
+        .find(|item| item["textEdit"]["newText"] == json!(label))
+        .map(|item| item["textEdit"]["range"]["start"].clone())
+}
+
+#[test]
+fn kebab_identifier_navigation_resolves_at_every_cursor_position() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join("doc.md"), KEBAB_NAVIGATION_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), KEBAB_NAVIGATION_DOC);
+
+    // `K: {{ spec-name }}` — the name spans columns 6..15; column 10 is the dash.
+    for character in 6..=15 {
+        let hover = hover_markup(&mut fixture, uri.as_str(), 8, character);
+        assert!(
+            hover.contains("from frontmatter `spec-name`"),
+            "hover at column {character}: {hover}"
+        );
+
+        let definition = fixture
+            .request(
+                "textDocument/definition",
+                json!({
+                    "textDocument": { "uri": uri.as_str() },
+                    "position": { "line": 8, "character": character }
+                }),
+            )
+            .result
+            .expect("definition");
+        assert_eq!(
+            definition.as_array().and_then(|locations| locations.first()).map(|location| location["range"].clone()),
+            Some(json!({ "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 9 } })),
+            "definition at column {character}: {definition}"
+        );
+
+        assert_eq!(
+            completion_edit_start(&mut fixture, uri.as_str(), 8, character, "spec-name"),
+            Some(json!({ "line": 8, "character": 6 })),
+            "completion at column {character} must replace the whole kebab partial"
+        );
+    }
+
+    // `S: {{ a - b }}` — spaced subtraction keeps two operands.
+    let on_b = hover_markup(&mut fixture, uri.as_str(), 9, 10);
+    assert!(on_b.contains("from frontmatter `b`"), "{on_b}");
+    assert_eq!(
+        completion_edit_start(&mut fixture, uri.as_str(), 9, 11, "b"),
+        Some(json!({ "line": 9, "character": 10 }))
+    );
+
+    // `D: {{ foo--bar }}` — the double dash never joins.
+    let on_foo = hover_markup(&mut fixture, uri.as_str(), 10, 7);
+    assert!(on_foo.contains("from frontmatter `foo`"), "{on_foo}");
+    let on_bar = hover_markup(&mut fixture, uri.as_str(), 10, 12);
+    assert!(on_bar.contains("from frontmatter `bar`"), "{on_bar}");
+    assert_eq!(
+        completion_edit_start(&mut fixture, uri.as_str(), 10, 14, "bar"),
+        Some(json!({ "line": 10, "character": 11 }))
+    );
+    let definition = fixture
+        .request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 10, "character": 12 }
+            }),
+        )
+        .result
+        .expect("definition");
+    assert!(
+        definition.as_array().is_none_or(Vec::is_empty),
+        "`foo--bar` is not a bare variable and must not jump anywhere: {definition}"
+    );
+
+    fixture.shutdown();
+}
+
 const FUNCTION_HOVER_DOC: &str = "# Doc\n\nA: {{ as_csv(items) }} and {{ mystery(items) }}\n";
 
 #[test]
@@ -2678,7 +2841,7 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
         .collect();
     assert_eq!(
         git_context.len(),
-        3,
+        4,
         "the shipped Git context descriptor set changed"
     );
     assert_eq!(
@@ -2702,8 +2865,8 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
                     && descriptor.display_type.to_string() == "string[]"
             })
             .count(),
-        1,
-        "Git context must expose one required string array"
+        2,
+        "Git context must expose two required string arrays (merge_conflicts, recent_commits)"
     );
 
     let git_functions: Vec<_> = expressions::function_descriptors()
@@ -2721,6 +2884,7 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
             "branch_exists_on_remote(branch)",
             "branch_exists_on_remote(branch, remote)",
             "remote_vendor([remote])",
+            "recent_commits(count)",
         ],
         "the shipped Git function signature set changed"
     );
@@ -6549,4 +6713,589 @@ fn server_worker_finishes_before_workspace_release_during_unwind() {
         ],
         "the workspace must be deleted strictly after the worker finished"
     );
+}
+
+/// Requirement 3: every operand position, in a body interpolation and in an
+/// Expression-typed frontmatter value. Each `B*`/`F*` line holds exactly one
+/// flagged identifier, except `B2` (both ternary branches). `S*` lines handle
+/// absence and must stay silent; `D*` lines spell a dash-separated key.
+const OPERAND_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  f1: expression\n",
+    "  f2: expression\n",
+    "  f3: expression\n",
+    "  f4: expression\n",
+    "  f5: expression\n",
+    "  f6: expression\n",
+    "  f7: expression\n",
+    "known: 1\n",
+    "ok: true\n",
+    "foo--bar: x\n",
+    "a-b: y\n",
+    "iteration-1: 3\n",
+    "f1: known - fm_bin\n",
+    "f2: \"known ? fm_then : known\"\n",
+    "f3: lower(fm_arg)\n",
+    "f4: known || fm_rhs\n",
+    "f5: \"fm_quiet ? fm_quiet : is_null(fm_other)\"\n",
+    "f6: 'foo--bar'\n",
+    "f7: a- b\n",
+    "---\n",
+    "\n",
+    "B1: {{ known - bin_op }}\n",
+    "B2: {{ known ? then_b : else_b }}\n",
+    "B3: {{ lower(fn_arg) }}\n",
+    "B4: {{ known || rhs_var }}\n",
+    "B5: {{ is_empty(lower(nested)) }}\n",
+    "S1: {{ quiet1 || \"d\" }} {{ quiet2 ? quiet2 : \"none\" }} {{ is_null(quiet3) }} {{ isEmpty(quiet4) }}\n",
+    "S2: {{ ok ? known : null }} {{ repo }} {{ doc['typo-key'] }}\n",
+    "D1: {{ foo--bar }}\n",
+    "D2: {{ a- b }}\n",
+    "D3: {{ iteration - 1 }} {{ c_op - d_op }}\n",
+);
+
+/// `(line, start character, end character)` of `needle` on the line that
+/// starts with `marker`. ASCII, so UTF-16 columns are byte columns.
+fn span_on(doc: &str, marker: &str, needle: &str) -> (u64, u64, u64) {
+    let (line, text) = doc
+        .lines()
+        .enumerate()
+        .find(|(_, text)| text.starts_with(marker))
+        .unwrap_or_else(|| panic!("no line starting with {marker}"));
+    let start = text.find(needle).unwrap_or_else(|| panic!("{needle} not on {marker}"));
+    (line as u64, start as u64, (start + needle.len()) as u64)
+}
+
+fn diagnostic_span(diagnostic: &Value) -> (u64, u64, u64) {
+    let range = &diagnostic["range"];
+    assert_eq!(range["start"]["line"], range["end"]["line"], "{diagnostic}");
+    (
+        range["start"]["line"].as_u64().unwrap(),
+        range["start"]["character"].as_u64().unwrap(),
+        range["end"]["character"].as_u64().unwrap(),
+    )
+}
+
+fn unknown_identifier_diagnostics(diagnostics: &[Value]) -> Vec<Value> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.expression.unknown_identifier"))
+        .cloned()
+        .collect()
+}
+
+fn open_operand_doc(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace) -> (String, Vec<Value>) {
+    std::fs::write(workspace.path().join("operands.md"), OPERAND_DOC).unwrap();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("operands.md")).unwrap();
+    open(fixture, uri.as_str(), OPERAND_DOC);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    (uri.as_str().to_string(), unknown_identifier_diagnostics(&diagnostics))
+}
+
+#[test]
+fn unknown_identifier_fires_in_every_operand_position_at_warning_severity() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    let (_, unknown) = open_operand_doc(&mut fixture, &workspace);
+
+    let expected = vec![
+        (span_on(OPERAND_DOC, "f1:", "fm_bin"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "f2:", "fm_then"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "f3:", "fm_arg"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "f4:", "fm_rhs"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "f6:", "foo--bar"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "f7:", "a- b"), "darkmatter.frontmatter"),
+        (span_on(OPERAND_DOC, "B1:", "bin_op"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "B2:", "then_b"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "B2:", "else_b"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "B3:", "fn_arg"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "B4:", "rhs_var"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "B5:", "nested"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "D1:", "foo--bar"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "D2:", "a- b"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "D3:", "iteration"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "D3:", "c_op"), "darkmatter.compose"),
+        (span_on(OPERAND_DOC, "D3:", "d_op"), "darkmatter.compose"),
+    ];
+
+    let mut actual: Vec<((u64, u64, u64), String)> = unknown
+        .iter()
+        .map(|diagnostic| {
+            assert_eq!(diagnostic["severity"], json!(2), "WARNING at both sites: {diagnostic}");
+            (diagnostic_span(diagnostic), diagnostic["source"].as_str().unwrap().to_string())
+        })
+        .collect();
+    actual.sort();
+    let mut expected: Vec<((u64, u64, u64), String)> = expected
+        .into_iter()
+        .map(|(range, source)| (range, source.to_string()))
+        .collect();
+    expected.sort();
+    assert_eq!(actual, expected, "{unknown:#?}");
+
+    // The generic message names the root; the key-level one names the key.
+    let message_at = |range: (u64, u64, u64)| {
+        unknown
+            .iter()
+            .find(|diagnostic| diagnostic_span(diagnostic) == range)
+            .map(|diagnostic| diagnostic["message"].as_str().unwrap().to_string())
+            .unwrap()
+    };
+    assert!(message_at(span_on(OPERAND_DOC, "B1:", "bin_op")).starts_with("`bin_op` matches no frontmatter key"));
+    assert!(message_at(span_on(OPERAND_DOC, "D1:", "foo--bar")).contains("frontmatter key `foo--bar` exists"));
+
+    fixture.shutdown();
+}
+
+/// Requirement 3 for Expression-typed values authored across lines: literal
+/// and folded block scalars, a multi-line double-quoted scalar, and multibyte
+/// text before the flagged identifier. Each `blk_*`/`dq_*`/`mb_*` identifier is
+/// unknown and must be flagged at its own authored range.
+const BLOCK_OPERAND_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  g1: expression\n",
+    "  g2: expression\n",
+    "  g3: expression\n",
+    "  g4: expression\n",
+    "known: 1\n",
+    "g1: |\n",
+    "  known - blk_bin\n",
+    "  || lower(blk_arg)\n",
+    "g2: >-\n",
+    "  known ? blk_then\n",
+    "  : blk_else\n",
+    "g3: \"known ||\n",
+    "  dq_rhs\"\n",
+    "g4: |2-\n",
+    "    \"naïve café\" || mb_var\n",
+    "---\n",
+    "\n",
+    "body\n",
+);
+
+/// `(line, start, end)` of the only occurrence of `needle` in `doc`, in the
+/// UTF-16 columns LSP positions use.
+fn utf16_span(doc: &str, needle: &str) -> (u64, u64, u64) {
+    let (line, text) = doc
+        .split('\n')
+        .enumerate()
+        .find(|(_, text)| text.contains(needle))
+        .unwrap_or_else(|| panic!("{needle} not in the document"));
+    let start = text[..text.find(needle).unwrap()].encode_utf16().count();
+    (line as u64, start as u64, (start + needle.encode_utf16().count()) as u64)
+}
+
+#[test]
+#[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
+fn unknown_identifiers_in_block_and_multi_line_expression_values_warn_at_their_own_ranges() {
+    for (name, text) in [
+        ("blocks.md", BLOCK_OPERAND_DOC.to_string()),
+        ("blocks-crlf.md", BLOCK_OPERAND_DOC.replace('\n', "\r\n")),
+    ] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = LspFixture::start(&workspace);
+        std::fs::write(workspace.path().join(name), &text).unwrap();
+        fixture.initialize(vscode_like_initialize_params(workspace.path()));
+        let uri = url::Url::from_file_path(workspace.path().join(name)).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+
+        let mut actual: Vec<(u64, u64, u64)> = unknown
+            .iter()
+            .map(|diagnostic| {
+                assert_eq!(diagnostic["severity"], json!(2), "WARNING: {diagnostic}");
+                assert_eq!(diagnostic["source"], json!("darkmatter.frontmatter"), "{diagnostic}");
+                diagnostic_span(diagnostic)
+            })
+            .collect();
+        actual.sort();
+        let mut expected: Vec<(u64, u64, u64)> =
+            ["blk_bin", "blk_arg", "blk_then", "blk_else", "dq_rhs", "mb_var"]
+                .into_iter()
+                .map(|needle| utf16_span(BLOCK_OPERAND_DOC, needle))
+                .collect();
+        expected.sort();
+        assert_eq!(actual, expected, "{name}: {unknown:#?}");
+
+        fixture.shutdown();
+    }
+}
+
+/// Requirement 3 for Expression-typed values behind YAML node properties: a
+/// tag, an anchor, both in either order, and an alias. Each `tag_*`/`anc_*`/
+/// `ali_*` identifier is unknown and must be flagged once, where it is
+/// authored. `dup_*` and the malformed `&mal` sit behind redefined anchors,
+/// whose definition is not provable from the text: they are diagnosed on the
+/// alias token instead (`café`/`naïve` keys make its UTF-16 columns differ
+/// from bytes), each distinct issue once and without a quick-fix.
+const NODE_PROPERTY_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  t1: expression\n",
+    "  t2: expression\n",
+    "  t3: expression\n",
+    "  t4: expression\n",
+    "  t5: expression\n",
+    "  t6: expression\n",
+    "  t7: expression\n",
+    "  café: expression\n",
+    "  naïve: expression\n",
+    "  t9: expression\n",
+    "known: 1\n",
+    "t1: !!str known - tag_bin\n",
+    "t2: !<tag:yaml.org,2002:str> \"known ? tag_then : lower(tag_arg)\"\n",
+    "t3: !!str |-\n",
+    "  \"naïve café\" || tag_block\n",
+    "t4: &reused !!str '\"naïve café\" || anc_both'\n",
+    "t5: *reused\n",
+    "t6: !!str &late \"\\\"naïve café\\\" || anc_late\"\n",
+    "defaults:\n",
+    "  - cond: &only >-\n",
+    "      \"naïve café\"\n",
+    "      || ali_only\n",
+    "t7: *only\n",
+    "first: &dup known || dup_first\n",
+    "second: &dup known - dup_second - dup_second - dup_other\n",
+    "café: *dup\n",
+    "bad1: &mal '1 +'\n",
+    "bad2: &mal 'known || lower('\n",
+    "naïve: *mal\n",
+    "t9: !!str '\"naïve café\" || lower('\n",
+    "---\n",
+    "\n",
+    "body\n",
+);
+
+#[test]
+#[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
+fn tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_authored() {
+    for (name, text) in [
+        ("properties.md", NODE_PROPERTY_DOC.to_string()),
+        ("properties-crlf.md", NODE_PROPERTY_DOC.replace('\n', "\r\n")),
+    ] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = LspFixture::start(&workspace);
+        std::fs::write(workspace.path().join(name), &text).unwrap();
+        fixture.initialize(vscode_like_initialize_params(workspace.path()));
+        let uri = url::Url::from_file_path(workspace.path().join(name)).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+
+        let unknown = unknown_identifier_diagnostics(&diagnostics);
+        let mut actual: Vec<(u64, u64, u64)> = unknown
+            .iter()
+            .map(|diagnostic| {
+                assert_eq!(diagnostic["severity"], json!(2), "WARNING: {diagnostic}");
+                assert_eq!(diagnostic["source"], json!("darkmatter.frontmatter"), "{diagnostic}");
+                diagnostic_span(diagnostic)
+            })
+            .collect();
+        actual.sort();
+        // `*dup` carries two distinct issues on one range; the repeated
+        // `dup_second` collapses into one of them.
+        let mut expected: Vec<(u64, u64, u64)> = [
+            "tag_bin", "tag_then", "tag_arg", "tag_block", "anc_both", "anc_late", "ali_only", "*dup", "*dup",
+        ]
+        .into_iter()
+        .map(|needle| utf16_span(NODE_PROPERTY_DOC, needle))
+        .collect();
+        expected.sort();
+        assert_eq!(actual, expected, "{name}: {unknown:#?}");
+
+        let alias_token = utf16_span(NODE_PROPERTY_DOC, "*dup");
+        assert_eq!(alias_token, (27, 6, 10), "UTF-16 columns, not the byte offset 7");
+        let mut on_the_alias: Vec<&str> = unknown
+            .iter()
+            .filter(|diagnostic| diagnostic_span(diagnostic) == alias_token)
+            .map(|diagnostic| {
+                assert!(diagnostic.get("data").is_none_or(Value::is_null), "no fix on an alias token: {diagnostic}");
+                diagnostic["message"].as_str().unwrap()
+            })
+            .collect();
+        on_the_alias.sort();
+        assert_eq!(on_the_alias.len(), 2, "{on_the_alias:#?}");
+        assert!(on_the_alias[0].contains("`dup_other`") && on_the_alias[1].contains("`dup_second`"), "{on_the_alias:#?}");
+
+        let mut malformed: Vec<(u64, u64, u64)> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.expression.malformed"))
+            .map(|diagnostic| {
+                assert_eq!(diagnostic["severity"], json!(2), "WARNING: {diagnostic}");
+                diagnostic_span(diagnostic)
+            })
+            .collect();
+        malformed.sort();
+        assert_eq!(
+            malformed,
+            [utf16_span(NODE_PROPERTY_DOC, "*mal"), utf16_span(NODE_PROPERTY_DOC, "\"naïve café\" || lower(")],
+            "{name}: {diagnostics:#?}"
+        );
+        assert_eq!(utf16_span(NODE_PROPERTY_DOC, "*mal"), (30, 7, 11));
+
+        fixture.shutdown();
+    }
+}
+
+/// The fix for an aliased expression edits the anchor's scalar, so its
+/// replacement avoids that scalar's quote, not anything at the alias token.
+#[test]
+#[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
+fn an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote() {
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  when: expression\n",
+        "foo--bar: x\n",
+        "defaults:\n",
+        "  - &cond 'foo--bar'\n",
+        "when: *cond\n",
+        "---\n",
+        "\n",
+        "body\n",
+    );
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    std::fs::write(workspace.path().join("alias-fix.md"), text).unwrap();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("alias-fix.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+
+    assert_eq!(unknown.len(), 1, "{unknown:#?}");
+    assert_eq!(diagnostic_span(&unknown[0]), (5, 11, 19), "inside the anchored scalar: {}", unknown[0]);
+    assert_eq!(
+        unknown[0]["data"],
+        json!({ "key": "foo--bar", "replacement": "doc[\"foo--bar\"]" }),
+        "{}",
+        unknown[0]
+    );
+
+    fixture.shutdown();
+}
+
+/// Behind a redefined anchor the same finding lands on the alias token, where
+/// a replacement range would be wrong: it carries no fix.
+#[test]
+#[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
+fn a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix() {
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  when: expression\n",
+        "foo--bar: x\n",
+        "defaults:\n",
+        "  - &cond 'other'\n",
+        "  - &cond 'foo--bar'\n",
+        "when: *cond\n",
+        "---\n",
+        "\n",
+        "body\n",
+    );
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    std::fs::write(workspace.path().join("alias-no-fix.md"), text).unwrap();
+    fixture.initialize(vscode_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("alias-no-fix.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+
+    assert_eq!(unknown.len(), 1, "{unknown:#?}");
+    assert_eq!(diagnostic_span(&unknown[0]), (7, 6, 11), "the alias token: {}", unknown[0]);
+    assert_eq!(unknown[0]["severity"], json!(2), "WARNING: {}", unknown[0]);
+    assert!(unknown[0].get("data").is_none_or(Value::is_null), "{}", unknown[0]);
+    let actions = fixture
+        .request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "range": unknown[0]["range"],
+                "context": { "diagnostics": [unknown[0]] }
+            }),
+        )
+        .result
+        .expect("code actions");
+    assert!(actions.as_array().is_none_or(Vec::is_empty), "{actions:#?}");
+
+    fixture.shutdown();
+}
+
+/// An alias is analyzed in the node the YAML parser resolved it to, which no
+/// reading of the text has to find: a `-` sequence item with an explicit
+/// indentation indicator, a multi-line plain scalar in a nested mapping, an
+/// anchor whose name a comment and a string repeat, a scalar on the line after
+/// its anchor, and an anchor redefined only after the alias. `*shape` is a
+/// collection and reports nothing; `a7` reads `&later` after its redefinition
+/// and keeps the alias token.
+const RESOLVED_ALIAS_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  a1: expression\n",
+    "  a2: expression\n",
+    "  a3: expression\n",
+    "  a4: expression\n",
+    "  a5: expression\n",
+    "  a6: expression\n",
+    "  a7: expression\n",
+    "known: 1\n",
+    "defs:\n",
+    "  - &seq |2-\n",
+    "      \"naïve café\" || ali_seq\n",
+    "  - nested:\n",
+    "      deep: &deep known ||\n",
+    "        ali_deep\n",
+    "  - &noted '\"naïve café\" || ali_noted' # see &noted\n",
+    "  - \"mentions &noted too\"\n",
+    "  - &shape { a: 1 }\n",
+    "next: &next\n",
+    "  known || ali_next\n",
+    "early: &later known || ali_before\n",
+    "a1: *seq\n",
+    "a2: *deep\n",
+    "a3: *noted\n",
+    "a4: *next\n",
+    "a5: *later\n",
+    "a6: *shape\n",
+    "again: &later known || ali_after\n",
+    "a7: *later\n",
+    "---\n",
+    "\n",
+    "body\n",
+);
+
+#[test]
+#[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
+fn aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved() {
+    for (name, text) in [
+        ("resolved.md", RESOLVED_ALIAS_DOC.to_string()),
+        ("resolved-crlf.md", RESOLVED_ALIAS_DOC.replace('\n', "\r\n")),
+    ] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = LspFixture::start(&workspace);
+        std::fs::write(workspace.path().join(name), &text).unwrap();
+        fixture.initialize(vscode_like_initialize_params(workspace.path()));
+        let uri = url::Url::from_file_path(workspace.path().join(name)).unwrap();
+        open(&fixture, uri.as_str(), &text);
+        let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+
+        let mut actual: Vec<(u64, u64, u64)> = unknown
+            .iter()
+            .map(|diagnostic| {
+                assert_eq!(diagnostic["severity"], json!(2), "WARNING: {diagnostic}");
+                assert_eq!(diagnostic["source"], json!("darkmatter.frontmatter"), "{diagnostic}");
+                diagnostic_span(diagnostic)
+            })
+            .collect();
+        actual.sort();
+        let redefined = span_on(RESOLVED_ALIAS_DOC, "a7:", "*later");
+        let mut expected: Vec<(u64, u64, u64)> = ["ali_seq", "ali_deep", "ali_noted", "ali_next", "ali_before"]
+            .into_iter()
+            .map(|needle| utf16_span(RESOLVED_ALIAS_DOC, needle))
+            .chain([redefined])
+            .collect();
+        expected.sort();
+        assert_eq!(actual, expected, "{name}: {unknown:#?}");
+
+        let on_the_alias = unknown
+            .iter()
+            .find(|diagnostic| diagnostic_span(diagnostic) == redefined)
+            .expect("asserted above");
+        assert!(on_the_alias["message"].as_str().unwrap().contains("`ali_after`"), "{on_the_alias}");
+
+        fixture.shutdown();
+    }
+}
+
+#[test]
+fn dash_separated_key_carries_its_replacement_and_quick_fix() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    let (uri, unknown) = open_operand_doc(&mut fixture, &workspace);
+    let at = |marker: &str, needle: &str| {
+        let range = span_on(OPERAND_DOC, marker, needle);
+        unknown
+            .iter()
+            .find(|diagnostic| diagnostic_span(diagnostic) == range)
+            .unwrap_or_else(|| panic!("no diagnostic at {marker} {needle}: {unknown:#?}"))
+            .clone()
+    };
+
+    let cases = [
+        (at("D1:", "foo--bar"), "foo--bar", "doc['foo--bar']"),
+        (at("D2:", "a- b"), "a-b", "a-b"),
+        // Single-quoted YAML: the replacement must not use `'`.
+        (at("f6:", "foo--bar"), "foo--bar", "doc[\"foo--bar\"]"),
+        (at("f7:", "a- b"), "a-b", "a-b"),
+    ];
+    for (diagnostic, key, replacement) in &cases {
+        assert_eq!(
+            diagnostic["data"],
+            json!({ "key": key, "replacement": replacement }),
+            "structured data: {diagnostic}"
+        );
+        // With `data` echoed, and without it (a client that drops `data`): the
+        // same single edit over the subtraction.
+        let mut stripped = diagnostic.clone();
+        stripped.as_object_mut().unwrap().remove("data");
+        for sent in [diagnostic.clone(), stripped] {
+            let actions = fixture
+                .request(
+                    "textDocument/codeAction",
+                    json!({
+                        "textDocument": { "uri": uri },
+                        "range": sent["range"],
+                        "context": { "diagnostics": [sent] }
+                    }),
+                )
+                .result
+                .expect("code actions");
+            let actions = actions.as_array().expect("action array");
+            assert_eq!(actions.len(), 1, "{actions:#?}");
+            assert_eq!(actions[0]["kind"], json!("quickfix"));
+            assert_eq!(collect_new_texts(&actions[0]["edit"]), [replacement.to_string()]);
+            let edit_range = &actions[0]["edit"]["documentChanges"][0]["edits"][0]["range"];
+            assert_eq!(edit_range, &diagnostic["range"], "{actions:#?}");
+        }
+    }
+
+    // Ambiguous arithmetic: generic diagnostics with no data and no fix.
+    for (marker, needle) in [("D3:", "iteration"), ("B1:", "bin_op")] {
+        let diagnostic = at(marker, needle);
+        assert!(diagnostic.get("data").is_none_or(Value::is_null), "{diagnostic}");
+        let actions = fixture
+            .request(
+                "textDocument/codeAction",
+                json!({
+                    "textDocument": { "uri": uri },
+                    "range": diagnostic["range"],
+                    "context": { "diagnostics": [diagnostic] }
+                }),
+            )
+            .result
+            .expect("code actions");
+        assert!(actions.as_array().is_none_or(Vec::is_empty), "{actions:#?}");
+    }
+
+    fixture.shutdown();
+}
+
+#[test]
+fn a_frontmatter_less_document_never_reports_unknown_identifiers() {
+    let text = "# No frontmatter\n\n{{ mystery - other }} {{ a ? b : lower(c) }} {{ foo--bar }}\n";
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join("bare.md"), text).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("bare.md")).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        unknown_identifier_diagnostics(&diagnostics).is_empty(),
+        "any name could be a `--set` value: {diagnostics:#?}"
+    );
+
+    fixture.shutdown();
 }

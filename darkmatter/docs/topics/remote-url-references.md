@@ -51,16 +51,22 @@ since it injects fetched bodies into the document.
 
 ## Cache And Freshness
 
-Remote response bodies can be stored in the persistent compose cache when a
-cache root is configured:
+Raw remote response bodies (transport artifacts) can be stored in the remote
+transport cache when a cache root is configured. The store lives at
+`<cache-root>/.darkmatter/cache/v1/`; semantic results such as composed
+documents are never persisted. A cache root never authorizes a host.
 
 ```bash
-md compose doc.md --allow-host example.com --cache-root .darkmatter/cache/v1
+md compose doc.md --allow-host example.com --cache-root .
 ```
 
-Freshness is resolved in this order:
+Response `Cache-Control` outranks everything below: a `no-store` response is
+never written (an existing `no-store` entry is removed), and a `no-cache`
+response is revalidated before every reuse.
 
-1. `--remote-ttl <SECONDS>` overrides server cache headers.
+Otherwise, freshness is resolved in this order:
+
+1. `--remote-ttl <SECONDS>` overrides the server's `max-age`.
 2. `Cache-Control: max-age=<SECONDS>` sets the remote artifact expiry.
 3. No TTL means the artifact is revalidated according to the freshness mode.
 
@@ -68,11 +74,14 @@ Freshness modes:
 
 - `fallback` (the default) revalidates stale artifacts but serves the stale
   cached body on network or HTTP failure, keeping CI/offline builds resilient.
+  A `no-cache` body is never served stale.
 - `strict` revalidates stale remote artifacts and fails when revalidation fails.
-- `optimistic` serves an existing cached body without revalidation.
+- `optimistic` serves an existing cached body without revalidation, except a
+  `no-cache` body.
 
 `--remote-refresh` forces revalidation even when a cached remote artifact is
-still fresh.
+still fresh. See [Caching](./caching.md#remote-transport-cache) for the full
+contract.
 
 Conditional revalidation uses `If-None-Match` and `If-Modified-Since` when the
 server previously returned `ETag` or `Last-Modified`.

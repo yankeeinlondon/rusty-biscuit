@@ -485,6 +485,42 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
     );
 }
 
+/// More-context plan Phase 4, end to end through the shipped catalogs: the
+/// added `ctx.*` variables and typed function signatures (including the
+/// refined `ip-address` argument, the `"unstable" | null` return union, and the
+/// generated agentic-CLI enum) reach `md --verbose schema about`.
+#[test]
+fn verbose_schema_about_projects_more_context_descriptors() {
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
+        .args(["--verbose", "schema", "about"])
+        .output()
+        .expect("run verbose md schema about");
+    assert!(output.status.success());
+    let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for needle in [
+        "ctx.self",
+        "ctx.hash",
+        "ctx.id",
+        "ctx.sid",
+        "ctx.hostname",
+        "ctx.tailnet",
+        "ctx.gateway_v6",
+        "ctx.recent_commits",
+        "recent_commits(count: number(integer)) -> string[] | error",
+        "ping(address: ip-address, [timeout: number]) -> boolean | null | error",
+        "-> boolean | \"unstable\" | null | error",
+        "has_agentic_cli(agent: enum(claude, codex,",
+        "has_binary(name_or_path: string) -> boolean",
+        "as_markdown(content: string) -> string | error",
+    ] {
+        assert!(normalized.contains(needle), "verbose schema about missing `{needle}`");
+    }
+}
+
 #[test]
 fn schema_about_verbose_prints_context_and_expression_sections() {
     let process = CliProcessFixture::new();

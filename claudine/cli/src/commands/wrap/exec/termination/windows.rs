@@ -63,6 +63,28 @@ fn as_handle(raw: isize) -> windows::Win32::Foundation::HANDLE {
     windows::Win32::Foundation::HANDLE(raw as *mut core::ffi::c_void)
 }
 
+/// Whether `handle`'s process has already exited.
+///
+/// Reads the exit code rather than reaping through [`std::process::Child`], so
+/// the caller's later `wait` still observes the child itself. A process whose
+/// real exit code is `STILL_ACTIVE` (259) is reported as running for as long
+/// as it is alive anyway, which is the standard Win32 caveat and harmless
+/// here: the caller only widens an error into a warning.
+fn child_already_exited(handle: windows::Win32::Foundation::HANDLE) -> bool {
+    use windows::Win32::Foundation::STILL_ACTIVE;
+    use windows::Win32::System::Threading::GetExitCodeProcess;
+
+    let mut code = 0u32;
+    // Safety: `handle` is the live process handle owned by the caller's
+    // `Child`, and `code` is a valid out-parameter for the call's lifetime.
+    match unsafe { GetExitCodeProcess(handle, &mut code) } {
+        Ok(()) => code != STILL_ACTIVE.0 as u32,
+        // The handle could not be queried, so nothing is known about the
+        // process; let the caller treat the original failure as real.
+        Err(_) => false,
+    }
+}
+
 struct JobObjectCloser;
 
 impl HandleCloser for JobObjectCloser {
@@ -450,10 +472,32 @@ fn windows_wait_loop(
     // Assign the child to the Job. Per Windows docs, assignment works after
     // spawn as long as the child hasn't spawned descendants yet — true here
     // because we assign immediately after `Command::spawn`.
+    //
+    // A child that has already exited cannot be assigned, and Windows reports
+    // that as ERROR_ACCESS_DENIED — the same code a genuine permission failure
+    // returns, so the error alone cannot tell them apart. Ask the child
+    // instead. The Job exists solely to kill descendants when it closes, and a
+    // process that has exited has none to kill, so losing that race is not a
+    // launch failure; every other cause still is. A provider that fails fast
+    // (a rejected flag, an auth refusal) exits in milliseconds and hits this
+    // on every run — `sequence --budget-ledger`, which is what configures the
+    // timeout that selects this wait loop, failed outright on Windows until
+    // 2026-09-21 for exactly that reason.
     if child_in_own_pgroup {
-        unsafe { AssignProcessToJobObject(as_handle(job.raw()), child_handle)?; }
-        #[cfg(test)]
-        tests::signal_job_assignment(child_pid);
+        match unsafe { AssignProcessToJobObject(as_handle(job.raw()), child_handle) } {
+            Ok(()) => {
+                #[cfg(test)]
+                tests::signal_job_assignment(child_pid);
+            }
+            Err(error) if child_already_exited(child_handle) => {
+                tracing::debug!(
+                    pid = child_pid,
+                    %error,
+                    "child exited before Job assignment; continuing without a Job"
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 
     // Declared after `job` so it drops *first*: the console handler may

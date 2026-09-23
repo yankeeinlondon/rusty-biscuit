@@ -6,6 +6,8 @@ use super::types::{PageBlockError, PageBlockRegion};
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::expression::EvaluationLookup;
 use crate::markdown::compose::ComposeReport;
+use crate::markdown::compose::body_origin::TextEdit;
+use crate::markdown::compose::context::report::CandidateLocus;
 use biscuit_terminal::errors::SourceContext;
 use tracing::debug;
 
@@ -21,8 +23,22 @@ pub fn render_page_blocks<L: EvaluationLookup>(
     report: &mut ComposeReport,
     ctx: SourceContext,
 ) -> Result<String, PageBlockError> {
+    render_page_blocks_with_edits(content, regions, state, report, ctx).map(|(output, _)| output)
+}
+
+/// [`render_page_blocks`], also returning the edits the rendering made to
+/// `content` in source order: a false block's whole region and a true block's
+/// opening and closing directive lines, each replaced by nothing.
+pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
+    content: &str,
+    regions: &[PageBlockRegion],
+    state: &L,
+    report: &mut ComposeReport,
+    ctx: SourceContext,
+) -> Result<(String, Vec<TextEdit>), PageBlockError> {
     debug!(region_count = regions.len(), "page_blocks: rendering");
 
+    let mut edits = Vec::new();
     let mut output = String::with_capacity(content.len());
     let mut cursor = 0;
 
@@ -37,13 +53,25 @@ pub fn render_page_blocks<L: EvaluationLookup>(
                 {
                     report.add_warning(warning.at_line(region.start_line));
                 }
-                conditions::evaluate_condition(expr, state, region.start_line, ctx.clone())?
+                let mut missing = Vec::new();
+                let condition = conditions::evaluate_condition_observed(
+                    expr,
+                    state,
+                    region.start_line,
+                    ctx.clone(),
+                    &mut missing,
+                )?;
+                report.add_unknown_root_candidates("condition", missing, |_| {
+                    CandidateLocus::BodyLine(region.start_line)
+                });
+                condition
             }
             None => true, // No when → treated as enabled
         };
 
         if condition {
             // Render body, recursively processing nested children
+            removed(&mut edits, region.span.start..region.body_span.start);
             let body = render_body(
                 content,
                 &region.body_span,
@@ -51,11 +79,14 @@ pub fn render_page_blocks<L: EvaluationLookup>(
                 state,
                 report,
                 &ctx,
+                &mut edits,
             )?;
+            removed(&mut edits, region.body_span.end..region.span.end);
             output.push_str(&body);
             report.page_blocks_rendered += 1;
         } else {
             // False block: append nothing
+            removed(&mut edits, region.span.clone());
             report.page_blocks_skipped += 1;
         }
 
@@ -65,7 +96,13 @@ pub fn render_page_blocks<L: EvaluationLookup>(
     // Append trailing content after the last block
     output.push_str(&content[cursor..]);
 
-    Ok(output)
+    Ok((output, edits))
+}
+
+fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
+    if !range.is_empty() {
+        edits.push(TextEdit { range, replacement_len: 0 });
+    }
 }
 
 /// Renders the body of a block, recursively processing nested child blocks.
@@ -76,6 +113,7 @@ fn render_body<L: EvaluationLookup>(
     state: &L,
     report: &mut ComposeReport,
     ctx: &SourceContext,
+    edits: &mut Vec<TextEdit>,
 ) -> Result<String, PageBlockError> {
     if children.is_empty() {
         return Ok(content[body_span.clone()].to_string());
@@ -95,12 +133,24 @@ fn render_body<L: EvaluationLookup>(
                 {
                     report.add_warning(warning.at_line(child.start_line));
                 }
-                conditions::evaluate_condition(expr, state, child.start_line, ctx.clone())?
+                let mut missing = Vec::new();
+                let condition = conditions::evaluate_condition_observed(
+                    expr,
+                    state,
+                    child.start_line,
+                    ctx.clone(),
+                    &mut missing,
+                )?;
+                report.add_unknown_root_candidates("condition", missing, |_| {
+                    CandidateLocus::BodyLine(child.start_line)
+                });
+                condition
             }
             None => true,
         };
 
         if condition {
+            removed(edits, child.span.start..child.body_span.start);
             let body = render_body(
                 content,
                 &child.body_span,
@@ -108,10 +158,13 @@ fn render_body<L: EvaluationLookup>(
                 state,
                 report,
                 ctx,
+                edits,
             )?;
+            removed(edits, child.body_span.end..child.span.end);
             output.push_str(&body);
             report.page_blocks_rendered += 1;
         } else {
+            removed(edits, child.span.clone());
             report.page_blocks_skipped += 1;
         }
 
@@ -307,6 +360,32 @@ mod tests {
         assert_eq!(output, "B\n");
         assert_eq!(report.page_blocks_rendered, 1);
         assert_eq!(report.page_blocks_skipped, 2);
+    }
+
+    /// The reported edits describe the rendering exactly: replaying them on
+    /// the input reproduces the output, nested and false blocks included.
+    #[test]
+    fn reported_edits_replay_to_the_rendered_output() {
+        use std::path::PathBuf;
+        let content = "a\n::block when=\"t\"\nB\n::block when=\"f\"\nC\n::end-block\nD\n::end-block\nE\n::block when=\"f\"\nF\n::end-block\nG\n";
+        let state = state_with(json!({"t": true, "f": false}));
+        let source = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
+        let regions = parse_page_blocks(content, source.clone()).unwrap();
+        let mut report = ComposeReport::default();
+        let (output, edits) =
+            render_page_blocks_with_edits(content, &regions, &state, &mut report, source).unwrap();
+
+        let mut replayed = String::new();
+        let mut cursor = 0;
+        for edit in &edits {
+            assert!(edit.range.start >= cursor, "edits are sorted and disjoint: {edits:?}");
+            assert_eq!(edit.replacement_len, 0);
+            replayed.push_str(&content[cursor..edit.range.start]);
+            cursor = edit.range.end;
+        }
+        replayed.push_str(&content[cursor..]);
+        assert_eq!(output, "a\nB\nD\nE\nG\n");
+        assert_eq!(replayed, output);
     }
 
     #[test]

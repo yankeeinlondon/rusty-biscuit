@@ -209,6 +209,21 @@ fn observe_prepared_context(
     }
 }
 
+/// The refresh capability a preparation with no invocation context installs.
+///
+/// Answering nothing is the point: a caller that supplied no launch evidence
+/// gets `null` plus a `PartialRuntimeCapture` diagnostic for every
+/// `current.<key>`, rather than an ambient observation of whatever host and
+/// directory the process happens to be in.
+#[derive(Debug)]
+struct UnsuppliedRefresh;
+
+impl darkmatter::markdown::compose::CurrentProvider for UnsuppliedRefresh {
+    fn refresh(&self, _key: &str) -> darkmatter::markdown::compose::CurrentRefresh {
+        darkmatter::markdown::compose::CurrentRefresh::Unsupported
+    }
+}
+
 /// The one `ComposeOptions` shape every canonical preparation stage composes
 /// with.
 ///
@@ -223,8 +238,37 @@ fn canonical_compose_options(
     options: &PrepareOptions,
     schema_phase: Option<SchemaPhase>,
 ) -> ComposeOptions {
+    // A transcluded source may name a group the root did not. The snapshot
+    // grows from the evidence that produced it: the invocation's launch
+    // evidence for a prepared snapshot, host discovery for the ambient fallback
+    // `derive_compose_context` captured.
+    let authority = match (
+        options.prepared_context.is_some(),
+        options.document_epoch.as_ref(),
+        options.invocation_context.as_ref(),
+    ) {
+        (false, _, _) => darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned,
+        (true, Some(epoch), _) => epoch.compose_context_authority(),
+        (true, None, Some(invocation)) => invocation.compose_context_authority(),
+        (true, None, None) => darkmatter::markdown::compose::ContextAuthority::CallerSupplied,
+    };
+    // Claudine never takes Darkmatter's ambient anchored refresh for the lazy
+    // `current` root: an invocation owns its launch evidence, and rediscovering
+    // the host from the process CWD is exactly what the launch anchor forbids.
+    // Without an invocation there is no evidence at all, so every `current.*`
+    // read fails closed rather than probing (spec R30–R33, decision D5).
+    let current_provider = match (
+        options.document_epoch.as_ref(),
+        options.invocation_context.as_ref(),
+    ) {
+        (Some(epoch), _) => epoch.current_provider(),
+        (None, Some(invocation)) => invocation.current_provider(),
+        (None, None) => std::sync::Arc::new(UnsuppliedRefresh) as _,
+    };
     let mut compose_opts = bind_agent_workspace(
-        ComposeOptions::new_with_context(ctx.clone()),
+        ComposeOptions::new_with_context(ctx.clone())
+            .with_context_authority(authority)
+            .with_current_provider(current_provider),
         source_path,
         options.shell_working_directory.as_deref(),
     )
@@ -702,8 +746,8 @@ fn effective_surface(
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
-    // executed command. Late-binding references (`err`/`timing`/`current`)
-    // are rejected with a typed error.
+    // executed command. Late-binding references (`err`/`timing`/`current`/
+    // `current_env`) are rejected with a typed error.
     super::preflight::resolve_lifecycle_shell_commands(
         &mut lifecycle,
         effective_frontmatter,

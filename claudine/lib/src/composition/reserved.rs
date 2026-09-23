@@ -16,4 +16,9 @@ pub(crate) const EXPRESSION_RESERVED_ROOTS: &[&str] = &["true", "false", "doc", 
 pub(crate) const SET_ACTION_BLOCKLIST: &[&str] = &["loop", "replace"];
 
 /// Runtime-only lifecycle roots resolved after document preparation.
-pub const LATE_BINDING_ROOTS: &[&str] = &["err", "timing", "current"];
+///
+/// `current` and `current_env` are Darkmatter reserved roots rather than
+/// Claudine globals, but they are late-binding in exactly the sense this list
+/// means: they observe a fact when the reference is reached, so a `shell`
+/// command approved against early-binding surfaces alone cannot reference them.
+pub const LATE_BINDING_ROOTS: &[&str] = &["err", "timing", "current", "current_env"];

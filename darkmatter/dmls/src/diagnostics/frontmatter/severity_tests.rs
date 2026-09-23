@@ -118,8 +118,9 @@ fn pending_values_are_deferred_before_parsing() {
                 &ValidationOptions::default(),
             );
             assert!(rejecting.problems.iter().any(|problem| problem.path == "/when"));
+            let expression_values = crate::providers::frontmatter::expression_values(ctx, ast);
             let mut out = Vec::new();
-            expression_diagnostics(ctx, ast, &rejecting, &mut out);
+            expression_diagnostics(ctx, ast, &rejecting, &expression_values, &mut out);
             assert!(out.is_empty(), "{value}: {out:#?}");
         });
     }

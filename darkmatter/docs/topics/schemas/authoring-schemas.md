@@ -93,6 +93,19 @@ $schema:
     registered: boolean(required)
 ```
 
+#### Defaults, optional values, and runtime presence
+
+Properties are optional unless their definition includes `required`. An
+unbound optional property therefore remains nullable at a use site, including
+when its definition contains `default(...)`: schema defaults are metadata and
+are not applied as runtime values. Only `required` or a concrete non-null
+frontmatter/caller binding establishes that a property is non-null.
+
+This distinction matters when an expression supplies a directive target. DMLS
+warns about an unguarded whole-value target such as `::file {{log}}` when
+`log` is optional. Bind `log`, declare it `file(required)`, or guard the use
+with `::block when="file_exists(log)"`.
+
 #### Descriptors
 
 Schema's -- _by their very nature_ -- describe a data structure but by allowing a schema to describe itself in prose as well as it's innate rule based structure, it can add a tremendous amount of clarity to schemas. This clarity is not only available as documentation but can also be picked up by language servers too.

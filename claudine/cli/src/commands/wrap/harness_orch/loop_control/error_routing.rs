@@ -53,12 +53,7 @@ pub(super) fn run_catch_protocol(
             ),
             LifecycleCatchExecution::RedesignateBlockedAsFailure => {
                 guard.redesignate_terminal_to_failure();
-                let (timing, current) = capture_lifecycle_globals(
-                    source_path,
-                    repo_root,
-                    guard.context().launch_area,
-                    loop_start,
-                );
+                let timing = capture_lifecycle_timing(loop_start);
                 let failure_ctx = build_lifecycle_stack_context_for_materialized(
                     step.signal,
                     materialized,
@@ -73,7 +68,6 @@ pub(super) fn run_catch_protocol(
                     effect_engine,
                     step.error.as_ref(),
                     Some(&timing),
-                    Some(&current),
                 );
                 guard.run_event_stack(step.signal, &failure_ctx)
             }

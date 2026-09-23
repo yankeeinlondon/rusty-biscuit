@@ -4,7 +4,8 @@ use sniff::os::OsType;
 use super::super::format;
 use super::snapshot::ContextCapture;
 
-pub(super) const OS_KEYS: &[&str] = &["os", "os_distro", "os_package_manager", "os_version"];
+pub(super) const OS_KEYS: &[&str] =
+    &["os", "os_distro", "os_package_manager", "os_version", "hostname"];
 pub(super) const HARDWARE_KEYS: &[&str] = &[
     "memory_total", "memory_used", "memory_avail", "cpu_cores", "cpu_arch",
 ];
@@ -52,6 +53,14 @@ pub(super) fn populate_os(cap: &ContextCapture, values: &mut Map<String, Value>)
     values.insert(
         "os_version".into(),
         Value::String(os_info.map(|info| info.version.clone()).unwrap_or_default()),
+    );
+
+    values.insert(
+        "hostname".into(),
+        os_info
+            .map(|info| info.hostname.as_str())
+            .filter(|hostname| !hostname.is_empty())
+            .map_or(Value::Null, |hostname| Value::String(hostname.to_string())),
     );
 }
 

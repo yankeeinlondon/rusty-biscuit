@@ -70,20 +70,30 @@ because the mistake now ships.
 
 | Surface | Parse error | Evaluation error |
 | --- | --- | --- |
-| Frontmatter interpolation | fatal `MarkdownError`; exit 1 | fatal `MarkdownError`; exit 1 |
+| Frontmatter interpolation, whole-value and mixed-text | fatal `MarkdownError`; exit 1 | fatal `MarkdownError`; exit 1 |
 | `when="…"` conditions | fatal `ConditionError`; exit 1 | fatal `ConditionError`; exit 1 |
-| Body interpolation | fatal; exit 1 | fatal; exit 1 |
+| `$()` ternary conditions and branches | fatal; exit 1 | fatal; exit 1 |
+| Body interpolation | fatal `MarkdownError`; exit 1 | fatal `MarkdownError`; exit 1 |
 
-> **Known deviation.** Body interpolation does not yet honor this rule: a parse
-> or evaluation failure there emits a warning on stderr, leaves the `{{ … }}` in
-> the output verbatim, and exits 0. That is a defect, not a design — it is why a
-> `{{spec-name}}` typo can reach a composed prompt unnoticed. Tracked by
-> [dasherized identifiers](../../../features/2026-09-15-dasherized-identifiers/spec.md).
+The error names the source file, the authored line and column, and the
+expression, and no partially composed document is written. `ComposeOptions::with_fail_fast(false)`
+does not relax this; it governs recoverable non-expression stages only. The one
+lenient path is an explicit `compose_subtree(..., SubtreeStrictness::Lenient)`
+call over a data tree. The public condition API (`evaluate_condition`,
+`parse_condition`) returns its failures as `Result` errors and leaves their
+disposition to the caller.
+
+A well-formed identifier that resolves to nothing is **not** a failure: it
+renders empty and warns with `dm.expression.unknown_identifier` unless something
+knows the name or the author handled its absence. See
+[Interpolation § Missing Variables](../../inline/interpolation.md#missing-variables).
 
 The language server also carries static checks over the same AST, so an author
 sees the problem while editing rather than at compose time. Those checks
 complement the runtime contract; they do not substitute for it. See
-[grammar.md](./grammar.md#what-the-language-server-sees).
+[grammar.md](./grammar.md#what-the-language-server-sees). Diagnostic codes are
+shared across surfaces under the
+[`dm.*` registry rules](../../../dmls/docs/diagnostics.md#dm-registry-rules).
 
 ## Where a span points
 

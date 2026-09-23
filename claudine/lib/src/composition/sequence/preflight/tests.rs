@@ -1102,10 +1102,14 @@ mod shell {
         assert_eq!(root, "outputs");
     }
 
-    /// The lifecycle late-binding globals are rejected for the same reason.
+    /// The lifecycle late-binding roots are rejected for the same reason.
+    ///
+    /// `current` and `current_env` belong here even though Darkmatter owns
+    /// them: both observe a fact when the reference is reached, and a shell
+    /// command is resolved at preflight before any event fires (R33).
     #[test]
     fn lifecycle_late_binding_in_a_shell_command_is_rejected() {
-        for root_name in ["err", "timing", "current"] {
+        for root_name in ["err", "timing", "current", "current_env"] {
             let dir = TempDir::new().unwrap();
             let command = format!("echo {{{{ {root_name}.message }}}}");
             let source = write_source(
@@ -1529,6 +1533,9 @@ mod lifecycle_literals {
         .with_repository_root(root.clone())
         .with_package_area(package.clone())
         .add_magic_path(magic.clone(), biscuit_file::PathPosition::Start);
+        // One capture for all six spellings: a full capture probes the host,
+        // and the context is not what varies between the cases.
+        let context = darkmatter::markdown::compose::ComposeContext::capture();
 
         for (reference, dir, file) in cases {
             write_source(dir, file, &[("success", success.clone())], "Prompt.\n");
@@ -1549,7 +1556,7 @@ mod lifecycle_literals {
             let graph = build_preflight_graph_with_context_and_resolution(
                 &plan,
                 &resolved,
-                darkmatter::markdown::compose::ComposeContext::capture(),
+                context.clone(),
                 Some(&snapshot),
             )
             .unwrap_or_else(|error| panic!("{reference}: graph failed: {error}"));

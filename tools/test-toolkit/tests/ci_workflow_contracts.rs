@@ -880,25 +880,36 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
     );
 }
 
+/// The executable text of one `case` branch of the gate step's script, with
+/// `#` comments removed.
+///
+/// Stripping is the whole point: each branch's comment *explains* the flag it
+/// sets, so a substring search over the raw branch is satisfied by the prose
+/// alone and still passes when the assignment itself is deleted. Both tier
+/// contracts below were vacuous that way until 2026-09-21.
+fn tier_branch_code(tier: &str) -> String {
+    let test_job = job_block("_package-ci.yml", "  test:");
+    let test_steps = steps(&test_job);
+    let gate = step_with_id(&test_steps, "gate").expect("the test job carries the gate command");
+    step_script(gate)
+        .split(&format!("{tier})"))
+        .nth(1)
+        .unwrap_or_else(|| panic!("the gate command branches on the {tier} tier"))
+        .split(";;")
+        .next()
+        .unwrap_or_default()
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn the_l1_suite_runs_no_fail_fast() {
     let shared = workflow("_package-ci.yml");
-    // The tiers share one job, so the flag is bound to the L1 branch alone —
-    // exactly as it was when L1 had a job of its own.
-    let test_job = job_block("_package-ci.yml", "  test:");
-    let test_steps = steps(&test_job);
-    let gate = step_with_id(&test_steps, "gate")
-        .expect("the test job carries the gate command");
-    let script = step_script(gate);
-    let l1_branch = script
-        .split("L1)")
-        .nth(1)
-        .expect("the gate command branches on the L1 tier")
-        .split(";;")
-        .next()
-        .unwrap_or_default();
+    // The tiers share one job, so the flag is set per tier branch.
     assert!(
-        l1_branch.contains("--no-fail-fast"),
+        tier_branch_code("L1").contains("tier_args=(--no-fail-fast)"),
         "L1 suites must run --no-fail-fast so one failure cannot hide the suite's evidence (D7)"
     );
     assert!(
@@ -909,6 +920,20 @@ fn the_l1_suite_runs_no_fail_fast() {
         shared.contains("actions/upload-artifact")
             && shared.contains("name: ${{ steps.cell.outputs.junit_artifact }}"),
         "each test cell must publish its own per-package JUnit artifact (D7)"
+    );
+}
+
+/// R1's environment policy is per *environment*, not per tier: a truncated L2
+/// report costs the same full round-trip as a truncated L1 one, on the tier
+/// whose backends an author's host is least likely to have. The L2 branch
+/// carried no flag until 2026-09-21 — an omission preserved across the
+/// row-driven refactor, never a decision.
+#[test]
+fn the_l2_suite_runs_no_fail_fast() {
+    assert!(
+        tier_branch_code("L2").contains("tier_args=(--no-fail-fast)"),
+        "L2 suites must run --no-fail-fast so one failure cannot hide the rest \
+         of the tier's evidence (R1: in CI, run to completion)"
     );
 }
 

@@ -440,7 +440,7 @@ fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
     let root = repo_root();
     let surfaces = [
         (
-            "darkmatter/docs/topics/schema-definition.md",
+            "darkmatter/docs/topics/schemas/definition.md",
             vec![
                 "`required` and `eager` are independent axes",
                 "| `required; eager` | Required, and the value is validated eagerly | Required |",

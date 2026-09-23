@@ -360,12 +360,13 @@ pub enum TransclusionError {
     #[error("Maximum transclusion depth exceeded (max: {max_depth})")]
     MaxDepthExceeded { max_depth: usize },
 
-    #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
+    #[error("Failed to evaluate condition '{expr}' at line {line}: {cause}")]
     ConditionEval {
         ctx: Box<SourceContext>,
         expr: String,
         line: usize,
-        message: String,
+        #[source]
+        cause: Box<crate::markdown::compose::expression::ExpressionError>,
     },
 
     #[error("Failed to parse condition '{expr}' at line {line}: {message}")]
@@ -555,7 +556,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 ctx,
                 expr,
                 line,
-                message,
+                cause,
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -571,7 +572,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "condition evaluation failed",
                     ))
                     .body(body)
-                    .hint(format!("Error: {}", Prose::escape_text(message)))
+                    .hint(format!("Error: {}", Prose::escape_text(&cause.to_string())))
             }
 
             TransclusionError::ConditionParse {

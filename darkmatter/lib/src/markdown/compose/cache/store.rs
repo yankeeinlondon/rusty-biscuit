@@ -2,15 +2,19 @@
 //!
 //! Stores cache artifacts in a workspace-local directory structure:
 //! ```text
-//! .darkmatter/cache/v1/
+//! .darkmatter/cache/v{STORE_LAYOUT_VERSION}/
 //!   manifests/{class}/{ab}/{cd}/{hex}.json
 //!   blobs/{ext}/{ab}/{cd}/{hex}.{ext}
 //! ```
 //!
-//! Writes are atomic (tempfile + rename) to prevent corruption from crashes.
-//! Cross-process safety uses filesystem-level lock files.
+//! Writes are atomic (tempfile + rename) to prevent corruption from crashes;
+//! concurrent processes rely on that rename, not on lock files.
+//!
+//! Configuring a store mutates nothing: directories are created only by the
+//! first write that needs them, so a run that never writes an artifact leaves
+//! the cache root exactly as it found it (missing roots stay missing).
 
-use super::manifest::CACHE_VERSION;
+use super::manifest::STORE_LAYOUT_VERSION;
 use super::types::ArtifactClass;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -30,28 +34,20 @@ pub(crate) struct FileStore {
 }
 
 impl FileStore {
-    /// Creates a new FileStore, creating the directory structure if needed.
-    pub fn new(root: PathBuf) -> io::Result<Self> {
-        fs::create_dir_all(root.join("manifests"))?;
-        fs::create_dir_all(root.join("blobs"))?;
-        Ok(Self { root })
+    /// Records `root` without touching the filesystem.
+    pub fn at(root: PathBuf) -> Self {
+        Self { root }
     }
 
-    /// Resolves the cache root for a given compose source.
+    /// Resolves the store root `<cache_root>/.darkmatter/cache/v{STORE_LAYOUT_VERSION}[/<namespace>]`.
     ///
-    /// Prefers `<workspace>/.darkmatter/cache/v1/`. Falls back to
-    /// the platform cache directory if no workspace is detected.
-    pub fn resolve_cache_root(workspace_root: Option<&Path>, namespace: Option<&str>) -> PathBuf {
-        let base = if let Some(root) = workspace_root {
-            root.join(".darkmatter").join("cache")
-        } else {
-            dirs::cache_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join("darkmatter")
-                .join("cache")
-        };
-
-        let versioned = base.join(format!("v{}", CACHE_VERSION));
+    /// There is deliberately no platform-cache fallback: persistence happens
+    /// only under an explicitly configured cache root.
+    pub fn resolve_cache_root(cache_root: &Path, namespace: Option<&str>) -> PathBuf {
+        let versioned = cache_root
+            .join(".darkmatter")
+            .join("cache")
+            .join(format!("v{}", STORE_LAYOUT_VERSION));
 
         match namespace {
             Some(ns) => versioned.join(ns),
@@ -133,20 +129,22 @@ impl FileStore {
         Ok(())
     }
 
-    /// Checks whether a manifest exists without reading it.
-    pub fn has_manifest(&self, class: ArtifactClass, key: u64) -> bool {
-        self.manifest_path(class, key).exists()
+    /// Removes a manifest; a missing manifest is success.
+    pub fn remove_manifest(&self, class: ArtifactClass, key: u64) -> io::Result<()> {
+        remove_if_present(&self.manifest_path(class, key))
+    }
+
+    /// Removes a blob; a missing blob is success.
+    pub fn remove_blob(&self, hash: u64, ext: &str) -> io::Result<()> {
+        remove_if_present(&self.blob_path(hash, ext))
     }
 
     // ── Path helpers ───────────────────────────────────────────────
 
-    fn manifest_path(&self, class: ArtifactClass, key: u64) -> PathBuf {
+    pub(super) fn manifest_path(&self, class: ArtifactClass, key: u64) -> PathBuf {
         let hex = format!("{:016x}", key);
         let (ab, cd) = (&hex[..2], &hex[2..4]);
         let class_dir = match class {
-            ArtifactClass::DocumentSnapshot => "snapshot",
-            ArtifactClass::ComposeDocumentCore => "composed",
-            ArtifactClass::OperationResult => "operation",
             ArtifactClass::RemoteUrl => "remote",
         };
         self.root
@@ -157,7 +155,7 @@ impl FileStore {
             .join(format!("{}.json", hex))
     }
 
-    fn blob_path(&self, hash: u64, ext: &str) -> PathBuf {
+    pub(super) fn blob_path(&self, hash: u64, ext: &str) -> PathBuf {
         let hex = format!("{:016x}", hash);
         let (ab, cd) = (&hex[..2], &hex[2..4]);
         self.root
@@ -171,7 +169,8 @@ impl FileStore {
     /// Atomic write: write to a tempfile in the same directory, then rename.
     ///
     /// This ensures readers never see a partially-written file. On crash,
-    /// only the temp file is left behind (harmless).
+    /// only the temp file is left behind (harmless). This is the store's only
+    /// directory-creation point, so it is where an unusable root first fails.
     fn atomic_write(&self, target: &Path, data: &[u8]) -> io::Result<()> {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -195,50 +194,122 @@ impl FileStore {
     }
 }
 
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::cache::manifest::{
-        ComposedDocumentManifest, DocumentSnapshotManifest,
-    };
-    use crate::markdown::compose::cache::types::SourceKind;
+    use crate::markdown::compose::cache::manifest::{CACHE_VERSION, RemoteUrlManifest};
     use std::time::SystemTime;
+
+    fn remote_manifest(source_id_hash: u64, body_blob_hash: u64) -> RemoteUrlManifest {
+        RemoteUrlManifest {
+            cache_version: CACHE_VERSION,
+            redacted_url: "https://example.com/doc.md".to_string(),
+            source_id_hash,
+            status: 200,
+            etag: None,
+            last_modified: None,
+            cache_control: None,
+            fetched_at: SystemTime::UNIX_EPOCH,
+            expires_at: None,
+            content_hash: body_blob_hash,
+            body_blob_hash,
+            size_bytes: 0,
+        }
+    }
 
     fn test_store() -> (tempfile::TempDir, FileStore) {
         let dir = tempfile::tempdir().unwrap();
-        let store = FileStore::new(dir.path().join("cache/v1")).unwrap();
+        let store = FileStore::at(dir.path().join("cache/v1"));
         (dir, store)
+    }
+
+    #[test]
+    fn at_and_reads_leave_a_missing_root_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("cache/v1");
+        let store = FileStore::at(root.clone());
+
+        assert!(store.read_blob(1, "md").unwrap().is_none());
+        let manifest: Option<RemoteUrlManifest> =
+            store.read_manifest(ArtifactClass::RemoteUrl, 1).unwrap();
+        assert!(manifest.is_none());
+        assert!(!store.manifest_path(ArtifactClass::RemoteUrl, 1).exists());
+
+        assert!(!dir.path().join("cache").exists(), "construction or reads created the root");
+    }
+
+    #[test]
+    fn first_blob_write_creates_only_the_blob_fanout() {
+        let (dir, store) = test_store();
+        let root = dir.path().join("cache/v1");
+        let key: u64 = 0x0011223344556677;
+
+        store.write_blob(key, "md", b"body").unwrap();
+
+        assert!(root.join("blobs/md/00/11/0011223344556677.md").is_file());
+        assert!(!root.join("manifests").exists(), "a blob write must not create manifests/");
+        assert_eq!(store.read_blob(key, "md").unwrap().as_deref(), Some(b"body".as_slice()));
+    }
+
+    #[test]
+    fn remove_deletes_written_files_and_tolerates_missing_ones() {
+        let (dir, store) = test_store();
+        let root = dir.path().join("cache/v1");
+        let manifest = serde_json::json!({ "k": 1 });
+        store
+            .write_artifact(ArtifactClass::RemoteUrl, 7, &manifest, b"body", 9, "remote")
+            .unwrap();
+
+        store.remove_manifest(ArtifactClass::RemoteUrl, 7).unwrap();
+        store.remove_blob(9, "remote").unwrap();
+        assert!(!store.manifest_path(ArtifactClass::RemoteUrl, 7).exists());
+        assert!(store.read_blob(9, "remote").unwrap().is_none());
+
+        // Removing again, or from a root that never existed, is success.
+        store.remove_manifest(ArtifactClass::RemoteUrl, 7).unwrap();
+        store.remove_blob(9, "remote").unwrap();
+        let missing = FileStore::at(dir.path().join("missing"));
+        missing.remove_manifest(ArtifactClass::RemoteUrl, 7).unwrap();
+        missing.remove_blob(9, "remote").unwrap();
+        assert!(!dir.path().join("missing").exists());
+        assert!(root.join("manifests").is_dir(), "removal must not prune directories");
+    }
+
+    #[test]
+    fn write_under_a_file_root_fails_without_touching_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-directory");
+        fs::write(&file, "plain").unwrap();
+        let store = FileStore::at(file.join("cache/v1"));
+
+        assert!(store.write_blob(1, "md", b"body").is_err());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "plain");
     }
 
     #[test]
     fn write_read_manifest_roundtrip() {
         let (_dir, store) = test_store();
 
-        let manifest = DocumentSnapshotManifest {
-            cache_version: CACHE_VERSION,
-            source_kind: SourceKind::LocalFile,
-            canonical_source: "/test/doc.md".to_string(),
-            source_id_hash: 12345,
-            raw_bytes_hash: 67890,
-            frontmatter_hash: 11111,
-            body_semantic_hash: 22222,
-            body_template_hash: 33333,
-            modified_at: SystemTime::UNIX_EPOCH,
-            size_bytes: 1024,
-        };
+        let manifest = remote_manifest(12345, 0);
 
         store
-            .write_manifest(ArtifactClass::DocumentSnapshot, 12345, &manifest)
+            .write_manifest(ArtifactClass::RemoteUrl, 12345, &manifest)
             .unwrap();
 
-        let loaded: Option<DocumentSnapshotManifest> = store
-            .read_manifest(ArtifactClass::DocumentSnapshot, 12345)
+        let loaded: Option<RemoteUrlManifest> = store
+            .read_manifest(ArtifactClass::RemoteUrl, 12345)
             .unwrap();
 
         let loaded = loaded.expect("manifest should exist");
         assert_eq!(loaded.source_id_hash, 12345);
-        assert_eq!(loaded.raw_bytes_hash, 67890);
-        assert_eq!(loaded.canonical_source, "/test/doc.md");
+        assert_eq!(loaded.redacted_url, "https://example.com/doc.md");
     }
 
     #[test]
@@ -255,8 +326,8 @@ mod tests {
     #[test]
     fn read_missing_manifest_returns_none() {
         let (_dir, store) = test_store();
-        let result: Option<DocumentSnapshotManifest> = store
-            .read_manifest(ArtifactClass::DocumentSnapshot, 99999)
+        let result: Option<RemoteUrlManifest> = store
+            .read_manifest(ArtifactClass::RemoteUrl, 99999)
             .unwrap();
         assert!(result.is_none());
     }
@@ -269,54 +340,15 @@ mod tests {
     }
 
     #[test]
-    fn has_manifest_check() {
-        let (_dir, store) = test_store();
-
-        assert!(!store.has_manifest(ArtifactClass::DocumentSnapshot, 12345));
-
-        let manifest = DocumentSnapshotManifest {
-            cache_version: CACHE_VERSION,
-            source_kind: SourceKind::LocalFile,
-            canonical_source: "/test.md".to_string(),
-            source_id_hash: 12345,
-            raw_bytes_hash: 0,
-            frontmatter_hash: 0,
-            body_semantic_hash: 0,
-            body_template_hash: 0,
-            modified_at: SystemTime::UNIX_EPOCH,
-            size_bytes: 0,
-        };
-        store
-            .write_manifest(ArtifactClass::DocumentSnapshot, 12345, &manifest)
-            .unwrap();
-
-        assert!(store.has_manifest(ArtifactClass::DocumentSnapshot, 12345));
-    }
-
-    #[test]
     fn write_artifact_creates_both_manifest_and_blob() {
         let (_dir, store) = test_store();
 
-        let manifest = ComposedDocumentManifest {
-            cache_version: CACHE_VERSION,
-            entry_key: 55555,
-            source_id_hash: 44444,
-            source_body_semantic_hash: 33333,
-            self_hash: 100,
-            closure_hash: 200,
-            dependency_count: 0,
-            dependencies: vec![],
-            payload_blob_hash: 77777,
-            warnings_hash: 0,
-            created_at: SystemTime::now(),
-            last_accessed_at: SystemTime::now(),
-            expires_at: None,
-        };
+        let manifest = remote_manifest(44444, 77777);
 
-        let blob = b"composed content here";
+        let blob = b"remote body here";
         store
             .write_artifact(
-                ArtifactClass::ComposeDocumentCore,
+                ArtifactClass::RemoteUrl,
                 55555,
                 &manifest,
                 blob,
@@ -326,11 +358,11 @@ mod tests {
             .unwrap();
 
         // Both should be readable
-        let loaded_manifest: Option<ComposedDocumentManifest> = store
-            .read_manifest(ArtifactClass::ComposeDocumentCore, 55555)
+        let loaded_manifest: Option<RemoteUrlManifest> = store
+            .read_manifest(ArtifactClass::RemoteUrl, 55555)
             .unwrap();
         assert!(loaded_manifest.is_some());
-        assert_eq!(loaded_manifest.unwrap().closure_hash, 200);
+        assert_eq!(loaded_manifest.unwrap().body_blob_hash, 77777);
 
         let loaded_blob = store.read_blob(77777, "md").unwrap();
         assert_eq!(loaded_blob.as_deref(), Some(blob.as_slice()));
@@ -342,26 +374,15 @@ mod tests {
 
         // Key 0x0011223344556677 should create ab=00, cd=11 directories
         let key: u64 = 0x0011223344556677;
-        let manifest = DocumentSnapshotManifest {
-            cache_version: CACHE_VERSION,
-            source_kind: SourceKind::LocalFile,
-            canonical_source: "/test.md".to_string(),
-            source_id_hash: key,
-            raw_bytes_hash: 0,
-            frontmatter_hash: 0,
-            body_semantic_hash: 0,
-            body_template_hash: 0,
-            modified_at: SystemTime::UNIX_EPOCH,
-            size_bytes: 0,
-        };
+        let manifest = remote_manifest(key, 0);
         store
-            .write_manifest(ArtifactClass::DocumentSnapshot, key, &manifest)
+            .write_manifest(ArtifactClass::RemoteUrl, key, &manifest)
             .unwrap();
 
         // Verify the fanout path exists
         let expected = store
             .root
-            .join("manifests/snapshot/00/11/0011223344556677.json");
+            .join("manifests/remote/00/11/0011223344556677.json");
         assert!(
             expected.exists(),
             "Expected fanout path: {}",
@@ -371,21 +392,13 @@ mod tests {
 
     #[test]
     fn resolve_cache_root_with_workspace() {
-        let root = FileStore::resolve_cache_root(Some(Path::new("/project")), None);
+        let root = FileStore::resolve_cache_root(Path::new("/project"), None);
         assert_eq!(root, PathBuf::from("/project/.darkmatter/cache/v1"));
     }
 
     #[test]
     fn resolve_cache_root_with_namespace() {
-        let root = FileStore::resolve_cache_root(Some(Path::new("/project")), Some("test-ns"));
+        let root = FileStore::resolve_cache_root(Path::new("/project"), Some("test-ns"));
         assert_eq!(root, PathBuf::from("/project/.darkmatter/cache/v1/test-ns"));
-    }
-
-    #[test]
-    fn resolve_cache_root_without_workspace() {
-        let root = FileStore::resolve_cache_root(None, None);
-        // Should use platform cache dir, not workspace
-        assert!(!root.starts_with(".darkmatter"));
-        assert!(root.to_string_lossy().contains("darkmatter"));
     }
 }
