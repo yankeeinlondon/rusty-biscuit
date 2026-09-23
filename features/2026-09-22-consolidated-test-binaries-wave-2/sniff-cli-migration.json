@@ -1,0 +1,1897 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "sniff/cli",
+  "dispositions": [
+    {
+      "detector": "path_key",
+      "path": "sniff/cli/tests/l1/spawn_site_guard.rs",
+      "reason": "R19 path-keyed self-exclusion: `excluded()` (:42) compares the guard's path under `tests/`, which the move changes from `spawn_site_guard.rs` to `l1/spawn_site_guard.rs` (the claudine-cli precedent). Scan sets before and after: `sniff-cli/guard-scans-after.md`"
+    }
+  ],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "sniff/cli/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "cli",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/cli.rs",
+      "old_binary_id": "sniff-cli::cli",
+      "old_path": "sniff/cli/tests/cli.rs",
+      "old_target": "cli",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "cli::counter_tree_reaches_the_human_report",
+          "old": "counter_tree_reaches_the_human_report"
+        },
+        {
+          "new": "cli::json_perf_stdout_is_exactly_one_document",
+          "old": "json_perf_stdout_is_exactly_one_document"
+        },
+        {
+          "new": "cli::perf_on_a_scriptable_text_command_stays_off_stdout",
+          "old": "perf_on_a_scriptable_text_command_stays_off_stdout"
+        },
+        {
+          "new": "cli::perf_plain_output_is_ansi_free_and_hierarchical",
+          "old": "perf_plain_output_is_ansi_free_and_hierarchical"
+        },
+        {
+          "new": "cli::repo_aggregate_json_context_groups_cwd_relative_facts",
+          "old": "repo_aggregate_json_context_groups_cwd_relative_facts"
+        },
+        {
+          "new": "cli::repo_aggregate_json_does_not_duplicate_full_package_catalogs",
+          "old": "repo_aggregate_json_does_not_duplicate_full_package_catalogs"
+        },
+        {
+          "new": "cli::repo_aggregate_json_excludes_network_and_parameterized_keys",
+          "old": "repo_aggregate_json_excludes_network_and_parameterized_keys"
+        },
+        {
+          "new": "cli::repo_aggregate_json_is_offline",
+          "old": "repo_aggregate_json_is_offline"
+        },
+        {
+          "new": "cli::repo_aggregate_json_is_valid_object",
+          "old": "repo_aggregate_json_is_valid_object"
+        },
+        {
+          "new": "cli::repo_aggregate_json_never_re_embeds_the_full_package_catalog",
+          "old": "repo_aggregate_json_never_re_embeds_the_full_package_catalog"
+        },
+        {
+          "new": "cli::repo_aggregate_json_not_partial",
+          "old": "repo_aggregate_json_not_partial"
+        },
+        {
+          "new": "cli::repo_aggregate_json_scope_buckets_have_stable_shape",
+          "old": "repo_aggregate_json_scope_buckets_have_stable_shape"
+        },
+        {
+          "new": "cli::repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys",
+          "old": "repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys"
+        },
+        {
+          "new": "cli::repo_aggregate_perf_covers_complete_command",
+          "old": "repo_aggregate_perf_covers_complete_command"
+        },
+        {
+          "new": "cli::repo_default_and_plain_emit_text_with_clean_stderr",
+          "old": "repo_default_and_plain_emit_text_with_clean_stderr"
+        },
+        {
+          "new": "cli::repo_default_is_bare_name",
+          "old": "repo_default_is_bare_name"
+        },
+        {
+          "new": "cli::repo_default_verbose_is_rich_oneliner",
+          "old": "repo_default_verbose_is_rich_oneliner"
+        },
+        {
+          "new": "cli::repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error",
+          "old": "repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error"
+        },
+        {
+          "new": "cli::repo_is_monorepo_json_emits_object",
+          "old": "repo_is_monorepo_json_emits_object"
+        },
+        {
+          "new": "cli::repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json",
+          "old": "repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json"
+        },
+        {
+          "new": "cli::repo_is_monorepo_no_error_exits_zero_when_false",
+          "old": "repo_is_monorepo_no_error_exits_zero_when_false"
+        },
+        {
+          "new": "cli::repo_is_monorepo_text_in_monorepo_exits_zero_with_label",
+          "old": "repo_is_monorepo_text_in_monorepo_exits_zero_with_label"
+        },
+        {
+          "new": "cli::repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false",
+          "old": "repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false"
+        },
+        {
+          "new": "cli::repo_is_monorepo_text_prints_label",
+          "old": "repo_is_monorepo_text_prints_label"
+        },
+        {
+          "new": "cli::repo_json_output_is_valid_json_on_stdout_with_clean_stderr",
+          "old": "repo_json_output_is_valid_json_on_stdout_with_clean_stderr"
+        },
+        {
+          "new": "cli::repo_json_stdout_is_exactly_one_json_document",
+          "old": "repo_json_stdout_is_exactly_one_json_document"
+        },
+        {
+          "new": "cli::repo_json_succeeds_in_a_shallow_clone",
+          "old": "repo_json_succeeds_in_a_shallow_clone"
+        },
+        {
+          "new": "cli::repo_name_json_is_leaf_only",
+          "old": "repo_name_json_is_leaf_only"
+        },
+        {
+          "new": "cli::repo_name_json_is_still_leaf_only",
+          "old": "repo_name_json_is_still_leaf_only"
+        },
+        {
+          "new": "cli::repo_name_verbose_is_name_only",
+          "old": "repo_name_verbose_is_name_only"
+        },
+        {
+          "new": "cli::repo_package_count_json_is_single_key_number",
+          "old": "repo_package_count_json_is_single_key_number"
+        },
+        {
+          "new": "cli::repo_package_count_text_is_integer",
+          "old": "repo_package_count_text_is_integer"
+        },
+        {
+          "new": "cli::repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr",
+          "old": "repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr"
+        },
+        {
+          "new": "cli::repo_version_json_no_error_exits_zero",
+          "old": "repo_version_json_no_error_exits_zero"
+        },
+        {
+          "new": "cli::repo_version_json_returns_array_shape_under_real_repo",
+          "old": "repo_version_json_returns_array_shape_under_real_repo"
+        },
+        {
+          "new": "cli::repo_version_text_absent_exits_one",
+          "old": "repo_version_text_absent_exits_one"
+        },
+        {
+          "new": "cli::test_bare_repo_json_version_collapses_workspace_inheritance_from_member",
+          "old": "test_bare_repo_json_version_collapses_workspace_inheritance_from_member"
+        },
+        {
+          "new": "cli::test_base_flag_after_subcommand_is_accepted",
+          "old": "test_base_flag_after_subcommand_is_accepted"
+        },
+        {
+          "new": "cli::test_base_flag_before_subcommand",
+          "old": "test_base_flag_before_subcommand"
+        },
+        {
+          "new": "cli::test_blast_radius_dirty_matches_documents",
+          "old": "test_blast_radius_dirty_matches_documents"
+        },
+        {
+          "new": "cli::test_blast_radius_json_output",
+          "old": "test_blast_radius_json_output"
+        },
+        {
+          "new": "cli::test_blast_radius_last_commit_matches_documents",
+          "old": "test_blast_radius_last_commit_matches_documents"
+        },
+        {
+          "new": "cli::test_blast_radius_list_format",
+          "old": "test_blast_radius_list_format"
+        },
+        {
+          "new": "cli::test_blast_radius_no_error_exits_0",
+          "old": "test_blast_radius_no_error_exits_0"
+        },
+        {
+          "new": "cli::test_blast_radius_no_matches_exits_1",
+          "old": "test_blast_radius_no_matches_exits_1"
+        },
+        {
+          "new": "cli::test_blast_radius_on_error_to_stderr",
+          "old": "test_blast_radius_on_error_to_stderr"
+        },
+        {
+          "new": "cli::test_blast_radius_staged_matches_documents",
+          "old": "test_blast_radius_staged_matches_documents"
+        },
+        {
+          "new": "cli::test_commit_family_empty_results_succeed_with_empty_output",
+          "old": "test_commit_family_empty_results_succeed_with_empty_output"
+        },
+        {
+          "new": "cli::test_commit_family_invalid_inputs_are_typed_failures",
+          "old": "test_commit_family_invalid_inputs_are_typed_failures"
+        },
+        {
+          "new": "cli::test_commit_family_json_ignores_display_flags",
+          "old": "test_commit_family_json_ignores_display_flags"
+        },
+        {
+          "new": "cli::test_commit_family_rejects_oversized_duration_scopes",
+          "old": "test_commit_family_rejects_oversized_duration_scopes"
+        },
+        {
+          "new": "cli::test_completions_bash_shows_setup",
+          "old": "test_completions_bash_shows_setup"
+        },
+        {
+          "new": "cli::test_completions_fish_shows_setup",
+          "old": "test_completions_fish_shows_setup"
+        },
+        {
+          "new": "cli::test_completions_help_flag_shows_setup",
+          "old": "test_completions_help_flag_shows_setup"
+        },
+        {
+          "new": "cli::test_completions_powershell_shows_setup",
+          "old": "test_completions_powershell_shows_setup"
+        },
+        {
+          "new": "cli::test_completions_zsh_shows_setup",
+          "old": "test_completions_zsh_shows_setup"
+        },
+        {
+          "new": "cli::test_cpu_subcommand_json_output",
+          "old": "test_cpu_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_cpu_subcommand_text_output",
+          "old": "test_cpu_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_dirty_package_areas_json_shape",
+          "old": "test_dirty_package_areas_json_shape"
+        },
+        {
+          "new": "cli::test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo",
+          "old": "test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo"
+        },
+        {
+          "new": "cli::test_dirty_packages_json_shape",
+          "old": "test_dirty_packages_json_shape"
+        },
+        {
+          "new": "cli::test_docs_blast_radius_filter",
+          "old": "test_docs_blast_radius_filter"
+        },
+        {
+          "new": "cli::test_docs_stdout_stderr_split",
+          "old": "test_docs_stdout_stderr_split"
+        },
+        {
+          "new": "cli::test_double_verbose_flag",
+          "old": "test_double_verbose_flag"
+        },
+        {
+          "new": "cli::test_dynamic_completions_bash",
+          "old": "test_dynamic_completions_bash"
+        },
+        {
+          "new": "cli::test_dynamic_completions_fish",
+          "old": "test_dynamic_completions_fish"
+        },
+        {
+          "new": "cli::test_dynamic_completions_zsh",
+          "old": "test_dynamic_completions_zsh"
+        },
+        {
+          "new": "cli::test_enrichment_flags_in_help",
+          "old": "test_enrichment_flags_in_help"
+        },
+        {
+          "new": "cli::test_filesystem_help_mentions_scoped_flags",
+          "old": "test_filesystem_help_mentions_scoped_flags"
+        },
+        {
+          "new": "cli::test_filesystem_scoped_flags_parse_in_help",
+          "old": "test_filesystem_scoped_flags_parse_in_help"
+        },
+        {
+          "new": "cli::test_filesystem_subcommand_json_output",
+          "old": "test_filesystem_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_filesystem_subcommand_text_output",
+          "old": "test_filesystem_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_git_status_from_linked_worktree_renders_case_a",
+          "old": "test_git_status_from_linked_worktree_renders_case_a"
+        },
+        {
+          "new": "cli::test_git_status_from_main_worktree_renders_case_b",
+          "old": "test_git_status_from_main_worktree_renders_case_b"
+        },
+        {
+          "new": "cli::test_git_status_help_mentions_refresh_remotes",
+          "old": "test_git_status_help_mentions_refresh_remotes"
+        },
+        {
+          "new": "cli::test_git_status_json_is_git_info",
+          "old": "test_git_status_json_is_git_info"
+        },
+        {
+          "new": "cli::test_git_status_json_perf_attaches_performance_field",
+          "old": "test_git_status_json_perf_attaches_performance_field"
+        },
+        {
+          "new": "cli::test_git_status_json_with_package_scope",
+          "old": "test_git_status_json_with_package_scope"
+        },
+        {
+          "new": "cli::test_git_status_json_worktree_ahead_is_lazy_by_default",
+          "old": "test_git_status_json_worktree_ahead_is_lazy_by_default"
+        },
+        {
+          "new": "cli::test_git_status_subcommand_compact_output",
+          "old": "test_git_status_subcommand_compact_output"
+        },
+        {
+          "new": "cli::test_git_status_subcommand_json_output",
+          "old": "test_git_status_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_git_status_subcommand_text_output",
+          "old": "test_git_status_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_git_status_subcommand_with_history_flag",
+          "old": "test_git_status_subcommand_with_history_flag"
+        },
+        {
+          "new": "cli::test_git_status_text_and_json_agree_on_current_worktree",
+          "old": "test_git_status_text_and_json_agree_on_current_worktree"
+        },
+        {
+          "new": "cli::test_gpu_subcommand_json_output",
+          "old": "test_gpu_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_gpu_subcommand_text_output",
+          "old": "test_gpu_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_hardware_subcommand_json_output",
+          "old": "test_hardware_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_hardware_subcommand_text_output",
+          "old": "test_hardware_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_has_merge_conflict_json_false",
+          "old": "test_has_merge_conflict_json_false"
+        },
+        {
+          "new": "cli::test_help_flag",
+          "old": "test_help_flag"
+        },
+        {
+          "new": "cli::test_help_mentions_completions",
+          "old": "test_help_mentions_completions"
+        },
+        {
+          "new": "cli::test_help_mentions_remote_via_repo",
+          "old": "test_help_mentions_remote_via_repo"
+        },
+        {
+          "new": "cli::test_help_mentions_software_install",
+          "old": "test_help_mentions_software_install"
+        },
+        {
+          "new": "cli::test_help_mentions_subcommands",
+          "old": "test_help_mentions_subcommands"
+        },
+        {
+          "new": "cli::test_invalid_refresh_remotes_on_remote_subcommand_fails",
+          "old": "test_invalid_refresh_remotes_on_remote_subcommand_fails"
+        },
+        {
+          "new": "cli::test_invalid_subcommand_fails",
+          "old": "test_invalid_subcommand_fails"
+        },
+        {
+          "new": "cli::test_is_current_package_area_dirty_json_clean",
+          "old": "test_is_current_package_area_dirty_json_clean"
+        },
+        {
+          "new": "cli::test_is_current_package_area_dirty_json_outside_area_emits_false",
+          "old": "test_is_current_package_area_dirty_json_outside_area_emits_false"
+        },
+        {
+          "new": "cli::test_is_current_package_area_dirty_json_perf_attaches_performance_field",
+          "old": "test_is_current_package_area_dirty_json_perf_attaches_performance_field"
+        },
+        {
+          "new": "cli::test_is_current_package_area_dirty_json_true_branch",
+          "old": "test_is_current_package_area_dirty_json_true_branch"
+        },
+        {
+          "new": "cli::test_json_flag_after_subcommand",
+          "old": "test_json_flag_after_subcommand"
+        },
+        {
+          "new": "cli::test_json_flag_before_subcommand",
+          "old": "test_json_flag_before_subcommand"
+        },
+        {
+          "new": "cli::test_language_subcommand_json_output",
+          "old": "test_language_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_language_subcommand_text_output",
+          "old": "test_language_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_memory_subcommand_json_output",
+          "old": "test_memory_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_memory_subcommand_text_output",
+          "old": "test_memory_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_network_subcommand_json_output",
+          "old": "test_network_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_network_subcommand_text_output",
+          "old": "test_network_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_network_subcommand_verbose_text_output",
+          "old": "test_network_subcommand_verbose_text_output"
+        },
+        {
+          "new": "cli::test_no_subcommand_shows_help",
+          "old": "test_no_subcommand_shows_help"
+        },
+        {
+          "new": "cli::test_no_subcommand_with_json_outputs_json",
+          "old": "test_no_subcommand_with_json_outputs_json"
+        },
+        {
+          "new": "cli::test_old_agents_command_fails",
+          "old": "test_old_agents_command_fails"
+        },
+        {
+          "new": "cli::test_old_audio_players_command_fails",
+          "old": "test_old_audio_players_command_fails"
+        },
+        {
+          "new": "cli::test_old_editors_command_fails",
+          "old": "test_old_editors_command_fails"
+        },
+        {
+          "new": "cli::test_old_flag_syntax_fails",
+          "old": "test_old_flag_syntax_fails"
+        },
+        {
+          "new": "cli::test_old_language_package_managers_command_fails",
+          "old": "test_old_language_package_managers_command_fails"
+        },
+        {
+          "new": "cli::test_old_notification_helpers_command_fails",
+          "old": "test_old_notification_helpers_command_fails"
+        },
+        {
+          "new": "cli::test_old_os_package_managers_command_fails",
+          "old": "test_old_os_package_managers_command_fails"
+        },
+        {
+          "new": "cli::test_old_programs_command_fails",
+          "old": "test_old_programs_command_fails"
+        },
+        {
+          "new": "cli::test_old_terminal_apps_command_fails",
+          "old": "test_old_terminal_apps_command_fails"
+        },
+        {
+          "new": "cli::test_old_tts_clients_command_fails",
+          "old": "test_old_tts_clients_command_fails"
+        },
+        {
+          "new": "cli::test_old_utilities_command_fails",
+          "old": "test_old_utilities_command_fails"
+        },
+        {
+          "new": "cli::test_os_subcommand_json_output",
+          "old": "test_os_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_os_subcommand_text_output",
+          "old": "test_os_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_package_area_has_source_code_changes_json_clean",
+          "old": "test_package_area_has_source_code_changes_json_clean"
+        },
+        {
+          "new": "cli::test_package_area_has_source_code_changes_json_docs_only_is_false",
+          "old": "test_package_area_has_source_code_changes_json_docs_only_is_false"
+        },
+        {
+          "new": "cli::test_package_area_has_source_code_changes_json_true_branch",
+          "old": "test_package_area_has_source_code_changes_json_true_branch"
+        },
+        {
+          "new": "cli::test_package_area_json_empty_name_stable_shape",
+          "old": "test_package_area_json_empty_name_stable_shape"
+        },
+        {
+          "new": "cli::test_package_area_json_resolves_to_real_area",
+          "old": "test_package_area_json_resolves_to_real_area"
+        },
+        {
+          "new": "cli::test_package_area_root_json_when_present",
+          "old": "test_package_area_root_json_when_present"
+        },
+        {
+          "new": "cli::test_package_json_empty_name_stable_shape",
+          "old": "test_package_json_empty_name_stable_shape"
+        },
+        {
+          "new": "cli::test_package_name_json",
+          "old": "test_package_name_json"
+        },
+        {
+          "new": "cli::test_package_root_json_when_present",
+          "old": "test_package_root_json_when_present"
+        },
+        {
+          "new": "cli::test_plain_flag_strips_escape_codes",
+          "old": "test_plain_flag_strips_escape_codes"
+        },
+        {
+          "new": "cli::test_plain_with_json_ignores_plain",
+          "old": "test_plain_with_json_ignores_plain"
+        },
+        {
+          "new": "cli::test_recent_commits_branch_is_a_history_base",
+          "old": "test_recent_commits_branch_is_a_history_base"
+        },
+        {
+          "new": "cli::test_recent_commits_defaults_to_the_last_ten_as_a_bare_json_array",
+          "old": "test_recent_commits_defaults_to_the_last_ten_as_a_bare_json_array"
+        },
+        {
+          "new": "cli::test_recent_commits_filters_run_through_the_library",
+          "old": "test_recent_commits_filters_run_through_the_library"
+        },
+        {
+          "new": "cli::test_recent_commits_hash_period_walks_back_to_the_hash",
+          "old": "test_recent_commits_hash_period_walks_back_to_the_hash"
+        },
+        {
+          "new": "cli::test_recent_commits_no_change_commit_is_reported_with_no_files",
+          "old": "test_recent_commits_no_change_commit_is_reported_with_no_files"
+        },
+        {
+          "new": "cli::test_recent_commits_operation_filter_accepts_breaking_change_commits",
+          "old": "test_recent_commits_operation_filter_accepts_breaking_change_commits"
+        },
+        {
+          "new": "cli::test_recent_commits_package_filters_and_attribution_in_a_monorepo",
+          "old": "test_recent_commits_package_filters_and_attribution_in_a_monorepo"
+        },
+        {
+          "new": "cli::test_recent_commits_plain_output_is_the_library_plain_report",
+          "old": "test_recent_commits_plain_output_is_the_library_plain_report"
+        },
+        {
+          "new": "cli::test_recent_commits_terminal_output_renders_library_prose",
+          "old": "test_recent_commits_terminal_output_renders_library_prose"
+        },
+        {
+          "new": "cli::test_repo_aggregate_commit_families_match_the_focused_commands",
+          "old": "test_repo_aggregate_commit_families_match_the_focused_commands"
+        },
+        {
+          "new": "cli::test_repo_aggregate_dependencies_are_cwd_invariant",
+          "old": "test_repo_aggregate_dependencies_are_cwd_invariant"
+        },
+        {
+          "new": "cli::test_repo_aggregate_embeds_empty_commit_families_as_empty_arrays",
+          "old": "test_repo_aggregate_embeds_empty_commit_families_as_empty_arrays"
+        },
+        {
+          "new": "cli::test_repo_area_at_area_dir_returns_area_name",
+          "old": "test_repo_area_at_area_dir_returns_area_name"
+        },
+        {
+          "new": "cli::test_repo_area_at_repo_root_prints_an_empty_area",
+          "old": "test_repo_area_at_repo_root_prints_an_empty_area"
+        },
+        {
+          "new": "cli::test_repo_area_inside_package_returns_package_name",
+          "old": "test_repo_area_inside_package_returns_package_name"
+        },
+        {
+          "new": "cli::test_repo_area_json_emits_name_outcome",
+          "old": "test_repo_area_json_emits_name_outcome"
+        },
+        {
+          "new": "cli::test_repo_area_no_error_zero_exit_when_no_monorepo",
+          "old": "test_repo_area_no_error_zero_exit_when_no_monorepo"
+        },
+        {
+          "new": "cli::test_repo_area_non_monorepo_repo_silent_failure",
+          "old": "test_repo_area_non_monorepo_repo_silent_failure"
+        },
+        {
+          "new": "cli::test_repo_area_non_monorepo_verbose_message_on_stderr",
+          "old": "test_repo_area_non_monorepo_verbose_message_on_stderr"
+        },
+        {
+          "new": "cli::test_repo_area_not_in_repo_verbose_message_on_stderr",
+          "old": "test_repo_area_not_in_repo_verbose_message_on_stderr"
+        },
+        {
+          "new": "cli::test_repo_area_on_error_prints_message_to_stdout",
+          "old": "test_repo_area_on_error_prints_message_to_stdout"
+        },
+        {
+          "new": "cli::test_repo_branches_json_shape",
+          "old": "test_repo_branches_json_shape"
+        },
+        {
+          "new": "cli::test_repo_dependencies_filters_dev_dependencies",
+          "old": "test_repo_dependencies_filters_dev_dependencies"
+        },
+        {
+          "new": "cli::test_repo_deps_is_not_an_alias",
+          "old": "test_repo_deps_is_not_an_alias"
+        },
+        {
+          "new": "cli::test_repo_deps_json_shape",
+          "old": "test_repo_deps_json_shape"
+        },
+        {
+          "new": "cli::test_repo_dirty_files_json_perf_stdout_is_valid_json",
+          "old": "test_repo_dirty_files_json_perf_stdout_is_valid_json"
+        },
+        {
+          "new": "cli::test_repo_dirty_files_returns_all_file_types",
+          "old": "test_repo_dirty_files_returns_all_file_types"
+        },
+        {
+          "new": "cli::test_repo_dirty_files_short_p_flag_scopes_to_package",
+          "old": "test_repo_dirty_files_short_p_flag_scopes_to_package"
+        },
+        {
+          "new": "cli::test_repo_dirty_source_code_returns_source_files",
+          "old": "test_repo_dirty_source_code_returns_source_files"
+        },
+        {
+          "new": "cli::test_repo_dirty_source_code_with_list_flag",
+          "old": "test_repo_dirty_source_code_with_list_flag"
+        },
+        {
+          "new": "cli::test_repo_file_list_no_error_exits_0",
+          "old": "test_repo_file_list_no_error_exits_0"
+        },
+        {
+          "new": "cli::test_repo_file_list_no_results_exits_1",
+          "old": "test_repo_file_list_no_results_exits_1"
+        },
+        {
+          "new": "cli::test_repo_file_list_on_error_plus_no_error_to_stdout",
+          "old": "test_repo_file_list_on_error_plus_no_error_to_stdout"
+        },
+        {
+          "new": "cli::test_repo_file_list_on_error_to_stderr",
+          "old": "test_repo_file_list_on_error_to_stderr"
+        },
+        {
+          "new": "cli::test_repo_git_status_branch_absent_ordinary_name_succeeds",
+          "old": "test_repo_git_status_branch_absent_ordinary_name_succeeds"
+        },
+        {
+          "new": "cli::test_repo_git_status_branch_absent_short_hex_succeeds",
+          "old": "test_repo_git_status_branch_absent_short_hex_succeeds"
+        },
+        {
+          "new": "cli::test_repo_git_status_branch_absent_valid_length_hex_succeeds",
+          "old": "test_repo_git_status_branch_absent_valid_length_hex_succeeds"
+        },
+        {
+          "new": "cli::test_repo_git_status_branch_surfaces_malformed_remote_ref",
+          "old": "test_repo_git_status_branch_surfaces_malformed_remote_ref"
+        },
+        {
+          "new": "cli::test_repo_git_status_outside_git_repo_is_graceful",
+          "old": "test_repo_git_status_outside_git_repo_is_graceful"
+        },
+        {
+          "new": "cli::test_repo_git_status_package_with_area_name_errors",
+          "old": "test_repo_git_status_package_with_area_name_errors"
+        },
+        {
+          "new": "cli::test_repo_git_status_reports_packed_checkout_branch",
+          "old": "test_repo_git_status_reports_packed_checkout_branch"
+        },
+        {
+          "new": "cli::test_repo_git_status_subcommand",
+          "old": "test_repo_git_status_subcommand"
+        },
+        {
+          "new": "cli::test_repo_git_status_surfaces_corrupt_history",
+          "old": "test_repo_git_status_surfaces_corrupt_history"
+        },
+        {
+          "new": "cli::test_repo_has_merge_conflict_json_perf_stdout_is_valid_json",
+          "old": "test_repo_has_merge_conflict_json_perf_stdout_is_valid_json"
+        },
+        {
+          "new": "cli::test_repo_has_merge_conflict_surfaces_corrupt_index",
+          "old": "test_repo_has_merge_conflict_surfaces_corrupt_index"
+        },
+        {
+          "new": "cli::test_repo_hash_and_git_status_link_only_remote_contained_commits",
+          "old": "test_repo_hash_and_git_status_link_only_remote_contained_commits"
+        },
+        {
+          "new": "cli::test_repo_hash_surfaces_corrupt_commit_object",
+          "old": "test_repo_hash_surfaces_corrupt_commit_object"
+        },
+        {
+          "new": "cli::test_repo_help_lists_language_subcommand",
+          "old": "test_repo_help_lists_language_subcommand"
+        },
+        {
+          "new": "cli::test_repo_help_mentions_latest_versions",
+          "old": "test_repo_help_mentions_latest_versions"
+        },
+        {
+          "new": "cli::test_repo_help_shows_examples",
+          "old": "test_repo_help_shows_examples"
+        },
+        {
+          "new": "cli::test_repo_language_base_flag_all_three_placements",
+          "old": "test_repo_language_base_flag_all_three_placements"
+        },
+        {
+          "new": "cli::test_repo_language_json_empty_repo_emits_null_and_exits_one",
+          "old": "test_repo_language_json_empty_repo_emits_null_and_exits_one"
+        },
+        {
+          "new": "cli::test_repo_language_json_returns_rust_for_rust_repo",
+          "old": "test_repo_language_json_returns_rust_for_rust_repo"
+        },
+        {
+          "new": "cli::test_repo_language_text_empty_repo_exits_one_with_no_stdout",
+          "old": "test_repo_language_text_empty_repo_exits_one_with_no_stdout"
+        },
+        {
+          "new": "cli::test_repo_language_text_returns_rust_for_rust_repo",
+          "old": "test_repo_language_text_returns_rust_for_rust_repo"
+        },
+        {
+          "new": "cli::test_repo_package_and_area_flags_non_overlap_errors",
+          "old": "test_repo_package_and_area_flags_non_overlap_errors"
+        },
+        {
+          "new": "cli::test_repo_package_and_area_flags_overlap_succeeds",
+          "old": "test_repo_package_and_area_flags_overlap_succeeds"
+        },
+        {
+          "new": "cli::test_repo_package_area_flag_uses_prefix_semantics",
+          "old": "test_repo_package_area_flag_uses_prefix_semantics"
+        },
+        {
+          "new": "cli::test_repo_package_areas_csv_default",
+          "old": "test_repo_package_areas_csv_default"
+        },
+        {
+          "new": "cli::test_repo_package_areas_json_output",
+          "old": "test_repo_package_areas_json_output"
+        },
+        {
+          "new": "cli::test_repo_package_areas_json_perf_stdout_is_valid_json",
+          "old": "test_repo_package_areas_json_perf_stdout_is_valid_json"
+        },
+        {
+          "new": "cli::test_repo_package_areas_list_format",
+          "old": "test_repo_package_areas_list_format"
+        },
+        {
+          "new": "cli::test_repo_package_areas_md_and_list_conflict",
+          "old": "test_repo_package_areas_md_and_list_conflict"
+        },
+        {
+          "new": "cli::test_repo_package_areas_md_format",
+          "old": "test_repo_package_areas_md_format"
+        },
+        {
+          "new": "cli::test_repo_package_areas_no_error_allows_empty_filter",
+          "old": "test_repo_package_areas_no_error_allows_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_package_areas_no_error_empty_filter",
+          "old": "test_repo_package_areas_no_error_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_package_areas_no_error_json_empty_filter",
+          "old": "test_repo_package_areas_no_error_json_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_package_areas_no_error_json_with_flag",
+          "old": "test_repo_package_areas_no_error_json_with_flag"
+        },
+        {
+          "new": "cli::test_repo_package_areas_on_error_message",
+          "old": "test_repo_package_areas_on_error_message"
+        },
+        {
+          "new": "cli::test_repo_package_areas_package_area_filter",
+          "old": "test_repo_package_areas_package_area_filter"
+        },
+        {
+          "new": "cli::test_repo_package_areas_positional_filter",
+          "old": "test_repo_package_areas_positional_filter"
+        },
+        {
+          "new": "cli::test_repo_package_areas_positional_filter_negation",
+          "old": "test_repo_package_areas_positional_filter_negation"
+        },
+        {
+          "new": "cli::test_repo_package_areas_root_area_verbose_renders_dot_slash",
+          "old": "test_repo_package_areas_root_area_verbose_renders_dot_slash"
+        },
+        {
+          "new": "cli::test_repo_package_areas_verbose_does_not_emit_tracing",
+          "old": "test_repo_package_areas_verbose_does_not_emit_tracing"
+        },
+        {
+          "new": "cli::test_repo_package_areas_verbose_shows_root_dir",
+          "old": "test_repo_package_areas_verbose_shows_root_dir"
+        },
+        {
+          "new": "cli::test_repo_package_dependencies_help_mentions_ui",
+          "old": "test_repo_package_dependencies_help_mentions_ui"
+        },
+        {
+          "new": "cli::test_repo_package_flag_returns_single_package",
+          "old": "test_repo_package_flag_returns_single_package"
+        },
+        {
+          "new": "cli::test_repo_package_manager_json_uses_shared_collapse",
+          "old": "test_repo_package_manager_json_uses_shared_collapse"
+        },
+        {
+          "new": "cli::test_repo_package_manager_output_modes",
+          "old": "test_repo_package_manager_output_modes"
+        },
+        {
+          "new": "cli::test_repo_package_manager_variant_list_uses_unique_values",
+          "old": "test_repo_package_manager_variant_list_uses_unique_values"
+        },
+        {
+          "new": "cli::test_repo_packages_csv_default",
+          "old": "test_repo_packages_csv_default"
+        },
+        {
+          "new": "cli::test_repo_packages_json_output",
+          "old": "test_repo_packages_json_output"
+        },
+        {
+          "new": "cli::test_repo_packages_list_format",
+          "old": "test_repo_packages_list_format"
+        },
+        {
+          "new": "cli::test_repo_packages_md_and_list_conflict",
+          "old": "test_repo_packages_md_and_list_conflict"
+        },
+        {
+          "new": "cli::test_repo_packages_md_format",
+          "old": "test_repo_packages_md_format"
+        },
+        {
+          "new": "cli::test_repo_packages_no_error_allows_empty_filter",
+          "old": "test_repo_packages_no_error_allows_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_packages_no_error_empty_filter",
+          "old": "test_repo_packages_no_error_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_packages_no_error_json_empty_filter",
+          "old": "test_repo_packages_no_error_json_empty_filter"
+        },
+        {
+          "new": "cli::test_repo_packages_no_error_json_with_flag",
+          "old": "test_repo_packages_no_error_json_with_flag"
+        },
+        {
+          "new": "cli::test_repo_packages_on_error_message",
+          "old": "test_repo_packages_on_error_message"
+        },
+        {
+          "new": "cli::test_repo_packages_package_area_filter",
+          "old": "test_repo_packages_package_area_filter"
+        },
+        {
+          "new": "cli::test_repo_packages_verbose_does_not_emit_tracing",
+          "old": "test_repo_packages_verbose_does_not_emit_tracing"
+        },
+        {
+          "new": "cli::test_repo_packages_verbose_shows_root_dir",
+          "old": "test_repo_packages_verbose_shows_root_dir"
+        },
+        {
+          "new": "cli::test_repo_positional_filter_and_package_flag_combine",
+          "old": "test_repo_positional_filter_and_package_flag_combine"
+        },
+        {
+          "new": "cli::test_repo_pr_help_documents_bitbucket_draft_limitation",
+          "old": "test_repo_pr_help_documents_bitbucket_draft_limitation"
+        },
+        {
+          "new": "cli::test_repo_recent_commits_json_perf_stdout_is_valid_json",
+          "old": "test_repo_recent_commits_json_perf_stdout_is_valid_json"
+        },
+        {
+          "new": "cli::test_repo_recent_commits_plain_is_the_joined_per_commit_blocks",
+          "old": "test_repo_recent_commits_plain_is_the_joined_per_commit_blocks"
+        },
+        {
+          "new": "cli::test_repo_recent_commits_surfaces_corrupt_history",
+          "old": "test_repo_recent_commits_surfaces_corrupt_history"
+        },
+        {
+          "new": "cli::test_repo_remote_help",
+          "old": "test_repo_remote_help"
+        },
+        {
+          "new": "cli::test_repo_root_is_absolute_without_base_from_subdir",
+          "old": "test_repo_root_is_absolute_without_base_from_subdir"
+        },
+        {
+          "new": "cli::test_repo_root_json_perf_stdout_is_valid_json",
+          "old": "test_repo_root_json_perf_stdout_is_valid_json"
+        },
+        {
+          "new": "cli::test_repo_scope_projections_use_the_empty_top_level_area",
+          "old": "test_repo_scope_projections_use_the_empty_top_level_area"
+        },
+        {
+          "new": "cli::test_repo_scoped_flags_parse_in_help",
+          "old": "test_repo_scoped_flags_parse_in_help"
+        },
+        {
+          "new": "cli::test_repo_source_code_changes_surfaces_corrupt_history",
+          "old": "test_repo_source_code_changes_surfaces_corrupt_history"
+        },
+        {
+          "new": "cli::test_repo_staged_files_json_uses_new_shape",
+          "old": "test_repo_staged_files_json_uses_new_shape"
+        },
+        {
+          "new": "cli::test_repo_staged_files_uses_new_path",
+          "old": "test_repo_staged_files_uses_new_path"
+        },
+        {
+          "new": "cli::test_repo_staged_source_code_returns_staged_only",
+          "old": "test_repo_staged_source_code_returns_staged_only"
+        },
+        {
+          "new": "cli::test_repo_structure_filter_json_filters_packages",
+          "old": "test_repo_structure_filter_json_filters_packages"
+        },
+        {
+          "new": "cli::test_repo_subcommand_json_output",
+          "old": "test_repo_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_repo_subcommand_json_shapes_are_distinct",
+          "old": "test_repo_subcommand_json_shapes_are_distinct"
+        },
+        {
+          "new": "cli::test_repo_subcommand_text_output",
+          "old": "test_repo_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_repo_test_runner_detects_workspace_root_nextest",
+          "old": "test_repo_test_runner_detects_workspace_root_nextest"
+        },
+        {
+          "new": "cli::test_repo_test_runner_json_reports_package_usage",
+          "old": "test_repo_test_runner_json_reports_package_usage"
+        },
+        {
+          "new": "cli::test_repo_test_runner_list_reports_library_values",
+          "old": "test_repo_test_runner_list_reports_library_values"
+        },
+        {
+          "new": "cli::test_repo_test_runner_output_modes",
+          "old": "test_repo_test_runner_output_modes"
+        },
+        {
+          "new": "cli::test_repo_test_runner_verbose_machine_formats_keep_evidence",
+          "old": "test_repo_test_runner_verbose_machine_formats_keep_evidence"
+        },
+        {
+          "new": "cli::test_repo_unknown_package_area_errors_with_valid_list",
+          "old": "test_repo_unknown_package_area_errors_with_valid_list"
+        },
+        {
+          "new": "cli::test_repo_unknown_package_errors_with_valid_list",
+          "old": "test_repo_unknown_package_errors_with_valid_list"
+        },
+        {
+          "new": "cli::test_repo_unstaged_files_json_uses_new_shape",
+          "old": "test_repo_unstaged_files_json_uses_new_shape"
+        },
+        {
+          "new": "cli::test_repo_unstaged_source_code_returns_modified_only",
+          "old": "test_repo_unstaged_source_code_returns_modified_only"
+        },
+        {
+          "new": "cli::test_repo_untracked_files_json_uses_new_shape",
+          "old": "test_repo_untracked_files_json_uses_new_shape"
+        },
+        {
+          "new": "cli::test_repo_version_all_override_returns_repo_scope",
+          "old": "test_repo_version_all_override_returns_repo_scope"
+        },
+        {
+          "new": "cli::test_repo_version_csv_output_is_names_only",
+          "old": "test_repo_version_csv_output_is_names_only"
+        },
+        {
+          "new": "cli::test_repo_version_empty_exits_one_with_no_stdout",
+          "old": "test_repo_version_empty_exits_one_with_no_stdout"
+        },
+        {
+          "new": "cli::test_repo_version_empty_json_emits_array_shape",
+          "old": "test_repo_version_empty_json_emits_array_shape"
+        },
+        {
+          "new": "cli::test_repo_version_empty_with_no_error_exits_zero",
+          "old": "test_repo_version_empty_with_no_error_exits_zero"
+        },
+        {
+          "new": "cli::test_repo_version_json_reports_array_shape",
+          "old": "test_repo_version_json_reports_array_shape"
+        },
+        {
+          "new": "cli::test_repo_version_list_output_is_names_only",
+          "old": "test_repo_version_list_output_is_names_only"
+        },
+        {
+          "new": "cli::test_repo_version_md_output_uses_dash_prefix",
+          "old": "test_repo_version_md_output_uses_dash_prefix"
+        },
+        {
+          "new": "cli::test_repo_version_monorepo_root_reports_collapsed_versions",
+          "old": "test_repo_version_monorepo_root_reports_collapsed_versions"
+        },
+        {
+          "new": "cli::test_repo_version_package_area_override_scopes_to_single_area",
+          "old": "test_repo_version_package_area_override_scopes_to_single_area"
+        },
+        {
+          "new": "cli::test_repo_version_package_override_scopes_to_single_package",
+          "old": "test_repo_version_package_override_scopes_to_single_package"
+        },
+        {
+          "new": "cli::test_repo_version_single_package_known_package_resolves",
+          "old": "test_repo_version_single_package_known_package_resolves"
+        },
+        {
+          "new": "cli::test_repo_version_single_package_unknown_area_errors",
+          "old": "test_repo_version_single_package_unknown_area_errors"
+        },
+        {
+          "new": "cli::test_repo_version_single_package_unknown_package_errors",
+          "old": "test_repo_version_single_package_unknown_package_errors"
+        },
+        {
+          "new": "cli::test_repo_version_text_output_default",
+          "old": "test_repo_version_text_output_default"
+        },
+        {
+          "new": "cli::test_repo_version_unknown_package_area_errors",
+          "old": "test_repo_version_unknown_package_area_errors"
+        },
+        {
+          "new": "cli::test_repo_version_unknown_package_errors",
+          "old": "test_repo_version_unknown_package_errors"
+        },
+        {
+          "new": "cli::test_repo_version_variance_reports_each_version_separately",
+          "old": "test_repo_version_variance_reports_each_version_separately"
+        },
+        {
+          "new": "cli::test_repo_version_verbose_named_workspace_inheritance",
+          "old": "test_repo_version_verbose_named_workspace_inheritance"
+        },
+        {
+          "new": "cli::test_repo_worktree_help_mentions_subcommand",
+          "old": "test_repo_worktree_help_mentions_subcommand"
+        },
+        {
+          "new": "cli::test_repo_worktree_inside_linked_worktree_returns_name",
+          "old": "test_repo_worktree_inside_linked_worktree_returns_name"
+        },
+        {
+          "new": "cli::test_repo_worktree_inside_main_worktree_exits_1",
+          "old": "test_repo_worktree_inside_main_worktree_exits_1"
+        },
+        {
+          "new": "cli::test_repo_worktree_json_failure_no_error",
+          "old": "test_repo_worktree_json_failure_no_error"
+        },
+        {
+          "new": "cli::test_repo_worktree_json_success",
+          "old": "test_repo_worktree_json_success"
+        },
+        {
+          "new": "cli::test_repo_worktree_no_error_exits_0",
+          "old": "test_repo_worktree_no_error_exits_0"
+        },
+        {
+          "new": "cli::test_repo_worktree_on_error_to_stderr",
+          "old": "test_repo_worktree_on_error_to_stderr"
+        },
+        {
+          "new": "cli::test_repo_worktree_verbose_includes_path",
+          "old": "test_repo_worktree_verbose_includes_path"
+        },
+        {
+          "new": "cli::test_repo_worktrees_csv_output",
+          "old": "test_repo_worktrees_csv_output"
+        },
+        {
+          "new": "cli::test_repo_worktrees_csv_verbose_single_line_with_metadata",
+          "old": "test_repo_worktrees_csv_verbose_single_line_with_metadata"
+        },
+        {
+          "new": "cli::test_repo_worktrees_current_marker_from_linked_worktree",
+          "old": "test_repo_worktrees_current_marker_from_linked_worktree"
+        },
+        {
+          "new": "cli::test_repo_worktrees_current_marker_from_main_worktree",
+          "old": "test_repo_worktrees_current_marker_from_main_worktree"
+        },
+        {
+          "new": "cli::test_repo_worktrees_default_output",
+          "old": "test_repo_worktrees_default_output"
+        },
+        {
+          "new": "cli::test_repo_worktrees_detached_head",
+          "old": "test_repo_worktrees_detached_head"
+        },
+        {
+          "new": "cli::test_repo_worktrees_json_output",
+          "old": "test_repo_worktrees_json_output"
+        },
+        {
+          "new": "cli::test_repo_worktrees_list_output",
+          "old": "test_repo_worktrees_list_output"
+        },
+        {
+          "new": "cli::test_repo_worktrees_list_verbose_composes_and_has_no_leading_space",
+          "old": "test_repo_worktrees_list_verbose_composes_and_has_no_leading_space"
+        },
+        {
+          "new": "cli::test_repo_worktrees_md_output",
+          "old": "test_repo_worktrees_md_output"
+        },
+        {
+          "new": "cli::test_repo_worktrees_md_verbose_keeps_bullet_and_metadata",
+          "old": "test_repo_worktrees_md_verbose_keeps_bullet_and_metadata"
+        },
+        {
+          "new": "cli::test_repo_worktrees_plain_verbose_no_escape_codes",
+          "old": "test_repo_worktrees_plain_verbose_no_escape_codes"
+        },
+        {
+          "new": "cli::test_repo_worktrees_verbose_output",
+          "old": "test_repo_worktrees_verbose_output"
+        },
+        {
+          "new": "cli::test_root_json_outside_git_repo_stable_shape",
+          "old": "test_root_json_outside_git_repo_stable_shape"
+        },
+        {
+          "new": "cli::test_runtime_subcommand_json_output",
+          "old": "test_runtime_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_runtime_subcommand_text_output",
+          "old": "test_runtime_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_services_state_all",
+          "old": "test_services_state_all"
+        },
+        {
+          "new": "cli::test_services_state_running",
+          "old": "test_services_state_running"
+        },
+        {
+          "new": "cli::test_services_state_stopped",
+          "old": "test_services_state_stopped"
+        },
+        {
+          "new": "cli::test_services_subcommand_json_output",
+          "old": "test_services_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_services_subcommand_text_output",
+          "old": "test_services_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_single_package_cargo_reports_root_facts",
+          "old": "test_single_package_cargo_reports_root_facts"
+        },
+        {
+          "new": "cli::test_single_package_node_reports_root_facts",
+          "old": "test_single_package_node_reports_root_facts"
+        },
+        {
+          "new": "cli::test_single_package_python_reports_root_facts",
+          "old": "test_single_package_python_reports_root_facts"
+        },
+        {
+          "new": "cli::test_software_agents_subcommand_json_output",
+          "old": "test_software_agents_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_agents_subcommand_text_output",
+          "old": "test_software_agents_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_audio_players_subcommand_json_output",
+          "old": "test_software_audio_players_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_audio_players_subcommand_text_output",
+          "old": "test_software_audio_players_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_editors_install_help_works",
+          "old": "test_software_editors_install_help_works"
+        },
+        {
+          "new": "cli::test_software_editors_install_invalid_name_fails",
+          "old": "test_software_editors_install_invalid_name_fails"
+        },
+        {
+          "new": "cli::test_software_editors_json_still_works_with_install_subcommand",
+          "old": "test_software_editors_json_still_works_with_install_subcommand"
+        },
+        {
+          "new": "cli::test_software_editors_shows_table_without_install",
+          "old": "test_software_editors_shows_table_without_install"
+        },
+        {
+          "new": "cli::test_software_editors_subcommand_json_output",
+          "old": "test_software_editors_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_editors_subcommand_text_output",
+          "old": "test_software_editors_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_install_invalid_name_fails",
+          "old": "test_software_install_invalid_name_fails"
+        },
+        {
+          "new": "cli::test_software_language_package_managers_subcommand_json_output",
+          "old": "test_software_language_package_managers_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_language_package_managers_subcommand_text_output",
+          "old": "test_software_language_package_managers_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_notification_helpers_subcommand_json_output",
+          "old": "test_software_notification_helpers_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_notification_helpers_subcommand_text_output",
+          "old": "test_software_notification_helpers_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_os_package_managers_subcommand_json_output",
+          "old": "test_software_os_package_managers_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_os_package_managers_subcommand_text_output",
+          "old": "test_software_os_package_managers_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_subcommand_json_output",
+          "old": "test_software_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_subcommand_rejects_json_format_flag",
+          "old": "test_software_subcommand_rejects_json_format_flag"
+        },
+        {
+          "new": "cli::test_software_subcommand_text_output",
+          "old": "test_software_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_terminal_apps_subcommand_json_output",
+          "old": "test_software_terminal_apps_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_terminal_apps_subcommand_text_output",
+          "old": "test_software_terminal_apps_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_test_runners_json_stdout_is_parseable_without_stderr",
+          "old": "test_software_test_runners_json_stdout_is_parseable_without_stderr"
+        },
+        {
+          "new": "cli::test_software_test_runners_plain_suppresses_hint_and_ansi",
+          "old": "test_software_test_runners_plain_suppresses_hint_and_ansi"
+        },
+        {
+          "new": "cli::test_software_test_runners_subcommand_json_output_shape",
+          "old": "test_software_test_runners_subcommand_json_output_shape"
+        },
+        {
+          "new": "cli::test_software_test_runners_subcommand_text_output",
+          "old": "test_software_test_runners_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_tts_clients_subcommand_json_output",
+          "old": "test_software_tts_clients_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_tts_clients_subcommand_text_output",
+          "old": "test_software_tts_clients_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_software_utilities_install_invalid_name_fails",
+          "old": "test_software_utilities_install_invalid_name_fails"
+        },
+        {
+          "new": "cli::test_software_utilities_subcommand_json_output",
+          "old": "test_software_utilities_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_software_utilities_subcommand_text_output",
+          "old": "test_software_utilities_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_source_and_documentation_changes_project_their_files",
+          "old": "test_source_and_documentation_changes_project_their_files"
+        },
+        {
+          "new": "cli::test_staged_package_areas_json_shape",
+          "old": "test_staged_package_areas_json_shape"
+        },
+        {
+          "new": "cli::test_staged_packages_json_shape",
+          "old": "test_staged_packages_json_shape"
+        },
+        {
+          "new": "cli::test_storage_subcommand_json_output",
+          "old": "test_storage_subcommand_json_output"
+        },
+        {
+          "new": "cli::test_storage_subcommand_text_output",
+          "old": "test_storage_subcommand_text_output"
+        },
+        {
+          "new": "cli::test_subcommand_outputs_text_by_default",
+          "old": "test_subcommand_outputs_text_by_default"
+        },
+        {
+          "new": "cli::test_subcommand_with_json_flag_outputs_json",
+          "old": "test_subcommand_with_json_flag_outputs_json"
+        },
+        {
+          "new": "cli::test_topics_subcommand_output",
+          "old": "test_topics_subcommand_output"
+        },
+        {
+          "new": "cli::test_unstaged_package_areas_json_shape",
+          "old": "test_unstaged_package_areas_json_shape"
+        },
+        {
+          "new": "cli::test_unstaged_packages_json_shape",
+          "old": "test_unstaged_packages_json_shape"
+        },
+        {
+          "new": "cli::test_verbose_flag_after_subcommand",
+          "old": "test_verbose_flag_after_subcommand"
+        },
+        {
+          "new": "cli::test_verbose_flag_before_subcommand",
+          "old": "test_verbose_flag_before_subcommand"
+        },
+        {
+          "new": "cli::test_verbose_with_hardware_shows_details",
+          "old": "test_verbose_with_hardware_shows_details"
+        },
+        {
+          "new": "cli::test_verbose_with_software_adds_columns",
+          "old": "test_verbose_with_software_adds_columns"
+        },
+        {
+          "new": "cli::test_version_flag",
+          "old": "test_version_flag"
+        },
+        {
+          "new": "cli::with_network_global_flag_is_rejected",
+          "old": "with_network_global_flag_is_rejected"
+        },
+        {
+          "new": "cli::with_network_subcommand_flag_is_rejected",
+          "old": "with_network_subcommand_flag_is_rejected"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "cli_process_fixture",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/cli_process_fixture.rs",
+      "old_binary_id": "sniff-cli::cli_process_fixture",
+      "old_path": "sniff/cli/tests/cli_process_fixture.rs",
+      "old_target": "cli_process_fixture",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "cli_process_fixture::ambient_context_accepts_a_disposable_directory_the_test_built",
+          "old": "ambient_context_accepts_a_disposable_directory_the_test_built"
+        },
+        {
+          "new": "cli_process_fixture::ambient_context_accepts_only_existing_fixture_directories",
+          "old": "ambient_context_accepts_only_existing_fixture_directories"
+        },
+        {
+          "new": "cli_process_fixture::assert_and_raw_surfaces_produce_the_same_effective_environment",
+          "old": "assert_and_raw_surfaces_produce_the_same_effective_environment"
+        },
+        {
+          "new": "cli_process_fixture::canonical_checkout_containment_rejects_nested_roots",
+          "old": "canonical_checkout_containment_rejects_nested_roots"
+        },
+        {
+          "new": "cli_process_fixture::canonical_checkout_containment_rejects_symlink_spelling",
+          "old": "canonical_checkout_containment_rejects_symlink_spelling"
+        },
+        {
+          "new": "cli_process_fixture::fluent_ambient_context_rejects_a_checkout_directory",
+          "old": "fluent_ambient_context_rejects_a_checkout_directory"
+        },
+        {
+          "new": "cli_process_fixture::fluent_ambient_context_rejects_a_non_disposable_directory",
+          "old": "fluent_ambient_context_rejects_a_non_disposable_directory"
+        },
+        {
+          "new": "cli_process_fixture::inherited_git_sniff_and_rendering_inputs_are_scrubbed",
+          "old": "inherited_git_sniff_and_rendering_inputs_are_scrubbed"
+        },
+        {
+          "new": "cli_process_fixture::intentional_override_after_policy_wins_over_the_scrub",
+          "old": "intentional_override_after_policy_wins_over_the_scrub"
+        },
+        {
+          "new": "cli_process_fixture::owned_ambient_context_rejects_a_checkout_directory",
+          "old": "owned_ambient_context_rejects_a_checkout_directory"
+        },
+        {
+          "new": "cli_process_fixture::owned_ambient_context_rejects_a_non_disposable_directory",
+          "old": "owned_ambient_context_rejects_a_non_disposable_directory"
+        },
+        {
+          "new": "cli_process_fixture::owned_command_keeps_its_disposable_launch_directory_alive",
+          "old": "owned_command_keeps_its_disposable_launch_directory_alive"
+        },
+        {
+          "new": "cli_process_fixture::path_modes_are_bounded_and_keep_fixture_stubs_first",
+          "old": "path_modes_are_bounded_and_keep_fixture_stubs_first"
+        },
+        {
+          "new": "cli_process_fixture::real_sniff_command_observes_the_fixture_launch_context",
+          "old": "real_sniff_command_observes_the_fixture_launch_context"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "install_interview_cli",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/install_interview_cli.rs",
+      "old_binary_id": "sniff-cli::install_interview_cli",
+      "old_path": "sniff/cli/tests/install_interview_cli.rs",
+      "old_target": "install_interview_cli",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "install_interview_cli::install_dry_run_plain_emits_announcement_and_success_status",
+          "old": "install_dry_run_plain_emits_announcement_and_success_status"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "install_plan",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/install_plan.rs",
+      "old_binary_id": "sniff-cli::install_plan",
+      "old_path": "sniff/cli/tests/install_plan.rs",
+      "old_target": "install_plan",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "install_plan::install_dry_run_does_not_execute",
+          "old": "install_dry_run_does_not_execute"
+        },
+        {
+          "new": "install_plan::install_plan_force_rebuilds_cache",
+          "old": "install_plan_force_rebuilds_cache"
+        },
+        {
+          "new": "install_plan::install_plan_no_sudo_never_selects_sudo_method",
+          "old": "install_plan_no_sudo_never_selects_sudo_method"
+        },
+        {
+          "new": "install_plan::install_plan_populates_cache_file",
+          "old": "install_plan_populates_cache_file"
+        },
+        {
+          "new": "install_plan::install_plan_unknown_program_errors",
+          "old": "install_plan_unknown_program_errors"
+        },
+        {
+          "new": "install_plan::install_plan_via_brew_selects_brew_or_fails_cleanly",
+          "old": "install_plan_via_brew_selects_brew_or_fails_cleanly"
+        },
+        {
+          "new": "install_plan::install_plan_vim_json_returns_program_field",
+          "old": "install_plan_vim_json_returns_program_field"
+        },
+        {
+          "new": "install_plan::install_plan_vim_renders_text_output",
+          "old": "install_plan_vim_renders_text_output"
+        },
+        {
+          "new": "install_plan::install_via_unknown_manager_errors_with_valid_list",
+          "old": "install_via_unknown_manager_errors_with_valid_list"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "snapshots",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/snapshots.rs",
+      "old_binary_id": "sniff-cli::snapshots",
+      "old_path": "sniff/cli/tests/snapshots.rs",
+      "old_target": "snapshots",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "snapshots::cargo_monorepo_structure_json_snapshot",
+          "old": "cargo_monorepo_structure_json_snapshot"
+        },
+        {
+          "new": "snapshots::cargo_monorepo_structure_text_snapshot",
+          "old": "cargo_monorepo_structure_text_snapshot"
+        },
+        {
+          "new": "snapshots::cargo_pnpm_monorepo_structure_json_snapshot",
+          "old": "cargo_pnpm_monorepo_structure_json_snapshot"
+        },
+        {
+          "new": "snapshots::cargo_pnpm_monorepo_structure_text_snapshot",
+          "old": "cargo_pnpm_monorepo_structure_text_snapshot"
+        },
+        {
+          "new": "snapshots::completions_help_output_snapshot",
+          "old": "completions_help_output_snapshot"
+        },
+        {
+          "new": "snapshots::degenerate_cargo_structure_json_has_no_topology_keys",
+          "old": "degenerate_cargo_structure_json_has_no_topology_keys"
+        },
+        {
+          "new": "snapshots::degenerate_cargo_structure_text_is_empty",
+          "old": "degenerate_cargo_structure_text_is_empty"
+        },
+        {
+          "new": "snapshots::help_output_snapshot",
+          "old": "help_output_snapshot"
+        },
+        {
+          "new": "snapshots::os_json_snapshot",
+          "old": "os_json_snapshot"
+        },
+        {
+          "new": "snapshots::pnpm_nx_monorepo_structure_json_snapshot",
+          "old": "pnpm_nx_monorepo_structure_json_snapshot"
+        },
+        {
+          "new": "snapshots::pnpm_nx_monorepo_structure_text_snapshot",
+          "old": "pnpm_nx_monorepo_structure_text_snapshot"
+        },
+        {
+          "new": "snapshots::redact_base_paths_normalizes_windows_separators",
+          "old": "redact_base_paths_normalizes_windows_separators"
+        },
+        {
+          "new": "snapshots::repo_aggregate_json_snapshot",
+          "old": "repo_aggregate_json_snapshot"
+        },
+        {
+          "new": "snapshots::topics_table_snapshot",
+          "old": "topics_table_snapshot"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "spawn_site_guard",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/spawn_site_guard.rs",
+      "old_binary_id": "sniff-cli::spawn_site_guard",
+      "old_path": "sniff/cli/tests/spawn_site_guard.rs",
+      "old_target": "spawn_site_guard",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "spawn_site_guard::detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings",
+          "old": "detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings"
+        },
+        {
+          "new": "spawn_site_guard::escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings",
+          "old": "escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings"
+        },
+        {
+          "new": "spawn_site_guard::escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes",
+          "old": "escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes"
+        },
+        {
+          "new": "spawn_site_guard::l1_path_escapes_carry_a_call_site_reason",
+          "old": "l1_path_escapes_carry_a_call_site_reason"
+        },
+        {
+          "new": "spawn_site_guard::l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry",
+          "old": "l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry"
+        },
+        {
+          "new": "spawn_site_guard::reconciliation_rejects_stale_and_unexplained_entries",
+          "old": "reconciliation_rejects_stale_and_unexplained_entries"
+        },
+        {
+          "new": "spawn_site_guard::restored_detector_rejects_a_violation_that_a_neutered_detector_misses",
+          "old": "restored_detector_rejects_a_violation_that_a_neutered_detector_misses"
+        },
+        {
+          "new": "spawn_site_guard::restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses",
+          "old": "restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::l1",
+      "inner_cfg": [],
+      "module": "tty",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/l1/tty.rs",
+      "old_binary_id": "sniff-cli::tty",
+      "old_path": "sniff/cli/tests/tty.rs",
+      "old_target": "tty",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "tty::os_subcommand_runs_in_pty",
+          "old": "os_subcommand_runs_in_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::level2",
+      "inner_cfg": [
+        "feature = \"test-fixtures\""
+      ],
+      "module": "level2_cicd_styling",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/level2/level2_cicd_styling.rs",
+      "old_binary_id": "sniff-cli::level2_cicd_styling",
+      "old_path": "sniff/cli/tests/level2_cicd_styling.rs",
+      "old_target": "level2_cicd_styling",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_cicd_styling::level2_cicd_status_cells_render_styled_in_tmux",
+          "old": "level2_cicd_status_cells_render_styled_in_tmux"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::level2",
+      "inner_cfg": [
+        "feature = \"test-fixtures\""
+      ],
+      "module": "level2_git_status_styling",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/level2/level2_git_status_styling.rs",
+      "old_binary_id": "sniff-cli::level2_git_status_styling",
+      "old_path": "sniff/cli/tests/level2_git_status_styling.rs",
+      "old_target": "level2_git_status_styling",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_git_status_styling::level2_git_status_headers_and_links_render_styled_in_tmux",
+          "old": "level2_git_status_headers_and_links_render_styled_in_tmux"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::level2",
+      "inner_cfg": [
+        "feature = \"test-fixtures\""
+      ],
+      "module": "level2_perf_tree_rendering",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/level2/level2_perf_tree_rendering.rs",
+      "old_binary_id": "sniff-cli::level2_perf_tree_rendering",
+      "old_path": "sniff/cli/tests/level2_perf_tree_rendering.rs",
+      "old_target": "level2_perf_tree_rendering",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_perf_tree_rendering::level2_perf_trees_render_aligned_and_styled_in_tmux",
+          "old": "level2_perf_trees_render_aligned_and_styled_in_tmux"
+        },
+        {
+          "new": "level2_perf_tree_rendering::level2_perf_trees_survive_narrow_pane_truncation_in_tmux",
+          "old": "level2_perf_trees_survive_narrow_pane_truncation_in_tmux"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "sniff-cli::level2",
+      "inner_cfg": [
+        "feature = \"test-fixtures\""
+      ],
+      "module": "level2_recent_commits_rendering",
+      "nested_root": false,
+      "new_path": "sniff/cli/tests/level2/level2_recent_commits_rendering.rs",
+      "old_binary_id": "sniff-cli::level2_recent_commits_rendering",
+      "old_path": "sniff/cli/tests/level2_recent_commits_rendering.rs",
+      "old_target": "level2_recent_commits_rendering",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_recent_commits_rendering::level2_recent_commits_styles_and_links_map_to_their_spans_in_tmux",
+          "old": "level2_recent_commits_styles_and_links_map_to_their_spans_in_tmux"
+        },
+        {
+          "new": "level2_recent_commits_rendering::level2_recent_commits_verbose_report_wraps_styles_and_links_in_tmux",
+          "old": "level2_recent_commits_verbose_report_wraps_styles_and_links_in_tmux"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "sniff-cli",
+  "ruled_targets": [
+    {
+      "old_target": "level2_recent_commits_rendering",
+      "ruling": "R14: #![cfg(feature = \"test-fixtures\")] gates every item",
+      "target": "level2"
+    }
+  ],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "cli",
+        "cli_process_fixture",
+        "install_interview_cli",
+        "install_plan",
+        "snapshots",
+        "spawn_site_guard",
+        "tty"
+      ],
+      "name": "l1",
+      "path": "sniff/cli/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level2_cicd_styling",
+        "level2_git_status_styling",
+        "level2_perf_tree_rendering",
+        "level2_recent_commits_rendering"
+      ],
+      "name": "level2",
+      "path": "sniff/cli/tests/level2/main.rs",
+      "required_features": [
+        "test-fixtures"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}
