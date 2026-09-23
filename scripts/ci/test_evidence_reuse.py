@@ -1017,6 +1017,100 @@ class SuccessiveReceiptTests(EvidenceFixture):
         self.assertEqual([], rejections)
 
 
+class NarrowedEvidenceTests(EvidenceFixture):
+    """A narrowed test-input run stands in for its planned cell from any host.
+
+    The one cross-environment rule (docs/cicd/test-inputs.md): the receipt
+    cell must carry the plan cell's exact `test_filter`, and the receipt must
+    be the head's exact tree.
+    """
+
+    NARROW = "(binary_id(alpha::l1) & test(=docs::guide_wording_holds))"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_narrowed_plan()
+
+    def write_narrowed_plan(self) -> None:
+        plan = self.plan()
+        for cell in plan["cells"]:
+            if (cell["package"], cell["environment"], cell["gate"]) == ("alpha", "ubuntu-latest", "L1"):
+                cell["test_filter"] = self.NARROW
+        self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
+
+    def verify(self) -> tuple[dict[str, dict], list[str]]:
+        accepted, rejections = target("verify_cells")(str(self.plan_path), self.base, self.head)
+        return {
+            f"{cell['package']}/{cell['environment']}/{cell['gate']}": cell for cell in accepted
+        }, rejections
+
+    def test_a_macos_narrowed_run_satisfies_the_planned_linux_cell(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha", test_filter=self.NARROW)]),
+        )
+        accepted, _ = self.verify()
+        self.assertEqual(["alpha/ubuntu-latest/L1"], sorted(accepted))
+        cell = accepted["alpha/ubuntu-latest/L1"]
+        self.assertEqual(("local", self.NARROW), (cell["origin"], cell["test_filter"]))
+        self.assertEqual(f"{NOTES_PREFIX}/macos-latest", cell["evidence"]["ref"])
+        self.assertIn("on macos-latest", cell["measurements"])
+
+    def test_it_never_stands_in_for_the_hosts_own_whole_tier(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha", test_filter=self.NARROW)]),
+        )
+        accepted, _ = self.verify()
+        self.assertNotIn("alpha/macos-latest/L1", accepted)
+
+    def test_a_run_narrowed_to_other_tests_satisfies_nothing(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.receipt(
+                "macos-latest",
+                [self.receipt_cell("alpha", test_filter="(binary_id(alpha::l1))")],
+            ),
+        )
+        accepted, _ = self.verify()
+        self.assertEqual({}, accepted)
+
+    def test_an_older_narrowed_run_is_refused_even_when_gate_inputs_match(self) -> None:
+        older = self.head
+        self.add_note(
+            "macos-latest",
+            self.receipt("macos-latest", [self.receipt_cell("alpha", test_filter=self.NARROW)]),
+            commit=older,
+        )
+        # A documentation change leaves alpha's gate inputs identical, which is
+        # exactly why only the exact tree may vouch for a narrowed run.
+        self.write("docs/unrelated.md", "edited prose\n")
+        self.git("commit", "-q", "-am", "edit the document the test reads")
+        self.head = self.git("rev-parse", "HEAD")
+        self.write_narrowed_plan()
+        accepted, rejections = self.verify()
+        self.assertNotIn("alpha/ubuntu-latest/L1", accepted)
+        self.assertTrue(
+            any("narrowed" in reason and "exact tree" in reason for reason in rejections),
+            rejections,
+        )
+
+    def test_whole_tier_evidence_on_linux_does_not_satisfy_the_narrowed_cell(self) -> None:
+        self.add_note(
+            "ubuntu-latest",
+            self.receipt(
+                "ubuntu-latest",
+                [self.receipt_cell("alpha")],
+                host={"os": "Linux", "kernel": "6.8", "report_dir": "/r"},
+            ),
+        )
+        accepted, _ = self.verify()
+        # Accepted by verification like any exact-tree cell; the planner's
+        # `cell_evidence` is what refuses it for the narrowed cell, because
+        # the filters differ (`TestInputSelectionTests`).
+        self.assertIsNone(accepted["alpha/ubuntu-latest/L1"].get("test_filter"))
+
+
 class NoVerifyTests(EvidenceFixture):
     """AC7 / spec 3.7: `--no-verify` adds nothing and invalidates nothing."""
 
@@ -1105,6 +1199,36 @@ class ReceiptRecordingTests(EvidenceFixture):
                 self.head,
                 report_dir=str(elsewhere),
             )
+
+    def test_a_narrowed_test_input_run_is_recorded_with_its_filter(self) -> None:
+        # docs/cicd/test-inputs.md: the narrowed cell is planned on
+        # ubuntu-latest, run here on macOS, and recorded WITH its filter so it
+        # can never read as this host's whole tier.
+        narrow = "(binary_id(alpha::l1) & test(=docs::t))"
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        for cell in plan["cells"]:
+            if (cell["package"], cell["environment"], cell["gate"]) == ("alpha", "ubuntu-latest", "L1"):
+                cell["test_filter"] = narrow
+        self.plan_path.write_text(schema.canonical(plan), encoding="utf-8")
+        alpha, beta = self.staged("alpha"), self.staged("beta")
+        directory = self.stage(alpha, beta)
+        self.report(directory, alpha)
+        self.report(directory, beta)
+        document = json.loads(
+            local_evidence.record_cells(
+                str(self.plan_path),
+                str(directory),
+                "macos-latest",
+                self.base,
+                self.head,
+                report_dir=str(directory),
+            )
+        )
+        self.assertEqual([], schema.validate_receipt(document))
+        self.assertEqual(
+            {"alpha": narrow, "beta": None},
+            {cell["package"]: cell.get("test_filter") for cell in document["cells"]},
+        )
 
     def test_a_passing_run_publishes_measured_cells_that_verify_back(self) -> None:
         record = self.staged("alpha")

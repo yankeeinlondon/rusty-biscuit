@@ -18,9 +18,11 @@ import unittest.mock
 
 import affected_scope
 import cell_contract
+import copy
 import companion_suites
 import diff_scope
 import schema
+import test_inputs
 from tool_guard import require_tools
 from pending_contracts import pending
 from affected_scope import (
@@ -4834,7 +4836,14 @@ class ArchiveGuardOnlyCellTests(unittest.TestCase):
     def test_a_documentation_change_schedules_no_guard_cell(self) -> None:
         plan = self.plan("docs/topics/ci-cd.md")
         self.assertFalse(plan["archive_guard"]["selected"])  # type: ignore[index]
-        self.assertEqual([], self.toolkit_cells(plan))
+        # The document is a test input of `test-toolkit`'s CI-documentation
+        # contracts, so it selects their narrowed L1 cell — and nothing that
+        # resembles the guard's lint cell.
+        self.assertEqual(
+            [("ubuntu-latest", "L1")],
+            [(cell["environment"], cell["gate"]) for cell in self.toolkit_cells(plan)],
+        )
+        self.assertIn("test_filter", self.toolkit_cells(plan)[0])
 
     def test_the_guard_cell_is_never_satisfied_by_reuse(self) -> None:
         # The spec's "initially prefer non-reusable guard execution": no
@@ -5666,9 +5675,10 @@ class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
 
     #: Repository-owned, area-owned, and package-owned, in that order. Each is
     #: a tracked file, so a rename that makes one of them stop existing is a
-    #: fixture failure rather than a silently weaker assertion.
+    #: fixture failure rather than a silently weaker assertion — and none is
+    #: read by any test, which a document like `docs/topics/ci-cd.md` is.
     LEVELS = (
-        "docs/topics/ci-cd.md",
+        "docs/comment-quality.md",
         "darkmatter/docs/topics/caching.md",
         "biscuit-file/README.md",
     )
@@ -7080,13 +7090,14 @@ class SelectionEntryPairingTests(unittest.TestCase):
 
 
 class DiffScopeParserTests(unittest.TestCase):
-    """`--name-status -z` into the planner's `--deleted`/`--` argument tail.
+    """`--name-status -z` into the planner's `--deleted`/`--renamed-from`/`--` tail.
 
     The parser every selection boundary shares, so the NUL framing is proved
     once: a status and each path are separate records, and a rename or copy
     carries TWO paths for one status. Mis-stepping that puts a rename's SOURCE
     in the changed list, which is exactly the "unexpectedly missing path" the
-    deletion identity exists to distinguish.
+    deletion identity exists to distinguish. The source travels on its own,
+    as `--renamed-from`, for the test-input search alone.
     """
 
     @staticmethod
@@ -7094,11 +7105,14 @@ class DiffScopeParserTests(unittest.TestCase):
         return b"".join(record.encode() + b"\0" for record in records)
 
     def parse(self, *records: str) -> tuple[list[str], list[str]]:
-        changed, deleted = diff_scope.parse_name_status(self.stream(*records))
+        changed, deleted, _ = diff_scope.parse_name_status(self.stream(*records))
         return (
             [path.decode() for path in changed],
             [path.decode() for path in deleted],
         )
+
+    def renamed_from(self, *records: str) -> list[str]:
+        return [path.decode() for path in diff_scope.parse_name_status(self.stream(*records))[2]]
 
     def test_a_deletion_is_reported_as_changed_and_as_deleted(self) -> None:
         self.assertEqual((["gone.rs"], ["gone.rs"]), self.parse("D", "gone.rs"))
@@ -7113,6 +7127,14 @@ class DiffScopeParserTests(unittest.TestCase):
 
     def test_a_copy_reports_its_destination_too(self) -> None:
         self.assertEqual((["copy.rs"], []), self.parse("C75", "source.rs", "copy.rs"))
+
+    def test_a_rename_reports_its_source_as_renamed_from(self) -> None:
+        # 869cbb225..330805a84 moved a document a test still named; the old
+        # name is the only thing that finds that test.
+        self.assertEqual(["before.md"], self.renamed_from("R098", "before.md", "after.md"))
+
+    def test_a_copy_leaves_its_source_in_place_and_reports_no_rename(self) -> None:
+        self.assertEqual([], self.renamed_from("C75", "source.rs", "copy.rs"))
 
     def test_a_rename_beside_a_deletion_keeps_the_two_apart(self) -> None:
         # The regression in one record set: a parser that read the rename's
@@ -7141,6 +7163,13 @@ class DiffScopeParserTests(unittest.TestCase):
         tail = diff_scope.arguments([b"after.rs", b"gone.rs"], [b"gone.rs"])
         self.assertEqual(
             ["--deleted", "gone.rs", "--", "after.rs", "gone.rs"],
+            [part.decode() for part in tail.split(b"\0")[:-1]],
+        )
+
+    def test_the_argument_tail_names_every_rename_source_before_the_separator(self) -> None:
+        tail = diff_scope.arguments([b"after.rs"], [], [b"before.rs"])
+        self.assertEqual(
+            ["--renamed-from", "before.rs", "--", "after.rs"],
             [part.decode() for part in tail.split(b"\0")[:-1]],
         )
 
@@ -7185,9 +7214,737 @@ class DiffScopeParserTests(unittest.TestCase):
             ).stdout
             tail = [part.decode() for part in parsed.split(b"\0")[:-1]]
 
-        self.assertEqual(["--deleted", "gone.rs", "--"], tail[:3])
-        self.assertEqual({"after.rs", "gone.rs", "kept.rs", "new.rs"}, set(tail[3:]))
-        self.assertNotIn("before.rs", tail)
+        self.assertEqual(
+            ["--deleted", "gone.rs", "--renamed-from", "before.rs", "--"], tail[:5]
+        )
+        self.assertEqual({"after.rs", "gone.rs", "kept.rs", "new.rs"}, set(tail[5:]))
+
+
+# ---------------------------------------------------------------------------
+# Test inputs (fixes/2026-09-22-test-input-blind-spot)
+# ---------------------------------------------------------------------------
+
+
+def rust_package(
+    root: Path,
+    name: str,
+    manifest_dir: str,
+    targets: list[tuple[str, str, str]],
+    ci: object | None = None,
+) -> dict[str, object]:
+    """A metadata record whose targets carry `src_path`, as `cargo metadata` does.
+
+    `targets` is `(kind, name, relative source path)`; the relative path is
+    under `manifest_dir`.
+    """
+    record = package(root, name, f"{manifest_dir}/Cargo.toml", ci=ci)
+    record["targets"] = [
+        {
+            "kind": [kind],
+            "name": target,
+            "src_path": str((root / manifest_dir / source).resolve()),
+        }
+        for kind, target, source in targets
+    ]
+    return record
+
+
+def write_tree(root: Path, files: dict[str, str]) -> None:
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+class TestInputIndexTests(unittest.TestCase):
+    """The static index: which compiled code names a path, and as which test.
+
+    Each case is one reference form, on a temp tree walked from real target
+    roots, because the forms are exactly where a regex-level shortcut would
+    either miss a read or mistake a fixture for one.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def references(
+        self,
+        files: dict[str, str],
+        candidates: list[str],
+        targets: list[tuple[str, str, str]] | None = None,
+        include_slow: frozenset[str] = frozenset(),
+    ) -> list[tuple[str, str | None, bool]]:
+        write_tree(self.root, files)
+        record = rust_package(
+            self.root,
+            "pkg",
+            "pkg/lib",
+            targets or [("lib", "pkg", "src/lib.rs"), ("test", "l1", "tests/l1/main.rs")],
+        )
+        targets_ = test_inputs.targets_from_metadata([record], self.root.as_posix())
+        found = test_inputs.scan(
+            targets_,
+            affected_scope.worktree_reader(self.root),
+            candidates,
+            include_slow,
+        )
+        return [(reference.path, reference.unit, reference.product) for reference in found]
+
+    def test_a_literal_inside_a_test_names_that_test_exactly(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": "mod docs;\n",
+                "pkg/lib/tests/l1/docs.rs": (
+                    "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                    "#[test]\nfn wording_holds() {\n"
+                    "    let text = std::fs::read_to_string(repo_root().join(\"docs/guide.md\"));\n"
+                    "}\n"
+                ),
+            },
+            ["docs/guide.md"],
+        )
+        self.assertEqual(
+            [("docs/guide.md", "binary_id(pkg::l1) & test(=docs::wording_holds)", False)],
+            found,
+        )
+
+    def test_a_literal_in_a_helper_names_its_module(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": "mod docs;\n",
+                "pkg/lib/tests/l1/docs.rs": (
+                    "const PAGES: &[&str] = &[\"pkg/docs/guide.md\"];\n"
+                    "fn read(page: &str) -> String {\n"
+                    "    std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(page)).unwrap()\n"
+                    "}\n"
+                ),
+            },
+            ["pkg/docs/guide.md"],
+        )
+        self.assertEqual(
+            [("pkg/docs/guide.md", "binary_id(pkg::l1) & test(/^docs::/)", False)], found
+        )
+
+    def test_a_unit_test_module_declared_under_cfg_test_is_test_code(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "pub mod render;\n",
+                "pkg/lib/src/render.rs": "pub fn go() {}\n#[cfg(test)]\nmod tests;\n",
+                "pkg/lib/src/render/tests.rs": (
+                    "#[test]\nfn fixture_parses() {\n"
+                    "    let _ = include_str!(\"../../fixtures/page.md\");\n}\n"
+                ),
+            },
+            ["pkg/lib/fixtures/page.md"],
+        )
+        self.assertEqual(
+            [
+                (
+                    "pkg/lib/fixtures/page.md",
+                    "binary_id(pkg) & test(=render::tests::fixture_parses)",
+                    False,
+                )
+            ],
+            found,
+        )
+
+    def test_an_include_in_shipped_code_is_product_source(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "pub const SCHEMA: &str = include_str!(\"../../schemas/base.yaml\");\n",
+            },
+            ["pkg/schemas/base.yaml"],
+        )
+        self.assertEqual([("pkg/schemas/base.yaml", None, True)], found)
+
+    def test_a_path_joined_onto_a_tempdir_is_a_fixture_not_a_read(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": (
+                    "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                    "#[test]\nfn writes_a_fixture() {\n"
+                    "    let dir = tempfile::tempdir().unwrap();\n"
+                    "    std::fs::write(dir.path().join(\".claude/skills/pkg/SKILL.md\"), \"x\");\n"
+                    "    let _ = repo_root();\n"
+                    "}\n"
+                ),
+            },
+            [".claude/skills/pkg/SKILL.md"],
+        )
+        self.assertEqual([], found)
+
+    def test_mock_data_in_a_file_that_never_reads_a_root_is_not_a_read(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": (
+                    "#[test]\nfn classifies() {\n"
+                    "    assert!(classify(\".github/workflows/ci.yml\"));\n}\n"
+                ),
+            },
+            [".github/workflows/ci.yml"],
+        )
+        self.assertEqual([], found)
+
+    def test_a_bare_file_name_counts_only_when_joined_onto_a_root(self) -> None:
+        files = {
+            "pkg/lib/src/lib.rs": "",
+            "pkg/lib/tests/l1/main.rs": (
+                "#[test]\nfn bare() {\n    let _ = std::path::Path::new(\"README.md\");\n}\n"
+            ),
+        }
+        self.assertEqual([], self.references(files, ["README.md", "pkg/lib/README.md"]))
+
+    def test_parent_steps_resolve_against_the_manifest(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": (
+                    "#[test]\nfn recipe() {\n"
+                    "    let justfile = biscuit_test_harness::manifest_dir!()\n"
+                    "        .parent()\n        .expect(\"area\")\n        .join(\"justfile\");\n}\n"
+                ),
+            },
+            ["justfile", "pkg/justfile", "pkg/lib/justfile"],
+        )
+        self.assertEqual([("pkg/justfile", "binary_id(pkg::l1) & test(=recipe)", False)], found)
+
+    def test_a_rooted_directory_walk_reads_every_file_under_it(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": (
+                    "#[test]\nfn every_spec_parses() {\n"
+                    "    let root = biscuit_test_harness::manifest_dir!().join(\"..\");\n"
+                    "    walk(root.join(\"features\"));\n}\n"
+                ),
+            },
+            ["pkg/features/2026-01-01-x/spec.md"],
+        )
+        self.assertEqual(
+            [("pkg/features/2026-01-01-x/spec.md", "binary_id(pkg::l1) & test(=every_spec_parses)", False)],
+            found,
+        )
+
+    def test_a_test_outside_the_l1_tier_is_not_a_unit(self) -> None:
+        files = {
+            "pkg/lib/src/lib.rs": "",
+            "pkg/lib/tests/l1/main.rs": (
+                "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                "#[test]\nfn level2_renders() {\n"
+                "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+                "#[test]\nfn slow_renders() {\n"
+                "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+            ),
+        }
+        self.assertEqual(
+            [("docs/guide.md", None, False)] * 2,
+            self.references(files, ["docs/guide.md"]),
+        )
+
+    def test_slow_tests_are_units_where_the_package_keeps_them_in_l1(self) -> None:
+        files = {
+            "pkg/lib/src/lib.rs": "",
+            "pkg/lib/tests/l1/main.rs": (
+                "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                "#[test]\nfn slow_renders() {\n"
+                "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+            ),
+        }
+        self.assertEqual(
+            [("docs/guide.md", "binary_id(pkg::l1) & test(=slow_renders)", False)],
+            self.references(files, ["docs/guide.md"], include_slow=frozenset({"pkg"})),
+        )
+
+    def test_a_module_file_declared_inside_an_inline_module_is_walked(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "#[cfg(test)]\nmod tests {\n    mod golden;\n}\n",
+                "pkg/lib/src/tests/golden.rs": (
+                    "#[test]\nfn matches() {\n"
+                    "    let _ = biscuit_test_harness::manifest_dir!().join(\"golden/out.txt\");\n}\n"
+                ),
+            },
+            ["pkg/lib/golden/out.txt"],
+        )
+        self.assertEqual(
+            [("pkg/lib/golden/out.txt", "binary_id(pkg) & test(=tests::golden::matches)", False)],
+            found,
+        )
+
+    def test_a_file_no_target_reaches_is_not_scanned(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/src/orphan.rs": "#[test]\nfn t() { let _ = include_str!(\"x.md\"); }\n",
+            },
+            ["pkg/lib/src/x.md"],
+        )
+        self.assertEqual([], found)
+
+
+class TestInputSelectionTests(unittest.TestCase):
+    """What the planner schedules for a changed file that code reads."""
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+        seed_build_inputs(self.root)
+        write_tree(
+            self.root,
+            {
+                "reader/lib/src/lib.rs": (
+                    "pub const BASE: &str = include_str!(\"../../schemas/base.yaml\");\n"
+                ),
+                "reader/lib/tests/l1/main.rs": "mod docs;\n",
+                "reader/lib/tests/l1/docs.rs": (
+                    "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                    "#[test]\nfn guide_wording_holds() {\n"
+                    "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+                ),
+                "other/lib/src/lib.rs": "",
+                "docs/guide.md": "# Guide\n",
+                "docs/unread.md": "# Unread\n",
+                "reader/schemas/base.yaml": "a: 1\n",
+            },
+        )
+        packages = [
+            rust_package(
+                self.root,
+                "reader",
+                "reader/lib",
+                [("lib", "reader", "src/lib.rs"), ("test", "l1", "tests/l1/main.rs")],
+            ),
+            rust_package(self.root, "other", "other/lib", [("lib", "other", "src/lib.rs")]),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "reader", "deps": []}, {"id": "other", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(self, files: list[str], **kwargs: object) -> dict:
+        plan = calculate_scope(
+            files,
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_a_read_document_schedules_one_narrowed_linux_l1_cell(self) -> None:
+        plan = self.plan(["docs/guide.md"])
+        self.assertEqual(
+            [("reader", "ubuntu-latest", "L1")],
+            [(cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]],
+        )
+        cell = plan["cells"][0]
+        self.assertEqual("execute", cell["execution"])
+        self.assertEqual(
+            "(binary_id(reader::l1) & test(=docs::guide_wording_holds))", cell["test_filter"]
+        )
+        self.assertTrue(cell["reusable"])
+        self.assertIn("docs/guide.md", cell["selection_reason"])
+        # A narrowed cell still runs from an archive like any L1 cell.
+        self.assertEqual(["reader"], [build["package"] for build in plan["builds"]])
+        self.assertEqual(["reader"], [entry["package"] for entry in plan["packages"]])
+        self.assertEqual([], plan["source_packages"])
+        self.assertEqual([], plan["reverse_dependencies"])
+        self.assertEqual(
+            "changed test input read by package(s) reader", plan["areas"][0]["selection_reason"]
+        )
+
+    def test_an_unread_document_schedules_nothing(self) -> None:
+        plan = self.plan(["docs/unread.md"])
+        self.assertEqual([], plan["cells"])
+        self.assertEqual("documentation", plan["change_class"])
+
+    def test_a_deleted_document_a_test_still_names_schedules_that_test(self) -> None:
+        (self.root / "docs" / "guide.md").unlink()
+        plan = self.plan(["docs/guide.md"], deleted=["docs/guide.md"])
+        self.assertEqual(["reader"], [cell["package"] for cell in plan["cells"]])
+
+    def test_a_document_renamed_away_schedules_the_test_that_still_names_it(self) -> None:
+        (self.root / "docs" / "guide.md").rename(self.root / "docs" / "moved.md")
+        plan = self.plan(["docs/moved.md"], renamed_from=["docs/guide.md"])
+        self.assertEqual(["reader"], [cell["package"] for cell in plan["cells"]])
+        self.assertEqual(["docs/moved.md"], plan["change_inventory"]["paths"]["documentation"])
+
+    def test_an_embedded_file_is_source_of_the_package_that_ships_it(self) -> None:
+        plan = self.plan(["reader/schemas/base.yaml"])
+        self.assertEqual(["reader"], plan["source_packages"])
+        l1 = [cell for cell in plan["cells"] if cell["gate"] == "L1"]
+        self.assertEqual(
+            {"ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"},
+            {cell["environment"] for cell in l1},
+        )
+        self.assertFalse(any("test_filter" in cell for cell in plan["cells"]))
+        self.assertIn("embedded file reader/schemas/base.yaml", plan["packages"][0]["selection_reason"])
+
+    def test_a_package_whose_whole_tier_already_runs_gains_no_narrowed_cell(self) -> None:
+        plan = self.plan(["reader/lib/src/lib.rs", "docs/guide.md"])
+        self.assertFalse(any("test_filter" in cell for cell in plan["cells"]))
+        self.assertIn(
+            ("ubuntu-latest", "L1"),
+            {(cell["environment"], cell["gate"]) for cell in plan["cells"]},
+        )
+
+    def test_an_event_that_plans_no_linux_cell_schedules_no_narrowed_cell(self) -> None:
+        plan = self.plan(["docs/guide.md"], event="push", proven_event="pull_request")
+        self.assertEqual([], plan["cells"])
+
+    NARROW = "(binary_id(reader::l1) & test(=docs::guide_wording_holds))"
+
+    def narrowed_evidence(self, **overrides: object) -> dict[str, object]:
+        """What `verify_cells` accepts for a narrowed run on a macOS host."""
+        return {
+            "package": "reader",
+            "environment": "ubuntu-latest",
+            "gate": "L1",
+            "outcome": "pass",
+            "origin": "local",
+            "test_filter": self.NARROW,
+            "evidence": {"ref": "refs/notes/ci-local/macos-latest", "commit": "0" * 40},
+            **overrides,
+        }
+
+    def test_an_exact_tree_narrowed_run_from_any_host_satisfies_the_cell(self) -> None:
+        plan = self.plan(["docs/guide.md"], accepted_cells=[self.narrowed_evidence()])
+        cell = plan["cells"][0]
+        self.assertEqual(("reuse", "reused"), (cell["execution"], cell["state"]))
+        self.assertEqual(self.NARROW, cell["test_filter"])
+        self.assertEqual([], plan["builds"], "a satisfied cell demands no archive")
+
+    def test_the_overlay_reaches_the_same_answer_as_resolving_with_the_evidence(self) -> None:
+        resolved = self.plan(["docs/guide.md"], accepted_cells=[self.narrowed_evidence()])
+        overlaid = apply_accepted_cells(
+            self.plan(["docs/guide.md"]), [self.narrowed_evidence()], None
+        )
+        self.assertEqual(schema.canonical(resolved), schema.canonical(overlaid))
+
+    def test_whole_tier_evidence_does_not_satisfy_a_narrowed_cell(self) -> None:
+        evidence = self.narrowed_evidence()
+        del evidence["test_filter"]
+        plan = self.plan(["docs/guide.md"], accepted_cells=[evidence])
+        self.assertEqual("execute", plan["cells"][0]["execution"])
+
+    def test_a_run_narrowed_to_other_tests_does_not_satisfy_it(self) -> None:
+        plan = self.plan(
+            ["docs/guide.md"],
+            accepted_cells=[self.narrowed_evidence(test_filter="(binary_id(reader::l1))")],
+        )
+        self.assertEqual("execute", plan["cells"][0]["execution"])
+
+    def test_an_older_narrowed_run_does_not_satisfy_it(self) -> None:
+        # The changed file is not a gate input; only the exact tree counts.
+        plan = self.plan(
+            ["docs/guide.md"], accepted_cells=[self.narrowed_evidence(origin="prior-local")]
+        )
+        self.assertEqual("execute", plan["cells"][0]["execution"])
+
+    def test_a_narrowed_run_never_satisfies_the_whole_tier(self) -> None:
+        plan = self.plan(["reader/lib/src/lib.rs"], accepted_cells=[self.narrowed_evidence()])
+        l1 = [
+            cell for cell in plan["cells"]
+            if (cell["environment"], cell["gate"]) == ("ubuntu-latest", "L1")
+        ]
+        self.assertEqual("execute", l1[0]["execution"])
+
+    def test_the_cell_contract_hands_the_filter_to_the_producer(self) -> None:
+        plan = self.plan(["docs/guide.md"])
+        contract = producer_contracts(plan, "reader")[("ubuntu-latest", "L1")]
+        self.assertEqual(plan["cells"][0]["test_filter"], contract["test_filter"])
+
+    def test_an_ordinary_cell_hands_the_producer_no_filter(self) -> None:
+        plan = self.plan(["reader/lib/src/lib.rs"])
+        contract = producer_contracts(plan, "reader")[("ubuntu-latest", "L1")]
+        self.assertEqual("", contract["test_filter"])
+
+    def test_the_schema_refuses_a_filter_outside_an_executing_l1_cell(self) -> None:
+        plan = self.plan(["docs/guide.md"])
+        cell = plan["cells"][0]
+        for mutation in (
+            {"gate": "L2"},
+            {"test_filter": " "},
+        ):
+            with self.subTest(mutation=mutation):
+                broken = copy.deepcopy(plan)
+                broken["cells"][0].update(mutation)
+                self.assertTrue(
+                    any("test_filter" in problem
+                        for problem in schema.validate_resolved_plan(broken)),
+                    mutation,
+                )
+        self.assertIn("test_filter", cell)
+
+
+#: The test as it stood at 869cbb225, aa1f03c70, and 330805a84: its own
+#: integration binary, a local `repo_root()`, and a table of repository paths
+#: read in a loop. Verbatim in every line the scanner reads; the assertions'
+#: bodies are elided.
+HISTORICAL_SCHEMA_PHASE_VALIDATION = """\
+#[test]
+fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
+    let root = repo_root();
+    let surfaces = [
+        (
+            "darkmatter/docs/topics/schema-definition.md",
+            vec!["`required` and `eager` are independent axes"],
+        ),
+        (
+            "darkmatter/docs/inline/schema-validation.md",
+            vec!["An eager-only `null` is therefore allowed at both phases"],
+        ),
+        (
+            ".claude/skills/darkmatter/schema.md",
+            vec!["`required` and `eager` are independent axes"],
+        ),
+    ];
+
+    for (relative, expected) in surfaces {
+        let path = root.join(relative);
+        let text = collapse_whitespace(
+            &fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} is unreadable: {error}", path.display())),
+        );
+        for claim in expected {
+            assert!(text.contains(claim), "{relative} no longer states: {claim}");
+        }
+    }
+}
+
+fn repo_root() -> std::path::PathBuf {
+    // The manifest directory is `<repo>/darkmatter/lib`.
+    let crate_dir = biscuit_test_harness::manifest_dir!();
+    crate_dir
+        .ancestors()
+        .nth(2)
+        .expect("repository root is two levels above darkmatter/lib")
+        .to_path_buf()
+}
+"""
+
+
+class HistoricalDocumentationBlindSpotReplayTests(unittest.TestCase):
+    """The three docs-only commits that broke a darkmatter L1 test unseen.
+
+    `4df71d20e` added `public_docs_and_skill_describe_required_and_eager_as_
+    independent_axes`, which reads three documents by path. `869cbb225` edited
+    one of them and relocated another, `aa1f03c70` deleted the path the test
+    still named, and `330805a84` edited the first again while folding the
+    relocation into `topics/schemas/`. Each planned nothing at the time (the
+    fix spec records the live replay), so neither CI nor the pre-push hook
+    ran the test, and it went red on `main`.
+
+    The replay is hermetic because producer checkouts are shallow: each
+    commit's `--name-status -M` diff is inlined exactly as Git reports it,
+    over a workspace holding the test as it stood.
+    """
+
+    #: `git diff --name-status -M <commit>^ <commit>`, verbatim.
+    COMMITS = {
+        "869cbb225": [
+            ("M", "darkmatter/docs/inline/schema-validation.md"),
+            ("A", "darkmatter/docs/topics/schema/constraints.md"),
+            ("A", "darkmatter/docs/topics/schema/definition.md"),
+            ("A", "darkmatter/docs/topics/schema/types.md"),
+            ("M", "darkmatter/docs/topics/simplified-schemas.md"),
+        ],
+        "aa1f03c70": [
+            ("D", "darkmatter/docs/topics/schema-definition.md"),
+        ],
+        "330805a84": [
+            ("M", "darkmatter/docs/inline/schema-validation.md"),
+            ("D", "darkmatter/docs/topics/schema/constraints.md"),
+            ("D", "darkmatter/docs/topics/schema/types.md"),
+            (
+                "R098",
+                "darkmatter/docs/topics/schema/definition.md",
+                "darkmatter/docs/topics/schemas/definition.md",
+            ),
+            ("M", "darkmatter/docs/topics/schemas/index.md"),
+            ("M", "docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md"),
+        ],
+    }
+
+    TEST_UNIT = (
+        "(binary_id(darkmatter::schema_phase_validation) & "
+        "test(=public_docs_and_skill_describe_required_and_eager_as_independent_axes))"
+    )
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+        seed_build_inputs(self.root)
+        write_tree(
+            self.root,
+            {
+                "darkmatter/lib/src/lib.rs": "",
+                "darkmatter/lib/tests/schema_phase_validation.rs": HISTORICAL_SCHEMA_PHASE_VALIDATION,
+                "darkmatter/README.md": "# Darkmatter\n",
+            },
+        )
+        packages = [
+            rust_package(
+                self.root,
+                "darkmatter",
+                "darkmatter/lib",
+                [
+                    ("lib", "darkmatter", "src/lib.rs"),
+                    ("test", "schema_phase_validation", "tests/schema_phase_validation.rs"),
+                ],
+            )
+        ]
+        self.metadata = {
+            "workspace_members": ["darkmatter"],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": "darkmatter", "deps": []}]},
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def replay(self, records: list[tuple[str, ...]]) -> dict:
+        """The plan `ci.yml` would resolve, through the same `diff_scope` parser."""
+        stream = b"".join(field.encode() + b"\0" for record in records for field in record)
+        changed, deleted, renamed_from = diff_scope.parse_name_status(stream)
+        plan = calculate_scope(
+            [path.decode() for path in changed],
+            self.root,
+            self.metadata,
+            environments_for_tests(),
+            self.policy,
+            event="pull_request",
+            deleted=[path.decode() for path in deleted],
+            renamed_from=[path.decode() for path in renamed_from],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_each_commit_now_schedules_exactly_the_test_that_reads_its_documents(self) -> None:
+        for commit, records in self.COMMITS.items():
+            with self.subTest(commit=commit):
+                plan = self.replay(records)
+                self.assertEqual("package", plan["change_class"])
+                self.assertEqual(
+                    [("darkmatter", "ubuntu-latest", "L1", "execute", self.TEST_UNIT)],
+                    [
+                        (
+                            cell["package"],
+                            cell["environment"],
+                            cell["gate"],
+                            cell["execution"],
+                            cell.get("test_filter"),
+                        )
+                        for cell in plan["cells"]
+                    ],
+                )
+                # Nothing a source change would add: no lint, no check, no
+                # macOS or Windows leg, no dependents.
+                self.assertEqual([], plan["reverse_dependencies"])
+                self.assertEqual([], plan["source_packages"])
+
+    def test_a_readme_typo_in_the_same_package_still_schedules_nothing(self) -> None:
+        plan = self.replay([("M", "darkmatter/README.md")])
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["builds"])
+        self.assertEqual("documentation", plan["change_class"])
+
+
+class RealWorkspaceTestInputTests(unittest.TestCase):
+    """The shipped tree: the live instance is caught and a typo stays free."""
+
+    LIVE_TEST = (
+        "binary_id(darkmatter::l1) & "
+        "test(=schema_phase_validation::public_docs_and_skill_describe_required_and_eager_as_independent_axes)"
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.metadata = load_metadata(ROOT)
+        cls.environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
+        cls.policy = package_ci_policy(
+            workspace_packages(cls.metadata),
+            runner_labels={environment["runner"] for environment in cls.environments},
+            root=ROOT,
+            today=TODAY,
+        )
+
+    def plan(self, *files: str, **kwargs: object) -> dict:
+        plan = calculate_scope(
+            list(files),
+            ROOT,
+            self.metadata,
+            self.environments,
+            self.policy,
+            event="pull_request",
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_each_document_the_live_test_reads_selects_it(self) -> None:
+        for document in (
+            "darkmatter/docs/inline/schema-validation.md",
+            ".claude/skills/darkmatter/schema.md",
+        ):
+            with self.subTest(document=document):
+                self.assertTrue((ROOT / document).is_file(), f"{document} is no longer tracked")
+                plan = self.plan(document)
+                cells = [cell for cell in plan["cells"] if cell["package"] == "darkmatter"]
+                self.assertEqual(1, len(cells))
+                self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
+                self.assertIn(self.LIVE_TEST, cells[0]["test_filter"])
+
+    def test_readme_typos_schedule_nothing(self) -> None:
+        for readme in ("README.md", "darkmatter/README.md", "biscuit-file/README.md"):
+            with self.subTest(readme=readme):
+                self.assertTrue((ROOT / readme).is_file(), f"{readme} is no longer tracked")
+                plan = self.plan(readme)
+                self.assertEqual([], plan["cells"])
+                self.assertEqual([], plan["builds"])
+
+    def test_a_guard_only_owner_gains_the_narrowed_cell_on_its_one_record(self) -> None:
+        # `claudine/lib/src/lib.rs` selects `test-toolkit` for the archive-path
+        # guard alone; `docs/topics/ci-cd.md` is read by its CI-documentation
+        # contracts. One package record carries both cells.
+        plan = self.plan("claudine/lib/src/lib.rs", "docs/topics/ci-cd.md")
+        records = [entry for entry in plan["packages"] if entry["package"] == "test-toolkit"]
+        self.assertEqual(1, len(records))
+        self.assertEqual(["lint", "L1"], records[0]["gates"])
+        toolkit = {
+            (cell["environment"], cell["gate"]): cell
+            for cell in plan["cells"]
+            if cell["package"] == "test-toolkit"
+        }
+        self.assertEqual({("ubuntu-latest", "lint"), ("ubuntu-latest", "L1")}, set(toolkit))
+        self.assertTrue(toolkit[("ubuntu-latest", "lint")]["companions_only"])
+        self.assertIn("test_filter", toolkit[("ubuntu-latest", "L1")])
 
 
 if __name__ == "__main__":

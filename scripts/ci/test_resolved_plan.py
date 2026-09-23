@@ -248,7 +248,10 @@ class SelectionTests(PlannerFixture):
         )
 
     def test_documentation_only_change_selects_no_package_job(self) -> None:
-        plan = self.plan("docs/topics/ci-cd.md")
+        # A document no test reads. One a test does read — `docs/topics/ci-cd.md`
+        # is asserted by `test-toolkit`'s CI-documentation contracts — selects
+        # exactly those tests (fixes/2026-09-22-test-input-blind-spot).
+        plan = self.plan("docs/comment-quality.md")
         self.assertEqual([], self.job_packages(plan))
         self.assertEqual("documentation", plan["change_class"])
 
@@ -324,21 +327,40 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
         )
 
     def test_each_tooling_trigger_selects_exactly_its_owner(self) -> None:
-        for path, expected in (
-            (".github/ci/ci-baseline.toml", ["repo-deps"]),
-            (".github/ci/environments.json", ["repo-deps"]),
-            ("scripts/Cargo.toml", ["repo-deps"]),
-            (".github/workflows/ci.yml", ["test-toolkit"]),
-            (".github/workflows/_area-ci.yml", ["test-toolkit"]),
-            ("tools/test-audit/package.json", ["test-toolkit"]),
-            ("pnpm-lock.yaml", ["test-toolkit"]),
-            ("pnpm-workspace.yaml", ["test-toolkit"]),
-            ("tools/test-toolkit/Cargo.toml", ["test-toolkit"]),
-            ("docs/topics/ci-cd.md", []),
-            ("darkmatter/README.md", []),
+        # Ownership is the whole-tier selection. Several of these files are
+        # also read by `test-toolkit`'s contract tests, which a changed test
+        # input schedules separately as one narrowed Linux L1 cell; that is
+        # the second column, and it never widens into ownership.
+        for path, owners, readers in (
+            (".github/ci/ci-baseline.toml", ["repo-deps"], ["test-toolkit"]),
+            (".github/ci/environments.json", ["repo-deps"], ["test-toolkit"]),
+            ("scripts/Cargo.toml", ["repo-deps"], ["test-toolkit"]),
+            (".github/workflows/ci.yml", ["test-toolkit"], []),
+            (".github/workflows/_area-ci.yml", ["test-toolkit"], []),
+            ("tools/test-audit/package.json", ["test-toolkit"], []),
+            ("pnpm-lock.yaml", ["test-toolkit"], []),
+            ("pnpm-workspace.yaml", ["test-toolkit"], []),
+            ("tools/test-toolkit/Cargo.toml", ["test-toolkit"], []),
+            ("docs/topics/ci-cd.md", [], ["test-toolkit"]),
+            ("darkmatter/README.md", [], []),
         ):
             with self.subTest(path=path):
-                self.assertEqual(expected, self.job_packages(self.plan(path)))
+                plan = self.plan(path)
+                narrowed = sorted(
+                    {cell["package"] for cell in self.cells(plan) if cell.get("test_filter")}
+                )
+                self.assertEqual(readers, narrowed)
+                self.assertEqual(
+                    owners,
+                    [
+                        package
+                        for package in self.job_packages(plan)
+                        if any(
+                            cell["package"] == package and not cell.get("test_filter")
+                            for cell in self.cells(plan)
+                        )
+                    ],
+                )
 
     def test_a_trigger_selection_compiles_no_reverse_dependents(self) -> None:
         # A workflow edit says nothing about test-toolkit's public API, so the

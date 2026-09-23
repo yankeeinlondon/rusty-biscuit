@@ -691,6 +691,14 @@ class CiLocalDiffScopeTests(unittest.TestCase):
         self.assertNotIn("before.rs", changed)
         self.assertNotIn("before.rs", deleted)
         self.assertNotIn("untracked.rs", deleted)
+        # The rename's source reaches the planner only as the old name the
+        # test-input search looks for.
+        renamed = [
+            options[index + 1]
+            for index, option in enumerate(options)
+            if option == "--renamed-from"
+        ]
+        self.assertEqual(["before.rs"], renamed)
 
 
 class ThreadPolicyTests(unittest.TestCase):
@@ -823,6 +831,61 @@ class L1ThreadForwardingTests(unittest.TestCase):
                 self.assertEqual(1, len(calls))
                 self.assertEqual(expected, calls[0]["threads"])
                 self.assertEqual(["nextest", "run", "-p", "fixture-package"], calls[0]["args"][:4])
+
+    def test_a_narrowed_l1_fails_on_no_tests_and_does_not_leak_its_filter(self) -> None:
+        # docs/cicd/test-inputs.md. `repo-deps`' archive fixtures run
+        # `just _test` from inside a test; an exported narrowing reached them
+        # and selected nothing, so `_test` consumes it before nextest starts.
+        lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
+        start = next(index for index, line in enumerate(lines) if line.startswith("_test pkg "))
+        end = start + 1
+        while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
+            end += 1
+        recipe = "".join(lines[start:end])
+        with tempfile.TemporaryDirectory(prefix="l1-narrow-") as temporary:
+            root = Path(temporary)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            justfile = root / "justfile"
+            justfile.write_text(
+                "".join(f'{name} := ""\n' for name in ("bold", "reset", "red", "green", "yellow"))
+                + "_storage_preflight:\n    @true\n\n" + recipe,
+                encoding="utf-8",
+            )
+            stubs = {
+                "cargo": (
+                    "import json, os, sys\n"
+                    "if sys.argv[2] == 'run':\n"
+                    "    with open(os.environ['TEST_CALL_LOG'], 'a') as log:\n"
+                    "        log.write(json.dumps({'args': sys.argv[1:], "
+                    "'narrow': os.environ.get('BISCUIT_TEST_NARROW')}) + '\\n')\n"
+                ),
+                "just": (
+                    "import sys\n"
+                    "if sys.argv[1] == '_tier_filter':\n    print('all()')\n"
+                    "elif sys.argv[1] == '_test_threads':\n    print('2')\n"
+                ),
+            }
+            for name, body in stubs.items():
+                path = bin_dir / name
+                path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+                path.chmod(0o755)
+            environment = clean_policy_environment()
+            environment.update({
+                "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
+                "BISCUIT_NEXTEST_BIN": "cargo nextest",
+                "BISCUIT_TEST_NARROW": "binary_id(fixture-package::l1)",
+                "TEST_CALL_LOG": str(root / "calls.jsonl"),
+            })
+            result = subprocess.run(
+                [JUST, "--justfile", str(justfile), "_test", "fixture-package"],
+                cwd=root, env=environment, capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+        self.assertEqual(1, len(calls))
+        self.assertIn("--no-tests=fail", calls[0]["args"])
+        self.assertIsNone(calls[0]["narrow"], "the narrowing leaked into the test processes")
 
 
 # ---------------------------------------------------------------------------
@@ -3113,7 +3176,9 @@ class EmptyMatrixGuardTests(unittest.TestCase):
                 None,
             )
             cls._plans = {
-                "documentation-only": plan_for(["docs/topics/ci-cd.md"]),
+                # No test reads this document; one that a test does read
+                # schedules that test (fixes/2026-09-22-test-input-blind-spot).
+                "documentation-only": plan_for(["docs/comment-quality.md"]),
                 "scheduled": scheduled,
                 "all-cells-reused": reused,
             }
