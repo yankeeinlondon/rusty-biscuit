@@ -89,7 +89,11 @@ local and hosted runs. Its package policy is deliberately narrow:
   reaches only the owning Ubuntu check, where setup combines it with the
   changed package's own requirements. Other jobs retain the original native
   map.
-- Documentation, manifests, lockfiles, and Just recipes select no package jobs.
+- Documentation, manifests, lockfiles, and Just recipes select no package jobs
+  — unless compiled code reads the changed file. Then the tests that read it
+  run, narrowed, on one environment; see
+  [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md) and the
+  lessons under "Scheduling by input, not by suffix" below.
 - CI's own inputs are the exception, because CI's own suites now have owners.
   `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
   canonical recipe, environment, and kind (`cargo` or `companion`);
@@ -216,10 +220,12 @@ full scan. `--deleted PATH` is how a caller declares a removal, because
 boundary — `ci.yml`'s scope step, `just/ci-local.just`, and `.githooks/pre-push`
 — therefore takes `git diff --name-status -z` and renders it through
 `scripts/ci/diff_scope.py`, the one parser that emits
-`--deleted <path>... -- <changed path>...`. A rename contributes its
-destination to the changed list and nothing at all under its old name: the
-source is not a reported deletion, and listing it as changed would be exactly
-the unexplained absence the declaration exists to remove.
+`--deleted <path>... --renamed-from <path>... -- <changed path>...`. A rename
+contributes its destination to the changed list; its source is not a reported
+deletion, and listing it as changed would be exactly the unexplained absence
+the declaration exists to remove. It travels only as `--renamed-from`, whose
+one reader is the test-input search: a test still naming a file that moved
+away must be selected.
 
 Version 3 added the required
 `change_inventory`: the calculator's own input paths, normalized to one
@@ -238,6 +244,31 @@ previous-generation receipt once with the existing `scope-schema` reason,
 forcing one fresh calculation rather than an in-place upgrade. `RECEIPT_SCHEMA_VERSION` and
 `LEGACY_RECEIPT_SCHEMA_VERSION` are unchanged, so validation receipts stay
 reusable wherever their cell and gate-input checks still qualify.
+
+## Scheduling by input, not by suffix
+
+Reusable lessons from closing a "docs change ran no test" gap
+(`2026-09-22-test-input-blind-spot`):
+
+- **Derive the file-to-test map from source; never declare it.** A declared
+  list of the files a test reads is a second copy of each path, and a stale
+  copy of a path is exactly the failure being prevented. Walking each target's
+  `mod` tree from its root also yields exact nextest identities.
+- **Measure precision against real history before shipping a selector.** The
+  first cut here would have scheduled cells on 49 of 62 merges; excluding
+  tempdir-relative joins and mock literals brought it to 32, all genuine.
+- **Justify cross-host evidence by the change, not the test.** Whether a test
+  is OS-independent is undecidable in practice and an annotation drifts. "No
+  source in this package changed, only a data file it reads" is derivable, and
+  is what makes one run anywhere sufficient — with exact-tree evidence only,
+  because the data file is not a compiled input.
+- **Nextest ORs repeated `-E` flags.** A narrowing passed as an extra `-E`
+  widens the run; intersect explicitly.
+- **`--no-tests=pass` hides a stale filter.** A narrowed run must use
+  `--no-tests=fail`.
+- **Consume a narrowing variable; do not leave it exported.** Tests that spawn
+  the same recipe (archive fixtures running `just _test`) inherit it and
+  narrow their own selection to nothing.
 
 ## Local scope and validation evidence
 
@@ -309,6 +340,9 @@ semantics:
   never come from a local receipt and are always CI-origin — do not expect a
   local-origin lint cell. A receipt is keyed by environment, so it never stands
   in for another OS, for Level 3, or for a companion suite it did not execute.
+  The one exception is a narrowed test-input cell, satisfied by an exact-tree
+  run carrying the same filter from any host
+  ([`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md)).
 
 Browser receipts remain supported by the existing per-cell implementation:
 only a measured `browser` outcome for the matching package and environment

@@ -5,7 +5,7 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-dcfca728e343e978
+hash: 61d07be7e22c9f45-c5ce954ede8d2d45
 last_updated: 2026-09-22
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -703,6 +703,31 @@ A failing cell says which build it ran (planned key, realized digest,
 producer) and what each stage cost. A cell that could not run at all is
 `MISSING — blocked by build <key>`: its archive never arrived, and that is an
 infrastructure failure, never a test result and never baseline-eligible.
+
+## A Test That Reads a Repository File Is Scheduled By It
+
+A change to a Markdown doc, YAML schema, or fixture selects no package, so the
+planner finds the tests that read it from their source
+and runs exactly those — on Linux in CI, or on the pushing host, whose
+exact-tree run satisfies the CI cell. It
+recognizes a read only in forms it can resolve without running anything, so
+spell yours in one of them or the file's next edit will not run your test:
+
+- **Embed it** — `include_str!("../../docs/x.md")` also makes a missing file a
+  compile error rather than a runtime one.
+- **Join it onto a root in the same expression** —
+  `manifest_dir!().join("tests/fixtures/x.json")`,
+  `repo_root().join("darkmatter/docs/x.md")`, or a name the same file binds to
+  one (`let root = repo_root();`, `fn docs() -> PathBuf { manifest_dir!().join("docs") }`).
+  `.parent()` steps are followed. A root-anchored directory counts for every
+  file under it.
+- **Or write the full repository-relative path** as a literal (a table of
+  documents walked later), in a file that reads through a root somewhere.
+
+Paths assembled from `format!`, a value computed at run time, or a helper
+defined in another file are invisible, and a literal joined onto a tempdir is
+correctly treated as a fixture, not a read. The why and the evidence rules are
+in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
 
 ## Environment Contract
 
