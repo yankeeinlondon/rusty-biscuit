@@ -1,10 +1,14 @@
-//! Level 2 (`terminal-tests`) integration tests for `biscuit-terminal-cli`, one test binary per
-//! execution contract (`2026-09-21-consolidated-test-binaries`).
+//! `biscuit-terminal-cli` integration tests that need the `terminal-tests` feature,
+//! one test binary per execution contract (`2026-09-21-consolidated-test-binaries`).
 //!
-//! Each module was its own test target before the consolidation and keeps
-//! that target's name, which is the first segment of every test path here.
-//! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
-//! not declared below never compiles; `test_layout.rs` rejects one.
+//! The binary groups tests by feature contract, not by tier: tier selection
+//! follows each test's path, so the unmarked tests in `diagrams` and
+//! `prose_cells` run in Level 1 and the `level2_` modules in Level 2. Each
+//! module keeps its former target's name except those two, which drop the
+//! `level2_` prefix of `level2_diagrams` and `level2_prose_cells` so their
+//! tests keep their tier. `Cargo.toml` sets `autotests = false`, so a file in
+//! this directory that is not declared below never compiles; `test_layout.rs`
+//! rejects one.
 
 #[path = "../common/mod.rs"]
 mod common;
