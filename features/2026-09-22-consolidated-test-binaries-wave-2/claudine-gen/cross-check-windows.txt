@@ -1,0 +1,342 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: claudine-gen @ origin/fix/ci-build-feature-divergence (1879dd880) + 558 changed file(s) as 25868dbe1
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  7ef8113ea1e85060 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\mac--feat-dark-fixes
+
+== windows (build-win-native, archive 7ef8113ea1e85060 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: 141556d1b1dcc9d7214599ab9eac4c898b6fb50a
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.72s
+   Compiling serde_json v1.0.149
+   Compiling tokio v1.52.1
+   Compiling either v1.15.0
+   Compiling futures-util v0.3.32
+   Compiling num-rational v0.4.2
+   Compiling compression-core v0.4.31
+   Compiling nom_locate v5.0.0
+   Compiling blake3 v1.8.4
+   Compiling onig_sys v69.9.1
+   Compiling siphasher v1.0.2
+   Compiling constant_time_eq v0.4.2
+   Compiling cpufeatures v0.3.0
+   Compiling rayon v1.12.0
+   Compiling compression-codecs v0.4.37
+   Compiling lopdf v0.38.0
+   Compiling itertools v0.14.0
+   Compiling clap_builder v4.6.0
+   Compiling phf_shared v0.13.1
+   Compiling av1-grain v0.2.5
+   Compiling fastrand v2.4.1
+   Compiling phf_generator v0.13.1
+   Compiling num v0.4.3
+   Compiling ahash v0.8.12
+   Compiling pulldown-cmark v0.13.3
+   Compiling openapiv3 v2.2.0
+   Compiling schemars v1.2.1
+   Compiling renderable v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\renderable)
+   Compiling fluent-uri v0.4.1
+   Compiling phf_macros v0.13.1
+   Compiling lopdf v0.39.0
+   Compiling maybe-rayon v0.1.1
+   Compiling av-scenechange v0.14.1
+   Compiling clap v4.6.1
+   Compiling mermaid-rs-renderer v0.2.1
+   Compiling futures-executor v0.3.32
+   Compiling pdf-extract v0.10.0
+   Compiling biscuit-hash v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-hash\lib)
+   Compiling fraction v0.17.0
+   Compiling rav1e v0.8.1
+   Compiling getopts v0.2.24
+   Compiling bincode v1.3.3
+   Compiling dtoa v1.0.11
+   Compiling tokio-util v0.7.18
+   Compiling tokio-rustls v0.26.4
+   Compiling async-compression v0.4.41
+   Compiling tower v0.5.3
+   Compiling tokio-stream v0.1.18
+   Compiling tokio-tungstenite v0.26.2
+   Compiling pulldown-cmark-escape v0.11.0
+   Compiling h2 v0.4.13
+   Compiling tower-http v0.6.8
+   Compiling phf v0.13.1
+   Compiling dtoa-short v0.3.5
+   Compiling jsonschema-value v0.55.0
+   Compiling referencing v0.55.0
+   Compiling futures v0.3.32
+   Compiling windows-sys v0.60.2
+   Compiling fancy-regex v0.19.1
+   Compiling email_address v0.2.9
+   Compiling cssparser-macros v0.7.0
+   Compiling env_home v0.1.0
+   Compiling winsafe v0.0.19
+   Compiling utf8-width v0.1.8
+   Compiling unicode-id v0.3.6
+   Compiling html-escape v0.2.13
+   Compiling cssparser v0.37.0
+   Compiling shared_child v1.1.1
+   Compiling markdown v1.0.0
+   Compiling jsonschema v0.55.0
+   Compiling pulldown-cmark-to-cmark v22.0.0
+   Compiling biscuit-test-harness v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-test-harness)
+   Compiling hyper v1.9.0
+   Compiling ravif v0.13.0
+   Compiling quick-xml v0.39.4
+   Compiling test-toolkit v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\tools\test-toolkit)
+   Compiling hyper-util v0.1.20
+   Compiling image v0.25.10
+   Compiling which v7.0.3
+   Compiling serial_test v3.4.0
+   Compiling claudine-catalog-types v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\claudine\catalog-types)
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.2
+   Compiling onig v6.5.1
+   Compiling biscuit-visualized v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-visualized\src)
+   Compiling syntect v5.3.0
+   Compiling biscuit-file v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+   Compiling viuer v0.11.0
+   Compiling two-face v0.5.1
+   Compiling schematic-define v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\define)
+   Compiling biscuit-terminal v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-terminal\lib)
+   Compiling schematic-definitions v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\definitions)
+   Compiling schematic-schema v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\schema)
+   Compiling sniff v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\sniff\lib)
+   Compiling darkmatter v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\darkmatter\lib)
+   Compiling claudine-gen v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\claudine\gen)
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\claudine_gen.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\claudine_gen.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `claudine-gen` (bin "claudine-gen") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-c72e362e5e6e8d10.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-c72e362e5e6e8d10.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `claudine-gen` (test "l1") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\claudine_gen-4f6298b6fe8c0828.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\claudine_gen-4f6298b6fe8c0828.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `claudine-gen` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 41s
+   Archiving 5 binaries (including 1 non-test binary), 4 linked paths, and 2 standard libraries to B:\coding\mac--feat-dark-fixes\cross-check-Mac-11980-1790199651-build\build-claudine-gen-windows-latest-7ef8113ea1e85060.tar.zst
+    Archived 382 files to B:\coding\mac--feat-dark-fixes\cross-check-Mac-11980-1790199651-build\build-claudine-gen-windows-latest-7ef8113ea1e85060.tar.zst in 0.26s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 64 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `7ef8113ea1e85060` for `windows-latest` — digest `4a03dc3bf34b4c40`, produced on `windows-latest`.
+cross-check-key: 7ef8113ea1e85060
+cross-check-digest: 4a03dc3bf34b4c40
+
+Testing [1mclaudine-gen[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 5 binaries (including 1 non-test binary) and 4 linked paths to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-rbgP5y
+   Extracted 382 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-rbgP5y in 0.90s
+────────────
+ Nextest run ID ca88fab9-4951-44dc-8b9d-3b2bbb2d25ca with nextest profile: ci
+    Starting 181 tests across 4 binaries
+        PASS [   0.020s] (  1/181) claudine-gen agent_errors_check::tests::clean_research_yields_no_findings
+        PASS [   0.026s] (  2/181) claudine-gen agent_errors_check::review6_tests::motivating_class_reads_numeric_code_values
+        PASS [   0.031s] (  3/181) claudine-gen agent_errors_check::tests::missing_capacity_class_is_flagged_but_a_gap_satisfies_it
+        PASS [   0.039s] (  4/181) claudine-gen agent_errors_check::review6_tests::empirical_schema_fixture_loads_and_resolves
+        PASS [   0.107s] (  5/181) claudine-gen agent_errors_check::tests::invented_seed_evidence_is_flagged
+        PASS [   0.108s] (  6/181) claudine-gen agent_errors_check::review6_tests::empirical_provenance_requires_a_resolvable_scoped_fixture_and_capture_notes
+        PASS [   0.114s] (  7/181) claudine-gen agent_errors_check::tests::non_seed_needle_without_source_is_flagged
+        PASS [   0.119s] (  8/181) claudine-gen agent_errors_check::tests::uppercase_and_whitespace_needles_are_flagged
+        PASS [   0.124s] (  9/181) claudine-gen agent_errors_check::tests::seed_row_changes_are_classified_and_seed_claims_are_identity_bound
+        PASS [   0.138s] ( 10/181) claudine-gen agent_errors_check::tests::outcome_replacement_covers_findings_then_clean
+        PASS [   0.116s] ( 11/181) claudine-gen agentic_clis::tests::emitted_artifact_is_deterministic_and_well_formed
+        PASS [   0.117s] ( 12/181) claudine-gen agentic_clis::tests::names_are_slugs_then_aliases_deduplicated_and_skipped_entries_included
+        PASS [   0.049s] ( 13/181) claudine-gen apply::tests::emitter_only_drift_yields_no_override_snippet
+        PASS [   0.069s] ( 14/181) claudine-gen apply::tests::decline_leaves_files_and_scaffolds_the_override_pin
+        PASS [   0.059s] ( 15/181) claudine-gen artifact::tests::family_index_and_generated_at_are_projected
+        PASS [   0.065s] ( 16/181) claudine-gen apply::tests::quit_declines_the_rest_without_prompting
+        PASS [   0.049s] ( 17/181) claudine-gen artifact::tests::fresh_generated_at_does_not_warn
+        PASS [   0.050s] ( 18/181) claudine-gen artifact::tests::index_splits_wire_ids_on_first_slash_and_skips_gap_offerings
+        PASS [   0.039s] ( 19/181) claudine-gen artifact::tests::missing_file_is_a_loud_error_naming_the_producer
+        PASS [   0.042s] ( 20/181) claudine-gen artifact::tests::schema_version_one_is_rejected_after_v2_migration
+        PASS [   0.176s] ( 21/181) claudine-gen agentic_clis::tests::invalid_rosters_fail_loudly
+        PASS [   0.102s] ( 22/181) claudine-gen apply::tests::accept_writes_and_clean_files_skip_the_callback
+        PASS [   0.026s] ( 23/181) claudine-gen catalog::tests::build_catalog_is_deterministic
+        PASS [   0.190s] ( 24/181) claudine-gen agentic_clis::tests::check_detects_every_roster_change_without_regeneration
+        PASS [   0.033s] ( 25/181) claudine-gen artifact::tests::stale_generated_at_warns_but_loads
+        PASS [   0.032s] ( 26/181) claudine-gen catalog::tests::catalog_carries_provenance_and_override_records
+        PASS [   0.032s] ( 27/181) claudine-gen catalog::tests::catalog_sorts_providers_fields_and_nested_keys
+        PASS [   0.032s] ( 28/181) claudine-gen emit::tests::pascal_converts_wire_forms
+        PASS [   0.033s] ( 29/181) claudine-gen emit::tests::path_records_reject_templated_segments
+        PASS [   0.027s] ( 30/181) claudine-gen emit::tests::provider_variant_rejects_unknown_slug
+        PASS [   0.030s] ( 31/181) claudine-gen emit::tests::stream_protocol_maps_kebab_wire_forms
+        PASS [   0.036s] ( 32/181) claudine-gen emit::tests::yolo_emits_all_wire_forms
+        PASS [   0.039s] ( 33/181) claudine-gen families::tests::build_emits_sorted_binary_searchable_rows_with_the_artifact_stamp
+        PASS [   0.045s] ( 34/181) claudine-gen families::tests::compiled_keys_dedupe_across_providers_and_skip_unjoined
+        PASS [   0.043s] ( 35/181) claudine-gen families::tests::families_path_targets_the_model_catalog_module
+        PASS [   0.046s] ( 36/181) claudine-gen generate::coerce::execution_prompting::tests::bare_flag_token_accepts_flags_and_rejects_annotations
+        PASS [   0.053s] ( 37/181) claudine-gen families::tests::missing_family_is_a_loud_generation_error
+        PASS [   0.047s] ( 38/181) claudine-gen generate::coerce::execution_prompting::tests::env_var_ident_accepts_bare_identifiers_only
+        PASS [   0.046s] ( 39/181) claudine-gen generate::coerce::identity_paths::tests::bare_config_path_rejects_annotations_and_placeholders
+        PASS [   0.072s] ( 40/181) claudine-gen families::tests::check_families_reports_clean_drift_and_missing
+        PASS [   0.048s] ( 41/181) claudine-gen generate::tests::model_catalog_source_variant_maps_snake_members
+        PASS [   0.044s] ( 42/181) claudine-gen generate::tests::model_catalog_source_variant_rejects_bare_shell_command
+        PASS [   0.045s] ( 43/181) claudine-gen generate::tests::provider_slugs_match_the_wired_set_in_order
+        PASS [   0.043s] ( 44/181) claudine-gen offerings::tests::classification_table_applies_the_v1_rulings
+        PASS [   0.051s] ( 45/181) claudine-gen offerings::tests::cross_family_duplicate_alias_drops_both_marks_and_reports
+        PASS [   0.046s] ( 46/181) claudine-gen offerings::tests::duplicate_aliases_in_one_family_keep_their_marks
+        PASS [   0.044s] ( 47/181) claudine-gen offerings::tests::expected_offerings_value_classifies_joins_and_reports
+        PASS [   0.045s] ( 48/181) claudine-gen offerings::tests::join_ladder_ambiguous_bare_and_zero_matches_yield_none
+        PASS [   0.046s] ( 49/181) claudine-gen offerings::tests::join_ladder_bare_unique_hit
+        PASS [   0.049s] ( 50/181) claudine-gen offerings::tests::join_ladder_exact_hit_uses_the_mapped_source
+        PASS [   0.049s] ( 51/181) claudine-gen offerings::tests::join_ladder_plan_endpoint_skips_lookup
+        PASS [   0.045s] ( 52/181) claudine-gen offerings::tests::offering_sources_value_maps_and_sorts_runners
+        PASS [   0.051s] ( 53/181) claudine-gen offerings::tests::resolves_marks_alias_plus_join_records_only
+        PASS [   0.049s] ( 54/181) claudine-gen registry::tests::mapping_json_covers_every_entry
+        PASS [   0.039s] ( 55/181) claudine-gen registry::tests::registry_fields_are_unique
+        PASS [   0.038s] ( 56/181) claudine-gen registry::tests::registry_matches_matrix_source_counts
+        PASS [   0.042s] ( 57/181) claudine-gen registry::tests::supports_skills_is_research_declared
+        PASS [   0.044s] ( 58/181) claudine-gen report::tests::angle_placeholder_survives_escaping
+        PASS [   0.043s] ( 59/181) claudine-gen report::tests::colored_provider_clean_carries_sgr_but_same_visible_text
+        PASS [   0.042s] ( 60/181) claudine-gen report::tests::plain_artifact_missing_preserves_hint_text
+        PASS [   0.044s] ( 61/181) claudine-gen report::tests::plain_drift_diff_lists_details_without_ansi
+        PASS [   0.046s] ( 62/181) claudine-gen report::tests::plain_provider_clean_is_bare_text
+        PASS [   0.042s] ( 63/181) claudine-gen report::tests::roster_lines_match_both_shapes
+        PASS [   0.043s] ( 64/181) claudine-gen report::tests::wrote_line_keeps_trailing_space_marker
+        PASS [   0.045s] ( 65/181) claudine-gen report::tests::wrote_line_renders_windows_shaped_path_portably
+        PASS [   0.057s] ( 66/181) claudine-gen scaffold::tests::facts_skeleton_emits_the_mixed_source_acp_subrecord
+        PASS [   0.056s] ( 67/181) claudine-gen scaffold::tests::facts_skeleton_lists_every_facts_field_in_registry_order
+        PASS [   0.056s] ( 68/181) claudine-gen scaffold::tests::facts_skeleton_never_overwrites
+        PASS [   0.044s] ( 69/181) claudine-gen signals::tests::pascal_round_trips_signal_members
+        PASS [   0.045s] ( 70/181) claudine-gen signals::tests::signal_path_accepts_the_restricted_subset
+        PASS [   0.057s] ( 71/181) claudine-gen scaffold::tests::stub_writers_never_overwrite
+        PASS [   0.045s] ( 72/181) claudine-gen signals::tests::signal_path_rejects_everything_outside_the_subset
+        PASS [   0.064s] ( 73/181) claudine-gen scaffold::tests::mod_and_behavior_stubs_carry_the_expected_identifiers
+        PASS [   0.046s] ( 74/181) claudine-gen steering_check::tests::accepts_active_turn_preserving_delivery
+        PASS [   0.046s] ( 75/181) claudine-gen steering_check::tests::accepts_next_turn_as_non_interrupting_follow_up
+        PASS [   0.035s] ( 76/181) claudine-gen steering_check::tests::execution_contract_rejects_invalid_interface_and_steering_foreign_keys
+        PASS [   0.034s] ( 77/181) claudine-gen steering_check::tests::receipt_observations_require_exact_mechanism_coverage
+        PASS [   0.034s] ( 78/181) claudine-gen steering_check::tests::reports_missing_mechanism_evidence_and_profile_references
+        PASS [   0.036s] ( 79/181) claudine-gen steering_check::tests::requires_an_exact_discovery_gap_for_a_supported_case
+        PASS [   0.035s] ( 80/181) claudine-gen vocabulary::tests::emit_code_buckets_render_signed_and_ordered
+        PASS [   0.037s] ( 81/181) claudine-gen vocabulary::tests::emit_file_ends_in_exactly_one_trailing_newline
+        PASS [   0.039s] ( 82/181) claudine-gen vocabulary::tests::emit_preserves_repeated_kind_and_bucket_order
+        PASS [   0.042s] ( 83/181) claudine-gen vocabulary::tests::graduated_loader_rejects_a_stale_facts_entry
+        PASS [   0.042s] ( 84/181) claudine-gen vocabulary::tests::parse_omitted_branches_default_to_empty
+        PASS [   0.043s] ( 85/181) claudine-gen vocabulary::tests::parse_preserves_code_bucket_order_and_negative_codes
+        PASS [   0.042s] ( 86/181) claudine-gen vocabulary::tests::parse_preserves_repeated_kind_buckets
+        PASS [   0.043s] ( 87/181) claudine-gen vocabulary::tests::parse_preserves_sequence_order_of_buckets_and_needles
+        PASS [   0.043s] ( 88/181) claudine-gen vocabulary::tests::parse_rejects_unknown_top_level_key
+        PASS [   0.043s] ( 89/181) claudine-gen vocabulary::tests::research_projection_drops_provenance_and_preserves_order
+        PASS [   0.044s] ( 90/181) claudine-gen vocabulary::tests::resolve_facts_only_returns_the_facts_value
+        PASS [   0.043s] ( 91/181) claudine-gen vocabulary::tests::resolve_facts_plus_research_collides
+        PASS [   0.044s] ( 92/181) claudine-gen vocabulary::tests::resolve_graduated_but_facts_not_deleted_collides
+        PASS [   0.044s] ( 93/181) claudine-gen vocabulary::tests::resolve_missing_source_is_none
+        PASS [   0.045s] ( 94/181) claudine-gen vocabulary::tests::resolve_research_only_returns_the_research_value
+        PASS [   0.045s] ( 95/181) claudine-gen vocabulary::tests::validate_accepts_a_clean_vocabulary
+        PASS [   0.046s] ( 96/181) claudine-gen vocabulary::tests::validate_rejects_duplicate_numeric_code
+        PASS [   0.045s] ( 97/181) claudine-gen vocabulary::tests::validate_rejects_empty_bucket
+        PASS [   0.046s] ( 98/181) claudine-gen vocabulary::tests::validate_rejects_empty_or_whitespace_needle
+        PASS [   0.046s] ( 99/181) claudine-gen vocabulary::tests::validate_rejects_missing_message_vocabulary
+        PASS [   0.047s] (100/181) claudine-gen vocabulary::tests::validate_rejects_out_of_range_code
+        PASS [   0.048s] (101/181) claudine-gen vocabulary::tests::validate_rejects_unknown_kind_in_code_bucket
+        PASS [   0.048s] (102/181) claudine-gen vocabulary::tests::validate_rejects_unknown_semantic_kind
+        PASS [   0.050s] (103/181) claudine-gen vocabulary::tests::validate_rejects_uppercase_needle
+        PASS [   0.077s] (104/181) claudine-gen::l1 agent_errors_check::workspace_archived_seed_survives_graduation_and_detects_identity_changes
+        PASS [   0.129s] (105/181) claudine-gen::l1 agent_errors_check::all_archived_seeds_match_their_post_graduation_research_rows
+        PASS [   0.100s] (106/181) claudine-gen::l1 agent_errors_check::invalid_seed_writes_terminal_gate_input_error_scope
+        PASS [   0.121s] (107/181) claudine-gen::l1 agent_errors_check::clean_document_writes_explicit_clean_outcome
+        PASS [   0.110s] (108/181) claudine-gen::l1 agent_errors_check::schema_invalid_document_writes_gate_error_and_never_reports_clean
+        PASS [   0.137s] (109/181) claudine-gen::l1 agent_errors_check::corrected_document_replaces_findings_with_explicit_clean
+        PASS [   0.035s] (110/181) claudine-gen::l1 drift::committed_agentic_clis_match_regenerated_roster
+        PASS [   0.141s] (111/181) claudine-gen::l1 agent_errors_check::failing_document_writes_findings_and_persists_across_reruns
+        PASS [   0.137s] (112/181) claudine-gen::l1 agent_errors_check::fleet_clean_action_requires_explicit_clean_status
+        PASS [   0.034s] (113/181) claudine-gen::l1 drift::committed_generated_artifacts_match_phase_1_byte_baseline
+        PASS [   0.062s] (114/181) claudine-gen::l1 fixtures_provenance::provenance_manifest_matches_fixture_corpus
+        PASS [   0.127s] (115/181) claudine-gen::l1 drift::committed_signals_match_regenerated_inputs
+        PASS [   0.212s] (116/181) claudine-gen::l1 drift::committed_vocabulary_matches_regenerated_inputs
+        PASS [   0.921s] (117/181) claudine-gen::l1 agent_errors_check::checker_process_report_write_failure_is_nonzero_and_never_prints_clean
+        PASS [   0.572s] (118/181) claudine-gen::l1 generate_ux::mapping_output_is_raw_parseable_json
+        PASS [   0.933s] (119/181) claudine-gen::l1 agent_errors_check::checker_process_schema_failure_emits_gate_error_not_clean_success
+        PASS [   1.045s] (120/181) claudine-gen::l1 drift::committed_data_matches_regenerated_inputs
+        PASS [   1.047s] (121/181) claudine-gen::l1 drift::committed_families_match_regenerated_inputs
+        PASS [   1.101s] (122/181) claudine-gen::l1 drift::committed_catalog_matches_regenerated_inputs
+        PASS [   0.337s] (123/181) claudine-gen::l1 generate_ux::scaffold_unwired_slug_errors_before_writing
+        PASS [   0.276s] (124/181) claudine-gen::l1 pipeline::absent_overlay_capabilities_is_rejected
+        PASS [   0.365s] (125/181) claudine-gen::l1 pipeline::absolute_source_root_is_rejected
+        PASS [   0.311s] (126/181) claudine-gen::l1 pipeline::bare_shell_command_override_fails_loudly
+        PASS [   0.304s] (127/181) claudine-gen::l1 pipeline::compound_env_var_sites_are_skipped_loudly
+        PASS [   0.289s] (128/181) claudine-gen::l1 pipeline::doctored_sidecar_enum_not_subset_fails_before_value_mapping
+        PASS [   0.326s] (129/181) claudine-gen::l1 pipeline::dynamic_listing_true_without_override_fails_loudly
+        PASS [   3.371s] (130/181) claudine-gen::l1 generate_ux::force_color_check_output_carries_ansi
+        PASS [   2.812s] (131/181) claudine-gen::l1 generate_ux::no_color_check_output_has_no_ansi
+        PASS [   3.520s] (132/181) claudine-gen::l1 generate_ux::dry_run_reports_and_writes_nothing
+        PASS [   0.370s] (133/181) claudine-gen::l1 pipeline::facts_key_with_no_registry_entry_is_rejected
+        PASS [   2.871s] (134/181) claudine-gen::l1 generate_ux::non_tty_check_output_has_no_ansi
+        PASS [   3.639s] (135/181) claudine-gen::l1 generate_ux::clean_check_report_summary_matches_phase_1_snapshot
+        PASS [   3.692s] (136/181) claudine-gen::l1 generate_ux::clean_area_generates_nothing_and_exits_zero
+        PASS [   0.420s] (137/181) claudine-gen::l1 pipeline::facts_value_for_research_declared_field_is_a_source_collision
+        PASS [   3.137s] (138/181) claudine-gen::l1 generate_ux::non_tty_drift_is_report_only_and_exits_nonzero
+        PASS [   0.338s] (139/181) claudine-gen::l1 pipeline::missing_capability_reason_is_rejected
+        PASS [   0.372s] (140/181) claudine-gen::l1 pipeline::graduated_supports_skills_in_facts_is_a_source_collision
+        PASS [   0.395s] (141/181) claudine-gen::l1 pipeline::graduated_acp_server_mode_in_facts_is_a_source_collision
+        PASS [   0.336s] (142/181) claudine-gen::l1 pipeline::multi_segment_child_is_rejected
+        PASS [   0.387s] (143/181) claudine-gen::l1 pipeline::missing_or_mismatched_artifact_fails_loudly
+        PASS [   0.091s] (144/181) claudine-gen::l1 pipeline::override_without_reason_is_rejected
+        PASS [   0.459s] (145/181) claudine-gen::l1 pipeline::null_overlay_selector_emits_none
+        PASS [   0.336s] (146/181) claudine-gen::l1 pipeline::null_source_root_emits_none
+        PASS [   0.331s] (147/181) claudine-gen::l1 pipeline::overlay_facts_emit_the_selector_and_capability_records
+        PASS [   0.313s] (148/181) claudine-gen::l1 pipeline::override_for_unmapped_field_is_rejected
+        PASS [   0.368s] (149/181) claudine-gen::l1 pipeline::override_wins_and_reports_the_suppressed_source_value
+        PASS [   0.302s] (150/181) claudine-gen::l1 pipeline::parent_of_provider_dir_shape_carries_the_child_segment
+        PASS [   0.443s] (151/181) claudine-gen::l1 pipeline::override_equal_to_source_value_is_flagged_stale
+        PASS [   0.116s] (152/181) claudine-gen::l1 pipeline::skip_research_roster_entry_is_rejected_loudly
+        PASS [   0.213s] (153/181) claudine-gen::l1 pipeline::research_frontmatter_violating_its_sidecar_fails_loudly
+        PASS [   0.336s] (154/181) claudine-gen::l1 pipeline::pipeline_generates_from_all_declared_sources
+        PASS [   0.029s] (155/181) claudine-gen::l1 registry_coverage::every_serialized_field_is_registered_or_excluded
+        PASS [   0.409s] (156/181) claudine-gen::l1 pipeline::parent_of_provider_dir_without_a_child_is_rejected
+        PASS [   0.023s] (157/181) claudine-gen::l1 registry_coverage::registry_order_matches_serialization_order
+        PASS [   0.032s] (158/181) claudine-gen::l1 registry_coverage::registry_has_no_entries_outside_the_serialized_field_list
+        PASS [   0.036s] (159/181) claudine-gen::l1 signals_sidecar_mirror::signals_sidecar_enums_mirror_rust_variants
+        PASS [   0.309s] (160/181) claudine-gen::l1 pipeline::relative_area_inside_a_repository_uses_one_absolute_resolution_boundary
+        PASS [   0.346s] (161/181) claudine-gen::l1 pipeline::shell_command_override_emits_struct_variant
+        PASS [   0.114s] (162/181) claudine-gen::l1 signals_validation::dangling_extraction_reference_is_rejected
+        PASS [   0.106s] (163/181) claudine-gen::l1 signals_validation::declarative_record_without_match_op_is_rejected
+        PASS [   0.105s] (164/181) claudine-gen::l1 signals_validation::duplicate_priority_in_a_source_group_is_rejected
+        PASS [   0.089s] (165/181) claudine-gen::l1 signals_validation::exists_with_match_value_is_rejected
+        PASS [   0.336s] (166/181) claudine-gen::l1 pipeline::unknown_relocated_resource_class_is_rejected
+        PASS [   0.102s] (167/181) claudine-gen::l1 signals_validation::out_of_range_priority_is_rejected
+        PASS [   0.404s] (168/181) claudine-gen::l1 pipeline::unknown_capability_verdict_is_rejected
+        PASS [   0.112s] (169/181) claudine-gen::l1 signals_validation::wildcard_match_path_is_rejected
+        PASS [   0.120s] (170/181) claudine-gen::l1 signals_validation::unknown_signal_member_is_rejected
+        PASS [   0.046s] (171/181) claudine-gen::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.344s] (172/181) claudine-gen::l1 pipeline::unknown_selector_shape_is_rejected
+        PASS [   0.114s] (173/181) claudine-gen::l1 steering_check::generation_stops_before_writes_when_steering_gate_fails
+        PASS [   0.222s] (174/181) claudine-gen::l1 signals_validation::non_compiling_regex_is_rejected
+        PASS [   0.104s] (175/181) claudine-gen::l1 vocabulary::kimi_research_projects_the_complete_jsonrpc_code_mapping
+        PASS [   0.132s] (176/181) claudine-gen::l1 vocabulary::kilo_research_preserves_shared_seed_order
+        PASS [   0.296s] (177/181) claudine-gen::l1 signals_validation::shipped_corpus_builds_deterministically
+        PASS [   0.204s] (178/181) claudine-gen::l1 vocabulary::every_research_vocabulary_projects_to_runtime_strings
+        PASS [   0.311s] (179/181) claudine-gen::l1 vocabulary::build_vocabulary_is_deterministic_and_well_formed
+        PASS [   4.234s] (180/181) claudine-gen::l1 generate_ux::yes_writes_all_drift_and_check_reconverges
+        PASS [   5.039s] (181/181) claudine-gen::l1 generate_ux::roster_alias_rename_drifts_the_darkmatter_name_table_until_regenerated
+────────────
+     Summary [   6.745s] 181 tests run: 181 passed, 0 skipped
+
+✅ [32m all tests passing in [1mclaudine-gen[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 128
+
+cross-check summary for claudine-gen:
+  windows  pass

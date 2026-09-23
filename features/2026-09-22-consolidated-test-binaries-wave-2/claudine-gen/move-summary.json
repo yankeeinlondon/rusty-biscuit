@@ -1,0 +1,64 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"terminal-tests\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "claudine/gen/tests/l1/agent_errors_check.rs",
+      "old": "claudine/gen/tests/agent_errors_check.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/drift.rs",
+      "old": "claudine/gen/tests/drift.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/fixtures_provenance.rs",
+      "old": "claudine/gen/tests/fixtures_provenance.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/generate_ux.rs",
+      "old": "claudine/gen/tests/generate_ux.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/pipeline.rs",
+      "old": "claudine/gen/tests/pipeline.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/registry_coverage.rs",
+      "old": "claudine/gen/tests/registry_coverage.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/signals_sidecar_mirror.rs",
+      "old": "claudine/gen/tests/signals_sidecar_mirror.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/signals_validation.rs",
+      "old": "claudine/gen/tests/signals_validation.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/steering_check.rs",
+      "old": "claudine/gen/tests/steering_check.rs"
+    },
+    {
+      "new": "claudine/gen/tests/l1/vocabulary.rs",
+      "old": "claudine/gen/tests/vocabulary.rs"
+    },
+    {
+      "new": "claudine/gen/tests/level2/level2_report_terminal.rs",
+      "old": "claudine/gen/tests/level2_report_terminal.rs"
+    }
+  ],
+  "package": "claudine-gen",
+  "path_repairs": {},
+  "proptest_relocated": [],
+  "roots": {
+    "claudine/gen/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 10
+    },
+    "claudine/gen/tests/level2/main.rs": {
+      "declares_common": false,
+      "modules": 1
+    }
+  },
+  "version": 1
+}
