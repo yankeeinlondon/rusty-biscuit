@@ -42,6 +42,28 @@ docs_created_during_phase_1:
     - darkmatter/fixes/_unscheduled/proptest-regressions-after-consolidation/spec.md
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_2:
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.py
+docs_updated_during_phase_2:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+docs_created_during_phase_2:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/dry-run.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/r18-proptest-scratch.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-metadata-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-darkmatter-proptest-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-b.SHA256SUMS
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-a/
+skills_files_updated_during_phase_2: []
 ---
 
 # Implementation Plan — Consolidated Test Binaries, Wave 2
@@ -171,6 +193,25 @@ Phase 1 added these (see `rulings.md` R14–R19):
   binary.** No in-scope reference is newly hidden by that (R15).
 - **F14 — `cross-check` ships the working tree, not `HEAD`,** and keeps no
   per-test report. Windows evidence is its `tee`d PASS lines (R13, R16).
+
+Phase 2 added these (see `selfproof/README.md` and the implementation log):
+
+- **F15 — `biscuit-terminal-cli`'s shared `tests/common/` holds 10 unit tests**
+  (`common::pane_geometry::tests::*`). Each of the 9 `level2_*` files that
+  declares `mod common;` compiles a copy, so there are 90 identities today.
+  With one `common` per root (first spec §3), they become 10 identities in
+  `level2`. `plan` now records them as `shared_tests`, and `compare` folds the
+  copies and fails if they disagree. These are L1-tier tests, in addition to
+  F3's 49. Phase 4 records the 90 → 10 fold as this package's disposition.
+- **F16 — The tier-by-name default does not give the ruled targets** for
+  `schematic-gen` (`l1-terminal`), `biscuit-tui-cli` (`l1-terminal`, `real`),
+  `sniff-cli` (`level2` plus `level2-test-fixtures`), or `sniff`'s `fixtures`
+  helper. `consolidation.py`'s reviewed `RULED_TARGETS` table encodes R4, R14,
+  and R19, and `plan` checks each entry against the captures.
+- **F17 — Wave 1's `claudine-cli` feature table is stale.** Its CI union has
+  since gained `test-fixtures`, so `capture --package claudine-cli` now refuses
+  until that table is updated. `claudine-cli` is outside this wave; nothing
+  here captures it.
 
 ### Non-negotiable constraints
 
@@ -461,41 +502,44 @@ unmigrated tree.
 
 ### Wave 1 — Independent changes (parallel)
 
-- [ ] **Package tables** — add the ten packages to `PACKAGES` and
+- [x] **Package tables** — add the ten packages to `PACKAGES` and
       `PACKAGE_FEATURE_SETS` in `scripts/ci/consolidation.py` from S1's table.
       Extend the `inventory` and `capture` fixtures in
       `scripts/ci/test_consolidation.py` so an unlisted package still
       refuses.
-- [ ] **`move` subcommand** — port `pilot/apply-move.py` behavior into
+- [x] **`move` subcommand** — port `pilot/apply-move.py` behavior into
       `consolidation.py move`. That covers file moves, nested-root moves, and
       `inner_cfg` stripping onto the module declaration; it also covers
       `mod common;` → `use crate::common;`, the relative `include_*` repair,
       and root generation. Add the R2 refinements: rustfmt-ordered `mod` lines
       and `common` only where used. Add fixture tests, including one that
       proves an alias from the manifest becomes the module name.
-- [ ] **`check-metadata` and `body-diff` subcommands** — port both scripts,
+- [x] **`check-metadata` and `body-diff` subcommands** — port both scripts,
       taking manifests and base revision as arguments. Exit 1 on a mismatch.
       Add fixture tests for a missing target, an extra target, a feature
       mismatch, and a body change.
 
 ### Wave 2 — Self-proof (needs Wave 1)
 
-- [ ] **Toolkit suite** — `python3 scripts/ci/test_consolidation.py` passes,
+- [x] **Toolkit suite** — `python3 scripts/ci/test_consolidation.py` passes,
       every new failure oracle is shown red then green, and `just ci-local`'s
       Python leg is green.
-- [ ] **No-op comparison** — `capture` the unmigrated tree twice for all ten
+- [x] **No-op comparison** — `capture` the unmigrated tree twice for all ten
       packages and every S1 feature set, then `compare`: identical, trivially
       mapped. Commit `selfproof/noop-comparison.{json,md}`.
-- [ ] **Regression check on wave 1** — run `check-metadata` against the four
+- [x] **Regression check on wave 1** — run `check-metadata` against the four
       wave-1 manifests. It must pass, which proves the port matches the
       originals.
 
 ### Checkpoint
 
-- [ ] `just lint` passes for the repo `scripts/ci` surface, and the toolkit
+- [x] `just lint` passes for the repo `scripts/ci` surface, and the toolkit
       suite is green.
 - [ ] The no-op self-proof for ten packages is committed. The toolkit commit
       is signed and verified.
+      *(Phase 2 produced the self-proof in `selfproof/`. The phase instructions
+      forbid committing, so the signed toolkit commit (R12) is left to the
+      separate commit step.)*
 
 ## Phase 3 — Single-Contract Packages (`tree-hugger`, `claudine`, `sniff`)
 
@@ -534,7 +578,7 @@ their distinct hazards and checklist.
    `tests/l1/orphan.rs`, then passes once both are removed.
 5. **Checks.**
    - `check-attributes`, `check-snapshots` (where snapshots exist),
-     `check-metadata`, and `body-diff`.
+     `check-proptest` (R18), `check-metadata`, and `body-diff`.
    - `compare` on macOS. Any difference is a manifest or move defect, never a
      filter change.
 6. **Suites.**

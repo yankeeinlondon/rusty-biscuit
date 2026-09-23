@@ -27,6 +27,28 @@ docs_created_during_phase_1:
     - darkmatter/fixes/_unscheduled/proptest-regressions-after-consolidation/spec.md
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_2:
+    - scripts/ci/consolidation.py
+    - scripts/ci/test_consolidation.py
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.py
+docs_updated_during_phase_2:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/plan.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/implementation-log.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/spec.md
+docs_created_during_phase_2:
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/README.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/dry-run.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/noop-comparison.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.md
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/inventory.json
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/mutation-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/r18-proptest-scratch.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-metadata-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/wave1-darkmatter-proptest-check.txt
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-b.SHA256SUMS
+    - features/2026-09-22-consolidated-test-binaries-wave-2/selfproof/capture-a/
+skills_files_updated_during_phase_2: []
 packages: []
 ---
 
@@ -113,3 +135,103 @@ committed, per the phase instructions.
 - There is no requirement-to-test mapping, because Phase 1 changes no
   behavior. Its outputs are evidence documents, and each claim cites file
   and line or a committed log.
+
+## Phase 2
+
+Phase 2 (toolkit extension) ran at `9d44e7988`. No file in the ten packages
+changed. Nothing was committed, per the phase instructions. R12's signed
+toolkit commit is left to the separate commit step.
+
+### What changed in `scripts/ci/consolidation.py`
+
+| Plan task / ruling | Change |
+|---|---|
+| Package tables (R1) | `PACKAGES` gained the ten packages. `PACKAGE_FEATURE_SETS` holds S1's reviewed sets, including `dmls`'s fourth set `(terminal-tests)`. `capture` refuses an unlisted package **before** any subprocess (it used to run `cargo metadata` first), and `inventory --package <unlisted>` now refuses too (exit 2). |
+| `move` (R2, R17, R18) | Ports `pilot/apply-move.py`, generalized: it refuses before touching anything (missing source, existing destination, undeclared module, unresolved `mod`). It resolves every `include_str!`/`include_bytes!`/`#[path]` literal against the old location and rewrites it only when the resolution would change, which also covers nested-root children. `mod common;`, bare or `#[path]` to `tests/common/mod.rs`, becomes `use crate::common;` with its other attributes kept. Any other bare `mod x;` gains a `#[path]` to its old file (sniff's `fixtures`). The row flag `keep_inner_cfg` keeps the inner cfg (R17). Roots declare `common` only where a module uses it, and list modules in rustfmt order (byte order, verified against `rustfmt --edition 2024`). Seed files move to `proptest_regression_path` (R18). It prints the `[[test]]` entries for `Cargo.toml`. |
+| `check-proptest` (R18) | New. Seed content must survive byte for byte, and every seed file must be the resolution of some test source. A file proptest never reads fails. |
+| `check-metadata` | Ports `acceptance/metadata-check.py` with `--manifest` (repeatable) and `--metadata`. Output on wave 1's four manifests is identical to the original's. |
+| `body-diff` | Ports `acceptance/body-diff.py` with `--manifest`, `--base-rev`, `--after-rev` (default: the working tree), and `--markdown`. It now pairs nested-root children, and counts a line that differs only by a path literal as structural. **It exits 1** on any `other` line or a missing side, because wave 2 allows structural edits only. |
+| `plan`: `RULED_TARGETS` (R4, R14, R19; new finding F16) | A reviewed table places `schematic-gen`'s `terminal_capture` and `biscuit-tui-cli`'s `real_terminal_render` and `windows_captured_stdout` in `level2`, places `sniff-cli`'s `level2_recent_commits_rendering` in `level2` (`test-fixtures`), and rules `sniff`'s `fixtures` a helper. `plan` fails if an entry names no target, if a helper lists tests, if the target would compile where it never did, or if it joins a target with more features while listing tests without them. |
+| `plan`/`compare`: shared `common` tests (new finding F15) | Tests inside the shared `common` module are recorded as `shared_tests` and not projected per module. `compare` folds their copies into the consolidated identity and fails if the copies disagree. |
+
+### Self-proof (all in `selfproof/`; see its `README.md`)
+
+- **No-op:** `capture` ran twice for the ten packages (21 feature sets).
+  `compare --require-identical-digests` gave `identical`: 0 failures and 0
+  notes across 487 selector cells, and the two runs were byte-identical.
+  `capture-a/` is committed as the before-side for Phases 3–5, with
+  `inventory.json`.
+- **`plan` over `capture-a`** gives exactly the ruled table: 18 targets; the
+  aliases `prose_cells`, `diagrams`, and `terminal_render` only; R10's two
+  rewrites; and `sniff` with 19 modules plus the `fixtures` helper.
+  `ShippedWave2PlanTests` pins this against the frozen evidence and the
+  filters each capture recorded.
+- **`move` dry run** of all ten packages in a throwaway worktree: 0 `other`
+  body lines, 0 `check-proptest` failures, and the `biscuit-file` seed
+  relocated. The 7 `check-attributes` failures are exactly the S2/R19
+  dispositions. `tree-hugger` and `biscuit-file` were then built and compared
+  against `capture-a`: `identical` (`dry-run.md`).
+- **R18:** a scratch crate with a failing property wrote
+  `tests/proptest-regressions/always_fails.txt`, exactly as predicted.
+  `check-proptest` is red on wave 1's darkmatter seeds (the filed defect).
+- **Red then green:** `mutation-check.py` gave 17 of 17 `OK`. Wave 1's
+  `mutation-check.py` still gives 8 of 8.
+
+### Requirement-to-test mapping (`scripts/ci/test_consolidation.py`, 86 → 96 tests)
+
+| Behavior | Tests |
+|---|---|
+| Ruled feature sets; unlisted package refused (capture and inventory) | `PackageTableTests.*`; shipped: `ShippedPackageTableTests` (each wave-2 set against the real `Cargo.toml`, CI union listed) |
+| proptest path resolution | `ProptestPathTests` |
+| `move`: moves, path repairs (include, `#[path]`, bare `mod`, nested child), `common` rewrite, alias as module name, rustfmt order, common only where used, `keep_inner_cfg`, seed relocation, `[[test]]` entries, refusal leaves the tree untouched, CLI | `MoveTests.*` (10 tests), including `test_a_generated_root_is_already_rustfmt_clean` and `test_the_moved_tree_passes_every_after_check` |
+| `check-proptest` | `CheckProptestTests.*`: the wave-1 defect shape, changed or lost seeds, correct relocation |
+| `check-metadata` | `CheckMetadataTests.*`: missing target, extra target, feature mismatch, missing `autotests`, double mapping, unknown target, CLI exit codes; shipped: `ShippedWave1MetadataTests` |
+| `body-diff` | `BodyDiffTests.*`: structural-only passes, body change fails with the line, missing side fails |
+| `RULED_TARGETS`, `shared_tests` in `plan` | `SharedAndRuledPlanTests.*` (5 tests); shipped: `ShippedWave2PlanTests` (3 tests) |
+| Shared-copy fold in `compare` | `CompareTests.test_shared_common_copies_fold_into_the_consolidated_identity`, `test_shared_copies_that_disagree_fail` |
+
+### Gates run
+
+- `python3 scripts/ci/test_consolidation.py`: 96 tests, OK. No shipped class
+  skipped.
+- `just ci-local`'s Python leg (its ten suites, run as `ci-local` runs them):
+  all pass.
+- Lint: the repository has no Python lint recipe, and `scripts/` is not a
+  `just` area, so `just lint` (Rust areas) does not cover this surface. Run
+  instead: `python3 -W error -m py_compile` and
+  `uvx ruff check --select F,E9,B` on the three changed Python files, both
+  clean. The base file was clean under the same rules; my three findings
+  (B905 ×2, B023) were fixed.
+- No Rust, manifest, or justfile changed, so area `just test`/`just lint` are
+  unaffected by this phase. Phase 1's baseline stands.
+
+### Findings (written into the plan as F15–F17)
+
+- **F15:** `biscuit-terminal-cli`'s `tests/common/pane_geometry.rs` has 10 unit
+  tests. Each of 9 `level2_*` binaries compiles a copy (90 identities). They
+  are L1-tier and run in CI's L1 cell with `terminal-tests`. Phase 1 (F3, S2)
+  missed them because they are not in a target file. Under one `common` per
+  root they fold to 10. **Open for Phase 4:** record the fold as that
+  package's disposition (recommended: it follows first-spec §3 and
+  `rust-testing`'s "declared once" rule, while wave 1's per-module
+  `parity_helpers` copies are labeled "legacy shape, not a pattern"), or keep
+  per-module copies. The toolkit supports the fold. Keeping copies would need
+  `plan` to project `common::` tests per module again.
+- **F16:** without `RULED_TARGETS`, `plan` gave `schematic-gen: l1-terminal`,
+  `biscuit-tui-cli: l1-terminal + real`, and
+  `sniff-cli: level2 + level2-test-fixtures`, which contradict R4 and R14.
+- **F17:** wave 1's `claudine-cli` row in `PACKAGE_FEATURE_SETS` is stale. Its
+  CI union now includes `test-fixtures`, so `capture --package claudine-cli`
+  refuses. It is outside scope and was not changed. `ShippedPackageTableTests`
+  checks wave-2 rows only, and says why.
+- **S2 miscount:** S2 says 12 `#[path]` sites in scope. There are 11 (its
+  `sniff` row says ×7 and lists 6). All 11 are handled.
+- **Still manual in Phases 3–5** (the mover does not guess these):
+  - `Cargo.toml`, including removing stale `[[test]]` entries such as
+    `biscuit-file`'s `fetch_integration`;
+  - `dispositions` for the 7 `check-attributes` hits;
+  - `keep_inner_cfg: true` on `biscuit-tui-cli`'s `windows_captured_stdout`
+    row (R17);
+  - the snapshot moves;
+  - the `spawn_site_guard` key; and
+  - the self-exec `--exact` strings.
