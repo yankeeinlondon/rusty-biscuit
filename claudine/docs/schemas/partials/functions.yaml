@@ -1,12 +1,25 @@
 kind: schema
+# we're adding categories as a top level section as metadata
+# and when it's included than a schema that uses categories
+# must ONLY use the categories provided
+categories:
+    - |-
+        Type Predicates ->
+        description goes here
+    - Math -> description
+    - Collection -> description
+    - Type Conversion -> description
+    - String Predicates -> description
+    - String Mutations -> description
+    - Rendering
+    - Date Formatting
+    - Date Validators
+    - Logical
+    - Filesystem
+    - Context
+    - List Formatting
+    - Devops
 types:
-    set: |-
-        function(
-            parameters(key: string, value: any);
-            returns(object);
-            category(Frontmatter);
-            fallible;
-        ) -> Sets a top-level key in the `doc` namespace; no external mutation
     is_string: |-
         function(
             parameters(x: any);
@@ -364,13 +377,13 @@ types:
             parameters(...values: any);
             returns(boolean);
             category(Logical);
-        ) -> Logical AND of all arguments. Short-circuits on first falsy value.
+        ) -> Logical AND of all arguments. Short-circuits on first _falsy_ value.
     or: |-
         function(
             parameters(...values: any);
             returns(boolean);
             category(Logical);
-        ) -> Logical OR of all arguments. Short-circuits on first truthy value.
+        ) -> Logical OR of all arguments. Short-circuits on first _truthy_ value.
     absolute: |-
         function(
             parameters(file: file);
@@ -663,7 +676,7 @@ types:
         function(
             parameters(id: any);
             returns(string);
-            category(Pull Requests);
+            category(Devops);
             fallible;
         ) -> Returns one provider pull or merge request in canonical Markdown form.
     pr_list:
@@ -671,14 +684,14 @@ types:
             function(
                 parameters(query: object);
                 returns(string[]);
-                category(Pull Requests);
+                category(Devops);
                 fallible;
             ) -> Queries pull or merge requests with the canonical bounded filter vocabulary. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
         - |-
             function(
                 parameters(count: number(integer));
                 returns(string[]);
-                category(Pull Requests);
+                category(Devops);
                 fallible;
             ) -> Returns the newest `count` open pull or merge requests.
     cicd: |-
@@ -693,13 +706,13 @@ types:
             function(
                 parameters(query: object);
                 returns(string[]);
-                category(CI/CD);
+                category(Devops);
                 fallible;
             ) -> Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
         - |-
             function(
                 parameters(count: number(integer));
                 returns(string[]);
-                category(CI/CD);
+                category(Devops);
                 fallible;
             ) -> Returns the newest `count` CI/CD jobs of any status.
