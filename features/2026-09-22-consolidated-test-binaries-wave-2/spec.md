@@ -1,6 +1,6 @@
 ---
 area: repo
-status: draft-spec
+status: planned
 created: 2026-09-22
 owner: Ken Snyder <ken@ken.net>
 origin: follow-on to 2026-09-21-consolidated-test-binaries — every remaining package with ten or more integration-test binaries, 2026-09-22
@@ -43,6 +43,18 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
 implemented: false
+human_review: false
+message_to_agent: |-
+    Phase 1 is complete. Read `rulings.md` before Phase 2. It amends the plan in six places, and the amendments bind Phase 2:
+    - R1: `dmls` has FOUR feature sets. Add `(terminal-tests)` alone, because `darkmatter`'s `test-l2` builds it. `claudine` is `()` only. Use the table in `spikes/s1-feature-sets.md`.
+    - R18: `move` must relocate a `*.proptest-regressions` file to `tests/proptest-regressions/<stem>.txt`, byte-identical. That is proptest 1.11's `SourceParallel` location once `tests/<target>/main.rs` exists (`failure_persistence/file.rs:336-367`). It must NOT move beside the module, which is what wave 1 did for darkmatter and silently broke seed replay; that is filed as `darkmatter/fixes/_unscheduled/proptest-regressions-after-consolidation`. Prove the rule once in a throwaway scratch crate (local only).
+    - R7: five packages need an unconditional `test-toolkit` dev-dependency, not two. `schematic-gen`, `biscuit-terminal-cli`, and `claudine-gen` have it only as an optional regular dependency, so ALSO add a `[dev-dependencies]` entry (precedent `biscuit-terminal/lib/Cargo.toml:74,98`).
+    - R14: `sniff-cli` is 2 targets (`l1`, `level2` requiring `test-fixtures`), not 3. All four `level2_*` files are `#![cfg(feature = "test-fixtures")]`, so the spec's hazard-3 premise does not hold. This contradicts the spec's wording, so the author may restore the split before Phase 5. The Phase 5 wave-1 text carries a note to that effect.
+    - R19: `check-attributes` needs `crate_path` dispositions for three `crate::` strings inside string literals (schematic-gen x2, claudine-gen x1). Recipes that run a former `--test` target (`schematic/justfile:271`, `biscuit-tui/justfile:127-129`) are fixed in the structural-move commit.
+    - R16: never pass `--features` to `cross-check`, because it switches every host to native mode with no tier filter. Capture Windows/WSL output with `./scripts/cross-check.sh <pkg> --os <os> 2>&1 | tee ...`. The run keeps no per-test report locally, and a green leg does not prove a `cfg(windows)` test ran.
+    - R17: `tools/test-toolkit/tests/ci_workflow_contracts.rs:7053` reads `biscuit-tui/cli/tests/windows_captured_stdout.rs` by path and asserts its inner `#![cfg(windows)]`. The biscuit-tui-cli move must update that path and keep the inner attribute.
+    Baseline (`baseline/pre-existing.md`): every area is green except two `claudine-cli::l1 shipped_prompt_route_drift` failures. They are caused by the author's uncommitted `prompts/_implement/implement-plan.md` edit in this worktree (the fixture lacks the new `::file ../_test-tiers.md` line). They are not in scope; do not "fix" them by editing the fixture as part of this feature.
+    Nothing was committed in Phase 1, per the phase instructions. The rulings' R12 commit series applies from Phase 2 on.
 ---
 
 # Consolidate integration tests in the ten remaining double-digit packages
