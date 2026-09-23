@@ -5,7 +5,10 @@ kind: schema
 categories:
     - |-
         Type Predicates ->
-        description goes here
+        Guard clauses that answer _“what is this value?”_. Each predicate accepts an
+        untyped `any` input and returns `true` or `false` based on the value's runtime
+        type or shape — a string, number, array, object, or null — or, for the numeric
+        predicates, its sign or integrality.
     - Math -> description
     - Collection -> description
     - Type Conversion -> description
