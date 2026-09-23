@@ -65,7 +65,7 @@ sanity:
 
 # test just the CLI in Claudine
 test-cli *args="": _ensure-md
-    @just _test claudine-cli {{ args }}
+    @just _test claudine-cli --features test-fixtures {{ args }}
 
 # test just the Claudine Library
 test-library *args="":
@@ -115,7 +115,7 @@ test *args="": _ensure-md
     set -euo pipefail
     packages="claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
-        just _test_all "claudine-catalog-types; claudine; claudine-contract; claudine-cli --features daemon-tests,terminal-tests; claudine-gen --features terminal-tests" {{ args }}
+        just _test_all "claudine-catalog-types; claudine; claudine-contract; claudine-cli --features daemon-tests,terminal-tests,test-fixtures; claudine-gen --features terminal-tests" {{ args }}
     else
         just _test_local_all "${packages}" {{ args }}
     fi
@@ -124,7 +124,7 @@ test *args="": _ensure-md
 # intentionally opt-in: the feature adds rendezvous-daemon and bundled DuckDB
 # to the graph.
 test-daemon *args="": _ensure-md
-    @just _test claudine-cli --features daemon-tests {{ args }}
+    @just _test claudine-cli --features daemon-tests,test-fixtures {{ args }}
 
 # test just the contract adapter library
 test-contract *args="":

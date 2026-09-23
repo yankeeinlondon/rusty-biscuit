@@ -14,6 +14,10 @@
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::directives_api::{DirectiveKind, scan_shell_block_commands};
+use darkmatter::markdown::compose::directive_targets::{
+    TargetNullability, analyze_directive_targets,
+};
+use darkmatter::markdown::compose::expression::ExpressionFinder;
 use darkmatter::markdown::compose::{
     FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
 };
@@ -607,8 +611,45 @@ fn disclosure_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Broken transclusion paths and transclusion cycles.
+/// Transclusion target warnings and transclusion cycles.
 fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
+    let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
+    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
+    let effective_schema = bundle.map(|bundle| &bundle.effective);
+    let static_frontmatter = bundle
+        .map(|bundle| &bundle.frontmatter_json)
+        .unwrap_or(&empty_frontmatter);
+    if let Ok(analyses) = analyze_directive_targets(ctx.text, effective_schema, static_frontmatter) {
+        for analysis in analyses {
+            let TargetNullability::Nullable { root } = &analysis.nullability else {
+                continue;
+            };
+            if analysis.is_narrowed() {
+                continue;
+            }
+            let Some(range) = ctx
+                .source_map
+                .byte_range_to_lsp(analysis.expression_span.clone())
+            else {
+                continue;
+            };
+            let keyword = directives::info_for(analysis.kind)
+                .map(|info| info.keyword)
+                .unwrap_or("directive");
+            out.push(diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                code::TRANSCLUSION_NULLABLE_TARGET,
+                source::COMPOSE,
+                format!(
+                    "`{}` may be null here; a null `{keyword}` target transcludes nothing. Guard with `::block when=\"file_exists({})\"`, bind a non-null value, or make the parameter required.",
+                    root.as_str(),
+                    root.as_str(),
+                ),
+            ));
+        }
+    }
+
     for directive in directives::directives(ctx.text) {
         if !directives::is_transclusion(directive.kind) {
             continue;
@@ -616,6 +657,9 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         let Some(target) = directive.target else {
             continue;
         };
+        if !ExpressionFinder::find_all_plain(&target.value).is_empty() {
+            continue;
+        }
         let path = target.value.split('#').next().unwrap_or(&target.value);
         if is_remote(path) {
             continue;
@@ -666,11 +710,13 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Malformed body interpolations and unknown bare identifiers, both `WARNING`:
-/// a body `{{ … }}` is only *inferred* to be an expression (foreign template
-/// syntax is common in prose), and an unknown root might be supplied at runtime.
+/// Malformed body interpolations and unknown identifiers in any operand
+/// position (see [`KnownRoots`]), both `WARNING`: a body `{{ … }}` is only
+/// *inferred* to be an expression (foreign template syntax is common in
+/// prose), and an unknown root might be supplied at runtime.
 fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let body_base = body_base(ctx.text);
+    let known_roots = KnownRoots::for_document(ctx);
     for interpolation in expressions::interpolations(ctx.text, body_base) {
         match expressions::parse(&interpolation.text) {
             Err(error) => {
@@ -689,22 +735,115 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                 }
             }
             Ok(expr) => {
-                if let Some(name) = expressions::root_identifier(&expr)
-                    && is_unknown_identifier(ctx, &name)
-                    && let Some(range) = ctx.source_map.byte_range_to_lsp(interpolation.inner.clone())
-                {
-                    out.push(diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        code::EXPRESSION_UNKNOWN_IDENTIFIER,
-                        source::COMPOSE,
-                        format!(
-                            "`{name}` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function"
-                        ),
-                    ));
+                let Some(known_roots) = &known_roots else {
+                    continue;
+                };
+                let base = interpolation.inner.start;
+                for finding in known_roots.findings(&expr, &interpolation.text, expressions::parse, None) {
+                    let span = finding_span(&finding);
+                    if let Some(range) =
+                        ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)
+                    {
+                        out.push(unknown_identifier_diagnostic(range, source::COMPOSE, &finding));
+                    }
                 }
             }
         }
+    }
+}
+
+/// Frontmatter membership for `dm.expression.unknown_identifier`, computed
+/// once per diagnostics pass and shared by the body-interpolation and
+/// frontmatter-expression providers.
+///
+/// Only exists when the document has frontmatter (so the intended variable
+/// set is known); on a frontmatter-less document every bare identifier could
+/// be a `--set` value, so none is flagged. The compose runtime has no such
+/// blind spot.
+///
+/// A property the effective schema **declares** counts as known even when the
+/// document leaves it unset: schema-declared properties (including required
+/// ones) are the caller-supplied parameters a document interpolates, validated
+/// against the merged state at compose time — not unknown identifiers.
+pub(crate) struct KnownRoots<'a> {
+    ast: &'a crate::overlay::FrontmatterAst,
+    shape: darkmatter::markdown::schemas::SchemaShape,
+}
+
+impl<'a> KnownRoots<'a> {
+    pub(crate) fn for_document(ctx: &DocumentContext<'a>) -> Option<Self> {
+        let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
+        Some(Self {
+            ast,
+            shape: frontmatter::known_shape(ctx),
+        })
+    }
+
+    fn is_key(&self, name: &str) -> bool {
+        self.ast.entry_by_dotted(name).is_some() || self.shape.properties.contains_key(name)
+    }
+
+    /// See [`expressions::unknown_identifier_findings`].
+    pub(crate) fn findings(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        source: &str,
+        reparse: fn(
+            &str,
+        ) -> Result<
+            darkmatter::markdown::compose::expression::SpannedExpr,
+            darkmatter::markdown::compose::expression::ParseError,
+        >,
+        forbidden_quote: Option<char>,
+    ) -> Vec<expressions::UnknownIdentifierFinding> {
+        expressions::unknown_identifier_findings(
+            expr,
+            source,
+            reparse,
+            |root| {
+                expressions::is_unknown_root(
+                    root,
+                    |name| self.ast.entry_by_dotted(name).is_some(),
+                    |name| self.shape.properties.contains_key(name),
+                )
+            },
+            |key| self.is_key(key),
+            forbidden_quote,
+        )
+    }
+}
+
+/// The expression-relative span of a finding.
+pub(crate) fn finding_span(finding: &expressions::UnknownIdentifierFinding) -> &SourceSpan {
+    match finding {
+        expressions::UnknownIdentifierFinding::Identifier { span, .. }
+        | expressions::UnknownIdentifierFinding::DashSeparatedKey { span, .. } => span,
+    }
+}
+
+/// A `dm.expression.unknown_identifier` diagnostic at `WARNING`, the severity
+/// the compose runtime uses for the same condition. A proven dash-separated-key
+/// fix rides in `data` as a [`expressions::KeyReferenceFix`].
+pub(crate) fn unknown_identifier_diagnostic(
+    range: Range,
+    source_value: &str,
+    finding: &expressions::UnknownIdentifierFinding,
+) -> Diagnostic {
+    let data = match finding {
+        expressions::UnknownIdentifierFinding::DashSeparatedKey { fix: Some(fix), .. } => {
+            serde_json::to_value(fix).ok()
+        }
+        _ => None,
+    };
+    Diagnostic {
+        data,
+        ..diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            code::EXPRESSION_UNKNOWN_IDENTIFIER,
+            source_value,
+            expressions::unknown_identifier_message(finding),
+        )
     }
 }
 
@@ -877,31 +1016,6 @@ fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<String> {
         .and_then(|overlay| overlay.ast.as_ref())
         .and_then(|ast| ast.entry_by_dotted(dotted))
         .and_then(|entry| entry.scalar.clone())
-}
-
-/// Whether a bare identifier resolves to nothing DMLS can name.
-///
-/// Only fires when the document has frontmatter (so the intended variable set is
-/// known); on a frontmatter-less document every bare identifier could be a
-/// `--set` value, so none is flagged. Namespaced roots (`ctx.*`, `env.*`,
-/// `doc.*`) and expression functions are always known.
-///
-/// A property the effective schema **declares** counts as known even when the
-/// document leaves it unset: schema-declared properties (including required
-/// ones) are the caller-supplied parameters a document interpolates, validated
-/// against the merged state at compose time — not unknown identifiers.
-fn is_unknown_identifier(ctx: &DocumentContext, name: &str) -> bool {
-    // Only fires when the document has frontmatter (so the intended variable set
-    // is known); on a frontmatter-less document every bare identifier could be a
-    // `--set` value, so none is flagged.
-    let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_ref()) else {
-        return false;
-    };
-    expressions::is_unknown_root(
-        name,
-        |name| ast.entry_by_dotted(name).is_some(),
-        |name| frontmatter::known_shape(ctx).properties.contains_key(name),
-    )
 }
 
 /// The document spans of top-level `prologue`/`epilogue` frontmatter values.

@@ -97,7 +97,7 @@ Claudine's composition features let you use Markdown as a dynamic template for a
 
 Prompt context uses the launch repository even for prompts stored elsewhere:
 `ctx.repo` provides its name independently of Git-variable references, while
-`ctx.area` is empty at the repository root. See [context variables](docs/topics/context/context-variables.md).
+`ctx.area` is empty at the repository root. See [context variables](docs/topics/state-management/context-variables.md).
 
 Three canonical commands:
 

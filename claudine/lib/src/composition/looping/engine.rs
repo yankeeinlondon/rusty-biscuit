@@ -357,6 +357,11 @@ where
 
     let base_dir = prompt_path.parent();
 
+    // One invocation-owned refresh capability for the whole loop: `current.*`
+    // in any iteration observes the fact through the retained launch evidence.
+    // Without an epoch there is no evidence, and every read fails closed.
+    let current_authority = document_epoch.map(crate::invocation_context::DocumentEpoch::current_authority);
+
     // Run-level wall-clock anchor for lifecycle `timing.*` across all
     // iterations and the loop gate.
     let loop_start = std::time::Instant::now();
@@ -364,8 +369,7 @@ where
     let mut guard = LifecycleRunGuard::new(lifecycle_config, lifecycle_ctx, emitter);
 
     // Emit initialize once before any iteration runs.
-    let (init_timing, init_current) =
-        capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
+    let init_timing = capture_loop_lifecycle_timing(loop_start);
     let initialize_live = std::sync::Mutex::new(initialize_frontmatter.clone());
     let mut init_ctx = build_loop_stack_context(
         LifecycleSignal::Initialize,
@@ -377,7 +381,7 @@ where
         base_dir,
         file_resolution_context,
         Some(&init_timing),
-        Some(&init_current),
+        current_authority.clone(),
     );
     init_ctx.live_frontmatter = Some(&initialize_live);
     init_ctx.runtime_state = runtime_state;
@@ -687,6 +691,7 @@ where
         emitter,
         loop_start,
         file_resolution_context,
+        current_authority.clone(),
     )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
@@ -823,9 +828,9 @@ fn run_loop_gate(
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> Result<LoopGateOutcome, CompositionError> {
-    let (timing, current) =
-        capture_loop_lifecycle_globals(base_dir, lifecycle_ctx.launch_area, loop_start);
+    let timing = capture_loop_lifecycle_timing(loop_start);
     let loop_ctx = build_loop_stack_context(
         LifecycleSignal::Loop,
         frontmatter,
@@ -836,7 +841,7 @@ fn run_loop_gate(
         base_dir,
         file_resolution_context,
         Some(&timing),
-        Some(&current),
+        current,
     );
     let loop_outcome = guard.execute_event(LifecycleSignal::Loop, &loop_ctx);
 
@@ -947,8 +952,9 @@ fn run_loop_gate(
 
 /// Build a stack execution context for loop lifecycle events.
 ///
-/// `timing` and `current` are the lifecycle stack-only globals. The caller owns
-/// them (captured fresh per event so they outlive this borrowed context).
+/// `timing` is the lifecycle stack-only global; the caller owns it (captured
+/// fresh per event so it outlives this borrowed context). `current` is the
+/// invocation's refresh authority for the lazy `current`/`current_env` roots.
 #[allow(clippy::too_many_arguments)]
 fn build_loop_stack_context<'a>(
     signal: LifecycleSignal,
@@ -960,7 +966,7 @@ fn build_loop_stack_context<'a>(
     base_dir: Option<&'a Path>,
     file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
-    current: Option<&'a super::super::lifecycle_context::LifecycleCurrent>,
+    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
@@ -994,34 +1000,18 @@ fn build_loop_stack_context<'a>(
     }
 }
 
-/// Capture the lifecycle stack-only `timing`/`current` globals for a loop
-/// event.
+/// Capture the lifecycle stack-only `timing` global for a loop event.
 ///
-/// `current.env`/`current.ctx` are captured **now** so a side effect or
-/// external change since `prepare` (or since a prior iteration) is observable
-/// through `current.*`. `timing` measures wall-clock elapsed against
-/// `loop_start` (`document_ms` and `total_ms`; `step_ms` stays `None` outside a
-/// sequence).
-fn capture_loop_lifecycle_globals(
-    base_dir: Option<&Path>,
-    ctx_base_dir: Option<&Path>,
+/// Measures wall-clock elapsed against `loop_start` (`document_ms` and
+/// `total_ms`; `step_ms` stays `None` outside a sequence).
+fn capture_loop_lifecycle_timing(
     loop_start: std::time::Instant,
-) -> (
-    super::super::lifecycle_context::LifecycleTiming,
-    super::super::lifecycle_context::LifecycleCurrent,
-) {
-    // `current.ctx.*` follows the launch area like the event-time `ctx.*`
-    // capture; `current.env.*` is launch-area independent.
-    let current = match ctx_base_dir.or(base_dir) {
-        Some(dir) => super::super::lifecycle_context::LifecycleCurrent::capture_at_event(dir),
-        None => super::super::lifecycle_context::LifecycleCurrent::capture_env_only(),
-    };
-    let timing = super::super::lifecycle_context::LifecycleTiming::from_instants(
+) -> super::super::lifecycle_context::LifecycleTiming {
+    super::super::lifecycle_context::LifecycleTiming::from_instants(
         loop_start,
         Some(loop_start),
         std::time::Instant::now(),
-    );
-    (timing, current)
+    )
 }
 
 /// Outcome of consulting the rate-limit policy after an iteration.

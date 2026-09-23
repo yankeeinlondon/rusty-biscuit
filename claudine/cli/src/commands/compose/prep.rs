@@ -583,9 +583,10 @@ pub(crate) fn prepare_and_run_active_document(
     // observe a second, separately constructed capture. The resolved target's
     // identity overrides are applied exactly once, here.
     //
-    // `current.ctx.*` stays live event-time state and is captured separately
-    // downstream. The active `SourceContext` (not this snapshot) remains
-    // authoritative for file resolution, transclusion, and `$schema`.
+    // `current.*` is a different contract: it observes a mutable fact when a
+    // reference is reached, through this invocation's refresh capability. The
+    // active `SourceContext` (not this snapshot) remains authoritative for file
+    // resolution, transclusion, and `$schema`.
     let document_epoch = invocation.begin_document_epoch();
     let prepared_context = {
         let requirements =
@@ -706,6 +707,7 @@ fn eager_shell_preflight(
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
             prepared_context.clone(),
         )
+        .with_context_authority(document_epoch.compose_context_authority())
         .with_source_file(&source.resolved_path)
         .with_file_resolution_context(file_resolution_context.clone())
         // Lifecycle subtrees remain deferred because their file references
@@ -1040,6 +1042,7 @@ fn build_and_run_loop(
                                     term: &term,
                                     repo_root: effective_repo_root,
                                     launch_area: prep_context.launch_workspace.launch_cwd.as_path(),
+                                    current: Some(document_epoch.current_authority()),
                                     document_start: staged_start,
                                 };
                                 return Err(staged_boot::route_stabilized_failure(
@@ -1634,6 +1637,18 @@ fn run_staged_single(
         term: &term,
         repo_root,
         launch_area,
+        // Same precedence as `prepare_document`: the epoch's authority when
+        // the document has one, else the invocation's, else fail closed.
+        current: options
+            .document_epoch
+            .as_ref()
+            .map(claudine::invocation_context::DocumentEpoch::current_authority)
+            .or_else(|| {
+                options
+                    .invocation_context
+                    .as_ref()
+                    .map(claudine::invocation_context::InvocationContext::current_authority)
+            }),
         document_start: std::time::Instant::now(),
     };
 

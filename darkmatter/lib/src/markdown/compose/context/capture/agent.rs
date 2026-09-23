@@ -100,7 +100,7 @@ mod tests {
     fn capture_runtime_context_includes_agent_group() {
         with_env_var("AGENT", Some("opencode"), || {
             with_env_var("MODEL", Some("glm-5.2"), || {
-                let (values, _, _, _) =
+                let (values, _, _, _, _) =
                     capture_runtime_context_for_groups(Path::new("."), &[ContextGroup::Agent]);
                 assert_eq!(
                     values.get("agent"),

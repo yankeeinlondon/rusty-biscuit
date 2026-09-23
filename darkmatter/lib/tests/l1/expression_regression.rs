@@ -10,6 +10,19 @@ use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use serde_json::json;
 use std::path::Path;
 
+/// Composes `content` with default options (`fail_fast` off) and requires the
+/// body expression failure to abort with `fragment` in the error: a body
+/// expression that cannot be evaluated is an authoring error, never a warning
+/// beside a verbatim `{{ … }}`.
+fn assert_fatal_without_fail_fast(content: &str, fragment: &str) {
+    let md: Markdown = content.into();
+    let error = md
+        .compose()
+        .expect_err("an unevaluatable body expression fails composition without fail_fast");
+    let message = error.to_string();
+    assert!(message.contains(fragment), "expected {fragment:?} in: {message}");
+}
+
 /// Runs a closure with `AGENT` set to `value`, restoring the previous value
 /// (or unset state) afterwards.
 fn with_agent_env<F, R>(value: &str, f: F) -> R
@@ -541,20 +554,6 @@ Empty last: {{ last(items) || "none" }}"#;
     assert!(composed.content().contains("Empty last: none"));
 }
 
-#[test]
-fn regression_division_by_zero_error_in_interpolation() {
-    let content = r#"---
-numerator: 10
-denominator: 0
----
-Result: {{ numerator / denominator }}"#;
-    let md: Markdown = content.into();
-    let (composed, _) = md.compose().unwrap();
-    // Division by zero produces an error string in interpolation output
-    assert!(composed.content().contains("Result:"));
-    assert!(!composed.content().contains("Result: inf"));
-}
-
 // ── Fallback and ternary with new helpers ──────────────────────────
 
 #[test]
@@ -576,31 +575,13 @@ Display: {{ is_empty(name) ? "No name provided" : upper(name) }}"#;
 // ── Compose error reporting ────────────────────────────────────────
 
 #[test]
-fn regression_division_by_zero_default_non_fail_fast() {
+fn regression_division_by_zero_is_fatal_without_fail_fast() {
     let content = r#"---
 numerator: 10
 denominator: 0
 ---
 Result: {{ numerator / denominator }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    // Original expression is preserved in output when evaluation fails
-    assert!(
-        composed
-            .content()
-            .contains("Result: {{ numerator / denominator }}")
-    );
-    // Warning contains the expression and clear reason
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Division by zero"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Division by zero");
 }
 
 // ── Phase 7 integration: new expression functions in compose ─────────
@@ -726,32 +707,35 @@ Skill found
     assert!(composed.content().contains("Skill found"));
 }
 
+/// The repository `system-prompt.md` shape: at a monorepo root `ctx.area` is
+/// `""`, and gating a block on `has_skill(area)` must skip it, not fail compose.
 #[test]
-fn regression_remainder_by_zero_default_non_fail_fast() {
+fn regression_page_block_with_has_skill_of_empty_name() {
+    let content = r#"---
+area: ""
+---
+::block when="has_skill(area)"
+Skill found
+::end-block
+::block when="has_local_skill(area)"
+Local skill found
+::end-block
+Composed"#;
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert!(composed.content().contains("Composed"));
+    assert!(!composed.content().contains("Skill found"));
+    assert!(!composed.content().contains("Local skill found"));
+}
+
+#[test]
+fn regression_remainder_by_zero_is_fatal_without_fail_fast() {
     let content = r#"---
 numerator: 10
 denominator: 0
 ---
 Result: {{ numerator % denominator }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    // Original expression is preserved in output when evaluation fails
-    assert!(
-        composed
-            .content()
-            .contains("Result: {{ numerator % denominator }}")
-    );
-    // Warning contains the expression and clear reason
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Remainder by zero"));
-    assert!(
-        warning.is_some(),
-        "Expected warning containing 'Remainder by zero', got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Remainder by zero");
 }
 
 #[test]
@@ -795,72 +779,33 @@ Result: {{ numerator % denominator }}"#;
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_boolean_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_boolean_is_fatal_without_fail_fast() {
     let content = r#"---
 flag: true
 ---
 Result: {{ flag + 1 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    // Original expression is preserved in output
-    assert!(composed.content().contains("Result: {{ flag + 1 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Addition requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Addition requires numeric operands");
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_array_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_array_is_fatal_without_fail_fast() {
     let content = r#"---
 items:
   - 1
   - 2
 ---
 Result: {{ items + 1 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    // Original expression is preserved in output
-    assert!(composed.content().contains("Result: {{ items + 1 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Addition requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Addition requires numeric operands");
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_object_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_object_is_fatal_without_fail_fast() {
     let content = r#"---
 obj:
   a: 1
 ---
 Result: {{ obj + 1 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    // Original expression is preserved in output
-    assert!(composed.content().contains("Result: {{ obj + 1 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Addition requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Addition requires numeric operands");
 }
 
 #[test]
@@ -924,85 +869,37 @@ Result: {{ obj + 1 }}"#;
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_subtraction_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_subtraction_is_fatal_without_fail_fast() {
     let content = r#"---
 flag: true
 ---
 Result: {{ flag - 1 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    assert!(composed.content().contains("Result: {{ flag - 1 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Subtraction requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Subtraction requires numeric operands");
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_multiplication_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_multiplication_is_fatal_without_fail_fast() {
     let content = r#"---
 flag: true
 ---
 Result: {{ flag * 2 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    assert!(composed.content().contains("Result: {{ flag * 2 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report.warnings.iter().find(|w| {
-        w.message
-            .contains("Multiplication requires numeric operands")
-    });
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Multiplication requires numeric operands");
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_division_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_division_is_fatal_without_fail_fast() {
     let content = r#"---
 flag: true
 ---
 Result: {{ flag / 2 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    assert!(composed.content().contains("Result: {{ flag / 2 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Division requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Division requires numeric operands");
 }
 
 #[test]
-fn regression_arithmetic_type_mismatch_remainder_non_fail_fast() {
+fn regression_arithmetic_type_mismatch_remainder_is_fatal_without_fail_fast() {
     let content = r#"---
 flag: true
 ---
 Result: {{ flag % 2 }}"#;
-    let md: Markdown = content.into();
-    let (composed, report) = md.compose().unwrap();
-    assert!(composed.content().contains("Result: {{ flag % 2 }}"));
-    assert!(!report.warnings.is_empty());
-    let warning = report
-        .warnings
-        .iter()
-        .find(|w| w.message.contains("Remainder requires numeric operands"));
-    assert!(
-        warning.is_some(),
-        "Expected warning about non-numeric operand, got: {:?}",
-        report.warnings
-    );
+    assert_fatal_without_fail_fast(content, "Remainder requires numeric operands");
 }

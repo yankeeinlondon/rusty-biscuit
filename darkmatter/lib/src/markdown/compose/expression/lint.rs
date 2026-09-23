@@ -530,9 +530,16 @@ mod tests {
         let Value::Object(map) = data else {
             panic!("state data must be an object");
         };
+        // The fixtures read Repo/FileChanges keys; a group the request never
+        // captured is a typed read error, so capture them with fixed values.
+        let context = ComposeContext::fixed_for_testing_with([
+            ("area", json!("darkmatter")),
+            ("repo_name", json!("rusty-biscuit")),
+            ("dirty_package_areas", json!(["darkmatter"])),
+        ]);
         EffectiveStateBuilder::new()
             .with_frontmatter(map.into_iter().collect())
-            .with_context(ComposeContext::fixed_for_testing())
+            .with_context(context)
             .build()
             .unwrap()
     }
@@ -554,7 +561,7 @@ mod tests {
     fn rescanned(source: &str, data: &Value) -> String {
         let state = state(data.clone());
         let evaluator = Evaluator::new(&state);
-        interpolate_text(&format!("{{{{ {source} }}}}"), &evaluator, ScanMode::Plain, true, "test")
+        interpolate_text(&format!("{{{{ {source} }}}}"), &evaluator, ScanMode::Plain, crate::markdown::compose::interpolation::ExpressionFailurePolicy::Strict, "test")
             .unwrap()
             .output
     }
@@ -969,7 +976,7 @@ mod tests {
                 let input = pieces.concat();
                 let state = state(json!({}));
                 let evaluator = Evaluator::new(&state);
-                let took_whole_value_branch = match interpolate_value(&input, &evaluator, false, "test") {
+                let took_whole_value_branch = match interpolate_value(&input, &evaluator, crate::markdown::compose::interpolation::ExpressionFailurePolicy::Lenient, "test") {
                     Ok((value, _, _)) => !value.is_string(),
                     Err(_) => true,
                 };

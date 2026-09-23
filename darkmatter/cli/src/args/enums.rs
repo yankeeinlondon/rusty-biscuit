@@ -38,11 +38,14 @@ pub enum CodeBlockOutput {
 /// accepted values rather than silently degrading to a single mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum RemoteFreshness {
-    /// Serve any cached artifact without revalidation, even when stale.
+    /// Serve any cached body without revalidation, even when stale;
+    /// `no-cache` responses are always revalidated.
     Optimistic,
-    /// Always revalidate with a conditional GET.
+    /// Serve within the freshness lifetime; past it, revalidate with a
+    /// conditional GET and fail if revalidation fails.
     Strict,
-    /// Serve stale on network failure (the default).
+    /// Like `strict`, but serve the stale body when revalidation fails on the
+    /// network, except for `no-cache` responses (the default).
     Fallback,
 }
 

@@ -10,14 +10,13 @@ use tempfile::TempDir;
 use super::*;
 use crate::composition::types::{LoopAction, LoopCondition};
 
-/// The loop-engine wiring captures non-empty `timing`/`current` globals so
-/// loop lifecycle events (`initialize`, `loop`) expose `timing.document_ms`
-/// and a populated `current.env`, rather than the pre-fix `None`/`None`.
+/// The loop-engine wiring captures a populated `timing` global so loop
+/// lifecycle events (`initialize`, `loop`) expose `timing.document_ms` and
+/// `timing.total_ms`, rather than the pre-fix `None`/`None`.
 #[test]
-fn capture_loop_lifecycle_globals_populates_timing_and_env() {
-    let base = TempDir::new().unwrap();
+fn capture_loop_lifecycle_timing_populates_document_and_total_ms() {
     let loop_start = std::time::Instant::now();
-    let (timing, current) = capture_loop_lifecycle_globals(Some(base.path()), None, loop_start);
+    let timing = capture_loop_lifecycle_timing(loop_start);
 
     assert!(
         timing.document_ms.is_some(),
@@ -26,15 +25,6 @@ fn capture_loop_lifecycle_globals_populates_timing_and_env() {
     assert!(
         timing.total_ms.is_some(),
         "total_ms is populated because a run_start instant is supplied"
-    );
-    assert!(
-        current.env.is_object() && !current.env.as_object().unwrap().is_empty(),
-        "current.env is a non-empty process-environment snapshot"
-    );
-    // A base directory captures ctx (at minimum ctx.today).
-    assert!(
-        current.ctx.get("today").is_some(),
-        "current.ctx snapshot carries today"
     );
 }
 

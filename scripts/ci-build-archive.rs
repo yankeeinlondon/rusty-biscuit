@@ -1778,7 +1778,15 @@ pub fn verify(
 }
 
 /// Compare the archive's real contents with the inventory the manifest claims.
-fn check_inventory(manifest: &Manifest, options: &VerifyOptions, archive: &Path) -> Vec<Rejection> {
+///
+/// Native-library content drift is not a rejection; it is appended to `drift`
+/// for the caller to report.
+fn check_inventory(
+    manifest: &Manifest,
+    options: &VerifyOptions,
+    archive: &Path,
+    drift: &mut Vec<String>,
+) -> Vec<Rejection> {
     let Some(workspace) = options.workspace.as_deref() else {
         return Vec::new();
     };
@@ -1798,8 +1806,15 @@ fn check_inventory(manifest: &Manifest, options: &VerifyOptions, archive: &Path)
     if let Some(observed) = observed {
         match observed {
             Ok(runtime) if runtime == manifest.realized.runtime => {},
-            Ok(runtime) => return vec![Rejection::new("build-runtime-incompatible",
-                format!("observed native libraries {:?} differ from producer {:?}", runtime.native_libraries, manifest.realized.runtime.native_libraries))],
+            // Every library resolved, only its content differs: a runner image
+            // update between producer and consumer. The tests are the
+            // compatibility proof — an incompatible library fails them loudly —
+            // so this is reported as drift rather than refused. A library that
+            // does not resolve at all is the `Err` arm below and stays refused.
+            Ok(runtime) => drift.push(format!(
+                "observed native libraries {:?} differ from producer {:?}",
+                runtime.native_libraries, manifest.realized.runtime.native_libraries
+            )),
             Err(error) => return vec![Rejection::new("build-runtime-incompatible", format!("{error:#}"))],
         }
     }
@@ -1895,8 +1910,14 @@ pub fn run_verify(options: &VerifyOptions, term: &Terminal) -> Result<bool> {
             .iter()
             .any(|entry| entry.code.starts_with("build-archive-"));
     let extraction = Instant::now();
+    let mut drift = Vec::new();
     if inventory_checked {
-        rejections.extend(check_inventory(&manifest, options, &archive));
+        rejections.extend(check_inventory(&manifest, options, &archive, &mut drift));
+    }
+    for detail in &drift {
+        // A GitHub annotation, so the drift is visible on the checks page when
+        // a later test failure needs explaining.
+        println!("::warning title=build-runtime-drift ({})::{detail}", options.environment);
     }
 
     let verdict = Verdict {

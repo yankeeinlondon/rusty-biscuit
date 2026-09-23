@@ -20,7 +20,9 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-09-19
+status: abandoned
+superseded_by: ../2026-09-19-topic-based-fleet-research/spec.md
 area: messenger
 clarified: true
 review_iterations: 3
@@ -119,6 +121,9 @@ human_review_items:
 
         **Recommendation: A.** Phase 8 requires this evidence anyway, and it is cheaper to find Windows problems before Phase 7's live research depends on them.
 message_to_agent: |-
+    ABANDONED: superseded by ../2026-09-19-topic-based-fleet-research/spec.md.
+    The instructions and human-review items below are historical, not current work directives.
+    Do not resume Phase 7 or Phase 8 under this specification.
     Phase 8 was run on 2026-09-18 with Phase 7 still blocked (no limits, approver, or agent choice). Read "## Phase 8" in `implementation-log.md` first.
     - Still open in Phase 8, and only possible after Phase 7 publishes an accepted baseline: Generated Summary (`catalog.json` plus the summary's generated region, both via `messenger research generate` or `promote`, never by hand), Skill Projection (`.claude/skills/messenger/platform-metadata.md`, projected from the published snapshot), Platform Gates (real native-Windows and WSL2 runs), and Checkpoint 2 (acceptance criteria linked to evidence in `fixture-matrix.md`).
     - Launch research with `just research-refresh SECONDS INVOCATIONS [PLATFORM…] -- --claude` from `messenger/`. It builds this worktree's `messenger` and `claudine`, puts them first on PATH, and runs each prepared run. Publish with `just research-publish "<approver>" RUN…`; the first publication takes all five run IDs.
@@ -130,6 +135,15 @@ implemented: false
 ---
 
 # Provider Research Metadata Pipeline
+
+> **Abandoned on 2026-09-19.** Replaced by
+> [Topic-Based Fleet Research](../2026-09-19-topic-based-fleet-research/spec.md).
+> The replacement adopts focused topic research, prose-first discovery, native
+> Claudine/Darkmatter composition, and lightweight review. The broad per-platform
+> contract and formal publication lifecycle below are no longer the implementation
+> target. This document and its reviews/log remain historical records; useful
+> research questions, schemas, validators, and fixtures may be reused selectively.
+> Existing code has not been removed by abandoning this specification.
 
 ## Purpose
 

@@ -17,6 +17,7 @@ use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern, PolicyClient
 use dashmap::DashMap;
 use url::Url;
 
+use super::ComposeWarning;
 use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
 use super::expression::ExpressionError;
@@ -37,9 +38,8 @@ fn test_cache_config() -> RemoteCacheConfig {
 enum FetchSlot {
     /// A fetch task is in progress.
     InFlight,
-    /// Fetch completed successfully with the response body as UTF-8 text and
-    /// the xxHash of that body (used for closure-hash dependency tracking).
-    Ready { body: String, content_hash: u64 },
+    /// Fetch completed successfully with the response body as UTF-8 text.
+    Ready { body: String },
     /// Fetch failed — the error message is stored for all waiters.
     Failed(String),
 }
@@ -68,6 +68,25 @@ pub struct RemoteFetchStats {
     pub not_modified: usize,
     /// Number of stale cached bodies served after a network failure.
     pub stale_served: usize,
+    /// Non-fatal persistent-cache I/O failures (a failed write or `no-store`
+    /// purge). They never change a fetch's outcome or the counters above.
+    pub cache_warnings: Vec<String>,
+}
+
+impl RemoteFetchStats {
+    /// Stage of the compose warnings projected from [`Self::cache_warnings`].
+    pub const CACHE_WARNING_STAGE: &'static str = "remote_cache";
+    /// Stable code of the compose warnings projected from
+    /// [`Self::cache_warnings`].
+    pub const CACHE_WARNING_CODE: &'static str = "dm.remote_cache.io_failure";
+
+    /// Projects each cache warning into the compose warning model.
+    pub(crate) fn cache_compose_warnings(&self) -> impl Iterator<Item = ComposeWarning> + '_ {
+        self.cache_warnings.iter().map(|message| ComposeWarning {
+            code: Some(Self::CACHE_WARNING_CODE.to_string()),
+            ..ComposeWarning::new(Self::CACHE_WARNING_STAGE, message.as_str())
+        })
+    }
 }
 
 /// Shared runtime for remote URL fetching across a compose pipeline.
@@ -391,7 +410,7 @@ impl RemoteFetchRuntime {
     /// persistent cache store for cross-run remote artifact caching.
     pub fn with_store(config: &RemoteReadConfig, store: Option<Arc<FileStore>>) -> Self {
         let mut policy = FetchPolicy::deny_all();
-        for host in &config.allowed_hosts {
+        for host in config.http_hosts() {
             policy = policy.allow(HostPattern::Exact(host.clone()));
         }
         let cache_config = RemoteCacheConfig {
@@ -575,6 +594,7 @@ impl RemoteFetchRuntime {
                     // reflects requests actually issued, bounded by the cap.
                     let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                     task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+                    let mut cache_warnings = Vec::new();
                     let result = match task_inner.client() {
                         Some(client) => {
                             fetch_with_cache(
@@ -583,12 +603,16 @@ impl RemoteFetchRuntime {
                                 &url,
                                 &task_inner.policy,
                                 &task_inner.cache_config,
+                                &mut cache_warnings,
                             )
                             .await
                         }
                         None => Err("failed to initialize remote fetch client".to_string()),
                     };
                     task_inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    if !cache_warnings.is_empty() {
+                        task_inner.stats.lock().unwrap().cache_warnings.extend(cache_warnings);
+                    }
 
                     let mut guard = task_slot.state.lock().unwrap();
                     match result {
@@ -609,10 +633,7 @@ impl RemoteFetchRuntime {
                                     }
                                 }
                             }
-                            *guard = FetchSlot::Ready {
-                                body: outcome.body,
-                                content_hash: outcome.content_hash,
-                            };
+                            *guard = FetchSlot::Ready { body: outcome.body };
                         }
                         Err(err) => {
                             {
@@ -652,35 +673,13 @@ impl RemoteFetchRuntime {
         let mut guard = slot.state.lock().unwrap();
         loop {
             match &*guard {
-                FetchSlot::Ready { body, .. } => return Ok(Some(body.clone())),
+                FetchSlot::Ready { body } => return Ok(Some(body.clone())),
                 FetchSlot::Failed(err) => return Err(err.clone()),
                 FetchSlot::InFlight => {
                     {
                         let mut stats = self.inner.stats.lock().unwrap();
                         stats.waits += 1;
                     }
-                    guard = slot.notify.wait(guard).unwrap();
-                }
-            }
-        }
-    }
-
-    /// Returns the xxHash of a URL's fetched body, blocking until the fetch
-    /// completes.
-    ///
-    /// Used to feed remote dependency changes into a parent document's
-    /// closure hash. Returns `None` if the URL was never registered or its
-    /// fetch failed.
-    pub fn content_hash(&self, url: &Url) -> Option<u64> {
-        let key = url.to_string();
-        let slot = self.inner.slots.get(&key)?;
-
-        let mut guard = slot.state.lock().unwrap();
-        loop {
-            match &*guard {
-                FetchSlot::Ready { content_hash, .. } => return Some(*content_hash),
-                FetchSlot::Failed(_) => return None,
-                FetchSlot::InFlight => {
                     guard = slot.notify.wait(guard).unwrap();
                 }
             }
@@ -1037,6 +1036,7 @@ mod persistent_cache_tests {
     use super::*;
     use crate::markdown::compose::remote::RemoteFreshnessMode;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use crate::markdown::compose::cache::manifest::CACHE_VERSION;
     use std::time::Duration;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
@@ -1045,7 +1045,7 @@ mod persistent_cache_tests {
 
     /// Builds an `Arc<FileStore>` rooted at a temp dir's `cache/v1`.
     fn temp_store(dir: &tempfile::TempDir) -> Arc<FileStore> {
-        Arc::new(FileStore::new(dir.path().join("cache/v1")).unwrap())
+        Arc::new(FileStore::at(dir.path().join("cache/v1")))
     }
 
     fn config(
@@ -1147,6 +1147,70 @@ mod persistent_cache_tests {
         // Dropping the server verifies the `.expect(1)` request count.
     }
 
+    /// The store's root does not exist until the first remote body is
+    /// written, and that write creates it.
+    #[tokio::test]
+    async fn first_remote_write_creates_the_missing_store_root() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("v1"))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        let rt = runtime(store, config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict));
+        assert!(!root.exists(), "building the runtime created the store root");
+
+        rt.register_and_fetch(url.clone());
+        tokio::time::sleep(SETTLE).await;
+
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("v1"));
+        assert!(root.join("manifests").join("remote").is_dir());
+        assert!(root.join("blobs").is_dir());
+    }
+
+    /// An unusable store root is not an error: the fetch serves the network
+    /// body, nothing is cached, and the offending file is untouched.
+    #[tokio::test]
+    async fn store_root_under_a_file_stays_network_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("v1"))
+            // Both runs must reach the network: nothing could be cached.
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-directory");
+        std::fs::write(&file, "plain").unwrap();
+        let store = Arc::new(FileStore::at(file.join("cache/v1")));
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        let cfg = config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict);
+
+        for _ in 0..2 {
+            let rt = runtime(Arc::clone(&store), cfg);
+            rt.register_and_fetch(url.clone());
+            tokio::time::sleep(SETTLE).await;
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("v1"));
+            let stats = rt.stats();
+            assert_eq!((stats.fetched, stats.failures), (1, 0));
+            // The failed write is reported, once, without touching a counter.
+            assert_eq!(stats.cache_warnings.len(), 1, "{:?}", stats.cache_warnings);
+            assert!(
+                stats.cache_warnings[0].starts_with("failed to write remote cache entry"),
+                "{:?}",
+                stats.cache_warnings
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "plain");
+    }
+
     #[tokio::test]
     async fn no_network_cached_run_after_server_gone() {
         let dir = tempfile::tempdir().unwrap();
@@ -1240,7 +1304,6 @@ mod persistent_cache_tests {
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
         assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("v1"));
-        let hash1 = rt1.content_hash(&url).unwrap();
 
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
@@ -1249,9 +1312,6 @@ mod persistent_cache_tests {
         let stats = rt2.stats();
         assert_eq!(stats.fetched, 1);
         assert_eq!(stats.revalidations, 1);
-        // Closure-hash invalidation: changed remote body → changed content hash.
-        let hash2 = rt2.content_hash(&url).unwrap();
-        assert_ne!(hash1, hash2);
     }
 
     #[tokio::test]
@@ -1449,5 +1509,724 @@ mod persistent_cache_tests {
         let stats = rt2.stats();
         assert_eq!(stats.cache_hits, 1);
         assert_eq!(stats.revalidations, 0);
+    }
+
+    // ── RFC 9111 `no-store` / `no-cache` (acceptance criterion 4) ──────
+
+    const FRESH_TTL: Duration = Duration::from_secs(3600);
+    const MODES: [RemoteFreshnessMode; 3] = [
+        RemoteFreshnessMode::Strict,
+        RemoteFreshnessMode::Fallback,
+        RemoteFreshnessMode::Optimistic,
+    ];
+
+    /// Every regular file under `root`; empty when `root` does not exist.
+    fn files_under(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut files = Vec::new();
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return files;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(files_under(&path));
+            } else {
+                files.push(path);
+            }
+        }
+        files
+    }
+
+    /// Writes a fresh-by-TTL entry for `url`, as a cache that ignored
+    /// `Cache-Control` would have.
+    fn seed_entry(store: &FileStore, url: &Url, body: &str, cache_control: &str) {
+        seed_manifest(store, url, body, seed_manifest_json(url, body, cache_control));
+    }
+
+    /// Like [`seed_entry`], but in the `CACHE_VERSION` 1 shape: the cleartext
+    /// request URL under `url` and no `redacted_url`.
+    fn seed_v1_entry(store: &FileStore, url: &Url, body: &str, cache_control: &str) {
+        let mut manifest = seed_manifest_json(url, body, cache_control);
+        let fields = manifest.as_object_mut().unwrap();
+        fields.remove("redacted_url");
+        fields.insert("url".into(), serde_json::Value::String(url.to_string()));
+        fields.insert("cache_version".into(), 1.into());
+        seed_manifest(store, url, body, manifest);
+    }
+
+    fn seed_manifest_json(url: &Url, body: &str, cache_control: &str) -> serde_json::Value {
+        use super::super::cache::manifest::{RemoteUrlManifest, redact_url};
+        let content_hash = biscuit_hash::xx_hash(body);
+        let now = std::time::SystemTime::now();
+        serde_json::to_value(RemoteUrlManifest {
+            cache_version: CACHE_VERSION,
+            redacted_url: redact_url(url),
+            source_id_hash: biscuit_hash::xx_hash(url.as_str()),
+            status: 200,
+            etag: None,
+            last_modified: None,
+            cache_control: Some(cache_control.to_string()),
+            fetched_at: now,
+            expires_at: Some(now + FRESH_TTL),
+            content_hash,
+            body_blob_hash: content_hash,
+            size_bytes: body.len() as u64,
+        })
+        .unwrap()
+    }
+
+    fn seed_manifest(store: &FileStore, url: &Url, body: &str, manifest: serde_json::Value) {
+        use super::super::cache::types::ArtifactClass;
+        let content_hash = biscuit_hash::xx_hash(body);
+        store
+            .write_artifact(
+                ArtifactClass::RemoteUrl,
+                biscuit_hash::xx_hash(url.as_str()),
+                &manifest,
+                body.as_bytes(),
+                content_hash,
+                "remote",
+            )
+            .unwrap();
+    }
+
+    /// Fetches `url` once through a fresh runtime and returns it for stats.
+    fn run_once(store: &Arc<FileStore>, cfg: RemoteCacheConfig, url: &Url) -> RemoteFetchRuntime {
+        let rt = runtime(Arc::clone(store), cfg);
+        rt.register_and_fetch(url.clone());
+        rt
+    }
+
+    /// Serves a numbered body (`body-1`, `body-2`, ...) with `cache_control`.
+    async fn numbered_server(cache_control: &'static str, expected: u64) -> MockServer {
+        numbered_server_with_lines(&[cache_control], expected).await
+    }
+
+    /// Like [`numbered_server`], but sends each entry of `lines` as its own
+    /// `Cache-Control` field line.
+    async fn numbered_server_with_lines(lines: &[&'static str], expected: u64) -> MockServer {
+        let server = MockServer::start().await;
+        let hits = AtomicUsize::new(0);
+        let lines = lines.to_vec();
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(move |_: &wiremock::Request| {
+                let n = hits.fetch_add(1, Ordering::SeqCst) + 1;
+                lines
+                    .iter()
+                    .fold(ResponseTemplate::new(200), |response, line| {
+                        response.append_header("Cache-Control", *line)
+                    })
+                    .set_body_string(format!("body-{n}"))
+            })
+            .expect(expected)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// `no-store` writes neither manifest nor blob under any freshness mode or
+    /// TTL override, so a second run reaches the network again. The mixed
+    /// `max-age=3600, no-store` value is the original defect: first-match
+    /// parsing read it as a one-hour lifetime.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_store_response_is_never_stored_under_any_mode_or_ttl() {
+        let mut cases: Vec<(&'static str, RemoteFreshnessMode, Option<Duration>)> = Vec::new();
+        for mode in MODES {
+            for ttl in [None, Some(FRESH_TTL)] {
+                cases.push(("max-age=3600, no-store", mode, ttl));
+            }
+        }
+        for header in ["no-store", "Private, No-Store", "no-cache, no-store"] {
+            cases.push((header, RemoteFreshnessMode::Optimistic, Some(FRESH_TTL)));
+        }
+
+        for (header, mode, ttl) in cases {
+            let label = format!("{header:?} / {mode:?} / ttl {ttl:?}");
+            let server = numbered_server(header, 2).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let root = dir.path().join("cache/v1");
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            let cfg = config(ttl, false, mode);
+
+            let rt1 = run_once(&store, cfg, &url);
+            assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("body-1"), "{label}");
+            assert!(files_under(&root).is_empty(), "{label}: stored {:?}", files_under(&root));
+
+            let rt2 = run_once(&store, cfg, &url);
+            assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("body-2"), "{label}");
+            let stats = rt2.stats();
+            assert_eq!((stats.fetched, stats.cache_hits), (1, 0), "{label}");
+            assert!(stats.cache_warnings.is_empty(), "{label}: {:?}", stats.cache_warnings);
+            assert!(files_under(&root).is_empty(), "{label}");
+            // Dropping the server verifies `.expect(2)`.
+        }
+    }
+
+    /// `no-store` on a second `Cache-Control` field line is as binding as on
+    /// the first: nothing is written under any freshness mode or TTL override,
+    /// and the second run reaches the network again. `biscuit_file`'s
+    /// `fetch_integration` pins that `append_header` puts two lines on the wire.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn split_line_no_store_is_never_stored_under_any_mode_or_ttl() {
+        for mode in MODES {
+            for ttl in [None, Some(FRESH_TTL)] {
+                let label = format!("{mode:?} / ttl {ttl:?}");
+                let server = numbered_server_with_lines(&["max-age=3600", "no-store"], 2).await;
+                let dir = tempfile::tempdir().unwrap();
+                let store = temp_store(&dir);
+                let root = dir.path().join("cache/v1");
+                let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+                let cfg = config(ttl, false, mode);
+
+                let rt1 = run_once(&store, cfg, &url);
+                assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("body-1"), "{label}");
+                assert!(files_under(&root).is_empty(), "{label}: stored {:?}", files_under(&root));
+
+                let rt2 = run_once(&store, cfg, &url);
+                assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("body-2"), "{label}");
+                let stats = rt2.stats();
+                assert_eq!((stats.fetched, stats.cache_hits), (1, 0), "{label}");
+                assert!(stats.cache_warnings.is_empty(), "{label}: {:?}", stats.cache_warnings);
+                assert!(files_under(&root).is_empty(), "{label}");
+                // Dropping the server verifies `.expect(2)`.
+            }
+        }
+    }
+
+    /// A `no-store` entry already on disk, fresh by TTL, is never served under
+    /// any mode: it is purged and the network answers instead.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pre_existing_no_store_entry_is_purged_not_served() {
+        for mode in MODES {
+            let server = numbered_server("no-store", 1).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let root = dir.path().join("cache/v1");
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            seed_entry(&store, &url, "old-secret", "max-age=3600, no-store");
+            assert_eq!(files_under(&root).len(), 2);
+
+            let rt = run_once(&store, config(Some(FRESH_TTL), false, mode), &url);
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"), "{mode:?}");
+            let stats = rt.stats();
+            assert_eq!((stats.fetched, stats.cache_hits, stats.failures), (1, 0, 0), "{mode:?}");
+            assert!(stats.cache_warnings.is_empty(), "{mode:?}: {:?}", stats.cache_warnings);
+            assert!(files_under(&root).is_empty(), "{mode:?}: {:?}", files_under(&root));
+        }
+    }
+
+    /// Acceptance criterion 5 at the runtime seam: a fresh entry for a denied
+    /// host is never read, under every mode, with and without a TTL override.
+    /// `fetch_with_cache` reads the store before the policy-enforcing client
+    /// runs, so the early `check_allowed` in `register_and_fetch` is the only
+    /// thing keeping cached bytes from a denied host.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn denied_host_never_reads_a_fresh_cached_entry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("network"))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        let tree = |root: &std::path::Path| {
+            let mut files: Vec<_> = files_under(root)
+                .into_iter()
+                .map(|path| {
+                    let bytes = std::fs::read(&path).unwrap();
+                    (path, bytes)
+                })
+                .collect();
+            files.sort();
+            files
+        };
+
+        for mode in MODES {
+            for ttl in [None, Some(FRESH_TTL)] {
+                let dir = tempfile::tempdir().unwrap();
+                let store = temp_store(&dir);
+                let root = dir.path().join("cache/v1");
+                seed_entry(&store, &url, "seeded", "max-age=3600");
+                let before = tree(&root);
+                assert_eq!(before.len(), 2);
+                let cfg = config(ttl, false, mode);
+
+                let denied = RemoteFetchRuntime::with_policy_store_and_config(
+                    FetchPolicy::deny_all(),
+                    Some(Arc::clone(&store)),
+                    cfg,
+                );
+                denied.register_and_fetch(url.clone());
+                let error = denied.get_content(&url).unwrap_err();
+                assert!(error.contains("127.0.0.1"), "{mode:?}/{ttl:?}: {error}");
+                let stats = denied.stats();
+                assert_eq!(
+                    (stats.policy_denials, stats.cache_hits, stats.stale_served, stats.fetched),
+                    (1, 0, 0, 0),
+                    "{mode:?}/{ttl:?}"
+                );
+                assert_eq!(tree(&root), before, "{mode:?}/{ttl:?}: the seeded entry changed");
+
+                // Control: the same entry is served to an allowed host, so the
+                // denial above is what kept it out.
+                let allowed = run_once(&store, cfg, &url);
+                assert_eq!(allowed.get_content(&url).unwrap().as_deref(), Some("seeded"));
+                assert_eq!(allowed.stats().cache_hits, 1, "{mode:?}/{ttl:?}");
+            }
+        }
+        // Dropping the server verifies that no request reached it.
+    }
+
+    /// When the fresh response is storable it replaces the purged entry, and
+    /// the old `no-store` body does not survive beside it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pre_existing_no_store_entry_is_replaced_by_a_storable_response() {
+        let server = numbered_server("max-age=60", 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        seed_entry(&store, &url, "old-secret", "no-store");
+
+        let rt = run_once(&store, config(None, false, RemoteFreshnessMode::Optimistic), &url);
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"));
+
+        let files = files_under(&root);
+        assert_eq!(files.len(), 2, "{files:?}");
+        for file in files {
+            let bytes = std::fs::read_to_string(&file).unwrap();
+            assert!(!bytes.contains("old-secret"), "{} kept the no-store body", file.display());
+        }
+    }
+
+    /// A purge that cannot remove the body is non-fatal: the fetch succeeds
+    /// and the failure is a cache warning. A directory standing where the blob
+    /// file should be makes the removal fail on every platform.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_store_purge_failure_is_a_warning_not_an_error() {
+        let server = numbered_server("no-store", 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        seed_entry(&store, &url, "old-secret", "no-store");
+        let blob = files_under(&root)
+            .into_iter()
+            .find(|path| path.extension().is_some_and(|ext| ext == "remote"))
+            .unwrap();
+        std::fs::remove_file(&blob).unwrap();
+        std::fs::create_dir_all(blob.join("occupied")).unwrap();
+
+        let rt = run_once(&store, config(None, false, RemoteFreshnessMode::Fallback), &url);
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"));
+        let stats = rt.stats();
+        assert_eq!((stats.fetched, stats.failures), (1, 0));
+        assert_eq!(stats.cache_warnings.len(), 1, "{:?}", stats.cache_warnings);
+        assert!(
+            stats.cache_warnings[0].starts_with("failed to remove no-store remote cache body"),
+            "{:?}",
+            stats.cache_warnings
+        );
+        // The manifest was still removed, so the entry can never be served.
+        assert!(
+            files_under(&root).iter().all(|path| !path.to_string_lossy().ends_with(".json")),
+            "{:?}",
+            files_under(&root)
+        );
+    }
+
+    // ── Manifest privacy (acceptance criterion 6) ──────────────────────
+
+    /// Every remote manifest under `root`, parsed.
+    fn manifests_under(root: &std::path::Path) -> Vec<serde_json::Value> {
+        files_under(root)
+            .into_iter()
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap())
+            .collect()
+    }
+
+    /// A URL carrying credentials and a query token is fetched and cached,
+    /// then served from cache, and no persisted byte ever holds the secrets.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn manifest_never_persists_url_userinfo_or_query() {
+        let server = numbered_server("max-age=3600", 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let port = server.address().port();
+        let url =
+            Url::parse(&format!("http://user:secret@127.0.0.1:{port}/doc.md?token=abc")).unwrap();
+
+        for (run, expected) in [(1, (1, 0)), (2, (0, 1))] {
+            let rt = run_once(&store, config(None, false, RemoteFreshnessMode::Strict), &url);
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"), "run {run}");
+            let stats = rt.stats();
+            assert_eq!((stats.fetched, stats.cache_hits), expected, "run {run}");
+
+            let files = files_under(&root);
+            assert_eq!(files.len(), 2, "run {run}: {files:?}");
+            for file in &files {
+                let bytes = std::fs::read(file).unwrap();
+                let text = String::from_utf8_lossy(&bytes);
+                for secret in ["user", "secret", "token", "abc"] {
+                    assert!(!text.contains(secret), "{} holds {secret:?}", file.display());
+                }
+            }
+            let manifests = manifests_under(&root);
+            assert_eq!(
+                manifests[0]["redacted_url"],
+                format!("http://127.0.0.1:{port}/doc.md?<redacted>"),
+                "run {run}"
+            );
+            assert_eq!(manifests[0]["cache_version"], CACHE_VERSION, "run {run}");
+            assert_eq!(manifests[0]["source_id_hash"], biscuit_hash::xx_hash(url.as_str()));
+        }
+    }
+
+    /// Redaction applies to the manifest, never to the key: URLs differing
+    /// only in query or userinfo keep separate entries and bodies, even though
+    /// their redacted forms are identical.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn urls_differing_only_in_query_or_userinfo_never_share_an_entry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(|req: &wiremock::Request| {
+                let auth = req
+                    .headers
+                    .get("Authorization")
+                    .map(|value| value.to_str().unwrap().to_string())
+                    .unwrap_or_default();
+                let query = req.url.query().unwrap_or_default().to_string();
+                ResponseTemplate::new(200)
+                    .insert_header("Cache-Control", "max-age=3600")
+                    .set_body_string(format!("query={query} auth={auth}"))
+            })
+            .expect(4)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let port = server.address().port();
+        let urls: Vec<Url> = [
+            format!("http://127.0.0.1:{port}/doc.md?v=1"),
+            format!("http://127.0.0.1:{port}/doc.md?v=2"),
+            format!("http://a:x@127.0.0.1:{port}/doc.md?v=1"),
+            format!("http://b:y@127.0.0.1:{port}/doc.md?v=1"),
+        ]
+        .iter()
+        .map(|raw| Url::parse(raw).unwrap())
+        .collect();
+        let optimistic = config(None, false, RemoteFreshnessMode::Optimistic);
+
+        let mut cold = Vec::new();
+        for url in &urls {
+            let rt = run_once(&store, optimistic, url);
+            cold.push(rt.get_content(url).unwrap().unwrap());
+        }
+        let distinct: std::collections::BTreeSet<_> = cold.iter().collect();
+        assert_eq!(distinct.len(), urls.len(), "{cold:?}");
+
+        let manifests = manifests_under(&root);
+        assert_eq!(manifests.len(), urls.len());
+        let keys: std::collections::BTreeSet<_> =
+            manifests.iter().map(|m| m["source_id_hash"].as_u64().unwrap()).collect();
+        assert_eq!(keys.len(), urls.len());
+        let redacted: std::collections::BTreeSet<_> =
+            manifests.iter().map(|m| m["redacted_url"].as_str().unwrap()).collect();
+        assert_eq!(
+            redacted.into_iter().collect::<Vec<_>>(),
+            [format!("http://127.0.0.1:{port}/doc.md?<redacted>")]
+        );
+
+        // Warm: each URL is served its own body from cache (the mock's
+        // `expect(4)` fails the test if any warm read reaches the network).
+        for (url, body) in urls.iter().zip(&cold) {
+            let rt = run_once(&store, optimistic, url);
+            assert_eq!(rt.get_content(url).unwrap().as_ref(), Some(body), "{url}");
+            assert_eq!(rt.stats().cache_hits, 1, "{url}");
+        }
+    }
+
+    /// Like [`seed_entry`], but recording a `cache_version` this build does
+    /// not write, as a newer darkmatter sharing the cache root would.
+    fn seed_foreign_version_entry(store: &FileStore, url: &Url, body: &str, cache_control: &str) {
+        let mut manifest = seed_manifest_json(url, body, cache_control);
+        manifest["cache_version"] = (CACHE_VERSION + 1).into();
+        seed_manifest(store, url, body, manifest);
+    }
+
+    /// An entry from another `CACHE_VERSION`, however fresh, is a miss under
+    /// every mode — whether its shape no longer parses (v1) or still does (a
+    /// newer version). When the new response is `no-store` nothing replaces
+    /// it, and it is left on disk byte-for-byte.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn other_version_entry_is_a_miss_and_left_in_place() {
+        type Seeder = fn(&FileStore, &Url, &str, &str);
+        let seeders: [(&str, Seeder); 2] =
+            [("v1", seed_v1_entry), ("newer", seed_foreign_version_entry)];
+        for ((version, seed), mode) in seeders
+            .into_iter()
+            .flat_map(|seeder| MODES.map(|mode| (seeder, mode)))
+        {
+            let server = numbered_server("no-store", 1).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let root = dir.path().join("cache/v1");
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            seed(&store, &url, "legacy-body", "max-age=3600");
+            let snapshot = || -> Vec<_> {
+                files_under(&root)
+                    .into_iter()
+                    .map(|file| (file.clone(), std::fs::read(&file).unwrap()))
+                    .collect()
+            };
+            let before = snapshot();
+            assert_eq!(before.len(), 2);
+
+            let rt = run_once(&store, config(Some(FRESH_TTL), false, mode), &url);
+            let case = format!("{version} {mode:?}");
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"), "{case}");
+            let stats = rt.stats();
+            assert_eq!((stats.fetched, stats.cache_hits), (1, 0), "{case}");
+            assert!(stats.cache_warnings.is_empty(), "{case}: {:?}", stats.cache_warnings);
+            assert_eq!(snapshot(), before, "{case}");
+        }
+    }
+
+    /// A storable response for a URL with a v1 entry overwrites that entry in
+    /// the v2 shape, so the cleartext URL leaves the disk; the next run reads
+    /// the v2 entry back from cache.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn legacy_v1_entry_is_replaced_by_a_redacted_v2_entry() {
+        let server = numbered_server("max-age=3600", 1).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let root = dir.path().join("cache/v1");
+        let port = server.address().port();
+        let url = Url::parse(&format!("http://user:secret@127.0.0.1:{port}/doc.md?token=abc"))
+            .unwrap();
+        seed_v1_entry(&store, &url, "legacy-body", "max-age=3600");
+        assert_eq!(manifests_under(&root)[0]["url"], url.as_str());
+
+        let optimistic = config(None, false, RemoteFreshnessMode::Optimistic);
+        let rt = run_once(&store, optimistic, &url);
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"));
+        assert_eq!(rt.stats().fetched, 1);
+
+        let manifests = manifests_under(&root);
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0]["cache_version"], CACHE_VERSION);
+        assert!(manifests[0].get("url").is_none(), "{:?}", manifests[0]);
+        assert!(!manifests[0].to_string().contains("secret"));
+
+        let rt = run_once(&store, optimistic, &url);
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"));
+        assert_eq!((rt.stats().fetched, rt.stats().cache_hits), (0, 1));
+    }
+
+    /// A v1 entry recording `no-store` is purged even though its version is a
+    /// miss: the version check must not hide it from the R-E purge.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn legacy_v1_no_store_entry_is_purged() {
+        for mode in MODES {
+            let server = numbered_server("no-store", 1).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let root = dir.path().join("cache/v1");
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            seed_v1_entry(&store, &url, "old-secret", "max-age=3600, no-store");
+            assert_eq!(files_under(&root).len(), 2);
+
+            let rt = run_once(&store, config(Some(FRESH_TTL), false, mode), &url);
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("body-1"), "{mode:?}");
+            let stats = rt.stats();
+            assert_eq!((stats.fetched, stats.cache_hits), (1, 0), "{mode:?}");
+            assert!(stats.cache_warnings.is_empty(), "{mode:?}: {:?}", stats.cache_warnings);
+            assert!(files_under(&root).is_empty(), "{mode:?}: {:?}", files_under(&root));
+        }
+    }
+
+    /// Serves `v1` with ETag `e1` and `cache_control`; a conditional request
+    /// is counted and answered by `revalidated`.
+    async fn conditional_server(
+        cache_control: &'static str,
+        revalidated: fn() -> ResponseTemplate,
+        conditional_hits: Arc<AtomicUsize>,
+    ) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(move |req: &wiremock::Request| {
+                if req.headers.contains_key("If-None-Match") {
+                    conditional_hits.fetch_add(1, Ordering::SeqCst);
+                    revalidated()
+                } else {
+                    ResponseTemplate::new(200)
+                        .insert_header("ETag", "e1")
+                        .insert_header("Cache-Control", cache_control)
+                        .set_body_string("v1")
+                }
+            })
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// A stored `no-cache` entry is revalidated under every mode, including
+    /// Optimistic, even with a TTL override that would call it fresh.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_cache_entry_is_revalidated_under_every_mode_despite_ttl() {
+        for mode in MODES {
+            let conditional_hits = Arc::new(AtomicUsize::new(0));
+            let server = conditional_server(
+                "no-cache",
+                || {
+                    ResponseTemplate::new(304)
+                        .insert_header("ETag", "e1")
+                        .insert_header("Cache-Control", "no-cache")
+                },
+                Arc::clone(&conditional_hits),
+            )
+            .await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            let cfg = config(Some(FRESH_TTL), false, mode);
+
+            let rt1 = run_once(&store, cfg, &url);
+            assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("v1"), "{mode:?}");
+            // no-cache is storable: the entry exists, it just is not reusable
+            // without validation.
+            assert_eq!(files_under(&dir.path().join("cache/v1")).len(), 2, "{mode:?}");
+
+            for run in 1..=2 {
+                let rt = run_once(&store, cfg, &url);
+                assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("v1"), "{mode:?}");
+                let stats = rt.stats();
+                assert_eq!(
+                    (stats.cache_hits, stats.revalidations, stats.not_modified),
+                    (0, 1, 1),
+                    "{mode:?} run {run}"
+                );
+                assert_eq!(conditional_hits.load(Ordering::SeqCst), run, "{mode:?}");
+            }
+        }
+    }
+
+    /// A `no-cache` revalidation that returns new content replaces the entry,
+    /// even under Optimistic.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_cache_revalidation_serves_changed_content() {
+        let conditional_hits = Arc::new(AtomicUsize::new(0));
+        let server = conditional_server(
+            "no-cache",
+            || {
+                ResponseTemplate::new(200)
+                    .insert_header("ETag", "e2")
+                    .insert_header("Cache-Control", "no-cache")
+                    .set_body_string("v2")
+            },
+            Arc::clone(&conditional_hits),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        let cfg = config(Some(FRESH_TTL), false, RemoteFreshnessMode::Optimistic);
+
+        assert_eq!(run_once(&store, cfg, &url).get_content(&url).unwrap().as_deref(), Some("v1"));
+        let rt = run_once(&store, cfg, &url);
+        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("v2"));
+        assert_eq!((rt.stats().fetched, rt.stats().revalidations), (1, 1));
+        assert_eq!(conditional_hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// R-G: `no-cache` outranks Fallback. A failed revalidation of a
+    /// `no-cache` entry is an error, never a stale serve. The contrast case
+    /// (a plain entry is served stale) is `network_failure_serves_stale_under_fallback`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fallback_does_not_serve_a_no_cache_entry_after_failed_revalidation() {
+        let conditional_hits = Arc::new(AtomicUsize::new(0));
+        let server = conditional_server(
+            "max-age=3600, no-cache",
+            || ResponseTemplate::new(500),
+            Arc::clone(&conditional_hits),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        let cfg = config(Some(FRESH_TTL), false, RemoteFreshnessMode::Fallback);
+
+        assert_eq!(run_once(&store, cfg, &url).get_content(&url).unwrap().as_deref(), Some("v1"));
+        let rt = run_once(&store, cfg, &url);
+        assert!(rt.get_content(&url).is_err());
+        let stats = rt.stats();
+        assert_eq!((stats.failures, stats.stale_served, stats.cache_hits), (1, 0, 0));
+        assert_eq!(conditional_hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// A revalidation answered with `no-store` (as a `304` or a new `200`)
+    /// stops the old entry from being refreshed or kept: it is purged.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn revalidation_that_turns_no_store_purges_the_entry() {
+        type Revalidated = fn() -> ResponseTemplate;
+        let cases: [(&str, Revalidated, &str); 2] = [
+            (
+                "304",
+                || {
+                    ResponseTemplate::new(304)
+                        .insert_header("ETag", "e1")
+                        .insert_header("Cache-Control", "no-store")
+                },
+                "v1",
+            ),
+            (
+                "200",
+                || {
+                    ResponseTemplate::new(200)
+                        .insert_header("Cache-Control", "no-store")
+                        .set_body_string("v2")
+                },
+                "v2",
+            ),
+        ];
+        for (label, revalidated, expected) in cases {
+            let conditional_hits = Arc::new(AtomicUsize::new(0));
+            let server =
+                conditional_server("max-age=0", revalidated, Arc::clone(&conditional_hits)).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let root = dir.path().join("cache/v1");
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            let cfg = config(None, false, RemoteFreshnessMode::Strict);
+
+            assert_eq!(run_once(&store, cfg, &url).get_content(&url).unwrap().as_deref(), Some("v1"));
+            assert_eq!(files_under(&root).len(), 2, "{label}");
+
+            let rt = run_once(&store, cfg, &url);
+            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some(expected), "{label}");
+            assert_eq!(conditional_hits.load(Ordering::SeqCst), 1, "{label}");
+            assert!(files_under(&root).is_empty(), "{label}: {:?}", files_under(&root));
+        }
+    }
+
+    #[test]
+    fn cache_warnings_project_to_coded_compose_warnings() {
+        let stats = RemoteFetchStats {
+            cache_warnings: vec!["failed to write remote cache entry 00: denied".to_string()],
+            ..RemoteFetchStats::default()
+        };
+        let warnings: Vec<ComposeWarning> = stats.cache_compose_warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].stage, "remote_cache");
+        assert_eq!(warnings[0].code.as_deref(), Some("dm.remote_cache.io_failure"));
+        assert_eq!(warnings[0].message, stats.cache_warnings[0]);
+        assert!(RemoteFetchStats::default().cache_compose_warnings().next().is_none());
     }
 }

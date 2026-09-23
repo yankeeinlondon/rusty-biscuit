@@ -10,9 +10,35 @@ Interpolation happens in two stages during the compose pipeline (see the [pipeli
 Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `doc.*` namespace — the same grammar resolves identically across every surface.
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
+
+### Nullable directive targets
+
+A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` has special
+absence semantics. If it evaluates to `null` or the empty string, Darkmatter
+skips that directive and records a compose warning instead of turning the
+value into an authored empty target. Literal missing targets, `::file ""`, and
+mixed targets such as `::file "{{dir}}/log.md"` keep their ordinary syntax and
+path behavior.
+
+Page blocks run before body interpolation, so the recommended optional-file
+form removes the directive before its target is evaluated and suppresses the
+runtime warning:
+
+```md
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
+
+Shell-approval preflight remains condition-blind: it scans every branch for
+commands, but an evaluated-absent target contributes no transclusion edge.
+Targets that depend on pending frontmatter shell expansion fail closed before
+approval rather than disappearing and later revealing unapproved content.
+
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
-    - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
+    - when nothing defines that property — no frontmatter key, caller input, or schema property — composition also warns, because the name is most likely a typo (see [Missing Variables](#missing-variables)).
+    - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax, which also tells Darkmatter the absence is intended:
 
       ```md
       Bob's favorite color is {{ color || "unknown" }}.
@@ -70,7 +96,7 @@ Body interpolation runs after text replacement and page blocks have been applied
 - **Context Variables**
 
     - there are a certain set of properties that will always be provided to a page as the `ctx` frontmatter value
-    - Details on all of the available information provided is found in the document: [Context Variables](../topics/context-variables.md)
+    - Details on all of the available information provided is found in the document: [Context Variables](../topics/state-management/context-variables.md)
 
 - **Environment Variables**
 
@@ -95,8 +121,65 @@ Body interpolation runs after text replacement and page blocks have been applied
       ```
 
     - in this example both lines will resolve the frontmatter `color` if it's set but if it's not the two lines will vary:
-        - the first line will resolve to the frontmatter property `unknown` which if not set will default to an empty string
+        - the first line will resolve to the frontmatter property `unknown` which if not set will default to an empty string (and warn, since nothing defines `unknown`)
         - the second line will resolve to the string literal "unknown"
+
+- **Kebab-case Keys**
+
+    - a frontmatter key such as `spec-name` is referenced by its name: `{{ spec-name }}` and `{{ doc.spec-name }}` both read it
+    - a `-` joins an identifier only when it sits between identifier characters, so subtraction whose left operand is a name needs whitespace: `{{ iteration - 1 }}` subtracts, while `{{ iteration-1 }}` reads a key named `iteration-1`
+    - bracket access still reaches keys the identifier form cannot spell, such as `{{ doc['release.channel'] }}`
+    - see [Lexing § `-` inside an identifier](../topics/parsing/lexing.md#--inside-an-identifier) for the full rule
+
+## Missing Variables
+
+A reference to a property that has no value renders as an empty string, and
+composition continues. Whether it also warns depends on whether anything
+**knows** the name:
+
+| The name is | Result |
+| --- | --- |
+| present in frontmatter, `--set`, inherited state, or another caller input — even as `null` or `""` | silent |
+| declared by the effective schema (the document's `$schema`, the configured baseline, or a matched trigger) | silent; a `required` property left unset already failed schema validation |
+| a reserved namespace (`ctx`, `env`, `doc`, …) or a runtime context name | silent |
+| none of the above | warning `dm.expression.unknown_identifier`, once per name per source document |
+
+```text
+unknown identifier 'colour' at docs/page.md:5: no frontmatter key, caller
+input, or schema property defines it, so it resolves to null
+```
+
+The warning is decided by the name's root: `{{ user.name }}` warns when nothing
+defines `user`. It is suppressed where the author has handled the absence:
+
+| Expression | Unresolved `x` warns? |
+| --- | --- |
+| `{{ x }}` | yes |
+| `{{ x \|\| "d" }}` | no — primary of a fallback |
+| `{{ a \|\| x }}` | yes, when the right-hand side is evaluated |
+| `{{ x ? a : b }}` | no — ternary condition |
+| `{{ x ? x : b }}` | no — the branch is guarded by `x` |
+| `{{ a ? x : b }}` | yes, when the `x` branch is evaluated |
+| `{{ is_null(x) }}`, `{{ is_empty(x) }}` | no — direct argument of an absence predicate or one of its aliases |
+| `{{ is_empty(lower(x)) }}` | yes — the predicate no longer guards the lookup directly |
+| `::block when="x"` | yes — a misspelled gate would silently hide content |
+
+Composition warns only for what it evaluates, so an unchosen ternary branch or a
+short-circuited fallback never warns. The same rule applies to frontmatter
+interpolation, `when="…"` conditions, and `$()` ternaries. The language server
+applies the same suppressions while you edit, but checks both ternary branches
+(see [DMLS diagnostics](../../dmls/docs/diagnostics.md)).
+
+## Failures
+
+An expression that cannot be parsed, or that fails to evaluate (an unknown
+function, a wrong argument type), is an authoring error. It **fails
+composition** with exit code 1, naming the file, the authored line and
+column, and the expression. Nothing is written to stdout, and the `{{ … }}` never reaches the
+output. `ComposeOptions::with_fail_fast(false)` does not relax this; it governs
+recoverable non-expression stages such as TOC linking.
+
+A missing *value* is not a failure — see [Missing Variables](#missing-variables).
 
 
 ## Interpolation Literals
@@ -186,6 +269,7 @@ The current implementation uses a source-first scanner approach, rescanned to a 
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
 - Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
+- A failing expression fails document composition. Under the lenient policy that only `compose_subtree(..., SubtreeStrictness::Lenient)` and preflight discovery use, it is left in place and reported once, and later scan passes do not evaluate it again. Coded warnings are reported once per issue: an unknown `ctx.*` group warns once per source document however often it is referenced, and a transcluded document's issues stay separate from its parent's
 
 See the source modules:
 

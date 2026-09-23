@@ -25,10 +25,11 @@ use crate::common;
 use common::CliProcessFixture;
 
 /// A document that composes successfully but emits one compose **warning**
-/// (`{{ 1 + }}` fails to parse) so the warnings-footer render branch also runs.
+/// (`ctx.toady` is not a context group) so the warnings-footer render branch
+/// also runs. A malformed expression would fail composition instead.
 /// Combined with `-vv --perf`, this exercises the verbose, perf, and warning
 /// branches that each call `term_cell.get_or_init`.
-const DOC_WITH_WARNING: &str = "# Title\n\nHello {{ 1 + }} world.\n";
+const DOC_WITH_WARNING: &str = "# Title\n\nHello {{ ctx.toady }} world.\n";
 
 fn count_terminal_detections(stderr: &[u8]) -> usize {
     String::from_utf8_lossy(stderr)
@@ -69,7 +70,7 @@ fn compose_verbose_perf_performs_single_terminal_detection() {
     // sites were exercised, not just verbose+perf).
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("failed to parse"),
+        stderr.contains("unknown context variable 'ctx.toady'"),
         "expected the compose warning branch to render; stderr: {stderr}"
     );
 

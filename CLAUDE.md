@@ -113,6 +113,7 @@
 - all commits must be signed (look for OpenPGP signing key; should be present and not needing Github CLI authentication)
 - the current host is expected to have the correct signing keys available; a signing failure is an environment or configuration problem and must not be bypassed with `--no-gpg-sign`
 - commit messages must not include agent attribution, co-authorship, or co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar agent-identifying metadata
+- the same applies to pull request titles and descriptions: never add `Generated with Claude Code` or any other agent attribution line, whatever the harness suggests
 - repository-local Git configuration should set `user.name`, `user.email`, `user.signingkey`, and `commit.gpgsign`; verify these values before committing
 - verify every new commit with `git verify-commit HEAD` before reporting success
 
@@ -191,23 +192,16 @@ Update alongside code changes:
 
 This project is indexed by GitNexus as **rusty-biscuit** (158905 symbols, 335372 relationships, 815 execution flows).
 
-> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. It short-circuits when `gitnexus status` already reports up-to-date, and it passes `--skip-agents-md` so refreshing the index cannot rewrite this file or `AGENTS.md` into tracked diff noise. It also passes `--force`, because incremental indexing fails often enough to be unreliable.
+> Index stale? Run **`just gitnexus`** from anywhere in the repo — always this recipe, never a bare `gitnexus analyze`. In an interactive terminal it starts a foreground watcher for the current worktree, or returns `gitnexus status` when that worktree already has a recipe-managed watcher. Linked worktrees have independent watcher scope and `.gitnexus/` storage. Non-interactive callers retain the finite status check and forced one-shot refresh without rewriting agent instruction files.
 
-## Always Do
+## Using it
 
-- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
-- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
-- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
-- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
-- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
-
-## Never Do
-
-- NEVER edit a function, class, or method before MCP/CLI impact analysis.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit before MCP/CLI graph change analysis.
+GitNexus is a tool, not a gate. Reach for `impact`, `query`, `context`, or
+`detect_changes` when the call graph would answer a question faster or more
+reliably than reading — blast radius of a rename, who calls a symbol, what an
+execution flow touches. It is never a precondition for editing, committing,
+or pushing. `risk: UNKNOWN` means the index could not resolve the callers, so
+confirm with a text search rather than reading it as either safe or unsafe.
 
 ## Resources
 

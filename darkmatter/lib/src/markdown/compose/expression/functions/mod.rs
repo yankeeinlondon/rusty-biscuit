@@ -29,17 +29,23 @@ use super::resolve_ctx::{
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
+mod agentic_cli;
+pub(in crate::markdown::compose) mod agentic_cli_generated;
 mod args;
 mod cicd;
 mod collections;
+mod composition;
 mod dates;
 pub(in crate::markdown::compose) mod escape;
 mod git;
 mod markdown_docs;
+mod network;
 mod paths;
 mod predicates;
 pub(in crate::markdown::compose) mod provider;
 mod pull_requests;
+mod repository;
+mod shell;
 mod skills;
 mod strings;
 mod terminal;
@@ -118,6 +124,21 @@ mod registration_tests {
     }
 
     #[test]
+    fn exactly_is_null_and_is_empty_are_absence_predicates_with_their_aliases() {
+        let marked: HashSet<_> = bindings()
+            .filter(|binding| super::is_absence_predicate(binding.canonical))
+            .map(|binding| binding.canonical)
+            .collect();
+        assert_eq!(marked, HashSet::from(["is_null", "is_empty"]));
+        for alias in ["isnull", "isempty", "IS_NULL", "isEmpty"] {
+            assert!(super::is_absence_predicate(alias), "{alias}");
+        }
+        for other in ["is_string", "trim", "length", "or", "is_nul", ""] {
+            assert!(!super::is_absence_predicate(other), "{other}");
+        }
+    }
+
+    #[test]
     fn alias_canonical_collisions_are_rejected() {
         let fixtures = [("alpha", &["beta"][..]), ("beta", &[][..])];
         assert_eq!(
@@ -171,17 +192,23 @@ const LAZY_BINDINGS: &[FunctionBinding] = &[
 ];
 
 const BINDING_GROUPS: &[&[FunctionBinding]] = &[
+    predicates::ABSENCE_PREDICATES,
     predicates::BINDINGS,
     collections::BINDINGS,
     strings::BINDINGS,
     terminal::BINDINGS,
     dates::BINDINGS,
     git::BINDINGS,
+    repository::BINDINGS,
+    network::BINDINGS,
     pull_requests::BINDINGS,
     cicd::BINDINGS,
     paths::BINDINGS,
+    shell::BINDINGS,
+    agentic_cli::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
+    composition::BINDINGS,
     LAZY_BINDINGS,
 ];
 
@@ -2261,6 +2288,10 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
         return Ok(Value::Null);
     }
     let name = require_string_expr("has_skill", &args[0])?;
+    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
+    if name.is_empty() {
+        return Ok(Value::Bool(false));
+    }
     if !validate_skill_name(name) {
         return Err(expression_other(
             "has_skill",
@@ -2288,6 +2319,10 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let name = require_string_expr("has_local_skill", &args[0])?;
+    // `ctx.area` is `""` at a monorepo root, so no skill is the answer, not an error.
+    if name.is_empty() {
+        return Ok(Value::Bool(false));
+    }
     if !validate_skill_name(name) {
         return Err(expression_other(
             "has_local_skill",
@@ -2668,6 +2703,18 @@ pub fn newer_than(args: &[Value]) -> Result<Value, String> {
 #[cfg(test)]
 pub(crate) fn lazy_operator_names() -> impl Iterator<Item = &'static str> {
     LAZY_BINDINGS.iter().map(|binding| binding.canonical)
+}
+
+/// Whether `name` resolves, as a canonical name or alias, to an absence
+/// predicate (`is_null`, `is_empty`). Case-insensitive, like dispatch.
+///
+/// Interim rule (spec Resolved Decision 9); see
+/// [`predicates::ABSENCE_PREDICATES`].
+pub(crate) fn is_absence_predicate(name: &str) -> bool {
+    predicates::ABSENCE_PREDICATES.iter().any(|binding| {
+        binding.canonical.eq_ignore_ascii_case(name)
+            || binding.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(name))
+    })
 }
 
 /// Returns every canonical function name the evaluator can dispatch.
@@ -5002,6 +5049,16 @@ mod tests {
             assert!(has_skill_fn(&[json!("foo/bar")], &ctx).is_err());
             assert!(has_skill_fn(&[json!("..")], &ctx).is_err());
             assert!(has_skill_fn(&[json!(".")], &ctx).is_err());
+        }
+
+        #[test]
+        fn has_skill_empty_name_returns_false() {
+            let ctx = ResolutionContext::new(std::env::temp_dir());
+            assert_eq!(has_skill_fn(&[json!("")], &ctx).unwrap(), json!(false));
+            assert_eq!(
+                has_local_skill_fn(&[json!("")], &ctx).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]

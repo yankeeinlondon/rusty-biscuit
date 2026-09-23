@@ -615,43 +615,17 @@ fn install_marker_provider(fixture: &CliProcessFixture) -> std::path::PathBuf {
         &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho run >> \"$PROVIDER_MARKER\"\necho done\nexit 0\n",
     );
-    // Compiled rather than a `.cmd`: Rust refuses to spawn a batch file whose
-    // arguments contain newlines, and Claudine delivers the composed prompt as
-    // one `-t` argument, so a shim stub fails the launch with "batch file
-    // arguments are invalid" before the test's own assertion is reached
-    // (measured on `build-win-native`, 2026-09-22). Mirrors
-    // `common/review_router.rs` and `compose_caller_file_provenance.rs`.
+    // A built binary rather than the `.cmd` shim this used to write: Rust
+    // refuses to pass arguments it cannot safely escape to a batch file, so
+    // Claudine's prompt argument failed with "batch file arguments are
+    // invalid" before the shim ran. The fixture honors `PROVIDER_MARKER` the
+    // same way the shim did.
     #[cfg(windows)]
-    {
-        let source = fixture.bin_dir().join("goose-marker.rs");
-        fs::write(
-            &source,
-            r##"fn main() {
-    let marker = std::env::var("PROVIDER_MARKER").expect("PROVIDER_MARKER");
-    let mut log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(marker)
-        .expect("open provider marker");
-    std::io::Write::write_all(&mut log, b"run\n").expect("record the run");
-    println!("done");
-}
-"##,
-        )
-        .unwrap();
-        let output = std::process::Command::new("rustc")
-            .arg("--edition=2024")
-            .arg(&source)
-            .arg("-o")
-            .arg(fixture.bin_dir().join("goose.exe"))
-            .output()
-            .expect("rustc must build the Windows provider fixture");
-        assert!(
-            output.status.success(),
-            "provider fixture compilation failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        fixture.bin_dir().join("goose.exe"),
+    )
+    .unwrap();
     fixture.cwd().join("provider-runs.log")
 }
 

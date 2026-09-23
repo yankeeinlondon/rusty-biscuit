@@ -1,0 +1,107 @@
+kind: schema
+description: the 'style' property in Darkmatter
+types:
+    style:
+        page:
+            left-margin: &style-length
+                - "string -> Horizontal length such as 2ch or 10%."
+                - "number(integer; min(0)) -> Character-cell length."
+            right-margin: *style-length
+            top-margin: &style-rows "number(integer; min(0); max(65535)) -> Terminal row count."
+            bottom-margin: *style-rows
+            left-padding: *style-length
+            right-padding: *style-length
+            top-padding: *style-rows
+            bottom-padding: *style-rows
+            max-width: *style-length
+            alignment: &style-alignment "enum(left, center, right) -> Horizontal alignment."
+            color: &style-color "string(suggest()) -> Tailwind(red-500 or red-300/20, etc.), hexadecimal, or CSS named color."
+            bg-color: *style-color
+            background: "enum(transparent, subtle, pronounced) -> Page background fill strategy."
+            stylesheet: "file -> CSS file reference or URL used for browser rendering."
+            meta: "object -> Browser metadata passed through to generated HTML."
+            code:
+                theme: "string -> Syntax-highlighting theme pair for code blocks."
+
+        table: &style-common
+            width: &style-width
+                - "enum(auto, fit-content) -> Intrinsic component width mode."
+                - "string -> Fixed width such as 40ch or 50%."
+                - "number(integer; min(0)) -> Fixed character-cell width."
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            margin: *style-length
+            padding: *style-length
+            border: &style-border
+                - "boolean -> Enables or disables a thin border on all sides."
+                - "enum(thin, medium, thick, none) -> Border weight on all sides."
+                - left: "boolean -> Whether to draw the left border."
+                  right: "boolean -> Whether to draw the right border."
+                  top: "boolean -> Whether to draw the top border."
+                  bottom: "boolean -> Whether to draw the bottom border."
+                  weight: "enum(thin, medium, thick) -> Border weight."
+                  color: *style-color
+                  style: "enum(solid, dashed, dotted, double) -> Border line style."
+                  radius: *style-length
+            emphasis: &style-emphasis
+                bold: boolean
+                dim: boolean
+                italic: boolean
+                strikethrough: boolean
+                underline: "enum(straight, double, curly, dotted, dashed) -> Underline style."
+                inverse: boolean
+                blink: boolean
+            word-wrap: &style-word-wrap "enum(none, wrap, truncate, wrap-prose) -> Component wrapping policy."
+
+        block-quote: *style-common
+
+        ul:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            left-margin: *style-length
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        ol: *style-common
+        li: *style-common
+
+        hyperlinks:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        images:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        hr:
+            width: *style-length
+            max-width: *style-length
+            alignment: "enum(full, left, center, right) -> Horizontal-rule alignment."
+            color: *style-color
+            bg-color: *style-color
+            kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule glyph style."
+            weight: "enum(thin, medium, thick) -> Horizontal-rule weight."
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        disclosure: *style-common
+        code-block: *style-common

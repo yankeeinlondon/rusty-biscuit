@@ -25,6 +25,11 @@ default = []
 # and attempts no network access. Off by default; production builds carry no
 # counter state and expose none of the instrumentation API.
 effects-instrumentation = []
+# Test-only instrumentation. Exposes the thread-local work counters that
+# complexity regressions in downstream crates (DMLS) read across the crate
+# boundary, where `cfg(test)` does not reach. Off by default; without it the
+# counters and their accessors are not compiled.
+work-counters = []
 terminal-tests = ["dep:image"]
 browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
 
@@ -66,7 +71,8 @@ which = "7"
 dirs = "6"
 
 # HTTP and URLs
-reqwest = { version = "0.13", features = ["json", "gzip"] }
+# default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2", "json", "gzip"] }
 url = "2.5"
 
 # Async runtime
@@ -97,8 +103,17 @@ quick-xml = "0.39"
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
 biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 
-# Hashing (for Mermaid diagram caching and markdown TOC)
-biscuit-hash = { path = "../../biscuit-hash/lib" }
+# Hashing (for Mermaid diagram caching and markdown TOC). `blake3` backs the
+# cryptographic `ctx.sid` digest (more-context R2).
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["blake3"] }
+
+# CIDR parsing and matching for `ipv4`/`ipv6` filters and ICMP grants
+# (more-context R14). Already resolved through sniff.
+ipnet = "2"
+
+# The per-execution `ctx.id`/`ctx.sid` nonce drawn from the OS CSPRNG, with a
+# typed failure (more-context Q1). Already resolved transitively.
+getrandom = "0.4"
 
 # System detection (OS, hardware, repo, docs)
 sniff = { path = "../../sniff/lib", features = ["remote"] }
@@ -126,10 +141,15 @@ futures-util = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true }
 
 [target.'cfg(unix)'.dependencies]
-# `setsid` for the alias-lookup child in
-# `markdown/compose/shell_expansion/alias.rs`. Only the raw syscall is needed,
+# `setsid` and process-group cleanup for login-shell queries in
+# `markdown/compose/shell_expansion/launcher.rs`. Only the raw syscall is needed,
 # so `libc` rather than a wrapper crate; already compiled transitively.
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Kill-on-close Job Object that contains a login-shell probe's process tree
+# (`markdown/compose/shell_expansion/launcher.rs`).
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_JobObjects"] }
 
 [dev-dependencies]
 image = "0.25"

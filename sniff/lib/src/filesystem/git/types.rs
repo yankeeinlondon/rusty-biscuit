@@ -966,6 +966,7 @@ impl GitRepo {
             branches: Vec::new(),
             in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
+            current_worktree: super::worktree::current_worktree_name_from_gix(&self.gix.borrow()),
             recent: Vec::new(),
             status: None,
             remotes: Vec::new(),
@@ -1167,6 +1168,7 @@ impl GitRepo {
             branches,
             in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
+            current_worktree: super::worktree::current_worktree_name_from_gix(&self.gix.borrow()),
             recent,
             status: Some(status),
             remotes,
@@ -1273,6 +1275,13 @@ pub struct GitInfo {
     /// Absolute path to the base repository root (only set when inside a worktree).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_repo_root: Option<PathBuf>,
+    /// Directory basename of the linked worktree being observed.
+    ///
+    /// `None` in the main checkout or a bare repository. Every request preset
+    /// fills it from the open repository handle, without enumerating
+    /// [`worktrees`](Self::worktrees).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub current_worktree: Option<String>,
     /// Recent commits from HEAD (last 10 commits).
     pub recent: Vec<CommitInfo>,
     /// Working tree status.
@@ -1844,6 +1853,82 @@ mod tests {
             dir.path().canonicalize().unwrap()
         );
         assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn every_preset_names_the_linked_worktree_without_enumerating_worktrees() {
+        let (dir, repo) = setup_repo();
+        let linked_path = dir.path().join("linked-wt");
+        repo.worktree("linked", &linked_path, None).unwrap();
+        let nested = linked_path.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        for request in [
+            GitRequest::identity(),
+            GitRequest::minimal(),
+            GitRequest::summary(),
+        ] {
+            let git_repo = GitRepo::discover(&nested).unwrap().unwrap();
+            let collector = crate::performance::PerformanceCollector::new_shared();
+            let info = crate::performance::with_current_collector(Some(collector.clone()), || {
+                git_repo.detect_with_request(&request).unwrap()
+            });
+            let counters = collector.snapshot(std::time::Duration::ZERO).counters;
+
+            assert_eq!(info.current_worktree.as_deref(), Some("linked-wt"), "{request:?}");
+            assert!(info.worktrees.is_empty(), "{request:?}");
+            assert_eq!(
+                counters
+                    .get(crate::performance::counters::GIT_WORKTREE_OPENS)
+                    .copied()
+                    .unwrap_or(0),
+                0,
+                "{request:?}: {counters:?}"
+            );
+            assert_eq!(
+                git_repo.try_current_worktree_name().unwrap(),
+                info.current_worktree,
+                "the observation agrees with the ambient lookup"
+            );
+        }
+    }
+
+    #[test]
+    fn main_checkout_has_no_current_worktree_and_omits_the_json_key() {
+        let (dir, repo) = setup_repo();
+        repo.worktree("linked", &dir.path().join("linked-wt"), None)
+            .unwrap();
+
+        let git_repo = GitRepo::discover(dir.path()).unwrap().unwrap();
+        for request in [GitRequest::identity(), GitRequest::summary(), GitRequest::full()] {
+            let info = git_repo.detect_with_request(&request).unwrap();
+            assert_eq!(info.current_worktree, None, "{request:?}");
+            let json = serde_json::to_value(&info).unwrap();
+            assert!(json.get("current_worktree").is_none(), "{request:?}");
+        }
+    }
+
+    #[test]
+    fn current_worktree_round_trips_through_json() {
+        let (dir, repo) = setup_repo();
+        let linked_path = dir.path().join("linked-wt");
+        repo.worktree("linked", &linked_path, None).unwrap();
+        let info = GitRepo::discover(&linked_path)
+            .unwrap()
+            .unwrap()
+            .detect_with_request(&GitRequest::summary())
+            .unwrap();
+
+        let first = serde_json::to_string(&info).unwrap();
+        let decoded: GitInfo = serde_json::from_str(&first).unwrap();
+        assert_eq!(decoded.current_worktree.as_deref(), Some("linked-wt"));
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), first);
+
+        // Evidence written before the field existed still decodes.
+        let mut legacy = serde_json::to_value(&info).unwrap();
+        legacy.as_object_mut().unwrap().remove("current_worktree");
+        let decoded: GitInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.current_worktree, None);
     }
 
     #[test]

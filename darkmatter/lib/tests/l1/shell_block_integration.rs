@@ -14,8 +14,9 @@ use tempfile::TempDir;
 
 /// Compose options without the repo-wide capture `ComposeOptions::new()` runs
 /// (git, repo, file changes, languages, docs, OS, hardware, GPU via sniff —
-/// 1.4s per call on this working tree). No fixture here reads `ctx.*`, and a
-/// group an expression does ask for is still captured on demand.
+/// 1.4s per call on this working tree). No fixture here reads `ctx.*`; the
+/// supplied context is frozen, so a group an expression did ask for would fail
+/// with `ContextNotCaptured` rather than be captured.
 fn context_free_options() -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(
         std::path::Path::new("."),

@@ -231,6 +231,14 @@ With `--perf`, the array is wrapped so stdout stays valid JSON: `{ "data": [ ...
 
 > **Behavior change:** earlier releases kept Markdown bold markers such as `**Description:**` in plain output. Plain output now strips all markup.
 
+The plain output is exactly `RecentCommits::to_plain`, which is the library's
+per-commit `RecentCommits::plain_blocks` joined by one blank line. A consumer
+that wants commits as separate values — Darkmatter's `ctx.recent_commits` —
+takes the blocks rather than splitting this output on blank lines, which the
+verbose layout also uses inside a block.
+
+## No-Result Behavior
+
 ## Empty Results
 
 A valid query that matches no commits is a success:

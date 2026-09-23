@@ -1,0 +1,12 @@
+kind: schema
+name: safe mutations provided by Darkmatter
+categories:
+    - Frontmatter
+types:
+    set: |-
+        function(
+            parameters(key: string, value: any);
+            returns(object);
+            category(Frontmatter);
+            fallible;
+        ) -> Sets a top-level key in the `doc` namespace; no external mutation

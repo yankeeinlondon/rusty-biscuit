@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-9cfed90a3795c28a
-last_updated: 2026-09-16
+hash: ef46db3751d8e999-8c8798e28a36f7d9
+last_updated: 2026-09-20
 ---
 # Compose Pipeline
 
@@ -159,6 +159,76 @@ body, preserving interpolation-literal masking and date/time aliases. `all`,
 `contains`, and `iter` support explicit orchestration without exposing the
 population modules. Date/time is always present in a requirements set.
 
+Calls to `package(`/`package_area(` demand `Repo` and `ipv4(`/`ipv6(` demand
+`Network` (`FUNCTION_GROUPS` in `capture/groups.rs`). Those functions read
+`CapturedObservations` (package roots with names, scoped interface addresses)
+retained on the `ComposeContext` beside the JSON values and copied into
+`ResolutionContext::observations`; they never rediscover topology or
+interfaces. A call whose group was never captured fails with the fatal
+`ExpressionError::FunctionContextNotCaptured`. A call the function's spec
+makes a compose error (`recent_commits(0)`, a URL passed to `package`) returns
+`ExpressionError::ContractViolation`, which `is_authoring_fatal` never demotes
+to a warning; use `Other` only for failures a lenient caller (subtree,
+preflight discovery) may tolerate.
+`recent_commits(count)` demands
+no group: each reached call walks history from the file-resolution
+`repository_root` and renders through the capture's `render_recent_commits`.
+It is the lazy half of the first variable/function pair (R29): `ctx.recent_commits`
+is the eager snapshot of the same descriptor, and one descriptor entry projects
+both so the variable and the function cannot drift.
+
+`has_agentic_cli(agent)` demands `Agent`; the capture retains a lazily scanned
+`InstalledAiClients` `PATH` index that every clone of the request shares, and a
+name outside the generated `AGENTIC_CLI_NAMES` table is a `ContractViolation`.
+`has_alias`, `has_builtin_function`, `has_user_function`, and the shell half of
+`can_execute` demand no group: `ResolutionContext::shell_probe` is a
+`ShellProbe` built from the request environment's `SHELL` (Windows falls back
+to `pwsh`, then `powershell`, on that environment's `PATH`). One launch answers
+all three kinds through `shell_expansion/launcher.rs`, the bounded launcher
+alias resolution shares; the name reaches the shell only as an environment
+variable and is never executed. `ResolutionContext::default()` disables
+probing, and `ComposeOptions::suppress_shell_probes` (set by shell-command
+preflight discovery) keeps preflight from launching a profile. `can_execute`
+checks `has_binary` first and skips the launch when it succeeds.
+
+`as_markdown(content)` composes `content` through `compose/nested.rs`: the
+calling pipeline installs a `NestedComposeSlot::Active` handle on
+`ComposeOptions` (and so on the frontmatter and body `ResolutionContext`s) per
+document. The child reuses the caller's options with the root source as its
+resolution base, the request context epoch, the shell runtime, and the
+transclusion ancestry: each call pushes a unique node, so `as_markdown` and
+`::file` share `max_transclusion_depth`, and a cycle or depth failure below the
+call is restored as the typed `TransclusionError` when the caller finishes.
+Other nested failures are `ContractViolation`s naming the call site. Root-only
+stages (link normalization, the pre-approved gate) key on
+`PipelineRuntime::is_root`, not stack depth. The result is the composed body
+plus only the frontmatter keys the content authored; nested warnings carry an
+`as_markdown > <stage>` stage. Surfaces outside a compose request
+(`local_expression_resolution_context`, passive validation) leave the slot
+`Unavailable`, where the call is a `ContractViolation`.
+
+`ping(address, timeout?)` and `ping_under(address, timeout, attempts?)` are
+network effects under their own grant, separate from HTTP fetch permission even
+though both are spelled `--allow-host`. `ComposeOptions::icmp` is an
+`IcmpAuthority` (`compose/icmp.rs`) projected into every `ResolutionContext` the
+request builds; its grants are derived from `remote_read_config.allowed_hosts`
+on each projection, so the flag stays the single entry point. An exact IP
+literal grants ICMP *and* keeps its existing exact-HTTP meaning (a spelled IPv6
+zone constrains the grant to that zone); a strict CIDR grants ICMP only and is
+withheld from the `FetchPolicy` allowlist by `RemoteReadConfig::http_hosts`; a
+hostname or wildcard grants HTTP only and never authorizes an address
+indirectly. The address argument is a validated `ScopedIpAddr` literal — no DNS
+— and the budget goes through `sniff::network::icmp::ProbeBudget::from_millis`,
+which range-checks before converting, so a non-finite, non-positive,
+fractional, or overflowing number is a `ContractViolation` before any packet.
+An ungranted target answers `null`, records one warning on the authority's
+shared sink (drained into `ComposeReport::warnings` at the root), and sends
+nothing even for a multi-attempt call; a send failure is a `ContractViolation`
+that aborts the series after earlier replies. `ping` maps to `true`/`false`,
+`ping_under` adds `"unstable"`. Transport is `sniff::network::icmp`; the
+authority owns an injectable `EchoProbe` so tests are deterministic, and its
+discovery mode is what makes preflight passive.
+
 `ContextCaptureEvidence` carries the invocation environment plus optional
 Sniff-owned `GitInfo`, file changes, `RepoInfo`, `LanguageBreakdown`, Markdown
 metadata, `OsInfo`, `HardwareInfo`, and GPU observations. Its builders
@@ -187,6 +257,133 @@ ambient compatibility APIs and use the same `populate_*` code. Ambient capture
 snapshots the environment once and reuses its original `GitRepo` handle for
 file changes rather than discovering the repository a second time.
 
+### Lazy reserved roots (`current`, `current_env`)
+
+`context/current.rs` owns the request's refresh authority. Three pieces:
+
+- `CurrentProvider` — the invocation's capability to observe **one** cataloged
+  key now. A `DarkmatterOwned` request (`ComposeOptions::for_document`,
+  `ComposeOptions::new()`) installs `AnchoredRefresh`, which re-captures a
+  mutable key's group at the context's retained anchor and answers
+  `Repo`-group keys from the request's one repository observation (D3) — the
+  eager `Repo` capture, or one discovery at the anchor. `for_document` is the
+  request boundary: it fixes that observation at creation, before validation,
+  pre-flight, or compose run. A request built through `new()` or
+  `new_with_context(..).with_context_authority(DarkmatterOwned)` is fixed by
+  the root pipeline entry instead, unconditionally — not gated on whether the
+  root plans a `current.repo*` read, because a transcluded child may be the
+  only reader and a child pipeline never establishes request state. The
+  provider never discovers. `ComposeOptions::with_current_provider` installs
+  an embedder's own. A caller-supplied or caller-extended request with no
+  provider observes nothing.
+- `CurrentAuthority` — request-owned, carried on `ComposeOptions` beside
+  `IcmpAuthority`, projected into every `ResolutionContext` and into
+  `EffectiveStateBuilder::with_current_authority`. It owns the shared
+  `PartialRuntimeCapture` sink the root pipeline drains into
+  `ComposeReport::warnings`, and has a `discovering()` mode preflight installs
+  so a passive walk observes nothing.
+- `CurrentScope` — the per-lookup memo, cleared at every expression boundary by
+  `EvaluationLookup::begin_expression_scope`. The boundary is called by
+  `Evaluator::{eval, eval_value, eval_json}`, `conditions::evaluate_condition`,
+  and the two `$()` ternary evaluations. That is the Q2 memo scope: repeated
+  reads of one key inside one expression agree; the next expression refreshes.
+
+Resolution rules, enforced in `EffectiveState`, `FrontmatterSeedState`, and
+`LayeredLookup` **before** frontmatter, external state, and injected globals,
+so neither can shadow a reserved root:
+
+- `current.<key>` where `<key>` is cataloged: an `Invocation` or `Document`
+  key is request-owned and reads the eager capture; every other group refreshes
+  through the provider.
+- A key the provider does not hold is `null` plus one `PartialRuntimeCapture`
+  diagnostic — never the stale `ctx` value and never ambient discovery.
+- `current_env.<KEY>` is `std::env::var` at reference time, with `env`'s
+  missing-value semantics.
+- Bare `current` enumerates the descriptor names with null values; bare
+  `current_env` resolves to nothing, as bare `env` does.
+- Any other path (`current.ctx.x`, `current.env.x`, `current_env.ctx.x`,
+  `current.<typo>`) raises the authoring-fatal
+  `ExpressionError::ReservedRootPathUnknown`.
+
+`DeferredCapabilities` (`capture/capabilities.rs`) is the planning twin of
+`ContextRequirements`: it names the `current` keys, `current_env` names, and
+cataloged function calls a source can reach, and observes none of them. A
+`current.*` reference adds no eager requirement, and an eager requirement never
+answers a `current.*` read. `ComposePreflightReport::deferred_context` carries
+the union across the walked graph.
+
+### Checked `ctx.*` lookup
+
+`context/checked.rs` classifies each `ctx.<key>` read into one of four
+outcomes: `Present`, `NotCaptured`, `ProjectionMissing`, or `Unknown`.
+Classification uses only `ContextGroup::for_key`/`projected_keys` and the
+snapshot's `capture_requirements()`. Expression evaluation reads through
+`EvaluationLookup::get_checked`, which `EffectiveState`, `ResolvingLookup`,
+`FrontmatterSeedState`, `LayeredLookup`, `ShortcutLookup`, and `CtxLookup`
+override.
+
+- A captured group must project every key it owns, with `null` for absence.
+  `ProjectionMissing` raises `ExpressionError::ContextProjectionInvariant`
+  (authoring-fatal).
+- `NotCaptured` raises `ExpressionError::ContextNotCaptured`, which is
+  authoring-fatal.
+- Both errors stay typed through every wrapper:
+  - `ConditionError::Eval` and `TransclusionError::ConditionEval` carry a
+    `cause`.
+  - `$()` ternary evaluation uses `ShellExpansionError::ExpressionEvaluation`.
+  - Body interpolation errors carry the on-disk document.
+  - `MarkdownError::missing_runtime_context()` finds either error in the chain.
+  - Lenient transclusion treats either error as structural, so no notice
+    replaces the child.
+- Pre-flight discovery does not own the verdict:
+  - Each document it walks reads `ComposeOptions::extended_for(document)`,
+    and its children inherit that context.
+  - Its inline body compose sets `defer_missing_runtime_context`.
+  - A `$()` value left raw by a missing capture reports that error, not
+    `DynamicCommandShape`.
+- A `$()` ternary prepares both branches before evaluating its condition, so
+  both branches are checked.
+- Growth is decided by `ContextAuthority`, set on `ComposeOptions`:
+  - `CallerSupplied` is frozen. It is the default for `new_with_context` and
+    `with_context`.
+  - `DarkmatterOwned` uses `ComposeContext::extend_ambient`, which discovers
+    at the retained anchor and never reads CWD. It is the default for
+    `ComposeOptions::new()` and `ComposeOptions::for_document`, which the
+    `md` CLI builds its request through.
+  - `CallerExtended(Arc<dyn ContextExtension>)` grows the context from the
+    caller's retained evidence. Claudine passes
+    `InvocationContext`/`DocumentEpoch::compose_context_authority()`.
+- The request epoch (`context/authority.rs`, `RequestContextEpoch`):
+  - It lives on `PipelineRuntime` and is shared by `clone_for_child`. The root
+    seeds it after `extend_context_for`.
+  - `render_markdown_transclusion` (and the remote arm) hand each child
+    `context_for_source`. That is the parent's snapshot plus the child's own
+    `for_document` groups (after the `set` overlay), adopted from the epoch.
+  - Every group is captured once per request, under a write lock.
+  - A child's group set depends only on its path from the root, never on the
+    order siblings resolve in.
+- Child compose-cache identity (run-local only; semantic results are never
+  persisted, and local transclusion stays run-local even after a
+  `ContentPolicy` exists, R18/R36):
+  - The key's `context_hash` is the hash of the child's snapshot. The hoisted
+    phase hash is reused when the child named no new group.
+  - `ComposeResult` records the subtree's context-group closure so the parent
+    runtime can `record_context_groups` on a run-local hit.
+- User-facing contract: `docs/topics/context-variables.md` (authority, epoch,
+  captured absence) and `docs/topics/caching.md` (run-local keys and context hash).
+- A captured `null`/`""`/`[]` projection is `Present` and renders normally.
+  Only a never-captured group is `NotCaptured`; unknown names keep the
+  unknown-variable warning.
+- A graph that names no discovery-backed group must capture none. That is
+  guarded end to end by
+  `request_context_epoch::a_graph_naming_no_discovery_backed_group_captures_none`.
+- Authored `ctx:` values never satisfy an uncaptured group.
+- A bare-name fallback (`when="repo"`) with an uncaptured group is an undefined
+  name, not a missing capture.
+- Test fixtures must stay well formed: `fixed_for_testing_with` marks each
+  inserted key's group captured. Build a malformed snapshot with
+  `with_projection_key_removed`.
+
 ## Text Replacement
 
 The `replace:` frontmatter key enables literal string replacement.
@@ -214,16 +411,32 @@ Version: VERSION
 
 Expressions between `{{ }}` are evaluated and replaced with values. To render `{{ ... }}` literally instead of evaluating it, use the interpolation-literal syntax `{{{ ... }}}`; the content is never evaluated and composes down to `{{ ... }}`. See `darkmatter/docs/inline/interpolation.md`.
 
+A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` preserves
+typed evaluation. `null` and `""` skip the directive with a typed compose
+warning; authored-empty, quoted-empty, mixed, and malformed targets retain
+their ordinary parser/path behavior. Page blocks run first, so the recommended
+optional-target idiom is condition-aware and warning-free:
+
+```markdown
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
+
 ### Variable Resolution
 
 | Pattern | Description |
 |---------|-------------|
 | `{{ foo }}` | Frontmatter value |
 | `{{ user.name }}` | Nested object path |
+| `{{ spec-name }}` | A kebab-case key; `-` joins mid-identifier only before an identifier character, so `a - b`, `4-2`, `foo--bar` stay subtraction and `iteration-1` is a key |
+| `{{ doc['foo--bar'] }}` | Bracket access for a key the identifier form cannot spell (`.`, `--`, leading digit, trailing `-`) |
 | `{{ doc }}` | The whole frontmatter object |
 | `{{ doc.build }}` | A frontmatter property by the `doc.*` namespace (a property literally named `doc` is `doc.doc`); intercepted before any `ctx.*` fallback |
-| `{{ ctx.today }}` | Runtime context |
-| `{{ env.HOME }}` | Environment variable |
+| `{{ ctx.today }}` | Runtime context, captured once per request |
+| `{{ env.HOME }}` | Environment variable, from the snapshot frozen at capture |
+| `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
+| `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
 
 Read-side functions and `doc.*` resolve identically on every surface
@@ -233,9 +446,61 @@ the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
 
-How text becomes an AST — scanning, lexing, the grammar ladder, and which
-surfaces treat a malformed expression as fatal rather than a warning — is in
-`darkmatter/docs/topics/parsing/`.
+How text becomes an AST — scanning, lexing (including the `-` identifier
+rule), the grammar ladder, the failure table (every full-document surface is
+fatal), and what DMLS checks — is in `darkmatter/docs/topics/parsing/`. The
+`dm.*` code-sharing rules are in `darkmatter/dmls/docs/diagnostics.md`
+(§ "`dm.*` registry rules").
+
+### Unknown identifiers (`dm.expression.unknown_identifier`)
+
+A well-formed root that resolves to nothing still renders empty, but a
+full-document compose warns about it once per root per source document
+(source `darkmatter.expression`, `path` and `line_number` set, location also
+in the Prose-escaped message because `md` and Claudine render only the
+message). The moving parts:
+
+- **One classifier.** `expression::absence::AbsenceScope` is threaded through
+  `evaluate_expr`, so observation follows evaluation. An unchosen branch or a
+  short-circuited operand is never read, so it never warns. Handled: a
+  fallback primary (and every operand of a primary `a || b || "d"` chain), a
+  ternary condition, the condition's own root in its branches when the
+  condition is a bare variable, and a direct argument of an absence predicate.
+  "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all warn.
+  `when=` and `$()` ternary conditions are gates, not absence checks: a bare
+  unknown `when="x"` warns.
+- **Absence predicates** are the `predicates::ABSENCE_PREDICATES` binding group
+  (`is_null`, `is_empty`, aliases), read through
+  `functions::is_absence_predicate`. Never spell the names in a walker. The
+  rule is interim (spec Resolved Decision 9).
+- **Observation is opt-in.** `evaluate`/`evaluate_condition`/`Evaluator::eval`
+  are unchanged; surfaces call `evaluate_observed`,
+  `conditions::evaluate_condition_observed`, or build the `Evaluator` with
+  `.observing_missing_roots()` and drain `take_missing_roots()`. The `()`
+  observer compiles the check away.
+- **Known roots** come from `EvaluationLookup::is_known_variable_root`:
+  `EffectiveState`, `ResolvingLookup`, and `FrontmatterSeedState` answer it
+  (state key even if `null`/`""`, `ctx`/`env`/`doc`/`current`/`current_env`,
+  bare context names, and `null`, which the grammar has no literal for). The
+  trait default `true` keeps other lookups silent.
+- **Candidates, not warnings.** Surfaces push `UnknownRootCandidate`s onto
+  `ComposeReport` (first read per root only, through the hash-backed
+  `UnknownRootCandidates`, whose root set is private so it cannot drift from
+  the list; `report.rs`'s identity-work counter pins O(1) per read).
+  `unknown_identifiers::reconcile`
+  runs once per document just before `attribute_to_document`. It drops roots
+  known to the final state, a caller input record, or the effective schema
+  (`EffectiveSchema::declares_top_level_property`: `properties`,
+  `patternProperties`, union/`allOf`/`if` arms, local `$ref`), then emits.
+  A discovery pass drops its candidates. A required-but-unset root never gets
+  here: schema validation fails first.
+- **Lines are provable or absent.** Body spans project through the
+  `BodyOrigin` edit map (see [Error Handling](#error-handling)), then a
+  unique-occurrence match. `::block`/`::file when=` lines are body-relative,
+  so the stage converts them with `unknown_identifiers::directive_locus` before
+  rewriting the body. Frontmatter reads locate at their top-level key.
+- Directive targets are not observed. A null `::file {{ x }}` target already
+  warns as a skipped nullable target, and a second warning would duplicate it.
 
 ### Context Values (`ctx.*`)
 
@@ -459,6 +724,10 @@ Shell approval and shell execution are separate concerns:
   `::block` regions, and false-condition transclusions all contribute. Collection
   never evaluates conditions, never runs transclusion's merge, and never executes
   anything.
+- Nullable whole-value directive targets are evaluated during the recursive
+  approval walk. An absent target contributes no child edge, but concrete
+  siblings in any branch remain discoverable because the walk does not
+  evaluate page-block conditions.
 - **Execution is condition-aware.** The inline shell stages run only the
   commands whose branch is reached, gated by
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
@@ -466,6 +735,30 @@ Shell approval and shell execution are separate concerns:
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
+- A transclusion target depending on a pending frontmatter-shell value is
+  rejected by the same fail-closed dynamic-shape boundary before any nullable
+  rewrite or child discovery.
+- Nested `as_markdown` content is walked like a child, never composed:
+  discovery sets `NestedComposeSlot::Discover`, which records each evaluated
+  argument and returns `""`, and every string-literal argument in the authored
+  source (including untaken branches) is walked too, against the root source.
+- Discovery answers shell probes `false`, composes no nested content, and
+  answers `ping`/`ping_under` `null`, so a shape that depends on them is
+  rejected up front as `ShellExpansionError::UnevaluatedDependencyShape`: a
+  `::shell` line, shell-block body, transclusion target, or frontmatter
+  `$(...)` value calling `has_alias`, `has_builtin_function`,
+  `has_user_function`, `can_execute`, `as_markdown`, `ping`, or `ping_under`,
+  and a non-literal `as_markdown` argument that reads one of them or a pending
+  frontmatter-shell value.
+- ICMP is the second approvable effect. `ComposePreflightReport::icmp_probes`
+  carries typed `PlannedIcmpProbe` records (function, target, timeout,
+  attempts, and whether a grant already permits it) rather than command
+  strings; discovery installs `IcmpAuthority::discovering()`, which records the
+  plan and sends nothing. Every all-literal call in the authored source is
+  recorded too, so untaken branches contribute. `md compose --shell` prints
+  them.
+- Frontmatter interpolation runs before the root's pre-approved gate, so the
+  first nested call there runs the gate against the root document first.
 
 ### Interactive approval: the stage policy snapshot
 
@@ -526,17 +819,69 @@ A repeated command whose executable is on the built-in volatile allowlist
 suggesting `--no-cache`. See
 `docs/inline/shell-expansion.md`.
 
+This shell `no-cache` is unrelated to the HTTP `Cache-Control: no-cache`
+directive the remote transport cache honors (always revalidate before reuse).
+Keep the two visibly distinct in docs and diagnostics.
+
 ## Error Handling
 
+An expression that cannot be parsed or evaluated fails composition whatever
+`fail_fast` says: body, frontmatter whole-value and mixed text, directive
+targets, `when=`, and `$()` ternaries. The error is a typed
+`MarkdownError::Interpolation` anchored to the file, and nothing is emitted.
+When the failing `{{ … }}` is provably authored, its source is
+`SourceRef::OnDiskSpan` carrying an `AuthoredSpan` (byte range of the whole
+construct in the loaded text, plus one-based line and character column);
+otherwise it is file-only `SourceRef::OnDisk`, never a guess.
+
+- **Body.** The stages that rewrite the body before interpolation — text
+  replacement, page blocks, and directive targets — report the `TextEdit`s
+  they applied, and `body_origin::BodyOrigin` composes them into a map from
+  the current body back to the loaded text (CRLF-aware). A span projects only
+  when every byte was copied from the file. The map is keyed to the exact
+  text it describes, so a body rewritten by an untracked path stops
+  projecting instead of projecting wrongly. A new stage that rewrites the body
+  before interpolation must report its edits through `body_origin::advance`.
+- **Frontmatter.** `interpolate_frontmatter_located` records the failing
+  string's key/index path and the construct's span in it; the pipeline walks
+  the crate-private `locate_frontmatter_value` (the schema locator with block
+  and multi-line scalars enabled; schema documents keep the closed v1 grammar
+  that rejects them) to the authoring scalar and projects through its
+  quoting, escapes, line folding, and indentation with
+  `yaml_scalar::decode_scalar_node`, which follows libyaml's rules for plain,
+  quoted, literal `|`, and folded `>` scalars on one line or several
+  (chomping, indentation indicators, CRLF). A tag (`!!str`) or anchor
+  (`&name`) before the scalar is skipped and stays outside the span; the
+  locator looks past tags only for frontmatter, never for schema documents.
+  An alias (`*name`) projects into the scalar defining its anchor, the one
+  place the expression is authored, but only when `&name` occurs exactly once
+  before it: for a redefined anchor, or the name repeated in a comment or
+  string, the span is the alias token itself (`yaml_scalar::alias_token`),
+  where the value is certainly referenced, rather than a guessed definition.
+  Only an alias gets that fallback. The parser
+  reads the YAML lines joined without the last terminator, so the projection
+  decodes the same extent. The scalar must decode to exactly the scanned
+  string, which is also what rejects a tag that changes the value (`!!int`);
+  a value changed after loading (coercion, shell expansion) stays file-only.
+  DMLS projects Expression-typed values through the same decoder, but reads
+  an alias's definition from its own YAML tree
+  (`yaml_scalar::decode_alias_definition`) instead of searching: the search
+  is affordable here only because a frontmatter failure ends the run.
+- **Rescans** of replacement output have no authored span.
+
+The helper takes an explicit
+`ExpressionFailurePolicy`; only `compose_subtree(..., Lenient)`, preflight's
+best-effort frontmatter pass, and the discovery compose pass
+(`ComposeOptions::defer_expression_failures`, crate-private) use `Lenient`.
+Discovery must stay lenient because it runs without page blocks and would
+otherwise reject a failure inside a region a false `::block` removes.
+
 With `fail_fast: false` (default):
-- Parse errors leave original `{{ expression }}` in place
-- Evaluation errors leave original in place
 - TOC-linking and non-structural transclusion failures are downgraded to warnings
 - Structural transclusion errors (cycles, max depth) still return immediately
 - Warnings recorded in report
 
 With `fail_fast: true`:
-- Interpolation parse/evaluation errors return immediately
 - TOC-linking and other non-structural transclusion failures return immediately
 - Structural transclusion errors still return immediately
 
@@ -596,10 +941,11 @@ darkmatter/lib/src/
     │   ├── phases.rs    # Inline-Pre/Transclusion/Inline-Post/Finalization dispatch
     │   └── operations.rs # ComposeOperation, ComposePhase, descriptor table, default_order
     ├── schema_validation.rs # Always-on schema validation stage
-    ├── preflight/       # Shell approval-set lifecycle (condition-blind)
+    ├── preflight/       # Approval-set lifecycle (condition-blind)
     │   ├── mod.rs       # ComposePreflightReport + Markdown::compose_preflight
-    │   ├── collect.rs   # Condition-blind graph walk → approval candidates
+    │   ├── collect.rs   # Condition-blind graph walk → shell + ICMP effects
     │   └── approval.rs  # Deduped normalized approval-set boundary export
+    ├── icmp.rs          # IcmpAuthority: ICMP grants, transport, planned probes
     ├── inline/          # Inline stage runners (free fns over &mut Markdown)
     │   ├── replacement.rs    # run_stage → replacement engine
     │   ├── interpolation.rs  # run_stage → {{ }} body interpolation

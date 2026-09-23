@@ -427,7 +427,7 @@ something a consumer may repair by compiling a replacement**. `ci-build`'s own
 | `build-key-mismatch` | the plan names no such key, or a different package/producer/artifact/identity for it |
 | `build-source-mismatch` | built at a revision the plan does not resolve |
 | `build-environment-incompatible` | this environment is not in `compatible_environments` |
-| `build-runtime-incompatible` | the host's or the plan environment's arch/ABI/libc is not the one the archive was built for |
+| `build-runtime-incompatible` | the host's or the plan environment's arch/ABI/libc is not the one the archive was built for, or a native library the binaries link does not resolve on the consumer. A library that resolves with different content (a runner image update) is not refused: the consumer prints a `build-runtime-drift` warning annotation and runs the tests, which are the compatibility proof |
 | `build-archive-missing` / `build-archive-corrupt` | the archive is absent, or its size or BLAKE3 digest disagrees |
 | `build-sidecar-missing` / `build-sidecar-corrupt` | the same, for a declared sidecar |
 | `build-asset-missing` | a declared `archive-includes` entry never reached the manifest |

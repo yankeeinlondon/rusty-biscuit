@@ -773,6 +773,13 @@ jobs:
               tier_args=(--no-fail-fast)
               ;;
             L2)
+              # --no-fail-fast, for the same reason as L1: a truncated report
+              # costs a full round-trip to learn what the second failure was,
+              # and L2 is the tier whose backends the author's host may not
+              # have. The shared-pane suites are safe to run on: the broker's
+              # pane is torn down by `_test_l2`'s trap rather than by a test,
+              # and both profiles set `retries = 0`.
+              tier_args=(--no-fail-fast)
               # Execution proof, not just availability: require exactly the
               # backends the plan attached to this cell — the subset of the
               # package's declaration its environment hosts, the same list the

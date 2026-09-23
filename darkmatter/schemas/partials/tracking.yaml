@@ -1,0 +1,5 @@
+kind: schema
+description: the global `tracking` variable exposed to lifecycle events
+types:
+    # TODO: fill in with actual properties
+    tracking: object

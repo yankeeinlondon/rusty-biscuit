@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 fn fixture_text(stem: &str) -> String {
     let path: PathBuf = manifest_dir!()
-        .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
+        .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("fixture {} readable: {e}", path.display()))
 }

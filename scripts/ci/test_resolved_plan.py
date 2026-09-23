@@ -79,10 +79,11 @@ def producer_contracts(plan: dict, package: str) -> dict[tuple[str, str], dict[s
 #: `sniff repo package-area` run from `biscuit-test-harness/` answers
 #: `biscuit-test-harness`, but `sniff repo package-areas` does not list that
 #: name, and the three identically shaped root-level members (`renderable`,
-#: `biscuit-browser-harness`, `tabby`) all answer `root`. `root` is therefore
-#: the answer consistent with `make_package_area` in
-#: `sniff/lib/src/filesystem/repo/detection.rs` and with the universe, and it
-#: is what the planner emits. Named here rather than tolerated silently: when
+#: `biscuit-browser-harness`, `tabby`) all answer the repository-root area,
+#: which sniff spells as the empty string and the planner as `ROOT_AREA` (see
+#: `planner_area_name`). The root area is therefore the answer consistent with
+#: `make_package_area` in `sniff/lib/src/filesystem/repo/detection.rs` and with
+#: the universe, and it is what the planner emits. Named here rather than tolerated silently: when
 #: sniff is fixed, this entry fails and gets deleted.
 SNIFF_SELF_INCONSISTENT = {"biscuit-test-harness": ("root", "biscuit-test-harness")}
 
@@ -116,14 +117,26 @@ def sniff_package_area(directory: Path) -> str:
     own rule.
     """
     completed = subprocess.run(
-        ["sniff", "repo", "package-area", "--json"],
+        # `--no-error`: sniff answers the repository-root area with an empty
+        # name and treats an empty name as "no result", which exits 1.
+        ["sniff", "repo", "package-area", "--json", "--no-error"],
         check=True,
         capture_output=True,
         text=True,
         cwd=directory,
         timeout=180,
     )
-    return json.loads(completed.stdout)["name"]
+    return planner_area_name(json.loads(completed.stdout)["name"])
+
+
+def planner_area_name(sniff_area: str) -> str:
+    """Sniff's area name as the planner spells it.
+
+    The identity for every area but one: sniff's repository-root area is the
+    empty string, which cannot be a matrix key, so the planner names it
+    `ROOT_AREA`. A sniff that still answers `root` there maps to itself.
+    """
+    return sniff_area or affected_scope.ROOT_AREA
 
 
 class PlannerFixture(unittest.TestCase):
@@ -465,6 +478,13 @@ class AreaGroupingTests(PlannerFixture):
         zed = self.plan("darkmatter/dmls/zed-dmls-cli/src/main.rs")
         self.assertEqual(["darkmatter/dmls", "tools"], self.selected_areas(zed))
 
+    def test_a_directory_named_like_the_root_area_is_refused(self) -> None:
+        # `root` is the planner's own name for the area sniff leaves empty, so a
+        # real `root/` directory would merge two areas into one matrix entry.
+        self.assertEqual("root", affected_scope.package_area("renderable"))
+        with self.assertRaisesRegex(RuntimeError, "would share one area"):
+            affected_scope.package_area("root/lib")
+
     def test_the_planners_area_matches_sniff_for_every_layout_the_repo_uses(
         self,
     ) -> None:
@@ -534,8 +554,9 @@ class AreaGroupingTests(PlannerFixture):
 
     def test_the_area_universe_is_a_subset_of_sniffs(self) -> None:
         require_sniff()
-        universe = set(
-            json.loads(
+        universe = {
+            planner_area_name(name)
+            for name in json.loads(
                 subprocess.run(
                     ["sniff", "repo", "package-areas", "--json"],
                     check=True,
@@ -545,7 +566,7 @@ class AreaGroupingTests(PlannerFixture):
                     timeout=120,
                 ).stdout
             )
-        )
+        }
         plan = self.plan(force_all=True)
         # A subset, not equality: sniff reports areas that contain no Cargo
         # workspace member at all (`agent-sandbox`, `visualizer`, `root`), which

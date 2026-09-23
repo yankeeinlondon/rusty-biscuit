@@ -4,6 +4,91 @@ use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
+fn compose_guarded_nullable_target_through_real_preflight_lifecycle() {
+    let fixture = CliProcessFixture::named(
+        "compose_guarded_nullable_target_through_real_preflight_lifecycle",
+    );
+    let document = fixture.write_file(
+        "cwd/root.md",
+        "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n",
+    );
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "guarded nullable target must compose: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("::file"), "stdout: {stdout}");
+}
+
+#[test]
+fn compose_rejects_pending_target_before_child_command_can_execute() {
+    let fixture = CliProcessFixture::named(
+        "compose_rejects_pending_target_before_child_command_can_execute",
+    );
+    let sentinel = fixture.workspace_path().join("child-command-ran");
+    let sentinel_text = biscuit_file::to_portable_string(&sentinel);
+    fixture.write_file(
+        "cwd/child.md",
+        &format!("::shell touch {sentinel_text}\n"),
+    );
+    let document = fixture.write_file(
+        "cwd/root.md",
+        "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n",
+    );
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix printf\nprefix touch\n");
+    let output = fixture
+        .command_builder()
+        .host_path()
+        .build()
+        .arg("compose")
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "pending target must fail closed");
+    assert!(!sentinel.exists(), "child command executed before approval completed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("dynamic") && stderr.contains("child"),
+        "pending directive target must be rejected as dynamic: {stderr}"
+    );
+}
+
+#[test]
+fn compose_shipped_transclusion_fixture_through_normal_cli_path() {
+    let fixture = CliProcessFixture::named(
+        "compose_shipped_transclusion_fixture_through_normal_cli_path",
+    );
+    fixture.write_file(
+        "cwd/compose_child.md",
+        include_str!(
+            "../../../benchmarks/fixtures/compose_child.md"
+        ),
+    );
+    let document = fixture.write_file(
+        "cwd/compose_schema_transclusion.md",
+        include_str!(
+            "../../../benchmarks/fixtures/compose_schema_transclusion.md"
+        ),
+    );
+
+    fixture
+        .command()
+        .arg("compose")
+        .arg(document)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Schema and Transclusion"))
+        .stdout(predicate::str::contains("## Included Section"));
+}
+
+#[test]
 fn test_compose_set_variables_available_during_validation() {
     let fixture =
         CliProcessFixture::named("test_compose_set_variables_available_during_validation");

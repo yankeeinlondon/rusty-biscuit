@@ -67,11 +67,13 @@ The principles worth carrying around:
   filesystem, or the function catalog. The same text always yields the same AST;
   an unknown variable or an unknown function is an *evaluation* concern, not a
   parse error.
-- **Identifiers are letters, digits and `_`, and never start with a digit.**
-  Every other character ends an identifier — including `-`, which is always the
-  subtraction operator. A kebab-case frontmatter key such as `spec-name` is
-  therefore reachable only as `doc['spec-name']`, not as `{{ spec-name }}`,
-  which parses as `spec` minus `name`.
+- **Identifiers are letters, digits, `_`, and inner `-`, and never start with
+  a digit.** A `-` joins an identifier only mid-identifier and only when an
+  identifier character follows it, so a kebab-case key such as `spec-name` is
+  simply `{{ spec-name }}`. `a - b`, `a -b`, `4-2`, and `foo--bar` stay
+  subtraction. Subtracting from a name therefore needs whitespace:
+  `iteration - 1`, not `iteration-1`, which names a key. See
+  [lexing](./parsing/lexing.md#--inside-an-identifier).
 - **Dotted paths are one token.** `a.b.c` lexes as a single variable; a `.`
   followed by a digit does not fold, which is why `items.0` is rejected and
   `items[0]` is the array form.
@@ -84,6 +86,12 @@ The principles worth carrying around:
   into `and(…)` / `or(…)` calls in the AST.
 - **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
   composition with an error naming the source line, on every surface.
+- **A missing value is not a failure, but an unknown name warns.** A reference
+  that resolves to nothing renders empty. When no frontmatter key, caller
+  input, or schema property defines its root, composition warns once with
+  `dm.expression.unknown_identifier`, unless the expression handles the
+  absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
+  [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
 
 Full detail lives under [Parsing](./parsing/index.md):
 [scanning](./parsing/scanning.md), [lexing](./parsing/lexing.md), and
@@ -103,6 +111,26 @@ When an unprefixed key is not found in frontmatter or inherited state,
 Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`. The
 reserved `doc` namespace is intercepted **before** this fallback, so bare `doc`
 always means the frontmatter object and never falls back to `ctx.doc`.
+
+### Nullable directive targets
+
+Optional schema properties remain nullable until the document or caller binds
+a concrete non-null value. A schema `default(...)` is descriptive metadata; it
+does not install a runtime value and therefore does not make an unbound target
+non-null. Use `required`, provide a concrete binding, or guard the directive:
+
+```md
+::block when="file_exists(log)"
+::file {{log}}
+::end-block
+```
+
+For a whole-value `::file`, `::code`, or `::url` target, evaluation to `null`
+or `""` skips the directive with a compose warning. The guard above is applied
+before body interpolation, so it removes the directive and suppresses that
+warning. DMLS warns on statically nullable unguarded targets without executing
+the expression; unsupported expression or schema shapes remain unknown rather
+than being guessed nullable or safe.
 
 ## Operator Precedence
 
@@ -173,8 +201,9 @@ Use interpolation literals when documentation needs to display `{{ ... }}` synta
 Supported variable forms:
 
 - simple keys: `draft`
+- kebab-case keys: `spec-name`, `doc.spec-name`
 - nested keys: `user.role`
-- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](./context-variables.md)
+- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](state-management/context-variables.md)
 - environment keys: `env.AGENT`, `env.HOME`
 
 ### Dot Access
@@ -212,15 +241,48 @@ access returns `null` and never errors.
 
 ## Namespaces
 
-Three reserved prefixes select a distinct value source. They are intercepted
-before ordinary key lookup, so a frontmatter property that happens to share a
-namespace name never shadows the namespace.
+Five reserved prefixes select a distinct value source. They are intercepted
+before ordinary key lookup, so neither a frontmatter property nor a
+caller-injected global that happens to share a namespace name can shadow the
+namespace.
 
-| Namespace | Resolves to |
-| --- | --- |
-| `doc` / `doc.*` | the **current** document's frontmatter (this document) |
-| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](./context-variables.md) |
-| `env.*` | process environment variables |
+| Namespace | Resolves to | Observed |
+| --- | --- | --- |
+| `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
+| `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
+| `env.*` | process environment variables, from the snapshot frozen at capture | eager |
+| `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
+| `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
+
+### The lazy `current` and `current_env` namespaces
+
+`current` mirrors `ctx` key for key and `current_env` mirrors `env` key for
+key. There is no nesting: `current.ctx.x`, `current.env.x`, and
+`current_env.ctx.x` name no member and fail as unknown paths.
+
+- **Freshness.** `ctx.branch` is the branch at the start of the request;
+  `current.branch` is the branch when the expression evaluating it runs.
+- **Memo scope.** A key is observed at most once per expression evaluation, so
+  repeated reads inside one `{{ … }}` span, one `when=` condition, or one `$()`
+  branch agree. The next expression observes the fact afresh.
+- **What never refreshes.** The invocation directory and the root document's
+  identity (`ctx.self`, `ctx.hash`, `ctx.id`, `ctx.sid`) are owned by the
+  request, so `current` reads exactly what `ctx` does for them. The repository
+  root and package topology (`repo`, `repo_root`, `packages`, `area`, and the
+  other repository keys) are fixed by the request's repository observation,
+  made once when the request is created: `current` answers them from that one
+  observation, never by discovering the repository again. Only mutable Git and
+  filesystem facts (`branch`, `recent_commits`, `dirty_files`) and
+  `current_env.*` refresh at reference time.
+- **Cost.** A `current.*` reference adds no eager capture, and an unreached
+  reference observes nothing.
+- **Bare `current`** enumerates the context variable names with no value
+  observed for any of them.
+- **Who supplies the answer.** `md compose` refreshes at the directory the
+  request captured — never the process CWD at reference time. An embedder that
+  drives composition installs its own capability; a key it does not supply
+  resolves to nothing and raises a partial-capture warning rather than falling
+  back to host discovery or to the stale `ctx` value.
 
 ### The `doc` namespace
 
@@ -466,6 +528,20 @@ refresh it after changing the catalog.
 | CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
 | List Formatting | `as_json(list)` | Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`. | `as_json(["a", 1])` ⇒ `["a",1]` |
 | List Formatting | `as_json5(list)` | Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`. | `as_json5(["a", 1])` ⇒ `['a', 1]` |
+| Filesystem | `has_binary(name_or_path)` | Returns true when the command is found on PATH or is an existing executable absolute path. A second name for has_command with the same implementation. |  |
+| Shell | `has_alias(name)` | Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure returns false; the name is never executed. |  |
+| Shell | `has_builtin_function(name)` | Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure returns false; the name is never executed. |  |
+| Shell | `has_user_function(name)` | Returns true when the name is a user-defined function in the login shell. Any probe failure returns false; the name is never executed. |  |
+| Shell | `can_execute(name)` | Returns true when the name is an alias, a binary, a shell builtin, or a user function (has_alias \|\| has_binary \|\| has_builtin_function \|\| has_user_function). |  |
+| Agentic CLIs | `has_agentic_cli(agent)` | Returns true when the named agentic CLI is installed on PATH. Names are the Claudine provider roster slugs and their aliases; an unknown name is a compose error. |  |
+| Repository | `package_area(where)` | Returns the name of the package area containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no area contains the path. |  |
+| Repository | `package(where)` | Returns the name of the package containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no package contains the path. |  |
+| Git | `recent_commits(count)` | Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository. |  |
+| Network | `ipv4([filter])` | Returns the host's IPv4 addresses, excluding loopback and link-local. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set. |  |
+| Network | `ipv6([filter])` | Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4. |  |
+| Network | `ping(address, [timeout])` | Sends one ICMP echo to an IP address and returns true when it replies within timeout milliseconds (default 100). Returns null with a warning when the address is not granted through --allow-host, false when there is no reply, and a compose error when the host cannot send ICMP. |  |
+| Network | `ping_under(address, timeout, [attempts])` | Sends attempts ICMP echoes (default 3) sequentially, each with a timeout of timeout milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping. |  |
+| Composition | `as_markdown(content)` | Composes the string as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown text. |  |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -917,6 +993,30 @@ let expr = Expr::Variable("name".to_string());
 assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 ```
 
+`evaluate` reads variables through `EvaluationLookup::get_checked`. Its default
+wraps `get` and never fails, so a custom lookup needs only `get`. Darkmatter's
+own lookups override it, so composition never evaluates a cataloged `ctx.*`
+variable to a silent `null`:
+
+- If the request's context never captured the variable's group, evaluation
+  fails with `ExpressionError::ContextNotCaptured`. Composition never captures
+  a group at the point of use. A document's groups are added when the document
+  becomes reachable (the root, or a transcluded child), and only when the
+  options' `ContextAuthority` allows growth. `ComposeOptions::new()` allows it,
+  while `new_with_context` and `with_context` freeze the supplied context.
+- If the group was captured but omitted the key, evaluation fails with
+  `ExpressionError::ContextProjectionInvariant`, which is a Darkmatter bug.
+
+Both are fatal on every compose surface, including lenient
+(`fail_fast: false`) mode and a lenient transclusion, whose failing child would
+otherwise become a notice. Only an evaluated reference fails: an unchosen
+ternary branch, a short-circuited operand, a `{{{ … }}}` literal, and content a
+false `::block` removed raise nothing. A captured `null`, `""`, `[]`, or `{}` is
+a real value and raises nothing. Unknown `ctx.*` names keep the
+unknown-variable warning path. A caller finds either error through
+`MarkdownError::missing_runtime_context`, which walks the typed cause chain of
+condition, `$()` ternary, and interpolation errors.
+
 ### Lazy `ctx.*` Resolution
 
 Context capture is **lazy**: only the context groups actually referenced by
@@ -1020,15 +1120,17 @@ Unsupported or easy-to-misread forms:
 - a single `&`, `|`, or `=` — each is a lexer error; all three are only valid doubled
 - numeric dot access like `foo.0` — use `foo[0]` instead
 - chained comparison like `a < b < c` — use `a < b && b < c`
-- `-` inside a name: `{{ spec-name }}` is `spec` minus `name`, never a reference
-  to a `spec-name` key — use `{{ doc['spec-name'] }}`
+- unspaced subtraction after a name: `{{ iteration-1 }}` reads a key named
+  `iteration-1` (and warns when nothing defines it) — write `{{ iteration - 1 }}`
+- keys the identifier form cannot spell — containing `.` or `--`, starting with
+  a digit, or ending in `-` — use bracket access: `{{ doc['foo--bar'] }}`
 - number forms with an exponent (`1e3`), a leading dot (`.5`), or digit
   separators (`1_000`)
 
 ## Authoring a New Expression Function
 
 Expression functions live in domain modules under
-[`expression/functions/`](../../lib/src/markdown/compose/expression/functions)
+[`expression/functions/`](../../lib/src/markdown/compose/expression/functions/mod.rs)
 and share one registration model:
 
 - **Pure functions** — depend only on their arguments. Most
@@ -1065,4 +1167,4 @@ it never leaks an unresolved `{{ … }}` literal.
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)
-- [Context Variables](./context-variables.md)
+- [Context Variables](state-management/context-variables.md)

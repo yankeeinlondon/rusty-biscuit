@@ -4788,6 +4788,17 @@ class ArchiveGuardOnlyCellTests(unittest.TestCase):
             "a Rust file elsewhere says nothing about this package's public API",
         )
 
+    def test_a_guard_only_owner_is_not_also_reported_as_a_reverse_dependency(
+        self,
+    ) -> None:
+        # `test-toolkit` depends on `biscuit-test-harness`, so this one change
+        # makes the owner both an unchanged direct dependent and the guard's
+        # selection. `self.plan` validates the schema, which forbids both.
+        plan = self.plan("biscuit-test-harness/src/lib.rs")
+        self.assertEqual(1, len(self.toolkit_cells(plan)))
+        self.assertNotIn("test-toolkit", plan["reverse_dependencies"])
+        self.assertIn("biscuit-test-harness", plan["source_packages"])
+
     def test_a_guard_only_selection_adds_no_other_environment_or_build(self) -> None:
         plan = self.plan("claudine/lib/src/lib.rs")
         self.assertEqual(

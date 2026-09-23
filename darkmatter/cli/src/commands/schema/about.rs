@@ -722,7 +722,7 @@ mod tests {
         "<!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->";
     const CTX_DOC_END_MARKER: &str = "<!-- END GENERATED: ctx catalog -->";
 
-    /// The per-variable catalog reference in `docs/topics/context-variables.md`
+    /// The per-variable catalog reference in `docs/topics/state-management/context-variables.md`
     /// must be the exact `context_catalog_markdown()` output — the same renderer
     /// `md schema about --verbose` uses — so the doc can never drift from the
     /// schema-derived catalog. The generated block lives between the BEGIN/END
@@ -732,7 +732,7 @@ mod tests {
     fn context_variables_doc_matches_generated_catalog() {
         let doc = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../docs/topics/context-variables.md"
+            "/../docs/topics/state-management/context-variables.md"
         ));
 
         let generated = context_catalog_markdown();

@@ -30,7 +30,8 @@ pulldown-cmark = "0.13.1"
 termbg = "0.6"
 pulldown-cmark-to-cmark = "22.0.0"
 regex = "1.11"
-reqwest = { version = "0.13", features = ["json"] }
+# default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2", "json"] }
 rig-core = "0.31.0"
 unchained-ai = { path = "../../unchained-ai/lib" }
 semver = "1.0"

@@ -661,6 +661,41 @@ fn phase2_linked_worktree_paths_and_flags() {
 }
 
 #[test]
+fn summary_evidence_names_the_current_worktree_like_the_ambient_lookup() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+    let linked = dir.path().join("_wt").join("wt000");
+    // The request Claudine's invocation evidence uses.
+    let request = GitRequest::summary()
+        .metadata(sniff::request::GitMetadataRequest::none().remotes(true));
+
+    let info = detect_git_with_request(&linked, &request)
+        .unwrap()
+        .expect("linked worktree is a repository");
+    let ambient = GitRepo::discover(&linked)
+        .unwrap()
+        .unwrap()
+        .try_current_worktree_name()
+        .unwrap();
+    assert_eq!(info.current_worktree.as_deref(), Some("wt000"));
+    assert_eq!(info.current_worktree, ambient);
+    assert!(info.worktrees.is_empty(), "no worktree enumeration was requested");
+
+    let main = detect_git_with_request(dir.path(), &request)
+        .unwrap()
+        .expect("main checkout is a repository");
+    assert_eq!(main.current_worktree, None);
+
+    let outside = TempDir::new().unwrap();
+    assert!(
+        detect_git_with_request(outside.path(), &request)
+            .unwrap()
+            .is_none(),
+        "outside a repository there is no Git evidence at all"
+    );
+}
+
+#[test]
 fn phase2_discover_walks_up_from_subdirectory() {
     let dir = TempDir::new().unwrap();
     build_linear_main(dir.path(), 1);

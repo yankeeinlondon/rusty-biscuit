@@ -77,6 +77,20 @@ Build `SourceContext` at the parse boundary, where the path and content
 are already available. Pass it into the parser entry point and attach it
 to error variants as they are constructed.
 
+A line number is only true in the frame of the `content` it indexes.
+`Markdown::full_source_context_for_errors` rebuilds its text from the
+*current* body, which text replacement, page blocks, directive targets,
+and interpolation rescans may already have rewritten. To point at an
+authored position, index the loaded text (`loaded_source_context_for_errors`)
+and prove the location is authored first. Body and frontmatter
+interpolation do this — the body through the `BodyOrigin` edit map, the
+frontmatter through the YAML scalar projection, block, multi-line, tagged,
+and anchored scalars included, an alias through its uniquely defined
+anchor or else at the alias token — and report
+`SourceRef::OnDiskSpan` with an `AuthoredSpan` (range, line, column),
+falling back to file-only `SourceRef::OnDisk` when the proof fails rather
+than guessing.
+
 ## Standard Structural Layout
 
 Errors with a file origin follow this layout (rendered from top to

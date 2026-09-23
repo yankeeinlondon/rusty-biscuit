@@ -178,6 +178,10 @@ pub(crate) struct StagedDocument<'a> {
     pub term: &'a Terminal,
     pub repo_root: Option<&'a Path>,
     pub launch_area: &'a Path,
+    /// The invocation's refresh authority for the lazy `current`/`current_env`
+    /// roots, resolved once by the caller; `None` when there is no invocation,
+    /// so every `current.*` read in the staged boot fails closed.
+    pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     pub document_start: Instant,
 }
 
@@ -197,6 +201,7 @@ impl StagedDocument<'_> {
             launch_area: self.launch_area,
             context: self.context,
             file_resolution_context: self.bootstrap.input_layers.file_resolution_context.as_ref(),
+            current: self.current.clone(),
             frontmatter,
             document_start: self.document_start,
         }
@@ -239,9 +244,6 @@ pub(crate) fn route_staged_initialize(
         .as_object()
         .unwrap_or(&empty);
     let surface = document.catch_surface(frontmatter);
-    let current = claudine::composition::lifecycle_context::LifecycleCurrent::capture_at_event(
-        document.launch_area,
-    );
     let timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document.document_start,
         None,
@@ -254,7 +256,7 @@ pub(crate) fn route_staged_initialize(
         runtime_state: None,
         err: None,
         timing: Some(&timing),
-        current: Some(&current),
+        current: document.current.clone(),
         group: None,
         base_dir: surface.source_path.parent().or(document.repo_root),
         ctx_base_dir: Some(document.launch_area),

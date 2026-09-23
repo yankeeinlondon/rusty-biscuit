@@ -132,7 +132,7 @@ fn deepest_package_area(cwd: &Path, repo: &RepoInfo, packages: &[Package]) -> Op
     packages
         .iter()
         .map(|package| {
-            let path = if package.package_area == "root" {
+            let path = if package.package_area.is_empty() {
                 repo.root.clone()
             } else {
                 repo.root.join(&package.package_area)

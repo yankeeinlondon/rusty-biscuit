@@ -37,6 +37,26 @@ fn a_stray_top_level_file_is_rejected() {
 }
 
 #[test]
+fn a_fixture_binary_declared_under_tests_is_reached() {
+    // `claudine-cli`'s `claudine-fake-goose` lives in `tests/bin/` and is
+    // compiled by its own `[[bin]]`, not by any test target.
+    let manifest = format!(
+        "{MANIFEST}\n[[bin]]\nname = \"fake\"\npath = \"tests/bin/fake/main.rs\"\n"
+    );
+    let files = tree(&[
+        ("tests/bin/fake/main.rs", "mod support;\nfn main() {}\n"),
+        ("tests/bin/fake/support.rs", ""),
+    ]);
+    assert_eq!(layout_violations(&manifest, &files), Vec::<String>::new());
+    // Without the declaration, the same root is still an undeclared one.
+    let undeclared = layout_violations(MANIFEST, &files);
+    assert!(
+        undeclared.iter().any(|violation| violation.starts_with("tests/bin/fake/main.rs: an undeclared")),
+        "{undeclared:?}"
+    );
+}
+
+#[test]
 fn an_undeclared_crate_root_is_rejected() {
     let root = layout_violations(MANIFEST, &tree(&[("tests/level9/main.rs", "")]));
     assert_eq!(root.len(), 1);

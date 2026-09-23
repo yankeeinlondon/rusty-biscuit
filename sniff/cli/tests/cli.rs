@@ -6481,11 +6481,11 @@ fn test_repo_package_areas_root_area_verbose_renders_dot_slash() {
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(
-        stdout.contains("root (./)"),
+        stdout.contains("(root) (./)"),
         "Root package area should render as the repo root, got:\n{stdout}"
     );
     assert!(
-        !stdout.contains("root (./root)"),
+        !stdout.contains("(./root)"),
         "Root package area should not render a non-existent root directory, got:\n{stdout}"
     );
 }
@@ -8912,17 +8912,6 @@ fn test_repo_area_at_area_dir_returns_area_name() {
 }
 
 #[test]
-fn test_repo_area_at_repo_root_returns_root() {
-    let (_dir, path) = create_cli_monorepo();
-    let assert = common::owned_sniff_command()
-        .args(["--base", path.to_str().unwrap(), "repo", "area"])
-        .assert()
-        .success();
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert_eq!(stdout.trim(), "root");
-}
-
-#[test]
 fn test_repo_area_json_emits_name_outcome() {
     let (_dir, path) = create_cli_monorepo();
     let inside_pkg_b = path.join("pkg-b/lib");
@@ -9065,4 +9054,192 @@ fn test_repo_git_status_outside_git_repo_is_graceful() {
         stderr.is_empty(),
         "git-status outside a repo should produce no stderr, got: {stderr:?}"
     );
+}
+
+// ─── merged from feat/dark-fixes: package-area root sentinel ────────────────
+
+#[test]
+fn test_repo_area_at_repo_root_prints_an_empty_area() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "repo", "area"])
+        .assert()
+        .success();
+    // The empty area is still a result: an empty line and exit 0, distinct
+    // from the non-monorepo "no results" exit 1.
+    assert_eq!(String::from_utf8_lossy(&assert.get_output().stdout), "\n");
+
+    let assert = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap(), "--json", "repo", "area"])
+        .assert()
+        .success();
+    let value: Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+/// A monorepo with a top-level package (`top`), a package inside a real area
+/// named `root` (`root/lib`), and an ordinary area (`pkg-a/lib`).
+fn create_cli_monorepo_with_top_level_and_root_named_area() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_cli_monorepo();
+    std::fs::write(
+        path.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"pkg-a/lib\", \"pkg-b/lib\", \"root/lib\", \"top\"]\n",
+    )
+    .unwrap();
+    for (dir_name, name) in [("root/lib", "root-lib"), ("top", "top")] {
+        let pkg = path.join(dir_name);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn f() {}").unwrap();
+    }
+    (dir, path)
+}
+
+fn sniff_stdout(base: &Path, args: &[&str]) -> (String, Option<i32>) {
+    let output = common::owned_sniff_command()
+        .args(["--base", base.to_str().unwrap()])
+        .args(args)
+        .output()
+        .expect("failed to run sniff");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        output.status.code(),
+    )
+}
+
+#[test]
+fn test_repo_scope_projections_use_the_empty_top_level_area() {
+    let (_dir, path) = create_cli_monorepo_with_top_level_and_root_named_area();
+
+    // Inside a top-level package: the area is the package, the package area is
+    // empty (a no-result), and no synthetic `root` appears anywhere.
+    let top = path.join("top/src");
+    assert_eq!(sniff_stdout(&top, &["repo", "area"]), ("top\n".to_string(), Some(0)));
+    let (stdout, code) = sniff_stdout(&top, &["repo", "package-area"]);
+    assert_eq!(code, Some(1), "an empty package area is no result: {stdout}");
+    assert!(!stdout.contains("root"), "{stdout}");
+    let (stdout, _) = sniff_stdout(&top, &["--json", "repo", "package-area"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["name"], Value::String(String::new()));
+    let (stdout, _) = sniff_stdout(&top, &["--json", "repo", "package-area-root"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["root"], Value::String(String::new()));
+
+    // The aggregate projection carries the semantic empty strings.
+    let (stdout, code) = sniff_stdout(&top, &["--json", "repo"]);
+    assert_eq!(code, Some(0), "{stdout}");
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    let context = value
+        .as_object()
+        .and_then(|root| root.values().find_map(|v| v.get("package_area_root").map(|_| v)))
+        .unwrap_or_else(|| panic!("aggregate context missing:\n{stdout}"));
+    assert_eq!(context["area"], "top");
+    assert_eq!(context["package_area"], "");
+    assert_eq!(context["package_area_root"], "");
+
+    // A real area named `root` is an ordinary area.
+    let root_area = path.join("root");
+    assert_eq!(
+        sniff_stdout(&root_area, &["repo", "area"]),
+        ("root\n".to_string(), Some(0))
+    );
+    assert_eq!(
+        sniff_stdout(&path.join("root/lib/src"), &["repo", "package-area"]),
+        ("root\n".to_string(), Some(0))
+    );
+    let (stdout, _) = sniff_stdout(&root_area, &["--json", "repo", "package-area-root"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert!(
+        value["root"].as_str().unwrap().replace('\\', "/").ends_with("/root"),
+        "{stdout}"
+    );
+
+    // Listings label the empty area at render time only; JSON keeps it empty.
+    let (stdout, _) = sniff_stdout(&path, &["repo", "package-areas", "--list", "--plain"]);
+    let mut listed: Vec<&str> = stdout.lines().collect();
+    listed.sort_unstable();
+    assert_eq!(listed, vec!["(root)", "pkg-a", "pkg-b", "root"]);
+    let (stdout, _) = sniff_stdout(&path, &["--json", "repo", "package-areas"]);
+    let value: Value = serde_json::from_str(stdout.trim()).unwrap();
+    let mut areas: Vec<&str> = value
+        .as_array()
+        .unwrap_or_else(|| panic!("package-areas array missing:\n{stdout}"))
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    areas.sort_unstable();
+    assert_eq!(areas, vec!["", "pkg-a", "pkg-b", "root"]);
+}
+
+// ─── merged from feat/dark-fixes: plain-output parity, ported to `RecentCommits` ──
+
+fn commit_at(repo: &git2::Repository, files: &[(&str, &str)], message: &str, epoch: i64) {
+    let root = repo.workdir().unwrap().to_path_buf();
+    let mut index = repo.index().unwrap();
+    for (file, content) in files {
+        let full = root.join(file);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+        index.add_path(Path::new(file)).unwrap();
+    }
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
+    let parent = repo.head().ok().map(|head| head.peel_to_commit().unwrap());
+    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+        .unwrap();
+}
+
+/// `sniff repo recent-commits --plain` prints exactly `RecentCommits::to_plain`,
+/// and that report is the per-commit `plain_blocks` joined by one blank line.
+/// Darkmatter's `ctx.recent_commits` takes the blocks, so this is the parity
+/// chain that keeps its array elements byte-equal to the CLI's output.
+#[test]
+fn test_repo_recent_commits_plain_is_the_joined_per_commit_blocks() {
+    use sniff::filesystem::git::{GitRepo, RecentCommits, RecentCommitsOptions};
+
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    // 2020-02-03T12:00:00Z and later, one hour apart.
+    let base = 1_580_731_200;
+    commit_at(&repo, &[("a.txt", "a")], "initial", base);
+    commit_at(
+        &repo,
+        &[("src/lib.rs", "pub fn f() {}"), ("README.md", "# r")],
+        "feat(core): add f\n\n- adds f\n- documents f",
+        base + 3600,
+    );
+    commit_at(&repo, &[], "chore: empty commit", base + 7200);
+    commit_at(&repo, &[("a.txt", "b")], "tweak a", base + 10_800);
+
+    let assert = common::owned_sniff_command()
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "4",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+
+    let git = GitRepo::discover(dir.path()).unwrap().unwrap();
+    let options = RecentCommitsOptions::new().count(4);
+    let set = RecentCommits::collect(&git, &options).unwrap();
+    assert_eq!(set.len(), 4);
+    let blocks = set.plain_blocks(&options);
+    assert_eq!(blocks.len(), 4, "every collected commit has a block; consumers drop empties");
+    assert_eq!(set.to_plain(&options), blocks.join("\n"), "blocks are the units of to_plain");
+    assert_eq!(stdout, set.to_plain(&options), "the CLI prints to_plain verbatim");
+    for block in &blocks {
+        assert!(block.starts_with("- ["), "a block opens with its hash: {block:?}");
+        assert!(!block.contains("**"), "plain output carries no markup: {block:?}");
+    }
 }

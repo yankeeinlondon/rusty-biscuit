@@ -72,8 +72,9 @@ fn reference_options(repo_root: &std::path::Path) -> ComposeOptions {
     // Demand-driven capture: `ComposeOptions::new()` scans git, repo, file
     // changes, languages, docs, OS, hardware and GPU rooted at the real working
     // tree on every call. These fixtures compose throwaway documents in a temp
-    // repository and read no `ctx.*`, so the scan is pure cost — and `ctx.*`
-    // still captures its group on demand during evaluation if one appears.
+    // repository and read no `ctx.*`, so the scan is pure cost. The context is
+    // caller-supplied and frozen: a `ctx.*` read of another group would fail
+    // with `ContextNotCaptured`.
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(repo_root, ""))
         .with_file_resolution_context(context)
 }
@@ -857,11 +858,11 @@ fn reference_graph_with_cache_root() {
     let mut options = ReferenceGraphOptions::default();
     options.compose = options.compose.with_cache_root(cache_dir.path());
 
-    // First pass — populates the cache
+    // Two passes against one cache root build identical graphs; no local
+    // artifact is persisted between them (R18).
     let graph1 = md.reference_graph(options.clone()).unwrap();
     assert_eq!(graph1.node_count(), 2);
 
-    // Second pass — should hit the cache for child document load
     let graph2 = md.reference_graph(options).unwrap();
     assert_eq!(graph2.node_count(), 2);
     assert_eq!(
@@ -986,7 +987,7 @@ fn transclusion_ref_resolved_target_is_correct_path() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn reference_graph_cache_honors_namespace() {
+fn reference_graph_with_namespaced_cache_root_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     write_files(
@@ -1004,17 +1005,14 @@ fn reference_graph_cache_honors_namespace() {
         .with_cache_root(cache_dir.path())
         .with_cache_namespace("test-branch");
 
-    // Build the graph — should use namespace-scoped persistent cache
+    // The only persistent store is the remote-body store, and it creates its
+    // namespaced directories only when it writes a remote body; a local-only
+    // graph writes none.
     let graph = md.reference_graph(options).unwrap();
     assert_eq!(graph.node_count(), 2);
 
-    // Verify the namespaced cache directory was created
-    let expected_cache = cache_dir.path().join(".darkmatter").join("cache");
-    // The version directory should exist under the namespace
-    assert!(
-        expected_cache.exists(),
-        "persistent cache directory structure should be created under resolve_cache_root path"
-    );
+    let entries: Vec<_> = std::fs::read_dir(cache_dir.path()).unwrap().collect();
+    assert!(entries.is_empty(), "a local-only graph wrote under the cache root: {entries:?}");
 }
 
 // ── FileTree integration tests ──────────────────────────────────────
@@ -1562,8 +1560,8 @@ fn prebuilt_graph_rejects_unreadable_child() {
     assert!(err.to_string().contains("no longer readable"), "got: {err}");
 }
 
-/// Descendant verification reads the child straight from disk, so a persistent
-/// cache holding the old content cannot mask a subsequent on-disk edit.
+/// Descendant verification reads the child straight from disk, so a configured
+/// cache root cannot mask a subsequent on-disk edit.
 #[test]
 fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
     let dir = TempDir::new().unwrap();
@@ -1574,7 +1572,7 @@ fn prebuilt_graph_bypasses_cache_for_descendant_edit() {
     );
     let md = load_md(&dir, "root.md");
 
-    // Build the graph with a persistent cache populated from the old child.
+    // Build the graph with a cache root configured (no child is persisted).
     let graph_opts =
         ReferenceGraphOptions::with_compose(ComposeOptions::new().with_cache_root(cache_root.path()));
     let graph = md.reference_graph(graph_opts.clone()).unwrap();

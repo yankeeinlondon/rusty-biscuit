@@ -25,19 +25,19 @@ tags:
     - autocomplete
     - hover
     - diagnostics
-hash: 7c075441cf9b6eef-f8c0fcc1abedd327
-last_updated: 2026-09-18
+hash: 7c075441cf9b6eef-e377c118e10a1054
+last_updated: 2026-09-19
 ---
 # DMLS Schema Support
 
 ## Overview
 
-The **Darkmatter Language Server** (DMLS) is the piece of the Darkmatter package area that makes [Simplified Schemas](./authoring-schemas.md) come alive inside your editor. It speaks standard **LSP 3.17 over stdio**, so it works in any conforming editor, and it is verified against the four editors we care most about: VS Code, Zed, Neovim, and Helix.
+The **Darkmatter Language Server** (DMLS) is the piece of the Darkmatter package area that makes [Simplified Schemas](./authoring-schemas.md) come alive inside your editor. It speaks standard **LSP 3.17 over stdio** and targets four primary editors: VS Code, Zed, Neovim, and Helix. Its protocol behavior is covered by automated tests; most real-editor checks remain on the [manual smoke checklist](../../../dmls/docs/editors/smoke-checklist.md), with automated real-client coverage for Neovim's semantic-token integration.
 
 Two principles govern everything in this document:
 
-1. **The library is the only authority.** DMLS never re-implements schema parsing, selection, validation, or completion logic. It calls the same `darkmatter` library types that `md compose` and `md schema validate` call, so what your editor tells you and what the CLI enforces can never drift apart.
-2. **Editor analysis is passive.** Every schema request — diagnostics, completion, hover, navigation — runs on source text plus already-captured workspace context. Nothing executes a shell command, fetches a remote URL, or mutates a file. A schema may *declare* `file(eager)` or `expression` values, but DMLS only ever *explains* them; it never runs them.
+1. **The library owns schema semantics.** DMLS uses the same `darkmatter` library parsers, schema selection, validation, descriptor catalogs, and union-arm selection that `md compose` and `md schema validate` use. DMLS owns the LSP-specific assembly and presentation of completion items, hovers, diagnostics, and edits.
+2. **Editor analysis is passive.** Schema requests run on source text, captured workspace context, and passive local-file resolution. DMLS may read local schema files and check whether referenced paths exist, but it never executes a shell command, fetches a remote URL, or mutates a file. A schema may *declare* `file(eager)` or `expression` values, but DMLS never executes their contents.
 
 DMLS layers schema intelligence onto two very different authoring experiences:
 
@@ -73,8 +73,6 @@ A few details worth knowing:
 - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
 
-> **Note:** the implemented trigger envelope kind is `kind: trigger-schema`, discovered by scanning `schemas/` directories within the document's workspace boundary (the nearest workspace folder, narrowed by the Git repository root when one applies). The authoring documentation describes the agreed target contract under the canonical spelling `kind: schema-trigger`; the naming migration is still in flight, so match the spelling above when targeting today's DMLS. A malformed envelope is reported as a file-level `dm.schema.prepare` diagnostic on the envelope file itself — never on the documents it would have served — and the last-good registry keeps serving consumers while it is broken.
-
 DMLS does **not** read the `SCHEMA_DIR` environment variable; that is a CLI/library-side discovery mechanism. In the editor, additional always-on baselines arrive through [configuration](#extensibility-through-configuration) instead.
 
 ## Implemented LSP Features
@@ -89,6 +87,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 |----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `dm.frontmatter.yaml_parse`                                    | the frontmatter YAML could not be parsed                                                              |
 | `dm.schema.invalid_schema_shape`                               | the `$schema` value is not a valid schema shape (also covers a rejected standalone outer declaration) |
+| `dm.schema.invalid_type_definition`                            | a property definition in a schema-authoring surface is invalid                                        |
 | `dm.schema.prepare`                                            | the schema could not be resolved, merged, or compiled                                                 |
 | `dm.schema.type_mismatch`                                      | a value did not match its declared type                                                               |
 | `dm.schema.constraint`                                         | a non-type constraint failed (range, length, pattern, enum, …)                                        |
@@ -97,6 +96,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.deprecated_key`                                     | a deprecated key is present                                                                           |
 | `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse, resolve, or match a file                                   |
 | `dm.schema.invalid_suggestion`                                 | a `suggest(...)` candidate is invalid metadata for its target schema                                  |
+| `dm.schema.missing_simplified_envelope`                        | a referenced bare property map looks like SimplifiedSchema but lacks a supported envelope             |
 | `dm.schema.document_malformed`                                 | a recognized standalone schema envelope is malformed                                                  |
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
 | `dm.expression.malformed` / `dm.expression.unknown_identifier` | expression-typed frontmatter values that do not parse or name something resolvable                    |
@@ -198,7 +198,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 | Standalone schema documents (`kind: schema`)  | ✅ ¹⁴       | ✅         | ✅    | —            | —               | ❌          | ❌     | —            |
 | `expression`-typed values                     | ✅          | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 | `style.*` keys                                | ✅          | ✅         | ✅    | —            | —               | ❌          | ❌     | ✅           |
-| Trigger envelopes (`kind: trigger-schema`)    | ✅ ¹⁶       | —          | —     | —            | —               | ❌          | ❌     | —            |
+| Trigger envelopes (`kind: schema-trigger`)    | ✅ ¹⁶       | —          | —     | —            | —               | ❌          | ❌     | —            |
 | `ctx.*` generated keys                        | —           | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 
 1. Required keys marked; nested keys offered per the enclosing inline-object shape.
@@ -278,7 +278,7 @@ This is how any tool built on Darkmatter — Claudine today, whatever comes next
 
 DMLS deliberately ships **no plugin API** in v1: no dynamic provider registration, no custom completion sources, no server-side hooks. That is a design decision, not an omission — the editor surface stays a *projection* of the library, and the extension seam lives one layer down where it benefits every consumer at once.
 
-The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markdown::schemas`). Everything DMLS knows about schemas, it learned from these public types — so a host application that uses the same types gets identical semantics for free:
+The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markdown::schemas`). These public types provide the schema semantics that DMLS projects into LSP, so a host application can share parsing, selection, validation, and catalog behavior with the editor:
 
 - **`DarkmatterSchemas`** is the schema engine builder. Stack your own baselines the same way DMLS does:
     - `with_baseline(...)` / `with_baseline_from_file(...)` / `with_baseline_json_schema(...)` — add SimplifiedSchema or raw JSON Schema baselines
@@ -288,7 +288,7 @@ The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markd
 
 - **`EffectiveSchema`** carries the assembled result: `validate_with_positions(...)` for source-spanned problems, `dependencies()` for the files the schema depends on (what DMLS content-hash watches), and `advisories()` for non-fatal findings.
 - **`parse_standalone_schema_document`** is the passive classifier for standalone schema files — the same authority that decides when your open buffer is a `kind: schema` document deserving authoring intelligence.
-- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` — are public. DMLS completion and library validation call the *same* arm selectors and descriptor iterators, which is why editor completions cannot drift from CLI validation. Any tool that wants DMLS-grade schema intelligence (a documentation generator, a linter, a custom editor) consumes these and inherits every grammar rule by reference.
+- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
 
 The pattern in practice: a host application (Claudine is the worked example) authors its vocabulary as schema *data*, injects it programmatically through the `DarkmatterSchemas` builder for its own runtime, and — for the editor experience — ships the same YAML file referenced from a `[schema.extensions.*]` entry. One schema artifact, zero server code, identical behavior everywhere.
 

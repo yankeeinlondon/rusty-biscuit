@@ -1,0 +1,19 @@
+kind: schema
+description: a schema to represent a lifecycle hook's stack
+$schema:
+
+types:
+    stack:
+        - stack_item[]
+        - "[ ...stack_item[], terminal_node  ]"
+
+    conditional:
+        when: expression(required)
+        then: stack(required)
+        else: stack
+
+    stack_item:
+        - communication@./communication.yaml
+        - shell@./shell.yaml
+        - side_effect@./side-effect.yaml
+    terminal_node: flow@./flow-control.yaml

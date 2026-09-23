@@ -129,6 +129,11 @@ $schema:
     replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
     ctx:
         cwd: "string(generated) -> Absolute launch directory captured when the composition request began, or null when ambient capture failed."
+        self: "string(generated) -> Absolute canonical native path of the root document, or null for URL and in-memory roots."
+        last_updated: "datetime(generated) -> Filesystem modification time of the root document, or null when unavailable or for URL and in-memory roots."
+        hash: "string(generated) -> The root document's '<frontmatter>-<body>' xxHash of its source as loaded, matching `md hash`, or null for URL and in-memory roots."
+        id: "string(generated; required) -> xxHash identifying this execution of the root document: its source, ctx.timestamp_ms, host name, repository name, and a per-execution random nonce."
+        sid: "string(generated; required) -> Full hexadecimal BLAKE3 digest of the same inputs as ctx.id. A cryptographic digest, not a secret."
         now: "datetime(generated; required) -> Local date and time in ISO-8601 format."
         now_utc: "datetime(generated; required) -> UTC date and time in ISO-8601 format."
         today: "date(generated; required) -> Local date in ISO-8601 format."
@@ -173,6 +178,7 @@ $schema:
         repo_root: "string(generated) -> Absolute repository root path, or null when unavailable."
         branch: "string(generated) -> Current local Git branch name, or null outside a repository or at detached HEAD."
         worktree: "string(generated) -> Current linked Git worktree name, or null in the main worktree or outside a repository."
+        recent_commits: "string[](generated; required) -> Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository."
         is_monorepo: "boolean(generated; required) -> Whether the current repository is a monorepo."
         package_root: "string(generated) -> Absolute current package root path, or null when unavailable."
         package_area_root: "string(generated) -> Absolute current package area root path, or null when unavailable."
@@ -207,6 +213,7 @@ $schema:
         docs_drift: "string[](generated; required) -> Docs at risk of drift from source changes."
         docs_skill: "string(generated) -> Repo-relative path to the best matching skill file, or null when unavailable."
         os: "string(generated) -> Operating system name, or null when unavailable."
+        hostname: "string(generated) -> Host name reported by the operating system, or null when unavailable."
         os_distro: "string(generated; required) -> Linux distribution name, empty on macOS and Windows."
         os_package_manager: "string(generated) -> Primary system package manager, or null when unavailable."
         os_version: "string(generated; required) -> Operating system version."
@@ -216,6 +223,9 @@ $schema:
         cpu_cores: "number(integer; generated) -> Number of logical CPU cores, or null when unavailable."
         cpu_arch: "string(generated) -> CPU architecture, or null when unavailable."
         gpu: "string(generated) -> GPU device names, or null when unavailable."
+        tailnet: "boolean(generated; required) -> Whether any host interface has an address in the CGNAT range 100.64.0.0/10 (Tailscale). Other VPNs and CGNAT ISPs using that range also report true."
+        gateway: "string(generated) -> Primary IPv4 gateway address, or null without a default route or when the default route has no gateway address."
+        gateway_v6: "string(generated) -> Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address."
         agent: "string(generated; required) -> The agentic CLI provider being used in the current session."
         model: 'string(generated; required) -> Active model identifier, trimmed from the MODEL env var; defaults to "default".'
 

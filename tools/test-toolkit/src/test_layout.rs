@@ -62,7 +62,8 @@ fn collect(crate_root: &Path, directory: &Path, files: &mut BTreeMap<String, Str
 /// returns them). Empty means the layout holds.
 ///
 /// Besides unreached files, it requires `autotests = false` and an explicit,
-/// existing `path` on every `[[test]]`.
+/// existing `path` on every `[[test]]`. A `[[bin]]`, `[[example]]`, or
+/// `[[bench]]` whose path lies under `tests/` is a root too.
 pub fn layout_violations(manifest: &str, files: &BTreeMap<String, String>) -> Vec<String> {
     let mut violations = Vec::new();
     let manifest: toml::Table = match toml::from_str(manifest) {
@@ -94,6 +95,26 @@ pub fn layout_violations(manifest: &str, files: &BTreeMap<String, String>) -> Ve
             }
             Some(path) => violations.push(format!("[[test]] {name}: {path} does not exist")),
             None => violations.push(format!("[[test]] {name}: declare its `path` explicitly")),
+        }
+    }
+
+    // A fixture binary, example, or bench whose source sits under `tests/` is
+    // compiled by its own declared target, so it is reached. Only an explicit
+    // path can put one there; a missing path is Cargo's to report, not this
+    // gate's.
+    for kind in ["bin", "example", "bench"] {
+        for target in manifest
+            .get(kind)
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(path) = target.get("path").and_then(toml::Value::as_str) {
+                let path = normalize_relative(path);
+                if files.contains_key(&path) {
+                    pending.push(path);
+                }
+            }
         }
     }
 

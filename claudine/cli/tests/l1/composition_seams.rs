@@ -302,8 +302,9 @@ struct Occurrence {
 /// pattern this fix removed: route it through the invocation owner, or add the
 /// site here with a reason naming the compatibility contract it serves.
 ///
-/// Live `current.ctx.*` capture is a different contract (event-time state, out
-/// of scope by design) and is allowlisted as such below.
+/// The lazy `current.*` root is a different contract (it observes a mutable
+/// fact when the reference is reached, rather than snapshotting `ctx.*`) and is
+/// allowlisted as such below.
 const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
     AllowedSite {
         site: "invocation_context::capture_launch_context",
@@ -338,10 +339,11 @@ const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
                  without a retained snapshot",
     },
     AllowedSite {
-        site: "lifecycle::context::capture_at_event",
+        site: "invocation_context::refresh_current",
         calls: 1,
-        reason: "LIVE `current.ctx.*` event-time capture — intentionally \
-                 ambient and outside the prepared-snapshot contract",
+        reason: "the lazy `current.<key>` refresh — projects ONE re-observed \
+                 group against the same launch anchor and retained launch \
+                 repository the owner uses, never a second discovery",
     },
     AllowedSite {
         site: "sequence::preflight::build_preflight_graph",

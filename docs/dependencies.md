@@ -2,6 +2,24 @@
 
 ## Recent Dependency Notes
 
+- Every `reqwest` edge in the workspace sets `default-features = false` and
+  re-lists `default-tls`, `charset`, and `http2`. The one default this drops is
+  `system-proxy` (`hyper-util/client-proxy-system`), which removed
+  `system-configuration`, `system-configuration-sys`, `windows-registry`, and
+  `core-foundation 0.9` from the graph. **`default-tls` is re-listed
+  deliberately** — it resolves to rustls under reqwest 0.13 and to native-tls
+  under 0.12 (`messenger/lib`), so dropping it would silently switch a TLS
+  backend. What `system-proxy` provided was narrow: a *manually* configured
+  HTTP/HTTPS `host:port` from macOS System Settings or the Windows
+  `Internet Settings` registry key. It never read PAC/auto-configuration, WPAD,
+  SOCKS, Keychain credentials, or — on macOS only — the system bypass list, so
+  it could route a host the user had explicitly excluded through a proxy.
+  `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` and explicit
+  `ClientBuilder::proxy` are unaffected, and Linux never had the system path at
+  all. It also cost ~3 s per process on macOS: the `SCDynamicStore` probe walks
+  the executable's own directory via `CFBundleGetMainBundle`, which is
+  pathological for test binaries in `target/debug/deps`. A crate that adds
+  `reqwest` should copy this shape rather than take the defaults.
 - `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
   metadata pipeline Phase 5). The crate was already in the graph through
   `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
@@ -168,6 +186,10 @@
   and side-effect `http_post` host-policy enforcement.
 - `claudine-gen` uses `biscuit-file`'s `file-reference` feature to resolve
   schema-constrained empirical research fixtures relative to their topic.
+- `darkmatter/lib` enables `biscuit-hash`'s `blake3` feature for the `ctx.sid`
+  digest, and takes direct `ipnet` (CIDR filters and ICMP grants, already
+  resolved through `sniff`) and `getrandom` (the `ctx.id`/`ctx.sid` execution
+  nonce) dependencies.
 - `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
   transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
   precedence (Feature C) can emit negative-lookahead `patternProperties`: such
@@ -1008,6 +1030,12 @@ This is a Rust workspace with the following modules:
 
 ### Random
 
+- [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
+
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce._
+
+    _Tags: random, csprng, system_
+
 - [rand](https://github.com/rust-random/rand) _v0.8_ [📄](https://docs.rs/rand)
 
     _Random number generators with fast implementations and broad distribution support._
@@ -1327,6 +1355,18 @@ This is a Rust workspace with the following modules:
 - [getifaddrs](https://github.com/mmastrac/getifaddrs) _v0.6.0_ [📄](https://docs.rs/getifaddrs)
 
     _Cross-platform library for retrieving network interface addresses and indices._
+
+    _Tags: network, system_
+
+- [ipnet](https://github.com/krisprice/ipnet) _v2_ [📄](https://docs.rs/ipnet)
+
+    _IPv4 and IPv6 network (CIDR) types with containment checks._
+
+    _Tags: network, parsing_
+
+- [socket2](https://github.com/rust-lang/socket2) _v0.6_ [📄](https://docs.rs/socket2)
+
+    _Low-level socket construction beyond `std::net`, used for unprivileged datagram ICMP sockets (Unix)._
 
     _Tags: network, system_
 

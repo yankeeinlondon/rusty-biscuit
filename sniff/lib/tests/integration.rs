@@ -2843,3 +2843,24 @@ mod recent_commits_public_surface {
         );
     }
 }
+
+// ─── merged from feat/dark-fixes, ported to `RecentCommits` ─────────────────
+
+/// An unborn `HEAD` is an empty set, not an error; a directory outside any
+/// repository has no `GitRepo` to collect from at all.
+#[test]
+fn test_recent_commits_unborn_repo_is_empty_and_outside_is_not_a_repository() {
+    use sniff::filesystem::git::{GitRepo, RecentCommits, RecentCommitsOptions};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let repo = GitRepo::discover(dir.path()).unwrap().expect("an initialized repository");
+    let options = RecentCommitsOptions::new().count(10);
+    let set = RecentCommits::collect(&repo, &options).expect("an unborn HEAD is not an error");
+    assert!(set.is_empty());
+    assert_eq!(set.to_plain(&options), "");
+    assert!(set.plain_blocks(&options).is_empty());
+
+    let outside = tempfile::TempDir::new().unwrap();
+    assert!(GitRepo::discover(outside.path()).unwrap().is_none());
+}

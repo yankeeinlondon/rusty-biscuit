@@ -30,8 +30,11 @@ conditions that masquerade as repository defects.
   container. PTY-backed L2 tests pass there too. Mount the source as a copy
   (`rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`) because a worktree's `.git`
   is a file pointing outside the container. Excluding `.gitnexus/` is required: its
-  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Two traps: keep
-  `CARGO_TARGET_DIR` on a host mount (`-v /tmp/x-target:/t -e
+  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Put that copy
+  and the target under `$HOME` (e.g. `~/.cache/<scratch>`): Docker Desktop's default file
+  sharing rejects both `/Volumes/...` and `/tmp` (`/private`) bind mounts with
+  `mkdir /Volumes: read-only file system` (found 2026-09-16). Two traps: keep
+  `CARGO_TARGET_DIR` on a host mount (`-v ~/.cache/x-target:/t -e
   CARGO_TARGET_DIR=/t`), since the VM overlay is small and fills; and a
   whole-package `cargo nextest run` OOM-kills the linker in the default VM,
   so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and targeted `--lib` /

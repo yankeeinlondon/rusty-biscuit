@@ -50,12 +50,16 @@ fn unrelated_backslashes_are_untouched() {
 #[test]
 fn escaped_foreign_template_examples_produce_no_expression_warnings() {
     // The deprecated single-pipe form from `claudine/docs/topics/unified-events.md`
-    // is not Darkmatter syntax, so unescaped it warns.
+    // is not Darkmatter syntax. Unescaped, it is a body `{{ … }}` the grammar
+    // rejects, and that fails composition outright (see
+    // `interpolation/fatality_characterization.rs`): the control case proves
+    // the span is scanned, so the escape below is what keeps it out.
     let example = r#"{{env.VAR | "default"}}"#;
-    let (_, unescaped_warnings) = compose_body(&format!("Old form: {example}"));
+    let unescaped: Markdown = format!("---\nx: value\n---\nOld form: {example}\n").into();
+    let error = unescaped.compose().expect_err("an unparseable body span fails composition");
     assert!(
-        unescaped_warnings.iter().any(|w| w.contains("failed to parse")),
-        "control case should warn: {unescaped_warnings:?}"
+        error.to_string().contains("Unexpected '|'"),
+        "control case should fail to parse: {error}"
     );
 
     let escaped = format!("Old form: \\{example} and `\\{example}`");

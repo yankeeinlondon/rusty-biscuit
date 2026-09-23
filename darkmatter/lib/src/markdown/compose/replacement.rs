@@ -35,6 +35,7 @@
 //! ```
 
 use super::EffectiveState;
+use super::body_origin::TextEdit;
 use serde_json::Value;
 use tracing::debug;
 
@@ -87,16 +88,26 @@ struct ReplacementRule {
 /// assert_eq!(count, 2);
 /// ```
 pub fn apply_replacements(content: &str, state: &EffectiveState) -> (String, usize) {
+    let (result, edits) = apply_replacements_with_edits(content, state);
+    (result, edits.len())
+}
+
+/// [`apply_replacements`], also returning the edit each replacement made to
+/// `content`, in order. The edit count is the replacement count.
+pub(crate) fn apply_replacements_with_edits(
+    content: &str,
+    state: &EffectiveState,
+) -> (String, Vec<TextEdit>) {
     // Get replacement rules from state
     let rules = match build_replacement_rules(state) {
         Some(rules) if !rules.is_empty() => rules,
-        _ => return (content.to_string(), 0),
+        _ => return (content.to_string(), Vec::new()),
     };
 
     // Apply replacements with single-pass scanner
-    let (result, count) = scan_and_replace(content, &rules);
-    debug!(count, "replacement: applied text replacements");
-    (result, count)
+    let (result, edits) = scan_and_replace(content, &rules);
+    debug!(count = edits.len(), "replacement: applied text replacements");
+    (result, edits)
 }
 
 /// Builds sorted replacement rules from the effective state.
@@ -175,7 +186,7 @@ fn coerce_to_string(value: &Value) -> Option<String> {
 /// boundaries are preserved because every rule key is a valid substring, so its
 /// match range always lands on character boundaries; empty keys are already
 /// filtered in [`build_replacement_rules`], and scalar coercion is unchanged.
-fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize) {
+fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, Vec<TextEdit>) {
     let automaton = match AhoCorasick::builder()
         .match_kind(MatchKind::LeftmostLongest)
         .build(rules.iter().map(|rule| &rule.key))
@@ -184,23 +195,24 @@ fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize)
         // A build failure (e.g. a degenerate pattern set) is not a compose
         // fault: fall back to leaving the content unchanged, matching the
         // "no applicable rules" outcome rather than aborting the pipeline.
-        Err(_) => return (content.to_string(), 0),
+        Err(_) => return (content.to_string(), Vec::new()),
     };
 
     let mut result = String::with_capacity(content.len());
-    let mut replacement_count = 0;
+    let mut edits = Vec::new();
     let mut last_end = 0;
 
     for mat in automaton.find_iter(content) {
         // Copy the verbatim gap since the previous match, then the replacement.
+        let value = &rules[mat.pattern().as_usize()].value;
         result.push_str(&content[last_end..mat.start()]);
-        result.push_str(&rules[mat.pattern().as_usize()].value);
+        result.push_str(value);
         last_end = mat.end();
-        replacement_count += 1;
+        edits.push(TextEdit { range: mat.start()..mat.end(), replacement_len: value.len() });
     }
     result.push_str(&content[last_end..]);
 
-    (result, replacement_count)
+    (result, edits)
 }
 
 #[cfg(test)]

@@ -60,6 +60,7 @@ fn main() {
         branches: vec![],
         in_worktree: true,
         base_repo_root: Some(PathBuf::from("/tmp/demo/project")),
+        current_worktree: Some("login-fix".to_string()),
         recent: vec![],
         status: Some(RepoStatus::default()),
         remotes: vec![],

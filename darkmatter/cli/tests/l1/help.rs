@@ -117,3 +117,50 @@ fn test_completions_fish() {
         .success()
         .stdout(predicate::str::is_empty().not());
 }
+
+/// Acceptance criterion 7 (content-policy-no-cache): `md compose --help` names
+/// the one artifact class `--cache-root` persists in the same
+/// semantic-result / transport-artifact vocabulary as the library docs and
+/// the caching topic, and describes each freshness mode as the code behaves.
+#[test]
+fn test_compose_help_states_the_transport_cache_boundary() {
+    let fixture = CliProcessFixture::named("test_compose_help_states_the_transport_cache_boundary");
+    let output = fixture
+        .command()
+        .args(["compose", "--help"])
+        .output()
+        .expect("md compose --help runs");
+    assert!(output.status.success(), "md compose --help failed: {output:?}");
+    // Help wraps at the detected width; compare on collapsed whitespace.
+    let help = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for expected in [
+        // --cache-root: the persisted class, the prohibited class, laziness,
+        // `no-store`, and the absence of any network grant.
+        "Transport-artifact cache root",
+        "persists raw remote URL response bodies only",
+        "Semantic results (composed documents, `::file` children, `::code` / `::toc-linking` output) are never persisted",
+        "Nothing is created on disk until a storable remote response is written",
+        "A `Cache-Control: no-store` response is never written",
+        "A cache root never authorizes a host",
+        // --remote-ttl never turns a zero TTL into `no-store`.
+        "never makes a `no-store` response storable or a `no-cache` response fresh",
+        // --remote-refresh
+        "Revalidate every transport-cached remote body",
+        // --remote-freshness, per mode.
+        "Serve within the freshness lifetime; past it, revalidate with a conditional GET and fail if revalidation fails",
+        "serve the stale body when revalidation fails",
+        "`no-cache` responses are always revalidated",
+    ] {
+        assert!(help.contains(expected), "missing {expected:?} in:\n{help}");
+    }
+    for drifted in [
+        "Always revalidate with a conditional GET",
+        "composed output is never persisted",
+    ] {
+        assert!(!help.contains(drifted), "drifted wording {drifted:?} in:\n{help}");
+    }
+}

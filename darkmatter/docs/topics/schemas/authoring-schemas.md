@@ -41,20 +41,20 @@ In any case, our goal with **Simplified Schema** is to be as "standards based" a
     - an inline schema definition (Simplified Schema)
     - a local file reference to a YAML or JSON definition file (Simplified Schema _or_ JSON Schema)
     - a URI reference to an external schema file (Simplified Schema _or_ JSON Schema)
-
-      > **Note:** the external URI referencing is planned but currently not implemented yet!
+        
+>       **Note:** the external URI referencing is planned but currently not implemented yet!
 
 We also carry forward the idea from JSON Schema of "types" and "constraints" being used to define a schema and in the next two sections we'll discuss both.
 
 ## Authoring Simplified Schemas
 
-In this section we will get you up to speed on how to _define_ a schema. 
+In this section we will get you up to speed on how to _define_ a schema.
 
 ### The Primitives
 
 #### Types
 
-A **type** is the foundation primitive for defining a schema. Each property in a schema must be assigned to a **type**. To take some of the mystery out of it a type, types available include: 
+A **type** is the foundation primitive for defining a schema. Each property in a schema must be assigned to a **type**. To take some of the mystery out of it a type, types available include:
 
 - `string`, `number`, `boolean`, `null`, `object`
 
@@ -93,6 +93,19 @@ $schema:
     registered: boolean(required)
 ```
 
+#### Defaults, optional values, and runtime presence
+
+Properties are optional unless their definition includes `required`. An
+unbound optional property therefore remains nullable at a use site, including
+when its definition contains `default(...)`: schema defaults are metadata and
+are not applied as runtime values. Only `required` or a concrete non-null
+frontmatter/caller binding establishes that a property is non-null.
+
+This distinction matters when an expression supplies a directive target. DMLS
+warns about an unguarded whole-value target such as `::file {{log}}` when
+`log` is optional. Bind `log`, declare it `file(required)`, or guard the use
+with `::block when="file_exists(log)"`.
+
 #### Descriptors
 
 Schema's -- _by their very nature_ -- describe a data structure but by allowing a schema to describe itself in prose as well as it's innate rule based structure, it can add a tremendous amount of clarity to schemas. This clarity is not only available as documentation but can also be picked up by language servers too.
@@ -108,11 +121,7 @@ $schema:
 
 ### External Schemas
 
-The standalone schema and discovery rules below describe the agreed target
-contract in the [technical design](../../../../claudine/fixes/2026-09-17-remove-strict-mode/design.md),
-decisions D10–D13. They are not a claim that the current parser implements this
-contract. In particular, the current tagged parser treats `types` as the schema
-payload; the intended contract separates exported schemas from reusable types.
+> **Implementation status:** Some of the schema discovery and trigger behavior described below is not implemented yet. See [Schema Activation: Implementation Status](./schema-activation.md#implementation-status) for the current limitations.
 
 In our examples so far we've used the _inline_ form of defining a schema. The inline form _can_ be very useful but when you're looking for better reuse the external schema is usually the better approach:
 
@@ -122,88 +131,78 @@ $schema: ./food.yaml
 
 In the example above:
 
-- we simply replaced the key/value inline style of schema definition with a reference to an external file
+- we replaced the key/value inline style of schema definition with a _reference_ to an external file
 - the file being referenced must always be a YAML file, and
 - the format of an external schema file might look something like this:
-
-    ```yaml
-    kind: schema
-    $schema: 
-        name: string(required)
-        category: enum(good food, yuck, bad before expiry)
-    ```
+    
+  ```yaml
+  kind: schema
+  $schema: 
+      name: string(required)
+      category: enum(good food, yuck, bad before expiry)
+  ```
 
 In a moment of "recursive truth" the external schema definition is defined as a schema:
 
-::code @darkmatter/docs/schema-drafts/schema-definition.yaml
+::code ^darkmatter/docs/schemas/schema-definition.yaml
 
-A `kind: schema` document has two distinct payloads:
+A schema document has two distinct payloads:
 
 - `$schema` is the exported schema applied to a consuming document.
-- `types` holds reusable named type definitions. Helper names do not become
-  properties of the consuming document merely because they are declared here.
+- `types` holds reusable named type definitions. Helper names do not become properties of the consuming document merely because they are declared here.
 
-For example, a schema can export document properties while keeping its helper
-types separate:
+For example, a schema can export document properties while keeping its helper types separate:
 
 ```yaml
 kind: schema
 $schema:
-    recipient: "Address@this"
+    recipient: address
 types:
-    Address:
+    address:
         street: string(required)
         city: string(required)
 ```
+
+The `address` type comes from the `types` section in the same file. You can also write `address@this` if you prefer to make that explicit; both forms mean the same thing. A reference to another file still needs its source, such as `address@./address-types.yaml`.
+
+A named type also brings its constraints with it. If you define `code: string(required)` under `types`, using `code` elsewhere keeps it required; you don't need to write `code(required)` again. The same rule applies to `@this` and references to another file. See [Inheriting Constraints](./local-type-references.md#inheriting-constraints) for examples and the current implementation limitation.
+
+Built-in names such as `string` keep their normal meaning. If you give a local type the same name as a built-in, use `string@this` to select your definition. A misspelled or missing local type is an error, not a new type created automatically.
+
+> **Implementation status:** Bare local type names are not supported by the current parser yet. Until that support lands, use the explicit `@this` form. See [Local Type References](./local-type-references.md) for resolution and constraint details.
 
 A types-only library omits `$schema`:
 
 ```yaml
 kind: schema
 types:
-    Address:
+    address:
         street: string(required)
         city: string(required)
 ```
 
-Other schemas can import `Address` by name, for example with
-`Address@./address-types.yaml`. A whole-file schema reference to this types-only
-file fails with a structured **no exported schema** error. It does not turn the
-helper names into document properties. Discovering or importing a type library
-does not automatically activate a document schema or lifecycle binding scope.
+Other schemas can import `address` by name, for example with `address@./address-types.yaml`. A whole-file schema reference to this types-only file fails with a structured **no exported schema** error. It does not turn the helper names into document properties. Discovering or importing a type library does not automatically activate a document schema or lifecycle binding scope.
 
-To make an exported schema apply automatically, place its definition in one of
-the accepted discovery directories:
+To make an exported schema apply automatically, place its definition in one of the accepted discovery directories:
 
 - `{root}/schemas`
 - in a monorepo:
     - `{package-area-root}/schemas`
     - `{package-root}/schemas`
+
 - when the environment variable SCHEMA_DIR is set then it will be looked in as well
 
-Note that `{root}` is the root of the repo you currently operating in if you're in a repo, if you're NOT in a repo then `{root}` is the current working directory (or the root folder in your editor in the case of DMLS). 
+Note that `{root}` is the root of the repo you currently operating in if you're in a repo, if you're NOT in a repo then `{root}` is the current working directory (or the root folder in your editor in the case of DMLS).
 
-Recognized standalone schemas with an exported `$schema` augment the Darkmatter
-baseline within their discovery scope. Automatically discovered package-area
-and package schemas do not apply to sibling scopes. `SCHEMA_DIR` adds explicitly
-selected definitions with workspace-wide applicability; it does not replace
-normal discovery. Types-only libraries remain available for imports without
-automatically applying a schema. Arbitrary YAML files are not schema inputs.
+Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. `SCHEMA_DIR` adds explicitly selected definitions with workspace-wide applicability; it does not replace normal discovery. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
-Direct, explicitly supplied always-on schemas remain supported independently
-of automatic discovery.
-
+Direct, explicitly supplied always-on schemas remain supported independently of automatic discovery.
 
 ### Schema Triggers
 
-Unlike an exported standalone schema, a `schema-trigger` document applies its
-schema only when its matching conditions pass. The canonical kind is
-`schema-trigger`; the earlier `schema-target` wording is not a second document
-kind.
+Unlike an exported standalone schema, a `schema-trigger` document applies its schema only when its matching conditions pass. The canonical kind is `schema-trigger`; the earlier `schema-target` wording is not a second document kind.
 
-The following predicate capabilities are in scope for the agreed design. Their
-exact syntax, observation timing, and refresh behavior remain under review;
-this list does not claim implemented support:
+Schema triggers let you choose a schema based on the document and its surroundings. Conditions can check:
 
 - Frontmatter properties on the actively edited document
 - File existence or absence
@@ -215,9 +214,7 @@ this list does not claim implemented support:
 - Host OS
 - Repository membership or absence
 
-Conditions belong under `match`. Top-level conditions combine with **AND**;
-conditions inside a `group` combine with **OR**. Expressions use normal
-Darkmatter grammar with the passive activation function policy described below:
+Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. An `expression` uses normal Darkmatter expression syntax to check document values:
 
 ```yaml
 kind: schema-trigger
@@ -232,35 +229,23 @@ $schema:
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
-#### Passive activation expressions
+#### Passive Activation Expressions
 
-Before matching, the host captures the requested facts into an immutable
-snapshot, including one clock instant for the activation pass. Matching itself
-performs no I/O and invokes no actions, shell expansion, or lazy providers.
-Executable-availability predicates inspect availability; they do not run the
-binary. A failed observation remains distinct from an absent file or program.
+Choosing a schema should only answer a question: does this schema apply to this document? It should never run a command or start a runtime action. We call this _passive activation_.
 
-An `expression` can use document values, ordinary operators, and functions that
-operate entirely on supplied data. Supported clock-dependent functions use the
-captured clock rather than reading the clock again. External observations use
-explicit predicates with literal arguments; an expression cannot call a
-filesystem or remote-reading function, including one whose path comes from a
-document property.
+For conditions about the document itself, use an `expression`. For example, `kind == "task"` checks whether the document's `kind` property is `task`. You can combine comparisons with `&&` and `||`, and use functions that work on the values you give them.
 
-Darkmatter's shared function registry declares activation capabilities.
-Preparation rejects unsupported calls with structured errors even in inactive
-branches. Eligible expressions retain ordinary short-circuit evaluation:
-preparation does not execute inactive operands to search for computation errors.
-This policy uses the same Darkmatter parser and evaluator, not a separate
-expression language or an editor-specific function list.
+For conditions about files or the host computer, use a dedicated condition such as `file_exists` or `can_execute`. Give these conditions a literal path or program name rather than an expression that calculates one. Checking whether a program is available does **not** run it, and an expression cannot read a file or fetch a URL on its own.
 
-These are agreed design requirements, not implemented support. Remaining
-predicate spellings and refresh scheduling remain under design review.
+This distinction also affects errors. If a file is missing, a file-existence condition simply does not match. If Darkmatter cannot check the file because access was denied, it reports the problem rather than pretending the file is missing. Likewise, a function that is not allowed in a trigger remains an error even if you put it after `false &&`.
+
+For how Darkmatter gathers facts, evaluates conditions, and reports failures, see [How Schema Activation Is Evaluated](./schema-activation.md). Those details are shared by the CLI and DMLS; you do not need different trigger rules for each.
+
+Time-based conditions can change which schema applies even when you haven't edited the document. DMLS checks again when a relevant time window starts or ends, and after sleep or clock changes. CLI commands check once each time you run them. See [Refreshing Time-Based Conditions](./schema-activation.md#refreshing-time-based-conditions) for the scheduling policy.
 
 #### File predicate references
 
-File predicates accept ordinary `biscuit-file` file-reference strings. An
-explicit-relative string resolves only beside the declaring schema:
+File predicates accept ordinary `biscuit-file` file-reference strings. An explicit-relative string resolves only beside the declaring schema:
 
 ```yaml
 file_exists: "./config.yaml"
@@ -274,26 +259,35 @@ file_exists:
     path: "./.example/config.yaml"
 ```
 
-The explicit-base form requires an explicit-relative `path`, preventing a
-fallback search through other roots. Both forms use `FileReference` and captured
-resolution contexts, preserving typed failures. Schema imports retain their
-source origin. Existing sigils retain their meaning: `&` selects a repository
-root; `@` performs magic-path search and is not a workspace-root shorthand.
+The explicit-base form requires an explicit-relative `path`, preventing a fallback search through other roots. Both forms use `FileReference` and captured resolution contexts, preserving typed failures. Schema imports retain their source origin. Existing sigils retain their meaning: `&` selects a repository root; `@` performs magic-path search and is not a workspace-root shorthand.
 
-`base: workspace` selects the consuming document's repository/worktree root,
-even when the editor opened only a repository subdirectory. Outside a
-repository, it selects the nearest containing editor workspace folder or the
-captured CLI working directory. Nested repositories and linked worktrees use
-their own roots. Repository-discovery errors remain errors, not evidence that
-the document is outside a repository.
+`base: workspace` selects the consuming document's repository/worktree root, even when the editor opened only a repository subdirectory. Outside a repository, it selects the nearest containing editor workspace folder or the captured CLI working directory. Nested repositories and linked worktrees use their own roots. Repository-discovery errors remain errors, not evidence that the document is outside a repository.
 
-The consuming root is independent of schema-source location, including external
-`SCHEMA_DIR` sources. It does not expand the applicability of automatically
-discovered nested schemas. Additional base selectors remain under design
-review; these examples describe the intended contract, not current support.
+The consuming root is independent of schema-source location, including external `SCHEMA_DIR` sources. It does not expand the applicability of automatically discovered nested schemas. Additional base selectors remain under design review; these examples describe the intended contract, not current support.
 
-For the matching model and its implementation status, read
-[Schema Triggers in Darkmatter](./schema-targeting.md).
+For the matching model and its implementation status, read [Schema Triggers in Darkmatter](./schema-targeting.md).
+
+### Schemas for Global Variables
+
+Every global variable has a schema, including `doc`, `ctx`, `current`, `env`,
+`err`, and `tracking`. Darkmatter's built-in definitions start in
+[`darkmatter.yaml`](../../../schemas/darkmatter.yaml), which imports reusable
+named types from its `partials` directory. `ctx` and `current` share the same
+context type, so both expose properties such as `cwd` directly.
+
+Frontmatter is the value of `doc`. Most expressions can omit that namespace:
+`title` and `doc.title` refer to the same property. This shorthand does not change
+how its schema is defined. A frontmatter property named `ctx`, accessed as
+`doc.ctx`, is separate from the `ctx` global.
+
+The schema describes what a value can contain. The application supplies the value
+and determines when it is available. Knowing the fields of `err`, for example,
+does not make an error available during initialization. Editor assistance uses
+the schema and availability declarations without running value providers.
+
+The layering rules below apply to the properties of `doc`. Authored document
+schemas cannot redefine the other globals. The registered built-in global schema
+is not automatically applied as a collection of frontmatter properties.
 
 ### Schema Layering
 
@@ -301,65 +295,31 @@ Schemas are so great we often end with too many of them:
 
 - we _always_ get a base schema layer from Darkmatter
     - if you're using a library like Claudine (which is a big consumer of Darkmatter) then it will inject it's own schemas into the mix
+
 - every document can define a schema in the `$schema` frontmatter property
 - then we've just found out that `schema-definitions` and `schema-trigger`'s are a thing
 
-That can be a lot of schemas all piled up on top of one another. What happens when two or more of these schema's disagree on what type the property `foo` is? Well fortunately we live in a law based society ... so we follow the law/rules. 
-
-
+That can be a lot of schemas all piled up on top of one another. What happens when two or more of these schema's disagree on what type the property `foo` is? Well fortunately we live in a law based society ... so we follow the rules.
 
 The agreed precedence, from highest to lowest, is:
 
-| Precedence | Source |
-| --- | --- |
-| Highest | The consuming document's `$schema` |
-|         | Schemas activated by matching `schema-trigger` definitions |
-|         | Always-on schema definitions, including discovered `kind: schema` exports |
-| Lowest | The built-in Darkmatter base schema |
+| Precedence | Source                                                                    |
+|------------|---------------------------------------------------------------------------|
+| Highest    | The consuming document's `$schema`                                        |
+|            | Schemas activated by matching `schema-trigger` definitions                |
+|            | Always-on schema definitions, including discovered `kind: schema` exports |
+| Lowest     | The built-in Darkmatter base schema                                       |
 
-Conflicts are resolved for each frontmatter property, not by rejecting either
-schema as a whole. If two schemas both declare `foo`, the higher-precedence
-definition of `foo` wins; unrelated properties from both schemas remain.
+Conflicts are resolved for each frontmatter property, not by rejecting either schema as a whole. If two schemas both declare `foo`, the higher-precedence definition of `foo` wins.
 
-The winning property definition supplies its type, constraints, required or
-optional status, nested shape, and prose description together. For example, if
-the base schema defines `description` as a string and an active trigger defines
-it as an array of strings, the property becomes an array of strings and uses
-the trigger's description. If the winning definition has no description, the
-lower-precedence prose is not carried forward as though it describes the winner.
-
-Conflicts do not generate union types and are not themselves errors. Authors
-can still explicitly declare union types for individual properties. This policy
-does not decide the separate, still-open handling of alternative shapes for an
-entire exported document schema.
-
-Darkmatter owns one deterministic ordering shared by DMLS, the CLI, and library
-consumers. Within each precedence level, retain automatic sources in
-nearest-directory-first order and filename order within each directory, then
-apply explicit `SCHEMA_DIR` sources; later definitions win. Same-filename
-shadowing is confined to a level so an always-on file cannot hide a trigger.
-This tie-break is a consistency rule, not a claim that one same-level schema
-is more semantically appropriate. Source priority never crosses a level:
-an automatic trigger still outranks an always-on `SCHEMA_DIR` definition.
-
-Mandatory restrictions, including inherited `no-shell-expansion`, remain
-non-relaxable regardless of precedence. Types-only libraries do not become
-layers. These rules describe the intended contract, not a claim that the
-current implementation already follows it.
+> **Note:** When there is a property which has a property conflict and two or more schemas are at the _same level_ of the precedence hierarchy the precedence hierarchy can't dictate who wins but at this level -- _one which shouldn't happen often or ever if you're being careful about your schema design_ -- an author will have no semantic sense as to which one is more important so the key design goal is simply to be consistent:
+> 
+> - Darkmatter library owns the resolution algorithm, DMLS and others resolve a layered schema via the Darkmatter library
+> - the Darkmatter library uses precedence where possible but otherwise has a deterministic way to break conflicts at the same level of the precedence hierarchy
 
 #### Best practices
 
-Keep the active schema stack small. A typical Claudine document should need
-only the built-in Darkmatter schema plus the Claudine schema. Use
-`schema-trigger` definitions for specialized schemas so they participate only
-when document and environment conditions indicate that they apply. Avoid
-loading a large collection of unrelated always-on schemas and relying on
-precedence to sort out their differences.
-
-
-
-    
-
+Keep the active schema stack small. A typical Claudine document should need only the built-in Darkmatter schema plus the Claudine schema. Use `schema-trigger` definitions for specialized schemas so they participate only when document and environment conditions indicate that they apply. Avoid loading a large collection of unrelated always-on schemas and relying on precedence to sort out their differences.
 
 ### Modeling More Advanced Schemas
 
@@ -391,9 +351,7 @@ There is a _variant_ of an enumeration which we will call a "suggestion" which p
 
 #### Wide versus Nested Dictionaries
 
-
 ### Union Types
-
 
 ### Examples: using Inline Syntax
 
@@ -418,63 +376,55 @@ Your job is to review the specification file "{{spec}}".
     - `spec` and `design` are both **file** types
     - but only `spec` is considered a _required_ property
     - this means that `design` is valid when it's value is `null` (null and undefined are identical types) or when it's filepath
+
 - we also specify that `spec` should be evaluated _eagerly_ (the default is _lazy_ evaluation)
 - even though a filepath is a derivative of a string type it holds additional semantic meaning to define it as a **file** type
--
-
+- 
 
 This meaning becomes even more pronounced when we add the `eager` constraint:
 
 - by default all properties are `lazy` which means that the page can be _composed_ without
-
-
-
-
 
 ### External Grammar Files
 
 There are two primary types of grammar files which are distinguished by their `kind` property:
 
 - Schema Definition Files (`kind: schema`)
-
-    An optional `$schema` exports the document schema. Optional `types` contains
-    reusable named helpers. A types-only library has no exported document schema
-    and does not automatically apply to discovered documents.
-
+    
+    An optional `$schema` exports the document schema. Optional `types` contains reusable named helpers. A types-only library has no exported document schema and does not automatically apply to discovered documents.
+    
     This file type must follow the following schema definition:
-
-    ```yaml
-    kind: "const(schema,required)"
-    $schema: "schema -> optional exported document schema; absent in a types-only library"
-    description: "string -> a way to be more explicit about this schema's intended usage"
-    types: "schema -> you may optionally define types in this area which then become accessible as _types_ in the `$schema` property."
-    ```
+    
+  ```yaml
+  kind: "const(schema,required)"
+  $schema: "schema -> optional exported document schema; absent in a types-only library"
+  description: "string -> a way to be more explicit about this schema's intended usage"
+  types: "schema -> you may optionally define types in this area which then become accessible as _types_ in the `$schema` property."
+  ```
 
 - Schema Trigger Files (`kind: schema-trigger`)
-
+    
     The schema _trigger_ file is used to establish a matching pattern that _when matched_ will trigger the schema definition on a given file.
-
+    
     This file follows the following schema definition:
+    
+  ```yaml
+  kind: "const(schema-trigger,required)"
+  match: TODO
+  $schema:
 
-    ```yaml
-    kind: "const(schema-trigger,required)"
-    match: TODO
-    $schema:
-        - schema
-        - file
-    description: |-
-        string -> allows you to describe the intent of this trigger in prose
-    ```
+      - schema
+      - file
 
-An applying standalone schema or conditional trigger supplies `$schema`.
-A types-only `kind: schema` library omits it. The trigger predicate catalog and
-complete envelope validation rules are still being finalized; these sketches
-do not establish additional required fields.
+  description: |-
+      string -> allows you to describe the intent of this trigger in prose
+  ```
+
+An applying standalone schema or conditional trigger supplies `$schema`. A types-only `kind: schema` library omits it. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
 
 #### Schema Definition Files
 
 #### Trigger Files
-
 
 ## CLI Grammar Support
 

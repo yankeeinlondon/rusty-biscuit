@@ -12,4 +12,4 @@ expression: out
 ┃   11 │ line 11
 ┃ ```
 ┃ 
-┃ Error: items not found
+┃ Error: length(): items not found

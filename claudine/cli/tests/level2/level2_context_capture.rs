@@ -80,6 +80,11 @@ use common::{CliProcessFixture, clear_no_color};
 /// routes claudine through an optimistic terminal so the styling is the
 /// emulator's capture, not claudine's raw stream; `COLUMNS` fixes the logical
 /// width.
+/// `rows` is the tmux pane height, and the tmux harness captures only the
+/// visible pane (no scrollback), so a `--expressions` capture must be taller
+/// than the *wrapped* function catalog or its head scrolls away before the
+/// frame is taken. The catalog was 929 unwrapped lines on 2026-09-20; the
+/// heights below leave room for it to keep growing.
 fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     let fixture = CliProcessFixture::named("claudine-context-l2");
     fixture.seed_user_config();
@@ -574,7 +579,7 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--expressions"], 100, 700);
+    let frame = capture_context(&["--expressions"], 100, 2400);
     let report_plain = context_report_plain(&frame);
 
     assert!(
@@ -634,7 +639,7 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_at_140_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--expressions"], 140, 320);
+    let frame = capture_context(&["--expressions"], 140, 2000);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert!(
@@ -655,7 +660,7 @@ fn level2_context_expressions_at_140_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_caps_at_140_in_wide_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--expressions"], 160, 320);
+    let frame = capture_context(&["--expressions"], 160, 2000);
 
     assert!(
         max_visible_width(&frame) <= 140,
@@ -686,7 +691,7 @@ fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
     // Functions catalog below it must not push that list above the captured
     // pane (`capture-pane` has no scrollback). 820 rows fit the full report
     // with headroom for the prompt echo and footer.
-    let frame = capture_context(&["--expressions"], 65, 820);
+    let frame = capture_context(&["--expressions"], 65, 3600);
 
     assert_list_lines_reserve_right_margin(&frame, 65);
 }
@@ -875,7 +880,7 @@ fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_expressions_constrained_50_wraps_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--expressions"], 50, 400);
+    let frame = capture_context(&["--expressions"], 50, 4400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);

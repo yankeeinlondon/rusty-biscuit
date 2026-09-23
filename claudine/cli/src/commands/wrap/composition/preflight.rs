@@ -16,7 +16,7 @@ use claudine::composition::lifecycle::{
 use claudine::composition::lifecycle_executor::{LifecycleEventOutcome, StackControl};
 use claudine::composition::{
     CompositionError, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState,
-    LifecycleCurrent, LifecycleErrorInfo, LifecycleTiming,
+    LifecycleErrorInfo, LifecycleTiming,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionInput,
     decide_lifecycle_transition,
 };
@@ -97,6 +97,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     base_dir: Option<&Path>,
     ctx_base_dir: Option<&Path>,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
+    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: LifecycleErrorInfo,
@@ -114,6 +115,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         ctx_base_dir,
         prepared_context,
         None,
+        current,
         frontmatter,
         document_start,
         err_info,
@@ -136,14 +138,12 @@ pub(super) fn emit_preflight_blocked_and_finalize_in_context(
     ctx_base_dir: Option<&Path>,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
     err_info: LifecycleErrorInfo,
 ) -> PreflightBlockedOutcome {
     let timing = LifecycleTiming::from_instants(document_start, None, std::time::Instant::now());
-    // `current.ctx.*` follows the launch area like event-time `ctx.*` capture.
-    let current_anchor = ctx_base_dir.or(base_dir).unwrap_or(source_path);
-    let current = LifecycleCurrent::capture_at_event(current_anchor);
 
     let blocked_ctx = StackExecutionContext {
         signal: LifecycleSignal::Blocked,
@@ -153,7 +153,7 @@ pub(super) fn emit_preflight_blocked_and_finalize_in_context(
         runtime_state: None,
         err: Some(&err_info),
         timing: Some(&timing),
-        current: Some(&current),
+        current,
         group: None,
         base_dir,
         ctx_base_dir,

@@ -352,6 +352,9 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
 
                     let hint = match source.as_ref() {
                         ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
+                        ShellExpansionError::ExpressionEvaluation { .. } => {
+                            "Check the directive's expressions."
+                        }
                         ShellExpansionError::CommandNotFound { .. } => {
                             "Install the binary or update <cyan>$PATH</cyan>."
                         }

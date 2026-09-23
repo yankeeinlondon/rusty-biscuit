@@ -20,6 +20,9 @@ use crate::catalog::{Described, Example, ExampleVerification};
 
 pub(crate) mod ast;
 pub(crate) mod parser;
+mod roots;
+
+pub use roots::{ReservedRootDescriptor, RootEvaluation, RootMembers, reserved_root_descriptors};
 
 use ast::{CatalogReturnValue, CatalogVerification, ExpressionFunctionCatalog};
 use parser::{CatalogParseError, parse_expression_function_catalog};
@@ -127,6 +130,8 @@ impl DataType {
 pub struct ParamType {
     /// The parameter's data type.
     pub ty: DataType,
+    /// A catalog-only restriction on the values `ty` accepts, if any.
+    pub refinement: Option<ParamRefinement>,
     /// Whether the parameter is an array of `ty` (`ty[]`).
     pub array: bool,
     /// Whether the parameter is optional (`[name]` in the signature).
@@ -138,20 +143,98 @@ pub struct ParamType {
 impl ParamType {
     /// A required scalar parameter of type `ty`.
     pub const fn val(ty: DataType) -> Self {
-        Self { ty, array: false, optional: false, variadic: false }
+        Self { ty, refinement: None, array: false, optional: false, variadic: false }
     }
     /// A required array parameter (`ty[]`).
     pub const fn array(ty: DataType) -> Self {
-        Self { ty, array: true, optional: false, variadic: false }
+        Self { ty, refinement: None, array: true, optional: false, variadic: false }
     }
     /// An optional scalar parameter.
     pub const fn optional(ty: DataType) -> Self {
-        Self { ty, array: false, optional: true, variadic: false }
+        Self { ty, refinement: None, array: false, optional: true, variadic: false }
     }
     /// A variadic scalar parameter.
     pub const fn variadic(ty: DataType) -> Self {
-        Self { ty, array: false, optional: false, variadic: true }
+        Self { ty, refinement: None, array: false, optional: false, variadic: true }
     }
+
+    fn render(&self) -> String {
+        let mut rendered = match self.refinement {
+            None => self.ty.as_keyword().to_string(),
+            Some(refinement) => refinement.render(),
+        };
+        if self.array {
+            rendered.push_str("[]");
+        }
+        rendered
+    }
+}
+
+/// A catalog-only restriction on a `string` parameter.
+///
+/// Like `error`, these never enter [`DataType`] or the frontmatter validator's
+/// type domain; they describe what a function accepts, not a property type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamRefinement {
+    /// An IPv4, IPv6, or scoped IPv6 (`fe80::1%en0`) literal. Host names are
+    /// not addresses; nothing resolves DNS. Authored as `ip-address`.
+    IpAddress,
+    /// One of a closed set of names. Authored through a named generated set
+    /// (`agentic-cli`), never an inline `enum(...)` parameter.
+    Enum(&'static [&'static str]),
+}
+
+impl ParamRefinement {
+    /// Parses a refined parameter keyword into its underlying data type and
+    /// refinement.
+    fn from_keyword(keyword: &str) -> Option<(DataType, Self)> {
+        match keyword {
+            "ip-address" => Some((DataType::String, Self::IpAddress)),
+            "agentic-cli" => Some((DataType::String, Self::Enum(agentic_cli_names()))),
+            _ => None,
+        }
+    }
+
+    fn render(self) -> String {
+        match self {
+            Self::IpAddress => "ip-address".to_string(),
+            Self::Enum(variants) => render_enum(variants),
+        }
+    }
+}
+
+/// Every accepted `has_agentic_cli` name, in the generated roster order.
+///
+/// The names come from `claudine-gen`'s committed artifact, so the descriptor
+/// enum and the runtime mapping to `sniff::programs::AiCli` share one list.
+pub(crate) fn agentic_cli_names() -> &'static [&'static str] {
+    static NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+        super::functions::agentic_cli_generated::AGENTIC_CLI_NAMES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect()
+    });
+    &NAMES
+}
+
+/// Renders `enum(a, b)`, quoting any variant that is not a bare snake_case word.
+fn render_enum(variants: &[&str]) -> String {
+    let variants = variants
+        .iter()
+        .map(|variant| {
+            if !variant.is_empty()
+                && variant.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+                })
+            {
+                (*variant).to_string()
+            } else {
+                serde_json::to_string(variant).expect("a string enum variant must serialize")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("enum({variants})")
 }
 
 /// The success value of a function return.
@@ -167,33 +250,14 @@ impl ReturnValueType {
     fn render(self) -> String {
         match self {
             Self::Data(ty) => ty.as_keyword().to_string(),
-            Self::Enum(variants) => {
-                let variants = variants
-                    .iter()
-                    .map(|variant| {
-                        if !variant.is_empty()
-                            && variant
-                                .chars()
-                                .all(|character| character.is_ascii_lowercase()
-                                    || character.is_ascii_digit()
-                                    || character == '_')
-                        {
-                            (*variant).to_string()
-                        } else {
-                            serde_json::to_string(variant)
-                                .expect("a string enum variant must serialize")
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("enum({variants})")
-            }
+            Self::Enum(variants) => render_enum(variants),
         }
     }
 }
 
 /// A function's typed return.
 ///
+/// The rendered union is `value[] | "literal"… | null | error`, in that order.
 /// A fallible function returns `<success> | error`, modeled by
 /// [`ReturnType::fallible`] set to `true` (mirrors Rust `Result<T, error>`). The
 /// `error` type is a **return-position-only** anchor — it is never a
@@ -204,6 +268,10 @@ pub struct ReturnType {
     pub value: ReturnValueType,
     /// Whether the success value is an array.
     pub array: bool,
+    /// Additional string-literal union members (`boolean | "unstable"`).
+    pub literals: &'static [&'static str],
+    /// Whether `null` is a declared success value (adds `| null`).
+    pub nullable: bool,
     /// Whether the function is fallible (adds the `| error` union member).
     pub fallible: bool,
 }
@@ -211,11 +279,29 @@ pub struct ReturnType {
 impl ReturnType {
     /// An infallible scalar return of type `ty`.
     pub const fn plain(ty: DataType) -> Self {
-        Self { value: ReturnValueType::Data(ty), array: false, fallible: false }
+        Self { value: ReturnValueType::Data(ty), array: false, literals: &[], nullable: false, fallible: false }
     }
     /// A fallible scalar return (`ty | error`).
     pub const fn fallible(ty: DataType) -> Self {
-        Self { value: ReturnValueType::Data(ty), array: false, fallible: true }
+        Self { value: ReturnValueType::Data(ty), array: false, literals: &[], nullable: false, fallible: true }
+    }
+
+    fn render(&self) -> String {
+        let mut rendered = self.value.render();
+        if self.array {
+            rendered.push_str("[]");
+        }
+        for literal in self.literals {
+            rendered.push_str(" | ");
+            rendered.push_str(&serde_json::to_string(literal).expect("a string literal must serialize"));
+        }
+        if self.nullable {
+            rendered.push_str(" | null");
+        }
+        if self.fallible {
+            rendered.push_str(" | error");
+        }
+        rendered
     }
 }
 
@@ -238,6 +324,10 @@ pub struct ExpressionFunctionDescriptor {
     pub parameters: &'static [ParamType],
     /// Typed return, including `error` union membership for fallible functions.
     pub returns: ReturnType,
+    /// The `ctx.*` variable this function pairs with under R29, if any. A
+    /// paired function shares that variable's description and value type; the
+    /// variable is the launch-time capture and the function evaluates at call.
+    pub pair: Option<&'static str>,
     /// Optional verified example.
     pub example: Option<Example>,
 }
@@ -247,7 +337,8 @@ impl ExpressionFunctionDescriptor {
     ///
     /// Parameter names are read from [`Self::signature`]; their types come from
     /// [`Self::parameters`]. Optional parameters render as `[name: type]`,
-    /// variadic parameters as `...type`. A fallible return appends `| error`.
+    /// variadic parameters as `...type`. The return renders as described on
+    /// [`ReturnType`].
     pub fn typed_signature(&self) -> String {
         let name = self.signature.split('(').next().unwrap_or(self.signature);
         let inner = self
@@ -264,10 +355,7 @@ impl ExpressionFunctionDescriptor {
 
         let mut parts = Vec::with_capacity(self.parameters.len());
         for (i, p) in self.parameters.iter().enumerate() {
-            let mut ty = p.ty.as_keyword().to_string();
-            if p.array {
-                ty.push_str("[]");
-            }
+            let ty = p.render();
             if p.variadic {
                 parts.push(format!("...{ty}"));
                 continue;
@@ -281,14 +369,7 @@ impl ExpressionFunctionDescriptor {
             }
         }
 
-        let mut ret = self.returns.value.render();
-        if self.returns.array {
-            ret.push_str("[]");
-        }
-        if self.returns.fallible {
-            ret.push_str(" | error");
-        }
-        format!("{name}({}) -> {ret}", parts.join(", "))
+        format!("{name}({}) -> {}", parts.join(", "), self.returns.render())
     }
 }
 impl Described for ExpressionFunctionDescriptor {
@@ -325,6 +406,7 @@ fn project_descriptors(
         let category_order = category_orders.entry(function.category.clone()).or_default();
         let category = leak(function.category);
         let description = leak(function.description);
+        let name = leak(function.name.clone());
         for overload in function.overloads {
             *category_order += 1;
             let parameter_names = overload
@@ -347,6 +429,7 @@ fn project_descriptors(
                 .into_iter()
                 .map(|parameter| ParamType {
                     ty: parameter.ty,
+                    refinement: parameter.refinement,
                     array: parameter.array,
                     optional: parameter.optional,
                     variadic: parameter.variadic,
@@ -377,8 +460,13 @@ fn project_descriptors(
                         }
                     },
                     array: overload.returns.array,
+                    literals: Box::leak(
+                        overload.returns.literals.into_iter().map(leak).collect::<Vec<_>>().into_boxed_slice(),
+                    ),
+                    nullable: overload.returns.nullable,
                     fallible: overload.returns.fallible,
                 },
+                pair: function.pair.then_some(name),
                 example: Some(Example {
                     invocation: leak(overload.example.expression),
                     result: leak(overload.example.result),
@@ -1140,5 +1228,166 @@ mod list_formatting_example_files {
             );
             assert_eq!(got, expected, "example {file} did not match its declared returns");
         }
+    }
+}
+
+#[cfg(test)]
+mod more_context_descriptor_tests {
+    use super::*;
+    use crate::markdown::compose::context::context_variable_descriptors;
+
+    fn only(signature: &str) -> &'static ExpressionFunctionDescriptor {
+        let matches: Vec<_> = expression_function_descriptors()
+            .iter()
+            .filter(|descriptor| descriptor.signature == signature)
+            .collect();
+        assert_eq!(matches.len(), 1, "`{signature}` must be cataloged exactly once");
+        matches[0]
+    }
+
+    /// Every function the feature adds is cataloged with its exact typed
+    /// signature, so `claudine context --expressions`, DMLS, and
+    /// `md schema about` all discover the same shape (AC1, AC12, AC33).
+    #[test]
+    fn new_functions_have_their_specified_typed_signatures() {
+        let expected = [
+            ("as_markdown(content)", "as_markdown(content: string) -> string | error"),
+            ("package_area(where)", "package_area(where: file) -> string | error"),
+            ("package(where)", "package(where: file) -> string | error"),
+            ("recent_commits(count)", "recent_commits(count: number(integer)) -> string[] | error"),
+            ("ipv4([filter])", "ipv4([filter: string]) -> string[]"),
+            ("ipv6([filter])", "ipv6([filter: string]) -> string[]"),
+            ("ping(address, [timeout])", "ping(address: ip-address, [timeout: number]) -> boolean | null | error"),
+            (
+                "ping_under(address, timeout, [attempts])",
+                "ping_under(address: ip-address, timeout: number, [attempts: number(integer)]) -> boolean | \"unstable\" | null | error",
+            ),
+            ("has_alias(name)", "has_alias(name: string) -> boolean"),
+            ("has_binary(name_or_path)", "has_binary(name_or_path: string) -> boolean"),
+            ("has_builtin_function(name)", "has_builtin_function(name: string) -> boolean"),
+            ("has_user_function(name)", "has_user_function(name: string) -> boolean"),
+            ("can_execute(name)", "can_execute(name: string) -> boolean"),
+        ];
+        for (signature, typed) in expected {
+            assert_eq!(only(signature).typed_signature(), typed);
+        }
+        assert!(
+            only("has_agentic_cli(agent)")
+                .typed_signature()
+                .starts_with("has_agentic_cli(agent: enum(claude, codex, gemini, goose, kimi, kimicode, kimi_code, \"kimi-code\","),
+        );
+    }
+
+    /// AC12: both names are cataloged and dispatch to the same probe.
+    #[test]
+    fn has_binary_and_has_command_share_one_probe() {
+        use crate::markdown::compose::expression::{ResolutionContext, functions::dispatch_fs};
+
+        only("has_command(cmd)");
+        only("has_binary(name_or_path)");
+        let context = ResolutionContext::new(std::env::temp_dir());
+        for probe in ["sh", "definitely-not-a-real-bin-zzz", "", "./relative"] {
+            let args = [serde_json::json!(probe)];
+            assert_eq!(
+                dispatch_fs("has_binary", &args, &context).unwrap().unwrap(),
+                dispatch_fs("has_command", &args, &context).unwrap().unwrap(),
+                "`{probe}`"
+            );
+        }
+    }
+
+    /// AC26 / R29: `recent_commits` is one variable and one function projected
+    /// from one entry. The authored function entry carries no description or
+    /// return type of its own, so the two cannot drift.
+    #[test]
+    fn recent_commits_pair_projects_from_one_descriptor_entry() {
+        let variables: Vec<_> = context_variable_descriptors()
+            .iter()
+            .filter(|variable| variable.name == "recent_commits")
+            .collect();
+        assert_eq!(variables.len(), 1);
+        let variable = variables[0];
+        let function_overloads: Vec<_> = expression_function_descriptors()
+            .iter()
+            .filter(|descriptor| descriptor.signature.split('(').next() == Some("recent_commits"))
+            .collect();
+        assert_eq!(function_overloads.len(), 1);
+        let function = function_overloads[0];
+
+        assert_eq!(function.pair, Some("recent_commits"));
+        assert_eq!(function.description, variable.description);
+        assert_eq!(function.returns.value, ReturnValueType::Data(DataType::String));
+        assert!(function.returns.array && variable.display_type.is_array);
+        assert_eq!(variable.display_type.base, crate::markdown::schemas::SimplifiedType::String);
+
+        let authored: serde_yaml_ng::Value = serde_yaml_ng::from_str(include_str!(
+            "../../../../../../docs/schemas/expression-functions.yaml"
+        ))
+        .unwrap();
+        let entry = authored["functions"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some("recent_commits"))
+            .unwrap();
+        assert_eq!(entry["pair"].as_bool(), Some(true));
+        assert!(entry.get("description").is_none(), "the pair's description is authored once, on ctx");
+        for overload in entry["overloads"].as_sequence().unwrap() {
+            assert!(overload["returns"].get("type").is_none());
+            assert!(overload["returns"].get("array").is_none());
+        }
+
+        let paired: Vec<_> = expression_function_descriptors()
+            .iter()
+            .filter_map(|descriptor| descriptor.pair)
+            .collect();
+        assert_eq!(paired, ["recent_commits"], "recent_commits is the only pair so far");
+    }
+
+    /// AC18 / AC19 (Darkmatter side): the descriptor enum is the generated
+    /// name list, every row binds a real sniff `AiCli` variant, and aliases
+    /// share their provider's binding.
+    #[test]
+    fn agentic_cli_enum_is_the_generated_table_and_every_binding_resolves() {
+        use super::super::functions::agentic_cli_generated::AGENTIC_CLI_NAMES;
+        use sniff::programs::AiCli;
+
+        let descriptor = only("has_agentic_cli(agent)");
+        assert_eq!(descriptor.parameters.len(), 1);
+        let Some(ParamRefinement::Enum(names)) = descriptor.parameters[0].refinement else {
+            panic!("has_agentic_cli must take the generated enum");
+        };
+        assert_eq!(descriptor.parameters[0].ty, DataType::String);
+        assert_eq!(names, AGENTIC_CLI_NAMES.iter().map(|(name, _)| *name).collect::<Vec<_>>());
+
+        let binding = |wanted: &str| -> AiCli {
+            let (_, variant) = AGENTIC_CLI_NAMES
+                .iter()
+                .find(|(name, _)| *name == wanted)
+                .unwrap_or_else(|| panic!("`{wanted}` must be generated"));
+            serde_json::from_value(serde_json::json!(variant))
+                .unwrap_or_else(|error| panic!("`{variant}` is not an AiCli variant: {error}"))
+        };
+        for (name, _) in AGENTIC_CLI_NAMES {
+            binding(name);
+        }
+        assert_eq!(binding("kimi_code"), binding("kimi"));
+        assert_eq!(binding("kimi_code"), AiCli::KimiCli);
+        assert!(!names.contains(&"not_a_provider"));
+    }
+
+    /// AC33 (descriptor portion): ICMP arguments are typed addresses, and the
+    /// returns include the denial `null` and the `"unstable"` literal.
+    #[test]
+    fn icmp_descriptors_declare_address_arguments_and_denial_returns() {
+        for signature in ["ping(address, [timeout])", "ping_under(address, timeout, [attempts])"] {
+            let descriptor = only(signature);
+            assert_eq!(descriptor.parameters[0].refinement, Some(ParamRefinement::IpAddress));
+            assert_eq!(descriptor.parameters[0].ty, DataType::String);
+            assert!(descriptor.returns.nullable && descriptor.returns.fallible);
+            assert_eq!(descriptor.returns.value, ReturnValueType::Data(DataType::Boolean));
+        }
+        assert_eq!(only("ping(address, [timeout])").returns.literals, [] as [&str; 0]);
+        assert_eq!(only("ping_under(address, timeout, [attempts])").returns.literals, ["unstable"]);
     }
 }

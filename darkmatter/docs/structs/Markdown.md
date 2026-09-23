@@ -240,7 +240,7 @@ This includes `::toc-linking` as a dependency source and surfaces the generated 
 
 **`composed_image_references(options) -> MarkdownResult<Vec<ImageReference>>`** returns composed-order image references.
 
-All graph methods accept `ReferenceGraphOptions`, which wraps `ComposeOptions` and inherits its cache configuration. When `cache_root` is set, the graph builder resolves persistent cache paths through `FileStore::resolve_cache_root()`, honoring `cache_namespace` for branch/profile isolation -- matching the compose pipeline's cache semantics exactly.
+All graph methods accept `ReferenceGraphOptions`, which wraps `ComposeOptions` and inherits its cache configuration. Graph construction persists no semantic-result artifact; when `cache_root` is set, only raw remote URL response bodies (transport artifacts) are stored, under the path `FileStore::resolve_cache_root()` resolves with `cache_namespace` for branch/profile isolation -- matching the compose pipeline's cache semantics exactly.
 
 ```rust
 let mut options = ReferenceGraphOptions::default();

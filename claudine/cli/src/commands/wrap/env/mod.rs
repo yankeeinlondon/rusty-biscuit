@@ -67,7 +67,7 @@ pub(crate) fn detect_wrap_startup(
     {
         launch_context.package_area_root = Some(repo_root);
         launch_workspace.package_context = Some(PackageContext {
-            package_area: "root".to_string(),
+            package_area: String::new(),
             package: None,
             candidates: Vec::new(),
         });

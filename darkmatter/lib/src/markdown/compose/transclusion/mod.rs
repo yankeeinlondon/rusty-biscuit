@@ -19,6 +19,7 @@ pub(crate) use engine::{
     ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine, build_resolution_cache,
 };
 pub use parser::{parse_directives, parse_frontmatter_refs};
+pub(crate) use parser::parse_directives_with_line_offset;
 pub(crate) use resolver::{
     FrontmatterReference, classify_frontmatter_reference, resolve_parsed_target, resolve_path,
     resolve_target,

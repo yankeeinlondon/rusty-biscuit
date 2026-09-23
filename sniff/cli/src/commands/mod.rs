@@ -2013,14 +2013,20 @@ pub(super) fn resolve_package_area_path(
 
     let lower = area.to_lowercase();
 
+    // The top-level `""` area has no directory prefix to filter by.
     if let Some(pkg) = packages
         .iter()
+        .filter(|p| !p.package_area.is_empty())
         .find(|p| p.package_area.to_lowercase().starts_with(&lower))
     {
         return Ok(format!("{}/", pkg.package_area));
     }
 
-    let mut areas: Vec<&str> = packages.iter().map(|p| p.package_area.as_str()).collect();
+    let mut areas: Vec<&str> = packages
+        .iter()
+        .map(|p| p.package_area.as_str())
+        .filter(|area| !area.is_empty())
+        .collect();
     areas.sort();
     areas.dedup();
 

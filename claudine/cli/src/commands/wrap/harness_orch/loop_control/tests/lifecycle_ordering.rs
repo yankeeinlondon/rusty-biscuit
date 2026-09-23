@@ -800,7 +800,6 @@ fn start_stack_action_error_records_failure_then_runs_finalize() {
         &eng,
         Some(&action_error),
         None,
-        None,
     );
     guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);
     // 3. Finalize must now fire (records + runs because terminal_emitted).
@@ -882,7 +881,6 @@ fn failure_stack_without_record_skips_finalize() {
         guard.context().messaging,
         &eng,
         Some(&action_error),
-        None,
         None,
     );
     guard.run_event_stack(LifecycleSignal::Failure, &failure_ctx);

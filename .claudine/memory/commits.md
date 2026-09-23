@@ -343,6 +343,22 @@ belong here.
 - In cycle-close bodies quote what the diff says; do not paraphrase into
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
+- A spec rename from `<area>/fixes/<name>/spec.md` (undated) into
+    `<area>/fixes/YYYY-MM-DD-<name>/spec.md` (dated active directory) is
+    also a `planning(<area>): schedule <name>` event, even though the
+    source path is not under `_unscheduled`. The undated directory is the
+    pre-convention carrier; moving it under the `YYYY-MM-DD-<name>/`
+    convention is the same "becomes an active, scheduled fix" signal that
+    `_unscheduled → YYYY-MM-DD-<name>/` carries, just with no
+    `_unscheduled/` indirection. R100 renames are the common case (spec
+    content is unchanged, the date prefix is derived from the existing
+    authorship metadata), so the commit legitimately ships zero source
+    diff while still belonging under `planning` rather than `chore` or
+    `refactor`. The rename needs both the old path (tracked at HEAD, not
+    in the index) and the new path (in the index) in the pathspec — the
+    standard rename rule applies because the old path's removal has to
+    land in the same commit as the new path's addition.
+
 - A terminal review (`review-N.md` with `ready: true`, `implemented: false`,
   and no `next:` field) marks the end of a feature/fix, and the close can
   bundle the FINAL cycle with the directory move into
@@ -359,7 +375,7 @@ belong here.
   `_completed/<name>/` directory without the cycle history until each
   cycle-close catches up.
 - Multi-spec consolidation is one atomic `planning(<area>):` commit, not
-  N+M separate commits: marking N existing specs `status: superseded`
+    N+M separate commits: marking N existing specs `status: superseded`
   (with `superseded_by: ../<new>/spec.md` frontmatter pointer), adding
   M new spec/annex files that absorb their content, and recording the
   ratification in a charter spec's decision block all belong together.
@@ -370,6 +386,18 @@ belong here.
   relationship between old and new IS the consolidation — commit both
   sides together. See `4616e9aec` for a 5-file example (3 M supersede +
   ratification, 2 A new spec + design annex).
+- A fix's complete execution record arriving in one implementer batch
+  (plan.md + implementation-log.md + spec.md `implemented:`/cycle edits +
+  review-1.md + verification-matrix.md + surfaces.md + error-taxonomy.md)
+  is ONE atomic `planning(<area>):` commit, not separate "record
+  execution plan" / "close cycle 0, open cycle 1" commits. The journal's
+  separate-event guidance applies when those events arrive in separate
+  batches; when one implementer stages a fix's full execution through
+  cycle 1 review as a single batch, splitting ships a "record plan"
+  commit referencing a cycle-1 review that does not yet exist (or vice
+  versa) and orphans the evidence from the plan. Same rationale as
+  multi-spec consolidation — the events are one cohesive planning
+  record.
 - A supersede banner may land as a NEW spec file added directly to
   `fixes/_completed/` (or `features/_completed/`) on its first commit,
   paired atomically with the successor spec. The variant covers the
@@ -440,6 +468,14 @@ belong here.
   under `git rev-parse --git-dir` and ref locks under `--git-common-dir`.
   With five or more concurrent agents the budget can still run out — expect
   a second dispatch round after re-checking `git status --short`.
+- The "never remove a lock" rule has one carve-out: when a single-agent commit
+  fails fatally before the lock is released (e.g. `fatal: sha1 file
+  .../index.lock write error. Out of diskspace` on a Mac dev volume below
+  ~250 MiB free, where git aborts before its normal lock-cleanup path), the
+  lock is orphaned from your own prior attempt — not a sibling's. Confirm no
+  other git process owns it (`pgrep -f 'git (commit|status)'`), then `rm`
+  the index lock and retry. The multi-agent "never remove" rule still
+  governs every concurrent-agent case.
 - Never `--no-verify`, override `core.hooksPath`, amend, or add fixup commits
   mid-batch. Report and let the orchestrator decide.
 - Run from the inherited worktree root; never push.

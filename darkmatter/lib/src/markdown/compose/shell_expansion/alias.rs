@@ -4,35 +4,13 @@
 //! login shell (`$SHELL`). This allows `::shell` directives to use common
 //! aliases like `ll`, `la`, etc.
 //!
-//! ## Job-control hazard
-//!
-//! Reading aliases requires an *interactive* shell (`-i`), because that is what
-//! makes a shell source the rc file the aliases are defined in. Interactive mode
-//! also enables job control, and a job-control shell whose process group is not
-//! the foreground process group of its controlling terminal signals itself with
-//! `SIGTTIN` and is stopped by the kernel — it never exits, so a caller waiting
-//! on its stdout waits forever. The shell signals its whole process group, which
-//! it inherits from us, so an unprotected caller can be stopped alongside it.
-//! Being in the background is the normal case for
-//! anything spawned by a test harness or a subprocess chain (nextest, for one,
-//! puts every test binary in its own process group), which is why
-//! [`spawn_alias_query`] gives the child its own session via `setsid`.
-//!
-//! The hazard is invisible without a terminal: with no controlling terminal at
-//! all (CI, most agent harnesses) job control cannot engage and the shell exits
-//! in microseconds. Re-verify by hand under a PTY:
-//!
-//! ```text
-//! script -qc "cargo nextest run -p claudine-cli -E 'test(compose_preflight_discovers_shell_inside_false_block)'" /dev/null
-//! ```
+//! The shell is started through the bounded `shell_expansion::launcher`,
+//! whose module docs explain why the query runs in a detached session.
 
-use super::executor::{WaitOutcome, wait_with_timeout};
+use super::launcher::run_shell_query;
 use super::tokenize::ShellToken;
 use super::tokenize::tokenize;
-use shared_child::SharedChild;
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::process::Command;
 use std::time::Duration;
 
 /// Upper bound on how long the shell may take to report an alias definition.
@@ -127,74 +105,17 @@ fn resolve_alias_with_shell(shell: &str, name: &str, timeout: Duration) -> Optio
 /// Every failure — spawn error, non-zero exit, timeout, empty output — collapses
 /// to `None`, which callers already treat as "not an alias".
 fn query_alias(shell: &str, name: &str, timeout: Duration) -> Option<String> {
-    let child = spawn_alias_query(shell, name).map(Arc::new).ok()?;
-
-    let stdout = child.take_stdout();
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stdout) = stdout {
-            let _ = stdout.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    // On the timeout arm `wait_with_timeout` has already killed and reaped the
-    // child; leaving `reader` unjoined lets it observe the resulting EOF on its
-    // own rather than making this function's bound depend on it.
-    match wait_with_timeout(&child, timeout) {
-        Ok(WaitOutcome::Exited(status)) if status.success() => {}
-        _ => return None,
+    let mut command = Command::new(shell);
+    command.args(["-ic", &format!("alias {}", name)]);
+    let (status, stdout) = run_shell_query(&mut command, timeout)?;
+    if !status.success() {
+        return None;
     }
-
-    let stdout = reader.join().ok()?;
     let alias_output = String::from_utf8_lossy(&stdout).trim().to_string();
     if alias_output.is_empty() {
         return None;
     }
     Some(alias_output)
-}
-
-/// Spawns `<shell> -ic "alias <name>"` detached from any controlling terminal.
-///
-/// See the module docs for why the detachment is load-bearing. `setsid` is the
-/// mechanism because it is the only one that removes the controlling terminal:
-/// merely giving the child a new *process group* (`CommandExt::process_group`)
-/// leaves the terminal attached, so the shell still finds itself outside the
-/// foreground process group and still stops. Measured under a PTY, both the
-/// unmodified spawn and the `process_group(0)` variant reach state `T` within
-/// 20ms; the `setsid` variant exits normally.
-///
-/// A session with no controlling terminal cannot support job control, so the
-/// shell disables it (warning on stderr, which is discarded) and proceeds to run
-/// the builtin. `-i` still selects interactive mode, so rc files are still
-/// sourced and aliases are still defined.
-fn spawn_alias_query(shell: &str, name: &str) -> std::io::Result<SharedChild> {
-    let mut cmd = Command::new(shell);
-    cmd.args(["-ic", &format!("alias {}", name)])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: `pre_exec` runs in the forked child between `fork` and `exec`,
-        // where only async-signal-safe calls are legal. `setsid` is on POSIX's
-        // async-signal-safe list, and nothing else here allocates, locks, or
-        // touches inherited state. `setsid` can only fail with `EPERM` when the
-        // caller is already a process group leader, which a freshly forked child
-        // never is.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-
-    SharedChild::spawn(&mut cmd)
 }
 
 /// Validates that a name is safe to use in an alias lookup command.

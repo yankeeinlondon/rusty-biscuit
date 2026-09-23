@@ -1,0 +1,22 @@
+kind: schema
+name: err
+description: the late-binding `err` variable that is provided to lifecycle hooks in Claudine
+$schema:
+    err:
+        code: code -> a stable dotted syntax that identifies the error
+        category: category -> the category of error
+        disposition: disposition -> error disposition
+        severity: severity -> error severity
+        origin: origin -> the error's origin
+        msg: msg -> The error message
+        is_transient: is_transient ->
+
+types:
+    # TODO: this is really an enum
+    code: string(suggest(composition.invalid_file_reference,cap.plan_limit,timeout.step_silence); required;generated) -> a stable dotted syntax that identifies the error
+    category: enum(composition,cap,timeout,provider,document,vcs,io,config,usage,runaway,auth,internal;required;generated)
+    disposition: enum(transient,throttled,correctable,needs_input,unrecoverable;required;generated)
+    severity: enum(info,warning,error; required;generated)
+    origin: enum(provider,author,caller,environment,internal; required; generated)
+    msg: string(required;generated)
+    is_transient: boolean(required;generated)

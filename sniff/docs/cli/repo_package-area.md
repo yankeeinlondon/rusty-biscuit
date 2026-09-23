@@ -18,7 +18,10 @@ Outputs a single area name:
 sniff
 ```
 
-For packages at the repository root level (no parent area), outputs `root`.
+A package at the repository root level (no parent area) belongs to the empty
+area `""`, which is not a package area: nothing is printed and the command
+exits `1` (or `0` with `--no-error`). With `--json` the result is
+`{ "name": "" }`.
 
 ## Arguments and Flags
 

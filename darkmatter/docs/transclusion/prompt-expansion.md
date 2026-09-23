@@ -4,5 +4,3 @@ There are many times you'll want to create a Markdown document with an LLM promp
 
 1. Frontmatter Prompt Expansion
 2. Block Prompt Expansion
-
-

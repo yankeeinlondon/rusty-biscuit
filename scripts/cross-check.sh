@@ -688,7 +688,13 @@ run_unix() {
     local -a ship=("${script}")
     [[ -n "${bundle_file}" ]] && ship+=("${bundle_file}")
     [[ "${mode}" == "archive" ]] && ship+=("${plan_file}")
-    "${SCP[@]}" "${ship[@]}" "${host}:${base}/"
+    # Checked explicitly: `set -e` does not fire inside a function invoked as a
+    # condition, so an unchecked upload failure becomes a green verdict for a
+    # leg that ran nothing.
+    "${SCP[@]}" "${ship[@]}" "${host}:${base}/" || {
+        echo "cross-check: could not upload the run script to ${host}:${base}/ (is the disk full?)" >&2
+        return 1
+    }
     # A login shell is what puts cargo on PATH on every Unix host, but the run
     # script is handed to a NON-login `bash` inside it. A login shell that runs
     # a script file reports the status of the last command in the host's
@@ -967,8 +973,17 @@ EOF
     local -a ship=("${script}")
     [[ -n "${bundle_file}" ]] && ship+=("${bundle_file}")
     [[ "${mode}" == "archive" ]] && ship+=("${plan_file}")
-    # scp takes the forward-slash spelling of a Windows path.
-    "${SCP[@]}" "${ship[@]}" "${host}:${base//\\//}/"
+    # Checked explicitly, not left to `set -e`: this function is called as
+    # `if run_windows; then`, and bash suppresses `set -e` inside a function
+    # whose invocation is a condition. An unchecked failure here therefore ran
+    # on and reported `pass` for a leg that never executed a test — which is
+    # what a full `W:` produced on 2026-09-21 ("scp: write remote ... Failure"
+    # followed by "windows pass"). scp takes the forward-slash spelling of a
+    # Windows path.
+    "${SCP[@]}" "${ship[@]}" "${host}:${base//\\//}/" || {
+        echo "cross-check: could not upload the run script to ${host}:${base} (is the volume full?)" >&2
+        return 1
+    }
     local status=0
     "${SSH[@]}" "${host}" "powershell -NoProfile -ExecutionPolicy Bypass -File $(powershell_quote "${base}\\cross-check-${run_id}.ps1"); exit \$LASTEXITCODE" || status=$?
     # Nothing fetches a Windows report; see `discard_remote_report`.

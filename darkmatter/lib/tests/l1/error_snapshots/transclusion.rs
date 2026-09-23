@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::compose::TransclusionError;
 
+use darkmatter::markdown::compose::expression::ExpressionError;
+
 use super::helpers::{assert_contains_all, render, test_ctx_lines};
 
 #[test]
@@ -152,7 +154,10 @@ fn condition_eval_shows_expr_and_state_hint() {
         ctx: Box::new(test_ctx_lines(15, "doc.md")),
         expr: "length(items) > 0".into(),
         line: 10,
-        message: "items not found".into(),
+        cause: Box::new(ExpressionError::Other {
+            function: "length".into(),
+            message: "items not found".into(),
+        }),
     };
     let out = render(&err);
     assert_contains_all(

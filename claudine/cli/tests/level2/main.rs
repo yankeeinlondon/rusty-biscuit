@@ -9,6 +9,8 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod level2_ac28_lifecycle_lazy_roots;
+mod level2_ac2_worktree_compose;
 #[cfg(unix)]
 mod level2_auto_complete_chooser;
 #[cfg(unix)]

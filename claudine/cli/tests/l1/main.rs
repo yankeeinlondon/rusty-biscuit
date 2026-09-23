@@ -96,6 +96,9 @@ mod propagated_context_fixtures;
 mod protect_cli;
 mod provider_error_finalize;
 mod run_harness_loop_call_sites;
+// Spawns the `claudine-fake-goose` fixture binary, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 mod sequence_budget;
 mod sequence_cli;
 #[cfg(windows)]
@@ -133,6 +136,9 @@ mod wrap_compose_agent;
 mod wrap_compose_exec;
 #[cfg(unix)]
 mod wrap_compose_preflight;
+// Installs the `claudine-fake-goose` fixture binary, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 mod wrap_compose_validation;
 mod wrap_ctrl_c_windows;
 #[cfg(unix)]

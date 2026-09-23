@@ -4,31 +4,22 @@
 //! cacheable compose operations. Variant parameters determine the
 //! cached core result; post parameters are applied after cache lookup.
 
-// `CodeOperation` and `TocLinkingOperation` are wired into the compose
-// pipeline today. `FileOperation` remains available as the bucket model for
-// future compose-core refactoring, so this module still carries some unused
-// items in the current build.
-#![allow(dead_code)]
-
 use biscuit_hash::xx_hash;
 use serde_json::Value;
 use std::path::Path;
 
 use super::hashing::{canonical_json_sorted, compose_cache_key, operation_entry_key};
-use super::types::ArtifactClass;
 use crate::markdown::compose::toc_linking::TocLinkingOptions;
 use crate::markdown::compose::transclusion::{BlockOptions, ReplaceOption};
 
 /// Classification of directive parameters into cache-relevant buckets.
 ///
 /// - **conditional**: Control whether the operation runs (e.g., `when`).
-/// - **pre**: Applied before core computation.
 /// - **variant**: Determine the cached result — different variant params produce different entries.
 /// - **post**: Applied after cache lookup (cheap transforms like wrappers).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ParamBuckets {
     pub conditional: Vec<(String, String)>,
-    pub pre: Vec<(String, String)>,
     pub variant: Vec<(String, String)>,
     pub post: Vec<(String, String)>,
 }
@@ -55,63 +46,6 @@ pub(crate) trait CacheableOperation {
 
     /// Computes a variant cache key from source identity and parameter buckets.
     fn variant_cache_key(&self, source_id: u64, buckets: &ParamBuckets) -> u64;
-
-    /// Returns the artifact class for persistent storage.
-    fn artifact_class(&self) -> ArtifactClass;
-}
-
-// ── File operation ───────────────────────────────────────────────────
-
-/// `::file` markdown transclusion operation.
-pub(crate) struct FileOperation;
-
-impl CacheableOperation for FileOperation {
-    fn split_params(&self, options: &BlockOptions) -> ParamBuckets {
-        let mut buckets = ParamBuckets::default();
-
-        if let Some(when) = &options.when_expr {
-            buckets.conditional.push(("when".to_string(), when.clone()));
-        }
-
-        // Variant: replace behavior affects the composed core
-        match &options.replace {
-            ReplaceOption::InheritDefault => {
-                buckets
-                    .variant
-                    .push(("replace".to_string(), "inherit".to_string()));
-            }
-            ReplaceOption::ParentWins => {
-                buckets
-                    .variant
-                    .push(("replace".to_string(), "parent_wins".to_string()));
-            }
-            ReplaceOption::OneOff(map) => {
-                let canonical = canonical_json_sorted(&Value::Object(map.clone()));
-                buckets.variant.push(("replace".to_string(), canonical));
-            }
-        }
-
-        // Post: applied after cache lookup
-        for exclude in &options.exclude {
-            buckets.post.push(("exclude".to_string(), exclude.clone()));
-        }
-        if let Some(q) = &options.quotation {
-            buckets.post.push(("quotation".to_string(), q.clone()));
-        }
-        if let Some(d) = &options.disclosure {
-            buckets.post.push(("disclosure".to_string(), d.clone()));
-        }
-
-        buckets
-    }
-
-    fn variant_cache_key(&self, source_id: u64, buckets: &ParamBuckets) -> u64 {
-        operation_entry_key("file", source_id, buckets.variant_hash())
-    }
-
-    fn artifact_class(&self) -> ArtifactClass {
-        ArtifactClass::ComposeDocumentCore
-    }
 }
 
 // ── Code operation ───────────────────────────────────────────────────
@@ -158,10 +92,6 @@ impl CacheableOperation for CodeOperation {
 
     fn variant_cache_key(&self, source_id: u64, buckets: &ParamBuckets) -> u64 {
         operation_entry_key("code", source_id, buckets.variant_hash())
-    }
-
-    fn artifact_class(&self) -> ArtifactClass {
-        ArtifactClass::OperationResult
     }
 }
 
@@ -269,24 +199,6 @@ mod tests {
     }
 
     #[test]
-    fn file_split_params_post_includes_exclude_and_wrappers() {
-        let op = FileOperation;
-        let options = BlockOptions {
-            exclude: vec!["Examples".to_string()],
-            quotation: Some("".to_string()),
-            disclosure: Some("Details".to_string()),
-            ..Default::default()
-        };
-
-        let buckets = op.split_params(&options);
-        assert_eq!(buckets.post.len(), 3);
-        let post_keys: Vec<&str> = buckets.post.iter().map(|(k, _)| k.as_str()).collect();
-        assert!(post_keys.contains(&"exclude"));
-        assert!(post_keys.contains(&"quotation"));
-        assert!(post_keys.contains(&"disclosure"));
-    }
-
-    #[test]
     fn variant_hash_deterministic() {
         let mut buckets = ParamBuckets::default();
         buckets
@@ -313,13 +225,11 @@ mod tests {
 
     #[test]
     fn variant_cache_key_different_per_operation() {
-        let code_op = CodeOperation;
-        let file_op = FileOperation;
         let buckets = ParamBuckets::default();
 
-        let code_key = code_op.variant_cache_key(12345, &buckets);
-        let file_key = file_op.variant_cache_key(12345, &buckets);
-        assert_ne!(code_key, file_key);
+        let code_key = CodeOperation.variant_cache_key(12345, &buckets);
+        let toc_key = TocLinkingOperation::variant_cache_key(12345, &buckets);
+        assert_ne!(code_key, toc_key);
     }
 
     #[test]

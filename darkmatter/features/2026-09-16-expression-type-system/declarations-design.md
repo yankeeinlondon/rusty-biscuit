@@ -16,9 +16,11 @@ contract. It is re-homed — with dated corrections, not copied wholesale —
 from the superseded July draft
 ([2026-07-15-type-system](../2026-07-15-type-system/spec.md)); that draft
 remains in place as the historical record, and this annex — not the draft —
-is the design of record. Where the two disagree, this annex wins; the one
-deliberate disagreement is recorded prominently in the translation model
-below. The consolidation itself is recorded as Resolved Decision 17 in the
+is the design of record. Where this annex and the July draft disagree,
+this annex wins. The parent specification's dated confirmed clarifications
+also apply here; remaining compatibility implementation work is recorded
+in the parent specification. The consolidation itself is recorded as
+Resolved Decision 17 in the
 chartering spec
 ([2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md)).
 
@@ -56,10 +58,16 @@ constraint refines a scalar family. Everything downstream in this annex —
 the union algebra, the projection tables, the verification matrix —
 reflects the overturned stance.
 
-One adjacent July rule survives unchanged: `null` remains a type and a YAML
-value, never a synthesized one. Projection and evaluation must not
-materialize `null` properties (or any properties) merely to make names
-visible.
+Declaration projection and expression evaluation must not synthesize or
+replace properties merely to provide names or types. This component boundary
+does not remove existing composition-stage schema normalization: eligible
+absent optional, no-default top-level properties from document inline or
+referenced SimplifiedSchema still become null before coercion. Baseline and
+trigger properties, raw JSON Schema, root unions, nested properties,
+required properties, and defaulted properties remain excluded. Present
+values remain unchanged, repeated schema passes remain idempotent, and
+validation-only APIs remain passive. No new insertion is authorized by
+this declaration layer.
 
 ### Semantic invariants
 
@@ -72,16 +80,20 @@ Expression variables have three independent properties:
 
 Normative:
 
-- A visible variable may have type `any`.
+- A visible variable may have type `unknown`.
 - A visible variable of any type may have no runtime value.
 - A missing runtime value does not make a declared variable unknown.
-- `any` is a static type, not a value and not an alias for `null`.
-- Requiredness is a validation constraint; optionality is a default
-  constraint whose type contribution is `| null` (the reversal above).
+- `unknown` is the union of all types, including `null`; it is not itself a
+  value or an alias for `null`. `any` is an equivalent schema alias for
+  `unknown`, the canonical expression-facing name.
+- `required` is a validation constraint; optionality is a default constraint
+  whose type contribution is `| null`. The confirmed `null(required)` and
+  `unknown(required)` declarations both accept null and omission; `required`
+  must not be treated as universally forbidding them.
 - Static type information never manufactures a runtime value — including
   `null`.
 - Runtime frontmatter keys not declared by the schema are visible with type
-  `any`.
+  `unknown`.
 - A root absent from both declarations and runtime state remains unknown in
   a strict surface.
 
@@ -202,7 +214,7 @@ model.
 
 At minimum, the model distinguishes:
 
-- `any`;
+- `unknown`;
 - `null` (Phase A vocabulary);
 - each supported scalar family, including Darkmatter refinements such as
   `file`, `date`, `url`, and `expression`;
@@ -226,18 +238,17 @@ normalization operation:
 
 ```text
 union(T, T)          = T
-union(any, T)        = any
-union(T, any)        = any
+union(unknown, T)        = unknown
+union(T, unknown)        = unknown
 union(null, null)    = null
-union(T, null)       = T | null, when T != null and T != any
+union(T, null)       = T | null, when T != null and T != unknown
 union(T, U)          = T | U, when T != U
 union(T | U, V)      = normalize({T, U, V})
 ```
 
-`any` is the absorbing type because it states that no concrete restriction
-can be established — it absorbs `null` like everything else. `null` is
-otherwise an ordinary union member: it does not absorb, and nothing but
-`any` absorbs it. Distinct concrete types do not lose their information
+`unknown` is the absorbing type because it includes all types — it absorbs
+`null` like everything else. `null` is otherwise an ordinary union member: it does not absorb, and nothing but
+`unknown` absorbs it. Distinct concrete types do not lose their information
 merely because they differ: they remain alternatives in a union.
 
 Normalization must flatten nested unions, remove duplicate members,
@@ -254,7 +265,7 @@ Examples:
 | Inputs | Result |
 |---|---|
 | `file`, `file` | `file` |
-| `file`, `any` | `any` |
+| `file`, `unknown` | `unknown` |
 | `string`, `number` | `string \| number` |
 | `file`, `string` | `file \| string` |
 | `string`, `null` | `string \| null` |
@@ -262,8 +273,8 @@ Examples:
 | `string[]`, `string[]` | `string[]` |
 | `string[]`, `number[]` | `string[] \| number[]` |
 | `string`, `string[]` | `string \| string[]` |
-| `any`, `string \| number` | `any` |
-| `any`, `null` | `any` |
+| `unknown`, `string \| number` | `unknown` |
+| `unknown`, `null` | `unknown` |
 
 ### Optionality in projection
 
@@ -284,7 +295,7 @@ A `PropertyDef::Union` is projected before its containing object or
 root-union arm is combined. Each atom becomes a normalized expression type,
 and the same union normalization folds the atoms. Thus `[string, number]`
 projects to `string | number`, while `[file, file]` projects to `file` and
-`[file, any]` projects to `any`. An optional property declared
+`[file, unknown]` projects to `unknown`. An optional property declared
 `[string, number]` projects to `string | number | null`.
 
 ### Root-level unions
@@ -293,21 +304,23 @@ For every literal property name declared by at least one arm:
 
 1. Project that property into every arm, optionality applied per arm.
 2. Use the arm's projected property type when the property is declared.
-3. Use `any` when that arm has no property-specific declaration.
+3. Use `unknown` when that arm has no property-specific declaration.
 4. Fold all arm results with union normalization.
 
 For the motivating schema (see the acceptance scenario below):
 
 | Property | Specification arm | Review arm | Union type |
 |---|---|---|---|
-| `spec` | `file` (required) | `any` (undeclared) | `any` |
-| `design` | `file \| null` (optional) | `any` (undeclared) | `any` |
-| `review` | `any` (undeclared) | `file` (required) | `any` |
+| `spec` | `file` (required) | `unknown` (undeclared) | `unknown` |
+| `design` | `file \| null` (optional) | `unknown` (undeclared) | `unknown` |
+| `review` | `unknown` (undeclared) | `file` (required) | `unknown` |
 | `plan` | `file` (required) | `file` (required) | `file` |
 | `area` | `string \| null` | `string \| null` | `string \| null` |
 
-Arm selection remains relevant to validation, coercion, and runtime values.
-It does not remove declarations contributed by other arms.
+More than one arm may match, and validation succeeds without a unique match.
+Expressions do not require a unique arm identity. Existing arm-selection
+policies for coercion and runtime values are not changed by this ruling.
+They do not remove declarations contributed by other arms.
 
 ### Single object shapes
 
@@ -330,7 +343,7 @@ exist, but cannot declare arbitrary bare identifiers in advance.
 
 Therefore:
 
-- a runtime-present `foo` is visible with type `any` when no literal schema
+- a runtime-present `foo` is visible with type `unknown` when no literal schema
   property gives it a more specific type;
 - a literal `foo` property declared in any effective schema arm is visible
   even when runtime-absent;
@@ -377,7 +390,10 @@ Raw JSON Schema is in scope with conservative typing:
   `"type": ["string", "null"]`-style nullability folding through the same
   `null` member;
 - recognized distinct concrete alternatives remain a concrete union;
-- an unrecognized or indeterminate schema alternative contributes `any`,
+- `allOf` applies simultaneous constraints, not alternative union arms;
+  where their safe intersection is not representable, conservatively project
+  `unknown` while preserving enumerable literal root declarations;
+- an unrecognized or indeterminate schema alternative contributes `unknown`,
   which absorbs the other alternatives rather than narrowing them
   unsafely;
 - open/pattern shapes do not manufacture literal root declarations.
@@ -386,11 +402,11 @@ This is an owner-maintained projection from Darkmatter's resolved schema,
 not a second Claudine JSON Schema parser. Full JSON Schema static inference
 is not required. A raw construct whose possible literal property names
 cannot be enumerated provides no absent-runtime declarations; keys actually
-present at runtime remain visible as `any`.
+present at runtime remain visible as `unknown`.
 
 Equivalent supported inline and referenced schemas must produce the same
 declarations. Equivalent SimplifiedSchema and raw JSON Schema forms must
-expose the same literal roots; raw forms may conservatively produce `any`
+expose the same literal roots; raw forms may conservatively produce `unknown`
 where a SimplifiedSchema form retains a Darkmatter-specific refinement.
 
 **Phase note.** This conservative raw-JSON-Schema projection is Phase C
@@ -464,7 +480,9 @@ This design does not change Darkmatter's established tolerance for fallback
 and unchosen ternary paths. The shared validator must preserve the same
 reachable-root policy currently used by strict subtree composition.
 Refactoring the root walker must not broaden or narrow those semantics
-accidentally.
+accidentally. The parent specification separately requires type checking
+both conditional branches, including skipped branches. That diagnostic pass
+does not evaluate skipped expressions or change this root-visibility policy.
 
 ### Diagnostics (Phase E)
 
@@ -477,6 +495,60 @@ expression. When available, diagnostics should distinguish:
 
 The second case is not an error by itself — under the translation model it
 is ordinary `A | null` evaluation.
+
+Type diagnostics must follow the parent specification's confirmed
+conditional policy: report invalid calls even in skipped branches, but by
+default stop execution only upon reaching an invalid call, before invocation.
+The explicit CLI blocking policy below can stop execution earlier.
+DMLS performs this analysis without expression execution or target-file
+reads. Darkmatter's `file_exists` existence predicate is an explicit
+exception: a known argument type outside `string | file | null` produces
+a DMLS warning explaining its always-false result, and execution returns
+`false` without a type error. Warning behavior for `unknown` inputs is
+opt-in and disabled by default, with no execution change. The known-type
+warning remains enabled by default. A true `is_file_type` guard establishes
+suitability for a file parameter and removes this uncertainty within the
+guarded branch, without rewriting stored values or establishing existence
+or access permission.
+
+### CLI diagnostic policy boundary
+
+The parent specification's CLI consolidation uses `--deny <id|all>` for
+selected blocking diagnostics, `--allow <id|all>` for recovery or explicitly
+addressed access, and `--disable <id>` for stopping features. It supersedes
+a separate `--deny-warnings` proposal. Specific recovery/diagnostic rules
+override broad rules independent of order; equally specific opposing rules
+are usage errors detected before composition/rendering effects.
+
+This does not change DMLS's opt-in unknown-input warning policy or silently
+enable that warning. `--deny all` blocks success for every reported, enabled
+warning or error, including a type error in a skipped branch; informational
+notices do not block. A specific allowance overrides the broad denial.
+The earlier conditional execution examples describe default behavior
+without an applicable CLI denial. No denial executes skipped expressions.
+
+The CLI stops subsequent work and effects when a blocking diagnostic is
+known, using available passive analysis before effects when possible. It
+neither reorders the pipeline nor rolls back earlier effects. Failure
+withholds the composed document from standard output, while an explicitly
+selected report format may emit a JSON failure outcome and diagnostics
+without document content. Existing document-only `--output json` remains
+unchanged. These CLI rules do not replace Claudine's workflow policy.
+Migration details and acceptance cases are owned by the parent specification.
+
+### Diagnostic data and passive file checks
+
+The library owns diagnostic codes, severity, messages, source positions, and
+relevant expected/actual types, shared by CLI and DMLS. Do not add evaluated
+arguments, environment values, or file contents, and do not perform extra
+evaluation or I/O for reporting. Existing authored source or messages can
+contain sensitive text; no general redaction guarantee is made.
+
+`file_exists` rejects structurally malformed strings before filesystem or
+network access using the same passive `biscuit-file` rules as `is_file_type`.
+DMLS issues the always-false warning for statically provable malformed
+contents, not merely for an ordinary string type. Existing valid-reference
+resolution and remote-runtime behavior remains as specified in the parent.
 
 ## Interpolation Consistency
 
@@ -536,14 +608,44 @@ Darkmatter environment. Claudine may retain scans for Claudine-specific
 policy, such as prohibiting `err` in no-error events; it must not retain an
 independent definition of schema-visible variables.
 
+### Function extensions
+
+Hosts supply function implementations and matching declarations through the
+same Darkmatter contract as built-ins. That contract covers parameter and
+result types, supported conversions, advisory unsupported-input behavior,
+and optional true-result facts. Hosts must honor their declarations;
+Darkmatter performs the analysis, and DMLS consumes the declarations
+without executing functions. A declared file-suitability fact from a host
+predicate must support the same guarded file call as `is_file_type`.
+Custom host analysis callbacks are not required or authorized.
+
+### Representation evidence and call presence
+
+The completed [representation prototype](spikes/function-declarations-findings.md)
+supports separating call presence and argument order from schema value types
+and shared behavior metadata. A required function argument cannot be omitted
+merely because its value type is `unknown` or `null`; explicit null remains a
+supplied argument checked against that value type. This does not alter
+SimplifiedSchema property-omission semantics.
+
+The candidate is a proposed representation, not a validated generic checker.
+Its passive probes used an installed binary not proven to match this
+worktree; accepted metadata did not prove every nested definition or
+behavior. Planning must preserve catalog refinements, including `ip-address`,
+and audit variadic minimum counts, same-count overload dispatch, conversions,
+and fallback behavior. Exact candidate field names remain implementation
+choices. The parent specification records the evidence and completion limits.
+
 ## Design Properties
 
 ### D1 — Value-free declarations (Phase C)
 
 Schema visibility must be represented independently of frontmatter values
-and injected globals. No schema-declared-but-absent property is inserted
-into authored frontmatter, effective frontmatter, closure output, or
-`EffectiveState::data()`.
+and injected globals. Declaration projection, root validation, type
+checking, and expression evaluation must not insert or replace properties
+in authored frontmatter, effective frontmatter, closure output, or
+`EffectiveState::data()` merely to supply names or types. Existing
+composition-stage schema normalization remains unchanged.
 
 ### D2 — Darkmatter-owned projection (Phase C)
 
@@ -554,7 +656,7 @@ schema syntax.
 ### D3 — Deterministic union normalization (Phases A and C)
 
 Projection is independent of mapping order, selected validation arm,
-closest arm diagnostics, and validator error order. `any` absorbs other
+closest arm diagnostics, and validator error order. `unknown` absorbs other
 types including `null`; distinct concrete types remain members of a
 flattened, deduplicated, canonically ordered union. Depends on Phase A's
 `null` vocabulary.
@@ -580,7 +682,8 @@ remaining host validation path must agree on whether a root is known.
 Existing evaluation precedence, runtime function contracts, arm selection,
 coercion, eager file rewriting, optional-value dropping, and short-circuit
 rules remain unchanged except where this design explicitly adds declaration
-visibility or whole-value string rescanning. The type-vocabulary changes
+visibility or whole-value string rescanning, or the parent specification's
+confirmed conditional and file-predicate contracts. The type-vocabulary changes
 (`unknown`, `null`) are owned by the parent spec's Phases A and C, not by
 this annex.
 
@@ -589,14 +692,19 @@ this annex.
 - Creating a complete flow-sensitive or nested-object type checker (parent
   Phase D owns the narrowing that is in scope).
 - Making every name visible because an object schema is open.
-- Treating `any` as `null`, undefined, present, or valid for every runtime
+- Treating `unknown` as `null`, undefined, present, or valid for every runtime
   operation.
-- Materializing absent schema properties in document state.
-- Changing schema validation, arm selection, requiredness, coercion, eager
-  file rewriting, or optional-value dropping. Optionality changes the
-  projected effective runtime type; it does not change validation.
-- Changing function runtime contracts such as `file_exists`; this design
-  only allows a valid declared input to reach those contracts.
+- Inserting or replacing document properties through the declaration layer
+  merely to provide names or types; existing schema-stage normalization
+  remains in scope only for compatibility verification.
+- Changing schema validation, arm selection, coercion, eager file rewriting,
+  or optional-value dropping beyond the parent specification's confirmed
+  new-type behavior. The `null(required)` and `unknown(required)` cases are
+  explicit requirements, not contradictions to reject.
+- Changing function runtime contracts beyond the parent specification's
+  confirmed file-predicate behavior. `is_file_type` checks structure without
+  resolution; `file_exists` accepts null and retains advisory false results
+  for known unsupported types.
 - Making all lifecycle globals available in all events or during preflight.
 - Moving Claudine lifecycle scheduling or side-effect policy into Darkmatter.
 - Inferring arbitrary literal roots from `patternProperties`,
@@ -608,8 +716,9 @@ this annex.
 
 ## Acceptance Criteria
 
-Phase A criteria — the `null` keyword's core and the XOR authoring idiom —
-live in the parent spec's Phase A, absorbed from the superseded
+Phase A criteria — `unknown`/`any`, `null`, their `required` behavior, and
+inclusive/exclusive unions — live in the parent spec's confirmed
+clarifications. The original null-type cases were absorbed from the superseded
 [2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md) draft.
 
 ### Phase C — Darkmatter library
@@ -620,13 +729,13 @@ live in the parent spec's Phase A, absorbed from the superseded
 2. An optional property in a single shape is a known root when absent at
    runtime; its effective runtime type is `A | null` for declared type A.
 3. A root declared by only one root-union arm is known for all invocations
-   of that union and projects to `any` in arms where it is undeclared.
+   of that union and projects to `unknown` in arms where it is undeclared.
 4. Property-level unions and root-level unions use the same deterministic
    normalization, with optionality applied after the declared-type fold.
-5. `any | T` produces `any`; distinct concrete alternatives such as
+5. `unknown | T` produces `unknown`; distinct concrete alternatives such as
    `string | number` remain a union; identical concrete types collapse to
    that type; `T | null` is an ordinary two-member union.
-6. Runtime-present, schema-untyped keys are known with type `any`.
+6. Runtime-present, schema-untyped keys are known with type `unknown`.
 7. Open or pattern-based object acceptance does not make an arbitrary
    runtime-absent identifier known.
 8. Raw JSON Schema object/union forms expose enumerable literal roots
@@ -638,8 +747,11 @@ live in the parent spec's Phase A, absorbed from the superseded
     interpolation for the same lookup and expression.
 11. A root absent from all declaration/value/namespace/ambient layers still
     produces an unknown-root error.
-12. Neither projection nor evaluation inserts synthetic properties or
-    values into frontmatter.
+12. Declaration projection, root validation, type checking, and expression
+    evaluation preserve input property membership and values when supplying
+    names or types. Existing schema-stage null insertion retains its
+    eligibility, exclusions, idempotence, and preservation of present values;
+    validation-only APIs remain non-mutating.
 13. A whole-value ternary whose selected branch contains a nested
     interpolation span resolves that span with the same lookup and
     strictness.
@@ -676,6 +788,25 @@ live in the parent spec's Phase A, absorbed from the superseded
 25. Strict diagnostics distinguish an unknown root, a known root with no
     runtime value, and a known root rejected by host scope policy. The
     second case is not an error by itself.
+26. Both conditional branches receive type checking, with diagnostics for
+    invalid calls. A skipped invalid
+    call does not block a valid selected branch; a reached invalid call
+    fails before invocation, except for explicitly advisory contracts such
+    as `file_exists` on known unsupported types.
+27. DMLS produces these diagnostics without executing functions or reading
+    target files. The parent specification supplies concrete conditional
+    and file-predicate acceptance cases.
+
+### Shared function contract and guarded calls
+
+- A true `is_file_type` result permits a guarded file-parameter call for an
+  originally `unknown` or `string` argument without mutating its stored
+  value or claiming existence or access permission.
+- A host predicate with an equivalent declared true-result fact receives
+  the same analysis. DMLS uses declarations without invoking host functions.
+- `file_exists` on an unknown-typed argument produces no uncertainty warning
+  by default and does so when opted in; execution is unchanged. Its warning
+  for a known unsupported type remains enabled by default.
 
 ### The motivating regression (acceptance scenario)
 
@@ -726,23 +857,42 @@ consistent bounded-rescan behavior.
 
 | Scenario | Declaration type | Runtime result |
 |---|---|---|
-| Present untyped `foo` | `any` | supplied value is used |
+| Present untyped `foo` | `unknown` | supplied value is used |
 | Optional typed `spec`, present | `file \| null` | supplied value is used |
 | Optional typed `spec`, absent | `file \| null` | known root; no-value/falsy semantics |
-| `spec` absent from selected arm but present in another arm | `any` | known root; no-value/falsy semantics |
-| `file \| any` | `any` | runtime operation decides from actual value |
+| `spec` absent from selected arm but present in another arm | `unknown` | known root; no-value/falsy semantics |
+| `file \| unknown` | `unknown` | runtime operation decides from actual value |
 | `string \| number` | `string \| number` | runtime operation decides from actual value |
 | `[string, number]` property union (required) | `string \| number` | runtime operation decides from actual value |
 | `[string, number]` property union (optional) | `string \| number \| null` | runtime operation decides from actual value |
-| Raw JSON explicit property with indeterminate type | `any` | known root; runtime value if supplied |
+| Raw JSON explicit property with indeterminate type | `unknown` | known root; runtime value if supplied |
 | Runtime-absent key matched only by an open/pattern shape | no declaration | strict unknown-root error |
 | `specc` absent everywhere | no declaration | strict unknown-root error |
 | Whole-value ternary returns `"{{review}}"` | inherited from `review` lookup | nested span resolves within bound |
 
+## Completion Evidence
+
+The parent specification's phase-completion and performance criteria apply
+to this annex. Verify before/after composition and editor-analysis behavior
+on representative documents and controlled declaration, union, and depth
+growth, preserving existing resource bounds. Record and explain regressions
+for explicit review; no numeric threshold or new CI job is implied.
+
+The conservative raw JSON Schema projection includes simultaneous `allOf`
+constraints, falling back to `unknown` when a safe intersection cannot be
+represented. A documented increment deferral does not mark the full charter
+complete. Grammar/schema changes require passive shipped-artifact and normal
+invocation coverage, and correctness covers macOS, Linux, native Windows,
+and WSL2. Terminal/browser verification must not take window focus.
+
 ## Sequencing Constraints
 
-The design in this annex is ratified; per-increment planning happens when
-Phase C is scheduled. When implementation begins:
+The inherited design in this annex is ratified, with subsequent confirmed
+clarifications applied above. Clarification and risk review are complete;
+the parent specification records the remaining implementation-planning work. The declaration layer's
+non-mutation boundary preserves existing schema-stage normalization.
+Per-increment planning happens when Phase C is scheduled. When
+implementation begins:
 
 - Phase A must land first — the `| null` projection has no vocabulary to
   draw on until the `null` type exists.

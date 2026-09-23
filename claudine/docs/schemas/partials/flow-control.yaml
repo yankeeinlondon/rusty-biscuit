@@ -1,0 +1,42 @@
+kind: schema
+description: types for flow-control actions in a lifecycle event
+types:
+    # flow control for events other than initialize
+    flow:
+        - |-
+            stop -> End this event's stack cleanly; composition continues with the
+            current outcome
+        - proxy: |-
+              - file(required) -> move execution to a different prompt to complete the work
+              - { target: file(required), with: object }
+        - error:
+              - string(required) -> "Mark this event as failed; at `success`/`finalize` it converts success to failure"
+              - { reason: string(required) }
+        - retry:
+              - number -> the maximum number of times to retry
+              - { attempts: number }
+        - resume:
+              - string ->
+              - { message: string }
+        - defer: string
+    # flow control for initialize event
+    flow_init:
+        - |-
+            stop -> End this event's stack cleanly; composition continues with the
+            current outcome
+        - |-
+            skip -> Similar to a 'stop' because the current document does stop executing;
+            however if this prompt is inside of a sequence, then the sequence continues
+        - proxy: |-
+              - file(required) -> move execution to a different prompt to complete the work
+              - { target: file(required), with: object }
+        - error:
+              - string(required) -> "Mark this event as failed; at `success`/`finalize` it converts success to failure"
+              - { reason: string(required) }
+        - retry:
+              - number -> the maximum number of times to retry
+              - { attempts: number }
+        - resume:
+              - string ->
+              - { message: string }
+        - defer: string
