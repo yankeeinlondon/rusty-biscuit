@@ -1,0 +1,39 @@
+{
+  "probe": "biscuit-terminal/cli/README.md",
+  "before_rows": [
+    {
+      "package": "biscuit-terminal-cli",
+      "path": "biscuit-terminal/cli/README.md",
+      "source": "biscuit-terminal/cli/tests/integration_test.rs",
+      "line": 2205,
+      "embedded": false,
+      "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "biscuit-terminal-cli",
+      "path": "biscuit-terminal/cli/README.md",
+      "source": "biscuit-terminal/cli/tests/l1/integration_test.rs",
+      "line": 2205,
+      "embedded": false,
+      "unit": "binary_id(biscuit-terminal-cli::l1) & test(=integration_test::public_docs_do_not_advertise_removed_atomic_tokens)"
+    }
+  ],
+  "before_units": {
+    "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)": [
+      "biscuit-terminal-cli::integration_test public_docs_do_not_advertise_removed_atomic_tokens"
+    ]
+  },
+  "after_units": {
+    "binary_id(biscuit-terminal-cli::l1) & test(=integration_test::public_docs_do_not_advertise_removed_atomic_tokens)": [
+      "biscuit-terminal-cli::l1 integration_test::public_docs_do_not_advertise_removed_atomic_tokens"
+    ]
+  },
+  "before_mapped": [
+    "biscuit-terminal-cli::l1 integration_test::public_docs_do_not_advertise_removed_atomic_tokens"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

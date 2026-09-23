@@ -1,0 +1,35 @@
+{
+  "failures": [],
+  "kind": "consolidation-snapshot-check",
+  "moved": 7,
+  "package": "biscuit-terminal-cli",
+  "readers": {
+    "integration_test": {
+      "asserting_functions": {
+        "test_columns_snapshot": "running",
+        "test_list_snapshot": "running",
+        "test_padleft_snapshot": "running",
+        "test_padright_snapshot": "running",
+        "test_prose_snapshot": "running",
+        "test_prose_styled_snapshot": "running",
+        "test_quote_snapshot": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [
+        "biscuit-terminal/cli/tests/snapshots/integration_test__columns_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__list_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__padleft_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__padright_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__prose_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__prose_styled_snapshot.snap",
+        "biscuit-terminal/cli/tests/snapshots/integration_test__quote_snapshot.snap"
+      ],
+      "snapshots": {
+        "unresolved": 7
+      },
+      "statement": "0 of 7 moved snapshots are read only by #[ignore]d tests and 7 have no attributable reader; those are proven by rule and byte hash only, not by a passing run"
+    }
+  },
+  "unaffected": 0,
+  "version": 1
+}

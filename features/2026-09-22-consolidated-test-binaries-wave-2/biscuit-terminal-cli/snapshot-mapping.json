@@ -1,0 +1,43 @@
+{
+  "kind": "consolidation-snapshot-mapping",
+  "moved": [
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__columns_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__columns_snapshot.snap",
+      "sha256": "6df0e7c8df771a608a22ffd72d04da33f28320fa15e281cf6138e175fcbcb2cc"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__list_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__list_snapshot.snap",
+      "sha256": "881902752aee17ecf60b49dbc667bec75cebcd2af8252592dc5ab8321e19558d"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padleft_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__padleft_snapshot.snap",
+      "sha256": "7ebe5deb4ddae47f91c465f1edf110782755ed171db755ed8f10c9f9cf006c22"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__padright_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__padright_snapshot.snap",
+      "sha256": "1574b2ef6ae03c099c6a3747ad56d1ec2fc1f0833f4f809010c30d55a102af15"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__prose_snapshot.snap",
+      "sha256": "e8eafe13bd27aa0ca2418fa115852b467fef7c0795680694f470d7efe371e4c7"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__prose_styled_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__prose_styled_snapshot.snap",
+      "sha256": "35a8a170fb6b81ac83fb1349d906238cb3fe9c1611fa70a02cea5e2f58feabf6"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/snapshots/l1__integration_test__quote_snapshot.snap",
+      "old": "biscuit-terminal/cli/tests/snapshots/integration_test__quote_snapshot.snap",
+      "sha256": "f3bda90cb5d0f4ab57b5ca7686ff40b4c70d875827c09ef44b474b72d0057031"
+    }
+  ],
+  "package": "biscuit-terminal-cli",
+  "unaffected": [],
+  "version": 1
+}
