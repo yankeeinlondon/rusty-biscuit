@@ -753,7 +753,12 @@ spell yours in one of them or the file's next edit will not run your test:
 
 Paths assembled from `format!`, a value computed at run time, or a helper
 defined in another file are invisible, and a literal joined onto a tempdir is
-correctly treated as a fixture, not a read. The why and the evidence rules are
+correctly treated as a fixture, not a read. Only an L1 test is scheduled.
+Its tier comes from its path, not its binary's name, so an L1 test in a
+`level2` binary counts. A read inside a helper rather than a test function
+schedules every L1 test in the helper's binary, because any of them may call
+it. A read in a target whose `required-features` the
+package's CI `features` leave off schedules nothing. The why and the evidence rules are
 in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
 
 ## Environment Contract

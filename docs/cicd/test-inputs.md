@@ -58,8 +58,20 @@ built at run time (`format!`) is invisible to the index.
 
 Because the walk is exact, each reference resolves to a precise nextest test
 identity: `binary_id(darkmatter::l1) & test(=schema_phase_validation::public_docs_…)`
-for a literal inside a test function, or `test(/^module::/)` for one in a
-helper.
+for a literal inside a test function, or the whole binary,
+`binary_id(darkmatter::l1)`, for one in a helper. The index does not know
+which tests call a helper: a `pub` item, or a private one wrapped by a `pub`
+one, can be called from any module of its binary. A module-scoped unit would
+miss those callers, so a helper names its binary. The cost is a wider cell,
+which runs every L1 test in that binary; the alternative was an L1 test that a
+change to the file it reads would not run.
+
+Only a reference an L1 test can reach gets a unit. Tier is read from the
+test's path (`level2_`, `level3_`, `browser_`, `real_`, and `slow_` markers on
+any segment), never from the binary's name: `biscuit-tui-cli::level2` holds
+L1 tests. A helper gets no unit only when its binary holds no L1 test at all.
+A target whose `required-features` the package's CI `features` do not
+enable gets no unit either, because the L1 cell never compiles it.
 
 ## What gets scheduled
 

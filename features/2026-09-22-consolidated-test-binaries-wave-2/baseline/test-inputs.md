@@ -42,6 +42,20 @@ references today in `biscuit-terminal-cli` (`level2_cursor_and_hygiene.rs:39`,
 non-marker binary into a `level2`/`level3` one: `biscuit-tui-cli` has zero
 references.
 
+> **Superseded 2026-09-23 (review-1):** `NON_L1_BINARIES` is gone. `_unit`
+> now decides tier from the test path alone and honors `required-features`,
+> so the line numbers above describe the pre-review tree. The
+> `biscuit-terminal-cli` controls still resolve to no unit, now because their
+> modules carry the `level2_` marker.
+>
+> **Superseded 2026-09-23 (review-2):** a reference outside a test function
+> now names its whole binary, `binary_id(<id>)`, because any module of the
+> binary may call the helper that holds it. The `test(/^<module>::/)` form
+> above is no longer produced, and a helper's unit is dropped only when its
+> binary holds no L1 test. The `biscuit-terminal-cli` controls are helpers, so
+> they now resolve to `binary_id(biscuit-terminal-cli::level2)`, which holds
+> the L1 `prose_cells` tests.
+
 ## Method
 
 1. `baseline/test-input-probe.py` runs the planner's own index over every
