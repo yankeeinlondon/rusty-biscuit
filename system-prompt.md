@@ -8,7 +8,7 @@ mode: "append"
 
 - you are working in the **rusty-biscuit** monorepo
 - this session was _started_ in the **{{area}}** {{scope}}
-::block when="has_skill(area)"
+::block when="has_skill(ctx.area)"
     - you must use the '{{ area }}' agent skill
 ::end-block
 - always prefer US English (en-US) over other English
