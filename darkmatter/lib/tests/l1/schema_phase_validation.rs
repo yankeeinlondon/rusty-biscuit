@@ -635,7 +635,7 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
 /// `total_phases` are `required` only and are deferred to completion. The
 /// optional `spec` is absent from both.
 #[test]
-fn real_shipped_inline_schema_uses_normal_resolution_and_phase_path() {
+fn shipped_inline_schema_uses_normal_resolution_and_phase_path() {
     let text = include_str!("../../../../claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md");
     let source: Markdown = text.into();
     let schema = DarkmatterSchemas::new()

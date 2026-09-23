@@ -348,7 +348,7 @@ mod tests {
     /// profile lives in the Documents known folder, which no environment
     /// variable can point at a fixture.
     #[cfg(unix)]
-    mod real_shells {
+    mod installed_shells {
         use std::path::PathBuf;
         use std::time::Instant;
 
