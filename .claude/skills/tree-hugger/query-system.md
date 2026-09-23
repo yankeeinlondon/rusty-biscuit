@@ -240,7 +240,7 @@ The cache is:
 
 7. **Write tests**:
    - Add fixture files: `lib/tests/fixtures/sample.<ext>`, `types.<ext>`
-   - Add test in `lib/tests/tree_file.rs`
+   - Add test in `lib/tests/l1/tree_file.rs`
 
 ## Debugging Queries
 
