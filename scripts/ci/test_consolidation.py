@@ -1130,6 +1130,33 @@ class BodyDiffTests(MoveFixture):
         (self.repo / "pkg/tests/l1/beta.rs").unlink()
         self.assertTrue(any("missing on one side" in f for f in self.diff()["failures"]))
 
+    def plant_self_exec(self, after_line: str) -> Path:
+        """`beta` re-execs its own binary by test path; the move prefixes the module (R19)."""
+        before_line = 'let args = ["--exact", "probe"];\n'
+        (self.before / "pkg/tests/beta.rs").write_text(f"mod helper;\n{before_line}#[test]\nfn plain() {{}}\n")
+        self.move()
+        moved = self.repo / "pkg/tests/l1/beta.rs"
+        moved.write_text(moved.read_text().replace("#[test]", f"{after_line}#[test]", 1))
+        return moved
+
+    def test_a_dispositioned_identity_repair_is_structural(self) -> None:
+        self.plant_self_exec('let args = ["--exact", "beta::probe"];\n')
+        self.manifest["dispositions"].append({"path": "pkg/tests/l1/beta.rs", "detector": "exact_arg", "reason": "R19"})
+        report = self.diff()
+        self.assertEqual([], report["failures"])
+        self.assertEqual(0, report["changed_lines"]["other"])
+
+    def test_an_identity_repair_without_a_disposition_fails(self) -> None:
+        self.plant_self_exec('let args = ["--exact", "beta::probe"];\n')
+        report = self.diff()
+        self.assertIn('+ let args = ["--exact", "beta::probe"];', report["details"])
+
+    def test_a_dispositioned_file_still_fails_on_a_body_change(self) -> None:
+        self.plant_self_exec('let args = ["--exact", "beta::other_probe"];\n')
+        self.manifest["dispositions"].append({"path": "pkg/tests/l1/beta.rs", "detector": "exact_arg", "reason": "R19"})
+        report = self.diff()
+        self.assertIn('+ let args = ["--exact", "beta::other_probe"];', report["details"])
+
 
 class CheckMetadataTests(unittest.TestCase):
     def setUp(self) -> None:
