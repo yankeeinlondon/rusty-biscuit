@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_key  # noqa: E402  (needs the path insert above when run as a script)
 import schema  # noqa: E402
+import test_inputs  # noqa: E402
 
 try:  # Python 3.11+
     import tomllib
@@ -438,6 +439,14 @@ ARCHIVE_GUARD_OWN_INPUTS = frozenset({
     "tools/test-toolkit/src/archive_guard/matcher_tests.rs",
     "tools/test-toolkit/tests/archive_path_guard.rs",
 })
+
+# Test inputs (fixes/2026-09-22-test-input-blind-spot). A non-source file that
+# compiled code reads selects the code that reads it: embedded into shipped code
+# (`include_str!` outside tests), it is source of that package; read by a test,
+# it selects ONE L1 cell narrowed to exactly those tests, on this environment
+# alone. Whether a document's wording still satisfies the test that asserts it
+# does not depend on the OS, and Linux is where lint and check already live.
+TEST_INPUT_ENVIRONMENT = "ubuntu-latest"
 
 # Bootstrap-preflight breadth (D3). A full-scope run validates every runner OS
 # the plan's environments land on before fan-out; a package-local change
@@ -2533,9 +2542,22 @@ def cell_evidence(
     """
     if cell["gate"] == "check":
         return check_evidence(cell, accepted)
-    return accepted.get((cell["package"], cell["environment"], cell["gate"])) or (
+    evidence = accepted.get((cell["package"], cell["environment"], cell["gate"])) or (
         accepted_environments or {}
     ).get(cell["environment"])
+    if evidence is None:
+        return None
+    # A narrowed test-input cell and its evidence must name the same tests, and
+    # the evidence must be the head's exact tree: the file that changed is not
+    # a gate input, so no equivalence rule can vouch for an older run. The
+    # host may be any environment (docs/cicd/test-inputs.md).
+    narrow = cell.get("test_filter")
+    if narrow:
+        if evidence.get("test_filter") != narrow or evidence.get("origin") != "local":
+            return None
+    elif evidence.get("test_filter"):
+        return None
+    return evidence
 
 
 def check_evidence(
@@ -2557,7 +2579,7 @@ def check_evidence(
     rollup cannot present test counts as a check measurement.
     """
     l1 = accepted.get((cell["package"], cell["environment"], "L1"))
-    if l1 is None:
+    if l1 is None or l1.get("test_filter"):
         return None
     evidence = {
         "package": cell["package"],
@@ -3382,6 +3404,8 @@ def calculate_scope(
     all_environments: bool = False,
     proven_event: str | None = None,
     deleted: Sequence[str] = (),
+    renamed_from: Sequence[str] = (),
+    input_reader: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     """The canonical resolved plan for one event.
 
@@ -3412,6 +3436,12 @@ def calculate_scope(
     a missing file; the change inventory and the archive-path guard's scope
     both read it, the guard because a removed Rust file triggers exemption
     maintenance and has nothing left to scan.
+
+    `renamed_from` is the old name of each renamed path. It is in neither list
+    above — the path set describes the tree after the change — and is read
+    only to find test inputs that moved away under a test still naming them.
+    `input_reader` returns a repository file's text for that search, reading
+    `root` when omitted.
     """
     packages = workspace_packages(metadata)
     table = environments
@@ -3437,7 +3467,27 @@ def calculate_scope(
     full_scope = bool(full_gates)
 
     source_paths = source_paths_by_package(list(files), root, packages)
-    source_ids = set(source_paths)
+    references = (
+        []
+        if full_scope
+        else test_input_references(
+            [*files, *renamed_from],
+            root,
+            packages,
+            input_reader or worktree_reader(root),
+            frozenset(name for name, record in policy.items() if record.get("l1_include_slow")),
+        )
+    )
+    # A changed file compiled into a package's shipped code IS that package's
+    # source, whatever its suffix: selecting it is the ordinary source path.
+    embedded_paths: dict[str, list[str]] = {}
+    ids_by_package_name = {entry["name"]: package_id for package_id, entry in packages.items()}
+    for reference in references:
+        if reference.product and ids_by_package_name[reference.package] not in source_paths:
+            embedded_paths.setdefault(ids_by_package_name[reference.package], []).append(
+                reference.path
+            )
+    source_ids = set(source_paths) | set(embedded_paths)
     # A suite owner selected by a changed input rather than by its own source:
     # its gates run, but the changed path says nothing about its public API, so
     # it contributes no reverse-dependency seam below.
@@ -3488,6 +3538,11 @@ def calculate_scope(
             reason = "explicit full-scope request"
         elif package_id in source_paths:
             reason = f"source change in {source_paths[package_id][0]}"
+        elif package_id in embedded_paths:
+            reason = (
+                f"embedded file {embedded_paths[package_id][0]} changed; "
+                f"{name} compiles it into shipped code"
+            )
         else:
             reason = (
                 f"suite input {suite_paths[package_id][0]} selects its "
@@ -3594,6 +3649,20 @@ def calculate_scope(
             # never saw: what selected the guard was source in another area.
             suite_ids = suite_ids | {owner_id}
 
+    input_ids = select_test_inputs(
+        references,
+        package_records,
+        cells,
+        packages,
+        packages_by_name,
+        policy,
+        root,
+        cell_environments,
+        prohibitions,
+        metadata,
+        accepted,
+    )
+
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:
         raise RuntimeError(
@@ -3640,6 +3709,7 @@ def calculate_scope(
             package_records,
             full_scope,
             {packages[package_id]["name"] for package_id in suite_ids},
+            {packages[package_id]["name"] for package_id in input_ids},
         ),
         "packages": package_records,
         "source_packages": sorted(
@@ -3876,6 +3946,7 @@ def area_records(
     package_records: list[dict[str, Any]],
     full_scope: bool,
     suite_owners: set[str] | None = None,
+    input_readers: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Areas grouped from their packages, in sorted order.
 
@@ -3885,11 +3956,14 @@ def area_records(
     `suite_owners` names the packages selected because a registered suite they
     own verifies a changed input rather than because their own source changed;
     an area holding only those must not claim a source change it did not see.
+    `input_readers` are the packages selected only because a test of theirs
+    reads a changed file, under the same rule.
 
     Every area states [`EXECUTION_PATH`]: one path per area per run, stated on
     the record itself (ruling R9).
     """
     owners = suite_owners or set()
+    readers = input_readers or set()
     grouped: dict[str, list[str]] = {}
     for entry in package_records:
         grouped.setdefault(entry["area"], []).append(entry["package"])
@@ -3900,6 +3974,10 @@ def area_records(
         named = ", ".join(sorted(members))
         if set(members) <= owners:
             return f"changed suite input owned by package(s) {named}"
+        if set(members) <= readers:
+            return f"changed test input read by package(s) {named}"
+        if set(members) <= owners | readers:
+            return f"changed suite or test input of package(s) {named}"
         return f"source change in package(s) {named}"
 
     return [
@@ -4208,6 +4286,186 @@ def archive_guard_only_selection(
         "input_paths": input_paths,
     }
     return package_record, cells
+
+
+def worktree_reader(root: Path) -> Callable[[str], str | None]:
+    """A test-input reader over the checkout at `root`.
+
+    Every selection boundary plans from a checkout that IS the head tree (the
+    hook materializes one when it is not), so the checkout is the source the
+    plan describes.
+    """
+
+    def read(path: str) -> str | None:
+        try:
+            return (root / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    return read
+
+
+def test_input_references(
+    paths: Sequence[str],
+    root: Path,
+    packages: dict[str, dict[str, Any]],
+    reader: Callable[[str], str | None],
+    include_slow: frozenset[str],
+) -> list[test_inputs.Reference]:
+    """Every place compiled code names one of the changed non-source `paths`.
+
+    Source paths are left out: a source change already selects its owning
+    package, and a test that reads another package's source as text is a
+    separate, rarer coupling this selection does not take on.
+    """
+    candidates = [
+        path
+        for path in normalized_paths(paths)
+        if not is_package_source_path(PurePosixPath(path))
+    ]
+    if not candidates:
+        return []
+    targets = test_inputs.targets_from_metadata(packages.values(), root.resolve().as_posix())
+    return test_inputs.scan(targets, reader, candidates, include_slow)
+
+
+def select_test_inputs(
+    references: list[test_inputs.Reference],
+    package_records: list[dict[str, Any]],
+    cells: list[dict[str, Any]],
+    packages: dict[str, dict[str, Any]],
+    packages_by_name: dict[str, dict[str, Any]],
+    policy: dict[str, dict[str, Any]],
+    root: Path,
+    environments: list[dict[str, Any]],
+    prohibitions: dict[str, dict[str, Any]] | None,
+    metadata: dict[str, Any],
+    accepted: dict[tuple[str, str, str], dict[str, Any]],
+) -> set[str]:
+    """Add one narrowed L1 cell per package whose tests read a changed file.
+
+    A package whose L1 the plan already runs needs nothing: its whole suite
+    covers the narrowed one. A package the plan carries for another reason
+    alone (the archive-path guard's lint cell) gains the cell on its existing
+    record. `package_records` and `cells` are extended in place.
+
+    ## Returns
+
+    The ids of the packages this selection brought into the plan, so their
+    area can say why it was selected.
+    """
+    covered = {entry["package"] for entry in package_records if "L1" in entry["gates"]}
+    units: dict[str, dict[str, set[str]]] = {}
+    for reference in references:
+        if reference.product or reference.unit is None or reference.package in covered:
+            continue
+        units.setdefault(reference.package, {}).setdefault(reference.unit, set()).add(
+            reference.path
+        )
+
+    selected: set[str] = set()
+    for name in sorted(units):
+        record = policy[name]
+        # `gates = false` is a governed "CI launches nothing for this package".
+        if not record["gates"] or "L1" not in record["tiers"]:
+            continue
+        package_id = packages_by_name[name]["id"]
+        area = package_area(manifest_directory(root, packages[package_id]))
+        read = sorted({path for paths in units[name].values() for path in paths})
+        reason = (
+            f"test input {read[0]} changed"
+            + (f" (and {len(read) - 1} more)" if len(read) > 1 else "")
+            + f"; runs only the {len(units[name])} test unit(s) of {name} that read it"
+        )
+        owned = test_input_only_cells(
+            record,
+            area,
+            declared_target_kinds(packages[package_id]),
+            environments,
+            prohibitions,
+            reason,
+            " | ".join(f"({unit})" for unit in sorted(units[name])),
+            accepted,
+        )
+        if not owned:
+            continue
+        cells.extend(owned)
+        selected.add(package_id)
+        existing = next((entry for entry in package_records if entry["package"] == name), None)
+        if existing is not None:
+            existing["gates"] = [
+                gate for gate in schema.GATES if gate in existing["gates"] or gate == "L1"
+            ]
+            existing["tiers"] = ["L1"]
+            existing["test_args"] = feature_args(record, name)
+            existing["selection_reason"] = f"{existing['selection_reason']}; {reason}"
+            continue
+        package_records.append(
+            {
+                "package": name,
+                "area": area,
+                "selection_reason": reason,
+                "gates": ["L1"],
+                "targets": declared_target_kinds(packages[package_id]),
+                "tiers": ["L1"],
+                "test_args": feature_args(record, name),
+                "check_args": check_arguments(name, [], ""),
+                "l2_backends": record["l2_backends"],
+                "runner_tools": record["runner_tools"],
+                "companion_suites": [],
+                "archive_includes": record["archive_includes"],
+                "sidecars": record["sidecars"],
+                "l1_include_slow": record["l1_include_slow"],
+                "requires_toolchain": record["requires_toolchain"],
+                "native": native_closure(package_id, metadata, packages, policy),
+                "input_paths": closure_directories(package_id, root, metadata, packages),
+            }
+        )
+    return selected
+
+
+def test_input_only_cells(
+    record: dict[str, Any],
+    area: str,
+    target_kinds: list[str],
+    environments: list[dict[str, Any]],
+    prohibitions: dict[str, dict[str, Any]] | None,
+    reason: str,
+    test_filter: str,
+    accepted: dict[tuple[str, str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The one narrowed L1 cell a changed test input schedules, if its host is planned.
+
+    Built through [`package_cells`] with the package's own policy reduced to
+    its L1 tier and handed only [`TEST_INPUT_ENVIRONMENT`], so the cell's
+    execution, target kinds, profile, and prohibition handling are exactly an
+    ordinary L1 cell's, except that `test_filter` intersects the tier's own
+    expression, naming only the tests that read the changed file.
+
+    Evidence is applied after the filter is set, because [`cell_evidence`]
+    reads it: only an exact-tree receipt cell carrying the same filter
+    satisfies the cell, and it may come from any host.
+    """
+    hosts = [entry for entry in environments if entry["name"] == TEST_INPUT_ENVIRONMENT]
+    if not hosts:
+        return []
+    l1_only = {**record, "tiers": ["L1"], "companion_suites": []}
+    owned = [
+        cell
+        for cell in package_cells(
+            l1_only, area, target_kinds, hosts, {}, prohibitions=prohibitions
+        )
+        if cell["gate"] == "L1"
+    ]
+    for cell in owned:
+        cell["selection_reason"] = reason
+        if cell["execution"] != "execute":
+            continue
+        cell["test_filter"] = test_filter
+        evidence = cell_evidence(cell, accepted, None)
+        if evidence is not None:
+            mark_reused(cell, evidence)
+    return owned
 
 
 def classify_preflight(
@@ -4524,16 +4782,27 @@ def parse_args() -> argparse.Namespace:
             "declared rather than guessed"
         ),
     )
+    parser.add_argument(
+        "--renamed-from",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "the old name of a renamed path; repeatable. Read only to find the "
+            "tests that still name it"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     args = parser.parse_args()
     if args.apply_to and (
-        args.all or args.files or args.constraints or args.deleted
+        args.all or args.files or args.constraints or args.deleted or args.renamed_from
         or args.event or args.all_environments or args.proven_event
     ):
         parser.error(
             "--apply-to applies evidence to a carried plan and performs no "
             "selection: it cannot be combined with --all, --constraints, --event, "
-            "--all-environments, --proven-event, --deleted, or a file list"
+            "--all-environments, --proven-event, --deleted, --renamed-from, or a "
+            "file list"
         )
     return args
 
@@ -4629,6 +4898,7 @@ def main() -> None:
             all_environments=args.all_environments,
             proven_event=args.proven_event,
             deleted=args.deleted,
+            renamed_from=args.renamed_from,
         )
     if args.plan_out:
         Path(args.plan_out).write_text(schema.canonical(plan), encoding="utf-8")
