@@ -1,0 +1,917 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "biscuit-file/lib",
+  "dispositions": [],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "biscuit-file/lib/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "completion_round_trip",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/completion_round_trip.rs",
+      "old_binary_id": "biscuit-file::completion_round_trip",
+      "old_path": "biscuit-file/lib/tests/completion_round_trip.rs",
+      "old_target": "completion_round_trip",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "completion_round_trip::completion_rejects_rooted_magic_payloads_before_enumerating_roots",
+          "old": "completion_rejects_rooted_magic_payloads_before_enumerating_roots"
+        },
+        {
+          "new": "completion_round_trip::context_without_repository_root_stays_base_only",
+          "old": "context_without_repository_root_stays_base_only"
+        },
+        {
+          "new": "completion_round_trip::implicit_relative_completion_roots_are_base_first",
+          "old": "implicit_relative_completion_roots_are_base_first"
+        },
+        {
+          "new": "completion_round_trip::implicit_relative_completion_value_resolves_to_the_displayed_file",
+          "old": "implicit_relative_completion_value_resolves_to_the_displayed_file"
+        },
+        {
+          "new": "completion_round_trip::magic_completion_value_resolves_through_a_shared_configured_root",
+          "old": "magic_completion_value_resolves_through_a_shared_configured_root"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "detailed_resolution",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/detailed_resolution.rs",
+      "old_binary_id": "biscuit-file::detailed_resolution",
+      "old_path": "biscuit-file/lib/tests/detailed_resolution.rs",
+      "old_target": "detailed_resolution",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "detailed_resolution::candidate_plan_matches_the_probed_order",
+          "old": "candidate_plan_matches_the_probed_order"
+        },
+        {
+          "new": "detailed_resolution::detailed_no_match_retains_candidates_and_repository_root",
+          "old": "detailed_no_match_retains_candidates_and_repository_root"
+        },
+        {
+          "new": "detailed_resolution::detailed_success_retains_ordered_candidates_and_provenance",
+          "old": "detailed_success_retains_ordered_candidates_and_provenance"
+        },
+        {
+          "new": "detailed_resolution::direct_symlink_to_regular_file_is_selected",
+          "old": "direct_symlink_to_regular_file_is_selected"
+        },
+        {
+          "new": "detailed_resolution::explicit_implicit_reference_does_not_discover_repository_root",
+          "old": "explicit_implicit_reference_does_not_discover_repository_root"
+        },
+        {
+          "new": "detailed_resolution::explicit_relative_plan_is_exactly_one_source_candidate",
+          "old": "explicit_relative_plan_is_exactly_one_source_candidate"
+        },
+        {
+          "new": "detailed_resolution::invalid_context_is_a_typed_missing_context_failure",
+          "old": "invalid_context_is_a_typed_missing_context_failure"
+        },
+        {
+          "new": "detailed_resolution::io_probe_failure_stops_with_typed_error_identifying_candidate",
+          "old": "io_probe_failure_stops_with_typed_error_identifying_candidate"
+        },
+        {
+          "new": "detailed_resolution::legacy_projection_agrees_with_detailed_outcome",
+          "old": "legacy_projection_agrees_with_detailed_outcome"
+        },
+        {
+          "new": "detailed_resolution::non_file_candidate_advances_the_search",
+          "old": "non_file_candidate_advances_the_search"
+        },
+        {
+          "new": "detailed_resolution::recursive_reference_records_search_roots_with_provenance",
+          "old": "recursive_reference_records_search_roots_with_provenance"
+        },
+        {
+          "new": "detailed_resolution::rooted_magic_payloads_never_reach_planning_or_resolution",
+          "old": "rooted_magic_payloads_never_reach_planning_or_resolution"
+        },
+        {
+          "new": "detailed_resolution::supplied_repository_root_anchors_and_suppresses_ancestor_discovery",
+          "old": "supplied_repository_root_anchors_and_suppresses_ancestor_discovery"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "finalized_reference_resolution",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/finalized_reference_resolution.rs",
+      "old_binary_id": "biscuit-file::finalized_reference_resolution",
+      "old_path": "biscuit-file/lib/tests/finalized_reference_resolution.rs",
+      "old_target": "finalized_reference_resolution",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "finalized_reference_resolution::canonical_containment_accepts_internal_links_and_rejects_external_targets",
+          "old": "canonical_containment_accepts_internal_links_and_rejects_external_targets"
+        },
+        {
+          "new": "finalized_reference_resolution::completion_roots_match_execution_order_for_supported_forms",
+          "old": "completion_roots_match_execution_order_for_supported_forms"
+        },
+        {
+          "new": "finalized_reference_resolution::implicit_relative_is_cwd_first_and_first_match_wins",
+          "old": "implicit_relative_is_cwd_first_and_first_match_wins"
+        },
+        {
+          "new": "finalized_reference_resolution::magic_intrinsic_chain_is_between_registered_roots",
+          "old": "magic_intrinsic_chain_is_between_registered_roots"
+        },
+        {
+          "new": "finalized_reference_resolution::recursive_completion_stays_unsupported_but_malformed_payloads_still_error",
+          "old": "recursive_completion_stays_unsupported_but_malformed_payloads_still_error"
+        },
+        {
+          "new": "finalized_reference_resolution::repository_root_reference_has_one_candidate_match_and_miss",
+          "old": "repository_root_reference_has_one_candidate_match_and_miss"
+        },
+        {
+          "new": "finalized_reference_resolution::repository_scoped_reference_orders_package_area_and_repository",
+          "old": "repository_scoped_reference_orders_package_area_and_repository"
+        },
+        {
+          "new": "finalized_reference_resolution::repository_sigils_outside_a_repository_are_typed_errors",
+          "old": "repository_sigils_outside_a_repository_are_typed_errors"
+        },
+        {
+          "new": "finalized_reference_resolution::repository_sigils_reject_lexical_escapes_for_direct_recursive_and_completion",
+          "old": "repository_sigils_reject_lexical_escapes_for_direct_recursive_and_completion"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "implicit_relative",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/implicit_relative.rs",
+      "old_binary_id": "biscuit-file::implicit_relative",
+      "old_path": "biscuit-file/lib/tests/implicit_relative.rs",
+      "old_target": "implicit_relative",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "implicit_relative::ambient_cwd::env_var_interpolation_resolves_via_implicit_relative",
+          "old": "ambient_cwd::env_var_interpolation_resolves_via_implicit_relative"
+        },
+        {
+          "new": "implicit_relative::ambient_cwd::resolve_relative_with_implicit_relative",
+          "old": "ambient_cwd::resolve_relative_with_implicit_relative"
+        },
+        {
+          "new": "implicit_relative::explicit_relative_does_not_fall_back_to_git_root",
+          "old": "explicit_relative_does_not_fall_back_to_git_root"
+        },
+        {
+          "new": "implicit_relative::partial_completion::implicit_relative_base_is_git_root_dedupes_to_one_root",
+          "old": "partial_completion::implicit_relative_base_is_git_root_dedupes_to_one_root"
+        },
+        {
+          "new": "implicit_relative::partial_completion::implicit_relative_with_scope_inside_repo",
+          "old": "partial_completion::implicit_relative_with_scope_inside_repo"
+        },
+        {
+          "new": "implicit_relative::partial_completion::implicit_relative_without_repo_only_returns_base",
+          "old": "partial_completion::implicit_relative_without_repo_only_returns_base"
+        },
+        {
+          "new": "implicit_relative::partial_completion::magic_partial_includes_repo_and_home_roots",
+          "old": "partial_completion::magic_partial_includes_repo_and_home_roots"
+        },
+        {
+          "new": "implicit_relative::partial_completion::magic_with_scope_appends_scope_to_each_root",
+          "old": "partial_completion::magic_with_scope_appends_scope_to_each_root"
+        },
+        {
+          "new": "implicit_relative::partial_completion::magic_without_home_env_still_discovers_native_home",
+          "old": "partial_completion::magic_without_home_env_still_discovers_native_home"
+        },
+        {
+          "new": "implicit_relative::partial_completion::magic_without_repo_only_returns_home_root",
+          "old": "partial_completion::magic_without_repo_only_returns_home_root"
+        },
+        {
+          "new": "implicit_relative::partial_completion::separator_reset_empties_active_segment",
+          "old": "partial_completion::separator_reset_empties_active_segment"
+        },
+        {
+          "new": "implicit_relative::partial_completion::unsupported_forms_return_none",
+          "old": "partial_completion::unsupported_forms_return_none"
+        },
+        {
+          "new": "implicit_relative::prefers_cwd_over_git_root_on_name_collision",
+          "old": "prefers_cwd_over_git_root_on_name_collision"
+        },
+        {
+          "new": "implicit_relative::recursive_implicit_relative_finds_file_under_git_root",
+          "old": "recursive_implicit_relative_finds_file_under_git_root"
+        },
+        {
+          "new": "implicit_relative::recursive_implicit_relative_with_subdir_filter",
+          "old": "recursive_implicit_relative_with_subdir_filter"
+        },
+        {
+          "new": "implicit_relative::resolves_file_in_git_root_when_absent_from_cwd",
+          "old": "resolves_file_in_git_root_when_absent_from_cwd"
+        },
+        {
+          "new": "implicit_relative::resolves_outside_any_git_repo",
+          "old": "resolves_outside_any_git_repo"
+        },
+        {
+          "new": "implicit_relative::resolves_when_cwd_is_git_root",
+          "old": "resolves_when_cwd_is_git_root"
+        },
+        {
+          "new": "implicit_relative::returns_none_when_neither_cwd_nor_git_root_has_file",
+          "old": "returns_none_when_neither_cwd_nor_git_root_has_file"
+        },
+        {
+          "new": "implicit_relative::subdir_path_resolves_against_git_root",
+          "old": "subdir_path_resolves_against_git_root"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "parse_count",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/parse_count.rs",
+      "old_binary_id": "biscuit-file::parse_count",
+      "old_path": "biscuit-file/lib/tests/parse_count.rs",
+      "old_target": "parse_count",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "parse_count::candidate_bearing_input_reparses_once_for_combined_proof",
+          "old": "candidate_bearing_input_reparses_once_for_combined_proof"
+        },
+        {
+          "new": "parse_count::candidate_free_input_reparses_zero_times",
+          "old": "candidate_free_input_reparses_zero_times"
+        },
+        {
+          "new": "parse_count::clean_input_parses_once",
+          "old": "clean_input_parses_once"
+        },
+        {
+          "new": "parse_count::multi_candidate_input_proves_combined_in_one_reparse",
+          "old": "multi_candidate_input_proves_combined_in_one_reparse"
+        },
+        {
+          "new": "parse_count::retained_analysis_serves_both_views_from_one_scan",
+          "old": "retained_analysis_serves_both_views_from_one_scan"
+        },
+        {
+          "new": "parse_count::unparseable_flagship_parses_original_and_candidate",
+          "old": "unparseable_flagship_parses_original_and_candidate"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "precedence_flip",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/precedence_flip.rs",
+      "old_binary_id": "biscuit-file::precedence_flip",
+      "old_path": "biscuit-file/lib/tests/precedence_flip.rs",
+      "old_target": "precedence_flip",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "precedence_flip::explicit_relative_yields_one_base_candidate_and_never_falls_back",
+          "old": "explicit_relative_yields_one_base_candidate_and_never_falls_back"
+        },
+        {
+          "new": "precedence_flip::implicit_both_exist_source_candidate_wins",
+          "old": "implicit_both_exist_source_candidate_wins"
+        },
+        {
+          "new": "precedence_flip::implicit_only_source_exists_falls_back_to_base",
+          "old": "implicit_only_source_exists_falls_back_to_base"
+        },
+        {
+          "new": "precedence_flip::implicit_when_base_is_repository_root_dedupes_to_one_candidate",
+          "old": "implicit_when_base_is_repository_root_dedupes_to_one_candidate"
+        },
+        {
+          "new": "precedence_flip::implicit_without_git_root_uses_base_only",
+          "old": "implicit_without_git_root_uses_base_only"
+        },
+        {
+          "new": "precedence_flip::interpolation_injecting_a_sigil_is_rejected",
+          "old": "interpolation_injecting_a_sigil_is_rejected"
+        },
+        {
+          "new": "precedence_flip::interpolation_staying_implicit_keeps_both_kinds_implicit",
+          "old": "interpolation_staying_implicit_keeps_both_kinds_implicit"
+        },
+        {
+          "new": "precedence_flip::interpolation_to_absolute_reclassifies_anchoring",
+          "old": "interpolation_to_absolute_reclassifies_anchoring"
+        },
+        {
+          "new": "precedence_flip::recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning",
+          "old": "recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning"
+        },
+        {
+          "new": "precedence_flip::recursive_interpolation_reclassifies_and_resolves_local_paths",
+          "old": "recursive_interpolation_reclassifies_and_resolves_local_paths"
+        },
+        {
+          "new": "precedence_flip::special_kinds_are_unchanged_by_the_flip",
+          "old": "special_kinds_are_unchanged_by_the_flip"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "reference_grammar",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/reference_grammar.rs",
+      "old_binary_id": "biscuit-file::reference_grammar",
+      "old_path": "biscuit-file/lib/tests/reference_grammar.rs",
+      "old_target": "reference_grammar",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "reference_grammar::a_second_recursive_marker_is_invalid",
+          "old": "a_second_recursive_marker_is_invalid"
+        },
+        {
+          "new": "reference_grammar::defensive_sigil_payloads_are_portable_and_relative",
+          "old": "defensive_sigil_payloads_are_portable_and_relative"
+        },
+        {
+          "new": "reference_grammar::explicit_vs_implicit_relative_are_distinguished_without_fs",
+          "old": "explicit_vs_implicit_relative_are_distinguished_without_fs"
+        },
+        {
+          "new": "reference_grammar::home_kind_is_observable",
+          "old": "home_kind_is_observable"
+        },
+        {
+          "new": "reference_grammar::one_forward_slash_after_a_defensive_sigil_is_optional",
+          "old": "one_forward_slash_after_a_defensive_sigil_is_optional"
+        },
+        {
+          "new": "reference_grammar::recursive_is_a_modifier_over_a_kind",
+          "old": "recursive_is_a_modifier_over_a_kind"
+        },
+        {
+          "new": "reference_grammar::removed_package_sigil_has_a_migration_diagnostic",
+          "old": "removed_package_sigil_has_a_migration_diagnostic"
+        },
+        {
+          "new": "reference_grammar::repository_error_diagnostics_carry_only_the_required_context",
+          "old": "repository_error_diagnostics_carry_only_the_required_context"
+        },
+        {
+          "new": "reference_grammar::reserved_schemes_and_windows_device_prefixes_are_rejected",
+          "old": "reserved_schemes_and_windows_device_prefixes_are_rejected"
+        },
+        {
+          "new": "reference_grammar::special_kinds_classify",
+          "old": "special_kinds_classify"
+        },
+        {
+          "new": "reference_grammar::supported_absolute_and_explicit_filename_escape_hatches_are_preserved",
+          "old": "supported_absolute_and_explicit_filename_escape_hatches_are_preserved"
+        },
+        {
+          "new": "reference_grammar::tilde_user_is_rejected_at_construction",
+          "old": "tilde_user_is_rejected_at_construction"
+        },
+        {
+          "new": "reference_grammar::url_scheme_recognition_is_case_insensitive_and_beats_drive_classifier",
+          "old": "url_scheme_recognition_is_case_insensitive_and_beats_drive_classifier"
+        },
+        {
+          "new": "reference_grammar::windows_absolute_and_unc_classify_absolute_on_any_host",
+          "old": "windows_absolute_and_unc_classify_absolute_on_any_host"
+        },
+        {
+          "new": "reference_grammar::windows_backslash_explicit_relative",
+          "old": "windows_backslash_explicit_relative"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "repository_scope_catalog",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/repository_scope_catalog.rs",
+      "old_binary_id": "biscuit-file::repository_scope_catalog",
+      "old_path": "biscuit-file/lib/tests/repository_scope_catalog.rs",
+      "old_target": "repository_scope_catalog",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "repository_scope_catalog::constructor_rejects_relative_non_normalized_and_outside_roots",
+          "old": "constructor_rejects_relative_non_normalized_and_outside_roots"
+        },
+        {
+          "new": "repository_scope_catalog::constructor_validates_roots_without_filesystem_io_and_deduplicates",
+          "old": "constructor_validates_roots_without_filesystem_io_and_deduplicates"
+        },
+        {
+          "new": "repository_scope_catalog::context_derivations_recompute_or_clear_repository_scopes",
+          "old": "context_derivations_recompute_or_clear_repository_scopes"
+        },
+        {
+          "new": "repository_scope_catalog::first_component_fallback_covers_new_monorepo_areas",
+          "old": "first_component_fallback_covers_new_monorepo_areas"
+        },
+        {
+          "new": "repository_scope_catalog::replacing_the_catalog_selects_the_second_repository",
+          "old": "replacing_the_catalog_selects_the_second_repository"
+        },
+        {
+          "new": "repository_scope_catalog::repository_root_can_also_be_the_root_package",
+          "old": "repository_root_can_also_be_the_root_package"
+        },
+        {
+          "new": "repository_scope_catalog::scope_selection_is_component_aware_and_most_specific_first",
+          "old": "scope_selection_is_component_aware_and_most_specific_first"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "resolution_context",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/resolution_context.rs",
+      "old_binary_id": "biscuit-file::resolution_context",
+      "old_path": "biscuit-file/lib/tests/resolution_context.rs",
+      "old_target": "resolution_context",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "resolution_context::containment_is_component_aware_and_lexically_normalized",
+          "old": "containment_is_component_aware_and_lexically_normalized"
+        },
+        {
+          "new": "resolution_context::context_accessors_reflect_builders",
+          "old": "context_accessors_reflect_builders"
+        },
+        {
+          "new": "resolution_context::derived_source_preserves_request_snapshot_after_ambient_mutation",
+          "old": "derived_source_preserves_request_snapshot_after_ambient_mutation"
+        },
+        {
+          "new": "resolution_context::explicit_context_can_clear_the_ambient_home_snapshot",
+          "old": "explicit_context_can_clear_the_ambient_home_snapshot"
+        },
+        {
+          "new": "resolution_context::explicit_relative_never_falls_back_to_repo_root",
+          "old": "explicit_relative_never_falls_back_to_repo_root"
+        },
+        {
+          "new": "resolution_context::external_source_requires_explicit_trust",
+          "old": "external_source_requires_explicit_trust"
+        },
+        {
+          "new": "resolution_context::home_reference_resolves_against_context_home",
+          "old": "home_reference_resolves_against_context_home"
+        },
+        {
+          "new": "resolution_context::home_reference_resolves_from_home_env_on_posix",
+          "old": "home_reference_resolves_from_home_env_on_posix"
+        },
+        {
+          "new": "resolution_context::implicit_falls_back_to_caller_supplied_repo_root",
+          "old": "implicit_falls_back_to_caller_supplied_repo_root"
+        },
+        {
+          "new": "resolution_context::implicit_is_base_first_with_caller_supplied_repo_root",
+          "old": "implicit_is_base_first_with_caller_supplied_repo_root"
+        },
+        {
+          "new": "resolution_context::invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_derivation",
+          "old": "invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_derivation"
+        },
+        {
+          "new": "resolution_context::invalid_request_root_cannot_be_laundered_via_for_source",
+          "old": "invalid_request_root_cannot_be_laundered_via_for_source"
+        },
+        {
+          "new": "resolution_context::magic_roots_come_from_the_context",
+          "old": "magic_roots_come_from_the_context"
+        },
+        {
+          "new": "resolution_context::normal_derivation_reenables_containment_after_trusted_external_derivation",
+          "old": "normal_derivation_reenables_containment_after_trusted_external_derivation"
+        },
+        {
+          "new": "resolution_context::repository_root_containing_base_validates",
+          "old": "repository_root_containing_base_validates"
+        },
+        {
+          "new": "resolution_context::repository_root_not_containing_base_is_a_typed_error",
+          "old": "repository_root_not_containing_base_is_a_typed_error"
+        },
+        {
+          "new": "resolution_context::valid_request_supports_in_repo_and_explicit_trusted_external_derivations",
+          "old": "valid_request_supports_in_repo_and_explicit_trusted_external_derivations"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "round_trip",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/round_trip.rs",
+      "old_binary_id": "biscuit-file::round_trip",
+      "old_path": "biscuit-file/lib/tests/round_trip.rs",
+      "old_target": "round_trip",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "round_trip::json5_json_round_trip",
+          "old": "json5_json_round_trip"
+        },
+        {
+          "new": "round_trip::json_yaml_json_round_trip",
+          "old": "json_yaml_json_round_trip"
+        },
+        {
+          "new": "round_trip::toml_json_round_trip_basic",
+          "old": "toml_json_round_trip_basic"
+        },
+        {
+          "new": "round_trip::toml_json_round_trip_nested",
+          "old": "toml_json_round_trip_nested"
+        },
+        {
+          "new": "round_trip::toml_json_round_trip_numbers",
+          "old": "toml_json_round_trip_numbers"
+        },
+        {
+          "new": "round_trip::yaml_json_round_trip",
+          "old": "yaml_json_round_trip"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "span_compat",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/span_compat.rs",
+      "old_binary_id": "biscuit-file::span_compat",
+      "old_path": "biscuit-file/lib/tests/span_compat.rs",
+      "old_target": "span_compat",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "span_compat::test_crate_root_span_matches_yaml_diagnostic_field_type",
+          "old": "test_crate_root_span_matches_yaml_diagnostic_field_type"
+        },
+        {
+          "new": "span_compat::test_public_diagnostic_types_reachable_from_crate_root",
+          "old": "test_public_diagnostic_types_reachable_from_crate_root"
+        },
+        {
+          "new": "span_compat::test_source_span_construction_and_access",
+          "old": "test_source_span_construction_and_access"
+        },
+        {
+          "new": "span_compat::test_source_span_is_range_of_usize",
+          "old": "test_source_span_is_range_of_usize"
+        },
+        {
+          "new": "span_compat::test_source_span_slices_multibyte_source",
+          "old": "test_source_span_slices_multibyte_source"
+        },
+        {
+          "new": "span_compat::test_source_span_zero_length_and_bounds",
+          "old": "test_source_span_zero_length_and_bounds"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "yaml_corpus",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/yaml_corpus.rs",
+      "old_binary_id": "biscuit-file::yaml_corpus",
+      "old_path": "biscuit-file/lib/tests/yaml_corpus.rs",
+      "old_target": "yaml_corpus",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "yaml_corpus::analysis_never_panics_across_corpus",
+          "old": "analysis_never_panics_across_corpus"
+        },
+        {
+          "new": "yaml_corpus::bom_does_not_suppress_line_ending_normalization",
+          "old": "bom_does_not_suppress_line_ending_normalization"
+        },
+        {
+          "new": "yaml_corpus::bom_makes_multi_key_documents_unparseable",
+          "old": "bom_makes_multi_key_documents_unparseable"
+        },
+        {
+          "new": "yaml_corpus::corpus_is_populated_and_uniquely_named",
+          "old": "corpus_is_populated_and_uniquely_named"
+        },
+        {
+          "new": "yaml_corpus::pipeline_is_idempotent_across_corpus",
+          "old": "pipeline_is_idempotent_across_corpus"
+        },
+        {
+          "new": "yaml_corpus::preserved_cases_are_byte_identical",
+          "old": "preserved_cases_are_byte_identical"
+        },
+        {
+          "new": "yaml_corpus::preserved_cases_report_their_pinned_codes",
+          "old": "preserved_cases_report_their_pinned_codes"
+        },
+        {
+          "new": "yaml_corpus::repair_is_deterministic_across_corpus",
+          "old": "repair_is_deterministic_across_corpus"
+        },
+        {
+          "new": "yaml_corpus::repaired_cases_match_expected_output",
+          "old": "repaired_cases_match_expected_output"
+        },
+        {
+          "new": "yaml_corpus::repaired_parseable_cases_preserve_their_value",
+          "old": "repaired_parseable_cases_preserve_their_value"
+        },
+        {
+          "new": "yaml_corpus::single_pass_is_a_fixed_point_once_parseable",
+          "old": "single_pass_is_a_fixed_point_once_parseable"
+        },
+        {
+          "new": "yaml_corpus::untouched_bytes_preserved_across_corpus",
+          "old": "untouched_bytes_preserved_across_corpus"
+        },
+        {
+          "new": "yaml_corpus::yaml_test_suite_subset_is_release_pinned_and_preserved",
+          "old": "yaml_test_suite_subset_is_release_pinned_and_preserved"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "yaml_mutation",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/yaml_mutation.rs",
+      "old_binary_id": "biscuit-file::yaml_mutation",
+      "old_path": "biscuit-file/lib/tests/yaml_mutation.rs",
+      "old_target": "yaml_mutation",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "yaml_mutation::arbitrary_input_never_panics",
+          "old": "arbitrary_input_never_panics"
+        },
+        {
+          "new": "yaml_mutation::content_after_the_repair_site_is_preserved",
+          "old": "content_after_the_repair_site_is_preserved"
+        },
+        {
+          "new": "yaml_mutation::mutated_documents_hold_core_invariants",
+          "old": "mutated_documents_hold_core_invariants"
+        },
+        {
+          "new": "yaml_mutation::stacked_mutations_hold_core_invariants",
+          "old": "stacked_mutations_hold_core_invariants"
+        },
+        {
+          "new": "yaml_mutation::unrepairable_input_is_left_alone",
+          "old": "unrepairable_input_is_left_alone"
+        },
+        {
+          "new": "yaml_mutation::valid_documents_are_never_corrupted",
+          "old": "valid_documents_are_never_corrupted"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1",
+      "inner_cfg": [],
+      "module": "yaml_safety",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1/yaml_safety.rs",
+      "old_binary_id": "biscuit-file::yaml_safety",
+      "old_path": "biscuit-file/lib/tests/yaml_safety.rs",
+      "old_target": "yaml_safety",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "yaml_safety::report_only_and_clean_inputs_stay_byte_identical",
+          "old": "report_only_and_clean_inputs_stay_byte_identical"
+        },
+        {
+          "new": "yaml_safety::s1_accepted_edits_preserve_values",
+          "old": "s1_accepted_edits_preserve_values"
+        },
+        {
+          "new": "yaml_safety::s1_repairs_are_deterministic_across_runs",
+          "old": "s1_repairs_are_deterministic_across_runs"
+        },
+        {
+          "new": "yaml_safety::s3_repairs_satisfy_parse_recovery_proof",
+          "old": "s3_repairs_satisfy_parse_recovery_proof"
+        },
+        {
+          "new": "yaml_safety::untouched_bytes_preserved_across_corpus",
+          "old": "untouched_bytes_preserved_across_corpus"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-file::l1-fetch",
+      "inner_cfg": [],
+      "module": "fetch_integration",
+      "nested_root": false,
+      "new_path": "biscuit-file/lib/tests/l1-fetch/fetch_integration.rs",
+      "old_binary_id": "biscuit-file::fetch_integration",
+      "old_path": "biscuit-file/lib/tests/fetch_integration.rs",
+      "old_target": "fetch_integration",
+      "target": "l1-fetch",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "fetch_integration::fetch_200_returns_body_and_headers",
+          "old": "fetch_200_returns_body_and_headers"
+        },
+        {
+          "new": "fetch_integration::fetch_304_not_modified_preserves_headers",
+          "old": "fetch_304_not_modified_preserves_headers"
+        },
+        {
+          "new": "fetch_integration::fetch_404_returns_http_error",
+          "old": "fetch_404_returns_http_error"
+        },
+        {
+          "new": "fetch_integration::fetch_500_returns_http_error",
+          "old": "fetch_500_returns_http_error"
+        },
+        {
+          "new": "fetch_integration::fetch_blocking_works",
+          "old": "fetch_blocking_works"
+        },
+        {
+          "new": "fetch_integration::fetch_combines_split_cache_control_lines_in_wire_order",
+          "old": "fetch_combines_split_cache_control_lines_in_wire_order"
+        },
+        {
+          "new": "fetch_integration::fetch_conditional_if_modified_since",
+          "old": "fetch_conditional_if_modified_since"
+        },
+        {
+          "new": "fetch_integration::fetch_policy_denied_host",
+          "old": "fetch_policy_denied_host"
+        },
+        {
+          "new": "fetch_integration::fetch_unsupported_scheme",
+          "old": "fetch_unsupported_scheme"
+        },
+        {
+          "new": "fetch_integration::fetch_wildcard_does_not_match_bare_parent_host",
+          "old": "fetch_wildcard_does_not_match_bare_parent_host"
+        },
+        {
+          "new": "fetch_integration::policy_client_blocks_redirect_to_unallowed_host",
+          "old": "policy_client_blocks_redirect_to_unallowed_host"
+        },
+        {
+          "new": "fetch_integration::policy_client_blocks_redirect_to_unsupported_scheme",
+          "old": "policy_client_blocks_redirect_to_unsupported_scheme"
+        },
+        {
+          "new": "fetch_integration::post_combines_split_cache_control_lines_in_wire_order",
+          "old": "post_combines_split_cache_control_lines_in_wire_order"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "biscuit-file",
+  "ruled_targets": [],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "completion_round_trip",
+        "detailed_resolution",
+        "finalized_reference_resolution",
+        "implicit_relative",
+        "parse_count",
+        "precedence_flip",
+        "reference_grammar",
+        "repository_scope_catalog",
+        "resolution_context",
+        "round_trip",
+        "span_compat",
+        "yaml_corpus",
+        "yaml_mutation",
+        "yaml_safety"
+      ],
+      "name": "l1",
+      "path": "biscuit-file/lib/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "fetch_integration"
+      ],
+      "name": "l1-fetch",
+      "path": "biscuit-file/lib/tests/l1-fetch/main.rs",
+      "required_features": [
+        "fetch"
+      ],
+      "tier": "L1"
+    }
+  ],
+  "version": 1
+}
