@@ -52,7 +52,7 @@ impl ShellApprovalHandler for MockApproval {
 }
 
 fn make_runtime() -> PipelineRuntime {
-    PipelineRuntime::new(16, CacheAccessMode::Off, None)
+    PipelineRuntime::new(16, CacheAccessMode::Off)
 }
 
 fn find_python() -> Option<PathBuf> {

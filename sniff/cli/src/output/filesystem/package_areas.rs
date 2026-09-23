@@ -23,9 +23,17 @@ fn select_repo_package_areas<'a>(
         .collect()
 }
 
+/// Human-facing label for a package area.
+///
+/// The top-level area is stored as `""`; listings show it as `(root)`. The
+/// label is presentation only and never flows back into `package_area` or JSON.
+pub(crate) fn area_display_label(area: &str) -> &str {
+    if area.is_empty() { "(root)" } else { area }
+}
+
 /// Compute the repo-relative area root directory for a given package.
 ///
-/// For a package whose `package_area` is `"root"` (a top-level package living
+/// For a package whose `package_area` is `""` (a top-level package living
 /// directly at the repo root, such as `model_id` in this workspace), returns
 /// `"."` — the repo root itself.
 ///
@@ -40,7 +48,7 @@ fn select_repo_package_areas<'a>(
 ///
 /// Returns a borrowed `&str` to avoid allocation in the hot render loop.
 pub(super) fn package_area_root(pkg: &Package) -> &str {
-    if pkg.package_area == "root" {
+    if pkg.package_area.is_empty() {
         return ".";
     }
 
@@ -178,9 +186,9 @@ pub fn render_repo_package_areas_formatted(
         .iter()
         .map(|(area, root)| {
             let markup = if verbose > 0 {
-                // Special-case the "root" area so the annotation reads
-                // "root (./)" rather than "root (./root)" (a non-existent
-                // directory). Every other area renders as "./{root}".
+                // The top-level area's root is "." so the annotation reads
+                // "(root) (./)" rather than "(root) (./.)". Every other area
+                // renders as "./{root}".
                 let dir_label = if *root == "." {
                     String::from("./")
                 } else {
@@ -188,9 +196,9 @@ pub fn render_repo_package_areas_formatted(
                 };
                 // Note the SPACE before the open paren — spec requires
                 // "{package-area} (<dim><i>{dir}</i></dim>)".
-                format!("{area} (<dim><i>{dir_label}</i></dim>)")
+                format!("{} (<dim><i>{dir_label}</i></dim>)", area_display_label(area))
             } else {
-                (*area).to_string()
+                area_display_label(area).to_string()
             };
             Prose::new(markup).render(&term)
         })
@@ -254,7 +262,11 @@ pub fn render_dirty_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_dirty_package_area_names(result, repo_filter, package, package_area).join(", ")
+            select_dirty_package_area_names(result, repo_filter, package, package_area)
+                .iter()
+                .map(|area| area_display_label(area))
+                .collect::<Vec<_>>()
+                .join(", ")
         }
         _ => String::from(
             "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
@@ -306,7 +318,11 @@ pub fn render_staged_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_staged_package_area_names(result, repo_filter, package, package_area).join(", ")
+            select_staged_package_area_names(result, repo_filter, package, package_area)
+                .iter()
+                .map(|area| area_display_label(area))
+                .collect::<Vec<_>>()
+                .join(", ")
         }
         _ => String::from(
             "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -359,6 +375,9 @@ pub fn render_unstaged_package_areas(
     match repo {
         Some(repo) if repo.is_monorepo => {
             select_unstaged_package_area_names(result, repo_filter, package, package_area)
+                .iter()
+                .map(|area| area_display_label(area))
+                .collect::<Vec<_>>()
                 .join(", ")
         }
         _ => String::from(
@@ -383,9 +402,9 @@ pub fn render_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&P
 /// Render the area name for the given directory.
 ///
 /// Returns the package name if `dir` is inside a package, otherwise the
-/// surrounding package-area string (with `"root"` as the final fallback for
-/// top-level locations). Returns an empty string only when the underlying
-/// repository is not a monorepo (callers handle that path separately).
+/// surrounding package-area string; `""` at the repo root and for top-level
+/// locations outside any package. Also empty when the underlying repository is
+/// not a monorepo (callers handle that path separately).
 pub fn render_repo_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
     let dir = resolve_dir(base_dir);
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
@@ -402,7 +421,7 @@ pub fn render_repo_area(result: &sniff::SniffResult, base_dir: Option<&Path>) ->
 /// Render the root directory of the package area containing the given directory.
 ///
 /// Returns empty string if not in a package area. Root-level packages (area
-/// `"root"`) are not considered to be inside a package area directory, so this
+/// `""`) are not considered to be inside a package area directory, so this
 /// also returns empty for them.
 pub fn render_repo_package_area_root(
     result: &sniff::SniffResult,
@@ -412,7 +431,7 @@ pub fn render_repo_package_area_root(
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
-        if area == "root" {
+        if area.is_empty() {
             // Root-level packages have no real package area directory
             String::new()
         } else {

@@ -5,6 +5,9 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "relative", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::relative_fn)) },
     FunctionBinding { canonical: "file_exists", aliases: &["fileexists"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_exists_fn)) },
     FunctionBinding { canonical: "has_command", aliases: &["hascommand"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::has_command_fn)) },
+    // `has_binary` is a second documented name for the same probe (R16), not an
+    // alias: both names must appear in the descriptor catalog.
+    FunctionBinding { canonical: "has_binary", aliases: &["hasbinary"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::has_command_fn)) },
     FunctionBinding { canonical: "is_indexed_file", aliases: &["isindexedfile"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::is_indexed_file_fn)) },
     FunctionBinding { canonical: "file_index", aliases: &["fileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_index_fn)) },
     FunctionBinding { canonical: "increment_file_index", aliases: &["incrementfileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::increment_file_index_fn)) },

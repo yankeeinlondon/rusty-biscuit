@@ -244,7 +244,7 @@ pub(crate) fn select_package_area_for_cwd(
     packages
         .iter()
         .map(|package| {
-            let area_root = if package.package_area == "root" {
+            let area_root = if package.package_area.is_empty() {
                 repo_root_normalized.clone()
             } else {
                 repo_root_normalized.join(&package.package_area)

@@ -47,6 +47,22 @@
       },
       "severity": 2,
       "source": "darkmatter.compose"
+    },
+    {
+      "code": "dm.expression.unknown_identifier",
+      "message": "`i` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
+      "range": {
+        "end": {
+          "character": 26,
+          "line": 24
+        },
+        "start": {
+          "character": 25,
+          "line": 24
+        }
+      },
+      "severity": 2,
+      "source": "darkmatter.compose"
     }
   ],
   "_docs.md": [],
@@ -168,24 +184,7 @@
   ],
   "_repo-context.md": [],
   "_reviews__observability.md": [],
-  "_reviews__performance-review.md": [
-    {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`time` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
-      "range": {
-        "end": {
-          "character": 64,
-          "line": 341
-        },
-        "start": {
-          "character": 60,
-          "line": 341
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    }
-  ],
+  "_reviews__performance-review.md": [],
   "_reviews__review-implementation.md": [],
   "_reviews__review-spec-inline.md": [
     {
@@ -221,24 +220,7 @@
       "source": "darkmatter.compose"
     }
   ],
-  "_reviews__suggestion-review.md": [
-    {
-      "code": "dm.transclusion.broken_path",
-      "message": "broken transclusion: no file matches `@{{review}}`",
-      "range": {
-        "end": {
-          "character": 18,
-          "line": 33
-        },
-        "start": {
-          "character": 7,
-          "line": 33
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    }
-  ],
+  "_reviews__suggestion-review.md": [],
   "_writing-clearly.md": [],
   "brainstorm.md": [
     {
@@ -252,22 +234,6 @@
         "start": {
           "character": 2,
           "line": 14
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
-      "code": "dm.expression.unknown_identifier",
-      "message": "`area` matches no frontmatter key, schema property, `ctx.*`, `env.*`, or function",
-      "range": {
-        "end": {
-          "character": 52,
-          "line": 19
-        },
-        "start": {
-          "character": 48,
-          "line": 19
         }
       },
       "severity": 2,

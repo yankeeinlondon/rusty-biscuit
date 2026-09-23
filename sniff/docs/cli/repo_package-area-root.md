@@ -18,7 +18,8 @@ Outputs a single absolute path:
 /Users/ken/projects/rusty-biscuit/sniff
 ```
 
-For packages at the repository root level, returns the repository root.
+A package at the repository root level belongs to the empty area `""`, which
+has no directory of its own, so the command behaves as outside any package area.
 
 ## Arguments and Flags
 

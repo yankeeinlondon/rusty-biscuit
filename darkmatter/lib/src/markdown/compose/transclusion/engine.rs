@@ -439,28 +439,6 @@ impl<'a> TransclusionEngine<'a> {
         (idx > 0).then(|| table[idx - 1].1)
     }
 
-    /// Records a fetched remote URL body as a closure-hash dependency.
-    ///
-    /// The dependency's `closure_hash` is the xxHash of the response body, so a
-    /// changed remote document invalidates any parent artifact transcluding it.
-    /// No-op when the URL's content hash is unavailable (unregistered or failed).
-    fn record_remote_dependency(
-        runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
-        remote_fetch: &remote_fetch::RemoteFetchRuntime,
-        url: &url::Url,
-    ) {
-        if let Some(content_hash) = remote_fetch.content_hash(url) {
-            let sid = cache::hashing::source_id_hash(url.as_str());
-            let dependency = cache::types::DependencyRef {
-                artifact_class: cache::types::ArtifactClass::RemoteUrl,
-                entry_key: sid,
-                source_id_hash: sid,
-                closure_hash: content_hash,
-            };
-            runtime_mutex.lock().unwrap().record_dependency(dependency);
-        }
-    }
-
     /// Prepares `::file` / `::url` / `::code` transclusions from directives
     /// **parsed against the current content**.
     ///
@@ -579,12 +557,22 @@ impl<'a> TransclusionEngine<'a> {
                 {
                     report.add_warning(warning.at_line(directive.line));
                 }
-                let should_include = transclusion::evaluate_condition(
-                    expr,
-                    &lookup,
-                    directive.line,
-                    self.markdown.source_context_for_errors(),
-                )?;
+                let mut missing = Vec::new();
+                let should_include =
+                    crate::markdown::compose::conditions::evaluate_condition_observed(
+                        expr,
+                        &lookup,
+                        directive.line,
+                        self.markdown.source_context_for_errors(),
+                        &mut missing,
+                    )
+                    .map_err(transclusion::TransclusionError::from)?;
+                report.add_unknown_root_candidates("condition", missing, |_| {
+                    crate::markdown::compose::unknown_identifiers::directive_locus(
+                        self.markdown,
+                        directive.line,
+                    )
+                });
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1004,17 +992,13 @@ impl<'a> TransclusionEngine<'a> {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.cache.clone()
                 };
-                let (content, dependency) = self.render_code_transclusion(
+                let content = self.render_code_transclusion(
                     &path,
                     &directive_options,
                     state,
                     options,
                     &cache_handle,
                 )?;
-                if let Some(dependency) = dependency {
-                    let mut runtime = runtime_mutex.lock().unwrap();
-                    runtime.record_dependency(dependency);
-                }
                 let mut code_report = ComposeReport::new();
                 code_report.transclusions_applied = 1;
                 Ok(ResolvedTransclusion {
@@ -1048,8 +1032,6 @@ impl<'a> TransclusionEngine<'a> {
                         url: url.to_string(),
                         reason: "URL was not registered for fetching".to_string(),
                     })?;
-
-                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
 
                 // Parse the fetched body as Markdown and recursively compose it.
                 let mut child =
@@ -1102,7 +1084,13 @@ impl<'a> TransclusionEngine<'a> {
                     let runtime = runtime_mutex.lock().unwrap();
                     runtime.clone_for_child()
                 };
-                let mut child_options = options.clone();
+                let child_context = child_runtime.context_epoch.context_for_source(
+                    state.context(),
+                    &crate::markdown::compose::ContextRequirements::for_document(&child),
+                    options.context_authority(),
+                );
+                child_runtime.record_context_groups(child_context.capture_requirements());
+                let mut child_options = options.clone().with_request_context(child_context);
                 child_options.source = child_source;
                 // Recursive graph reuse for remote children: hand the child its
                 // OWN preflight sub-node (whose edges point at grandchildren) so
@@ -1170,8 +1158,6 @@ impl<'a> TransclusionEngine<'a> {
                         reason: "URL was not registered for fetching".to_string(),
                     })?;
 
-                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
-
                 let fenced = transclusion::wrap_in_code_block(&body_text, &language);
                 let spaced = transclusion::ensure_vertical_spacing(&fenced);
                 let result = self.apply_wrappers(spaced, &directive_options);
@@ -1202,23 +1188,8 @@ impl<'a> TransclusionEngine<'a> {
                         let runtime = runtime_mutex.lock().unwrap();
                         runtime.cache.clone()
                     };
-                    let canonical_source = cache::compose_cache_key_for_path(&path);
-                    let source_id = cache::hashing::source_id_hash(&canonical_source);
-                    let source_bytes =
-                        std::fs::read(&path).map_err(toc_linking::TocLinkingError::Io)?;
-                    let source_content_hash = cache::hashing::raw_bytes_hash(&source_bytes);
-                    let buckets = cache::TocLinkingOperation::split_params(&directive.options);
-                    let entry_key =
-                        cache::TocLinkingOperation::variant_cache_key(source_id, &buckets);
                     let cache_key =
                         cache::TocLinkingOperation::cache_key_string(&path, &directive.options);
-                    let persistent_ctx = cache::OperationPersistentContext {
-                        op_kind: "toc-linking",
-                        entry_key,
-                        source_id,
-                        canonical_source,
-                        source_content_hash,
-                    };
                     let line = directive.line;
                     let options_clone = directive.options.clone();
                     let display_clone = display_target.clone();
@@ -1226,8 +1197,6 @@ impl<'a> TransclusionEngine<'a> {
 
                     let cached = cache_handle.get_or_compute_operation(
                         &cache_key,
-                        Some(&persistent_ctx),
-                        options.cache_freshness_mode,
                         || {
                             let headings = {
                                 let runtime = runtime_mutex.lock().unwrap();
@@ -1250,12 +1219,6 @@ impl<'a> TransclusionEngine<'a> {
                             Ok(cache::OperationResult { content })
                         },
                     )?;
-
-                    if let Some(dependency) = cache_handle.operation_dependency_ref(&persistent_ctx)
-                    {
-                        let mut runtime = runtime_mutex.lock().unwrap();
-                        runtime.record_dependency(dependency);
-                    }
 
                     toc_linking::indent_text(
                         &cached.content,
@@ -1430,6 +1393,31 @@ impl<'a> TransclusionEngine<'a> {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
+        // ── Request context handoff ────────────────────────────────
+        // The child's context must cover the groups it names before its first
+        // expression stage and before its cache identity is taken, so the
+        // (memoized) load and the per-directive set overlay — which can add
+        // `ctx.*` references — happen here rather than inside the compute.
+        // The overlay is applied to the child's authored frontmatter only; it
+        // does NOT propagate through `child_options`, so grandchildren do not
+        // inherit it.
+        let mut child = runtime.load_markdown(path)?;
+        if directive_options.set_object.is_some() || !directive_options.set_properties.is_empty() {
+            let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+            let base_map: serde_json::Map<String, Value> = base_indexmap.into_iter().collect();
+            let overlaid = state::apply_set_overrides(
+                &base_map,
+                directive_options.set_object.as_ref(),
+                &directive_options.set_properties,
+            );
+            *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+        }
+        let child_context = runtime.context_epoch.context_for_source(
+            state.context(),
+            &crate::markdown::compose::ContextRequirements::for_document(&child),
+            options.context_authority(),
+        );
+
         // ── Core compose (cacheable via single-flight) ─────────────
         let overlay_hash = cache::hashing::set_overlay_hash(
             directive_options.set_object.as_ref(),
@@ -1439,20 +1427,20 @@ impl<'a> TransclusionEngine<'a> {
             cache::hashing::options_hash(options),
             overlay_hash,
         );
-        // 35.1: the state and context hashes are phase-wide (identical for every
-        // directive), captured once by the caller and threaded in here.
-        let persistent_ctx = cache::PersistentContext {
-            source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
-            state_hash: state_identity.state_hash,
-            context_hash: state_identity.context_hash,
-            options_hash,
+        // 35.1: the state hash is phase-wide (identical for every directive),
+        // captured once by the caller and threaded in here. The context hash is
+        // too, unless this child named a group its parent lacks.
+        let context_hash = if child_context.is_same_snapshot(state.context()) {
+            state_identity.context_hash
+        } else {
+            cache::hashing::context_hash(&child_context)
         };
         let cache_key = format!(
             "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
-            persistent_ctx.source_id,
-            persistent_ctx.state_hash,
-            persistent_ctx.context_hash,
-            persistent_ctx.options_hash,
+            cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
+            state_identity.state_hash,
+            context_hash,
+            options_hash,
             overlay_hash,
         );
         let cache_handle = runtime.cache.clone();
@@ -1468,23 +1456,14 @@ impl<'a> TransclusionEngine<'a> {
         };
         let path_buf = path.to_path_buf();
 
-        // Snapshot the per-directive set overlay. The overlay is applied to
-        // the child's authored frontmatter before any of the child's pre-op
-        // stages run; it does NOT propagate through `child_options` so
-        // grandchildren do not inherit it.
-        let set_object = directive_options.set_object.clone();
-        let set_properties = directive_options.set_properties.clone();
-
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
-            Some(&persistent_ctx),
-            options.cache_freshness_mode,
-            options.persistent_cache_eligible(),
             || {
                 let mut child_options = options
                     .clone()
                     .with_replace_parent_wins(replace_parent_wins)
-                    .with_one_off_replace(one_off.clone());
+                    .with_one_off_replace(one_off.clone())
+                    .with_request_context(child_context.clone());
                 child_options.external_state = Some(inherited.clone());
                 child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
@@ -1499,22 +1478,6 @@ impl<'a> TransclusionEngine<'a> {
                     .and_then(|graph| graph.child_for_source(&path_buf).cloned());
 
                 let mut compose_runtime = runtime.clone_for_child();
-                let mut child = compose_runtime.load_markdown(path)?;
-
-                // Apply the three-layer set overlay on the child's frontmatter
-                // before any of its pre-op stages observe it. Keeping this
-                // scoped inside the closure preserves the rule that
-                // grandchildren referenced by the child's own `::file`
-                // directives do NOT inherit this parent-applied overlay.
-                if set_object.is_some() || !set_properties.is_empty() {
-                    let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
-                    let base_map: serde_json::Map<String, Value> =
-                        base_indexmap.into_iter().collect();
-                    let overlaid =
-                        state::apply_set_overrides(&base_map, set_object.as_ref(), &set_properties);
-                    *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
-                }
-
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -1522,14 +1485,13 @@ impl<'a> TransclusionEngine<'a> {
                 Ok(cache::ComposeResult {
                     content: child.content().to_string(),
                     report: child_report,
-                    dependencies: compose_runtime.dependencies().to_vec(),
+                    context_groups: compose_runtime
+                        .context_groups()
+                        .union(child_context.capture_requirements()),
                 })
             },
         )?;
-
-        if let Some(dependency) = cache_handle.compose_dependency_ref(&persistent_ctx) {
-            runtime.record_dependency(dependency);
-        }
+        runtime.record_context_groups(&cached.context_groups);
 
         report.merge(cached.report.clone());
 
@@ -1581,7 +1543,7 @@ impl<'a> TransclusionEngine<'a> {
         state: &EffectiveState,
         options: &ComposeOptions,
         cache_handle: &cache::RunLocalCache,
-    ) -> MarkdownResult<(String, Option<cache::types::DependencyRef>)> {
+    ) -> MarkdownResult<String> {
         // Compute variant params (needed for both cache key and core)
         let base_map = state.get_replace_map().cloned().unwrap_or_default();
         let effective_map = match &directive_options.replace {
@@ -1595,7 +1557,6 @@ impl<'a> TransclusionEngine<'a> {
         let canonical_source = cache::compose_cache_key_for_path(path);
         let source_id = cache::hashing::source_id_hash(&canonical_source);
         let source_bytes = std::fs::read(path)?;
-        let source_content_hash = cache::hashing::raw_bytes_hash(&source_bytes);
 
         let op = cache::CodeOperation;
         let mut buckets = op.split_params(directive_options);
@@ -1604,13 +1565,6 @@ impl<'a> TransclusionEngine<'a> {
             .push(("language".to_string(), language.clone()));
         let entry_key = op.variant_cache_key(source_id, &buckets);
         let cache_key = format!("code:{}:{:016x}", canonical_source, entry_key);
-        let persistent_ctx = cache::OperationPersistentContext {
-            op_kind: "code",
-            entry_key,
-            source_id,
-            canonical_source,
-            source_content_hash,
-        };
 
         // Core computation (cacheable via single-flight)
         let context = options.context().clone();
@@ -1626,8 +1580,6 @@ impl<'a> TransclusionEngine<'a> {
         };
         let cached = cache_handle.get_or_compute_operation(
             &cache_key,
-            Some(&persistent_ctx),
-            options.cache_freshness_mode,
             || {
                 let raw = raw_text.clone();
 
@@ -1652,10 +1604,7 @@ impl<'a> TransclusionEngine<'a> {
         )?;
 
         // Post: apply wrappers (cheap, directive-specific)
-        Ok((
-            self.apply_wrappers(cached.content.clone(), directive_options),
-            cache_handle.operation_dependency_ref(&persistent_ctx),
-        ))
+        Ok(self.apply_wrappers(cached.content.clone(), directive_options))
     }
 
     pub(crate) fn apply_wrappers(
@@ -2009,7 +1958,7 @@ mod tests {
         #[test]
         fn relevel_output_matches_the_oracle_across_shipped_fixtures() {
             let dir = biscuit_test_harness::manifest_dir!()
-                .join("../features/2026-07-15-performance-followup/benchmarks/fixtures");
+                .join("../benchmarks/fixtures");
 
             let mut checked = 0;
             for entry in std::fs::read_dir(&dir).expect("fixture directory readable") {

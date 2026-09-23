@@ -2753,6 +2753,17 @@ unsafe extern "C" { fn review_native() -> i32; }
     opts.plan = Some(plan_path);
     opts.workspace = Some(workspace);
     assert!(run_verify(&opts, &Terminal::default()).unwrap());
+    // A runner image update: the library still resolves, only its content
+    // changed. That is drift, reported and accepted.
+    let before = fs::read(&library).unwrap();
+    fs::write(&source, "int review_native(void) { return 43; }\n").unwrap();
+    let mut cc = Command::new("cc");
+    if cfg!(target_os = "macos") { cc.args(["-dynamiclib", "-install_name"]).arg(&library); }
+    else { cc.args(["-shared", "-fPIC"]); }
+    let output = cc.arg(&source).arg("-o").arg(&library).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_ne!(fs::read(&library).unwrap(), before, "the rebuilt library must differ in content");
+    assert!(run_verify(&opts, &Terminal::default()).unwrap());
     fs::rename(&library, native.join("hidden-library")).unwrap();
     assert!(!run_verify(&opts, &Terminal::default()).unwrap());
 }

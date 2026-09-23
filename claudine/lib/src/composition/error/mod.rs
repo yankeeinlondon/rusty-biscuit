@@ -1177,7 +1177,8 @@ pub enum CompositionError {
     /// functions) and stamps the resolved bytes back so the approved command
     /// equals the executed command. This variant covers every failure DM2
     /// surfaces: malformed expressions, unknown roots (typos), unknown
-    /// functions, and late-binding references (`err`/`timing`/`current`),
+    /// functions, and late-binding references
+    /// (`err`/`timing`/`current`/`current_env`),
     /// which are rejected because shell commands are approved at pre-flight
     /// time, before any event fires.
     #[error(
@@ -1855,7 +1856,7 @@ pub enum CompositionError {
     SequenceShellLateBinding {
         /// The authored command.
         command: String,
-        /// The offending root (`outputs`, `err`, `timing`, `current`).
+        /// The offending root (`outputs`, `err`, `timing`, `current`, `current_env`).
         root: String,
         /// A label locating the task.
         task: String,

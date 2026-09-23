@@ -1765,7 +1765,7 @@ mod remote_transclusion_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cached_local_child_revalidates_nested_remote_under_refresh() {
+    async fn local_child_revalidates_nested_remote_under_refresh() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use wiremock::{Request, Respond};
@@ -1816,7 +1816,7 @@ mod remote_transclusion_tests {
                 .disable(ComposeOperation::Normalization)
         };
 
-        // Run 1: populate the local-child and remote caches; remote → v1.
+        // Run 1: populate the remote transport cache; remote → v1.
         let md1 = Markdown::try_from(root.as_path()).unwrap();
         let (c1, _) = md1.compose_with(mk_options(false)).unwrap();
         assert!(
@@ -1826,13 +1826,13 @@ mod remote_transclusion_tests {
         );
 
         // Run 2: the remote body has changed and `--remote-refresh` forces a
-        // revalidation. The cached local child must NOT be accepted against
-        // the stale remote manifest.
+        // revalidation. The local child is never persisted, so it recomposes
+        // and must embed the revalidated body.
         let md2 = Markdown::try_from(root.as_path()).unwrap();
         let (c2, _) = md2.compose_with(mk_options(true)).unwrap();
         assert!(
             c2.content().contains("remote v2"),
-            "cached local child must revalidate its nested remote URL under \
+            "local child must revalidate its nested remote URL under \
              --remote-refresh; got: {}",
             c2.content()
         );

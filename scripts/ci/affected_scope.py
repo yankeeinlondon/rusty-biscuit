@@ -553,7 +553,12 @@ TARGET_KINDS = ("lib", "bin", "test", "example", "bench")
 LIBRARY_TARGET_KINDS = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
 
 # The area a workspace member directly under the repository root belongs to.
-# Named by `sniff repo package-area`, which this planner replicates.
+#
+# The one name the planner owns. `sniff repo package-area` answers the empty
+# string there (it dropped its own `root` sentinel so a real area may carry that
+# name), and an area is a GitHub matrix key and a required workflow input, which
+# cannot be empty. Every other area is sniff's answer verbatim; `package_area`
+# refuses a directory that would collide with this name.
 ROOT_AREA = "root"
 
 # GitHub Actions ceiling for a single matrix. The area matrix and every area's
@@ -1753,7 +1758,15 @@ def package_area(relative_manifest_directory: PurePosixPath | str) -> str:
     ```
     """
     parent = PurePosixPath(relative_manifest_directory).parent
-    return ROOT_AREA if parent.as_posix() in (".", "") else parent.as_posix()
+    if parent.as_posix() in (".", ""):
+        return ROOT_AREA
+    if parent.as_posix() == ROOT_AREA:
+        raise RuntimeError(
+            f"{relative_manifest_directory!r} sits in a directory named "
+            f"{ROOT_AREA!r}, the planner's name for the repository-root area; "
+            "the two would share one area"
+        )
+    return parent.as_posix()
 
 
 def area_slug(area: str) -> str:
@@ -3593,6 +3606,10 @@ def calculate_scope(
             # The area's selection reason must not claim a source change it
             # never saw: what selected the guard was source in another area.
             suite_ids = suite_ids | {owner_id}
+            # `reverse_ids` was settled before this selection existed. An owner
+            # that is also an unchanged direct dependent now holds a record, and
+            # a reported dependent is one selected nowhere.
+            reverse_ids = reverse_ids - {owner_id}
 
     gating = [entry for entry in package_records if entry["gates"]]
     if len(gating) > MATRIX_LIMIT:

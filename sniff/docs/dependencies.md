@@ -42,6 +42,34 @@ DACL work (`Win32_Storage_FileSystem`, and `Win32_Security_Authorization` for
 does not make Sniff responsible for building a security descriptor. See
 [`claudine/docs/dependencies.md`](../../claudine/docs/dependencies.md).
 
+## Network Primitives (`network::{address, gateway, icmp}`)
+
+Scoped interface addresses, default gateways, and ICMP echo probes, consumed by
+Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
+`darkmatter/features/2026-09-09-more-context/spec.md`).
+
+- **`ipnet` 2.** CIDR values for address-bit membership
+  (`ScopedIpAddr::is_within`, the `100.64.0.0/10` CGNAT predicate). Darkmatter's
+  `ipv4()`/`ipv6()` filters use the same crate, so both sides agree on prefix
+  parsing. It was already in the lockfile through `reqwest`.
+- **`socket2` 0.6 (`cfg(unix)` only).** Unprivileged `SOCK_DGRAM` ICMP and
+  ICMPv6 sockets on macOS, Linux, and WSL2 — no raw socket, `setuid` binary, or
+  `ping` subprocess. Linux admits them only for groups inside
+  `net.ipv4.ping_group_range`; outside it the probe returns
+  `IcmpError::NotPermitted` rather than degrading to "no reply".
+- **No routing crate.** Gateways are parsed from `/proc/net/route` and
+  `/proc/net/ipv6_route` (Linux), the `PF_ROUTE` `NET_RT_DUMP` sysctl through
+  `libc` (macOS), and `route print` through the supervised subprocess boundary
+  (Windows). Each parser is a pure function so fixtures run on every host.
+
+### Windows feature set (network)
+
+| Feature | Supplies |
+|---|---|
+| `Win32_NetworkManagement_IpHelper` | `IcmpCreateFile`, `Icmp6CreateFile`, `IcmpSendEcho2`, `Icmp6SendEcho2`, `Icmp6ParseReplies`, reply structures and `IP_*` status codes |
+| `Win32_Networking_WinSock` | `SOCKADDR_IN6` for the IPv6 source and scoped destination |
+| `Win32_System_IO` | `PIO_APC_ROUTINE`, required by the `Icmp*SendEcho2` signatures |
+
 ## Git Access
 
 - **`gix` (pinned `=0.84.0`).** All production git access is pure-Rust gix. The

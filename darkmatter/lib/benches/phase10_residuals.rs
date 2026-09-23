@@ -61,7 +61,7 @@ use std::path::PathBuf;
 /// Reads a committed manifest fixture by stem.
 fn fixture_text(stem: &str) -> String {
     let path: PathBuf = biscuit_test_harness::manifest_dir!()
-        .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
+        .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("fixture {} readable: {e}", path.display()))

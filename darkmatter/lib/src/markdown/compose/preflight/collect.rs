@@ -17,10 +17,13 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::DeferredCapabilities;
 use crate::markdown::compose::context::effective_state as state;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter_best_effort;
 use crate::markdown::compose::frontmatter_shell_expansion::{
@@ -30,10 +33,13 @@ use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::expression::ExpressionFinder;
+use crate::markdown::compose::expression::{Expr, ResolutionContext, parse};
+use crate::markdown::compose::icmp::PlannedIcmpProbe;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
     ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError, frontmatter_key_line,
 };
+use crate::markdown::compose::nested::{NestedComposeSlot, RootSource};
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::remote_fetch;
 use crate::markdown::types::MarkdownResult;
@@ -148,22 +154,49 @@ pub fn collect_shell_commands_with_graph(
     markdown: &Markdown,
     options: &ComposeOptions,
 ) -> MarkdownResult<(Vec<ShellCommandEntry>, super::PreflightGraphNode)> {
+    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, options)?;
+    Ok((entries, graph))
+}
+
+/// Like [`collect_shell_commands_with_graph`], but also returns the ICMP
+/// probes the graph could send.
+///
+/// The walk never sends one: its ICMP authority runs in discovery mode, so a
+/// `ping` records its target, timeout, and attempt count and answers `null`.
+/// A probe inside `as_markdown` content is found the same way, because that
+/// content is walked as a child of the document that named it.
+pub(crate) fn collect_effects(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> MarkdownResult<(
+    Vec<ShellCommandEntry>,
+    Vec<PlannedIcmpProbe>,
+    DeferredCapabilities,
+    super::PreflightGraphNode,
+)> {
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
+    let mut icmp = Vec::new();
+    let mut capabilities = DeferredCapabilities::default();
     let mut visited = HashSet::new();
     // Reuse the caller-supplied shared runtime when present so the terminal
     // compose pass that follows fetches each remote URL once (single-flight),
     // not twice. Absent a shared runtime, build a private one.
     let remote_fetch = options.remote_fetch_runtime();
+    let root = (options.source.clone(), options.source_derivation);
     let graph = collect_recursive(
         markdown,
         options,
         &mut seen,
         &mut entries,
+        &mut icmp,
+        &mut capabilities,
         &mut visited,
         &remote_fetch,
+        &root,
+        None,
     )?;
-    Ok((entries, graph))
+    Ok((entries, icmp, capabilities, graph))
 }
 
 /// Collects the frontmatter `$(...)` commands of one document, without reading
@@ -223,13 +256,22 @@ pub fn collect_frontmatter_shell_commands(
 ///
 /// Returns a [`super::PreflightGraphNode`] describing this document's resolved
 /// source, its locally-discovered shell entries, and its nested children.
+///
+/// `root` is the request root's source, the resolution base of `as_markdown`
+/// content. `nested_key` is `Some` for such content: it identifies the node in
+/// `visited` instead of the root source its options carry.
+#[allow(clippy::too_many_arguments)]
 fn collect_recursive(
     markdown: &Markdown,
     options: &ComposeOptions,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
+    icmp: &mut Vec<PlannedIcmpProbe>,
+    capabilities: &mut DeferredCapabilities,
     visited: &mut HashSet<String>,
     remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    root: &RootSource,
+    nested_key: Option<String>,
 ) -> MarkdownResult<super::PreflightGraphNode> {
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
@@ -237,7 +279,8 @@ fn collect_recursive(
         _ => PathBuf::from("<unknown>"),
     };
 
-    let source_key = match &options.source {
+    let is_nested = nested_key.is_some();
+    let source_key = nested_key.or_else(|| match &options.source {
         ComposeSource::File(path) => Some(
             std::fs::canonicalize(path)
                 .unwrap_or_else(|_| path.clone())
@@ -246,12 +289,27 @@ fn collect_recursive(
         ),
         ComposeSource::Url(url) => Some(url.to_string()),
         ComposeSource::Unknown => None,
-    };
+    });
     if let Some(key) = source_key
         && !visited.insert(key)
     {
         return Ok(super::PreflightGraphNode::default());
     }
+
+    // The compose pass hands each source its parent's context plus the groups
+    // the source names; discovery must read that same context, and its
+    // children inherit it.
+    let extended = options.extended_for(markdown);
+    let options = extended.as_ref();
+
+    // Discovery evaluates this document's expressions but must not launch a
+    // login shell (R8) or compose nested content: `as_markdown` records what
+    // it was given, and that content is walked below like a child.
+    let mut discovery = options.clone();
+    discovery.suppress_shell_probes = true;
+    discovery.nested_compose = NestedComposeSlot::discover();
+    discovery.icmp = options.icmp.discovering();
+    discovery.current = options.current_authority().discovering();
 
     // Per-document accumulator: shell entries first discovered *here* (so the
     // returned graph node can attribute them to this document). The global
@@ -260,8 +318,28 @@ fn collect_recursive(
     let mut local_entries: Vec<ShellCommandEntry> = Vec::new();
     let mut edges: Vec<super::PreflightGraphEdge> = Vec::new();
 
+    // ── Deferred context reads ─────────────────────────────────────
+    // Metadata only (R30): planning names the lazy reads and function calls
+    // this source can reach, and observes none of them.
+    *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document(markdown));
+
     // ── Frontmatter commands ───────────────────────────────────────
-    scan_one_frontmatter(markdown, options, &source_file, seen, entries, &mut local_entries)?;
+    scan_one_frontmatter(markdown, &discovery, &source_file, seen, entries, &mut local_entries)?;
+
+    let authored_ctx = markdown.full_source_context_for_errors();
+    let authored_pending = pending_shell_literals(markdown, &authored_ctx);
+    detect_authored_dynamic_target(
+        markdown.content(),
+        &authored_pending,
+        &authored_ctx,
+        markdown.frontmatter_line_count(),
+    )?;
+    detect_unevaluated_dependency_shape(
+        markdown,
+        &authored_pending,
+        &authored_ctx,
+        markdown.frontmatter_line_count(),
+    )?;
 
     // ── Resolve this document's inline state ───────────────────────
     // Interpolation + text replacement only: never page blocks (so
@@ -285,14 +363,28 @@ fn collect_recursive(
     // re-validates them, so they are not yet final violations here.
     let mut inline_exclude_keys = options.exclude_keys.clone();
     inline_exclude_keys.insert("$schema".to_string());
-    let mut inline_options = options
+    let mut inline_options = discovery
         .clone()
         .only(&inline_ops)
         .with_exclude_keys(inline_exclude_keys);
     inline_options.defer_shell_pending_schema_problems = true;
+    inline_options.defer_missing_runtime_context = true;
+    inline_options.defer_expression_failures = true;
     let (prepared, _) = markdown.compose_with(inline_options)?;
     let line_offset = prepared.frontmatter_line_count();
     let prepared_ctx = prepared.full_source_context_for_errors();
+
+    // ── Planned ICMP effects ───────────────────────────────────────
+    // What discovery evaluated (which may include a target computed from
+    // `ctx.*`), plus every all-literal call in the authored source so a branch
+    // discovery did not take still contributes. Neither path sends a packet.
+    let mut planned = discovery.icmp.take_discovered();
+    planned.extend(authored_icmp_probes(markdown, options));
+    for probe in planned {
+        if !icmp.contains(&probe) {
+            icmp.push(probe);
+        }
+    }
 
     // ── Dynamic command shape (chicken-and-egg) ────────────────────
     // A body command whose text embeds a frontmatter value still pending
@@ -369,7 +461,11 @@ fn collect_recursive(
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
 
-    for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
+    for directive in transclusion::parse_directives_with_line_offset(
+        prepared.content(),
+        prepared_ctx.clone(),
+        line_offset,
+    )? {
         // `::file` and `::url` can both reference Markdown children that
         // contain shell directives. `::code` inserts literal code (no shell
         // directives), so it is excluded.
@@ -406,8 +502,12 @@ fn collect_recursive(
                     &options.clone().with_accepted_source_file(path.clone()),
                     seen,
                     entries,
+                    icmp,
+                    capabilities,
                     visited,
                     remote_fetch,
+                    root,
+                    None,
                 )?;
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
@@ -426,8 +526,12 @@ fn collect_recursive(
                     &options.clone().with_source_url(url.clone()),
                     seen,
                     entries,
+                    icmp,
+                    capabilities,
                     visited,
                     remote_fetch,
+                    root,
+                    None,
                 )?;
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
@@ -474,8 +578,12 @@ fn collect_recursive(
                     &options.clone().with_accepted_source_file(path),
                     seen,
                     entries,
+                    icmp,
+                    capabilities,
                     visited,
                     remote_fetch,
+                    root,
+                    None,
                 )?
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
@@ -488,8 +596,12 @@ fn collect_recursive(
                     &options.clone().with_source_url(url),
                     seen,
                     entries,
+                    icmp,
+                    capabilities,
                     visited,
                     remote_fetch,
+                    root,
+                    None,
                 )?
             }
         };
@@ -502,10 +614,39 @@ fn collect_recursive(
         children.push(std::sync::Arc::new(child));
     }
 
-    let source = match &options.source {
-        ComposeSource::File(p) => Some(p.clone()),
-        ComposeSource::Url(u) => Some(PathBuf::from(u.to_string())),
-        ComposeSource::Unknown => None,
+    // ── Nested `as_markdown` content (condition-blind) ─────────────
+    // What discovery evaluated, plus every string-literal argument in the
+    // authored source, so a branch discovery did not take still contributes.
+    // Runtime composes the content against the root source; so does this walk.
+    let mut nested_contents = discovery.nested_compose.take_discovered();
+    nested_contents.extend(authored_as_markdown_literals(markdown));
+    for content in nested_contents {
+        let key = format!("as_markdown:{}", biscuit_hash::xx_hash(&content));
+        let mut nested_options = options.clone();
+        nested_options.source = root.0.clone();
+        nested_options.source_derivation = root.1;
+        nested_options.set_overrides = None;
+        let child = Markdown::from(content);
+        let mut node = collect_recursive(
+            &child,
+            &nested_options,
+            seen,
+            entries,
+            icmp,
+            capabilities,
+            visited,
+            remote_fetch,
+            root,
+            Some(key),
+        )?;
+        node.source = None;
+        children.push(std::sync::Arc::new(node));
+    }
+
+    let source = match (&options.source, is_nested) {
+        (_, true) | (ComposeSource::Unknown, _) => None,
+        (ComposeSource::File(p), _) => Some(p.clone()),
+        (ComposeSource::Url(u), _) => Some(PathBuf::from(u.to_string())),
     };
 
     Ok(super::PreflightGraphNode {
@@ -561,6 +702,7 @@ fn scan_one_frontmatter(
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     let mut preflight_exclude_keys = options.exclude_keys.clone();
     preflight_exclude_keys.insert("$schema".to_string());
+    let mut best_effort_missing_context = None;
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
         // Defer templated keys that reference a shell-pending (`$(...)`) value.
         // Without this, a key like `review: "{{ dir + '/x' }}"` resolves against
@@ -578,15 +720,16 @@ fn scan_one_frontmatter(
         // compose pass. This keeps command discovery resilient while avoiding a
         // false schema failure when a required property is derived through
         // `file_exists()` or `frontmatter()`.
-        let _ = interpolate_frontmatter_best_effort(
+        best_effort_missing_context = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
             options.context(),
-            false,
             true,
             Some(options.frontmatter_resolution_context()),
             &preflight_exclude_keys,
             &options.name_coercion_keys,
-        );
+        )
+        .ok()
+        .and_then(|report| report.missing_runtime_context);
     }
 
     let scan_ctx = fm_clone.full_source_context_for_errors();
@@ -601,7 +744,13 @@ fn scan_one_frontmatter(
     // here with a clear dynamic-shape error rather than letting it surface later
     // as the misleading "command not pre-approved … bug in the pre-flight
     // scanner". This mirrors `detect_dynamic_command_shape` for body directives.
-    detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx)?;
+    //
+    // A key left raw because it read an uncaptured runtime context group is not
+    // a dynamic shape: the compose pass fails that key in frontmatter
+    // interpolation whatever the document's conditions, so report that error.
+    if let Err(error) = detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx) {
+        return Err(best_effort_missing_context.unwrap_or(error));
+    }
 
     let candidates = scan_frontmatter(
         fm_clone.frontmatter(),
@@ -747,9 +896,357 @@ fn pending_shell_literals(
     pending
 }
 
+/// Rejects an authored transclusion target that reads a frontmatter value whose
+/// shell expansion has not run yet.
+fn detect_authored_dynamic_target(
+    content: &str,
+    pending: &[(String, String)],
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+) -> MarkdownResult<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    for directive in crate::markdown::compose::directives_api::scan_darkmatter_directives(content)
+    {
+        if !matches!(
+            directive.kind,
+            crate::markdown::compose::directives_api::DirectiveKind::File
+                | crate::markdown::compose::directives_api::DirectiveKind::Code
+                | crate::markdown::compose::directives_api::DirectiveKind::Url
+        ) {
+            continue;
+        }
+        let Some(target) = directive.target else {
+            continue;
+        };
+        for location in ExpressionFinder::find_all_plain(&target.value) {
+            let Ok(expression) = parse(&location.expression) else {
+                continue;
+            };
+            let mut roots = Vec::new();
+            collect_expression_roots(&expression, &mut roots);
+            let Some((key, _)) = pending.iter().find(|(key, _)| roots.contains(key)) else {
+                continue;
+            };
+            return Err(ShellExpansionError::DynamicCommandShape {
+                ctx: Box::new(ctx.clone()),
+                command: content[directive.span.clone()].to_string(),
+                key: key.clone(),
+                origin: ShellCommandOrigin::Body {
+                    line: directive.line + line_offset,
+                },
+            }
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// Functions whose discovery value differs from their compose value: shell
+/// probes answer `false` without launching (R8), `as_markdown` composes
+/// nothing, and `ping`/`ping_under` answer `null` without sending ICMP (R6).
+const UNEVALUATED_IN_DISCOVERY: &[&str] = &[
+    "has_alias",
+    "has_builtin_function",
+    "has_user_function",
+    "can_execute",
+    "as_markdown",
+    "ping",
+    "ping_under",
+];
+
+/// Every string-literal `as_markdown` argument in the authored frontmatter and
+/// body, including conditional branches and regions discovery never reaches.
+fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
+    let mut literals = Vec::new();
+    for expression in authored_expressions(markdown) {
+        visit_calls(&expression, &mut |name, args| {
+            if name == "as_markdown"
+                && let [Expr::StringLiteral(content)] = args
+            {
+                literals.push(content.clone());
+            }
+        });
+    }
+    literals
+}
+
+/// Every `ping`/`ping_under` call in the authored frontmatter and body whose
+/// arguments are all literals, including branches discovery never evaluates.
+///
+/// A call whose arguments do not validate is left to the compose pass to
+/// reject: preflight reports effects, it does not diagnose authoring.
+fn authored_icmp_probes(markdown: &Markdown, options: &ComposeOptions) -> Vec<PlannedIcmpProbe> {
+    let authority = options.icmp_authority().discovering();
+    for expression in authored_expressions(markdown) {
+        visit_calls(&expression, &mut |name, args| {
+            if name != "ping" && name != "ping_under" {
+                return;
+            }
+            let literals: Option<Vec<Value>> = args.iter().map(literal_value).collect();
+            if let Some(literals) = literals {
+                let context = ResolutionContext { icmp: authority.clone(), ..Default::default() };
+                let _ = super::super::expression::functions::dispatch_fs(name, &literals, &context);
+            }
+        });
+    }
+    authority.take_discovered()
+}
+
+/// The JSON value of a literal expression node, or `None` when it is computed.
+fn literal_value(expression: &Expr) -> Option<Value> {
+    match expression {
+        Expr::StringLiteral(text) => Some(Value::String(text.clone())),
+        Expr::NumberLiteral(number) => serde_json::Number::from_f64(*number).map(Value::Number),
+        _ => None,
+    }
+}
+
+/// Parsed `{{ … }}` expressions from frontmatter string values and the whole
+/// body, code blocks included.
+fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
+    markdown
+        .frontmatter()
+        .as_map()
+        .values()
+        .filter_map(serde_json::Value::as_str)
+        .chain(std::iter::once(markdown.content()))
+        .flat_map(ExpressionFinder::find_all_plain)
+        .filter_map(|location| parse(&location.expression).ok())
+        .collect()
+}
+
+/// Calls `visit` with the name and arguments of every function call in
+/// `expression`, outermost first.
+fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
+    match expression {
+        Expr::FunctionCall { name, args } => {
+            visit(name, args);
+            for argument in args {
+                visit_calls(argument, visit);
+            }
+        }
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => visit_calls(inner, visit),
+        Expr::Fallback { primary, fallback } => {
+            visit_calls(primary, visit);
+            visit_calls(fallback, visit);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            visit_calls(condition, visit);
+            visit_calls(then_branch, visit);
+            visit_calls(else_branch, visit);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            visit_calls(left, visit);
+            visit_calls(right, visit);
+        }
+        Expr::Index { base, index } => {
+            visit_calls(base, visit);
+            visit_calls(index, visit);
+        }
+        Expr::ArrayLiteral(items) => {
+            for item in items {
+                visit_calls(item, visit);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                visit_calls(value, visit);
+            }
+        }
+        Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+    }
+}
+
+/// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
+fn unevaluated_call(expression: &Expr) -> Option<String> {
+    let mut found = None;
+    visit_calls(expression, &mut |name, _| {
+        if found.is_none() && UNEVALUATED_IN_DISCOVERY.contains(&name) {
+            found = Some(format!("{name}()"));
+        }
+    });
+    found
+}
+
+/// Fails with [`ShellExpansionError::UnevaluatedDependencyShape`] when the
+/// approved shape of a command or nested content would depend on a value
+/// discovery does not produce faithfully:
+///
+/// - a body `::shell` line, shell-block body, or transclusion target, or a
+///   top-level frontmatter `$(...)` value, embedding an expression that calls
+///   a function in [`UNEVALUATED_IN_DISCOVERY`];
+/// - an `as_markdown` call whose argument is not a string literal and reads
+///   such a function or a frontmatter value still pending shell expansion.
+///
+/// A non-literal `as_markdown` argument built only from values discovery
+/// evaluates is recorded during discovery and walked like any other content.
+fn detect_unevaluated_dependency_shape(
+    markdown: &Markdown,
+    pending: &[(String, String)],
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+) -> MarkdownResult<()> {
+    let error = |command: String, dependency: String, origin: ShellCommandOrigin| {
+        Err(ShellExpansionError::UnevaluatedDependencyShape {
+            ctx: Box::new(ctx.clone()),
+            command,
+            dependency,
+            origin,
+        }
+        .into())
+    };
+
+    for (key, value) in markdown.frontmatter().as_map() {
+        let Some(text) = value.as_str() else { continue };
+        let origin = || ShellCommandOrigin::Frontmatter {
+            key: key.clone(),
+            line: frontmatter_key_line(ctx, key),
+        };
+        for location in ExpressionFinder::find_all_plain(text) {
+            let Ok(expression) = parse(&location.expression) else { continue };
+            if text.trim_start().starts_with("$(")
+                && let Some(dependency) = unevaluated_call(&expression)
+            {
+                return error(text.to_string(), dependency, origin());
+            }
+            if let Some(dependency) = dynamic_nested_dependency(&expression, pending) {
+                return error(text.to_string(), dependency, origin());
+            }
+        }
+    }
+
+    let content = markdown.content();
+    let mut effect_spans: Vec<Range<usize>> = block_pairs::scan_block_pairs(content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|pair| matches!(pair.kind, block_pairs::BlockOpenKind::Shell))
+        .map(|pair| pair.body_span)
+        .collect();
+    effect_spans.extend(
+        crate::markdown::compose::directives_api::scan_darkmatter_directives(content)
+            .into_iter()
+            .filter(|directive| {
+                matches!(
+                    directive.kind,
+                    crate::markdown::compose::directives_api::DirectiveKind::File
+                        | crate::markdown::compose::directives_api::DirectiveKind::Code
+                        | crate::markdown::compose::directives_api::DirectiveKind::Url
+                )
+            })
+            .filter_map(|directive| directive.target.map(|target| target.span)),
+    );
+    for location in ExpressionFinder::new(content).find_all() {
+        let Ok(expression) = parse(&location.expression) else { continue };
+        let line_start = content[..location.start].rfind('\n').map_or(0, |at| at + 1);
+        let line_end = content[location.start..]
+            .find('\n')
+            .map_or(content.len(), |at| location.start + at);
+        let line = strip_blockquote_prefix(content[line_start..line_end].trim());
+        let origin = ShellCommandOrigin::Body {
+            line: content[..location.start].matches('\n').count() + 1 + line_offset,
+        };
+        let in_effect = line == "::shell"
+            || line.starts_with("::shell ")
+            || line.starts_with("::shell\t")
+            || effect_spans
+                .iter()
+                .any(|span| location.start >= span.start && location.start < span.end);
+        if in_effect && let Some(dependency) = unevaluated_call(&expression) {
+            return error(line.to_string(), dependency, origin);
+        }
+        if let Some(dependency) = dynamic_nested_dependency(&expression, pending) {
+            return error(line.to_string(), dependency, origin);
+        }
+    }
+    Ok(())
+}
+
+/// The unevaluated dependency of a non-literal `as_markdown` argument, if any.
+fn dynamic_nested_dependency(expression: &Expr, pending: &[(String, String)]) -> Option<String> {
+    let mut found = None;
+    visit_calls(expression, &mut |name, args| {
+        if found.is_some() || name != "as_markdown" {
+            return;
+        }
+        let [argument] = args else { return };
+        if matches!(argument, Expr::StringLiteral(_)) {
+            return;
+        }
+        let mut roots = Vec::new();
+        collect_expression_roots(argument, &mut roots);
+        found = unevaluated_call(argument).or_else(|| {
+            pending
+                .iter()
+                .find(|(key, _)| roots.contains(key))
+                .map(|(key, _)| format!("frontmatter.{key}, which frontmatter shell expansion resolves"))
+        });
+    });
+    found
+}
+
+fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
+    match expression {
+        Expr::Variable(path) => {
+            let path = path.strip_prefix("doc.").unwrap_or(path);
+            if let Some(root) = path.split('.').next()
+                && !root.is_empty()
+            {
+                roots.push(root.to_string());
+            }
+        }
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_expression_roots(inner, roots),
+        Expr::Fallback { primary, fallback } => {
+            collect_expression_roots(primary, roots);
+            collect_expression_roots(fallback, roots);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_expression_roots(condition, roots);
+            collect_expression_roots(then_branch, roots);
+            collect_expression_roots(else_branch, roots);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_expression_roots(left, roots);
+            collect_expression_roots(right, roots);
+        }
+        Expr::Index { base, index } => {
+            collect_expression_roots(base, roots);
+            collect_expression_roots(index, roots);
+        }
+        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
+            for argument in args {
+                collect_expression_roots(argument, roots);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_expression_roots(value, roots);
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+    }
+}
+
 /// Fails with [`ShellExpansionError::DynamicCommandShape`] when a pending
-/// frontmatter shell value has been interpolated into a body `::shell` directive
-/// or `::shell-block` command.
+/// frontmatter shell value has been interpolated into a body shell command or
+/// transclusion target.
 fn detect_dynamic_command_shape(
     content: &str,
     pending: &[(String, String)],
@@ -766,6 +1263,19 @@ fn detect_dynamic_command_shape(
         .filter(|p| matches!(p.kind, block_pairs::BlockOpenKind::Shell))
         .map(|p| p.body_span)
         .collect();
+    let transclusion_target_spans: Vec<Range<usize>> =
+        crate::markdown::compose::directives_api::scan_darkmatter_directives(content)
+            .into_iter()
+            .filter(|directive| {
+                matches!(
+                    directive.kind,
+                    crate::markdown::compose::directives_api::DirectiveKind::File
+                        | crate::markdown::compose::directives_api::DirectiveKind::Code
+                        | crate::markdown::compose::directives_api::DirectiveKind::Url
+                )
+            })
+            .filter_map(|directive| directive.target.map(|target| target.span))
+            .collect();
 
     for (key, literal) in pending {
         let mut from = 0usize;
@@ -784,8 +1294,11 @@ fn detect_dynamic_command_shape(
             let in_shell_block = shell_block_spans
                 .iter()
                 .any(|span| at >= span.start && at < span.end);
+            let in_transclusion_target = transclusion_target_spans
+                .iter()
+                .any(|span| at >= span.start && at < span.end);
 
-            if in_shell_directive || in_shell_block {
+            if in_shell_directive || in_shell_block || in_transclusion_target {
                 let line_number = content[..at].matches('\n').count() + 1 + line_offset;
                 return Err(ShellExpansionError::DynamicCommandShape {
                     ctx: Box::new(ctx.clone()),
@@ -808,6 +1321,167 @@ mod tests {
     use crate::markdown::compose::ComposeOptions;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn authored_target_and_pending_shell_data_identify_the_same_dependency() {
+        let md: Markdown = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n".into();
+        let ctx = md.full_source_context_for_errors();
+        let pending = pending_shell_literals(&md, &ctx);
+        assert_eq!(pending, vec![("child".to_string(), "$(printf child.md)".to_string())]);
+
+        let directive = crate::markdown::compose::directives_api::scan_darkmatter_directives(
+            md.content(),
+        )
+        .into_iter()
+        .next()
+        .expect("authored directive");
+        let target = directive.target.expect("authored target span");
+        assert_eq!(&md.content()[target.span.clone()], "{{child}}");
+        let expressions = ExpressionFinder::find_all_plain(&target.value);
+        assert_eq!(expressions.len(), 1);
+        assert_eq!(expressions[0].expression, pending[0].0);
+    }
+
+    #[test]
+    fn runtime_page_blocks_suppress_guarded_null_target() {
+        let content = "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md.compose_with(ComposeOptions::new()).unwrap();
+        assert!(!composed.content().contains("::file"), "{}", composed.content());
+        assert!(
+            report.warnings.iter().all(|warning| !warning.message.contains("nullable target")),
+            "a runtime-suppressed directive must not warn: {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn condition_blind_preflight_skips_null_edge_but_keeps_concrete_sibling() {
+        let temp = TempDir::new().unwrap();
+        let child = temp.path().join("child.md");
+        std::fs::write(&child, "# Child\n::shell echo sibling-command\n").unwrap();
+        let root = temp.path().join("root.md");
+        let content = "---\n$schema:\n  log: file\n---\n\n::block when=\"file_exists(log)\"\n::file {{log}}\n::end-block\n\n::file ./child.md when=false\n";
+        std::fs::write(&root, content).unwrap();
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let (entries, graph) = collect_shell_commands_with_graph(
+            &md,
+            &ComposeOptions::new().with_source_file(&root),
+        )
+        .expect("nullable target must not abort condition-blind preflight");
+        assert_eq!(entries.len(), 1, "entries: {entries:?}");
+        assert_eq!(entries[0].raw_command, "echo sibling-command");
+        assert_eq!(graph.edges.len(), 1, "only the concrete child forms an edge");
+        assert_eq!(graph.children.len(), 1, "only the concrete child is retained");
+    }
+
+    #[test]
+    fn unguarded_null_target_is_skipped_with_one_warning() {
+        let content = "---\n$schema:\n  log: file\n---\n\n::file {{log}}\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(ComposeOptions::new())
+            .expect("unguarded null target must compose");
+        assert!(!composed.content().contains("::file"));
+        let warnings: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|warning| warning.message.contains("nullable target"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "warnings: {:?}", report.warnings);
+        assert!(warnings[0].message.contains("log"));
+        assert!(warnings[0].message.contains("null"));
+    }
+
+    #[test]
+    fn unguarded_empty_string_target_keeps_its_typed_reason() {
+        let content = "---\nlog: \"\"\n---\n\n::file {{log}}\n";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(ComposeOptions::new())
+            .expect("empty-string target must compose");
+        assert!(!composed.content().contains("::file"));
+        let warnings: Vec<_> = report
+            .warnings
+            .iter()
+            .filter(|warning| warning.message.contains("nullable target"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "warnings: {:?}", report.warnings);
+        assert!(warnings[0].message.contains("log"));
+        assert!(warnings[0].message.contains("empty string"));
+        assert!(!warnings[0].message.contains("evaluated to null"));
+    }
+
+    #[test]
+    fn authored_empty_targets_remain_errors_and_mixed_targets_remain_paths() {
+        for content in ["::file\n", "::file \"\"\n"] {
+            let md: Markdown = content.into();
+            assert!(md.compose_with(ComposeOptions::new()).is_err(), "{content:?}");
+        }
+
+        let content = "::file \"{{dir}}/log.md\"\n";
+        let parsed = transclusion::parse_directives(
+            content,
+            Markdown::from(content).source_context_for_errors(),
+        )
+        .unwrap();
+        assert_eq!(parsed[0].raw_target, "{{dir}}/log.md");
+    }
+
+    #[test]
+    fn malformed_directive_in_false_block_has_distinct_runtime_and_preflight_outcomes() {
+        let content = "---\nenabled: false\n---\n\n::block when=\"enabled\"\n::file\n::end-block\n";
+        let md: Markdown = content.into();
+        let (composed, _) = md.compose_with(ComposeOptions::new()).unwrap();
+        assert!(!composed.content().contains("::file"));
+
+        let error = collect_shell_commands(&md, &ComposeOptions::new())
+            .expect_err("condition-blind preflight must reject authored malformed syntax");
+        assert!(error.to_string().contains("Failed to parse directive"));
+    }
+
+    #[test]
+    fn preflight_parse_errors_use_file_relative_lines() {
+        for frontmatter in [
+            "---\na: 1\n---\n",
+            "---\na: 1\nb: 2\nc: 3\n---\n",
+            "---\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\n---\n",
+        ] {
+            let content = format!("{frontmatter}\n# Body\n::file\n");
+            let expected_line = content[..content.find("::file").unwrap()].matches('\n').count() + 1;
+            let md: Markdown = content.into();
+            let error = collect_shell_commands(&md, &ComposeOptions::new())
+                .expect_err("malformed directive");
+            let crate::markdown::types::MarkdownError::Transclusion(error) = error else {
+                panic!("expected transclusion error");
+            };
+            let transclusion::TransclusionError::ParseDirective { line, ctx, .. } = *error else {
+                panic!("expected directive parse error");
+            };
+            assert_eq!(line, expected_line, "reported line must be the directive's file line");
+            assert!(ctx.content.lines().nth(line - 1).is_some_and(|line| line.contains("::file")));
+        }
+    }
+
+    #[test]
+    fn pending_shell_target_is_rejected_before_child_command_approval() {
+        let temp = TempDir::new().unwrap();
+        let child = temp.path().join("child.md");
+        std::fs::write(&child, "::shell touch should-not-be-approved\n").unwrap();
+        let root = temp.path().join("root.md");
+        let content = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n";
+        std::fs::write(&root, content).unwrap();
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let error = collect_shell_commands(
+            &md,
+            &ComposeOptions::new().with_source_file(&root),
+        )
+        .expect_err("pending target must fail as a dynamic command shape");
+        let message = error.to_string();
+        assert!(message.contains("child"), "pending target must fail as a dynamic command shape: {message}");
+        assert!(message.contains("dynamic"), "pending target must fail as a dynamic command shape: {message}");
+        assert!(!message.contains("should-not-be-approved"), "{message}");
+    }
 
     #[test]
     fn discovers_shell_directives_in_simple_document() {

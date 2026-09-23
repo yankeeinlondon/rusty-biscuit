@@ -292,7 +292,8 @@ pub(super) fn approve_discovered_commands(
 /// communication/action surfaces — which interpolate at event-time (C2) —
 /// `shell` commands are approved at pre-flight, before any event fires, and so
 /// resolve against an **early-binding-only** lookup: `doc.*`, `ctx.*`, `env.*`,
-/// and read-side functions. A late-binding reference (`err`/`timing`/`current`)
+/// and read-side functions. A late-binding reference
+/// (`err`/`timing`/`current`/`current_env`)
 /// is rejected with [`CompositionError::LifecycleShellResolution`] because its
 /// value does not yet exist.
 ///
@@ -429,7 +430,8 @@ fn resolve_shell_command_expr(
     Ok(())
 }
 
-/// Returns the first late-binding root (`err`/`timing`/`current`) referenced by
+/// Returns the first late-binding root
+/// (`err`/`timing`/`current`/`current_env`) referenced by
 /// any `{{ }}` span in `raw`, or `None` when the command uses only
 /// early-binding values.
 fn first_late_binding_root(raw: &str) -> Option<String> {

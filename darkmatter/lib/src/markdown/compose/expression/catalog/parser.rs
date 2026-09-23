@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use serde::Deserialize;
 
 use super::{
-    DataType,
+    DataType, ParamRefinement,
     ast::{
         CatalogExample, CatalogFunction, CatalogOverload, CatalogParam, CatalogReturn,
         CatalogReturnValue, CatalogVerification, ExpressionFunctionCatalog,
@@ -67,6 +67,18 @@ pub(crate) enum CatalogErrorKind {
     ExecutableReason,
     #[error("duplicate rendered signature `{0}`")]
     DuplicateSignature(String),
+    #[error("an unpaired function requires `{0}`")]
+    MissingUnpairedField(&'static str),
+    #[error("a paired function inherits `{0}` from its `ctx.*` variable and must not author it")]
+    PairedFieldAuthored(&'static str),
+    #[error("paired function has no `ctx.{0}` variable")]
+    UnknownPairVariable(String),
+    #[error("`ctx.{0}` has a type a function cannot return")]
+    UnpairableVariableType(String),
+    #[error("invalid return literal `{0}`")]
+    InvalidReturnLiteral(String),
+    #[error("duplicate return literal `{0}`")]
+    DuplicateReturnLiteral(String),
 }
 
 #[derive(Deserialize)]
@@ -84,7 +96,9 @@ struct RawFunction {
     name: String,
     category: String,
     order: i64,
-    description: String,
+    description: Option<String>,
+    #[serde(default)]
+    pair: bool,
     overloads: Vec<RawOverload>,
 }
 
@@ -115,9 +129,12 @@ struct RawParam {
 #[serde(deny_unknown_fields)]
 struct RawReturn {
     #[serde(rename = "type")]
-    ty: String,
+    ty: Option<String>,
+    array: Option<bool>,
     #[serde(default)]
-    array: bool,
+    literals: Vec<String>,
+    #[serde(default)]
+    nullable: bool,
     #[serde(default)]
     fallible: bool,
 }
@@ -183,7 +200,24 @@ pub(crate) fn parse_expression_function_catalog(
         if function.category.trim().is_empty() {
             return Err(error(Some(&name), None, Some("category"), CatalogErrorKind::EmptyValue));
         }
-        if function.description.trim().is_empty() {
+        let paired_variable = if function.pair {
+            if function.description.is_some() {
+                return Err(error(Some(&name), None, Some("description"), CatalogErrorKind::PairedFieldAuthored("description")));
+            }
+            Some(crate::markdown::compose::context::context_variable_descriptors().iter()
+                .find(|variable| variable.name == name)
+                .ok_or_else(|| error(Some(&name), None, Some("pair"), CatalogErrorKind::UnknownPairVariable(name.clone())))?)
+        } else {
+            None
+        };
+        let description = match (&paired_variable, function.description) {
+            (Some(variable), _) => variable.description.to_string(),
+            (None, Some(description)) => description,
+            (None, None) => {
+                return Err(error(Some(&name), None, Some("description"), CatalogErrorKind::MissingUnpairedField("description")));
+            }
+        };
+        if description.trim().is_empty() {
             return Err(error(Some(&name), None, Some("description"), CatalogErrorKind::EmptyValue));
         }
         let order = usize::try_from(function.order).ok()
@@ -218,28 +252,67 @@ pub(crate) fn parse_expression_function_catalog(
                     return Err(error(Some(&name), Some(index), Some("parameters"), CatalogErrorKind::RequiredAfterOptional));
                 }
                 optional_seen |= parameter.optional;
-                let ty = parse_type(&name, index, "parameters.type", &parameter.ty)?;
-                parameters.push(CatalogParam { name: parameter.name, ty, array: parameter.array, optional: parameter.optional, variadic: parameter.variadic });
+                let (ty, refinement) = parse_parameter_type(&name, index, &parameter.ty)?;
+                parameters.push(CatalogParam { name: parameter.name, ty, refinement, array: parameter.array, optional: parameter.optional, variadic: parameter.variadic });
             }
             let signature = format!("{}({})", name, parameters.iter().map(render_parameter).collect::<Vec<_>>().join(", "));
             if !signatures.insert(signature.clone()) {
                 return Err(error(Some(&name), Some(index), Some("parameters"), CatalogErrorKind::DuplicateSignature(signature)));
             }
-            let return_value = parse_return_type(&name, index, &overload.returns.ty)?;
+            let (value, array) = match (paired_variable, overload.returns.ty) {
+                (Some(_), Some(_)) => {
+                    return Err(error(Some(&name), Some(index), Some("returns.type"), CatalogErrorKind::PairedFieldAuthored("returns.type")));
+                }
+                (Some(_), None) if overload.returns.array.is_some() => {
+                    return Err(error(Some(&name), Some(index), Some("returns.array"), CatalogErrorKind::PairedFieldAuthored("returns.array")));
+                }
+                (Some(variable), None) => {
+                    let ty = if variable.display_type.integer {
+                        Some(DataType::Integer)
+                    } else {
+                        DataType::from_keyword(variable.display_type.base.as_keyword())
+                    };
+                    let ty = ty.ok_or_else(|| error(Some(&name), Some(index), Some("pair"), CatalogErrorKind::UnpairableVariableType(name.clone())))?;
+                    (CatalogReturnValue::Data(ty), variable.display_type.is_array)
+                }
+                (None, Some(keyword)) => (parse_return_type(&name, index, &keyword)?, overload.returns.array.unwrap_or(false)),
+                (None, None) => {
+                    return Err(error(Some(&name), Some(index), Some("returns.type"), CatalogErrorKind::MissingUnpairedField("returns.type")));
+                }
+            };
+            let literals = validate_return_literals(&name, index, overload.returns.literals)?;
             let example = validate_example(&name, index, overload.example)?;
             overloads.push(CatalogOverload {
                 parameters,
-                returns: CatalogReturn { value: return_value, array: overload.returns.array, fallible: overload.returns.fallible },
+                returns: CatalogReturn { value, array, literals, nullable: overload.returns.nullable, fallible: overload.returns.fallible },
                 example,
             });
         }
-        functions.push(CatalogFunction { name, category: function.category, order, description: function.description, overloads });
+        functions.push(CatalogFunction { name, category: function.category, order, description, pair: function.pair, overloads });
     }
     Ok(ExpressionFunctionCatalog { functions })
 }
 
-fn parse_type(function: &str, overload: usize, field: &str, keyword: &str) -> Result<DataType, CatalogParseError> {
-    DataType::from_keyword(keyword).ok_or_else(|| error(Some(function), Some(overload), Some(field), CatalogErrorKind::UnknownType(keyword.to_string())))
+fn parse_parameter_type(function: &str, overload: usize, keyword: &str) -> Result<(DataType, Option<ParamRefinement>), CatalogParseError> {
+    if let Some(ty) = DataType::from_keyword(keyword) {
+        return Ok((ty, None));
+    }
+    ParamRefinement::from_keyword(keyword)
+        .map(|(ty, refinement)| (ty, Some(refinement)))
+        .ok_or_else(|| error(Some(function), Some(overload), Some("parameters.type"), CatalogErrorKind::UnknownType(keyword.to_string())))
+}
+
+fn validate_return_literals(function: &str, overload: usize, literals: Vec<String>) -> Result<Vec<String>, CatalogParseError> {
+    let mut unique = HashSet::new();
+    for literal in &literals {
+        if literal.trim().is_empty() {
+            return Err(error(Some(function), Some(overload), Some("returns.literals"), CatalogErrorKind::InvalidReturnLiteral(literal.clone())));
+        }
+        if !unique.insert(literal.as_str()) {
+            return Err(error(Some(function), Some(overload), Some("returns.literals"), CatalogErrorKind::DuplicateReturnLiteral(literal.clone())));
+        }
+    }
+    Ok(literals)
 }
 
 fn parse_return_type(
@@ -400,6 +473,15 @@ functions:
         output
     }
 
+    /// `SCHEMA` with its declared `returns` shape widened to the union fields.
+    fn union_returns_schema() -> String {
+        replace(
+            SCHEMA,
+            "returns: { type: string(not-empty; required), array: boolean, fallible: boolean }",
+            "returns: { type: string(not-empty), array: boolean, literals: string[], nullable: boolean, fallible: boolean }",
+        )
+    }
+
     fn kind(yaml: &str) -> CatalogErrorKind {
         parse_expression_function_catalog(yaml).unwrap_err().kind
     }
@@ -414,8 +496,8 @@ functions:
         assert!(overloads[0].parameters[1].array);
         assert!(overloads[0].parameters[2].optional);
         assert!(overloads[1].parameters[0].variadic);
-        assert_eq!(overloads[0].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::String), array: false, fallible: false });
-        assert_eq!(overloads[1].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::Number), array: true, fallible: true });
+        assert_eq!(overloads[0].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::String), array: false, literals: Vec::new(), nullable: false, fallible: false });
+        assert_eq!(overloads[1].returns, CatalogReturn { value: CatalogReturnValue::Data(DataType::Number), array: true, literals: Vec::new(), nullable: false, fallible: true });
         assert!(matches!(overloads[0].example.verification, CatalogVerification::Executable));
         assert!(matches!(overloads[1].example.verification, CatalogVerification::DisplayOnly(ref reason) if reason == "illustrative"));
     }
@@ -437,6 +519,8 @@ functions:
                     "gitlab".to_string(),
                 ]),
                 array: true,
+                literals: Vec::new(),
+                nullable: false,
                 fallible: true,
             }
         );
@@ -498,8 +582,8 @@ functions:
     #[test]
     fn authored_catalog_matches_registration_baseline() {
         let catalog = parse_expression_function_catalog(AUTHORED_CATALOG).unwrap();
-        assert_eq!(catalog.functions.len(), 96);
-        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 103);
+        assert_eq!(catalog.functions.len(), 110);
+        assert_eq!(catalog.functions.iter().map(|function| function.overloads.len()).sum::<usize>(), 117);
 
         let mut functions: Vec<_> = catalog.functions.iter().collect();
         functions.sort_by_key(|function| function.order);
@@ -517,8 +601,11 @@ functions:
             if overload_index == 0 {
                 assert_eq!(function.description, descriptor.description);
             }
-            assert_eq!(overload.parameters.iter().map(|parameter| (parameter.ty, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>(),
-                descriptor.parameters.iter().map(|parameter| (parameter.ty, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>());
+            assert_eq!(overload.parameters.iter().map(|parameter| (parameter.ty, parameter.refinement, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>(),
+                descriptor.parameters.iter().map(|parameter| (parameter.ty, parameter.refinement, parameter.array, parameter.optional, parameter.variadic)).collect::<Vec<_>>());
+            assert_eq!(overload.returns.literals.iter().map(String::as_str).collect::<Vec<_>>(), descriptor.returns.literals);
+            assert_eq!(overload.returns.nullable, descriptor.returns.nullable);
+            assert_eq!(function.pair.then_some(function.name.as_str()), descriptor.pair);
             match (&overload.returns.value, descriptor.returns.value) {
                 (CatalogReturnValue::Data(expected), ReturnValueType::Data(actual)) => {
                     assert_eq!(expected, &actual);
@@ -687,5 +774,81 @@ functions:
         assert_eq!(error.function.as_deref(), Some("sample"));
         assert_eq!(error.overload, Some(0));
         assert_eq!(error.field.as_deref(), Some("parameters.type"));
+    }
+
+    #[test]
+    fn refined_parameters_and_union_returns_parse_and_render() {
+        let yaml = replace(&union_returns_schema(), "- { name: value, type: string }", "- { name: value, type: ip-address }");
+        let yaml = replace(&yaml, "returns: { type: string }", "returns: { type: boolean, literals: [unstable], nullable: true, fallible: true }");
+        let catalog = parse_expression_function_catalog(&yaml).unwrap();
+        let overload = &catalog.functions[0].overloads[0];
+        assert_eq!((overload.parameters[0].ty, overload.parameters[0].refinement), (DataType::String, Some(ParamRefinement::IpAddress)));
+        assert_eq!(overload.returns.literals, ["unstable"]);
+        assert!(overload.returns.nullable);
+        let descriptors = super::super::project_descriptors(catalog);
+        assert_eq!(
+            descriptors[0].typed_signature(),
+            "sample(value: ip-address, items: any[], [suffix: string]) -> boolean | \"unstable\" | null | error"
+        );
+
+        let agentic = replace(SCHEMA, "- { name: value, type: string }", "- { name: value, type: agentic-cli }");
+        let catalog = parse_expression_function_catalog(&agentic).unwrap();
+        assert_eq!(
+            catalog.functions[0].overloads[0].parameters[0].refinement,
+            Some(ParamRefinement::Enum(super::super::agentic_cli_names()))
+        );
+    }
+
+    #[test]
+    fn return_literals_reject_empty_and_duplicate_members() {
+        let empty = replace(&union_returns_schema(), "returns: { type: string }", "returns: { type: boolean, literals: [' '] }");
+        assert_eq!(kind(&empty), CatalogErrorKind::InvalidReturnLiteral(" ".to_string()));
+        let duplicate = replace(&union_returns_schema(), "returns: { type: string }", "returns: { type: boolean, literals: [unstable, unstable] }");
+        assert_eq!(kind(&duplicate), CatalogErrorKind::DuplicateReturnLiteral("unstable".to_string()));
+        let unknown_refinement = replace(SCHEMA, "- { name: value, type: string }", "- { name: value, type: IpAddress }");
+        assert_eq!(kind(&unknown_refinement), CatalogErrorKind::UnknownType("IpAddress".to_string()));
+    }
+
+    /// R29: a paired function resolves its description and value type from the
+    /// same-named `ctx.*` variable and may not author either.
+    #[test]
+    fn paired_functions_inherit_shared_fields_and_reject_authored_copies() {
+        const PAIRED: &str = r#"
+kind: expression-function-catalog
+$schema:
+  kind: enum(expression-function-catalog; required)
+  functions: "{ name: string(not-empty; required), category: string(not-empty; required), order: number(integer; required), description: string(not-empty), pair: boolean, overloads: { parameters: { name: string(not-empty; required), type: string(not-empty; required), array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty), array: boolean, literals: string[], nullable: boolean, fallible: boolean }, example: { expression: string(not-empty; required), result: string(required), verification: enum(executable, display-only; required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
+functions:
+  - name: dirty_files
+    category: Test
+    order: 1
+    pair: true
+    overloads:
+      - parameters: []
+        returns: { fallible: true }
+        example: { expression: 'dirty_files()', result: '[]', verification: display-only, reason: host }
+"#;
+        let catalog = parse_expression_function_catalog(PAIRED).unwrap();
+        let function = &catalog.functions[0];
+        let variable = crate::markdown::compose::context::context_variable_descriptors()
+            .iter()
+            .find(|variable| variable.name == "dirty_files")
+            .unwrap();
+        assert!(function.pair);
+        assert_eq!(function.description, variable.description);
+        assert_eq!(function.overloads[0].returns.value, CatalogReturnValue::Data(DataType::String));
+        assert!(function.overloads[0].returns.array && function.overloads[0].returns.fallible);
+
+        let cases = [
+            (replace(PAIRED, "    pair: true\n", "    pair: true\n    description: Copied.\n"), CatalogErrorKind::PairedFieldAuthored("description")),
+            (replace(PAIRED, "returns: { fallible: true }", "returns: { type: string, fallible: true }"), CatalogErrorKind::PairedFieldAuthored("returns.type")),
+            (replace(PAIRED, "returns: { fallible: true }", "returns: { array: true, fallible: true }"), CatalogErrorKind::PairedFieldAuthored("returns.array")),
+            (replace(PAIRED, "name: dirty_files", "name: not_a_ctx_variable"), CatalogErrorKind::UnknownPairVariable("not_a_ctx_variable".to_string())),
+            (replace(PAIRED, "    pair: true\n", ""), CatalogErrorKind::MissingUnpairedField("description")),
+            (replace(PAIRED, "    pair: true\n", "    description: Unpaired.\n"), CatalogErrorKind::MissingUnpairedField("returns.type")),
+        ];
+        for (yaml, expected) in cases {
+            assert_eq!(kind(&yaml), expected);
+        }
     }
 }

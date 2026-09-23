@@ -2,6 +2,8 @@
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
+Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](./darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
+
 ## Overcoming `ctx` Conflicts
 
 - Document authors are strongly discouraged from using the `ctx` frontmatter variable because it collides with Darkmatter's runtime context namespace
@@ -18,12 +20,41 @@ Context variables are variables which Darkmatter provides to the **Interpolation
 
 ## Timing in Compose
 
-When composing a document graph, we calculate the context once and reuse it across the full graph of documents.
+When composing a document graph, Darkmatter uses one request context for the whole graph.
 
 - This is more efficient
 - It also ensures that we have the same date/time info throughout the composed document
 
-However, context capture is also **demand-driven**: the document is scanned for `ctx.*` references and only the groups actually referenced are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
+Context capture is **demand-driven**: a document is scanned for `ctx.*` references and only the groups it references are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
+
+### The request context and its authority
+
+`ComposeOptions` is the context authority for a composition. It carries the captured `ComposeContext` and a `ContextAuthority` that decides whether that context may grow:
+
+| Authority | Constructed by | When a document names a group the context lacks |
+|-----------|----------------|--------------------------------------------------|
+| `DarkmatterOwned` | `ComposeOptions::new()`; the `md` CLI | Darkmatter captures the missing group at the context's retained anchor and environment |
+| `CallerExtended` | a caller with its own retained request evidence (Claudine) | the caller's `ContextExtension` populates the missing group |
+| `CallerSupplied` | `ComposeOptions::new_with_context(..)`, `with_context(..)` | nothing; the context is frozen |
+
+Growth happens at a fixed point, never during expression evaluation:
+
+- the root document's referenced groups are added before its first expression stage;
+- each transcluded child (local, remote, or nested) has its referenced groups added when it becomes reachable, before its first expression stage and before its cache identity is computed. A child behind a false `when=` condition never becomes reachable and captures nothing.
+
+Growth adds only missing groups and never overwrites a captured one. A group is captured at most once per request, and every document that reads it reads that one capture. Ambient context never re-anchors at the current working directory or re-reads the environment mid-request.
+
+A caller-supplied context never falls back to ambient discovery. If a document reads a known `ctx.*` variable whose group that context never captured, composition fails with `ContextNotCaptured`, naming the variable, its group, and the source document. To avoid it, capture the group up front (for example `ComposeContext::capture_for_document`) or pass an extendable authority with `with_context_authority(..)`.
+
+### Captured absence is not a missing capture
+
+A captured group can legitimately project `null`, `""`, or an empty list: `ctx.branch` outside a repository, `ctx.gpu` on a host with no device. Those values render with their normal semantics and produce no error. Only a group that was never captured is a failure. The other absence states keep their own diagnostics:
+
+- an unknown name such as `ctx.oss` produces the unknown-context-variable warning and its suggestion;
+- a requested capture that could not obtain its evidence produces `PartialRuntimeCapture` and a typed empty/null projection;
+- a captured group that fails to project one of its cataloged keys is a Darkmatter bug, reported as `ContextProjectionInvariant`.
+
+Cached composition follows the same rules: a cache entry's identity includes the context it was rendered from, so a cache hit cannot hide a missing capture. See [Caching](./caching.md#context-hash).
 
 ### Capture Groups
 
@@ -33,14 +64,17 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 |-------|--------------|------------|
 | **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `time_utc`, `time_military_utc`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
 | **Git** | One `GitRepo::discover` plus branch, worktree, and index-stage reads | `branch`, `worktree`, `merge_conflicts` |
+| **GitHistory** | `RecentCommits::collect` (ten commits and their file changes); never demanded by ordinary Git facts | `recent_commits` |
 | **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `package_areas`, `current_package`, `current_package_area`, `area`, `area_description`, `area_root`, `current_packages`, `depends_on`, `used_by` |
 | **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_source_code_files`, `staged_files`, `untracked_files`, `dirty_packages`, `dirty_package_areas`, `staged_packages`, `staged_package_areas`, `current_package_has_*`, `current_package_area_has_*` |
 | **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
 | **Documents** | `detect_docs_with_packages` | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
-| **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
+| **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version`, `hostname` |
 | **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
 | **Agent** | Reads `AGENT` and `MODEL` env vars | `agent`, `model` |
+| **Document** | Projects the retained root document; observes the hostname and Git repository name and draws one execution nonce | `self`, `last_updated`, `hash`, `id`, `sid` |
+| **Network** | Interface enumeration plus default-gateway detection | `tailnet`, `gateway`, `gateway_v6` |
 
 
 ## Information Provided
@@ -90,6 +124,14 @@ failure message prints the up-to-date block to paste back.
 **Invocation**
 
 - **ctx.cwd** — `string` _(optional)_ — Absolute launch directory captured when the composition request began, or null when ambient capture failed.
+
+**Document**
+
+- **ctx.self** — `string` _(optional)_ — Absolute canonical native path of the root document, or null for URL and in-memory roots.
+- **ctx.last\_updated** — `datetime` _(optional)_ — Filesystem modification time of the root document, or null when unavailable or for URL and in-memory roots.
+- **ctx.hash** — `string` _(optional)_ — The root document's '<frontmatter>-<body>' xxHash of its source as loaded, matching `md hash`, or null for URL and in-memory roots.
+- **ctx.id** — `string` — xxHash identifying this execution of the root document: its source, ctx.timestamp_ms, host name, repository name, and a per-execution random nonce.
+- **ctx.sid** — `string` — Full hexadecimal BLAKE3 digest of the same inputs as ctx.id. A cryptographic digest, not a secret.
 
 **Date and Time**
 
@@ -142,6 +184,7 @@ failure message prints the up-to-date block to paste back.
 - _Git_
   - **ctx.branch** — `string` _(optional)_ — Current local Git branch name, or null outside a repository or at detached HEAD.
   - **ctx.worktree** — `string` _(optional)_ — Current linked Git worktree name, or null in the main worktree or outside a repository.
+  - **ctx.recent\_commits** — `string[]` — Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository.
 - **ctx.is\_monorepo** — `boolean` — Whether the current repository is a monorepo.
 - _Packages_
   - **ctx.package\_root** — `string` _(optional)_ — Absolute current package root path, or null when unavailable.
@@ -193,6 +236,7 @@ failure message prints the up-to-date block to paste back.
 **Operating System**
 
 - **ctx.os** — `string` _(optional)_ — Operating system name, or null when unavailable.
+- **ctx.hostname** — `string` _(optional)_ — Host name reported by the operating system, or null when unavailable.
 - **ctx.os\_distro** — `string` — Linux distribution name, empty on macOS and Windows.
 - **ctx.os\_package\_manager** — `string` _(optional)_ — Primary system package manager, or null when unavailable.
 - **ctx.os\_version** — `string` — Operating system version.
@@ -205,6 +249,12 @@ failure message prints the up-to-date block to paste back.
 - **ctx.cpu\_cores** — `number(integer)` _(optional)_ — Number of logical CPU cores, or null when unavailable.
 - **ctx.cpu\_arch** — `string` _(optional)_ — CPU architecture, or null when unavailable.
 - **ctx.gpu** — `string` _(optional)_ — GPU device names, or null when unavailable.
+
+**Network**
+
+- **ctx.tailnet** — `boolean` — Whether any host interface has an address in the CGNAT range 100.64.0.0/10 (Tailscale). Other VPNs and CGNAT ISPs using that range also report true.
+- **ctx.gateway** — `string` _(optional)_ — Primary IPv4 gateway address, or null without a default route or when the default route has no gateway address.
+- **ctx.gateway\_v6** — `string` _(optional)_ — Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address.
 
 **Agent**
 

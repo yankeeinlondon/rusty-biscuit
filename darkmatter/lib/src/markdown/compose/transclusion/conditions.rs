@@ -37,12 +37,12 @@ impl From<ConditionError> for TransclusionError {
                 ctx,
                 expr,
                 line,
-                message,
+                cause,
             } => TransclusionError::ConditionEval {
                 ctx,
                 expr,
                 line,
-                message,
+                cause,
             },
         }
     }

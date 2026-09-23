@@ -34,6 +34,12 @@ pub struct NetworkInterface {
 
     /// Interface state flags
     pub flags: InterfaceFlags,
+
+    /// Operating-system interface index, when the platform reported one.
+    ///
+    /// Windows IPv6 zone identifiers are this number (`fe80::1%12`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 /// An IPv4 address paired with its CIDR prefix length.

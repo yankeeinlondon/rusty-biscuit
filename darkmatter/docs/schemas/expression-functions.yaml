@@ -3,12 +3,13 @@ $schema:
     kind: enum(expression-function-catalog; required)
     functions:
         "{ name: string(not-empty; required), category: string(not-empty; required),
-        order: number(integer; required), description: string(not-empty; required), overloads:
+        order: number(integer; required), description: string(not-empty), pair: boolean, overloads:
         { parameters: { name: string(not-empty; required), type: string(not-empty; required),
-        array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty;
-        required), array: boolean, fallible: boolean }, example: { expression: string(not-empty;
-        required), result: string(required), verification: enum(executable, display-only;
-        required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
+        array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty),
+        array: boolean, literals: string[], nullable: boolean, fallible: boolean }, example: {
+        expression: string(not-empty; required), result: string(required), verification:
+        enum(executable, display-only; required), reason: string(not-empty) } }[](min(1); required)
+        }[](min(1); required)"
 functions:
     - name: is_string
       category: Type Predicates
@@ -1662,3 +1663,268 @@ functions:
                 result: "[CI job #456 — test](https://provider/job/456) · failed"
                 verification: display-only
                 reason: Requires an allowlisted remote-provider fixture.
+    - name: has_binary
+      category: Filesystem
+      order: 99
+      description:
+          Returns true when the command is found on PATH or is an existing executable
+          absolute path. A second name for has_command with the same implementation.
+      overloads:
+          - parameters:
+                - name: name_or_path
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_binary("sh")
+                result: "true"
+                verification: display-only
+                reason: result is host-dependent
+    - name: has_alias
+      category: Shell
+      order: 100
+      description:
+          Returns true when the name is an alias in the login shell ($SHELL, or pwsh then
+          powershell.exe on Windows). Any probe failure returns false; the name is never executed.
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_alias("ll")
+                result: "true"
+                verification: display-only
+                reason: result depends on the login shell profile
+    - name: has_builtin_function
+      category: Shell
+      order: 101
+      description:
+          Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login
+          shell. Any probe failure returns false; the name is never executed.
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_builtin_function("cd")
+                result: "true"
+                verification: display-only
+                reason: result depends on the login shell
+    - name: has_user_function
+      category: Shell
+      order: 102
+      description:
+          Returns true when the name is a user-defined function in the login shell. Any probe
+          failure returns false; the name is never executed.
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_user_function("mkcd")
+                result: "true"
+                verification: display-only
+                reason: result depends on the login shell profile
+    - name: can_execute
+      category: Shell
+      order: 103
+      description:
+          Returns true when the name is an alias, a binary, a shell builtin, or a user function
+          (has_alias || has_binary || has_builtin_function || has_user_function).
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: can_execute("git")
+                result: "true"
+                verification: display-only
+                reason: result depends on the host and the login shell profile
+    - name: has_agentic_cli
+      category: Agentic CLIs
+      order: 104
+      description:
+          Returns true when the named agentic CLI is installed on PATH. Names are the Claudine
+          provider roster slugs and their aliases; an unknown name is a compose error.
+      overloads:
+          - parameters:
+                - name: agent
+                  type: agentic-cli
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: has_agentic_cli("claude")
+                result: "true"
+                verification: display-only
+                reason: result depends on the host PATH
+    - name: package_area
+      category: Repository
+      order: 105
+      description:
+          Returns the name of the package area containing the path, from the captured repository
+          observation. Returns an empty string outside the repository, outside a monorepo, or when
+          no area contains the path.
+      overloads:
+          - parameters:
+                - name: where
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: package_area("darkmatter/lib/src/lib.rs")
+                result: darkmatter
+                verification: display-only
+                reason: result depends on the captured repository
+    - name: package
+      category: Repository
+      order: 106
+      description:
+          Returns the name of the package containing the path, from the captured repository
+          observation. Returns an empty string outside the repository, outside a monorepo, or when
+          no package contains the path.
+      overloads:
+          - parameters:
+                - name: where
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: package("darkmatter/lib/src/lib.rs")
+                result: darkmatter
+                verification: display-only
+                reason: result depends on the captured repository
+    - name: recent_commits
+      category: Git
+      order: 107
+      pair: true
+      overloads:
+          - parameters:
+                - name: count
+                  type: number(integer)
+            returns:
+                fallible: true
+            example:
+                expression: recent_commits(3)
+                result: '["- [abc1234] feat(sniff) at 1:01pm Today: add gateways\n\n"]'
+                verification: display-only
+                reason: result depends on the repository history and the local clock
+    - name: ipv4
+      category: Network
+      order: 108
+      description:
+          Returns the host's IPv4 addresses, excluding loopback and link-local. A valid CIDR filter
+          selects addresses inside that network (and can include loopback or link-local); any
+          other filter is a substring match over the default set.
+      overloads:
+          - parameters:
+                - name: filter
+                  type: string
+                  optional: true
+            returns:
+                type: string
+                array: true
+            example:
+                expression: ipv4("192.168.0.0/16")
+                result: '["192.168.10.5"]'
+                verification: display-only
+                reason: result depends on the host interfaces
+    - name: ipv6
+      category: Network
+      order: 109
+      description:
+          Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses
+          keep their %scope suffix. Filters behave as in ipv4.
+      overloads:
+          - parameters:
+                - name: filter
+                  type: string
+                  optional: true
+            returns:
+                type: string
+                array: true
+            example:
+                expression: ipv6("::1/128")
+                result: '["::1"]'
+                verification: display-only
+                reason: result depends on the host interfaces
+    - name: ping
+      category: Network
+      order: 110
+      description:
+          Sends one ICMP echo to an IP address and returns true when it replies within timeout
+          milliseconds (default 100). Returns null with a warning when the address is not granted
+          through --allow-host, false when there is no reply, and a compose error when the host
+          cannot send ICMP.
+      overloads:
+          - parameters:
+                - name: address
+                  type: ip-address
+                - name: timeout
+                  type: number
+                  optional: true
+            returns:
+                type: boolean
+                nullable: true
+                fallible: true
+            example:
+                expression: ping("192.168.1.1", 250)
+                result: "true"
+                verification: display-only
+                reason: result depends on the network and the ICMP grant
+    - name: ping_under
+      category: Network
+      order: 111
+      description:
+          Sends attempts ICMP echoes (default 3) sequentially, each with a timeout of timeout
+          milliseconds.
+          Returns true when every reply arrives in time, false when none does, and "unstable"
+          otherwise. Consent and error rules match ping.
+      overloads:
+          - parameters:
+                - name: address
+                  type: ip-address
+                - name: timeout
+                  type: number
+                - name: attempts
+                  type: number(integer)
+                  optional: true
+            returns:
+                type: boolean
+                literals:
+                    - unstable
+                nullable: true
+                fallible: true
+            example:
+                expression: ping_under("192.168.1.1", 50, 5)
+                result: unstable
+                verification: display-only
+                reason: result depends on the network and the ICMP grant
+    - name: as_markdown
+      category: Composition
+      order: 112
+      description:
+          Composes the string as Markdown through the root document's request (same context,
+          base directory, consent, and recursion budget) and returns the composed Markdown text.
+      overloads:
+          - parameters:
+                - name: content
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_markdown("::file ./intro.md")
+                result: "# Introduction"
+                verification: display-only
+                reason: result depends on the transcluded file

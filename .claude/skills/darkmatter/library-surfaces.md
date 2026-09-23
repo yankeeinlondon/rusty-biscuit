@@ -32,6 +32,33 @@ behavior.
 - Expression descriptors are typed catalogs used by both library callers and
   CLI documentation. Add a function once in the registry and keep parsing,
   evaluation, descriptors, and completion aligned.
+- Author functions in `docs/schemas/expression-functions.yaml` and `ctx.*` in
+  the `ctx:` block of `docs/schemas/darkmatter.yaml`. The function registry
+  panics at load when a cataloged function has no runtime binding, so every
+  catalog entry needs a `FunctionBinding` in the same change.
+- Catalog-only parameter types refine `string`: `ip-address` (IPv4, IPv6, or a
+  scoped `fe80::1%en0` literal; no DNS) and `agentic-cli` (the closed enum from
+  `expression/functions/agentic_cli_generated.rs`). Inline `enum(...)`
+  parameters stay rejected. Returns may add `literals: [...]` and
+  `nullable: true`; the typed signature renders `value | "literal" | null | error`.
+- R29 pairs: a function marked `pair: true` shares its name with a `ctx.*`
+  variable and authors no `description`, `returns.type`, or `returns.array`.
+  The parser copies all three from the variable, and
+  `ExpressionFunctionDescriptor::pair` names it. `recent_commits` is the first pair.
+- `agentic_cli_generated.rs` is written by `claudine-gen generate` from
+  `claudine/docs/providers.yaml`. Never hand-edit it; `claudine-gen check` and
+  its nextest drift test fail on a stale table. It stores `AiCli` variant
+  names as strings, so a stale table cannot block building the generator
+  (claudine-gen depends on this crate).
+- `reserved_root_descriptors()` lists `doc`, `ctx`, `env` and the lazy mirrors
+  `current` (of `ctx`) and `current_env` (of `env`). The evaluator reserves all
+  five: `context/current.rs` resolves the two lazy roots ahead of frontmatter,
+  external state, and injected globals. Public surface:
+  `CurrentProvider`/`CurrentRefresh` (the invocation's per-key capability),
+  `CurrentAuthority`, `ComposeOptions::with_current_provider`,
+  `EffectiveStateBuilder::with_current_authority`, and `DeferredCapabilities`
+  with `ComposePreflightReport::deferred_context`.
+- Every cataloged `ctx.*` key has exactly one owning `ContextGroup`.
 - File arguments resolve through the shared document-backed
   `FileResolutionContext`. Shape/probe helpers must agree with actual
   resolution.
@@ -46,6 +73,13 @@ behavior.
   instance/schema paths, offending property, source location, and optional
   file-reference detail.
 - `SchemaOriginMap` records the owner of each effective top-level property.
+- `effective_property_shape`, `property_def_at_path`, `nested_property_shape`,
+  `expression_atom`, and `frontmatter_expression_values` are the passive
+  authority for which property definition governs a frontmatter key path and
+  which values are Expression-typed. DMLS completion, hover, and
+  `dm.expression.*` diagnostics and the corpus gate share them; do not
+  re-derive arm selection or the Expression check elsewhere. Trigger payloads
+  and pattern-dictionary keys contribute no definitions here.
 - Reference graph nodes retain origin, dependency, identity, and freshness
   information; do not collapse these to plain paths.
 
@@ -64,8 +98,10 @@ behavior.
 
 - The effect engine owns explicit writes, shell calls, and HTTP POST behavior.
 - Remote reads and writes share `biscuit_file::FetchPolicy`.
-- Persistent cache keys include the source/reference identity and freshness
-  state needed to prevent stale or cross-context reuse.
+- Only raw remote-URL bodies (transport artifacts) persist (R18, R36).
+  Compose keys (source identity, state, context, options, overlay) are
+  run-local only; no semantic-result persistence code exists until a
+  `ContentPolicy` does.
 - Passive schema, DMLS, and validation surfaces never invoke the effect engine.
 
 ## Package boundaries

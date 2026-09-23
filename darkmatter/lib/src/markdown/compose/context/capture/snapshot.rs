@@ -6,17 +6,28 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sniff::filesystem::docs::{self as sniff_docs, MarkdownMeta};
-use sniff::filesystem::git::{FileChange, FileStatus, GitInfo, GitRepo};
+use sniff::filesystem::git::{FileChange, FileStatus, GitInfo, GitRepo, RecentCommits};
 use sniff::filesystem::LanguageBreakdown;
 use sniff::filesystem::repo::{self as sniff_repo, Package, RepoInfo};
 use sniff::hardware::{self, GpuInfo, HardwareInfo};
+use sniff::network::{DefaultGateways, NetworkInterface};
 use sniff::os::{self, OsInfo};
-use sniff::request::OsRequest;
+use sniff::request::{NetworkRequest, OsRequest};
 
+use super::network::NetworkObservation;
 use super::{ContextGroup, ContextMergeDiagnostic};
 
+/// Work counters for the "no rediscovery" contracts: root discovery
+/// (`GitRepo::discover`) and the package-topology walk. Both count only the
+/// ambient constructor; an evidence-backed capture performs neither.
 #[cfg(test)]
-static GIT_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static GIT_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+pub(crate) static REPOSITORY_DISCOVERY_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+pub(super) static HISTORY_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+pub(super) static NETWORK_CAPTURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Default)]
 enum EvidenceSlot<T> {
@@ -62,6 +73,9 @@ pub struct ContextCaptureEvidence {
     os: EvidenceSlot<Option<OsInfo>>,
     hardware: EvidenceSlot<Option<HardwareInfo>>,
     gpus: EvidenceSlot<Vec<GpuInfo>>,
+    recent_commits: EvidenceSlot<Option<RecentCommits>>,
+    network_interfaces: EvidenceSlot<Option<Vec<NetworkInterface>>>,
+    gateways: EvidenceSlot<Option<DefaultGateways>>,
 }
 
 impl ContextCaptureEvidence {
@@ -79,6 +93,9 @@ impl ContextCaptureEvidence {
             os: EvidenceSlot::Missing,
             hardware: EvidenceSlot::Missing,
             gpus: EvidenceSlot::Missing,
+            recent_commits: EvidenceSlot::Missing,
+            network_interfaces: EvidenceSlot::Missing,
+            gateways: EvidenceSlot::Missing,
         }
     }
 
@@ -181,6 +198,29 @@ impl ContextCaptureEvidence {
         self
     }
 
+    /// Supplies the newest commits of the request's repository, newest first,
+    /// or `None` outside a repository.
+    ///
+    /// `ctx.recent_commits` renders at most ten of them.
+    pub fn with_recent_commits(mut self, commits: Option<RecentCommits>) -> Self {
+        self.recent_commits = EvidenceSlot::Supplied(commits);
+        self
+    }
+
+    /// Supplies the host's network interfaces, or a retained detection failure.
+    pub fn with_network_interfaces(mut self, interfaces: Option<Vec<NetworkInterface>>) -> Self {
+        self.network_interfaces = EvidenceSlot::Supplied(interfaces);
+        self
+    }
+
+    /// Supplies the host's primary default gateways, or a retained detection
+    /// failure. A host without a default route supplies
+    /// `Some(DefaultGateways::default())`.
+    pub fn with_gateways(mut self, gateways: Option<DefaultGateways>) -> Self {
+        self.gateways = EvidenceSlot::Supplied(gateways);
+        self
+    }
+
     pub(super) fn environment(&self) -> &HashMap<String, String> {
         &self.environment
     }
@@ -215,6 +255,11 @@ pub(super) struct ContextCapture {
     pub(super) gpu_names: Option<String>,
     pub(super) current_package: Option<Package>,
     pub(super) current_package_area: Option<String>,
+    /// Host name hashed into `ctx.id`/`ctx.sid`; `None` when unobserved.
+    pub(super) identity_hostname: Option<String>,
+    /// Plain per-commit blocks for `ctx.recent_commits`.
+    pub(super) recent_commits: Vec<String>,
+    pub(super) network: Option<NetworkObservation>,
     pub(super) dirty_paths: Vec<PathBuf>,
     pub(super) staged_paths: Vec<PathBuf>,
     pub(super) untracked_paths: Vec<PathBuf>,
@@ -259,6 +304,9 @@ impl ContextCapture {
         };
 
         let need_git_group = groups.contains(&ContextGroup::Git);
+        let need_history = groups.contains(&ContextGroup::GitHistory);
+        let need_document = groups.contains(&ContextGroup::Document);
+        let need_network = groups.contains(&ContextGroup::Network);
         let need_repo = groups.iter().any(|g| {
             matches!(
                 g,
@@ -268,7 +316,7 @@ impl ContextCapture {
                     | ContextGroup::Documents
             )
         });
-        let need_git = need_git_group || need_repo;
+        let need_git = need_git_group || need_repo || need_history || need_document;
         let need_file_changes = groups.contains(&ContextGroup::FileChanges);
         let need_docs = groups.contains(&ContextGroup::Documents);
         let need_os = groups.contains(&ContextGroup::Os);
@@ -302,7 +350,7 @@ impl ContextCapture {
             .as_ref()
             .filter(|h| !h.is_bare())
             .map(|h| h.repo_root().to_path_buf());
-        let (_org, repo_name) = if need_repo {
+        let (_org, repo_name) = if need_repo || need_document {
             git_handle
                 .as_ref()
                 .map(|h| h.org_and_repo())
@@ -359,12 +407,41 @@ impl ContextCapture {
             timings.push(("file_changes".into(), file_changes_elapsed));
         }
 
+        let recent_commits = if need_history {
+            let t = Instant::now();
+            let rendered = match repo_root.as_deref() {
+                Some(root) => {
+                    #[cfg(test)]
+                    HISTORY_CAPTURE_COUNT.fetch_add(1, Ordering::Relaxed);
+                    match super::git::fetch_recent_commits(root, super::git::RECENT_COMMIT_COUNT) {
+                        Ok(set) => {
+                            super::git::render_recent_commits(&set, super::git::RECENT_COMMIT_COUNT)
+                        }
+                        Err(error) => {
+                            diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                                area: "git_history",
+                                detail: error.to_string(),
+                            });
+                            Vec::new()
+                        }
+                    }
+                }
+                None => Vec::new(),
+            };
+            timings.push(("git_history".into(), t.elapsed()));
+            rendered
+        } else {
+            Vec::new()
+        };
+
         // ── All remaining probes run in parallel ─────────────────────
-        let (repo_info, docs, os_info, hardware_info, gpu_names, languages) = std::thread::scope(|s| {
+        let (repo_info, docs, os_info, hardware_info, gpu_names, languages, network) = std::thread::scope(|s| {
                 let repo_handle = if need_repo {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
                         let t = Instant::now();
+                        #[cfg(test)]
+                        REPOSITORY_DISCOVERY_COUNT.fetch_add(1, Ordering::Relaxed);
                         let result = rr
                             .as_ref()
                             .and_then(|root| sniff_repo::detect_repo_structure(root).ok().flatten());
@@ -374,13 +451,19 @@ impl ContextCapture {
                     None
                 };
 
-                let os_handle = if need_os {
-                    Some(s.spawn(|| {
+                // Document identity needs only the host name, which the
+                // summary request reports without package-manager probes.
+                let os_handle = if need_os || need_document {
+                    Some(s.spawn(move || {
                         let t = Instant::now();
-                        let request = OsRequest::full()
-                            .include_locale(false)
-                            .include_timezone(false)
-                            .include_ntp_status(false);
+                        let request = if need_os {
+                            OsRequest::full()
+                                .include_locale(false)
+                                .include_timezone(false)
+                                .include_ntp_status(false)
+                        } else {
+                            OsRequest::summary()
+                        };
                         let result = os::detect_os_with_request(&request);
                         (result, t.elapsed())
                     }))
@@ -417,6 +500,21 @@ impl ContextCapture {
                 } else {
                     None
                 };
+
+                let network_handle = need_network.then(|| {
+                    s.spawn(|| {
+                        let t = Instant::now();
+                        #[cfg(test)]
+                        NETWORK_CAPTURE_COUNT.fetch_add(1, Ordering::Relaxed);
+                        let interfaces =
+                            sniff::network::detect_network_with_request(&NetworkRequest::interfaces_only())
+                                .map(|info| sniff::network::host_addresses(&info.interfaces))
+                                .map_err(|error| error.to_string());
+                        let gateways = sniff::network::detect_default_gateways()
+                            .map_err(|error| error.to_string());
+                        (interfaces, gateways, t.elapsed())
+                    })
+                });
 
                 // Repository structure is detected structure-only, which never
                 // enriches per-package languages, so the language group needs
@@ -498,7 +596,18 @@ impl ContextCapture {
                     result
                 });
 
-                (repo_info, docs, os_info, hardware_info, gpu_names, languages)
+                let network = network_handle.map(|h| match h.join() {
+                    Ok((interfaces, gateways, elapsed)) => {
+                        timings.push(("network".into(), elapsed));
+                        (interfaces, gateways)
+                    }
+                    Err(_) => (
+                        Err("network detection panicked".to_string()),
+                        Err("network detection panicked".to_string()),
+                    ),
+                });
+
+                (repo_info, docs, os_info, hardware_info, gpu_names, languages, network)
             });
 
         let os_info = match os_info {
@@ -510,6 +619,15 @@ impl ContextCapture {
             }
             None => None,
         };
+        let identity_hostname = os_info.as_ref().map(|info| info.hostname.clone());
+        // A summary-only observation exists for identity; it must not project
+        // the Os group's package-manager fields as observed absences.
+        let os_info = if need_os { os_info } else { None };
+
+        let network = network.map(|(interfaces, gateways)| NetworkObservation {
+            addresses: observed(interfaces, "network.interfaces", &mut diagnostics),
+            gateways: observed(gateways, "network.gateways", &mut diagnostics),
+        });
 
         let hardware_info = match hardware_info {
             Some(Ok(info)) => Some(info),
@@ -553,6 +671,9 @@ impl ContextCapture {
             gpu_names,
             current_package,
             current_package_area,
+            identity_hostname,
+            recent_commits,
+            network,
             dirty_paths,
             staged_paths,
             untracked_paths,
@@ -650,6 +771,24 @@ impl ContextCapture {
             groups.contains(&ContextGroup::Gpu) && evidence.gpus.is_missing(),
             "gpu",
         );
+        require(
+            groups.contains(&ContextGroup::GitHistory) && evidence.recent_commits.is_missing(),
+            "git_history",
+        );
+        let needs_network = groups.contains(&ContextGroup::Network);
+        require(needs_network && evidence.network_interfaces.is_missing(), "network.interfaces");
+        require(
+            needs_network && evidence.network_interfaces.as_ref().is_some_and(Option::is_none),
+            "network.interfaces",
+        );
+        require(needs_network && evidence.gateways.is_missing(), "network.gateways");
+        require(
+            needs_network && evidence.gateways.as_ref().is_some_and(Option::is_none),
+            "network.gateways",
+        );
+        let needs_document = groups.contains(&ContextGroup::Document);
+        require(needs_document && evidence.os.is_missing(), "document.hostname");
+        require(needs_document && evidence.git.is_missing(), "document.repository");
 
         let git_info = evidence.git.as_ref().and_then(Option::as_ref);
         let invocation_cwd = evidence
@@ -685,13 +824,7 @@ impl ContextCapture {
             .filter(|change| change.status == FileStatus::Conflicted)
             .map(|change| change.path.clone())
             .collect();
-        let git_worktree = git_info.and_then(|info| {
-            info.worktrees
-                .values()
-                .find(|worktree| worktree.is_current)
-                .and_then(|worktree| worktree.filepath.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-        });
+        let git_worktree = git_info.and_then(|info| info.current_worktree.clone());
         let (current_package, current_package_area) =
             current_package_context(base_dir, repo_info.as_ref());
         let (dirty_paths, staged_paths, untracked_paths) = changed_paths(&file_changes);
@@ -703,6 +836,21 @@ impl ContextCapture {
                     .join(", ")
             })
         });
+
+        let network = needs_network.then(|| NetworkObservation {
+            addresses: evidence
+                .network_interfaces
+                .as_ref()
+                .and_then(Option::as_deref)
+                .map(sniff::network::host_addresses),
+            gateways: evidence.gateways.as_ref().cloned().flatten(),
+        });
+        let recent_commits = evidence
+            .recent_commits
+            .as_ref()
+            .and_then(Option::as_ref)
+            .map(|commits| super::git::render_recent_commits(commits, super::git::RECENT_COMMIT_COUNT))
+            .unwrap_or_default();
 
         Self {
             invocation_cwd,
@@ -722,6 +870,12 @@ impl ContextCapture {
             gpu_names,
             current_package,
             current_package_area,
+            identity_hostname: evidence
+                .os
+                .as_ref()
+                .map(|os| os.as_ref().map(|info| info.hostname.clone()).unwrap_or_default()),
+            recent_commits,
+            network,
             dirty_paths,
             staged_paths,
             untracked_paths,
@@ -729,6 +883,17 @@ impl ContextCapture {
             timings: Vec::new(),
         }
     }
+}
+
+/// The observed value, or `None` with the failure recorded against `area`.
+fn observed<T>(
+    result: Result<T, String>,
+    area: &'static str,
+    diagnostics: &mut Vec<ContextMergeDiagnostic>,
+) -> Option<T> {
+    result
+        .map_err(|detail| diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture { area, detail }))
+        .ok()
 }
 
 fn current_package_context(
@@ -749,8 +914,11 @@ fn current_package_context(
         .map(|package| package.package_area.clone())
         .or_else(|| {
             repo.packages.as_ref().and_then(|packages| {
+                // A top-level package's `""` area has no directory; joining it
+                // would match every path under the root.
                 packages
                     .iter()
+                    .filter(|package| !package.package_area.is_empty())
                     .find(|package| base_dir.starts_with(repo.root.join(&package.package_area)))
                     .map(|package| package.package_area.clone())
             })
@@ -807,6 +975,9 @@ impl ContextCapture {
             gpu_names: None,
             current_package: None,
             current_package_area: None,
+            identity_hostname: None,
+            recent_commits: Vec::new(),
+            network: None,
             dirty_paths: Vec::new(),
             staged_paths: Vec::new(),
             untracked_paths: Vec::new(),

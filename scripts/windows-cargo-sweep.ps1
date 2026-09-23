@@ -91,14 +91,25 @@ if ($DryRun) {
 $sweepArgs += @("--recursive", "--maxsize", "${MaxSizeGB}GB", $RepoRoot)
 
 & {
-    $targetDir = (& $CargoPath metadata --no-deps --format-version 1 | ConvertFrom-Json).target_directory
+    # Resolve against the root being swept. Read from the task's working
+    # directory instead and the line names whatever checkout the scheduler
+    # happened to start in: on the native Windows host that printed
+    # `target=W:/rusty-biscuit-target`, a path that does not exist, for every
+    # run between 2026-09-08 and 2026-09-21 while `W:` sat at 4 KB free. An
+    # 11-second no-op is indistinguishable from a real sweep when the line it
+    # logs is about a different directory.
+    $manifest = Join-Path $RepoRoot "Cargo.toml"
+    $targetDir = (& $CargoPath metadata --no-deps --format-version 1 --manifest-path $manifest | ConvertFrom-Json).target_directory
     $driveName = [System.IO.Path]::GetPathRoot($targetDir).TrimEnd([char[]]@(':', '\'))
     $before = Get-PSDrive -Name $driveName
-    Write-Output "[$(Get-Date -Format o)] sweep start target=$targetDir free_gib=$([math]::Round($before.Free / 1GB, 1)) max=${MaxSizeGB}GB dry_run=$DryRun"
+    Write-Output "[$(Get-Date -Format o)] sweep start root=$RepoRoot target=$targetDir free_gib=$([math]::Round($before.Free / 1GB, 1)) max=${MaxSizeGB}GB dry_run=$DryRun"
     & $CargoSweepPath @sweepArgs
     if ($LASTEXITCODE -ne 0) {
         throw "cargo-sweep failed with exit $LASTEXITCODE"
     }
     $after = Get-PSDrive -Name $driveName
-    Write-Output "[$(Get-Date -Format o)] sweep complete target=$targetDir free_gib=$([math]::Round($after.Free / 1GB, 1))"
+    # Reclaimed bytes, so a sweep that freed nothing says so in its own line
+    # rather than leaving the reader to diff two free-space figures.
+    $freed = [math]::Round(($after.Free - $before.Free) / 1GB, 1)
+    Write-Output "[$(Get-Date -Format o)] sweep complete root=$RepoRoot target=$targetDir free_gib=$([math]::Round($after.Free / 1GB, 1)) freed_gib=$freed"
 } *>&1 | Tee-Object -FilePath $LogPath -Append

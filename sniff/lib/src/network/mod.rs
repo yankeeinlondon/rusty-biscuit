@@ -15,7 +15,14 @@ use tracing::Level;
 use tracing::{debug, info};
 use tracing::{instrument, warn};
 
+mod address;
+mod gateway;
+pub mod icmp;
 mod interface;
+pub use address::{
+    AddressParseError, ScopedIpAddr, cgnat_network, contains_cgnat_address, host_addresses,
+};
+pub use gateway::{DefaultGateways, detect_default_gateways};
 pub use interface::{
     InterfaceFlags, IpAddresses, Ipv4Address, Ipv4Cidr, Ipv6Address, Ipv6Cidr, NetworkInterface,
 };
@@ -284,6 +291,9 @@ fn detect_local_interfaces()
         entry.flags.is_up = ifaddr.flags.contains(getifaddrs::InterfaceFlags::UP);
         entry.flags.is_loopback = ifaddr.flags.contains(getifaddrs::InterfaceFlags::LOOPBACK);
         entry.flags.is_running = ifaddr.flags.contains(getifaddrs::InterfaceFlags::RUNNING);
+        if entry.index.is_none() {
+            entry.index = ifaddr.index;
+        }
 
         match ifaddr.address {
             getifaddrs::Address::V4(v4) => {

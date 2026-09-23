@@ -480,6 +480,46 @@ fn context_expressions_includes_every_function() {
     assert_one_row_each("expression report", &expected, &actual);
 }
 
+/// More-context AC1 and AC26: every added variable appears in `claudine
+/// context` and every added function in `claudine context --expressions`, and
+/// the `recent_commits` pair renders once on each side from one catalog entry.
+#[test]
+fn context_reports_list_more_context_names_and_the_recent_commits_pair_once() {
+    let variables = context_first_column_cells(&["context"]);
+    for name in [
+        "ctx.self", "ctx.last_updated", "ctx.hash", "ctx.id", "ctx.sid", "ctx.hostname",
+        "ctx.tailnet", "ctx.gateway", "ctx.gateway_v6", "ctx.recent_commits",
+    ] {
+        let rows = variables.iter().filter(|cell| *cell == name).count();
+        assert_eq!(rows, 1, "`{name}` must render exactly once in `claudine context`");
+    }
+
+    let functions = context_first_column_cells(&["context", "--expressions"]);
+    for signature in [
+        "as_markdown(content)", "package_area(where)", "package(where)", "recent_commits(count)",
+        "ipv4([filter])", "ipv6([filter])", "ping(address, [timeout])",
+        "ping_under(address, timeout, [attempts])", "has_alias(name)",
+        "has_binary(name_or_path)", "has_builtin_function(name)", "has_user_function(name)",
+        "can_execute(name)", "has_agentic_cli(agent)",
+    ] {
+        let rows = functions.iter().filter(|cell| *cell == signature).count();
+        assert_eq!(rows, 1, "`{signature}` must render exactly once in `claudine context --expressions`");
+    }
+    assert!(!functions.iter().any(|cell| cell.starts_with("ctx.recent_commits")));
+    assert!(!variables.iter().any(|cell| cell.starts_with("recent_commits(")));
+
+    let variable = darkmatter::markdown::compose::context::context_variable_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.name == "recent_commits")
+        .unwrap();
+    let function = darkmatter::markdown::compose::expression::expression_function_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.signature == "recent_commits(count)")
+        .unwrap();
+    assert_eq!(function.pair, Some("recent_commits"));
+    assert_eq!(function.description, variable.description);
+}
+
 /// Side-effects report must render exactly one row per side-effect descriptor
 /// (overloaded arities are folded into one signature per the catalog).
 #[test]

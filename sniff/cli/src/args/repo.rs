@@ -253,6 +253,7 @@ pub(crate) fn repo_package_area_candidates() -> Vec<clap_complete::engine::Compl
         .unwrap_or_default()
         .into_iter()
         .map(|p| p.package_area)
+        .filter(|area| !area.is_empty())
         .collect();
     areas.into_iter().map(CompletionCandidate::new).collect()
 }
@@ -470,7 +471,7 @@ pub enum RepoSubcommand {
         on_error: Option<String>,
     },
     /// Output the area for the current directory (package name when inside a
-    /// package, else the surrounding package-area, else "root")
+    /// package, else the surrounding package-area; empty at the repo root)
     Area {
         /// Exit 0 with no output when no results found (default is exit 1)
         #[arg(long)]

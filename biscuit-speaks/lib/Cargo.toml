@@ -29,7 +29,8 @@ gender_guesser = "0.2"
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 [dev-dependencies]
-reqwest = "0.13"
+# default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }

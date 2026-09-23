@@ -128,6 +128,13 @@ Returns a JSON array of package area name strings:
 
 `--json` is authoritative over `--md`/`--list`/`--verbose`: output is always a string array of area names.
 
+## Top-Level Packages
+
+Packages that sit directly under the repository root share the empty area `""`.
+Text output labels it `(root)` (`(root) (./)` with `--verbose`); `--json` keeps
+the semantic `""`. A real directory named `root` is an ordinary area and lists
+as `root`.
+
 ## Usage in Scripts
 
 ```bash

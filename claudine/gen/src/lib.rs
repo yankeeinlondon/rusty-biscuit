@@ -12,6 +12,7 @@
 //! (spec.md + design/catalog-generation.md).
 
 pub mod agent_errors_check;
+pub mod agentic_clis;
 pub mod apply;
 pub mod artifact;
 pub mod catalog;
@@ -33,7 +34,12 @@ pub use agent_errors_check::{
     Branch, Check, Finding, FindingsReport, GateErrorScope, GateStatus, ResearchVocabulary,
     check_provider as check_agent_errors, default_findings_path, evaluate as evaluate_agent_errors,
 };
-pub use apply::{ApplyOutcome, DeclinedDrift, Decision, apply_generations, override_snippet};
+pub use agentic_clis::{
+    AgenticCliName, agentic_clis_path, build_agentic_clis, check_agentic_clis, load_agentic_cli_names,
+};
+pub use apply::{
+    ApplyOutcome, DeclinedDrift, Decision, FullScopeArtifacts, apply_generations, override_snippet,
+};
 pub use artifact::{ArtifactIndex, artifact_path};
 pub use catalog::{build_catalog, catalog_path, check_catalog};
 pub use errors::GenError;

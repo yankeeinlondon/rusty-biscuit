@@ -141,7 +141,7 @@ sniff --json repo package-dependencies
 When `sniff repo` is invoked without a subcommand and with `--json`, the output is a consolidated `SniffRepo` projection with snake_case keys:
 
 - Identity fields stay top-level: `name`, `version`, `language`, `is_monorepo`, `package_count`, and `root`.
-- Cwd-relative fields are grouped under `context`, including `package`, `package_area`, `area`, `package_root`, `package_area_root`, `worktree`, `is_current_package_area_dirty`, and `package_area_has_source_code_changes`.
+- Cwd-relative fields are grouped under `context`, including `package`, `package_area`, `area`, `package_root`, `package_area_root`, `worktree`, `is_current_package_area_dirty`, and `package_area_has_source_code_changes`. Scope strings are `""` rather than a sentinel when there is no scope: `area` is `""` at the monorepo root, and `package_area` is `""` for a package directly under the repository root.
 - Worktrees and branches appear once as top-level `worktrees` and `branches` arrays.
 - Change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays.
 - `git_status` is a lean aggregate projection with current branch, config, compact file changes, and dirty/staged/unstaged/untracked counts. Use `sniff repo git-status --json` for the focused rich shape.

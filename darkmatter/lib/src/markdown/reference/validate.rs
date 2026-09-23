@@ -651,7 +651,7 @@ fn verify_graph_compatibility(
 /// The dependency manifest already holds one entry per unique visited local
 /// child, so each child is read and hashed at most once. Each read goes
 /// straight to disk via [`Markdown::try_from`], bypassing the graph-building
-/// runtime and both the run-local and persistent caches, so stale cached
+/// runtime and its run-local cache, so stale cached
 /// content cannot mask an on-disk edit. Content identity (not mtime/size/inode)
 /// is authoritative.
 ///

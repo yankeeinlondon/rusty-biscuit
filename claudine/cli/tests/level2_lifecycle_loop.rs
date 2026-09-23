@@ -48,7 +48,7 @@
 
 mod common;
 use common::wrap::seed_minimal_config;
-use common::{augmented_path, init_git_repo, write_executable};
+use common::{augmented_path, init_git_repo, wait_for_exit_marker, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
@@ -56,7 +56,7 @@ use serial_test::serial;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
 
@@ -108,11 +108,13 @@ fn event_lines(staged: &Staged) -> Vec<String> {
         .collect()
 }
 
-/// Run `claudine compose --goose <doc>` in a real tmux pane and block until the
-/// run settles (line count stable, or `expected_min_lines` reached), then
-/// return the captured pane. Bounded well under the nextest slow-timeout so a
-/// non-producing run never hangs the suite.
-fn run_loop_in_tmux(staged: &Staged, expected_min_lines: usize) -> String {
+/// Run `claudine compose --goose <doc>` in a real tmux pane, block until the
+/// command has exited, and return the captured pane.
+///
+/// The wait is on the shell's exit marker, not on `events.log`: claudine
+/// renders a gate error *after* the last marker is written, so a frame taken
+/// once the log is complete can predate the text a caller asserts on.
+fn run_loop_in_tmux(staged: &Staged) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
@@ -123,14 +125,17 @@ fn run_loop_in_tmux(staged: &Staged, expected_min_lines: usize) -> String {
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
     let claudine = common::claudine_bin();
-    let sentinel = format!("L2_LOOP_DONE_{seq}");
     let env_prefix = format!(
         "NO_COLOR='1' HOME='{home}' PATH='{path}' ",
         home = staged.workspace.path().display(),
         path = augmented_path(&staged.bin_dir).to_string_lossy(),
     );
+    // `printf` takes the marker as an *argument*, so the echoed command line
+    // carries `L2_LOOP_DONE_n` without the trailing colon the wait matches on.
+    // Spelling it inline would put the matched text in the pane before the run
+    // had started, and the wait would return the pre-run frame.
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; printf '%s:%s\\n' L2_LOOP_DONE_{seq} $?",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -138,33 +143,10 @@ fn run_loop_in_tmux(staged: &Staged, expected_min_lines: usize) -> String {
         .send_command_with_env(&cmd, &[])
         .expect("send compose command");
 
-    // Settle on either the expected line count or a stable count (the run
-    // finished without reaching the target — e.g. a fail-fast blocked loop).
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let mut last_count = 0usize;
-    let mut stable_since: Option<Instant> = None;
-    while Instant::now() < deadline {
-        let count = event_lines(staged).len();
-        if count >= expected_min_lines {
-            std::thread::sleep(Duration::from_millis(150));
-            break;
-        }
-        if count == last_count {
-            match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(800) => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_count = count;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    let pane = harness.capture().map(|f| f.plain).unwrap_or_default();
+    let (frame, _status) =
+        wait_for_exit_marker(&mut harness, &format!("L2_LOOP_DONE_{seq}"), Duration::from_secs(60));
     kill_session_by_name(&session);
-    pane
+    frame.plain
 }
 
 /// Coverage #2: a 3-iteration loop fires `initialize` exactly once, fires
@@ -200,10 +182,7 @@ finalize:
 Phase {{phase}}
 "#;
     let staged = stage(doc);
-    // 1 initialize + 3*(start + provider-ran + finalize + gate) = 13 markers.
-    // `events.log` records `provider-ran` too, so the settle target must count
-    // it or the poll breaks mid-run before the terminal `gate:3` lands.
-    let pane = run_loop_in_tmux(&staged, 13);
+    let pane = run_loop_in_tmux(&staged);
 
     let lines = event_lines(&staged);
     let lifecycle: Vec<&String> = lines.iter().filter(|l| *l != "provider-ran").collect();
@@ -286,7 +265,7 @@ finalize:
 Phase {{phase}}
 "#;
     let staged = stage(doc);
-    let pane = run_loop_in_tmux(&staged, 3);
+    let pane = run_loop_in_tmux(&staged);
 
     let lines = event_lines(&staged);
     assert!(
@@ -354,9 +333,7 @@ finalize:
 Phase {{phase}}
 "#;
     let staged = stage(doc);
-    // Only the single `initialize` marker is expected; settle on a stable
-    // count (the run exits cleanly without producing further markers).
-    let pane = run_loop_in_tmux(&staged, 1);
+    let pane = run_loop_in_tmux(&staged);
 
     let lines = event_lines(&staged);
     assert!(
@@ -420,9 +397,7 @@ finalize:
 Phase {{phase}}
 "#;
     let staged = stage(doc);
-    // 1 initialize + 1 start + 1 provider-ran + 1 finalize + 1 gate = 5 markers,
-    // then the gate errors and the loop exits.
-    let pane = run_loop_in_tmux(&staged, 5);
+    let pane = run_loop_in_tmux(&staged);
 
     let lines = event_lines(&staged);
     let count = |needle: &str| lines.iter().filter(|l| *l == needle).count();

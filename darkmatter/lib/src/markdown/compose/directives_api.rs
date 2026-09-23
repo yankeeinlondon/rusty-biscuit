@@ -264,8 +264,8 @@ fn parse_directive_line(
     }
 }
 
-/// Reads a single value token as the directive target, returning `None` when
-/// the cursor is at end-of-line or the value is empty.
+/// Reads a single value token as the directive target, returning `None` only
+/// when the cursor is at end-of-line.
 fn read_target(cursor: &mut Cursor<'_>, base: usize, line: usize) -> Option<Spanned<String>> {
     cursor.skip_ws();
     if cursor.is_eof() {
@@ -274,9 +274,6 @@ fn read_target(cursor: &mut Cursor<'_>, base: usize, line: usize) -> Option<Span
     let start = cursor.pos();
     let value = cursor.read_value(line).ok()?;
     let end = cursor.pos();
-    if value.is_empty() {
-        return None;
-    }
     Some(Spanned::new(value, base + start..base + end))
 }
 
@@ -656,6 +653,75 @@ mod tests {
         let directives = scan_darkmatter_directives(source);
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].target.as_ref().unwrap().value, "./included.md");
+    }
+
+    #[test]
+    fn nullable_target_raw_span_contract() {
+        for keyword in ["::file", "::code", "::url"] {
+            let source = format!(
+                "{keyword}\r\n{keyword} \"\"\r\n{keyword} {{{{log}}}}\r\n{keyword} \"{{{{dir}}}}/log.md\"\r\n```md\r\n{keyword} {{{{ignored}}}}\r\n```\r\n"
+            );
+            let directives = scan_darkmatter_directives(&source);
+            assert_eq!(directives.len(), 4, "{keyword}: fenced directive must be excluded");
+            assert!(directives[0].target.is_none(), "{keyword}: bare target");
+
+            let quoted_empty = directives[1]
+                .target
+                .as_ref()
+                .expect("quoted-empty target must retain its raw span");
+            assert_eq!(quoted_empty.value, "");
+            assert_eq!(&source[quoted_empty.span.clone()], "\"\"");
+
+            for (directive, raw, value) in [
+                (&directives[2], "{{log}}", "{{log}}"),
+                (&directives[3], "\"{{dir}}/log.md\"", "{{dir}}/log.md"),
+            ] {
+                let target = directive.target.as_ref().expect("target");
+                assert_eq!(target.value, value);
+                assert_eq!(&source[target.span.clone()], raw);
+                assert!(!source[directive.span.clone()].contains('\r'));
+            }
+        }
+    }
+
+    #[test]
+    fn directive_lines_can_be_removed_end_to_start_without_invalidating_spans() {
+        let source = "before\n::file {{a}}\nmiddle\n::code {{b}}\n::url {{c}}\nafter\n";
+        let directives = scan_darkmatter_directives(source);
+        let mut rewritten = source.to_string();
+        for directive in directives.iter().rev() {
+            let end = if rewritten.as_bytes().get(directive.span.end) == Some(&b'\n') {
+                directive.span.end + 1
+            } else {
+                directive.span.end
+            };
+            rewritten.replace_range(directive.span.start..end, "");
+        }
+        assert_eq!(rewritten, "before\nmiddle\nafter\n");
+    }
+
+    #[test]
+    fn shipped_transclusion_fixture_targets_are_scanned_passively() {
+        let dir = biscuit_test_harness::manifest_dir!().join("../benchmarks/fixtures");
+        let mut documents = 0usize;
+        let mut targets = 0usize;
+        for entry in std::fs::read_dir(&dir).expect("fixture directory readable") {
+            let path = entry.expect("readable fixture entry").path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
+                continue;
+            }
+            documents += 1;
+            let source = std::fs::read_to_string(&path).expect("fixture readable");
+            for directive in scan_darkmatter_directives(&source).into_iter().filter(|directive| {
+                matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url)
+            }) {
+                let target = directive.target.expect("shipped transclusion target must parse");
+                assert_eq!(&source[target.span.clone()], target.value);
+                targets += 1;
+            }
+        }
+        assert_eq!(documents, 13, "the shipped fixture corpus changed");
+        assert_eq!(targets, 41, "the shipped directive corpus changed");
     }
 
     #[test]

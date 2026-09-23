@@ -208,7 +208,7 @@ impl Harness {
 /// measured bytes are frozen and hashed in `benchmarks/manifest.yaml`).
 pub(crate) fn fixture_text(stem: &str) -> String {
     let path = biscuit_test_harness::manifest_dir!()
-        .join("../features/2026-07-15-performance-followup/benchmarks/fixtures")
+        .join("../benchmarks/fixtures")
         .join(format!("{stem}.md"));
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("fixture {} readable: {e}", path.display()))

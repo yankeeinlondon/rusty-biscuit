@@ -884,7 +884,7 @@ edition = "2024"
     assert!(!interactive.env_context.git.unwrap().is_dirty);
     assert_eq!(
         interactive.launch_workspace.package_context.unwrap().package_area,
-        "root"
+        ""
     );
     assert!(prompted.env_context.git.unwrap().is_dirty);
 }

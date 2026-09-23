@@ -68,6 +68,30 @@ impl RecentCommits {
         self.render(options, Utc::now(), Format::Plain)
     }
 
+    /// One plain block per commit, in report order.
+    ///
+    /// These are the per-commit units of [`to_plain`](Self::to_plain): the
+    /// blocks it separates with a blank line (in every verbosity but
+    /// `Compact`, which runs them together). A consumer that wants commits as
+    /// individual array elements — Darkmatter's `ctx.recent_commits` — takes
+    /// them here rather than splitting `to_plain` on blank lines, which the
+    /// verbose layout also uses inside a block. Projection applies exactly as
+    /// it does to `to_plain`, so a commit the projection drops has no block.
+    pub fn plain_blocks(&self, options: &RecentCommitsOptions) -> Vec<String> {
+        let now = Utc::now();
+        let report = self.projected(options.projection);
+        report
+            .commits()
+            .iter()
+            .map(|commit| {
+                commit_lines(commit, options, now, report.repo_root())
+                    .iter()
+                    .map(|line| Format::Plain.line(line))
+                    .collect()
+            })
+            .collect()
+    }
+
     fn render(&self, options: &RecentCommitsOptions, now: DateTime<Utc>, format: Format) -> String {
         layout(self, options, now)
             .iter()
@@ -153,33 +177,45 @@ fn layout(commits: &RecentCommits, options: &RecentCommitsOptions, now: DateTime
         if index > 0 && options.verbosity != RecentCommitsVerbosity::Compact {
             lines.push(Line::Blank);
         }
-        lines.push(Line::Text(header(commit, options, now)));
+        lines.extend(commit_lines(commit, options, now, report.repo_root()));
+    }
+    lines
+}
 
-        match options.verbosity {
-            RecentCommitsVerbosity::Compact => {}
-            RecentCommitsVerbosity::Normal => {
-                files_block(&mut lines, &commit.files, report.repo_root());
+/// The lines of one commit's block: its header, then whatever the verbosity
+/// adds. This is the unit [`RecentCommits::plain_blocks`] exposes, so it must
+/// not include the blank line `layout` places *between* commits.
+fn commit_lines(
+    commit: &RecentCommit,
+    options: &RecentCommitsOptions,
+    now: DateTime<Utc>,
+    repo_root: Option<&Path>,
+) -> Vec<Line> {
+    let mut lines = vec![Line::Text(header(commit, options, now))];
+    match options.verbosity {
+        RecentCommitsVerbosity::Compact => {}
+        RecentCommitsVerbosity::Normal => {
+            files_block(&mut lines, &commit.files, repo_root);
+        }
+        RecentCommitsVerbosity::Verbose => {
+            let mut has_commentary = false;
+            if !commit.description.is_empty() {
+                lines.push(Line::Text(vec![plain("  "), plain(&commit.description)]));
+                has_commentary = true;
             }
-            RecentCommitsVerbosity::Verbose => {
-                let mut has_commentary = false;
-                if !commit.description.is_empty() {
-                    lines.push(Line::Text(vec![plain("  "), plain(&commit.description)]));
-                    has_commentary = true;
+            if !commit.bullet_points.is_empty() {
+                lines.push(Line::Blank);
+                lines.push(label_line("Details:"));
+                lines.push(Line::Blank);
+                for bullet in &commit.bullet_points {
+                    lines.push(Line::Text(vec![plain("  - "), plain(bullet)]));
                 }
-                if !commit.bullet_points.is_empty() {
-                    lines.push(Line::Blank);
-                    lines.push(label_line("Details:"));
-                    lines.push(Line::Blank);
-                    for bullet in &commit.bullet_points {
-                        lines.push(Line::Text(vec![plain("  - "), plain(bullet)]));
-                    }
-                    has_commentary = true;
-                }
-                if has_commentary {
-                    lines.push(Line::Blank);
-                }
-                files_block(&mut lines, &commit.files, report.repo_root());
+                has_commentary = true;
             }
+            if has_commentary {
+                lines.push(Line::Blank);
+            }
+            files_block(&mut lines, &commit.files, repo_root);
         }
     }
     lines

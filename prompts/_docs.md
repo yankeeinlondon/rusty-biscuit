@@ -94,7 +94,7 @@ There are five _sources_ of knowledge that Agents can draw deep knowledge from (
     - this repo is a monorepo so the `features` or `fixes` directories which provide the root directory for these specifications can be at the repo root but they can -- and often are -- at the package area root or package root.
     - `features` and `fixes` directories of the repo root indicate work that is naturally aligned to a single package area or package
     ::end-block
-    ::block when=!ctx.is_monorepo"
+    ::block when="!ctx.is_monorepo"
     - the `features` and `fixes` directories will be found off of the repo's root directory
     ::end-block
     - every feature/fix is given it's own directory off of "features"/"fixes" that has a name that leads with the date it was authored (YYYY-DD-MM) but includes a name as well; an example of a well structured name would be: `2026-09-09-do-it`

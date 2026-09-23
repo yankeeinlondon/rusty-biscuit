@@ -54,9 +54,9 @@ Authoring rules and examples live in
 - An expression opens at `{{` and closes at the matching `}}`.
 - Matching is **brace-depth counted**, not first-match: a nested `{{` increments
   the depth and a `}}` decrements it. So `{{ a {{ b }} }}` is captured as **one**
-  region whose inner text is `a {{ b }}` — which then fails to parse and warns.
-  Nesting is not a feature; the depth counter exists so a stray inner `}}` does
-  not truncate the region at the wrong place.
+  region whose inner text is `a {{ b }}` — which then fails to parse and fails
+  composition. Nesting is not a feature; the depth counter exists so a stray
+  inner `}}` does not truncate the region at the wrong place.
 - Inner text is **trimmed** before it reaches the lexer, so `{{name}}` and
   `{{  name  }}` are identical.
 - **Empty or whitespace-only** content (`{{}}`, `{{  }}`) yields no expression at

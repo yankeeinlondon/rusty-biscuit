@@ -14,7 +14,7 @@ expression: stable
     }
   ],
   "context": {
-    "area": "root",
+    "area": "",
     "is_current_package_area_dirty": false,
     "package": "",
     "package_area": "",

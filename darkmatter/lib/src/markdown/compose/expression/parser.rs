@@ -2100,6 +2100,129 @@ mod tests {
     /// [`parse`]/[`parse_condition`] (which now lower from the spanned parser),
     /// so this module adds the erasure-equivalence corpus plus concrete byte
     /// spans.
+    /// Requirement 1 of the dasherized-identifiers spec at the parser level.
+    mod dasherized_identifiers {
+        use super::*;
+        use crate::markdown::compose::expression::ast::BinaryOp;
+
+        fn assert_subtraction(src: &str) {
+            match parse(src).unwrap_or_else(|error| panic!("{src:?} should parse: {error}")) {
+                Expr::Binary { op: BinaryOp::Sub, .. } => {}
+                other => panic!("{src:?} should lower to subtraction, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn kebab_name_lowers_to_one_variable_spanning_the_whole_name() {
+            for src in ["spec-name", "doc.spec-name", "iteration-1", "false-1", "true-value"] {
+                let spanned = parse_spanned(src).unwrap();
+                assert!(
+                    matches!(&spanned.kind, SpannedExprKind::Variable(name) if name == src),
+                    "{src:?} should be one Variable, got {:?}",
+                    spanned.kind
+                );
+                assert_eq!((spanned.span.start, spanned.span.end), (0, src.len()), "for {src:?}");
+            }
+        }
+
+        #[test]
+        fn subtraction_forms_still_lower_to_binary() {
+            for src in [
+                "iteration - 1",
+                "a - b",
+                "a -b",
+                "a- b",
+                "4-2",
+                "f(x)-1",
+                "arr[0]-1",
+                "(a)-1",
+                r#""x"-1"#,
+                "false - 1",
+                "_loop_count - 1",
+            ] {
+                assert_subtraction(src);
+            }
+        }
+
+        #[test]
+        fn double_dash_is_subtraction_of_a_negation() {
+            match parse("foo--bar").unwrap() {
+                Expr::Binary { op: BinaryOp::Sub, left, right } => {
+                    assert_eq!(*left, Expr::Variable("foo".to_string()));
+                    assert_eq!(*right, Expr::UnaryMinus(Box::new(Expr::Variable("bar".to_string()))));
+                }
+                other => panic!("expected foo - (-bar), got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn trailing_dash_is_a_parse_error() {
+            assert!(parse("spec-").is_err());
+        }
+
+        #[test]
+        fn kebab_names_work_as_operands_and_arguments() {
+            assert_eq!(
+                parse("spec-name || default-name").unwrap(),
+                Expr::Fallback {
+                    primary: Box::new(Expr::Variable("spec-name".to_string())),
+                    fallback: Box::new(Expr::Variable("default-name".to_string())),
+                }
+            );
+            match parse("upper(spec-name)").unwrap() {
+                Expr::FunctionCall { name, args } => {
+                    assert_eq!(name, "upper");
+                    assert_eq!(args, vec![Expr::Variable("spec-name".to_string())]);
+                }
+                other => panic!("expected a call, got {other:?}"),
+            }
+            match parse("phase-2 - 1").unwrap() {
+                Expr::Binary { op: BinaryOp::Sub, left, .. } => {
+                    assert_eq!(*left, Expr::Variable("phase-2".to_string()));
+                }
+                other => panic!("expected phase-2 - 1, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn kebab_identifier_is_an_unquoted_object_key() {
+            assert_eq!(
+                parse("{ spec-name: 1, snake_key: 2 }").unwrap(),
+                Expr::ObjectLiteral(vec![
+                    ("spec-name".to_string(), Expr::NumberLiteral(1.0)),
+                    ("snake_key".to_string(), Expr::NumberLiteral(2.0)),
+                ])
+            );
+            assert_eq!(
+                parse(r#"{ "spec-name": 1 }"#).unwrap(),
+                Expr::ObjectLiteral(vec![("spec-name".to_string(), Expr::NumberLiteral(1.0))])
+            );
+        }
+
+        #[test]
+        fn unquoted_and_quoted_kebab_keys_are_the_same_key() {
+            let error = parse(r#"{ spec-name: 1, "spec-name": 2 }"#).unwrap_err();
+            assert!(error.to_string().contains("duplicate object key"), "{error}");
+        }
+
+        #[test]
+        fn keys_the_guard_rejects_still_need_quotes() {
+            // A dotted key, a non-ASCII first character, and a leading digit
+            // are all outside the unquoted-key guard.
+            for src in ["{ doc.spec-name: 1 }", "{ été-name: 1 }", "{ 2-name: 1 }", "{ foo--bar: 1 }"] {
+                assert!(parse(src).is_err(), "{src:?} should require a quoted key");
+            }
+            for key in ["doc.spec-name", "été-name", "2-name", "foo--bar"] {
+                let src = format!(r#"{{ "{key}": 1 }}"#);
+                assert_eq!(
+                    parse(&src).unwrap(),
+                    Expr::ObjectLiteral(vec![(key.to_string(), Expr::NumberLiteral(1.0))]),
+                    "for {src:?}"
+                );
+            }
+        }
+    }
+
     mod spanned {
         use super::*;
 

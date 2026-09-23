@@ -1,0 +1,117 @@
+# Proposed representation, not a production catalog or ratified syntax.
+# Type strings use SimplifiedSchema value definitions; presence belongs to
+# the ordered argument record, independently of accepted null values.
+prototype_version: 1
+type_contract:
+  value_definition: SimplifiedSchema
+  value_required: true
+  explicit_null: accepted-by-value-type-including-unknown
+  omitted_argument: controlled-by-presence
+  variadic_items: checked-individually
+  overload_selection: preserve-existing-dispatch
+  guard_fact: argument-suitable-for-parameter-type
+functions:
+  - name: round
+    category: Math
+    order: 55
+    description: Rounds a value to the nearest integer, with an optional default.
+    overloads:
+      - parameters:
+          - {name: x, value: 'number(required)', presence: required, conversion: number-or-fallback}
+          - {name: default, value: 'number(required)', presence: optional, conversion: number-or-fallback}
+        returns: {value: 'number(required)', fallible: false}
+        example: {expression: 'round(3.7)', result: '4', verification: executable}
+        runtime_note: Preserve existing conversion and default-zero/fallback behavior; numeric value type is not a new rejection of strings.
+  - name: and
+    category: Logical
+    order: 49
+    description: Logical AND of all arguments. Short-circuits on first falsy value.
+    evaluation: short-circuit
+    overloads:
+      - parameters:
+          - {name: values, value: 'unknown(required)', presence: variadic}
+        returns: {value: 'boolean(required)', fallible: false}
+        example: {expression: 'and(true, true)', result: 'true', verification: executable}
+  - name: frontmatter
+    category: Filesystem
+    order: 59
+    description: Reads the frontmatter of a Markdown file as an object.
+    overloads:
+      - parameters:
+          - {name: file, value: 'file(required)', presence: required, conversion: file-reference}
+        returns: {value: 'object(required)', fallible: true}
+        example: {expression: 'frontmatter("fixture.md")', result: '{"title":"Fixture Title"}', verification: executable}
+      - parameters:
+          - {name: file, value: 'file(required)', presence: required, conversion: file-reference}
+          - {name: prop, value: 'string(required)', presence: required}
+        returns: {value: 'unknown(required)', fallible: true}
+        example: {expression: 'frontmatter("fixture.md", "title")', result: 'Fixture Title', verification: executable}
+  - name: representative_result
+    prototype_only: true
+    description: Exercises arrays, literal alternatives, nullability, and display-only examples without inventing a built-in.
+    overloads:
+      - parameters:
+          - {name: paths, value: 'file(required)[](required)', presence: required}
+        returns:
+          value: ['literal(found; required)', 'literal(missing; required)', 'null(required)']
+          fallible: true
+        example:
+          expression: 'representative_result(paths)'
+          result: 'found'
+          verification: display-only
+          reason: Prototype-only function; no implementation exists.
+  - name: file_exists
+    overloads:
+      - parameters:
+          - name: value
+            value: ['string(required)', 'file(required)', 'null(required)']
+            presence: required
+            conversion: file-reference
+            on_unsupported: {diagnostic: warning, result: false}
+            on_invalid_conversion: {diagnostic_when_statically_known: warning, result: false}
+            on_unknown_type: {diagnostic: warning, enabled_by_default: false}
+        returns: {value: 'boolean(required)', fallible: true}
+        true_facts:
+          - {argument: value, suitable_for: 'file(required)'}
+        runtime_note: Valid remote references still fail in a local-only context; policy-denied or failed remote fetches return false.
+  - name: is_file_type
+    overloads:
+      - parameters:
+          - {name: value, value: 'unknown(required)', presence: required}
+        returns: {value: 'boolean(required)', fallible: false}
+        true_facts:
+          - {argument: value, suitable_for: 'file(required)'}
+        runtime_note: Passive structural check only; no resolution, access, existence proof, or stored-value mutation.
+  - name: is_project_file
+    prototype_only: true
+    supplied_by: host
+    overloads:
+      - parameters:
+          - {name: source, value: 'unknown(required)', presence: required}
+        returns: {value: 'boolean(required)', fallible: false}
+        true_facts:
+          - {argument: source, suitable_for: 'file(required)'}
+        runtime_note: Host must honor its declaration; editor analysis never calls it.
+  - name: pr_list
+    overloads:
+      - parameters:
+          - {name: query, value: 'object(required)', presence: required}
+        returns: {value: 'string(required)[](required)', fallible: true}
+      - parameters:
+          - {name: count, value: 'number(integer; required)', presence: required}
+        returns: {value: 'string(required)[](required)', fallible: true}
+    runtime_note: Same argument count, different types; preserve existing dispatch rather than selecting by arity alone.
+  - name: ping_under
+    overloads:
+      - parameters:
+          - {name: address, value: 'ip-address(required)', presence: required}
+          - {name: timeout, value: 'number(required)', presence: required}
+          - {name: attempts, value: 'number(integer; required)', presence: optional}
+        returns:
+          value: ['boolean(required)', 'literal(unstable; required)', 'null(required)']
+          fallible: true
+        example:
+          expression: 'ping_under("192.168.1.1", 50, 5)'
+          result: unstable
+          verification: display-only
+          reason: Result depends on the network and ICMP grant; this spike never executes it.

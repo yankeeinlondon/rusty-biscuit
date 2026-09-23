@@ -115,6 +115,12 @@ impl Described for ContextVariableDescriptor {
 const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     // ── Invocation ──────────────────────────────────────────────────
     ("cwd", "Invocation", ""),
+    // ── Document ────────────────────────────────────────────────────
+    ("self", "Document", ""),
+    ("last_updated", "Document", ""),
+    ("hash", "Document", ""),
+    ("id", "Document", ""),
+    ("sid", "Document", ""),
     // ── Date and Time ───────────────────────────────────────────────
     ("now", "Date and Time", ""),
     ("now_utc", "Date and Time", ""),
@@ -161,6 +167,7 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("repo_root", "Repository", ""),
     ("branch", "Repository", "Git"),
     ("worktree", "Repository", "Git"),
+    ("recent_commits", "Repository", "Git"),
     ("is_monorepo", "Repository", ""),
     ("package_root", "Repository", "Packages"),
     ("package_area_root", "Repository", "Packages"),
@@ -207,6 +214,7 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("docs_skill", "Documents", ""),
     // ── Operating System ────────────────────────────────────────────
     ("os", "Operating System", ""),
+    ("hostname", "Operating System", ""),
     ("os_distro", "Operating System", ""),
     ("os_package_manager", "Operating System", ""),
     ("os_version", "Operating System", ""),
@@ -217,6 +225,10 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("cpu_cores", "Hardware", ""),
     ("cpu_arch", "Hardware", ""),
     ("gpu", "Hardware", ""),
+    // ── Network ─────────────────────────────────────────────────────
+    ("tailnet", "Network", ""),
+    ("gateway", "Network", ""),
+    ("gateway_v6", "Network", ""),
     // ── Agent ───────────────────────────────────────────────────────
     ("agent", "Agent", ""),
     ("model", "Agent", ""),
@@ -350,8 +362,7 @@ mod tests {
 
     /// Catalog descriptors and captured runtime keys must be in exact
     /// correspondence: every descriptor has a runtime key and no runtime key
-    /// lacks a descriptor. Phase 5 migrated capture to arrays and dropped the
-    /// ten `_list` twins, so the Phase 3–5 transitional tolerance is gone.
+    /// lacks a descriptor.
     #[test]
     fn every_descriptor_has_a_captured_runtime_key() {
         let descriptor_names: HashSet<&str> = context_variable_descriptors()

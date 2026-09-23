@@ -471,3 +471,30 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
         );
     }
 }
+
+/// The values report has no document, so the root-document identity variables
+/// must project their absent-document shape rather than a fabricated one.
+///
+/// `ctx.id` and `ctx.sid` are the exception: they identify the *execution*, so
+/// they are present even with no document. A regression that synthesized a
+/// placeholder document here would report a `ctx.hash` no composition of any
+/// real file could produce.
+#[test]
+fn values_report_projects_the_absent_document_identity() {
+    let context = ComposeContext::capture();
+    let values = context.values();
+
+    for key in ["self", "last_updated", "hash"] {
+        assert_eq!(
+            values.get(key),
+            Some(&serde_json::Value::Null),
+            "`ctx.{key}` has no answer without a document"
+        );
+    }
+    for key in ["id", "sid"] {
+        assert!(
+            values.get(key).and_then(serde_json::Value::as_str).is_some(),
+            "`ctx.{key}` identifies the execution and is present regardless"
+        );
+    }
+}

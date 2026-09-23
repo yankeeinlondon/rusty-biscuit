@@ -97,7 +97,7 @@ pub(super) fn build_deps_dot(
         let pkgs = &focus_area_packages[area];
         // Suppress the cluster wrapper for a single root-level package when
         // no focus filter is active (matches prior behavior).
-        if focus_names.is_none() && pkgs.len() == 1 && *area == "root" {
+        if focus_names.is_none() && pkgs.len() == 1 && area.is_empty() {
             let pkg = pkgs[0];
             let id = &node_ids[pkg.name.as_str()];
             writeln!(dot, "    {id} [label=\"{}\"];", escape_dot(&pkg.name)).unwrap();
@@ -106,7 +106,12 @@ pub(super) fn build_deps_dot(
 
         let cluster_name = format!("cluster_{idx}_{}", sanitize_id(area));
         writeln!(dot, "    subgraph {cluster_name} {{").unwrap();
-        writeln!(dot, "        label=\"{}\";", escape_dot(area)).unwrap();
+        writeln!(
+            dot,
+            "        label=\"{}\";",
+            escape_dot(super::package_areas::area_display_label(area))
+        )
+        .unwrap();
         for pkg in pkgs {
             let id = &node_ids[pkg.name.as_str()];
             writeln!(dot, "        {id} [label=\"{}\"];", escape_dot(&pkg.name)).unwrap();

@@ -280,39 +280,41 @@ Frontmatter interpolation uses the same expression grammar and evaluator as body
 
 That means:
 
-- missing variables resolve to the empty string
+- missing variables resolve to the empty string, and a root that nothing
+  defines warns with `dm.expression.unknown_identifier` (see
+  [Interpolation § Missing Variables](./interpolation.md#missing-variables)).
+  A candidate from pass 1 is only reported if the name is still unknown after
+  schema validation and pass 2, so a key that shell expansion or the schema
+  supplies never warns
 - fallbacks work: `{{ color || "unknown" }}`
 - ternaries work: `{{ enabled ? "yes" : "no" }}`
 - helper functions work: `{{ length(items) }}`
 
-When `fail_fast` is enabled, parse or evaluation failures stop the compose run.
-When `fail_fast` is disabled, the original string is preserved and a warning is recorded.
+A parse or evaluation failure stops the compose run, whatever `fail_fast` is
+set to, in mixed text and whole values alike. The error names the document,
+the frontmatter key's line, and the expression.
 
-### Whole-Value Exception (Strict)
+### Whole Values Keep Their Type
 
-There is one exception to the lenient `fail_fast`-off behavior above. When a
-frontmatter value's trimmed content is **exactly one** `{{ ... }}` span (only
-whitespace before and after it), the value is treated as executable state, not
-text, and is held to a strict parse-and-evaluate contract:
+When a frontmatter value's trimmed content is **exactly one** `{{ ... }}` span
+(only whitespace before and after it), the value is treated as executable
+state, not text:
 
 - The expression is parsed and evaluated directly, and the typed
   `serde_json::Value` result is preserved (so `{{ false }}` stays the boolean
   `false`, a numeric expression stays a number, and an array/object result keeps
   its type).
-- A parse failure or an evaluation failure is **fatal regardless of
-  `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
-  never leak downstream as a raw `{{ … }}` string.
-- Undefined variables stay lenient: a whole-value `{{ missing }}` resolves to
-  `null`, not an error.
+- Undefined variables are not an error: a whole-value `{{ missing }}` resolves
+  to `null` (and warns as described above).
 
-This is scoped to whole-value spans only. Mixed text (`"a {{ x }}"`), strings
-holding more than one expression, and body interpolation fall through to the
-lenient string path described above — they are **not** newly fatal when
-`fail_fast` is off.
+Mixed text (`"a {{ x }}"`) and strings holding more than one expression
+interpolate to a string instead.
 
-## Important Limitation
+## Chained References
 
-Chained references between templated top-level keys are intentionally not supported in v1.
+Templated top-level keys resolve in dependency order: a key is processed once
+every templated key it references has resolved, so chains work regardless of
+source order.
 
 ```yaml
 ---
@@ -322,19 +324,10 @@ plan: "{{spec}}.plan.md"
 ---
 ```
 
-Here:
-
-- `spec` is templated, so it is excluded from the seed state
-- `plan` cannot use the resolved value of `spec` during the same pass
-- `{{spec}}` therefore resolves as missing and becomes an empty string
-
-Result:
-
-```yaml
-plan: ".plan.md"
-```
-
-This constraint keeps the behavior deterministic and avoids source-order-dependent chaining rules.
+Here `plan` is `/root/spec.md.plan.md`. A reference cycle terminates rather
+than hanging: its keys resolve in map order, and the first reads the other as
+missing. With `a: "{{b}}x"` and `b: "{{a}}y"`, `a` is `x` and `b` is `xy`. Both
+names are frontmatter keys, so neither read warns.
 
 ## Downstream Effects
 

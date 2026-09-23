@@ -64,6 +64,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
     let context = document_epoch.capture_launch_context(&requirements);
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
+            .with_context_authority(document_epoch.compose_context_authority())
             .with_file_resolution_context(source_context.file_resolution_context().clone()),
         source_path,
         shell_cwd,

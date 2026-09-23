@@ -368,9 +368,16 @@ fn late_binding_roots_are_unknown_outside_lifecycle_keys() {
     );
     with_ctx(text, 1, |ctx| {
         let found = unknown_identifiers(ctx);
-        for root in ["err", "timing", "current"] {
+        for root in ["err", "timing"] {
             assert!(found.iter().any(|message| message.starts_with(&format!("`{root}`"))), "{root}: {found:#?}");
         }
+        // `current` is a reserved lazy root wherever it appears (spec R29–R33):
+        // it resolves through the invocation's refresh authority, so it is
+        // never unknown, inside a lifecycle key or out.
+        assert!(
+            !found.iter().any(|message| message.starts_with("`current`")),
+            "current is reserved: {found:#?}"
+        );
     });
 }
 

@@ -1,6 +1,6 @@
 //! Owned AST for authored expression-function catalogs.
 
-use super::DataType;
+use super::{DataType, ParamRefinement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExpressionFunctionCatalog {
@@ -13,6 +13,10 @@ pub(crate) struct CatalogFunction {
     pub category: String,
     pub order: usize,
     pub description: String,
+    /// Whether this function is the call-time half of an R29 pair. The parser
+    /// resolved `description` and every overload's return value/array shape
+    /// from the same-named `ctx.*` descriptor; the authored entry carries none.
+    pub pair: bool,
     pub overloads: Vec<CatalogOverload>,
 }
 
@@ -27,6 +31,7 @@ pub(crate) struct CatalogOverload {
 pub(crate) struct CatalogParam {
     pub name: String,
     pub ty: DataType,
+    pub refinement: Option<ParamRefinement>,
     pub array: bool,
     pub optional: bool,
     pub variadic: bool,
@@ -36,6 +41,8 @@ pub(crate) struct CatalogParam {
 pub(crate) struct CatalogReturn {
     pub value: CatalogReturnValue,
     pub array: bool,
+    pub literals: Vec<String>,
+    pub nullable: bool,
     pub fallible: bool,
 }
 

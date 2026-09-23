@@ -1,367 +1,213 @@
 ---
-description: Extracts lots of useful metadata in a Rust workspace and then provides it to the Agent so that the agent can build a high confidence plan on how to upgrade the external crates/dependencies that the repo has.
+description: Plan evidence-based upgrades and dependency alignment across a Rust workspace, preserving intentional differences.
 depends_on:
     binaries:
-        - jq
-        - cargo-outdated
+        - python3
+        - cargo
+        - git
+initialize:
+    info: "Preparing dependency evidence for {{ctx.repo_root}}. Collection may take several minutes."
+start:
+    info: "Starting dependency upgrade and alignment analysis. The agent will review evidence gaps and write a phased plan."
+success:
+    success: "Dependency planning session completed. Review the plan at {{ctx.repo_root}}/reviews/{{ctx.today}}-dependency-upgrade/plan.md."
+blocked:
+    warn: "Dependency planning was blocked before the agent started: {{err.msg}}"
+failure:
+    warn: "Dependency planning failed: {{err.msg}}. Any partial plan still needs review."
 ---
-# Dependency Upgrade Planner
+# Dependency Upgrade and Alignment Planner
 
-You are acting as a senior technical analyst for the Rusty Biscuit monorepo. Your task is to create a phased upgrade plan for this Rust monorepo.
+Act as a senior technical analyst for the Rusty Biscuit monorepo. Create a
+phased, evidence-based plan to upgrade third-party dependencies and synchronize
+workspace declarations where doing so offers a concrete benefit.
 
-## Metadata
+This is a planning task. Write evidence artifacts and the plan only. Do not
+modify Cargo manifests, Cargo.lock, source code, or toolchain configuration. Do
+not run upgrades or implement the phases. A newer release alone is insufficient
+justification for a change.
 
-We have compiled a large set of useful metadata for your analysis.
+## Evidence collection
 
-### Cargo Metadata
+The collector requires Python 3.11+ and creates a fresh directory under
+`target/dependency-report/` for each invocation. Cargo may access registries and
+populate its cache. Missing cargo-outdated, command failures, timeouts, and
+invalid JSON are recorded as unavailable evidence; they are not automatically
+classified as resolver conflicts. Partial collection still permits a plan with
+explicit blockers and uncertainty.
 
-All of the cargo metadata has been saved to disk: [metadata](target/dependency-report/metadata.json).
-::shell cargo metadata --format-version 1 --all-features --locked > "{{ctx.repo_root}}/target/dependency-report/metadata.json"
+Composition runs the collector, including during Claudine `--dry-run`. The block
+allows enough time for the collector's six reports, each bounded to 300 seconds,
+plus tool and repository probes. Do not move setup into a `start` lifecycle
+handler: this evidence must exist before the agent receives the composed prompt.
 
-
-### Cargo Tree Duplicates
-
-::shell cargo tree --workspace --duplicates > "{{ctx.repo_root}}/target/dependency-report/cargo-tree-duplicates.txt" 2>&1 && echo "The results of the `cargo tree --workspace --duplicates` can be found at: [tree-duplicates](target/dependency-report/cargo-tree-duplicates.txt)" || echo "**Important:** running `cargo tree --workspace --duplicates` currently fails; you can see the error output at [tree-duplicates](target/dependency-report/cargo-tree-duplicates.txt)."
-
-### Cargo Tree Features
-
-::shell cargo tree --workspace -e features > "{{ctx.repo_root}}/target/dependency-report/cargo-tree-features.txt" 2>&1 && echo "The results of `cargo tree --workspace --e features` can be found at: [tree-features](target/dependency-report/cargo-tree-features.txt)"|| echo "**Important:** running `cargo tree --workspace --duplicates` currently fails; you can see the error output at [tree-features](target/dependency-report/cargo-tree-features.txt)."
-
-
-### Outdated Report
-
-::shell cargo-outdated outdated && echo "" || echo "**Important:** `cargo outdated --workspace --format json` currently fails due to a resolver conflict. Treat this as the first upgrade blocker, not as missing data. The error can be found at [outdated-errors](target/depencency-report/)"
-
-### Workspace Dependencies
-
-#### Direct Dependencies
-
-::shell-block 
-jq '[ .workspace_members[] as $member_id
-    | .packages[] | select(.id == $member_id) as $pkg
-    | $pkg.dependencies[]
-    | {
-        dependency_name: .name,
-        package_name: $pkg.name,
-        manifest_path: $pkg.manifest_path,
-        req: .req,
-        kind: (.kind // "normal"),
-        optional: .optional,
-        uses_default_features: .uses_default_features,
-        features: .features,
-        target: .target,
-        rename: .rename,
-        source: .source,
-        registry: .registry,
-        path: .path
-      }
-  ]
-' "{{ctx.repo_root}}/target/dependency-report/metadata.json" \
-  > "{{ctx.repo_root}}/target/dependency-report/workspace-direct-dependencies.json" \
-  && echo "The direct dependencies this repo has have been cataloged in [direct dependencies](target/dependency-report/workspace-direct-dependencies.json)"
+::shell-block timeout=2100
+python3 scripts/dependency-report/collect.py
 ::end-block
 
-#### Transient Dependencies
+Read the index emitted above before using any report. Its command records contain
+exact arguments, working directory, exit status, stdout, stderr, and successful
+JSON artifact paths. Its derived records identify successful reports and skipped
+prerequisites. Use only artifacts from that invocation; an absent or failed
+report is never evidence of an empty dependency set.
 
-::shell-block
-jq '
-  [
-    .workspace_members[] as $member_id
-    | .packages[] | select(.id == $member_id) as $pkg
-    | $pkg.dependencies[]
-    | {
-        dependency_name: .name,
-        declaration: {
-          package_name: $pkg.name,
-          manifest_path: $pkg.manifest_path,
-          req: .req,
-          kind: (.kind // "normal"),
-          optional: .optional,
-          uses_default_features: .uses_default_features,
-          features: .features,
-          target: .target,
-          rename: .rename,
-          source: .source,
-          registry: .registry,
-          path: .path
-        }
-      }
-  ]
-  | group_by(.dependency_name)
-  | map({
-      dependency_name: .[0].dependency_name,
-      declarations: [.[] | .declaration],
-      declared_by_count: length,
-      requirement_set: [.[] | .declaration.req] | unique,
-      kinds: [.[] | .declaration.kind] | unique,
-      optional_values: [.[] | .declaration.optional] | unique,
-      targets: [.[] | .declaration.target] | unique
-    })
-  | sort_by(.dependency_name)
-' "{{ctx.repo_root}}/target/dependency-report/metadata.json" \
-  > target/dependency-report/upgrades/workspace-dependency-requirements-by-crate.json \
-  && echo "The transient dependencies this repo has, have been cataloged in [direct dependencies](target/dependency-report/workspace-direct-dependencies.json)"
-::end-block
+The collector runs at Claudine's launch repository root. If the helper is absent,
+stop and report the missing prerequisite. Do not substitute evidence from another
+checkout. Record the index path, repository revision, dirty state, collection
+time, tool versions, and lockfile hash in the plan. If the lockfile changed during
+collection, resolve the snapshot inconsistency before making firm recommendations.
 
-### Resolved External Package Metadata
+### How to interpret the reports
 
-With this data, we're answering the question "what external package are actually resolved, and do they have risky traits?"
+- `metadata-declarations.json` preserves direct declarations without resolving
+  external dependencies. Use it and `manifests.json` even when full resolution
+  fails. If metadata discovery fails too, the snapshot covers only the root
+  manifest: enumerate its workspace members and inspect their manifests before
+  claiming complete declaration coverage.
+- `metadata-default.json` and `metadata-all-features.json` are separate feature
+  views. Record the actual scope of each; do not treat all-features as a universal
+  valid build configuration. Metadata includes all target platforms by default;
+  the tree reports use the host target. Obtain targeted evidence for relevant
+  platform or feature differences before drawing conclusions from those reports.
+- `workspace-direct-dependencies` and `workspace-requirements-by-dependency`
+  reports include all declarations, including local dependencies. Separate
+  internal workspace members from external registry, Git, and nonmember path
+  dependencies. Group identity using name and source/path/registry, not name alone.
+- `manifests.json` preserves authored TOML, including workspace inheritance,
+  aliases, target tables, patches, and resolver settings. Compare root
+  `[workspace.dependencies]` with member declarations. Inspect applicable Cargo
+  configuration and toolchain files without copying credentials into reports.
+- `resolved-duplicate-identities` reports distinguish version count from source
+  count. Multiple package IDs do not necessarily mean multiple versions.
+- `resolved-dependency-edges` and `reverse-dependency-edges` preserve exact package
+  IDs, aliases, dependency kinds, and target conditions. Traverse these edges to
+  establish which workspace packages retain each older version. Do not infer
+  control merely because a crate name also appears in a direct declaration.
+- Raw metadata retains external package descriptions, MSRV, license, repository,
+  build-script/proc-macro targets, native `links`, and available features. Enabled
+  features are recorded separately in `resolve.nodes[].features`. Use both when
+  assessing risk and feature changes.
+- `outdated.json`, when available, is a discovery input. Distinguish the installed
+  version, latest compatible release, latest available release, and recommended
+  target. A failed outdated query does not by itself prove the current workspace
+  cannot resolve or build. Read the actual diagnostics.
 
-::shell-block
-jq '
-  [
-    .packages[]
-    | select(.source != null)
-    | {
-        id,
-        name,
-        version,
-        source,
-        license,
-        license_file,
-        description,
-        repository,
-        homepage,
-        documentation,
-        rust_version,
-        links,
-        has_build_script: any(.targets[]?; .kind | index("custom-build")),
-        is_proc_macro: any(.targets[]?; .kind | index("proc-macro")),
-        target_kinds: ([.targets[]?.kind[]?] | unique),
-        features
-      }
-  ]
-' "{{ctx.repo_root}}/target/dependency-report/metadata.json" \
-  > "{{ctx.repo_root}}/target/dependency-report/resolved-external-package-metadata.json" \
-  && echo "The data can be found at: [Resolved External Package Metadata](target/dependency-report/resolved-external-package-metadata.json)"
-::end-block
+## Analysis policy
 
-### Resolved Duplicate Version Groups
+### Upgrade value and risk
 
-With this data, we're answering the question "Which external crates are resolved at multiple versions?"
+Prioritize concrete security fixes, relevant bug fixes, platform/compiler
+compatibility, upstream support, public-type interoperability, and maintenance
+cost. Identify the specific benefit of every proposed change. Do not promise
+build-time or binary-size improvements merely from reducing lockfile duplicates.
 
-::shell-block
-jq '
-  [
-    .packages[]
-    | select(.source != null)
-    | {name, version, id, source}
-  ]
-  | group_by(.name)
-  | map(select(length > 1))
-  | map({
-      name: .[0].name,
-      versions: [.[].version] | unique,
-      version_count: ([.[].version] | unique | length),
-      packages: .
-    })
-  | sort_by(.name)
-' "{{ctx.repo_root}}/target/dependency-report/metadata.json" \
-  > "{{ctx.repo_root}}/target/dependency-report/upgrades/resolved-duplicate-version-groups.json" \
-  && echo "The data can be found at: [Resolved Duplicate Version Groups](target/dependency-report/resolved-duplicate-version-groups.json)"
-::end-block
+For each recommended target, verify release availability, migration notes, MSRV,
+feature changes, and supported platforms using authoritative registry, upstream,
+and advisory sources. Cite links and retrieval dates. Treat missing evidence as
+unknown; separate verified facts, inferences, and open questions. Do not claim
+security coverage unless a current advisory review or scanner result supports it.
 
-### Workspace Controlled Duplicates
+Flag build scripts, native links, proc macros, public API types, broad reverse
+usage, and platform-specific behavior. Candidate families include CLI/TUI,
+HTTP/TLS/networking, PDF/document parsing, SVG/image rendering, Git/native builds,
+audio/platform bindings, serialization/configuration, and random/crypto
+foundations. Name matching suggests investigation; actual dependency edges,
+shared types, features, or upstream guidance must justify coordinated upgrades.
+Do not assume a patch/minor change is low risk. Account for breaking pre-1.0
+releases and any required Rust toolchain increase explicitly.
 
-With this data, we're answer the question "Which duplicated crates are directly controlled by workspace manifests?"
+### Alignment is independent of duplicate removal
 
-::shell-block
-jq -n \
-  --slurpfile reqs target/dependency-report/upgrades/workspace-dependency-requirements-by-crate.json \
-  --slurpfile dupes target/dependency-report/upgrades/resolved-duplicate-version-groups.json '
-  ($reqs[0]) as $reqs
-  | ($dupes[0]) as $dupes
-  | [
-      $dupes[]
-      | . as $dupe
-      | ($reqs[] | select(.dependency_name == $dupe.name)) as $req
-      | {
-          name: $dupe.name,
-          resolved_versions: $dupe.versions,
-          version_count: $dupe.version_count,
-          direct_workspace_declarations: $req.declarations,
-          requirement_set: $req.requirement_set,
-          kinds: $req.kinds,
-          targets: $req.targets
-        }
-    ]
-  | sort_by(.name)
-' > "{{ctx.repo_root}}/target/dependency-report/upgrades/workspace-controlled-duplicates.json" \
-&& echo "The data can be found at: [Workspace Controlled Duplicates](target/dependency-report/workspace-controlled-duplicates.json)"
-::end-block
+Examine every external dependency declared by multiple workspace packages,
+including those currently resolving to a single version. Distinguish:
 
-### Upgrade Risk Surface
+1. **Requirement alignment:** compatible declarations adopt a shared version policy.
+2. **Workspace inheritance:** suitable common declarations move into
+   `[workspace.dependencies]` with member `workspace = true` entries.
+3. **Resolved-version consolidation:** a verified graph change can remove an
+   unnecessary version or source identity.
+4. **Intentional divergence:** incompatible requirements or justified differences
+   remain documented with a revisit condition.
 
-This report should help to distinguish "easy bump" from "isolate carefully."
+Compare requirements semantically, not only as strings. Preserve member-specific
+features, default-feature behavior, optionality, dependency kinds, aliases,
+sources, and target conditions. Inherited features are additive; putting features
+in the workspace declaration can broaden every inheriting member. Keep shared
+features minimal and inspect the workspace resolver. Validate affected packages
+individually as well as in the relevant combined build to catch feature masking.
 
-::shell-block
-jq '
-  [
-    .[]
-    | . + {
-        upgrade_risk_flags: (
-          []
-          + (if .is_proc_macro then ["proc-macro"] else [] end)
-          + (if .has_build_script then ["build-script"] else [] end)
-          + (if .links != null then ["native-links"] else [] end)
-          + (if (.source // "" | startswith("git+")) then ["git-source"] else [] end)
-          + (if (.name | test("openssl|ssl|tls|rustls|ring|aws-lc|crypto|argon|bcrypt|sha|hmac|aes|x509|webpki"; "i")) then ["crypto-or-tls"] else [] end)
-          + (if (.name | test("tokio|hyper|reqwest|axum|tower|tungstenite|websocket|h2|oauth|tonic"; "i")) then ["networking"] else [] end)
-          + (if (.name | test("sqlx|rusqlite|sqlite|postgres|mysql|diesel|sea-orm"; "i")) then ["database"] else [] end)
-          + (if (.name | test("pdf|lopdf|image|png|jpeg|jpg|gif|webp|tiff|svg|resvg|usvg|xml|html|scraper|nom|pest|regex"; "i")) then ["parser-or-media"] else [] end)
-          + (if (.name | test("sys$|bindgen|cc|cmake|libgit2|libssh2|sqlite|openssl-sys|coreaudio|onig|pcre2"; "i")) then ["native-build-surface"] else [] end)
-          + (if (.name | test("clap|ratatui|crossterm|inquire|tui|console|indicatif"; "i")) then ["cli-or-tui"] else [] end)
-        )
-      }
-  ]
-  | map(select(.upgrade_risk_flags | length > 0))
-  | sort_by(.name)
-' "{{ctx.repo_root}}/target/dependency-report/upgrades/resolved-external-package-metadata.json" \
-  > "{{ctx.repo_root}}/target/dependency-report/upgrades/upgrade-risk-surfaces.json" \
-  && echo "The report can be found at: ${}"
-::end-block
+Do not standardize features just for consistency, assume centralization eliminates
+duplicates, force all versions to converge, or use patches to disguise incompatible
+requirements. Recommend centralization only where its maintenance benefit exceeds
+migration cost. Retain public-type compatibility across package boundaries.
 
-### Upgrade Family View
+For each consolidation proposal, identify exact package IDs and sources, direct
+requirements, the versions they actually resolve to, and reverse paths anchoring
+older versions. State which specific changes would remove which identities and
+which transitive anchors would remain. If that conclusion is unverified, label it
+as a hypothesis and specify the smallest check that can resolve it.
 
-::shell-block
-jq -n \
-  --slurpfile packages target/dependency-report/upgrades/resolved-external-package-metadata.json \
-  --slurpfile controlled target/dependency-report/upgrades/workspace-controlled-duplicates.json '
-  def names_matching($re):
-    [
-      $packages[0][]
-      | select(.name | test($re; "i"))
-      | {
-          name,
-          version,
-          source,
-          has_build_script,
-          is_proc_macro,
-          links
-        }
-    ];
+### Ordering and validation
 
-  def controlled_matching($re):
-    [
-      $controlled[0][]
-      | select(.name | test($re; "i"))
-    ];
+Use this priority order, adjusting it when evidence establishes a prerequisite:
 
-  [
-    {
-      family: "cli-tui",
-      rationale: "Terminal UI, prompts, console rendering, and CLI argument parsing often need coordinated upgrades.",
-      packages: names_matching("clap|ratatui|crossterm|inquire|tui|console|indicatif|unicode-width|unicode-truncate|compact_str|strum"),
-      workspace_controlled_duplicates: controlled_matching("clap|ratatui|crossterm|inquire|tui|console|indicatif|unicode-width|unicode-truncate|compact_str|strum")
-    },
-    {
-      family: "http-tls-networking",
-      rationale: "HTTP, TLS, websocket, and async networking upgrades can affect runtime behavior and feature selection.",
-      packages: names_matching("reqwest|hyper|rustls|native-tls|openssl|tower|axum|tungstenite|tokio-tungstenite|h2|oauth|webpki"),
-      workspace_controlled_duplicates: controlled_matching("reqwest|hyper|rustls|native-tls|openssl|tower|axum|tungstenite|tokio-tungstenite|h2|oauth|webpki")
-    },
-    {
-      family: "pdf-document-parsing",
-      rationale: "PDF and document parsing crates process complex input and should be upgraded or feature-gated carefully.",
-      packages: names_matching("pdf|lopdf|pdf-extract"),
-      workspace_controlled_duplicates: controlled_matching("pdf|lopdf|pdf-extract")
-    },
-    {
-      family: "svg-image-rendering",
-      rationale: "SVG and image rendering crates tend to move together and affect binary size, parsing surface, and rendering behavior.",
-      packages: names_matching("resvg|usvg|image|png|jpeg|jpg|gif|webp|tiff|zune|kurbo|roxmltree|svgtypes|tiny-skia"),
-      workspace_controlled_duplicates: controlled_matching("resvg|usvg|image|png|jpeg|jpg|gif|webp|tiff|zune|kurbo|roxmltree|svgtypes|tiny-skia")
-    },
-    {
-      family: "git-native-build",
-      rationale: "Git/native dependencies involve build scripts, system libraries, OpenSSL/libgit2/libssh2, and platform-specific failures.",
-      packages: names_matching("git2|libgit2|libssh2|openssl-sys|libz-sys"),
-      workspace_controlled_duplicates: controlled_matching("git2|libgit2|libssh2|openssl-sys|libz-sys")
-    },
-    {
-      family: "audio-platform",
-      rationale: "Audio and platform bindings often include native APIs and target-specific behavior.",
-      packages: names_matching("cpal|rodio|coreaudio|symphonia|bindgen"),
-      workspace_controlled_duplicates: controlled_matching("cpal|rodio|coreaudio|symphonia|bindgen")
-    },
-    {
-      family: "serialization-config",
-      rationale: "serde/json/yaml/toml/config crates are broad foundations; version skew may indicate deprecated YAML or parser stacks.",
-      packages: names_matching("serde|serde_json|serde_yaml|serde_yaml_ng|toml|toml_edit|winnow|json|yaml"),
-      workspace_controlled_duplicates: controlled_matching("serde|serde_json|serde_yaml|serde_yaml_ng|toml|toml_edit|winnow|json|yaml")
-    },
-    {
-      family: "random-crypto-foundation",
-      rationale: "rand/getrandom and crypto foundations often reveal old transitive anchors.",
-      packages: names_matching("rand|getrandom|ring|argon|sha|hmac|aes|crypto"),
-      workspace_controlled_duplicates: controlled_matching("rand|getrandom|ring|argon|sha|hmac|aes|crypto")
-    }
-  ]
-  | map(. + {
-      package_count: (.packages | length),
-      controlled_duplicate_count: (.workspace_controlled_duplicates | length)
-    })
-' > "{{ctx.repo_root}}/target/dependency-report/upgrade-families.json" \
-&& echo "The family view data be found at: [Upgrade Family View](target/dependency-report/upgrade-families.json)"
-::end-block
+1. Evidence/tooling blockers and confirmed urgent security or correctness issues.
+2. Workspace-controlled alignment and consolidation with demonstrated benefit.
+3. Low-risk leaf upgrades with independent validation.
+4. Coordinated domain stacks and public-type migrations.
+5. Old transitive anchors requiring upstream changes, replacement, or feature gating.
 
+Transitive-only duplicates may remain when removing them offers little benefit or
+requires disproportionate disruption. Include intentional exceptions rather than
+silently omitting them. Separate independently reviewable changes; avoid phases
+that combine unrelated migrations or cannot be reverted coherently.
 
-### Feature Usage
+Read the affected package-area recipes and repository testing guidance. Propose
+exact commands with their working directories, package/feature/target scope,
+expected results, and acceptance criteria. Include affected consumers when public
+types or behavior change, and relevant macOS, Linux, native Windows, and WSL2
+checks. Use actual repository commands; do not invent recipes or claim proposed
+checks have run. Distinguish local verification from CI policy and reuse qualifying
+passing evidence under repository rules. Do not schedule a full-workspace CI run
+merely to discover scope. Include a post-change lockfile/graph comparison to verify
+claimed consolidation, feature preservation, and remaining intentional duplicates.
 
-This extracts feature configuration from direct workspace declarations, avoiding the need to scan every manifest.
+## Required plan
 
-::shell-block
-jq '
-  [
-    .[]
-    | select(
-        (.features | length > 0)
-        or (.uses_default_features == false)
-        or (.optional == true)
-        or (.target != null)
-      )
-    | {
-        dependency_name,
-        package_name,
-        manifest_path,
-        req,
-        kind,
-        optional,
-        uses_default_features,
-        features,
-        target
-      }
-  ]
-  | sort_by(.dependency_name, .package_name)
-' "{{ctx.repo_root}}/target/dependency-report/workspace-direct-dependencies.json" \
-  > "{{ctx.repo_root}}/target/dependency-report/workspace-dependency-feature-usage.json" \
-  && echo "Feature usage data can be found at: [Feature Usage Data](target/dependency-report/workspace-dependency-feature-usage.json)"
-::end-block
+Write an idiomatic Markdown plan with:
 
-## Task
-
-- identify dependency families that should be upgraded together
-- identify direct workspace dependency requirements that anchor older versions
-- identify transitive-only duplicates that should be left alone for now
-- propose an upgrade order
-- distinguish patch/minor/major/consolidate/feature-gate/replace/leave-alone
-- include validation commands after each phase
-
-Prioritize:
-
-1. blockers that prevent tooling from running
-2. direct workspace-controlled duplicate families
-3. low-risk leaf upgrades
-4. domain-specific stacks such as TUI, SVG/rendering, PDF, HTTP/TLS, Git/native, audio/platform
-5. old transitive anchors that may require replacement or feature-gating
-
-**IMPORTANT:** DO NOT recommend upgrading everything blindly.
+- Evidence inventory and limitations, including failed reports and actual causes
+  where established. If evidence is insufficient, plan evidence recovery first
+  and mark dependent recommendations provisional.
+- An alignment decision table covering all external dependencies used by multiple
+  workspace packages, including already-aligned entries and intentional exceptions.
+- An upgrade recommendation table with dependency identity, current requirements
+  and resolved versions, proposed requirement/target, affected packages/manifests,
+  benefit, supporting evidence, confidence, and unresolved blockers.
+- Separate action and compatibility classifications: `upgrade`, `align`,
+  `centralize`, `consolidate`, `feature-gate`, `replace`, or `leave-alone`; and
+  `patch`, `minor`, `major`, `pre-1.0-breaking`, `no-version-change`, or `unknown`.
+  A recommendation may require multiple actions.
+- Contiguous numbered phases. Each phase states its objective, prerequisites,
+  concrete edits an implementer would make, MSRV/feature/public API/platform
+  implications, validation commands, acceptance criteria, and rollback boundary.
+- A deferred/intentional-divergence table explaining remaining duplicates and
+  differing policies, their anchors, and measurable revisit conditions.
+- Source citations for target-version and migration claims. Separate recommended
+  validation from checks actually performed while preparing the plan.
 
 ## Closure
 
-To complete this task you must create a high confidence multi-phase plan to upgrade the repo's dependencies.
+Create `reviews/{{ctx.today}}-dependency-upgrade/plan.md` relative to
+`{{ctx.repo_root}}`. Include valid YAML frontmatter in the initial write:
 
-- the plan should be saved to "reviews/{{ctx.today}}-dependency-upgrade/plan.md" as a idiomatic Markdown document
-- once saved you will add and the following Frontmatter properties to "reviews/{{ctx.today}}-dependency-upgrade/plan.md":
-    - `phases` - the last phase number in the plan
-    - `start_phase` - typically 1 (but sometimes 0) representing the index of the first phase of work
+- `start_phase`: integer index of the first phase, normally 1; use 0 for a distinct
+  evidence-recovery or prerequisite phase.
+- `phases`: integer index of the last phase, not the number of phases.
+
+Number phases contiguously from `start_phase` through `phases`, inclusive. Verify
+that the frontmatter matches the body, artifact/source links are accurate, and
+every firm recommendation has supporting evidence. If the destination already
+exists, read it first and preserve execution status or author annotations; do not
+silently replace a plan already in progress. Finish by reporting the plan path,
+principal recommendations, and unresolved blockers. Do not implement the plan.

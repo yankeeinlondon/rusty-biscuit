@@ -339,6 +339,20 @@ Network interface enumeration using `getifaddrs` system call.
 - WAN IP lookup when the `network` feature is enabled
 - Permission denied error handling
 - Interface filtering utilities
+- `ScopedIpAddr` - an IP address with an optional IPv6 zone (`fe80::1%en0`);
+  `host_addresses` returns a sorted, deduplicated list that keeps link-local
+  scopes (interface name on Unix, numeric index on Windows)
+- `contains_cgnat_address` - true when any address is inside `100.64.0.0/10`
+  (the range Tailscale uses)
+- `detect_default_gateways` - primary default IPv4 and IPv6 gateways, as a
+  separate call from interface detection; an on-link default route yields no
+  gateway, and a missing IPv6 table is not an error
+- `network::icmp::ping` - ICMP echo to an IP literal (no DNS, no subprocess,
+  no privilege escalation) under a checked `ProbeBudget`; a missing reply is a
+  `PingVerdict`, never an error, and an `IcmpError` means the host could not
+  send. Linux and WSL2 require the process group to be inside
+  `net.ipv4.ping_group_range`. `ping_with` accepts an `EchoProbe` stub for
+  deterministic tests.
 
 **Example:**
 
@@ -361,6 +375,18 @@ if !net.permission_denied {
 // Only active, non-loopback interfaces
 let filtered = detect_network_filtered()?;
 // All interfaces here are up and not loopback
+```
+
+```rust
+use sniff::network::{ScopedIpAddr, detect_default_gateways};
+use sniff::network::icmp::{ProbeBudget, ping};
+
+let gateways = detect_default_gateways()?;
+println!("gateway: {:?}, gateway_v6: {:?}", gateways.v4, gateways.v6);
+
+let target: ScopedIpAddr = "127.0.0.1".parse()?;
+let report = ping(&target, ProbeBudget::from_millis(100.0, 3.0)?)?;
+println!("{:?}", report.verdict()); // AllReplied | NoneReplied | Unstable
 ```
 
 ### Filesystem Module
@@ -397,6 +423,8 @@ remote-tracking refresh.
 - `WorktreeInfo` - Linked worktree information
 - `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
 - `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
+- `get_current_worktree_name` / `current_worktree_name_with_repo` - Linked-worktree name only, without enumerating every worktree; `None` in the main checkout
+- `RecentCommits::plain_blocks` - Each commit rendered as the plain block that `RecentCommits::to_plain` and `sniff repo recent-commits --plain` join with a blank line
 - `merge_conflicts_at` - Actual unresolved paths from the live repository index
 - `merge_conflicts_with_branch_at` - Read-only committed-tip prediction for merging a local branch into the current branch
 

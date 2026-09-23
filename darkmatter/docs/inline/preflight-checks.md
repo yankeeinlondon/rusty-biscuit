@@ -43,6 +43,49 @@ still pending frontmatter-shell expansion (the chicken-and-egg case) is rejected
 up front as `DynamicCommandShape` rather than surfacing as a late
 `NotPreApproved`.
 
+Content passed to `as_markdown(...)` is part of the graph. Preflight never
+composes it: statically known content (string-literal arguments, in every
+branch, and arguments discovery can evaluate) is walked like a transcluded
+child, relative to the root document. Discovery answers shell probes
+(`has_alias`, `has_builtin_function`, `has_user_function`, `can_execute`) with
+`false`, returns `""` for `as_markdown`, and answers `ping`/`ping_under` with
+`null`, so a command, transclusion target, or nested content whose shape
+depends on one of those calls is rejected up front as
+`UnevaluatedDependencyShape`.
+
+## ICMP Effects
+
+Shell commands are not the only approvable effect. `ping` and `ping_under` are
+network effects under their own grant, and the same condition-blind walk
+reports them on `ComposePreflightReport::icmp_probes` — typed
+`PlannedIcmpProbe` records (function, target, per-attempt timeout, attempt
+count, and whether a grant already permits the target), not command strings.
+Collecting them sends no packet: discovery records the plan and answers `null`.
+A probe inside `as_markdown` content is discovered the same way, because that
+content is walked as a child of the document that named it.
+
+The grant itself comes from `--allow-host` (`ComposeOptions::with_allowed_host`),
+which is one entry point for two disjoint policies:
+
+- An **exact IP literal** grants ICMP to that address and, as before, HTTP to
+  that exact host. A grant that spells an IPv6 zone (`fe80::1%en0`) permits
+  only that zone; an unscoped one permits any.
+- A **strict CIDR** grants ICMP to every address whose bits fall inside it, of
+  that family only. It authorizes no HTTP at all — no URL host can spell a
+  range — so it is withheld from the fetch allowlist rather than left to fail
+  an exact-string comparison.
+- A **hostname or wildcard** grants HTTP only. It never authorizes an address
+  indirectly.
+
+At runtime the actual target is revalidated against the grant before anything
+is sent. An ungranted target answers `null` and records one compose warning,
+having sent nothing — even for a multi-attempt call. Evaluating an expression
+never acquires consent as a side effect, and a nested `as_markdown` child runs
+under the root's grants rather than its own.
+
+`md compose --shell` prints the discovered ICMP probes alongside the shell
+approval candidates.
+
 ## Security Policy
 
 Darkmatter uses a two-stage security design:

@@ -57,13 +57,23 @@ pub struct ApplyOutcome {
     pub declined: Vec<DeclinedDrift>,
 }
 
+/// The prebuilt full-scope artifact texts [`apply_generations`] writes after the
+/// per-provider `data.rs` files and `catalog.json`.
+#[derive(Debug, Clone, Copy)]
+pub struct FullScopeArtifacts<'a> {
+    /// [`crate::signals::build_signals`] output.
+    pub signals: &'a str,
+    /// [`crate::families::build_families`] output.
+    pub families: &'a str,
+    /// [`crate::vocabulary::build_vocabulary`] output.
+    pub vocabulary: &'a str,
+    /// [`crate::agentic_clis::build_agentic_clis`] output, written into Darkmatter.
+    pub agentic_clis: &'a str,
+}
+
 /// Applies regenerated artifacts under `area`: one `data.rs` per scoped
-/// slug, then `catalog.json`, the signals `generated.rs`, the families
-/// `families_generated.rs`, and the stream `vocabulary.rs` (all always full
-/// scope — `generations` must cover every provider; `signals`, `families`,
-/// and `vocabulary` are the prebuilt [`crate::signals::build_signals`] /
-/// [`crate::families::build_families`] / [`crate::vocabulary::build_vocabulary`]
-/// texts).
+/// slug, then `catalog.json` and every [`FullScopeArtifacts`] file (all
+/// always full scope — `generations` must cover every provider).
 ///
 /// `decide` receives each drifted file's path and line-diff and owns the
 /// interaction; after a [`Decision::Quit`] every remaining drifted file is
@@ -72,9 +82,7 @@ pub fn apply_generations(
     area: &Path,
     scope: &[&str],
     generations: &[Generation],
-    signals: &str,
-    families: &str,
-    vocabulary: &str,
+    artifacts: FullScopeArtifacts<'_>,
     decide: &mut dyn FnMut(&Path, &[String]) -> Decision,
 ) -> Result<ApplyOutcome, GenError> {
     let committed_catalog = load_committed_catalog(area)?;
@@ -119,7 +127,7 @@ pub fn apply_generations(
 
     apply_one(
         &crate::signals::signals_path(area),
-        signals,
+        artifacts.signals,
         &mut outcome,
         &mut quit,
         decide,
@@ -129,7 +137,7 @@ pub fn apply_generations(
 
     apply_one(
         &crate::families::families_path(area),
-        families,
+        artifacts.families,
         &mut outcome,
         &mut quit,
         decide,
@@ -139,7 +147,17 @@ pub fn apply_generations(
 
     apply_one(
         &crate::vocabulary::vocabulary_path(area),
-        vocabulary,
+        artifacts.vocabulary,
+        &mut outcome,
+        &mut quit,
+        decide,
+        None,
+        || None,
+    )?;
+
+    apply_one(
+        &crate::agentic_clis::agentic_clis_path(area),
+        artifacts.agentic_clis,
         &mut outcome,
         &mut quit,
         decide,
@@ -291,6 +309,13 @@ mod tests {
     use super::*;
     use crate::generate::{Provenance, ResolvedField};
 
+    const ARTIFACTS: FullScopeArtifacts<'static> = FullScopeArtifacts {
+        signals: "signals\n",
+        families: "families\n",
+        vocabulary: "vocabulary\n",
+        agentic_clis: "agentic\n",
+    };
+
     fn generation(slug: &str, data_rs: &str) -> Generation {
         Generation {
             slug: slug.to_string(),
@@ -318,14 +343,16 @@ mod tests {
     #[test]
     fn accept_writes_and_clean_files_skip_the_callback() {
         let dir = tempfile::tempdir().unwrap();
-        let area = dir.path();
+        // The Darkmatter artifact resolves above the area, so nest the area to
+        // keep every write inside the temporary root.
+        let area = &dir.path().join("claudine");
         let generation = generation("claude", "new\n");
         // Committed data.rs drifts; catalog.json is absent (drift-from-empty).
         std::fs::create_dir_all(area.join("lib/src/provider/claude")).unwrap();
         std::fs::write(committed_data_path(area, "claude"), "old\n").unwrap();
 
         let mut asked = Vec::new();
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |path,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), ARTIFACTS, &mut |path,
                 diff| {
             asked.push(path.to_path_buf());
             assert!(!diff.is_empty());
@@ -335,8 +362,8 @@ mod tests {
 
         assert_eq!(
             outcome.written.len(),
-            5,
-            "data.rs, catalog.json, signals, families, vocabulary"
+            6,
+            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs"
         );
         assert!(outcome.declined.is_empty());
         assert_eq!(
@@ -347,21 +374,25 @@ mod tests {
         assert!(crate::signals::signals_path(area).is_file());
         assert!(crate::families::families_path(area).is_file());
         assert!(crate::vocabulary::vocabulary_path(area).is_file());
+        assert!(crate::agentic_clis::agentic_clis_path(area).starts_with(dir.path()));
+        assert!(crate::agentic_clis::agentic_clis_path(area).is_file());
 
         // Second run: everything clean, callback never invoked.
-        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |_,
+        let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), ARTIFACTS, &mut |_,
                 _| {
             panic!("clean files must not prompt")
         })
         .unwrap();
-        assert_eq!(outcome.clean.len(), 5);
+        assert_eq!(outcome.clean.len(), 6);
         assert!(outcome.written.is_empty() && outcome.declined.is_empty());
     }
 
     #[test]
     fn decline_leaves_files_and_scaffolds_the_override_pin() {
         let dir = tempfile::tempdir().unwrap();
-        let area = dir.path();
+        // The Darkmatter artifact resolves above the area, so nest the area to
+        // keep every write inside the temporary root.
+        let area = &dir.path().join("claudine");
         let generation = generation("claude", "new\n");
         std::fs::create_dir_all(area.join("lib/src/provider/claude")).unwrap();
         std::fs::write(committed_data_path(area, "claude"), "old\n").unwrap();
@@ -373,7 +404,7 @@ mod tests {
         .unwrap();
 
         let outcome =
-            apply_generations(area, &["claude"], std::slice::from_ref(&generation), "signals\n", "families\n", "vocabulary\n", &mut |_, _| {
+            apply_generations(area, &["claude"], std::slice::from_ref(&generation), ARTIFACTS, &mut |_, _| {
                 Decision::Decline
             })
             .unwrap();
@@ -381,8 +412,8 @@ mod tests {
         assert!(outcome.written.is_empty());
         assert_eq!(
             outcome.declined.len(),
-            5,
-            "data.rs, catalog.json, signals, families, vocabulary"
+            6,
+            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs"
         );
         assert_eq!(
             std::fs::read_to_string(committed_data_path(area, "claude")).unwrap(),
@@ -397,17 +428,20 @@ mod tests {
         assert!(snippet.contains("OLD_VAR"), "{snippet}");
         assert!(snippet.contains("reason: TODO"), "{snippet}");
         // Only data.rs gets a field-keyed pin — catalog.json, signals,
-        // families, and vocabulary do not.
+        // families, vocabulary, and the agentic CLI table do not.
         assert!(outcome.declined[1].override_snippet.is_none());
         assert!(outcome.declined[2].override_snippet.is_none());
         assert!(outcome.declined[3].override_snippet.is_none());
         assert!(outcome.declined[4].override_snippet.is_none());
+        assert!(outcome.declined[5].override_snippet.is_none());
     }
 
     #[test]
     fn quit_declines_the_rest_without_prompting() {
         let dir = tempfile::tempdir().unwrap();
-        let area = dir.path();
+        // The Darkmatter artifact resolves above the area, so nest the area to
+        // keep every write inside the temporary root.
+        let area = &dir.path().join("claudine");
         let generations = vec![generation("claude", "new\n"), generation("codex", "new\n")];
         for slug in ["claude", "codex"] {
             std::fs::create_dir_all(area.join(format!("lib/src/provider/{slug}"))).unwrap();
@@ -416,7 +450,7 @@ mod tests {
 
         let mut calls = 0;
         let outcome =
-            apply_generations(area, &["claude", "codex"], &generations, "signals\n", "families\n", "vocabulary\n", &mut |_, _| {
+            apply_generations(area, &["claude", "codex"], &generations, ARTIFACTS, &mut |_, _| {
                 calls += 1;
                 Decision::Quit
             })
@@ -425,8 +459,8 @@ mod tests {
         assert_eq!(calls, 1, "quit stops further prompting");
         assert_eq!(
             outcome.declined.len(),
-            6,
-            "both data.rs plus catalog.json, signals, families, and vocabulary"
+            7,
+            "both data.rs plus catalog.json, signals, families, vocabulary, and agentic CLIs"
         );
         assert!(outcome.written.is_empty());
     }

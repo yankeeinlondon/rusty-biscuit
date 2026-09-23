@@ -1,6 +1,9 @@
 ---
-status: draft — awaiting naming and migration decisions
+status: draft — reviewed, ready for implementation
 created: 2026-07-31
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-09-18
 area: darkmatter
 packages:
   - darkmatter
@@ -13,259 +16,415 @@ amends:
 
 ## Summary
 
-A transclusion that fails today does not fail the compose. The engine records a
-warning, substitutes something for the directive, and returns `Ok`. The caller
-gets an exit code that says the document composed, a document that is missing
-content, and a warning on stderr that is easy to lose in a pipe.
+A transclusion that fails during resolution or composition can currently become
+a warning while `compose` still returns `Ok`. The caller receives a successful
+exit code and a document with missing content. This inverts that default:
+**transclusion failures are errors unless the request explicitly allows
+degraded output**.
 
-This inverts the default: **a transclusion failure is an error**. Suppressing it
-becomes an explicit, per-invocation choice via a CLI switch or an environment
-variable, and choosing it yields exactly the behavior shipped on 2026-07-31 —
-a visible failure notice in the directive's place plus the existing warning.
+Tolerance is one request-scoped policy exposed as:
 
-Nothing about *how* a tolerated failure renders changes. Only who has to ask for
-it, and what happens when nobody does.
+- `md compose --allow-transclusion-failures`;
+- `DARKMATTER_ALLOW_TRANSCLUSION_FAILURES`; and
+- `ComposeOptions::with_allow_transclusion_failures(bool)`.
 
-## Today's behavior
+When tolerance is enabled, a body directive is replaced by a visible notice,
+frontmatter `prologue`/`epilogue` failures omit the failed section, and every
+tolerated failure produces structured report data and a warning. Composition
+then returns `Ok`.
 
-### The tolerance model has three unrelated switches
+This is a breaking cleanup, implemented atomically. The existing
+`ignore_invalid`/`IGNORE_INVALID` policy is removed rather than broadened into a
+second spelling, and `fail_fast` retains its established meaning for other
+compose stages.
 
-Transclusion failure handling is currently decided by three mechanisms that were
-added at different times, are read at different points, and do not compose.
+> **Reader's note.** The initial draft proposed a new frontmatter key, legacy
+> aliases, and possible removal of `fail_fast`. Review found that those choices
+> would let a transcluded child weaken request policy, retain three overlapping
+> controls, and break interpolation's existing `fail_fast` contract. The
+> reviewed design instead makes transclusion tolerance part of the root
+> request authority and removes the obsolete transclusion-specific controls.
 
-**1. `fail_fast` — a `ComposeOptions` boolean, default `false`.**
+## Current behavior
 
-Checked once, at
-[`phases.rs:387`](../../lib/src/markdown/compose/pipeline/phases.rs#L387). When
-`true`, any resolution error returns from the transclusion phase unchanged. It
-is a library option with **no `md compose` flag**; the only CLI surface is
-`md validate --fail-fast`
-([`args/target.rs:32`](../../cli/src/args/target.rs#L32)), which is a different
-command with a different meaning ("stop on first error" while validating).
+### Three mechanisms overlap without forming one policy
 
-**2. `ignore_invalid` — a three-tier lookup, default `false`.**
+1. `ComposeOptions::fail_fast`, defaulting to `false`, controls leniency across
+   several compose stages. In transclusion result application, it also decides
+   whether most child failures become warnings. It is not an `md compose`
+   option; `md validate --fail-fast` belongs to reference validation and has a
+   different contract.
+2. `ComposeOptions::ignore_invalid_references`, the document's
+   `ignore_invalid` frontmatter key, and `IGNORE_INVALID` form a separate
+   precedence chain. They cover target-resolution and some `::file-links`
+   failures, but not failures from composing a resolved child.
+3. Cycle, depth, remote-fetch, and missing-runtime-context failures are forced
+   fatal in the transclusion result loop regardless of those controls.
 
-Resolved by `resolve_ignore_invalid`
-([`engine.rs:1689`](../../lib/src/markdown/compose/transclusion/engine.rs#L1689)),
-in precedence order:
+The result depends on which layer detects a failure. Some tolerated failures
+remove a directive, some insert a notice, and others remain fatal.
 
-1. `ComposeOptions::ignore_invalid_references: Option<bool>`;
-2. the document's own `ignore_invalid` frontmatter key;
-3. the `IGNORE_INVALID` environment variable, read from the *snapshot*
-   environment (`options.context().env()`), not `std::env`.
+### Reference validation is a separate gate
 
-It gates only **target-resolution** failures — a `::file` whose path does not
-resolve — at
-[`engine.rs:622`](../../lib/src/markdown/compose/transclusion/engine.rs#L622)
-(block directives) and
-[`engine.rs:803`](../../lib/src/markdown/compose/transclusion/engine.rs#L803)
-(frontmatter `prologue`/`epilogue` references). When on, the directive is
-replaced with an **empty string** and a warning is recorded. When off, the error
-propagates.
+`md compose` validates references before composition. The existing
+`--allow-missing-transclusions` flag only defers matching validation issues; it
+does not configure `ComposeOptions`. Consequently, a missing target can pass
+the first gate and then fail during composition. Any replacement policy must
+connect these two stages or its CLI escape hatch will not work for unresolved
+targets.
 
-Like `fail_fast`, it has **no `md compose` flag**.
-`--allow-missing-transclusions` looks like one but is not: it feeds
-`ComposeAllowFlags` ([`commands/mod.rs:134`](../../cli/src/commands/mod.rs#L134)),
-which filters the *reference-validation report*, and never reaches
-`ComposeOptions::ignore_invalid_references`.
+### Approval preflight is a third gate
 
-**3. The structural allowlist — hardcoded, not configurable.**
+When shell-capable operations are enabled, `md compose` runs the
+condition-blind approval preflight after reference validation and before the
+terminal compose pass. That walk recursively resolves `::file`, `::url`,
+`prologue`, and `epilogue` children so commands cannot evade approval by
+appearing in a branch that is false in the current state. Resolution, loading,
+or child-composition failures currently abort this walk independently of the
+reference-validation allow flags. Deferring an unresolved target at validation
+therefore does not by itself guarantee that tolerant composition is reached.
 
-At [`phases.rs:377`](../../lib/src/markdown/compose/pipeline/phases.rs#L377),
-three `TransclusionError` variants always propagate regardless of the other two
-switches:
+The replacement policy must connect validation, approval preflight, and
+terminal composition without making preflight condition-aware or allowing it
+to overlook commands in a child that can execute.
 
-- `CycleDetected`
-- `MaxDepthExceeded`
-- `RemoteFetchFailed`
+### `transclusions_skipped` is not a failure counter
 
-Everything else — including any error raised by the child document's own compose
-pipeline — is tolerated by default.
+`ComposeReport::transclusions_skipped` includes legitimate control-flow
+outcomes such as a false `when=` condition and an empty `::file-links` match.
+It cannot tell an embedding caller whether output was degraded by a failure.
 
-### What each failure point does
+Whole-value `::file`, `::code`, and `::url` targets that successfully evaluate
+to `null` or an empty string are another non-failure outcome. The interpolation
+stage removes those directives and records its existing nullable-target warning
+before the transclusion stage sees them. They currently increment neither
+`transclusions_skipped` nor a failure counter.
 
-| Failure | Decided at | Default outcome | Directive becomes |
-|---|---|---|---|
-| Target does not resolve | `engine.rs:622`, `engine.rs:803` | **error** | — |
-| Target does not resolve, `ignore_invalid` on | same | warning | empty string |
-| `::file-links` matched nothing | `engine.rs:1313` | warning | empty string |
-| `::file-links` matched nothing, `fail_fast` on | same | *not an error* | `_No matching files_` |
-| Cycle / max depth / remote fetch | `phases.rs:377` | **error** | — |
-| Child document's compose fails | `phases.rs:376` | warning | failure notice |
-| Any of the above, `fail_fast` on | `phases.rs:387` | **error** | — |
+### The 2026-07-31 fix remains valid
 
-Two things stand out. `ignore_invalid` and `fail_fast` gate overlapping
-failures at different layers with no defined interaction. And `::file-links`
-uses `fail_fast` inverted from everywhere else: strict mode inserts a
-placeholder and keeps going, because an empty match is not actually a failure —
-it is reusing the flag to mean "annotate rather than delete".
+The portable-strings work fixed a separate artifact-corruption bug. A failed
+child compose previously left the authored `::file child.md` line in output
+because no replacement was recorded. `PreparedTransclusion::failure_anchor`
+now retains the replacement target and `fit_notice_to_span` preserves its
+indentation and trailing newline. This specification keeps that mechanism and
+extends visible replacement to every tolerated body-directive failure.
 
-### What the 2026-07-31 change did and did not fix
+## Goals
 
-The portable-strings review surfaced that a child compose failure left the
-authored `::file child.md` line **literally in the composed output**, because
-the apply loop's `continue` skipped recording a replacement and therefore never
-overwrote the span. Directive syntax reached the reader, and for HTML and
-browser targets it rendered as a paragraph of engine internals.
+- A complete compose and a degraded compose must have different default
+  outcomes.
+- One request-scoped policy must govern failures from all transclusion kinds
+  and all recursion depths.
+- The CLI flag must cover reference validation, condition-blind approval
+  preflight, and compose execution.
+- Library callers must be able to detect degraded output without parsing human
+  messages.
+- Parallel transclusion resolution must not make the selected strict-mode
+  error or report ordering nondeterministic.
+- Document content must not be able to grant itself permission to suppress a
+  request-level failure.
 
-That is now fixed: `PreparedTransclusion::failure_anchor`
-([`engine.rs:308`](../../lib/src/markdown/compose/transclusion/engine.rs#L308))
-captures the span and a per-kind notice before the value is consumed, and the
-apply loop substitutes it. `fit_notice_to_span`
-([`phases.rs:505`](../../lib/src/markdown/compose/pipeline/phases.rs#L505))
-reproduces the directive's indentation and trailing newline so a notice inside a
-list item does not unnest the container.
+## Non-goals
 
-It deliberately did **not** touch the default. A composed document that is
-missing a section still exits `0`.
-
-### Why the default is wrong
-
-- **The exit code lies.** A build step, a CI job, or a script that pipes
-  `md compose` into a publisher has no way to distinguish a complete document
-  from one with a hole in it without parsing stderr. Exit status is the one
-  channel every one of those callers already reads.
-- **Silence scales badly.** One missing section in an interactive run is
-  obvious. Fifty documents composed in a loop, each with one tolerated failure,
-  produce fifty warnings nobody reads and fifty published pages with gaps.
-- **The tolerant path is the unusual case.** Authoring a `::file` directive is
-  a statement that the content belongs there. A missing target is nearly always
-  a typo, a moved file, or a broken generation step — not an intent to publish
-  without it.
-- **The switches are unreachable from the CLI.** Neither `fail_fast` nor
-  `ignore_invalid_references` has an `md compose` flag, so the only way a CLI
-  user changes this behavior at all is a frontmatter key or an environment
-  variable most of them do not know exists. A default that cannot be overridden
-  from the command line is not a default, it is a hardcoded policy.
-- **Tolerance is currently invisible in the artifact's provenance.** The
-  document does not record that it was composed in a degraded state, so a file
-  written to disk carries no evidence of the gap beyond the notice text itself.
+- Changing missing hyperlink or image-reference policy.
+- Treating an empty `::file-links` match as a failure.
+- Making internal invariant or missing-runtime-context failures suppressible.
+- Changing the meaning of `fail_fast` outside transclusion.
+- Stabilizing human-readable notice or error prose as a machine API.
 
 ## Proposed behavior
 
-### 1. A transclusion failure is an error
+### 1. Strict is the default
 
-Remove the tolerate-by-default branch. Every failure reaching
-`phases.rs:376` — resolution, child compose, code render, remote — returns
-`Err` from the transclusion phase and out of `compose`. The structural allowlist
-becomes redundant and is deleted: everything is structural now.
+Every failure attributable to an enabled transclusion operation returns `Err`
+unless tolerance is enabled. This includes failures while parsing, preparing,
+resolving, fetching, rendering, or recursively composing:
 
-`::file-links` matching nothing stays **not a failure**. It is a legitimate
-empty result and keeps its current strict-mode placeholder behavior; it must not
-be swept into the new error path.
+- body `::file`, `::code`, `::url`, `::toc-linking`, and `::file-links`
+  directives;
+- frontmatter `prologue` and `epilogue` references;
+- local and permitted remote targets;
+- child schema, expression, shell, render, cycle, and maximum-depth failures.
 
-### 2. One switch suppresses it, on two surfaces
+No partially composed `Markdown` or `ComposeReport` is returned on the strict
+path. With concurrent resolution, the returned error is the first failure in
+stable prepared/source order, never whichever worker finishes first.
 
-Suppression is a single concept with a single resolved value, reachable from
-both a flag and the environment. When on, behavior is byte-for-byte what ships
-today after the 2026-07-31 change: warning recorded, directive replaced with its
-notice, compose returns `Ok`.
+Three categories are not transclusion failures:
 
-Proposed names, following the repo's existing conventions:
+- a directive excluded by `when=false`;
+- `::file-links` successfully discovering zero matches; and
+- a whole-value `::file`, `::code`, or `::url` target successfully evaluating
+  to `null` or an empty string.
 
-| Surface | Name | Precedent |
-|---|---|---|
-| CLI | `md compose --allow-failed-transclusions` | the `--allow-missing-*` family in [`args/command.rs:152-166`](../../cli/src/args/command.rs#L152) |
-| Environment | `DARKMATTER_ALLOW_FAILED_TRANSCLUSIONS` | `DARKMATTER_REMOTE_CONCURRENCY` ([`args/command.rs:213`](../../cli/src/args/command.rs#L213)) |
-| Frontmatter | `allow_failed_transclusions` | the existing `ignore_invalid` key |
-| Library | `ComposeOptions::with_allow_failed_transclusions(Option<bool>)` | `with_ignore_invalid_references` |
+The first two return `Ok`, increment `transclusions_skipped`, and produce no
+failure warning. An empty `::file-links` result always removes the directive;
+it no longer uses `fail_fast` to choose between an empty replacement and
+`_No matching files_`. A nullable target retains the behavior established by
+the nullable-directive-targets fix: the interpolation stage removes it, emits
+the typed nullable-target warning, and increments neither
+`transclusions_skipped` nor `transclusion_failures_tolerated`. Tolerance does
+not control or reclassify that successful-absence path.
 
-Precedence, highest first — matching `resolve_ignore_invalid`'s existing shape
-so there is one rule to learn:
+### 2. Tolerance is request authority
 
-1. the library option, when `Some`;
-2. the document's frontmatter key;
-3. the environment variable, read from the snapshot environment;
-4. otherwise `false` — the new strict default.
+Add one resolved policy to `ComposeOptions`. The private representation may be
+`Option<bool>` so an explicit `false` can override the environment, while the
+public builder remains ergonomic:
 
-The environment variable is read from `options.context().env()` rather than
-`std::env` for the same reason the existing one is: compose must be reproducible
-from a captured context, and a snapshot that replays differently because the
-ambient environment changed is not a snapshot.
+```rust
+ComposeOptions::new().with_allow_transclusion_failures(true)
+```
 
-### 3. Fold the existing switches in
+Resolution precedence, highest first, is:
 
-`ignore_invalid` and `fail_fast` currently express two thirds of this idea each.
-Leaving all three would give three ways to say one thing.
+1. an explicit library/CLI option;
+2. `DARKMATTER_ALLOW_TRANSCLUSION_FAILURES` from the captured
+   `ComposeContext` environment;
+3. `false`.
 
-- **`ignore_invalid`** becomes an alias for the new switch, covering *all*
-  transclusion failures rather than only target resolution. Its frontmatter key
-  and `IGNORE_INVALID` environment variable keep working, at lower precedence
-  than the new names, and warn once per compose that they are superseded.
-- **`fail_fast`** keeps its `md validate` meaning untouched. Its `ComposeOptions`
-  field becomes redundant for transclusion once the default is strict; whether
-  it retains meaning for other phases needs the audit in the open questions
-  below before it is removed.
+The value is resolved once at the root request boundary and inherited by every
+recursive child, including `as_markdown(...)`. A child's frontmatter and a
+later ambient environment change cannot alter it. Boolean environment parsing
+uses the repository's existing boolish spellings; an invalid value is an
+error naming the variable rather than silently selecting strict or tolerant
+behavior.
 
-### 4. Report the degradation as data, not only as text
+There is deliberately no `allow_transclusion_failures` frontmatter property.
+Composition policy belongs to the caller because transcluded content is not
+authorized to decide whether its own failure may be hidden.
 
-`ComposeReport::transclusions_skipped` already counts tolerated failures. Callers
-that suppress the error should be able to act on the count without scraping
-warning strings, and `md compose` should print a one-line summary to stderr when
-it is non-zero, naming the count. This is what makes the suppressed mode safe to
-use in automation: the operator opted out of the error but not out of knowing.
+### 3. Tolerated output is explicit and structured
 
-## Migration
+For each tolerated failure:
 
-This is a breaking change to the default behavior of `md compose` and
-`Markdown::compose`. A document that composed with a warning yesterday fails
-today.
+- a body directive is replaced by its per-kind failure notice, shaped by
+  `fit_notice_to_span` so list and blockquote structure remains intact;
+- a frontmatter `prologue` or `epilogue` contributes no section because it has
+  no authored body span in which to place a notice;
+- the original directive syntax never survives in output;
+- `ComposeReport::transclusion_failures_tolerated` increments by one; and
+- a `ComposeWarning` is recorded with stage `transclusion`, source
+  `darkmatter.compose`, stable code `dm.transclusion.tolerated_failure`, and
+  available line/path provenance.
 
-- **The failure message must name the escape hatch.** The error text should
-  state the flag and the environment variable, so the first person to hit it in
-  CI does not have to read source to recover.
-- **One release of overlap.** Ship the new switch and the report summary before
-  flipping the default, so a caller can adopt the flag while the old default is
-  still in force.
-- **Repository sweep.** Every `md compose` invocation in `justfile`s, CI
-  workflows, and `scripts/` needs auditing for documents that currently rely on
-  a tolerated failure. Any that do should be fixed, not flagged — the flag is
-  for callers outside this repository.
+`transclusions_skipped` retains its non-failure meaning and does not increment
+for tolerated failures. Nested reports merge both the new counter and warnings
+into the root report in stable prepared/source order.
+
+The coded-warning family declares a stable deduplication key so generic
+`ComposeReport::merge` deduplication cannot collapse distinct failures that
+share the code. Its family key is the source-document identity, directive kind,
+and authored body span or frontmatter section slot (including the slot index).
+Repeated projection of the same failure deduplicates; different directives or
+frontmatter entries remain independently countable and visible. The
+`transclusion_failures_tolerated` counter uses those same distinct identities,
+so report merging cannot leave the summary count larger than the number of
+individually reported tolerated failures.
+
+Notice wording and warning messages are human-facing and explicitly unstable.
+Callers use the counter and warning code, not string matching. Notices must be
+plain Markdown safe for subsequent terminal and browser rendering; diagnostics
+continue through the existing `BlockError`/`TerminalRenderable` path rather
+than ad hoc ANSI or `eprintln!` formatting.
+
+### 4. Some failures remain fatal
+
+Tolerance must not convert a failure into output when Darkmatter cannot uphold
+request invariants. At minimum, these remain fatal in both modes:
+
+- missing or partial runtime context for a required captured group;
+- internal invariant failures for which no trustworthy replacement span or
+  section slot exists; and
+- panics, cancellation, or process-level failures outside the typed compose
+  error model.
+
+These are not counted as tolerated. Authorization failures such as a denied
+remote host do not gain authority from this flag: the read remains denied. If
+the denial has a trustworthy directive anchor, tolerant mode may replace that
+directive with a notice; it must never fetch or use cached bytes from the
+denied host.
+
+### 5. `fail_fast` is decoupled, not removed
+
+`ComposeOptions::fail_fast` remains the established policy for interpolation,
+expression, schema-adjacent, and other non-transclusion leniency. The
+transclusion engine no longer reads it. This includes removing its inverted use
+for empty `::file-links` results.
+
+The public docs for `fail_fast` must stop implying that every pipeline failure
+is controlled by that field. They should enumerate its actual remaining
+surfaces or describe it as non-transclusion compose leniency.
+
+### 6. Remove `ignore_invalid`
+
+Remove all of the following in the same breaking change:
+
+- `ComposeOptions::ignore_invalid_references` and
+  `with_ignore_invalid_references`;
+- the `ignore_invalid` frontmatter key and baseline-schema entry; and
+- the unprefixed `IGNORE_INVALID` environment variable.
+
+Do not retain them as aliases. Broadening an authored child key from
+target-resolution tolerance to all child-compose failures is an authority bug,
+while retaining its narrow meaning would preserve overlapping policies and
+technical debt. The repository has no established users, so an atomic cleanup
+is preferable to a deprecation window for a policy that is already internally
+inconsistent.
+
+### 7. CLI validation, preflight, and execution share the flag
+
+Replace `md compose --allow-missing-transclusions` with
+`--allow-transclusion-failures`. Before reference validation, the CLI resolves
+the effective policy from the flag and the captured environment. A true value
+from either surface must:
+
+1. defer transclusion-kind reference-validation errors so composition can
+   produce the configured degraded artifact; and
+2. configure condition-blind approval preflight to omit a child only when the
+   same failure would be suppressible during terminal composition; and
+3. set the root `ComposeOptions` tolerance policy.
+
+Preflight remains condition-blind and fail-closed for dynamic command shapes,
+missing or partial runtime context, internal invariants, and every other
+failure that Section 4 keeps fatal. For a suppressible resolution, load, fetch,
+or child-compose failure, tolerant preflight contributes no child graph edge
+and discovers no commands from that unavailable child. It does not emit the
+user-facing tolerated-failure warning or increment the report counter: the
+terminal compose pass owns that diagnostic and count, preventing duplicate
+reporting. A child that was successfully inspected must still contribute all
+of its commands regardless of current `when=` conditions.
+
+The same resolved value must drive all three stages; the environment-variable
+path must not bypass validation deferral or be read again from ambient
+`std::env`. An invalid environment value fails before validation, preflight, or
+composition begins.
+
+The flag does not defer missing hyperlink or image-reference errors. Existing
+`--allow-missing-hyperlinks` and `--allow-missing-image-refs` behavior is
+unchanged.
+
+`--allow-any-missing-reference` continues to include transclusions and
+therefore implies `--allow-transclusion-failures`; its help text must state the
+broader consequence that any later transclusion failure, not only a missing
+target, is tolerated for that invocation. This side effect is necessary to
+keep the shorthand from passing validation only to fail immediately in the
+compose stage.
+
+On a strict transclusion error, the CLI adds a rendered hint naming
+`--allow-transclusion-failures` and
+`DARKMATTER_ALLOW_TRANSCLUSION_FAILURES`. The library's typed error remains
+CLI-agnostic. On a successful degraded run, the CLI renders one summary after
+the individual warnings, for example `2 transclusion failures tolerated`.
+
+## Migration and repository impact
+
+The strict default, removed APIs, and CLI rename ship atomically. A staged
+release would temporarily require contradictory defaults or aliases that the
+final design intentionally rejects.
+
+Before implementation is considered complete:
+
+- audit every `md compose` invocation in repository `justfile`s, workflows,
+  scripts, fixtures, and documentation;
+- fix repository-owned broken transclusions rather than adding tolerance;
+- update any library caller using `with_ignore_invalid_references` to either
+  fix its input or opt into the new request-wide policy;
+- update the Darkmatter baseline schema and shipped schema documentation to
+  remove `ignore_invalid`; and
+- update the exhaustive `ComposeOptions` field-classification authority so the
+  policy participates in both graph-options identity and the compose-cache
+  fingerprint; tolerance changes graph traversal and semantic output.
 
 ## Testing
 
-- Each failure category returns `Err` by default: unresolved target, child
-  compose failure, code-render failure, remote failure, cycle, max depth.
-- Each of the same categories returns `Ok` with a notice and
-  `transclusions_skipped` incremented when the switch is on, through **each**
-  of the four surfaces, proving the precedence order rather than only the
-  library option.
-- `::file-links` with no matches stays `Ok` in both modes.
-- The error message names both the flag and the environment variable.
-- A suppressed run prints the stderr summary and a strict run does not.
-- The deprecated `ignore_invalid` frontmatter key and `IGNORE_INVALID`
-  environment variable still suppress, warn once, and lose to the new names.
-- `darkmatter/lib/tests/declined_path_transclusion.rs` — written for the
-  portable-strings fix — becomes a default-error test, keeping its
-  suppressed-mode assertions under the new flag.
+### Library behavior
+
+- Every failure category listed above returns `Err` by default.
+- Each suppressible category returns `Ok` with the correct body notice or
+  omitted frontmatter section when tolerance is enabled.
+- Missing-runtime-context and invariant failures remain errors in both modes.
+- Each tolerated failure increments `transclusion_failures_tolerated`, does not
+  increment `transclusions_skipped`, and records the stable warning metadata.
+- False conditions and empty `::file-links` results remain successful skips
+  with no tolerated-failure warning.
+- Nullable or empty whole-value directive targets retain their successful
+  interpolation-stage omission and nullable-target warning, incrementing
+  neither transclusion counter regardless of tolerance.
+- Distinct tolerated failures with the same warning code survive report merges,
+  while repeated projection of the same source location deduplicates without
+  inflating `transclusion_failures_tolerated`.
+- Multiple concurrent failures select and report in stable prepared/source
+  order across repeated runs.
+- Root policy propagates through recursive `::file`, `::url`, and
+  `as_markdown(...)` composition; child frontmatter cannot weaken it.
+- An explicit library `false` overrides a true captured environment value.
+- The new policy participates in graph-options identity and the compose-cache
+  fingerprint, preventing strict and tolerant requests from sharing graph or
+  semantic results.
+
+### CLI behavior
+
+- `--allow-transclusion-failures` alone is sufficient for an unresolved target:
+  reference validation defers it, approval preflight omits the unavailable
+  child, and composition emits degraded output.
+- With shell-capable operations enabled, tolerant preflight omits an unavailable
+  child without recording a graph edge or duplicate warning, then terminal
+  composition records exactly one tolerated failure.
+- Strict preflight still rejects malformed directives, dynamic command shapes,
+  missing runtime context, and other non-suppressible failures even inside a
+  currently false branch.
+- Without the flag or environment variable, the same invocation exits nonzero
+  and emits no composed document on stdout.
+- The strict CLI diagnostic renders the escape-hatch hint through terminal
+  components.
+- A degraded run prints individual warnings plus exactly one count summary to
+  stderr while preserving the selected stdout format.
+- `--allow-any-missing-reference` implies the same transclusion policy and its
+  help text describes that consequence.
+- Invalid environment values fail clearly; true and false boolish values are
+  covered through the fixture's captured environment.
+- Deterministic CLI tests use `CliProcessFixture` and do not restore protected
+  ambient environment after `build()`.
+
+### Regression coverage
+
+- Convert `darkmatter/lib/tests/declined_path_transclusion.rs` to assert the
+  strict default, preserving its notice assertions under tolerant mode.
+- Update `::file-links` tests to remove the `fail_fast`-dependent empty-result
+  behavior.
+- Preserve nullable-target tests for `::file`, `::code`, and `::url`, including
+  their counter behavior in both strict and tolerant requests.
+- Add coverage for body indentation/trailing-newline preservation and for
+  frontmatter `prologue`/`epilogue` omission.
+- Add a regression proving a denied host is checked before any transport-cache
+  read even when failures are tolerated.
+
+Use `just test` and `just lint` in `darkmatter`. These are L1/compile checks;
+this policy does not require a focused terminal or browser window.
 
 ## Documentation impact
 
-- `darkmatter/README.md` and the `md compose` help text gain the flag.
-- `.claude/skills/darkmatter/SKILL.md` — the transclusion failure model is
-  currently undocumented there and is exactly the kind of thing an agent will
-  guess wrong.
-- The `ignore_invalid` frontmatter key's documentation gains its deprecation.
+Update all surfaces that describe compose error policy:
+
+- `darkmatter/README.md` and `md compose --help`;
+- `darkmatter/docs/cli/compose.md`;
+- `darkmatter/docs/inline/preflight-checks.md`;
+- `darkmatter/docs/topics/transclusion.md`;
+- `darkmatter/docs/transclusion/block-transclusion.md`;
+- `darkmatter/docs/transclusion/transclusion-design.md`;
+- `darkmatter/docs/transclusion/fm-transclusion.md`;
+- `darkmatter/docs/inline/file-links.md`;
+- `darkmatter/docs/structs/Markdown.md`;
+- `darkmatter/docs/topics/schema-definition.md`;
+- the shipped Darkmatter schema and generated schema documentation; and
+- `.claude/skills/darkmatter/compose.md`.
+
+Documentation must distinguish successful skips from tolerated failures,
+describe the stable report counter/code, state that policy is resolved once per
+request, and avoid presenting `fail_fast` as the transclusion control.
 
 ## Open questions
 
-1. **Naming.** `--allow-failed-transclusions` sits next to
-   `--allow-missing-transclusions`, which does something else entirely
-   (validation reporting). Is that adjacency clarifying or a trap? A
-   `--strict-transclusions=false` form, or renaming the validation flag, are
-   both alternatives.
-2. **Environment variable prefix.** The existing `IGNORE_INVALID` is unprefixed
-   and therefore collision-prone; `DARKMATTER_REMOTE_CONCURRENCY` is prefixed.
-   This spec proposes the prefixed form for anything new, but the repo should
-   settle the convention once rather than per-feature.
-3. **Granularity.** Is one switch right, or do resolution failures and child
-   compose failures deserve separate control? One switch is simpler and matches
-   how the failures actually reach the operator; the counter-argument is that a
-   missing optional include is a different risk from a child that fails to
-   compose.
-4. **`fail_fast`'s remaining scope.** Does `ComposeOptions::fail_fast` still mean
-   anything outside transclusion once the default is strict? Needs an audit of
-   its read sites before removal.
-5. **Notice text as a contract.** Once failures are opt-in-tolerated, the notice
-   becomes something callers may match on. Should its format be specified, or
-   explicitly declared unstable?
+None. Naming, authority, migration, reporting, and `fail_fast` scope are design
+decisions in this reviewed specification.

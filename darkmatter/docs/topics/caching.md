@@ -1,519 +1,157 @@
 # Caching
 
-This document describes the caching system currently implemented for Darkmatter's compose pipeline.
-
-It replaces the earlier proposal-oriented notes in this file with the behavior that exists in the code today. Where there is still a gap between the long-term design and the current implementation, that gap is called out explicitly.
+This document describes how Darkmatter's compose pipeline caches work today and
+the boundary that decides what may ever reach disk.
 
 ## Overview
 
-Darkmatter uses a two-layer cache for compose work:
+Darkmatter separates cached artifacts into two categories. Each has its own
+cache, and the two never share a store.
 
-1. A run-local in-memory cache owned by `PipelineRuntime`
-2. An optional persistent file-backed cache stored under `.darkmatter/cache/v1/`
+| Category | Examples | Where it lives | Governed by |
+|---|---|---|---|
+| **Semantic-result artifacts** | composed documents, `::file` children, `::code` / `::toc-linking` results, document snapshots, shell output | run-local memory only | `CacheAccessMode`, within one compose run |
+| **Transport artifacts** | raw HTTP(S) response bodies | the remote transport cache under an explicit cache root | HTTP validators, response `Cache-Control`, and `RemoteReadConfig` |
 
-The cache is focused on transclusion-heavy compose work, especially:
+> **Semantic results are never persisted.** Until a `ContentPolicy` defines
+> when cached content becomes stale, no composed or derived result is read
+> from or written to disk (more-context rulings **R18** and **R36**,
+> `darkmatter/fixes/2026-09-16-content-policy-no-cache`). A warm cache cannot
+> replay an earlier run's composed output, warnings, runtime context, or
+> shell/probe output. The persistent semantic-result implementation was
+> deleted, not disabled; see [ContentPolicy](#contentpolicy-prerequisite-for-persisting-semantic-results).
 
-- Recursive `::file` markdown transclusion
-- `::code` source transclusion
-- `::toc-linking` heading-link generation
+A transport artifact is a lower-level exception. A cache hit returns raw bytes
+to the normal composition pipeline, which composes them again under the
+current request. It never returns a previously composed document.
 
-The goals of the current implementation are:
+## Run-local Cache
 
-- Deduplicate repeated work inside a single compose run
-- Reuse stable artifacts across compose runs
-- Invalidate parent entries when dependency state changes
-- Keep the implementation simple enough to debug from manifests and blobs on disk
+The run-local cache (`RunLocalCache`, `markdown/compose/cache/runtime.rs`) is
+owned by `PipelineRuntime` and lives for one compose invocation. Cloning it
+shares the same maps, so child compose branches see one cache. Its concurrent
+`DashMap` maps hold:
 
-## Current Status
-
-The implemented cache includes:
-
-- Run-local single-flight deduplication for compose cores and operation results
-- Persistent document snapshots
-- Persistent composed document cores
-- Persistent operation results for `::code` and `::toc-linking`
-- Dependency-aware closure-hash validation for composed documents
-- Freshness policy handling for persistent reads
-- In-memory retention of loaded document snapshots to avoid repeated manifest reads
-- Concurrent run-local maps for low-contention cache access
-
-The implementation does not yet include:
-
-- Remote artifact caching
-- TTL-driven policies for remote or LLM-backed operations
-- A special forced-mode empty-output fallback on generation failure
-- Persisted report warnings reconstruction from cache
-
-## Runtime Architecture
-
-The runtime cache lives in `markdown/compose/cache/runtime.rs`.
-
-`RunLocalCache` owns several in-memory maps backed by `DashMap`:
-
-- `markdown_documents`: canonical-path markdown loads
-- `toc_headings`: cached TOC heading extraction
-- `document_snapshots`: cached snapshot manifests keyed by `source_id_hash`
-- `compose_results`: single-flight slots for composed child markdown
+- `markdown_documents`: loaded Markdown, keyed by canonical path
+- `toc_headings`: TOC heading extraction
+- `compose_results`: single-flight slots for composed `::file` children
 - `operation_results`: single-flight slots for `::code` and `::toc-linking`
 
-These maps are shared by cloning the runtime cache, so child compose branches see the same run-local cache.
+`RunLocalCache` has no file-backed store and cannot acquire one.
+`lib/tests/semantic_results_never_persist.rs` fails the build's tests if it
+names `FileStore` or `RemoteFetchRuntime`, or if the deleted persistence
+symbols reappear.
+
+Local file transclusion stays run-local permanently. A future `ContentPolicy`
+does not make it persistable without a new ruling.
 
 ### Single-flight behavior
 
 For compose results and operation results:
 
-- The first caller inserts an `InFlight` slot and computes
-- Concurrent callers wait on the same slot
-- Successful results are promoted to the slot
-- Waiters receive the shared result
-- A timeout falls back to duplicate computation to reduce Rayon deadlock risk
-
-This is more than memoization. It suppresses duplicate work across concurrently evaluated sibling transclusions.
-
-## Persistent Store
-
-The persistent backend lives in `markdown/compose/cache/store.rs`.
-
-The file layout is:
-
-```text
-.darkmatter/cache/v1/
-  manifests/
-    snapshot/
-    composed/
-    operation/
-  blobs/
-    md/
-```
-
-Files are fanned out by the first four hex digits of the key or blob hash:
-
-```text
-manifests/{class}/{ab}/{cd}/{hex}.json
-blobs/{ext}/{ab}/{cd}/{hex}.{ext}
-```
-
-Writes are atomic:
-
-- Blob is written first
-- Manifest is written second
-- Each write uses a temp file plus rename in the target directory
-
-Cache roots are resolved as follows:
-
-- Preferred: `<workspace>/.darkmatter/cache/v1/`
-- Optional namespace: `<workspace>/.darkmatter/cache/v1/<namespace>/`
-- Fallback: platform cache directory if no workspace root is available
-
-## Artifact Classes
-
-The cache currently persists three artifact classes.
-
-### 1. `document_snapshot`
-
-This is written during `load_markdown()`.
-
-Purpose:
-
-- Track the current state of a source document
-- Provide the body hash needed to compute persistent compose keys
-- Support freshness validation using fast file metadata checks
-
-Stored manifest fields:
-
-- `canonical_source`
-- `source_id_hash`
-- `raw_bytes_hash`
-- `frontmatter_hash`
-- `body_semantic_hash`
-- `body_template_hash`
-- `modified_at`
-- `size_bytes`
-
-Current source kinds:
-
-- `local_file`
-
-The enum also allows `remote_url`, but remote snapshot caching is not implemented yet.
-
-### 2. `compose_document_core`
-
-This is the main persistent artifact for `::file` transclusion.
-
-It represents:
-
-- The recursively composed child document
-- Before parent-only transforms such as `exclude`, wrappers, and insertion-context releveling
-
-Stored manifest fields:
-
-- `entry_key`
-- `source_id_hash`
-- `source_body_semantic_hash`
-- `self_hash`
-- `closure_hash`
-- `dependency_count`
-- `dependencies`
-- `payload_blob_hash`
-- `warnings_hash`
-- `created_at`
-- `last_accessed_at`
-- `expires_at`
-
-### 3. `operation_result`
-
-This persists expensive non-markdown-core operations.
-
-Currently wired operations:
-
-- `::code`
-- `::toc-linking`
-
-Stored manifest fields:
-
-- `entry_key`
-- `op_kind`
-- `self_hash`
-- `closure_hash`
-- `payload_blob_hash`
-- `canonical_source`
-- `source_id_hash`
-- `source_content_hash`
-- `created_at`
-- `last_accessed_at`
-- `expires_at`
-
-## Hashing Strategy
-
-Darkmatter uses `biscuit-hash` for all cache identity and invalidation hashing.
-
-### Source identity
-
-`compose_cache_key(path)` canonicalizes the filesystem path and stringifies it.
-
-That canonical string is then hashed with raw `xxHash` to produce `source_id_hash`.
-
-### Raw bytes
-
-`raw_bytes_hash()` is an exact byte-level hash.
-
-It is used for:
-
-- Snapshot raw file tracking
-- Blob hashes
-- Operation source-content validation
-
-### Frontmatter
-
-Frontmatter is converted to canonical JSON with recursively sorted keys and then hashed with raw `xxHash`.
-The serializer writes the canonical form in one pass instead of recursively building intermediate strings.
-
-This means:
-
-- YAML key-order changes do not invalidate
-- Real data changes do invalidate
-
-### Body semantic hash
-
-`body_semantic_hash()` uses:
-
-- `HashVariant::BlockTrimming`
-- `HashVariant::LeadingWhitespace`
-- `HashVariant::TrailingWhitespace`
-
-This is the correctness-oriented body hash used in persistent compose keys and snapshot validation.
-
-Notably, the current implementation does not use `InteriorWhitespace` for `body_semantic_hash`, because that would be too aggressive for code blocks, tables, directives, and other structured markdown content.
-
-### Body template hash
-
-`body_template_hash()` uses:
-
-- `HashVariant::BlockTrimming`
-- `HashVariant::LeadingWhitespace`
-- `HashVariant::TrailingWhitespace`
-- `HashVariant::InteriorWhitespace`
-- `HashVariant::BlankLine`
-
-This is stored in the snapshot manifest for future structural reuse and diagnostics.
-
-The current implementation stores it but does not yet use it as part of persistent cache validation.
-
-### Effective state hash
-
-`effective_state_hash()` hashes the fully materialized effective state map after merge behavior has been resolved.
-
-This makes persistent compose reuse sensitive to inherited state that affects child output.
-
-### Context hash
-
-`context_hash()` hashes only stable output-relevant context:
-
-- `today`
-- `yesterday`
-- `tomorrow`
-- Sorted environment variables
-
-It intentionally excludes volatile time fields that would destroy cache usefulness.
-
-### Options hash
-
-`options_hash()` includes only output-affecting compose options, including:
-
-- Enabled operations
-- Failure behavior flags that alter output
-- Transclusion allow/deny flags
-- `code_fallback_language`
-- Cleanup settings
-- Replace inheritance behavior
-- One-off replace maps
-- External state
-- Set overrides
-
-## Persistent Key Model
-
-### Compose core entry key
-
-Composed markdown cores use:
-
-```text
-compose_entry_key(
-  source_id,
-  source_snapshot.body_semantic_hash,
-  state_hash,
-  context_hash,
-  options_hash
-)
-```
-
-This means a persistent compose hit depends on:
-
-- Which child source was transcluded
-- The child's current snapshot body hash
-- Effective inherited state
-- Runtime context
-- Output-affecting compose options
-
-Parent-only cheap transforms are intentionally outside this persistent key:
-
-- `exclude`
-- quotation wrapping
-- disclosure wrapping
-- insertion-context heading releveling
-
-### Operation entry key
-
-Operation results use:
-
-```text
-operation_entry_key(op_kind, source_id, variant_hash)
-```
-
-Where `variant_hash` is derived from parameter buckets.
-
-## Parameter Buckets
-
-The parameter bucket model lives in `markdown/compose/cache/operation.rs`.
-
-Each cacheable operation classifies inputs into:
-
-- `conditional`
-- `pre`
-- `variant`
-- `post`
-
-Only `variant` parameters participate in the persistent key.
-
-### `::file`
-
-Current bucket model:
-
-- `conditional`: `when`
-- `variant`: `replace`
-- `post`: `exclude`, `quotation`, `disclosure`
-
-Important note: the `FileOperation` bucket model exists, but the current `::file` compose-core cache path is still keyed through the compose-core key model above rather than directly through `FileOperation::variant_cache_key()`.
-
-### `::code`
-
-Current bucket model:
-
-- `conditional`: `when`
-- `variant`: effective `replace` behavior plus inferred language
-- `post`: quotation/disclosure wrappers
-
-The persistent `::code` cache now uses this model.
-
-### `::toc-linking`
-
-Current bucket model:
-
-- `variant`: heading levels, cleanup services, keep filters, reject filters, `empty_text`
-
-`::toc-linking` does not use `BlockOptions`, so it has standalone helpers instead of implementing `CacheableOperation`.
-
-The persistent `::toc-linking` cache now uses this model.
-
-## Dependency-aware Invalidation
-
-Dependency tracking is implemented for composed markdown cores.
-
-Each composed document records direct dependencies as `DependencyRef` values:
-
-- `artifact_class`
-- `entry_key`
-- `source_id_hash`
-- `closure_hash`
-
-These refs are collected per `PipelineRuntime` branch, so a child compose records only its direct dependencies, not every dependency seen elsewhere in the run.
-
-### Closure hash
-
-`closure_hash(self_hash, deps)` hashes:
-
-- The artifact's `self_hash`
-- Each dependency's `source_id_hash`
-- Each dependency's `closure_hash`
-
-This gives Merkle-style invalidation:
-
-1. A child source changes
-2. The child snapshot or operation source content changes
-3. The child artifact's closure hash changes or becomes invalid
-4. The parent's stored dependency ref no longer matches current dependency state
-5. The parent is treated as stale
-
-### Revalidation behavior
-
-When Darkmatter reads a composed-document manifest in strict or fallback freshness modes, it checks:
-
-1. `expires_at`
-2. The source document's current snapshot body semantic hash
-3. Every dependency ref by loading that dependency artifact and validating its current closure state
-
-If any of those checks fail, the compose core is stale.
-
-### Operation validation
-
-Operation artifacts do not currently recurse through dependency graphs.
-
-Instead, operation freshness is validated by:
-
-- `expires_at`
-- Re-reading the source file bytes
-- Comparing the current `raw_bytes_hash` to the stored `source_content_hash`
-
-For current `::code` and `::toc-linking`, that is sufficient because the expensive core depends on a single local source file.
-
-## Freshness and Access Modes
-
-The cache has two orthogonal policy knobs.
+- The first caller inserts an `InFlight` slot and computes.
+- Concurrent callers wait on the same slot.
+- Successful results are promoted to the slot, and waiters receive the shared
+  result.
+- A timeout falls back to duplicate computation to reduce Rayon deadlock risk.
+
+This suppresses duplicate work across concurrently evaluated sibling
+transclusions, not only repeated sequential work.
 
 ### Access mode
 
-`CacheAccessMode` controls read/write behavior:
+`CacheAccessMode` (`ComposeOptions::with_cache_access_mode`) controls run-local
+reuse. Nothing it selects is written to disk.
 
-- `Off`: no cache use
+- `Off`: no cache use; every request computes fresh
 - `ReadOnly`: read existing entries, never write
-- `ReadWrite`: normal mode
-- `Refresh`: bypass existing run-local hits and recompute, then write back
+- `ReadWrite` (default): read hits, write misses
+- `Refresh`: ignore existing entries, recompute, then write fresh results
 
-### Freshness mode
+### Run-local keys
 
-`CacheFreshnessMode` controls how persistent reads treat stale entries:
+A composed `::file` child is keyed on:
 
-- `Strict`: revalidate and reject stale entries
-- `Fallback`: revalidate, but keep a stale entry available if recomputation fails
-- `Optimistic`: accept any present persistent entry without revalidation
-- `Forced`: currently behaves the same as optimistic for reads
+```text
+compose:{source_id}:{state_hash}:{context_hash}:{options_hash}:{overlay_hash}
+```
 
-### Important note about `Forced`
+- `source_id`: `source_id_hash` of the canonicalized source path
+- `state_hash`: `effective_state_hash` of the fully merged effective state
+- `context_hash`: see [Context hash](#context-hash)
+- `options_hash`: see [Options hash](#options-hash)
+- `overlay_hash`: the directive's `set` overlay, combined with the options hash
 
-The original design intent for `Forced` was:
+Parent-only cheap transforms are applied after the lookup and stay outside the
+key: `exclude`, quotation wrapping, disclosure wrapping, and insertion-context
+heading releveling.
 
-- Treat stale hits as usable
-- If generation misses and recomputation fails, replace the directive with empty output instead of erroring
+`::code` results are keyed on the canonical source plus a variant hash from
+[parameter buckets](#parameter-buckets). `::toc-linking` results are keyed on
+the canonical source plus its variant options.
 
-That final "empty output on miss + failure" behavior is not implemented yet.
+`ComposeResult` also records the subtree's context-group closure, so the parent
+runtime can `record_context_groups` on a run-local hit.
 
-Today, `Forced` only affects persistent read validation. It does not add special error suppression at the compose-call-site layer.
+### Context hash
 
-## Read and Write Flow
+`context_hash()` hashes the request context a composed source was rendered
+from:
 
-### Compose core
+- every captured context value, excluding volatile per-second clock fields
+  (`now`, `now_utc`, `utc`, `time`, `time_military`, `timestamp`,
+  `timestamp_ms`) and volatile system state (`memory_used`, `memory_avail`)
+- sorted environment variables
 
-For `::file`:
+A transcluded child's context is finalized before its key is computed. The
+child's referenced `ctx.*` groups are added to the request context first (see
+[Context Variables](./context-variables.md#the-request-context-and-its-authority)),
+and the lookup and the write both use that one post-extension hash. When a
+child names no group its parent lacks, the parent's phase-wide hash is reused.
+Because one request has one context, a run-local hit cannot hide a missing
+capture.
 
-1. Build a run-local key from source/state/context/options
-2. Check run-local single-flight slots
-3. If persistent caching is enabled, resolve the compose entry key from the current snapshot
-4. Read and validate the composed manifest and blob
-5. If fresh, return the cached core
-6. If stale and mode is `Fallback`, remember the stale payload as backup
-7. Compute a fresh child compose if needed
-8. Persist the new core manifest and blob
-9. Apply parent-only transforms after the cache hit/miss
+### Options hash
 
-### Operation result
+`options_hash()` includes only output-affecting compose options, including
+enabled operations, failure-behavior flags that alter output,
+transclusion allow/deny flags, `code_fallback_language`, cleanup settings,
+replace inheritance, one-off replace maps, external state, and set overrides.
+It delegates to `ComposeOptions::compose_cache_fingerprint`, which shares one
+field classification with the reference-graph options identity.
 
-For `::code` and `::toc-linking`:
+### Parameter buckets
 
-1. Build a run-local key from canonical source plus variant parameters
-2. Check run-local single-flight slots
-3. Resolve the operation entry key
-4. Read and validate the persistent manifest and blob
-5. If fresh, return the cached core
-6. If stale and mode is `Fallback`, keep the stale payload as backup
-7. Compute the fresh operation output if needed
-8. Persist the new operation manifest and blob
-9. Apply cheap post-cache transforms such as wrappers
+`markdown/compose/cache/operation.rs` classifies directive parameters into
+buckets:
 
-## Snapshot Caching in Memory
+- `conditional`: controls whether the operation runs (`when`)
+- `variant`: determines the cached result and participates in the key
+- `post`: applied after the lookup (quotation and disclosure wrappers)
 
-One implementation detail worth keeping:
+For `::code`, the variant bucket holds the effective `replace` behavior and the
+inferred language. `::toc-linking` does not use `BlockOptions`; its variant
+options (heading levels, cleanup services, keep and reject filters,
+`empty_text`) feed `TocLinkingOperation::cache_key_string` directly.
 
-- `DocumentSnapshotManifest` values are cached in-memory inside `RunLocalCache`
+### Shell command memoization
 
-This avoids repeated manifest reads from disk when multiple compose-core lookups need the same source snapshot during one run.
+Shell command memoization is a separate run-local cache in
+`ShellExpansionRuntime`, not in `RunLocalCache`. The shell family's `no-cache`
+spelling (`::shell --no-cache`, `$(<cmd>)::no-cache`,
+`::shell-block no_cache=true`) bypasses that memoization only. It is unrelated
+to the HTTP `Cache-Control: no-cache` directive described below. See
+[Shell Expansion](../inline/shell-expansion.md).
 
-## Cache Statistics
+### Reference analysis
 
-Compose reports can include cache stats gathered during the run:
-
-- `hits`
-- `misses`
-- `writes`
-- `inflight_waits`
-- `errors`
-- `persistent_hits`
-- `persistent_writes`
-- `revalidations`
-- `stale_hits`
-
-These are merged upward through child compose reports in the normal compose-report flow.
-
-## Reference Analysis as a Cache Consumer
-
-The reference analysis subsystem (`reference_graph()`, `validate_references()`, `composed_references()`, and related methods) also uses the persistent cache to avoid re-loading child documents during graph traversal.
-
-Reference analysis constructs its own `RunLocalCache` via `make_cache()` in `markdown/reference/graph.rs`. This cache uses the same `FileStore::resolve_cache_root()` path resolution as the compose pipeline, including `cache_namespace` support. This means:
-
-- The reference analysis pipeline and the compose pipeline resolve to the **same persistent cache directory** for a given `ComposeOptions`
-- `cache_namespace` isolation (e.g., per-branch or per-profile) is honored consistently across both consumers
-- Cached document loads from compose runs can be reused by reference analysis and vice versa
-
-### What reference analysis caches
-
-Reference analysis currently uses the persistent cache layer for:
-
-- `load_markdown()` — avoids re-reading child documents from disk during graph traversal
-- Document snapshot manifests — retained in run-local memory to avoid repeated manifest reads
-
-Reference analysis does **not** write composed-document or operation-result artifacts. It reads source documents and snapshot manifests but does not execute the full compose pipeline at each node.
-
-### Configuration
-
-Reference analysis inherits cache configuration from `ReferenceGraphOptions`, which wraps `ComposeOptions`:
+`reference_graph()`, `validate_references()`, `composed_references()`, and
+related methods build their own memory-only `RunLocalCache` via `make_cache()`
+in `markdown/reference/graph.rs`. Every graph build reads its documents from
+disk, and `load_markdown()` and TOC heading extraction are deduplicated within
+that build. When child composition fetches remote URLs, those bodies use the
+same remote transport cache as the compose pipeline, including
+`cache_namespace`.
 
 ```rust
 let mut options = ReferenceGraphOptions::default();
@@ -524,29 +162,195 @@ options.compose = options.compose
 let graph = md.reference_graph(options)?;
 ```
 
-All `ComposeOptions` cache knobs apply: `cache_access_mode`, `cache_freshness_mode`, `cache_root`, and `cache_namespace`.
+## Remote Transport Cache
 
-## Current Limitations and Future Work
+The remote transport cache (`markdown/compose/cache/remote_cache.rs`, reached
+through `RemoteFetchRuntime` in `remote_fetch.rs`) stores raw HTTP(S) response
+bodies. It is the only persistent cache a compose run uses.
 
-The following are still reasonable future improvements:
+### Enabling it
 
-- Use `FileOperation` directly for `::file` variant-key generation once that abstraction is pushed further into the compose-core path
-- Persist and reconstruct warnings from cache instead of dropping them on cache hits
-- Add explicit TTL policies for remote and time-sensitive operations
-- Implement the original forced-mode empty-output fallback semantics
-- Decide whether `body_template_hash` should drive future structural caching or diagnostics
-- Expand operation caching beyond local-file-based `::code` and `::toc-linking`
+Persistence is explicit opt-in:
+
+- CLI: `md compose FILE --allow-host HOST --cache-root DIR`
+- Library: `ComposeOptions::with_cache_root(dir)`, optionally
+  `with_cache_namespace(name)` for branch or profile isolation
+
+Without a cache root, every remote read goes to the network and nothing is
+stored. There is no platform-cache fallback.
+
+The store root resolves to `<cache-root>/.darkmatter/cache/v1/`, or
+`<cache-root>/.darkmatter/cache/v1/<namespace>/` with a namespace. Pass the
+directory that should *contain* `.darkmatter/`, not the `v1` directory itself.
+
+**Configuring a cache root mutates nothing.** The store records the path and
+creates directories only inside the write that needs them. A run that writes no
+transport artifact, including every local-only compose, leaves a missing root
+missing and an existing root byte-for-byte unchanged.
+
+### On-disk layout
+
+```text
+<cache-root>/.darkmatter/cache/v1[/<namespace>]/
+  manifests/remote/{ab}/{cd}/{hex}.json
+  blobs/remote/{ab}/{cd}/{hex}.remote
+```
+
+Paths fan out by the first four hex digits of the key or blob hash. The
+manifest key is `xx_hash` of the full request URL; the blob is keyed by
+`xx_hash` of the body. The blob is written before the manifest, and each write
+is atomic (temp file plus rename in the target directory). Concurrent processes
+rely on that rename, not on lock files.
+
+### Host policy comes first
+
+A cache root never authorizes a host. `RemoteFetchRuntime::register_and_fetch`
+checks the exact-host `FetchPolicy` before any fetch task is created, and
+therefore before the transport cache is read. A denied host fails without a
+cache read or a network request, even when a fresh entry for that URL is on
+disk. The default policy is deny-all; the CLI grants hosts with `--allow-host`.
+
+### Freshness
+
+Freshness applies only to an entry that is eligible for storage and reuse (see
+[Cache-Control precedence](#cache-control-precedence)). A stored entry's
+lifetime is:
+
+1. no lifetime for a `no-cache` response (always revalidate);
+2. otherwise `--remote-ttl` / `RemoteReadConfig` TTL, when set;
+3. otherwise the response's `max-age`;
+4. otherwise no lifetime (stale immediately).
+
+`RemoteFreshnessMode` (`--remote-freshness`) then decides what to do with a
+found entry:
+
+- `Fallback` (default): serve within the lifetime; past it, revalidate with a
+  conditional GET, and serve the stale body if revalidation fails on the
+  network.
+- `Strict`: serve within the lifetime; past it, revalidate, and fail if
+  revalidation fails.
+- `Optimistic`: serve the cached body without revalidation, even when stale.
+
+`--remote-refresh` revalidates every found entry, even a fresh one.
+Revalidation sends `If-None-Match` and `If-Modified-Since` when the server
+previously returned `ETag` or `Last-Modified`. A `304` keeps the cached body
+and refreshes the manifest from the `304`'s headers.
+
+Serving stale data is never an implicit consequence of configuring a cache
+root: it happens only under `Fallback`, only after a failed revalidation, and
+never for `no-cache`.
+
+### Cache-Control precedence
+
+Response `Cache-Control` outranks every freshness mode and the TTL override
+(RFC 9111 §5.2.2.4 and §5.2.2.5). Directive names are matched
+case-insensitively, the whole directive list is parsed rather than the first
+match, and `no-cache="field"` is treated as `no-cache`.
+
+- **`no-store`** is never written and never reused. A new `no-store` response
+  is served for the current read only. An existing entry that records
+  `no-store` (including a revalidation whose `304` now says `no-store`) is
+  ignored, and its manifest and body are removed best-effort. Blobs are
+  content-addressed, so another entry could share the removed body; that entry
+  simply re-fetches.
+- **`no-cache`** may be stored but is revalidated before every reuse, including
+  under `Optimistic`. If that revalidation fails, the read fails; `Fallback`
+  never serves a `no-cache` body stale.
+- **A TTL override** controls freshness only where HTTP permits storage. It
+  never makes a `no-store` response storable or a `no-cache` response fresh. A
+  zero TTL is *not* equivalent to `no-store`: a zero-TTL entry is still
+  written and revalidated on reuse.
+
+### Manifest privacy and versioning
+
+A `RemoteUrlManifest` records the status, `ETag`, `Last-Modified`,
+`Cache-Control`, fetch time, expiry, content hash, blob hash, and size. It never
+records the raw request URL:
+
+- `redacted_url` is `scheme://host[:port]/path`. Userinfo and the fragment are
+  removed, and any query is replaced by the literal marker `?<redacted>`.
+- `source_id_hash` is `xx_hash` of the full, unredacted URL, so URLs that
+  differ only in userinfo or query never share an entry.
+
+Warnings name only the redacted form. A path segment can still carry a token,
+which redaction does not hide. Cached bodies remain potentially sensitive,
+which is why persistence stays explicit opt-in.
+
+Two versions are tracked separately:
+
+- `CACHE_VERSION` (currently `2`) is the manifest schema version. Version `1`
+  stored the cleartext URL. An entry from any other version is a miss and is
+  left on disk, except that one recording `no-store` is still purged.
+- `STORE_LAYOUT_VERSION` (currently `1`) is the `v{N}` directory. It changes
+  only when the path scheme changes, so old manifests stay findable.
+
+Darkmatter never deletes a cache tree automatically beyond the `no-store`
+removal above.
+
+### Failures are warnings
+
+A failed transport-cache write or `no-store` removal never fails the compose or
+changes a fetch's outcome. It is recorded in `RemoteFetchStats::cache_warnings`
+and surfaced as a compose warning with stage `remote_cache` and code
+`dm.remote_cache.io_failure`. An unusable cache root (unwritable, or a regular
+file) first fails at the write that needs it, and the fetch stays network-only.
+
+## Cache Statistics
+
+Run-local and transport activity are reported separately:
+
+- `ComposeReport.cache_stats` (`CacheStats`, run-local): `hits`, `misses`,
+  `writes`, `inflight_waits`, `errors`. These merge upward through child
+  compose reports and render as the `cache:` summary segment.
+- `ComposeReport.remote_fetch_stats` (`RemoteFetchStats`, transport):
+  `fetched`, `waits`, `policy_denials`, `failures`, `cache_hits`,
+  `revalidations`, `not_modified`, `stale_served`, and `cache_warnings`. These
+  render as the `remote:` summary segment.
+
+No statistic counts directory creation as a write.
+
+## ContentPolicy: Prerequisite for Persisting Semantic Results
+
+Persisting an expensive or agentic semantic result (for example, a website
+summary) requires a `ContentPolicy` that defines when the content becomes
+stale. It does not exist yet. The contract a future implementation must meet is
+recorded in the
+[content-policy-no-cache specification](../../fixes/2026-09-16-content-policy-no-cache/spec.md#contentpolicy-design-constraints).
+In brief:
+
+- `ContentPolicy` governs content freshness only. It does not grant network
+  access, define artifact identity, choose file placement, or permit persisting
+  sensitive data, and it does not enable a cache root by itself.
+- It needs a versioned, serializable identity; explicit expiry predicates with
+  "any predicate expires" semantics; an evaluator for each predicate; an
+  explicit stale action (recompute, serve with a warning, or fail); stored
+  generation evidence; deterministic evaluation under an injected clock; and
+  fail-closed handling of absent, unknown, malformed, or newer policies.
+- Calendar months and years must either define exact calendar arithmetic and
+  timezone or be replaced by unambiguous durations.
+- A persistent producer must opt in at its own boundary and key its artifact
+  on producer kind and version, inputs, dependency closure, and policy
+  identity. Shell execution, ICMP probes, and current-value lookups are not
+  persistable merely because their document has a policy.
+
+The shared `ContentPolicy` vocabulary is to live in a new dependency-light
+library consumed by Research, Darkmatter, and Claudine (Q3). Darkmatter must not
+define its own unqualified `ContentPolicy`.
+
+## Known Gaps
+
+- `redacted_url` keeps the URL path, which can itself carry a token.
 
 ## Source Files
 
-The current implementation is primarily defined in:
-
 - `darkmatter/lib/src/markdown/compose/cache/types.rs`
+- `darkmatter/lib/src/markdown/compose/cache/runtime.rs`
 - `darkmatter/lib/src/markdown/compose/cache/hashing.rs`
+- `darkmatter/lib/src/markdown/compose/cache/operation.rs`
+- `darkmatter/lib/src/markdown/compose/cache/remote_cache.rs`
 - `darkmatter/lib/src/markdown/compose/cache/manifest.rs`
 - `darkmatter/lib/src/markdown/compose/cache/store.rs`
-- `darkmatter/lib/src/markdown/compose/cache/runtime.rs`
-- `darkmatter/lib/src/markdown/compose/cache/operation.rs`
-- `darkmatter/lib/src/markdown/compose/mod.rs`
+- `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `darkmatter/lib/src/markdown/reference/graph.rs`
+- `darkmatter/lib/tests/semantic_results_never_persist.rs`

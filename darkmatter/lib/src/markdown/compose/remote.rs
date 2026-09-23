@@ -104,11 +104,13 @@ fn resolve_remote_concurrency_from(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RemoteFreshnessMode {
     /// Serve any cached artifact without revalidation, even when stale (TTL is
-    /// ignored).
+    /// ignored). A `no-cache` response is still revalidated before reuse.
     Optimistic,
-    /// Always revalidate with conditional GET.
+    /// Serve within the freshness lifetime; past it, revalidate with a
+    /// conditional GET, and fail if revalidation fails.
     Strict,
-    /// Serve stale on network failure. The default: the spec's
+    /// Serve stale on network failure, except a `no-cache` response, whose
+    /// failed revalidation is an error. The default: the spec's
     /// "TTL → conditional → stale-on-failure" behavior keeps CI/offline builds
     /// resilient when a remote dependency is briefly unreachable.
     #[default]
@@ -134,7 +136,9 @@ pub struct RemoteReadConfig {
     pub allowed_hosts: Vec<String>,
     /// Maximum concurrent remote fetches.
     pub remote_concurrency: usize,
-    /// TTL override for remote artifacts (`None` = use server-provided).
+    /// TTL override for remote artifacts (`None` = use server `max-age`). It
+    /// outranks `max-age` only: a `no-store` response is never stored and a
+    /// `no-cache` one is never reused without revalidation.
     pub remote_ttl: Option<std::time::Duration>,
     /// Force revalidation even when cached content is fresh.
     pub refresh: bool,
@@ -158,9 +162,20 @@ impl RemoteReadConfig {
     /// Checks whether `host` is in the allowlist (case-insensitive exact match).
     pub fn is_host_allowed(&self, host: &str) -> bool {
         let lower = host.to_ascii_lowercase();
+        self.http_hosts().any(|h| h.to_ascii_lowercase() == lower)
+    }
+
+    /// The allowlist entries that are HTTP host patterns.
+    ///
+    /// `--allow-host` is also the ICMP grant entry point (R6). A strict CIDR
+    /// entry names an address range, which no URL host can ever spell, so it
+    /// authorizes ICMP only and is withheld from the HTTP allowlist rather than
+    /// left to fail an exact-string comparison. A bare IP literal keeps its
+    /// long-standing meaning as an exact HTTP host *and* grants ICMP.
+    pub fn http_hosts(&self) -> impl Iterator<Item = &String> {
         self.allowed_hosts
             .iter()
-            .any(|h| h.to_ascii_lowercase() == lower)
+            .filter(|entry| !crate::markdown::compose::icmp::is_icmp_only_entry(entry))
     }
 }
 

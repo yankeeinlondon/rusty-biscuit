@@ -43,13 +43,13 @@ This will be an "inline review" meaning your task is to directly update the spec
 
 > **Important:** 
 > 
-::block when="parent"
+::block when='frontmatter(spec, "parent")'
 > - the spec you're reviewing includes a `parent` frontmatter property, this indicates that the spec you are reviewing is a sibling to the parent specification
 ::end-block
-::block when="peers"
+::block when='frontmatter(spec, "peers")'
 > - the spec you're reviewing includes a `peers` frontmatter property, this indicates that the spec you are reviewing is part of a group of specs are related and together are designed to address a larger design goal
 ::end-block
-::block when="depends-on"
+::block when='frontmatter(spec, "depends-on")'
 > - the spec you're reviewing includes a `depends_on` frontmatter property, this indicates that the spec you are reviewing 
 ::end-block
 

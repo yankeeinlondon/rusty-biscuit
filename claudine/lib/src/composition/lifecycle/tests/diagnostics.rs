@@ -336,7 +336,7 @@ fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
 fn timing_and_current_interpolation_allowed_in_no_error_events() {
     // `timing`/`current` are allowed everywhere, including no-error events.
     let fm = json!({
-        "start": { "message": "took {{timing.document_ms}}ms on {{current.ctx.agent}}" }
+        "start": { "message": "took {{timing.document_ms}}ms on {{current.agent}}" }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(validate_no_err_in_no_error_events(&config, dummy_path()).is_ok());
@@ -420,7 +420,7 @@ fn stack_timing_and_current_globals_are_not_undefined() {
         "start": {
             "stack": [
                 {"action": {"say": "timing.document_ms"}},
-                {"action": {"say": "current.ctx.agent"}}
+                {"action": {"say": "current.agent"}}
             ]
         }
     });
@@ -455,7 +455,7 @@ fn stack_bare_token_in_action_arg_is_literal_not_undefined_variable() {
 
 #[test]
 fn late_binding_global_in_top_level_field_is_a_known_root() {
-    // Late binding (C4 / 5.3): `err`/`timing`/`current` are known roots in
+    // Late binding (C4 / 5.3): `err`/`timing`/`current`/`current_env` are known roots in
     // top-level communication fields just like in stack surfaces — they
     // resolve at event-time, not against frontmatter — so the
     // undefined-variable scan does not flag a bare reference. (Placement

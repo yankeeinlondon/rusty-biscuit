@@ -1171,6 +1171,44 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
     }
 }
 
+/// The two lazy reserved roots are late-binding for the shell gate too.
+///
+/// A lifecycle `shell` command is approved at preflight against early-binding
+/// surfaces only, so a command naming `current.*` or `current_env.*` would be
+/// approved as one string and executed observing another. The rejection is
+/// what keeps the approved bytes and the executed bytes identical (R33).
+#[test]
+fn lazy_reserved_roots_in_a_lifecycle_shell_command_are_rejected_at_prepare() {
+    for (root, reference) in [
+        ("current", "{{current.branch}}"),
+        ("current_env", "{{current_env.HOME}}"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let command = format!("rm {reference}");
+        let source = make_source(
+            &dir,
+            &[(
+                "failure",
+                json!({"stack": [{"action": {"shell": command.clone()}}]}),
+            )],
+            "Do the work.",
+        );
+
+        let err = prepare_direct(&source, PrepareOptions::default())
+            .expect_err("a lazy reserved root cannot be approved at preflight");
+        match err {
+            CompositionError::LifecycleShellResolution { raw, message, .. } => {
+                assert_eq!(raw, command);
+                assert!(
+                    message.contains(root),
+                    "message names the rejected root `{root}`: {message}"
+                );
+            }
+            other => panic!("expected LifecycleShellResolution for `{root}`, got: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn shell_long_form_command_late_binding_rejected_at_prepare() {
     // Long-form `command: "rm {{err.msg}}"` is rejected the same way as

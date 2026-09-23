@@ -51,6 +51,11 @@ hidden, so it catches the class of failure that only the `wsl2-ubuntu` CI
 leg sees; feature flags are routed to the archive build and everything else
 to the run.
 
+The `just` recipe re-splits its arguments, so a filterset containing spaces
+or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
+before any host is contacted. Call `./scripts/cross-check.sh` directly for a
+filtered run; it passes the quoted filterset through intact.
+
 The hosts are shared. Each run holds a per-host lock
 (`ci-verification/.cross-check.lock`, an atomically created directory with an
 `owner` file naming the user, branch, base SHA, and start time) for the whole

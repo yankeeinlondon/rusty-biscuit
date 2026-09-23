@@ -18,7 +18,8 @@ pub struct LaunchContext {
     pub repo_root: Option<PathBuf>,
     /// Package-area root inside a monorepo.
     ///
-    /// For the "root" package area this equals `repo_root`.
+    /// For a package at the repository root — whose package area is `""` —
+    /// this equals `repo_root`.
     pub package_area_root: Option<PathBuf>,
     /// Deepest matching workspace package root.
     pub package_root: Option<PathBuf>,
@@ -137,7 +138,9 @@ fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) 
     packages
         .iter()
         .map(|package| {
-            if package.package_area == "root" {
+            // Empty is the repository root itself, not a directory named
+            // `root`: an area actually called `root` joins like any other.
+            if package.package_area.is_empty() {
                 repo_root_normalized.clone()
             } else {
                 repo_root_normalized.join(&package.package_area)

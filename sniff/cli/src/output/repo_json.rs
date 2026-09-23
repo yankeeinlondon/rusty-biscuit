@@ -1011,6 +1011,7 @@ mod tests {
             branches: Vec::new(),
             in_worktree: false,
             base_repo_root: None,
+            current_worktree: None,
             recent: Vec::new(),
             status: Some(RepoStatus::default()),
             remotes: Vec::new(),
@@ -2903,7 +2904,7 @@ mod tests {
             repo.packages = Some(vec![Package {
                 path: PathBuf::from("/tmp/repo/pkg-a"),
                 relative: "pkg-a".to_string(),
-                package_area: "root".to_string(),
+                package_area: String::new(),
                 name: "pkg-a".to_string(),
                 ecosystem: sniff::filesystem::repo::PackageEcosystem::default(),
                 standard: MonorepoStandard::CargoWorkspace,
@@ -2960,7 +2961,7 @@ mod tests {
                     Package {
                         path,
                         relative: name.to_string(),
-                        package_area: "root".to_string(),
+                        package_area: String::new(),
                         name: name.to_string(),
                         version: Some("0.1.0".to_string()),
                         ..Package::default()
