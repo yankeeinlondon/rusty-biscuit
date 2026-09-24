@@ -3032,14 +3032,28 @@ pub struct SequenceSelectionFailure {
 
 impl CompositionError {
     /// Preserve a shared resolver no-match as a structured composition error.
-    pub fn from_detailed_no_match(detailed: &biscuit_file::DetailedResolution) -> Self {
+    ///
+    /// For a direct magic (`@`) reference the resolving context's ordered
+    /// search roots are recorded beside the probe record, so the
+    /// human-readable miss report can list the directories an `@` reference
+    /// searches instead of the joined candidate paths (R4 of
+    /// 2026-09-23-local-before-home). The structured candidate list is kept
+    /// unchanged for tools that inspect it.
+    pub fn from_detailed_no_match(
+        detailed: &biscuit_file::DetailedResolution,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Self {
         debug_assert!(matches!(
             detailed.outcome(),
             biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch)
         ));
+        let mut resolution = ResolutionDetail::from_detailed(detailed);
+        if detailed.class().kind == biscuit_file::FileReferenceKind::Magic {
+            resolution = resolution.with_magic_search_roots(context.magic_search_roots());
+        }
         Self::FileReferenceNoMatch {
             reference: detailed.raw().to_string(),
-            resolution: Box::new(ResolutionDetail::from_detailed(detailed)),
+            resolution: Box::new(resolution),
             suggestions: Vec::new(),
         }
     }

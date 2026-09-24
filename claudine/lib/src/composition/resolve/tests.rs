@@ -13,13 +13,13 @@ use tempfile::TempDir;
 #[test]
 fn prompt_magic_roots_are_closest_first() {
     // Only Claudine conventions are registered. The package, area,
-    // repository, and home roots are supplied by biscuit-file's intrinsic
+    // local-root, and home roots are supplied by biscuit-file's intrinsic
     // `@` chain and must not be duplicated here.
     let area = Path::new("/repo/claudine");
     let package = Path::new("/repo/claudine/lib");
-    let repo = Path::new("/repo");
+    let local_root = Path::new("/repo");
     let home = Path::new("/home/u");
-    let got = prompt_magic_roots(Some(repo), Some(area), Some(package), Some(home));
+    let got = prompt_magic_roots(local_root, Some(area), Some(package), Some(home));
     assert_eq!(
         got,
         vec![
@@ -42,8 +42,9 @@ fn prompt_magic_roots_are_closest_first() {
 
 #[test]
 fn prompt_magic_roots_skip_absent_anchors() {
-    // No package area, no HOME: only the repo roots are registered.
-    let got = prompt_magic_roots(Some(Path::new("/repo")), None, None, None);
+    // No package area, no HOME: only the local-tree roots are registered,
+    // and none of them is a user row.
+    let got = prompt_magic_roots(Path::new("/repo"), None, None, None);
     assert_eq!(
         got,
         vec![
@@ -59,27 +60,114 @@ fn prompt_magic_roots_skip_absent_anchors() {
             PathBuf::from("/repo/.kimi/skills"),
         ],
     );
-    assert!(prompt_magic_roots(None, None, None, None).is_empty());
 }
 
 #[test]
-fn prompt_magic_roots_without_repository_register_only_user_tier() {
-    let got = prompt_magic_roots(None, None, None, Some(Path::new("/home/u")));
-    assert_eq!(got, vec![PathBuf::from("/home/u/.claudine/prompts")]);
+fn prompt_magic_roots_without_repository_register_launch_conventions() {
+    // R5: outside a repository the launch directory is the local root, so it
+    // registers the same convention rows a repository would.
+    let home = Path::new("/home/u");
+    let got = prompt_magic_roots(Path::new("/home/u/scratch"), None, None, Some(home));
+    assert_eq!(
+        got,
+        vec![
+            PathBuf::from("/home/u/scratch/prompts"),
+            PathBuf::from("/home/u/scratch/.claudine/prompts"),
+            PathBuf::from("/home/u/scratch/docs"),
+            PathBuf::from("/home/u/scratch/.claude/skills"),
+            PathBuf::from("/home/u/scratch/.codex/skills"),
+            PathBuf::from("/home/u/scratch/.gemini/skills"),
+            PathBuf::from("/home/u/scratch/.opencode/skills"),
+            PathBuf::from("/home/u/scratch/.goose/skills"),
+            PathBuf::from("/home/u/scratch/.qwen/skills"),
+            PathBuf::from("/home/u/scratch/.kimi/skills"),
+            PathBuf::from("/home/u/.claudine/prompts"),
+        ],
+    );
 }
 
 #[test]
-fn prompt_magic_fallback_roots_are_repo_then_home_claudine() {
+fn prompt_magic_fallback_roots_are_local_then_home_claudine() {
     let home = Path::new("/home/u");
     assert_eq!(
-        prompt_magic_fallback_roots(Some(Path::new("/repo")), Some(home)),
+        prompt_magic_fallback_roots(Path::new("/repo"), Some(home)),
         vec![PathBuf::from("/repo/.claudine"), PathBuf::from("/home/u/.claudine")],
     );
+    // Without a repository the launch directory registers the local row.
     assert_eq!(
-        prompt_magic_fallback_roots(None, Some(home)),
-        vec![PathBuf::from("/home/u/.claudine")],
+        prompt_magic_fallback_roots(Path::new("/home/u/scratch"), Some(home)),
+        vec![
+            PathBuf::from("/home/u/scratch/.claudine"),
+            PathBuf::from("/home/u/.claudine"),
+        ],
     );
-    assert!(prompt_magic_fallback_roots(None, None).is_empty());
+    assert_eq!(
+        prompt_magic_fallback_roots(Path::new("/repo"), None),
+        vec![PathBuf::from("/repo/.claudine")],
+    );
+}
+
+#[test]
+fn with_prompt_magic_roots_marks_the_claudine_home_rows_user_tier() {
+    // Ruling 1: when the local root is `$HOME` itself, the `~/.claudine` rows
+    // must be registered user-tier exactly once — never re-registered as an
+    // inferred local twin, which the chain's local-first dedup would keep.
+    let home = Path::new("/home/u");
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(home, Some(home.to_path_buf()), HashMap::new()),
+        home,
+        None,
+        None,
+        Some(home),
+    );
+    let registrations = context.magic_path_registrations();
+    let claudine_rows: Vec<_> = registrations
+        .iter()
+        .filter(|registration| {
+            registration.path() == home.join(".claudine")
+                || registration.path() == home.join(".claudine").join("prompts")
+        })
+        .collect();
+    assert_eq!(
+        claudine_rows.len(),
+        2,
+        "each `.claudine` row must be registered exactly once: {registrations:?}",
+    );
+    assert!(
+        claudine_rows
+            .iter()
+            .all(|registration| registration.tier() == biscuit_file::MagicPathTier::User),
+        "every `.claudine` row under a launch-equals-home local root must be user-tier: {registrations:?}",
+    );
+}
+
+#[test]
+fn user_tier_prompt_row_stays_behind_local_files_when_launch_is_home() {
+    // The observable side of ruling 1: launching in `$HOME` without a
+    // repository keeps `~/.claudine/prompts/<x>` behind the launch tree's
+    // own files, where containment inference alone would have promoted it.
+    let fixture = TempDir::new().unwrap();
+    let home = fixture.path().join("home");
+    let local_file = home.join("x.md");
+    let user_file = home.join(".claudine/prompts/x.md");
+    fs::create_dir_all(user_file.parent().unwrap()).unwrap();
+    fs::write(&local_file, "local").unwrap();
+    fs::write(&user_file, "user").unwrap();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&home, Some(home.clone()), HashMap::new()),
+        &home,
+        None,
+        None,
+        Some(&home),
+    );
+
+    assert_eq!(
+        FileReference::new("@x.md")
+            .unwrap()
+            .resolve_in_context(&context)
+            .unwrap(),
+        Some(local_file),
+    );
 }
 
 #[test]
@@ -92,7 +180,7 @@ fn path_shaped_prompt_reference_keeps_closest_tier_first() {
     let context = with_prompt_magic_roots(
         FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
             .with_repository_root(&repo),
-        Some(&repo),
+        &repo,
         None,
         None,
         Some(&home),
@@ -140,7 +228,7 @@ fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
         HashMap::new(),
     )
     .with_repository_scope_catalog(catalog);
-    for root in prompt_magic_roots(Some(&repo), Some(&area), Some(&package), Some(&home)) {
+    for root in prompt_magic_roots(&repo, Some(&area), Some(&package), Some(&home)) {
         context = context.add_magic_path(root, PathPosition::Start);
     }
 
@@ -352,6 +440,182 @@ fn detailed_no_match_rendering_matches_suggestion_order_and_uses_portable_paths(
     let first = rendered.find("zeta/missing.md").unwrap();
     let second = rendered.find("alpha/missing.md").unwrap();
     assert!(first < second, "{rendered}");
+}
+
+/// A plain, very wide terminal so rendered assertions match visible text,
+/// not SGR bytes or word-wrapped lines.
+fn plain_terminal() -> Terminal {
+    Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build()
+}
+
+/// The reported failure layout (2026-09-23-local-before-home): a plain
+/// repository nested under `$HOME`, referencing the missing `@prompts/<x>`.
+fn staged_repo_under_home() -> (TempDir, PathBuf, PathBuf) {
+    let fixture = TempDir::new().unwrap();
+    let home = fixture.path().join("home");
+    let repo = home.join("config").join("sh");
+    fs::create_dir_all(&repo).unwrap();
+    (fixture, home, repo)
+}
+
+#[test]
+fn magic_no_match_report_lists_search_roots_in_priority_order() {
+    let (_fixture, home, repo) = staged_repo_under_home();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        &repo,
+        None,
+        None,
+        Some(&home),
+    );
+    let err = resolve_composition_source_in_context("@prompts/missing.md", &context).unwrap_err();
+
+    let term = plain_terminal();
+    let rendered = err.report_block_error(&term);
+    assert!(
+        rendered.contains("was not found under any directory an `@` reference searches:"),
+        "got:\n{rendered}"
+    );
+
+    // The payload is named exactly once; every joined candidate path would
+    // repeat it as a suffix, so one occurrence also proves none are listed.
+    assert_eq!(
+        rendered.matches("prompts/missing.md").count(),
+        1,
+        "got:\n{rendered}"
+    );
+    assert!(!rendered.contains("@prompts/missing.md"), "got:\n{rendered}");
+
+    // No provenance labels in the `@` branch.
+    for label in ["magic:", "repository:", "home:", "launch directory:"] {
+        assert!(!rendered.contains(label), "label `{label}` leaked: got:\n{rendered}");
+    }
+
+    // Local roots precede every home root, and only configured roots carry
+    // the `(*)` marker with its footnote.
+    let positions: Vec<(usize, &str)> = [
+        repo.join(".claude").join("skills"),
+        repo.clone(),
+        repo.join(".claudine"),
+        home.join(".claudine").join("prompts"),
+        home.clone(),
+        home.join(".claudine"),
+    ]
+    .iter()
+    .map(|path| {
+        let line = format!("- `{}`", biscuit_file::to_portable_string(path));
+        let position = rendered.find(&line).unwrap_or_else(|| {
+            panic!("root line `{line}` missing from:\n{rendered}");
+        });
+        (position, "")
+    })
+    .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "roots out of priority order:\n{rendered}"
+    );
+
+    let (_, resolution, _) = err.file_reference_no_match().unwrap();
+    let configured = resolution
+        .magic_search_roots()
+        .iter()
+        .filter(|root| root.provenance() == biscuit_file::RootProvenance::Magic)
+        .count();
+    assert!(configured > 0);
+    assert_eq!(
+        rendered.matches("(*)").count(),
+        configured + 1, // + the footnote line
+        "got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("(*) searched in addition to the standard `@` roots, for this context"),
+        "got:\n{rendered}"
+    );
+
+    // The structured record keeps concrete candidates with dispositions and
+    // provenance for tools that inspect it.
+    let detail = err.detail();
+    let candidates = detail["candidates"].as_array().unwrap();
+    assert!(!candidates.is_empty());
+    assert!(candidates.iter().all(|candidate| candidate["path"].is_string()));
+    assert!(candidates.iter().all(|candidate| candidate["disposition"] == "missing"));
+    assert!(candidates.iter().any(|candidate| candidate["provenance"] == "magic"));
+}
+
+#[test]
+fn magic_no_match_without_repository_lists_the_launch_directory_without_marker() {
+    let fixture = TempDir::new().unwrap();
+    let home = fixture.path().join("home");
+    let scratch = home.join("scratch");
+    fs::create_dir_all(&scratch).unwrap();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&scratch, Some(home.clone()), HashMap::new()),
+        &scratch,
+        None,
+        None,
+        Some(&home),
+    );
+    let err = resolve_composition_source_in_context("@missing.md", &context).unwrap_err();
+
+    let term = plain_terminal();
+    let rendered = err.report_block_error(&term);
+
+    // The request directory is the intrinsic local root: listed, first, and
+    // unmarked, unlike the configured convention rows under it.
+    let launch_line = format!("- `{}`", biscuit_file::to_portable_string(&scratch));
+    assert!(rendered.contains(&launch_line), "got:\n{rendered}");
+    let launch_position = rendered.find(&launch_line).unwrap();
+    let home_line = format!("- `{}`", biscuit_file::to_portable_string(&home));
+    let home_position = rendered.find(&home_line).unwrap();
+    assert!(launch_position < home_position, "got:\n{rendered}");
+    let after_launch = &rendered[launch_position + launch_line.len()..];
+    assert!(
+        !after_launch.starts_with(" (*)"),
+        "intrinsic local root must stay unmarked:\n{rendered}"
+    );
+
+    // The no-repository local root reports its own machine provenance.
+    let detail = err.detail();
+    let candidates = detail["candidates"].as_array().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["provenance"] == "local_root"),
+        "got: {candidates:?}"
+    );
+}
+
+#[test]
+fn bare_no_match_keeps_the_candidate_report() {
+    let (_fixture, home, repo) = staged_repo_under_home();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        &repo,
+        None,
+        None,
+        Some(&home),
+    );
+    let err = resolve_composition_source_in_context("missing.md", &context).unwrap_err();
+
+    let term = plain_terminal();
+    let rendered = err.report_block_error(&term);
+    assert!(
+        rendered.contains("Cannot resolve `missing.md` from launch directory"),
+        "got:\n{rendered}"
+    );
+    assert!(rendered.contains("Tried:"), "got:\n{rendered}");
+    assert!(
+        !rendered.contains("was not found under any directory"),
+        "bare references keep their report; got:\n{rendered}"
+    );
+
+    let (_, resolution, _) = err.file_reference_no_match().unwrap();
+    assert!(resolution.magic_search_roots().is_empty());
 }
 
 #[test]

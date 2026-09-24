@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use biscuit_file::{FileResolutionContext, home_dir};
+use biscuit_file::{FileResolutionContext, LaunchMagicScope, home_dir};
 use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{FileChange, GitInfo};
@@ -875,6 +875,7 @@ impl InvocationContext {
             environment.clone(),
             launch_repository_root,
             launch_repository.repo_info(),
+            None,
         );
 
         let mut cache = RepositoryCache::default();
@@ -988,6 +989,12 @@ impl InvocationContext {
     /// projection and the resolution context. A caller that needs the same
     /// source context at two stages should carry the value rather than derive
     /// it again.
+    ///
+    /// The launch `@` scope is carried into the rebuilt context: a source in
+    /// another repository or an external prompt directory keeps its own
+    /// repository anchors for `&`/`^` and its own authoring base for `./`
+    /// and bare references, while nested `@` references keep searching the
+    /// launch tree first (ruling 2 of 2026-09-23-local-before-home).
     pub fn derive_source(
         &self,
         source_path: &Path,
@@ -1014,6 +1021,7 @@ impl InvocationContext {
             self.inner.environment.clone(),
             repository_root.as_deref(),
             entry.repo_info(),
+            Some(self.inner.launch_file_resolution.launch_magic_scope()),
         );
         let package_area_root = file_resolution.package_area().map(Path::to_path_buf);
         let package_root = file_resolution.package_root().map(Path::to_path_buf);
@@ -1874,6 +1882,17 @@ fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'s
     }
 }
 
+/// Build a file-resolution context, registering Claudine's prompt
+/// conventions.
+///
+/// `launch_scope` is `None` for the launch context itself, whose scope the
+/// context captures naturally from `base_dir` and the supplied repository.
+/// A context rebuilt around a source in another repository or an external
+/// prompt directory passes the launch context's captured scope instead: the
+/// conventions are registered against the launch local root and the snapshot
+/// is seeded last, so `@` keeps searching the launch tree (ruling 2 of
+/// 2026-09-23-local-before-home) while `./`, bare, `&`, and `^` references
+/// keep the source anchors built above.
 fn build_file_resolution_context(
     base_dir: &Path,
     source_path: Option<&Path>,
@@ -1881,6 +1900,7 @@ fn build_file_resolution_context(
     environment: HashMap<String, String>,
     repository_root: Option<&Path>,
     repo_info: Option<&RepoInfo>,
+    launch_scope: Option<&LaunchMagicScope>,
 ) -> FileResolutionContext {
     let mut context = FileResolutionContext::from_snapshot(base_dir, home_dir, environment);
     if let Some(source_path) = source_path {
@@ -1896,16 +1916,33 @@ fn build_file_resolution_context(
     } else if let Some(repository_root) = repository_root {
         context = context.with_repository_root(repository_root);
     }
-    let package_area_root = context.package_area().map(Path::to_path_buf);
-    let package_root = context.package_root().map(Path::to_path_buf);
+    let (local_root, package_area_root, package_root) = match launch_scope {
+        Some(scope) => (
+            scope.local_root().to_path_buf(),
+            scope.package_area().map(Path::to_path_buf),
+            scope.package_root().map(Path::to_path_buf),
+        ),
+        None => {
+            let local_root = repository_root
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| base_dir.to_path_buf());
+            let package_area_root = context.package_area().map(Path::to_path_buf);
+            let package_root = context.package_root().map(Path::to_path_buf);
+            (local_root, package_area_root, package_root)
+        }
+    };
     let home_dir = context.home_dir().map(Path::to_path_buf);
-    with_prompt_magic_roots(
+    let context = with_prompt_magic_roots(
         context,
-        repository_root,
+        &local_root,
         package_area_root.as_deref(),
         package_root.as_deref(),
         home_dir.as_deref(),
-    )
+    );
+    match launch_scope {
+        Some(scope) => context.with_launch_magic_scope(scope.clone()),
+        None => context,
+    }
 }
 
 /// Whether a `.git` boundary separates a directory from its enclosing root.

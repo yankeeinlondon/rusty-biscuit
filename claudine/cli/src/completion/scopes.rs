@@ -232,6 +232,8 @@ impl ScopeContext {
 /// magic roots that runtime composition registers. Repository, package-area,
 /// discrete-package, home, and environment state are captured once here;
 /// completion does not rediscover or reclassify them while walking candidates.
+/// Without a repository the launch (completion) directory is the local `@`
+/// root, so it registers the same convention rows a repository would.
 pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionContext {
     let repository_root = effective_repo_root(ctx);
 
@@ -250,9 +252,10 @@ pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionConte
     }
     let package_area = resolution.package_area().map(Path::to_path_buf);
     let package = resolution.package_root().map(Path::to_path_buf);
+    let local_root = repository_root.unwrap_or(ctx.cwd.as_path());
     claudine::composition::with_prompt_magic_roots(
         resolution,
-        repository_root,
+        local_root,
         package_area.as_deref(),
         package.as_deref(),
         ctx.home.as_deref(),

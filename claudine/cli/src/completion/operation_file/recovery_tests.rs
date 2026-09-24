@@ -262,7 +262,7 @@ fn recovery_attempts_autocomplete_only_for_bare_no_match() {
     let detailed = FileReference::new("access.md")
         .unwrap()
         .resolve_detailed(&context);
-    let error = CompositionError::from_detailed_no_match(&detailed);
+    let error = CompositionError::from_detailed_no_match(&detailed, &context);
 
     assert!(matches!(
         recover_operation_file("access.md", error),
@@ -295,7 +295,7 @@ fn recovery_enriches_explicit_no_match_without_selecting_suggestion() {
     let detailed = FileReference::new("./docs/unifi/protect.md")
         .unwrap()
         .resolve_detailed(&context);
-    let error = CompositionError::from_detailed_no_match(&detailed);
+    let error = CompositionError::from_detailed_no_match(&detailed, &context);
 
     let OperationFileRecovery::ExplicitNoMatch(error) =
         recover_operation_file("./docs/unifi/protect.md", error)
