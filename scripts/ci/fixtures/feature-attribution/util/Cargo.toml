@@ -1,0 +1,11 @@
+[package]
+name = "fa-util"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fa-base = { path = "../vendor/base" }
+
+[features]
+wide = []

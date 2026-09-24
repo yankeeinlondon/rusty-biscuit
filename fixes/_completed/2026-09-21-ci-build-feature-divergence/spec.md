@@ -1,13 +1,46 @@
 ---
 area: repo
-status: draft-spec
+status: finalized-spec
 created: 2026-09-21
 clarified: false
 reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-21
-review_iterations: 0
-implemented: false
+review_iterations: 3
+implemented: true
+implemented_by: claude/opus
+human_review: true
+human_review_items:
+    - |-
+      **Approve option B as a follow-on change, or close the fix with measurements only? (Open since Phase 1. All four phases are now done.)**
+
+      *Why this matters now:* the plan is finished, but the fix has not yet delivered its goal: fewer rebuilds of the repository's own crates in the CI build job. Re-running the measurement at the end (Phase 4) shows exactly the same numbers as at the start (90 crate builds on Linux, 65 of them extra), because no change was approved. What happens next depends on your answer. The planned "alignment" crate (a crate that switches on the same third-party options for every package) was not built: the options the spec allowed it to align save only **0.9 s**.
+
+      *Options:*
+      - **A. Close with the measurement.** Accept the attribution table, the tool, and the decisions as the result.
+        Pro: nothing to review beyond records, and no risk. Con: no speed-up; the goal stays unmet.
+      - **B. Approve removing one internal link as a small follow-on change.** `schematic-define` depends on `biscuit-file` only to reach the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly (same version) stops the large `schematic-definitions` crate (about 24 s per build) from being rebuilt for other packages' web-server and terminal options.
+        Pro: about **77 s** saved per run (measured), 90 → 84 builds, and nothing is shared between packages, so the 2026-09-12 protection stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: the spec did not list this remedy, so it needs your approval and one spec line.
+      - **C / D. Align many third-party options (C, about 211 s) or a middle set including `mio` (D, about 37 s).**
+        Pro: larger (C) or moderate (D) savings. Con: a package's tests could pass only because another package switched on an option its own manifest never asked for, which the 2026-09-12 decision guards against. Each option needs its own written ruling first, and the alignment-crate tasks reopen.
+
+      *Recommendation: B.* It is the largest saving that keeps the protection intact. If approved, it runs as a separate change: edit `schematic/define/Cargo.toml` and the three `use` lines, update the dependency docs, run `just test schematic-define` and `cargo test -p schematic-definitions --no-run`, and re-run the attribution tool (expect 84 on Linux). Record the next ordinary pull request's build-time sum once one runs anyway.
+    - |-
+      **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
+
+      *Why now:* this is the last open design question in the spec, and the fix should not be closed with a ruling that says something different from what was done. The Open Questions ruling (Option 1) aligns `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". The alignment crate was not built, so the fallback has technically fired. But this option affects only 6 crates, is never the sole reason for a rebuild, and was measured at **0 s**.
+
+      *Options:*
+      - **Leave the option and the test exactly as they are** (amend the ruling in Open Questions). Pro: matches what was done, and the evidence says nothing is lost. Con: none.
+      - **Follow the recorded fallback (Option 2).** Pro: follows the ruling to the letter. Con: CI-planner work and a new way to miss test coverage, for 0 s saved.
+
+      *Recommendation: leave it as it is,* and record the amendment in Open Questions.
+message_to_agent: |-
+    All four phases are complete as records (see "## Phase 4" in implementation-log.md). No source, manifest, or lock file changed after Phase 1, and the author has still not ruled on `human_review_items`.
+    - Phase 4 re-ran `feature-attribution`: identical to Phase 1 (Linux 90/65, macOS 93/68, after review 1's bin-only correction). Acceptance criterion 5 is recorded but not achieved, and the PR build-time observation is pending until a remedy lands.
+    - `feature-attribution` stays a standalone `local-tools` diagnostic (Task 4.4); do not add CI emission.
+    - If the author approves option B, apply it as its own change: `schematic/define/Cargo.toml` (`openapi` → `dep:serde_yaml_ng`, `serde_yaml_ng = { version = "0.10", optional = true }`), `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`, `schematic/docs/dependencies.md` (and the root `docs/dependencies.md` if it lists the edge), `just test schematic-define`, `cargo test -p schematic-definitions --no-run`, then re-run `feature-attribution --target x86_64-unknown-linux-gnu` and update "Phase 4 re-run" in attribution-2026-09-21.md (expect 84).
+    - Rebuild `feature-attribution` before trusting it: `cargo build -p repo-deps --bin feature-attribution`.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21
 related:
@@ -337,6 +370,43 @@ without weakening the ruling at all. The hack crate is for what remains.
   Cohorts would make this problem worse: a configuration shared across cohorts
   compiles once per cohort. They remain the fallback for a *different* finding.
 
+### Rulings (recorded 2026-09-23, before any part 2 work)
+
+These resolve the plan's decision points. The Open Question has its own
+ruling under Open Questions below. The spike evidence behind rulings 3 and 5
+is in this fix's implementation log (Phase 1, Wave 1).
+
+1. **Isolation:** Option 1 (see Open Questions).
+2. **Alignment crate identity.** If created, it is `feature-alignment` at
+   `tools/feature-alignment`: a root workspace member with no bins and no
+   tests, an empty `src/lib.rs`, reviewed `[dependencies]` entries only, and
+   `publish = false`. A rename needs a recorded reason.
+3. **`expectrl` source removal is blocked upstream.** The newest `expectrl`
+   (0.9.0) still depends on `nix ^0.26` and `ptyprocess ^0.5.0`, and 0.5.0
+   is the newest `ptyprocess`. So `libc/extra_traits` is handled by alignment
+   if it is handled at all. Replacing `expectrl` across its five
+   dev-dependency holders is out of scope. The spike also found that
+   `nix 0.29.0` and `0.31.3` enable the same `libc` feature, and that
+   `repo-deps` demands it through `ctrlc` → `nix 0.31.3`, so removing
+   `expectrl` would not retire the flag.
+4. **The "ruled per crate, default no" set stays divergent**
+   (`time/local-offset`, `hyper/server`, `hyper-util/*`, `tower/*`,
+   `crossterm/*`, `mio/*`, `tokio-stream/net`, `clap/*`). One of them may be
+   aligned only if the ranking shows material seconds **and** a per-flag
+   ruling is recorded in this spec first. The same rule covers any flag the
+   ranking surfaces that is not on this spec's eligible list.
+5. **`cache-workspace-crates` stays dismissed.** Verified locally: after a
+   fresh clone and a restored target tree, Cargo reports the workspace crate
+   `Dirty … the file … has changed`, and the third-party crate stays `Fresh`.
+6. **Attribution tooling.** The first-pass tool is the standalone
+   `feature-attribution` binary in `repo-deps`, behind `local-tools`. Whether
+   it becomes a report beside `ci-build` is decided once, in the final phase,
+   from how useful the first table was. This fix adds no CI emission.
+7. **Publishing is checked before the fan-out.** Before any member manifest
+   gains the alignment crate as a dev-dependency, a dry run must show that a
+   path dev-dependency on a `publish = false` crate does not block
+   packaging a publishable member.
+
 ### Out of scope
 
 - `area-drift`'s separate `cargo build -p sniff-cli --release` (about four
@@ -432,3 +502,19 @@ remedy, and it is available whenever the alignment crate exists. Choose
 option 2 only if part 1's ranking shows the alignment crate is not warranted
 at all. Option 3 is a last resort. Record the ruling here before
 implementing.
+
+**Ruling (2026-09-23): option 1.** `proc-macro2/span-locations` is aligned
+through the alignment crate whenever that crate is created. The source-scan
+guard stays in `claudine-cli`, with no new crate and no planner change.
+Option 2 is chosen instead only if part 1's ranking shows the alignment crate
+is not warranted at all. Option 3 is rejected: it re-imports the divergent
+configuration for `claudine`'s whole closure.
+
+Part 1 evidence that changes this question's weight without changing the
+ruling: the owner passes an explicit `--target`, so Cargo resolves
+host-side and target-side `proc-macro2` separately. The dev-dependency's
+`span-locations` reaches only the **target-side** `proc-macro2`. The host
+side, which every derive macro links, stays `default,proc-macro`. So the flag
+re-identifies only workspace crates that link `proc-macro2`/`syn` as normal
+dependencies, not every crate that derives a trait. This fix's attribution
+report ranks it by the seconds it actually causes.

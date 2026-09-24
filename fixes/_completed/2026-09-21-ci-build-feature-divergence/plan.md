@@ -2,7 +2,7 @@
 title: Stop divergent base features from recompiling the workspace per archive
 status: ready
 created: 2026-09-21
-phase: 1
+phase: 4
 total_phases: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -11,6 +11,97 @@ related:
     - 2026-09-12-single-os-compile
 packages:
     - repo-deps
+source_files_during_phase_1:
+    - scripts/feature-attribution.rs
+    - scripts/feature-attribution-tests.rs
+    - scripts/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.lock
+    - scripts/ci/fixtures/feature-attribution/core/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/core/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/util/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/util/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-own/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-own/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-plain/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-plain/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-third/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-third/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/base/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/base/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/src/lib.rs
+    - fixes/2026-09-21-ci-build-feature-divergence/timed-pass.sh
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-data/render-attribution.py
+docs_updated_during_phase_1:
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+docs_created_during_phase_1:
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+skills_files_updated_during_phase_1:
+    - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/rust-devops/ci-cd.md
+source_code:
+    - scripts/feature-attribution.rs
+    - scripts/feature-attribution-tests.rs
+    - scripts/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.lock
+    - scripts/ci/fixtures/feature-attribution/core/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/core/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/util/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/util/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-own/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-own/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-plain/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-plain/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-third/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-third/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/base/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/base/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/src/lib.rs
+    - fixes/2026-09-21-ci-build-feature-divergence/timed-pass.sh
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-data/render-attribution.py
+documentation:
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - .claude/skills/rust-devops/ci-cd.md
+completed_phase: 4
+implemented: true
 ---
 
 # Plan: Stop divergent base features from recompiling the workspace per archive
@@ -194,22 +285,22 @@ require, and none triggers CI.
 
 #### Wave 1 (all four spikes in parallel)
 
-- [ ] **Task 1.1 — Re-derive divergence** (Spike S1; no prerequisites).
+- [x] **Task 1.1 — Re-derive divergence** (Spike S1; no prerequisites).
   - Run `cargo tree -e features,normal,build,dev` for each of the ten owner
     packages at the implementing branch's base; diff resolved feature sets
     pairwise against the shared closure, keyed on `(crate, version)`.
   - Record the reproduced table (expected: the spec's thirteen
     `claudine`/`claudine-cli` rows and no others) plus any cross-owner rows
     the ten-package set adds, in `implementation-notes.md`.
-- [ ] **Task 1.2 — Trace nix owners** (Spike S2; parallel with 1.1, 1.3, 1.4).
+- [x] **Task 1.2 — Trace nix owners** (Spike S2; parallel with 1.1, 1.3, 1.4).
   - From the lock and `cargo tree -i libc` per owner, list which owners
     demand `libc/extra_traits` and through which `nix` version/chain.
   - Record the owner list; this seeds the Phase 2 decision table's
     `libc/extra_traits` row.
-- [ ] **Task 1.3 — Re-check expectrl** (Spike S3; parallel; time-boxed).
+- [x] **Task 1.3 — Re-check expectrl** (Spike S3; parallel; time-boxed).
   - Record the newest `expectrl` version and its `ptyprocess`/`nix` chain,
     with a link to the evidence. Feeds ruling 3; no code change.
-- [ ] **Task 1.4 — Verify cache expectation** (Spike S4; parallel;
+- [x] **Task 1.4 — Verify cache expectation** (Spike S4; parallel;
   time-boxed).
   - In a scratch clone under the temp workspace directory, warm a target tree,
     reset workspace-source mtimes the way a fresh checkout does, and observe
@@ -218,7 +309,7 @@ require, and none triggers CI.
 
 #### Wave 2 (after Wave 1 outcomes)
 
-- [ ] **Task 1.5 — Record rulings** (prerequisite: Wave 1 results; edits
+- [x] **Task 1.5 — Record rulings** (prerequisite: Wave 1 results; edits
   `spec.md`, so surgical changes only).
   - Write the seven rulings above into the spec: the Open Question ruling
     (Option 1, with the Option 2 fallback condition and Option 3 rejection)
@@ -232,7 +323,7 @@ require, and none triggers CI.
 
 #### Wave 3 (two tasks in parallel; both depend only on the selection, not on Wave 2)
 
-- [ ] **Task 1.6 — Build attribution script** (complexity: the highest in
+- [x] **Task 1.6 — Build attribution script** (complexity: the highest in
   this plan — reverse-dependency attribution; budget tests accordingly).
   - Add a `feature-attribution` binary to `scripts/` (package `repo-deps`,
     `[[bin]]` behind the existing `local-tools` feature, alongside `drift`
@@ -259,7 +350,7 @@ require, and none triggers CI.
     terminal; the machine output is JSON beside the rendered table. Update
     `scripts/Cargo.toml` features comment block and `docs/dependencies.md`
     in the same change if any dependency is added (none expected).
-- [ ] **Task 1.7 — Run timed pass** (prerequisite: storage headroom check;
+- [x] **Task 1.7 — Run timed pass** (prerequisite: storage headroom check;
     parallel with 1.6; no prerequisites on it).
   - Reproduce the owner's archive builds locally, once per owner package, in
     the producer's deterministic package order (read it from the resolved
@@ -278,7 +369,7 @@ require, and none triggers CI.
 
 #### Wave 4 (after Waves 3)
 
-- [ ] **Task 1.8 — Publish attribution table** (prerequisite: Tasks 1.6 and
+- [x] **Task 1.8 — Publish attribution table** (prerequisite: Tasks 1.6 and
   1.7; this task decides how far Phases 2 and 3 go).
   - Join script output with timed-pass seconds: charge each configuration
     beyond a crate's first the seconds of the crates it re-identifies.
@@ -310,7 +401,7 @@ before this phase's work.
 
 #### Wave 5 (single task; depends on Phase 1's ranking and rulings)
 
-- [ ] **Task 2.1 — Write decision table** (prerequisite: Task 1.8 and
+- [x] **Task 2.1 — Write decision table** (prerequisite: Task 1.8 and
   recorded rulings; no source changes).
   - For **every** divergent configuration the attribution table found (the
     three base flags, the remaining ten third-party rows, and the
@@ -339,7 +430,7 @@ before this phase's work.
 
 #### Wave 6 (conditional; tasks exist only if the decision table assigns them)
 
-- [ ] **Task 2.2 — Execute source removals** (only for flags whose decision
+- [x] **Task 2.2 — Execute source removals** (only for flags whose decision
   row says "remove the source"; expected: none, per ruling 3 — then this
   task is closed with the recorded block evidence).
   - Each removal is a separate, reviewable change: the manifest/lock edit,
@@ -348,6 +439,11 @@ before this phase's work.
     change.
   - Verify no behavior change: the affected packages' L1 suites pass
     locally (`just test <pkg>`).
+  - **Closed (Phase 2):** no flag row assigns source removal; every
+    third-party removal is blocked or not applicable (see the decision
+    table). The `schematic-define` → `biscuit-file` edge (option B, measured
+    at ≈77 s) is a source-removal candidate waiting on the author's ruling;
+    if approved, it runs here as a separate change before Phase 3.
 
 **Phase 2 validation checkpoint.** Every divergent configuration has a
 decision row; no row aligns a workspace crate's own feature; every executed
@@ -365,7 +461,7 @@ seconds order. No workspace crate's own feature is ever an entry.
 
 #### Wave 7 (two tasks in parallel)
 
-- [ ] **Task 3.1 — Verify publish interaction** (ruling 7; must complete
+- [x] **Task 3.1 — Verify publish interaction** (ruling 7; must complete
   before Task 3.2's fan-out — a blocking prerequisite, scheduled early so
   the result is known before any member manifest is touched).
   - On a scratch branch of the manifests, add the prospective path
@@ -374,7 +470,13 @@ seconds order. No workspace crate's own feature is ever an entry.
     repository's release-plz dry run) to prove packaging is unaffected.
   - Record the outcome in `implementation-notes.md`. If it blocks, record
     the chosen remedy as a ruling amendment before proceeding.
-- [ ] **Task 3.2 — Scaffold alignment crate** (parallel with 3.1; no member
+  - **Done (Phase 3): does not block.** A temporary `publish = false`
+    crate, wired as a versionless path dev-dependency of the publishable
+    `biscuit-hash`: `cargo package --list` and `cargo publish --dry-run`
+    both succeed, and the normalized `Cargo.toml` inside the `.crate` has no
+    `feature-alignment` entry (Cargo strips it). The edit was reverted. No
+    ruling amendment is needed.
+- [x] **Task 3.2 — Scaffold alignment crate** (parallel with 3.1; no member
   edges yet).
   - Create `tools/feature-alignment` per ruling 2: root workspace member
     (`members` list entry beside `tools/test-toolkit`), empty `src/lib.rs`,
@@ -383,10 +485,16 @@ seconds order. No workspace crate's own feature is ever an entry.
     lib doc: third-party base-graph features only, add-only, one reviewed
     entry at a time, never a workspace crate's own features.
   - Update `docs/dependencies.md` (new workspace member) in the same change.
+  - **Closed (Phase 3): not built.** Task 2.1 found the alignment crate not
+    warranted: the spec's eligible entries remove 0.6 s, and every option
+    that removes more (C/D) needs a ruling-4 spec entry that does not exist.
+    This phase exists only if the crate is warranted, so it collapses to
+    that no-op rationale. If the author later rules C or D, Tasks 3.2–3.4
+    run as written. Task 3.1's result already clears their prerequisite.
 
 #### Wave 8 (after 3.1 and 3.2)
 
-- [ ] **Task 3.3 — Fan out dev-dependency edges** (prerequisite: Tasks 3.1
+- [x] **Task 3.3 — Fan out dev-dependency edges** (prerequisite: Tasks 3.1
   and 3.2; one atomic change — the crate is inert until every member
   carries it).
   - Add `feature-alignment` as a path **dev-dependency** (dev-only: normal
@@ -404,10 +512,12 @@ seconds order. No workspace crate's own feature is ever an entry.
   - Validation in-change: `cargo check -p feature-alignment` and
     `cargo check -p repo-deps --all-targets` pass; `just test repo-deps`
     (including `scripts/ci-build-archive-tests.rs`) passes unchanged.
+  - **Closed (Phase 3): not built.** See Task 3.2. No member manifest or
+    `Cargo.lock` was edited, so no fan-out cost exists to record.
 
 #### Wave 9 (sequential entries; same file, ranked order)
 
-- [ ] **Task 3.4 — Add ranked entries** (prerequisite: Task 3.3; one
+- [x] **Task 3.4 — Add ranked entries** (prerequisite: Task 3.3; one
   separate change per entry, highest-seconds first; expected order from the
   spec's evidence: `libc/extra_traits`, then `proc-macro2/span-locations`
   per ruling 1, then `serde_core/default` if the ranking justifies it).
@@ -425,6 +535,9 @@ seconds order. No workspace crate's own feature is ever an entry.
     `just test repo-deps`.
   - Any "default no" flag promoted per ruling 4 requires its spec ruling
     recorded **before** its entry is written — not after.
+  - **Closed (Phase 3): no entries.** See Task 3.2. Under ruling 1,
+    `proc-macro2/span-locations` is aligned only if the crate exists, so it
+    stays divergent (the pending Open Questions amendment in the spec).
 
 **Phase 3 validation checkpoint.** `just test repo-deps` green including the
 unchanged archive contract fixture; the attribution script run over the
@@ -442,7 +555,7 @@ triggers a run.
 
 #### Wave 10 (three verification tasks in parallel)
 
-- [ ] **Task 4.1 — Re-run attribution** (prerequisite: Phase 3 complete, or
+- [x] **Task 4.1 — Re-run attribution** (prerequisite: Phase 3 complete, or
   its no-op rationale recorded).
   - Re-run `feature-attribution` over the same ten-package selection at the
     final tree; record the before/after configuration counts per workspace
@@ -450,7 +563,11 @@ triggers a run.
   - Expected: fewer configurations for the crates the entries targeted; the
     workspace-own divergence rows unchanged. Record the result either way —
     acceptance criterion 5 asks for the recording, not a gate.
-- [ ] **Task 4.2 — Prove isolated-package fidelity** (acceptance criterion
+  - **Done (Phase 4): unchanged.** No remedy landed, so the re-run equals
+    Phase 1 exactly (Linux 92 configurations / 65 divergent; macOS 95 / 68;
+    every crate's count the same). Recorded under "Phase 4 re-run" in
+    `attribution-2026-09-21.md`.
+- [x] **Task 4.2 — Prove isolated-package fidelity** (acceptance criterion
   6; may reuse qualifying local evidence).
   - For each package whose closure changed (at minimum the ten-owner
     selection once any Phase 3 entry landed), prove that
@@ -460,17 +577,23 @@ triggers a run.
   - This is the check that no package came to depend on a feature only the
     workspace-level declaration provides. Record the package list and
     results in `implementation-notes.md`.
-- [ ] **Task 4.3 — Confirm contracts unchanged** (acceptance criterion 4).
+  - **Done (Phase 4):** no package's closure changed. `repo-deps` (the only
+    manifest edit, a new bin) builds alone with `cargo test -p repo-deps
+    --no-run`.
+- [x] **Task 4.3 — Confirm contracts unchanged** (acceptance criterion 4).
   - Run `just test repo-deps` (L1 plus the Python companion suites,
     including `scripts/ci-build-archive-tests.rs` and
     `one_owner_tree_shares_a_dependency_compile_without_unifying_features`)
     and `just lint` for every touched package area. The archive mechanism
     is not what changed; any fixture failure is a defect in this fix, not a
     fixture update.
+  - **Done (Phase 4):** `just test repo-deps` 467 passed, 1 skipped (the skip
+    was already there), including the archive contract fixture, unchanged.
+    The 14 companion suites pass, and `just _lint repo-deps` is clean.
 
 #### Wave 11 (closure; after Wave 10)
 
-- [ ] **Task 4.4 — Decide tooling disposition** (ruling 6; single decision,
+- [x] **Task 4.4 — Decide tooling disposition** (ruling 6; single decision,
   recorded).
   - Decide from how useful the first table was whether `feature-attribution`
     becomes a reusable report beside `ci-build` (emitted from the plan the
@@ -479,14 +602,20 @@ triggers a run.
     `implementation-notes.md`. If "reusable report" is chosen, implement it
     as a bounded follow-on beside `ci-build` **without adding any CI
     emission in this fix**.
-- [ ] **Task 4.5 — Record follow-through observation** (acceptance criterion
+  - **Done (Phase 4): stays a standalone `local-tools` diagnostic.** The
+    table was decisive, so it is kept. The plan would supply only the owner
+    list, so it is not promoted to a `ci-build` report. Recorded in the log
+    and the `rust-devops` skill.
+- [x] **Task 4.5 — Record follow-through observation** (acceptance criterion
   5, second half; explicitly not gating, explicitly not triggered).
   - When the next ordinary pull request that selects a comparable package
     set completes anyway, record its owner job's sum of Cargo build time
     beside the analyzed job's 27.9 min in `implementation-notes.md`, with
     the run link. This observation may postdate the plan's terminal state —
     note it as pending if it has not happened by then.
-- [ ] **Task 4.6 — Finalize log and spec state**.
+  - **Closed (Phase 4): pending.** No remedy is in HEAD, so no run can show
+    a saving from this fix yet. The recording waits for a remedy to land.
+- [x] **Task 4.6 — Finalize log and spec state**.
   - Complete `implementation-notes.md`: the seconds split (from Task 1.8),
     the decision table (Task 2.1), each remedy change with its rationale,
     the fan-out record, the before/after attribution counts, and the
@@ -496,6 +625,11 @@ triggers a run.
     alone moves the fix to `_completed` after the review cycle closes.
   - Run `detect_changes` (scope `all`) over the final working tree and
     record the result with the handoff summary.
+  - **Done (Phase 4):** the log is complete, with an acceptance-criteria
+    status table. The comment pass needed no edits. `detect_changes`
+    reports 0 changed symbols, risk low. The spec is `implemented: true`,
+    with `human_review` still open for option B and the Open Questions
+    amendment.
 
 **Phase 4 validation checkpoint (plan terminal state).** All seven
 acceptance criteria of the spec are demonstrably met and recorded in the
