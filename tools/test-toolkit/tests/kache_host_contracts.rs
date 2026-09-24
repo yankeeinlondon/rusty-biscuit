@@ -106,6 +106,13 @@ fn qualify_prints_a_stable_verdict_line_that_matches_its_exit_code() {
             "a qualify verdict names its candidate (or defers with `-`): {first}"
         );
         assert_eq!(code, Some(0), "a qualify verdict exits 0");
+        // The report block's verdict line is built from it. A no-qualify
+        // verdict carries its deciding fact in the reason instead (spec §6:
+        // one line naming the reason), so only qualify promises this line.
+        assert!(
+            stdout.contains("kache-host: devices checkout="),
+            "a qualify verdict carries the devices line:\n{stdout}"
+        );
     } else if let Some(rest) = first.strip_prefix("kache-host: verdict=no-qualify") {
         assert!(
             rest.starts_with(" reason="),
@@ -115,10 +122,6 @@ fn qualify_prints_a_stable_verdict_line_that_matches_its_exit_code() {
     } else {
         panic!("first line is not a stable verdict line: {first:?}\nstdout:\n{stdout}");
     }
-    assert!(
-        stdout.contains("kache-host: devices checkout="),
-        "the devices line is part of the stable format:\n{stdout}"
-    );
 }
 
 /// The env-passthrough probe must fail against a wrapper that strips
@@ -238,4 +241,64 @@ fn unknown_subcommand_is_a_usage_error() {
         .output()
         .expect("script must spawn");
     assert_eq!(output.status.code(), Some(2));
+}
+
+/// A fresh home has no user cache directory yet (`~/.cache` on Linux,
+/// `~/Library/Caches` on macOS). The cascade must still consider the user
+/// cache dir, deciding its device from the nearest existing ancestor. The
+/// earlier script only looked at the immediate parent, so a fresh home fell
+/// through to the root-owned mount point and reported
+/// `no-user-writable-store-location-on-the-checkout-volume` on a filesystem
+/// that clones (found on the WSL guest, 2026-09-23). A non-qualifying
+/// verdict must also leave the fresh home as it found it: the cascade may
+/// create the candidate to probe it, and must remove what it created.
+#[cfg(unix)]
+#[test]
+fn qualify_places_the_candidate_in_a_fresh_home_and_cleans_up_on_no() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let home = scratch.path().join("home");
+    let checkout = scratch.path().join("checkout");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&checkout).expect("checkout");
+
+    let output = Command::new("bash")
+        .arg(repo_root().join("scripts/kache-host.sh"))
+        .arg("qualify")
+        .current_dir(&checkout)
+        .env("HOME", &home)
+        .env_remove("XDG_CACHE_HOME")
+        .env("WT", "")
+        .env("GIT_CEILING_DIRECTORIES", scratch.path())
+        .output()
+        .expect("qualify must spawn");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let first = stdout.lines().next().unwrap_or_default();
+
+    assert!(
+        !first.contains("no-user-writable-store-location"),
+        "the user cache dir under a fresh home is a valid placement:\n{stdout}"
+    );
+    if let Some(candidate) = first.strip_prefix("kache-host: verdict=qualify candidate=") {
+        assert_eq!(output.status.code(), Some(0));
+        let candidate = PathBuf::from(candidate);
+        assert!(
+            candidate.starts_with(&home) && candidate.is_dir(),
+            "the candidate is the user cache dir under the fresh home:\n{stdout}"
+        );
+    } else {
+        assert!(
+            first.starts_with("kache-host: verdict=no-qualify reason=clone-unsupported")
+                || first.starts_with("kache-host: verdict=no-qualify reason=store-device-"),
+            "a fresh home can only fail on the clone probe or the device check:\n{stdout}"
+        );
+        assert_eq!(output.status.code(), Some(1));
+        let leftovers: Vec<_> = fs::read_dir(&home)
+            .expect("home")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "a no-qualify verdict leaves the fresh home untouched, found {leftovers:?}:\n{stdout}"
+        );
+    }
 }
