@@ -53,7 +53,7 @@ All file references in the CLI use the `FileReference` struct from the `biscuit-
 | `x.md`, `docs/x.md`   | implicit relative        | the base directory **first**, then the repository root                                |
 | `/x.md`, `C:\x.md`    | absolute                 | used verbatim                                                                         |
 | `~/x.md`              | home                     | the user's home directory only (`~user` is rejected)                                  |
-| `@x.md`               | magic (multi-homed)      | registered prepends, package, package area, repository root, home, registered appends |
+| `@x.md`               | magic (multi-homed)      | the local tree (package, package area, repository root or launch directory, plus registered roots inside it) before home and registered roots outside it; see [Magic Paths](../topics/magic-paths.md) |
 | `&x.md`               | repository root, exactly | the repository root only                                                              |
 | `^x.md`               | repository scoped        | package, package area, then repository root; never consults home                      |
 | `vault:x.md`          | vault                    | registered vault roots, then the paths in `$VAULT`                                    |
