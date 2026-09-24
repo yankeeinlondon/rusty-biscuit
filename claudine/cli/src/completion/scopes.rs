@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, PathPosition, to_portable_string};
+use biscuit_file::{FileResolutionContext, to_portable_string};
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
 
 /// The composition command the scopes are being resolved for.
@@ -250,15 +250,13 @@ pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionConte
     }
     let package_area = resolution.package_area().map(Path::to_path_buf);
     let package = resolution.package_root().map(Path::to_path_buf);
-    for root in claudine::composition::prompt_magic_roots(
+    claudine::composition::with_prompt_magic_roots(
+        resolution,
         repository_root,
         package_area.as_deref(),
         package.as_deref(),
         ctx.home.as_deref(),
-    ) {
-        resolution = resolution.add_magic_path(root, PathPosition::Start);
-    }
-    resolution
+    )
 }
 
 /// Walk upward from `start` until a `.git` entry is found.

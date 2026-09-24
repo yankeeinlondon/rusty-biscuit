@@ -80,15 +80,14 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
     }
     let package_area = context.package_area().map(Path::to_path_buf);
     let package = context.package_root().map(Path::to_path_buf);
-    for root in prompt_magic_roots(
+    let home = context.home_dir().map(Path::to_path_buf);
+    Ok(with_prompt_magic_roots(
+        context,
         git_root.as_deref(),
         package_area.as_deref(),
         package.as_deref(),
-        context.home_dir(),
-    ) {
-        context = context.add_magic_path(root, PathPosition::Start);
-    }
-    Ok(context)
+        home.as_deref(),
+    ))
 }
 
 /// Build a source-anchored snapshot for compatibility callers.
@@ -154,15 +153,14 @@ pub fn derive_request_context_for_source(
     }
     let package_area = context.package_area().map(Path::to_path_buf);
     let package = context.package_root().map(Path::to_path_buf);
-    for root in prompt_magic_roots(
+    let home = context.home_dir().map(Path::to_path_buf);
+    Ok(with_prompt_magic_roots(
+        context,
         git_root.as_deref(),
         package_area.as_deref(),
         package.as_deref(),
-        context.home_dir(),
-    ) {
-        context = context.add_magic_path(root, PathPosition::Start);
-    }
-    Ok(context)
+        home.as_deref(),
+    ))
 }
 
 /// Resolves and loads a top-level composition source using a previously
@@ -439,6 +437,49 @@ pub fn prompt_magic_roots(
         push_unique_root(&mut roots, home.join(".claudine").join("prompts"));
     }
     roots
+}
+
+/// The bare `.claudine` roots, searched after every intrinsic `@` scope.
+///
+/// These let the path-shaped `@prompts/<x>` form reach the repo and user
+/// Claudine prompt tiers, which the concise `@<x>` form reaches through
+/// [`prompt_magic_roots`]. Without them `@prompts/<x>` resolves only where a
+/// package, area, or repository root happens to contain `prompts/`, so it
+/// fails in a repository with no `prompts/` directory and outside any
+/// repository. They are appended, not prepended, so a closer
+/// `prompts/<x>` still wins.
+#[must_use]
+pub fn prompt_magic_fallback_roots(git_root: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(root) = git_root {
+        push_unique_root(&mut roots, root.join(".claudine"));
+    }
+    if let Some(home) = home {
+        push_unique_root(&mut roots, home.join(".claudine"));
+    }
+    roots
+}
+
+/// Register Claudine's prompt conventions on a file-resolution context.
+///
+/// The single registration point shared by composition resolution, the
+/// invocation context, and shell completion, so a value completion offers
+/// is one runtime resolves.
+#[must_use]
+pub fn with_prompt_magic_roots(
+    mut context: FileResolutionContext,
+    git_root: Option<&Path>,
+    package_area: Option<&Path>,
+    package: Option<&Path>,
+    home: Option<&Path>,
+) -> FileResolutionContext {
+    for root in prompt_magic_roots(git_root, package_area, package, home) {
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+    for root in prompt_magic_fallback_roots(git_root, home) {
+        context = context.add_magic_path(root, PathPosition::End);
+    }
+    context
 }
 
 fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {

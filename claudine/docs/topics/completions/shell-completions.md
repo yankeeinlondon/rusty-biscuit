@@ -144,22 +144,31 @@ Default iteration order (`ScopeSet::iter_scopes`):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
-Magic convention roots come from Claudine's shared `prompt_magic_roots` builder
-and are expanded by `FileReference::complete_partial_in_context`. Because
-Claudine registers them as prepends, the complete effective `@` order is:
+Magic convention roots come from Claudine's shared `with_prompt_magic_roots`
+registration and are expanded by `FileReference::complete_partial_in_context`.
+Claudine prepends its prompt directories and appends the bare `.claudine`
+directories around biscuit-file's intrinsic roots, so the complete effective
+`@` order is:
 
-1. **Discrete package** — `<pkg>/`, then `<pkg>/prompts/`.
-2. **Package area** — `<repo>/<area>/`, then `<repo>/<area>/prompts/`.
+1. **Discrete package prompts** — `<pkg>/prompts/`.
+2. **Package-area prompts** — `<repo>/<area>/prompts/`.
 3. **Repo prompts** — `<repo>/prompts/`.
 4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
 5. **Repo document scopes** — `docs/`, then the agent-skill peers.
 6. **User Claudine scope** — `~/.claudine/prompts/`.
 7. **Intrinsic roots** — discrete package, package area, repository, then home.
+8. **Claudine fallbacks** — `<repo>/.claudine/`, then `~/.claudine/`.
 
-Runtime composition registers this identical ordered list. The package and
-area bare roots keep path-shaped values such as `@prompts/plan.md` resolvable;
-the prompt children support the concise `@plan.md` form. The default
-non-magic pipeline retains its separate display-oriented scope ordering.
+Runtime composition, the invocation context, and completion all register
+this identical ordered list. The prompt directories (1–6) serve the concise
+`@plan.md` form. The path-shaped `@prompts/plan.md` form is served by the
+bare roots: the intrinsic roots (7) reach any `prompts/` under the package,
+area, or repository, and the Claudine fallbacks (8) reach
+`<repo>/.claudine/prompts/` and `~/.claudine/prompts/`, so the form also
+works in a repository with no `prompts/` directory and outside any
+repository. The fallbacks come last so a closer `prompts/` still wins. The
+default non-magic pipeline retains its separate display-oriented scope
+ordering.
 
 **Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
 can shell out to `cargo metadata` on first call. Threading a single

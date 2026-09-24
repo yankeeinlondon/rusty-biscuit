@@ -37,6 +37,7 @@ mod compose_initialize_staged_boot;
 mod compose_interactive_timeout_cli;
 #[cfg(unix)]
 mod compose_removed_validation_keys;
+mod compose_prompt_tiers;
 mod compose_repository_context;
 mod compose_schema_cli;
 #[cfg(unix)]

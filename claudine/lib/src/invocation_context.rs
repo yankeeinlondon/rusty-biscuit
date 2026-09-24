@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use biscuit_file::{FileResolutionContext, PathPosition, home_dir};
+use biscuit_file::{FileResolutionContext, home_dir};
 use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{FileChange, GitInfo};
@@ -21,7 +21,7 @@ use sniff::request::{
 use darkmatter::markdown::compose::{CurrentProvider, CurrentRefresh};
 
 use crate::composition::{
-    LaunchWorkspaceContext, prompt_magic_roots,
+    LaunchWorkspaceContext, with_prompt_magic_roots,
 };
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::ClaudineError;
@@ -1898,15 +1898,14 @@ fn build_file_resolution_context(
     }
     let package_area_root = context.package_area().map(Path::to_path_buf);
     let package_root = context.package_root().map(Path::to_path_buf);
-    for root in prompt_magic_roots(
+    let home_dir = context.home_dir().map(Path::to_path_buf);
+    with_prompt_magic_roots(
+        context,
         repository_root,
         package_area_root.as_deref(),
         package_root.as_deref(),
-        context.home_dir(),
-    ) {
-        context = context.add_magic_path(root, PathPosition::Start);
-    }
-    context
+        home_dir.as_deref(),
+    )
 }
 
 /// Whether a `.git` boundary separates a directory from its enclosing root.

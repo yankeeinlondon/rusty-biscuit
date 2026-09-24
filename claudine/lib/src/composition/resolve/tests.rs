@@ -63,6 +63,63 @@ fn prompt_magic_roots_skip_absent_anchors() {
 }
 
 #[test]
+fn prompt_magic_roots_without_repository_register_only_user_tier() {
+    let got = prompt_magic_roots(None, None, None, Some(Path::new("/home/u")));
+    assert_eq!(got, vec![PathBuf::from("/home/u/.claudine/prompts")]);
+}
+
+#[test]
+fn prompt_magic_fallback_roots_are_repo_then_home_claudine() {
+    let home = Path::new("/home/u");
+    assert_eq!(
+        prompt_magic_fallback_roots(Some(Path::new("/repo")), Some(home)),
+        vec![PathBuf::from("/repo/.claudine"), PathBuf::from("/home/u/.claudine")],
+    );
+    assert_eq!(
+        prompt_magic_fallback_roots(None, Some(home)),
+        vec![PathBuf::from("/home/u/.claudine")],
+    );
+    assert!(prompt_magic_fallback_roots(None, None).is_empty());
+}
+
+#[test]
+fn path_shaped_prompt_reference_keeps_closest_tier_first() {
+    // `@prompts/x.md`: the repository's own `prompts/` precedes both
+    // `.claudine` tiers, and the repo tier precedes the user tier.
+    let fixture = TempDir::new().unwrap();
+    let repo = fixture.path().join("home/config/sh");
+    let home = fixture.path().join("home");
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        Some(&repo),
+        None,
+        None,
+        Some(&home),
+    );
+
+    let candidates = FileReference::new("@prompts/x.md")
+        .unwrap()
+        .candidate_plan(&context)
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate.path().to_path_buf())
+        .collect::<Vec<_>>();
+    let position = |path: PathBuf| {
+        candidates
+            .iter()
+            .position(|candidate| *candidate == path)
+            .unwrap_or_else(|| panic!("missing candidate {path:?} in {candidates:?}"))
+    };
+
+    let repo_prompts = position(repo.join("prompts/x.md"));
+    let repo_claudine = position(repo.join(".claudine/prompts/x.md"));
+    let user_claudine = position(home.join(".claudine/prompts/x.md"));
+    assert!(repo_prompts < repo_claudine, "{candidates:?}");
+    assert!(repo_claudine < user_claudine, "{candidates:?}");
+}
+
+#[test]
 fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
     // Roots must be host-absolute for the scope catalog; none need to exist.
     let fixture = TempDir::new().unwrap();
