@@ -1,5 +1,4 @@
-# Implementation Log for 2026-09-23-ensuring-kache-support (5 phases)
-
+---
 spec: /Volumes/coding/wt/rusty-biscuit/fix-dmls/fixes/2026-09-23-ensuring-kache-support/spec.md
 plan: fixes/2026-09-23-ensuring-kache-support/plan.md
 implemented_by: opencode/zai-coding-plan/glm-5.3
@@ -25,8 +24,26 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3:
+    - README.md
+    - docs/initialization.md
+    - docs/kache-strategy.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/kache/SKILL.md
+    - .claude/skills/kache/configuration.md
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/rust-devops/kache.md
 packages:
     - test-toolkit
+---
+
+# Implementation Log for 2026-09-23-ensuring-kache-support (5 phases)
 
 ## Phase 1
 
@@ -347,3 +364,101 @@ left as found.
 | Status shares the probe, no KACHE_DIR reconstruction, drift fails loudly | `kache_status_shares_the_probe_and_fails_loudly_on_drift` |
 | No stale policy text anywhere in the justfile | `justfile_carries_no_stale_kache_policy_text` |
 | init still wires `_ensure-kache`; installer stays an explicit recipe | `ci_workflow_contracts::init_installs_the_compiler_cache_without_activating_it` (bridged) |
+
+## Phase 3
+
+### Resumed state
+
+An earlier Phase 3 run had already landed the first three Wave 1 tasks
+(checked off): contract tests in `ci_workflow_contracts.rs`, the
+`docs/kache-strategy.md` rewrite, and the `docs/initialization.md` + README
+rewrite. It had also partly done the kache skill (SKILL.md ruling section,
+configuration.md store table and precedence stack) but wrote no log entry.
+This run verified that work against the landed Phase 2 recipes and finished
+the rest.
+
+### Wave 1 — remaining tasks
+
+**Kache skill** (`.claude/skills/kache/`)
+
+- `installation.md`: replaced the stale "installs on macOS and Linux, never
+  reinstalling / activation is a separate step" paragraph with the
+  probe-decided flow. It documents both `install-kache` forms (positional
+  `true` = binary-only, as the recipe actually accepts) and the **0.23.0
+  floor and its rationale** (the measured line; a check, not a pin). Added a
+  new section **"macOS: the hardened runtime strips `DYLD_*` — re-sign ad
+  hoc"**: symptom text, root cause, the `codesign --force -s -` remedy with
+  the `flags=0x2(adhoc)` check, the source-install fallback, probe-first
+  gating, and rejected workarounds (toolchain symlinks, recipe `DYLD_*`
+  exports). Rewrote "In this repository": init is the only activator, NTFS
+  does not qualify while ReFS can, `RUSTC_WRAPPER=""` opts one command out,
+  and what `kache-status` now reports. The uninstall paragraph now points at
+  `kache doctor` for the store, not a per-OS table.
+- `platforms.md`: the macOS store line is the *default*; `kache doctor`
+  names the store actually in use.
+- `SKILL.md`: the key-references entry for installation.md names the trap.
+  The ruling section from the earlier run was checked against the justfile
+  and is accurate (positional `true`, 0.23.0, `RUSTC_WRAPPER=""`).
+
+**OS skill**: `.claude/skills/os/macos.md` gets a "Host conditions that look
+like repo failures" entry for the `libLLVM.dylib` / LLD SIGABRT symptom,
+pointing at the kache skill. The `os/SKILL.md` index line for macos.md
+mentions it.
+
+### Wave 2 — Contracts checkpoint
+
+- **Lint found a Phase 3 defect**: clippy `collapsible_if` in the new
+  `justfile_corpus()` helper (`ci_workflow_contracts.rs`). The earlier run had
+  not run `just lint`. Fixed with a let-chain; `just lint` (tools) is now
+  green.
+- **Negative proof for the new contracts**: temporarily appended
+  `- run: just init` to `.github/workflows/_area-ci.yml` and a
+  `kache init -y` recipe line to `just/devops.just`.
+  `ci_never_runs_init_nor_installs_or_upgrades_kache` and
+  `init_owns_the_kache_host_setup_through_the_ensure_step` both FAILED with
+  their intended messages. The imported-file case proves `justfile_corpus`
+  follows `import`s. Both files were restored from backups, and `git status`
+  is clean for them.
+- **Drift scan** (`rg "never activated|never reinstalling|never reinstalls|
+  KACHE_DIR|not reinstalling|NOT activated|kache init"` over docs/, README,
+  .claude/skills/, justfile):
+  - `.claude/skills/rust-devops/kache.md` "In this repo" still stated the
+    2026-09-09 ruling ("macOS on / Windows and WSL off … never
+    reinstalling"). It was not in the plan's file list; rewritten to the
+    2026-09-23 init-owned summary.
+  - Deliberately historical, left as-is: the justfile comment above
+    `kache-status` ("the pre-2026-09-23 recipe guessed from KACHE_DIR") and
+    `docs/kache-strategy.md:26` (records that the "not reinstalling" skip
+    is gone).
+  - Generic upstream `kache init` usage in the kache skill (quick reference,
+    Post-install) and rust-devops/kache.md is vendor documentation, not repo
+    policy. The repo rule against running it lives in installation.md
+    "In this repository".
+- Docs agree with the recipe on the positional `just install-kache true`
+  form (docs/kache-strategy.md, docs/initialization.md, kache skill).
+- Implementation-log bookkeeping: its metadata block sat as plain text under
+  the H1, not as YAML frontmatter. Wrapped it in `---` delimiters at the top
+  of the file (values unchanged) so the required frontmatter properties can
+  be parsed.
+
+### Gates
+
+- `just test` (tools area): 377 passed, 2 skipped. The skips are
+  pre-existing `#[ignore]` fixtures
+  (`nextest_config_verification::cargo_nextest_flags_slow_test_in_output`,
+  `slow_fixture_for_nextest_verification`).
+- `just lint` (tools area): green after the collapsible-if fix.
+- No OS-specific code changed in this phase (tests read repository text
+  only), so no cross-check run: CI's Linux/macOS legs cover it.
+
+### Requirement → test mapping (Phase 3)
+
+| Behavior | Test(s) |
+|---|---|
+| `init` still runs `_ensure-kache`; installer stays an explicit recipe with `binary_only` | `ci_workflow_contracts::init_owns_the_kache_host_setup_through_the_ensure_step` |
+| No bare `kache init` / `export RUSTC_WRAPPER=kache` in the justfile or any import | same test (proven failing on a planted `just/devops.just` violation) |
+| Non-empty wrapper activation write only inside `_ensure-kache` | same test |
+| Installer targets latest; floor is a check (no version pin literal) | `ci_workflow_contracts::kache_has_a_single_version_floor` |
+| No workflow runs `just init` or installs/upgrades kache (Necessary Rule 3) | `ci_workflow_contracts::ci_never_runs_init_nor_installs_or_upgrades_kache` (proven failing on a planted workflow step) |
+| No tracked wrapper / CI kache wiring | `ci_workflow_contracts::ci_does_not_wire_the_kache_wrapper` (unchanged) |
+| Docs/skills no longer state the old policy | drift scan (manual; documentation is not test-pinned) |

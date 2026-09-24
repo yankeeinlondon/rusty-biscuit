@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-23
-phase: 2
+phase: 3
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 source_files_during_phase_1:
@@ -25,6 +25,21 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3:
+    - README.md
+    - docs/initialization.md
+    - docs/kache-strategy.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/kache/SKILL.md
+    - .claude/skills/kache/configuration.md
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/rust-devops/kache.md
 packages:
     - test-toolkit
 ---
@@ -284,7 +299,7 @@ no cross-wave concurrency is safe here.)
 All Wave 1 tasks are file-disjoint and run concurrently. Content derives from
 the spec; verify each against the landed Phase 2 recipes before finishing.
 
-- [ ] **Contract tests**
+- [x] **Contract tests**
     - Update `tools/test-toolkit/tests/ci_workflow_contracts.rs`
       (init_installs_the_compiler_cache_without_activating_it and the
       surrounding D1/D2 block) to the new contract (spec Changes): `init` must
@@ -299,7 +314,7 @@ the spec; verify each against the landed Phase 2 recipes before finishing.
     - Update the 2026-09-09 ruling doc-comments on those tests to cite the
       2026-09-23 spec rulings that supersede them.
     - Validation: `just test tools` (nextest) green with the new justfile.
-- [ ] **Strategy doc**
+- [x] **Strategy doc**
     - Rewrite `docs/kache-strategy.md`: repo-integration bullets and the
       2026-09-09 ruling table's install/activation wording → "`init` decides
       from the probe"; fix the Mac table's store path (the store is wherever
@@ -307,14 +322,14 @@ the spec; verify each against the landed Phase 2 recipes before finishing.
       and the re-sign remedy; record the 0.23.0 floor and why; note the
       placement cascade and the config-file-as-single-source-of-truth ruling
       (spec §2).
-- [ ] **Init docs**
+- [x] **Init docs**
     - `docs/initialization.md`: rewrite "Build Caching" (Installing / Probing
       before activating / Activating) and "Platform Behavior" to the new
       init-owned flow — probe, install, config write, daemon, activation last,
       failure contract, non-qualifying paths.
     - `README.md` (~line 93): replace "installed by `just init` on macOS and
       Linux but never activated" with the probe-decided, init-owned summary.
-- [ ] **Kache skill**
+- [x] **Kache skill**
     - `.claude/skills/kache/`: replace the 2026-09-09 ruling section in
       SKILL.md (init now owns placement, activation, daemon lifecycle);
       correct the store-location table in configuration.md to "`kache doctor`
@@ -323,7 +338,7 @@ the spec; verify each against the landed Phase 2 recipes before finishing.
       lowest-priority, cannot carry the store path or gate env) → default;
       `KACHE_DISABLED` ungated); add the hardened-runtime/`DYLD_*` trap and
       ad hoc re-sign to installation.md; the 0.23.0 floor and rationale.
-- [ ] **OS skill**
+- [x] **OS skill**
     - `.claude/skills/os/macos.md`: short entry for the hardened-runtime
       `DYLD_*`-stripping trap (symptom: the `rust-lld`/`libLLVM.dylib` dyld
       abort through kache), pointing at the kache skill — per the AGENTS.md
@@ -332,7 +347,7 @@ the spec; verify each against the landed Phase 2 recipes before finishing.
 
 Wave 2 checkpoint:
 
-- [ ] **Contracts checkpoint**
+- [x] **Contracts checkpoint**
     - `just test tools` green end-to-end; drift scan over the repo for stale
       claims (`rg -n "never activated|never reinstalling|KACHE_DIR"` over
       docs/, README, skills, justfile comments) — every hit is either updated

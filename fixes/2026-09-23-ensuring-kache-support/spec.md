@@ -39,55 +39,27 @@ $schema:
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |
-    Phase 2 (root justfile recipes) is complete; the three recipes landed and
-    were validated live on the dev Mac. Phase 3 (contract tests, docs, skills)
-    builds on this surface:
+    Phase 3 (contract tests, docs, skills) is complete. `just test` and
+    `just lint` in tools/ are green (377 passed, 2 pre-existing ignored skips).
+    Notes for Phase 4 (dev-Mac verification and host cleanup):
 
-    - `install-kache binary_only="false":` — the mode is a POSITIONAL boolean
-      (`just install-kache true`), not the plan's `binary-only=true` spelling:
-      just 1.56 has no named-argument syntax (measured) and rejects dashes in
-      parameter names. Document the positional form wherever the recipe is
-      described.
-    - install-kache is probe-first on macOS: `kache-host.sh
-      probe-passthrough` runs BEFORE any re-sign, because an unconditional
-      `codesign --force` rewrites the binary every init and the running daemon
-      exits whenever its executable is replaced (launchd relaunch, ~10s
-      throttle) — unconditional re-sign would break check 5's idempotence.
-      binstall runs WITHOUT `--force` (same-version no-op); the source-install
-      fallback carries `cargo install --locked --force kache` (without --force
-      it replaces nothing).
-    - `_ensure-kache` implements spec §4 steps (1)-(7) with a `kache_off()`
-      failure-contract helper whose undo writes `rustc-wrapper = ""` through
-      `scripts/kache-config-merge.py` — measured: Cargo treats the empty value
-      in a config file as no-wrapper. The daemon-restart trigger compares
-      pre/post config CONTENT; daemon state comes from `kache daemon --json`
-      (`daemon_version`, bare; do not trust `daemon_epoch` — it does not track
-      process restarts).
-    - `kache-status` now exits 1 on drift while active (that is the "fails
-      loudly" reading — flag it in the docs), reads everything from
-      `kache-host.sh report`, and the `KACHE_DIR` reconstruction is gone from
-      the justfile entirely (docs/skills may still carry it).
-    - Tests: new `tools/test-toolkit/tests/kache_recipe_contracts.rs` (10
-      tests) pins the recipe contract — read it before rewording recipe
-      comments, several assertions are literal. `ci_workflow_contracts.rs`
-      got a bridge edit only (the `install-kache binary_only=` signature
-      assertion); Phase 3's contract-test task still owns the full D1/D2
-      rework there, including the workflow-side CI assertions (no workflow
-      runs `just init`, none installs/upgrades kache) — those do not exist
-      yet.
-    - Host state left behind: kache 0.26.3 ad hoc re-signed, config carries
-      `local_store = "/Volumes/coding/kache"` + `ignore_env = true`
-      (dated backups beside it), activation present, daemon 0.26.3 running
-      on the ratified config. Phase 4's first init will therefore be the
-      idempotent one (check 5); the config-change restart already fired and
-      is logged in the implementation log (Phase 2 section) — treat that as
-      check 8's trigger evidence and verify the outcome (daemon store ==
-      CLI store) as planned. The 56 GiB abandoned store at
-      ~/Library/Caches/kache is now reported by every init run; deletion
-      stays with Ken.
-    - Two pre-existing claudine test failures exist on a full-workspace run
-      (prompt-fixture drift + one leaky test) — unrelated to this fix, left
-      as found.
+    - The docs and skills now describe the init-owned flow as landed in
+      Phase 2 (positional `just install-kache true` for binary-only). The
+      kache skill's installation.md carries the hardened-runtime / DYLD_*
+      trap and ad hoc re-sign; os/macos.md points at it. If Phase 4
+      verification shows a recipe behaving differently from these docs, fix
+      the docs in the same change (repo comment-drift rule).
+    - Contract tests in ci_workflow_contracts.rs pin: init runs
+      `_ensure-kache`; install-kache stays a recipe with a binary_only
+      parameter; no line in the root justfile or its imports starts with
+      `kache init` / `export RUSTC_WRAPPER=kache`; the non-empty
+      `rustc-wrapper kache` merge-helper write appears only inside
+      `_ensure-kache`; no workflow runs `just init` or installs kache. Any
+      recipe edit Phase 4 makes to fix a host finding must keep these true.
+    - The drift scan also caught `.claude/skills/rust-devops/kache.md`
+      (not in the plan's list); it is updated. The remaining `KACHE_DIR` /
+      "not reinstalling" hits are deliberate historical wording (justfile
+      comment above kache-status, docs/kache-strategy.md changes list).
 ---
 
 # Make kache a host setup that `just init` owns end to end
