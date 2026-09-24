@@ -477,11 +477,17 @@ pub fn prompt_magic_fallback_roots(local_root: &Path, home: Option<&Path>) -> Ve
 /// The two `~/.claudine` rows are registered with an explicit user-tier
 /// override: they are user conventions wherever the launch tree lies,
 /// including when the local root is or contains `$HOME`, where containment
-/// inference alone could not tell them from local rows. A local convention
-/// row that names the same directory (possible only in those overlap
-/// layouts) is dropped instead of registered inferred — the chain
-/// deduplicates by path with the local tier first, so an inferred twin would
-/// reclassify the user convention as local.
+/// inference alone could not tell them from local rows. When the local root
+/// is `$HOME` itself, its `.claudine` convention rows are the user rows and
+/// are dropped instead of registered inferred — the chain deduplicates by
+/// path with the local tier first, so an inferred twin would reclassify the
+/// user convention as local. That overlap is matched by directory identity
+/// as well as spelling: the launch directory arrives in its physical
+/// spelling while `$HOME` keeps the environment's, so under a symlinked home
+/// (macOS `/var` → `/private/var`, a Windows 8.3 alias) the same directory
+/// is spelled two ways. Any other local root keeps every row, including a
+/// `<root>/.claudine` that is a symlink to `~/.claudine`: tier follows the
+/// lexical path (spec R2), so such a row stays local.
 #[must_use]
 pub fn with_prompt_magic_roots(
     mut context: FileResolutionContext,
@@ -492,8 +498,18 @@ pub fn with_prompt_magic_roots(
 ) -> FileResolutionContext {
     let user_prompt_root = home.map(|home| home.join(".claudine").join("prompts"));
     let user_fallback_root = home.map(|home| home.join(".claudine"));
-    let is_user_row =
-        |root: &Path| user_prompt_root.as_deref() == Some(root) || user_fallback_root.as_deref() == Some(root);
+    let local_root_is_home = home.is_some_and(|home| {
+        home == local_root
+            || fs::canonicalize(home)
+                .is_ok_and(|physical| fs::canonicalize(local_root).is_ok_and(|local| local == physical))
+    });
+    // Physical identity decides only whether the local root is `$HOME`; a
+    // row is never classified by where a symlink points (spec R2).
+    let is_user_row = |root: &Path| {
+        local_root_is_home
+            && (root == local_root.join(".claudine")
+                || root == local_root.join(".claudine").join("prompts"))
+    };
 
     // Local-tier rows, registered inferred: their tier follows from
     // containment in the local root, and every row here lies inside it.

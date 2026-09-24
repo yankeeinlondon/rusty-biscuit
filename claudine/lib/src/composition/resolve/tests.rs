@@ -170,6 +170,92 @@ fn user_tier_prompt_row_stays_behind_local_files_when_launch_is_home() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn user_tier_prompt_row_stays_behind_local_files_when_home_is_spelled_through_a_symlink() {
+    // `cd ~` reports the physical launch directory while `$HOME` keeps its
+    // symlinked spelling (macOS `/var` → `/private/var`), so the local
+    // `.claudine/prompts` row and the user row are the same directory under
+    // two spellings. It must still be registered only as the user row.
+    let fixture = TempDir::new().unwrap();
+    let physical_home = fixture.path().join("physical-home");
+    let local_file = physical_home.join("x.md");
+    let user_file = physical_home.join(".claudine/prompts/x.md");
+    fs::create_dir_all(user_file.parent().unwrap()).unwrap();
+    fs::write(&local_file, "local").unwrap();
+    fs::write(&user_file, "user").unwrap();
+    let home = fixture.path().join("home");
+    std::os::unix::fs::symlink(&physical_home, &home).unwrap();
+
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&physical_home, Some(home.clone()), HashMap::new()),
+        &physical_home,
+        None,
+        None,
+        Some(&home),
+    );
+
+    assert!(
+        context
+            .magic_path_registrations()
+            .iter()
+            .all(|registration| registration.path() != physical_home.join(".claudine/prompts")),
+        "the physically spelled twin of the user row must not register as local: {:?}",
+        context.magic_path_registrations(),
+    );
+    assert_eq!(
+        FileReference::new("@x.md")
+            .unwrap()
+            .resolve_in_context(&context)
+            .unwrap(),
+        Some(local_file),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn repository_claudine_symlinked_to_user_claudine_stays_local_tier() {
+    // Spec R2: tier follows the lexical path. A repository `.claudine` that
+    // is a symlink to `~/.claudine` names the user directory physically but
+    // is still a local row, so it precedes the intrinsic home root.
+    let fixture = TempDir::new().unwrap();
+    let home = fixture.path().join("home");
+    let repo = home.join("project");
+    let symlinked_file = home.join(".claudine/prompts/x.md");
+    let home_file = home.join("prompts/x.md");
+    fs::create_dir_all(symlinked_file.parent().unwrap()).unwrap();
+    fs::create_dir_all(home_file.parent().unwrap()).unwrap();
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(&symlinked_file, "user").unwrap();
+    fs::write(&home_file, "home").unwrap();
+    std::os::unix::fs::symlink(home.join(".claudine"), repo.join(".claudine")).unwrap();
+
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        &repo,
+        None,
+        None,
+        Some(&home),
+    );
+
+    let registrations = context.magic_path_registrations();
+    for local_row in [repo.join(".claudine"), repo.join(".claudine/prompts")] {
+        assert!(
+            registrations.iter().any(|registration| registration.path() == local_row
+                && registration.tier() == biscuit_file::MagicPathTier::Inferred),
+            "{local_row:?} must register with inferred (local) tier: {registrations:?}",
+        );
+    }
+    assert_eq!(
+        FileReference::new("@prompts/x.md")
+            .unwrap()
+            .resolve_in_context(&context)
+            .unwrap(),
+        Some(repo.join(".claudine/prompts/x.md")),
+    );
+}
+
 #[test]
 fn path_shaped_prompt_reference_keeps_closest_tier_first() {
     // `@prompts/x.md`: the repository's own `prompts/` precedes both
@@ -544,6 +630,23 @@ fn magic_no_match_report_lists_search_roots_in_priority_order() {
     assert!(candidates.iter().all(|candidate| candidate["path"].is_string()));
     assert!(candidates.iter().all(|candidate| candidate["disposition"] == "missing"));
     assert!(candidates.iter().any(|candidate| candidate["provenance"] == "magic"));
+    // The joined probes the human report omits stay concrete in the record,
+    // including the legitimate nonmatching join through a `prompts` root.
+    let candidate_provenance = |path: PathBuf| {
+        let path = biscuit_file::to_portable_string(&path);
+        candidates
+            .iter()
+            .find(|candidate| candidate["path"] == path.as_str())
+            .unwrap_or_else(|| panic!("candidate `{path}` missing from {candidates:?}"))
+            ["provenance"]
+            .clone()
+    };
+    assert_eq!(
+        candidate_provenance(repo.join("prompts/prompts/missing.md")),
+        "magic"
+    );
+    assert_eq!(candidate_provenance(repo.join("prompts/missing.md")), "repository");
+    assert_eq!(candidate_provenance(home.join("prompts/missing.md")), "home");
 }
 
 #[test]
@@ -587,6 +690,60 @@ fn magic_no_match_without_repository_lists_the_launch_directory_without_marker()
             .any(|candidate| candidate["provenance"] == "local_root"),
         "got: {candidates:?}"
     );
+}
+
+/// Render the human-readable `@` miss for `reference` against the reported
+/// failure layout.
+fn render_magic_miss(reference: &str) -> String {
+    let (_fixture, home, repo) = staged_repo_under_home();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        &repo,
+        None,
+        None,
+        Some(&home),
+    );
+    let err = resolve_composition_source_in_context(reference, &context).unwrap_err();
+    let (_, resolution, _) = err.file_reference_no_match().unwrap();
+    assert!(
+        !resolution.magic_search_roots().is_empty(),
+        "`{reference}` must take the `@` miss branch"
+    );
+    err.report_block_error(&plain_terminal())
+}
+
+#[test]
+fn magic_no_match_names_the_parsed_payload_for_every_spelling() {
+    let cases = [
+        ("@missing.md", "missing.md"),
+        ("@/missing.md", "missing.md"),
+        ("@prompts/missing.md", "prompts/missing.md"),
+        ("@/prompts/missing.md", "prompts/missing.md"),
+        // A payload may itself begin with `@`; only the sigil is removed.
+        ("@@name.md", "@name.md"),
+        ("@/@name.md", "@name.md"),
+        ("%@missing.md", "missing.md"),
+        ("%@/missing.md", "missing.md"),
+    ];
+    for (reference, payload) in cases {
+        let rendered = render_magic_miss(reference);
+        let miss_line =
+            format!("`{payload}` was not found under any directory an `@` reference searches:");
+        assert!(
+            rendered.contains(&miss_line),
+            "`{reference}` must name payload `{payload}`; got:\n{rendered}"
+        );
+        assert_eq!(
+            rendered.matches(&format!("`{payload}`")).count(),
+            1,
+            "`{reference}` must name its payload once; got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains(&format!("`/{payload}`")),
+            "`{reference}` leaked the `/` separator; got:\n{rendered}"
+        );
+    }
 }
 
 #[test]
