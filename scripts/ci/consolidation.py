@@ -8,8 +8,11 @@ test changed identity, tier, or reachability except by the one intentional
 change: `<old-binary>::<path>` becomes `<consolidated-binary>::<module>::<path>`.
 
 The design authority is `2026-09-21-consolidated-test-binaries` (spec, plan
-Phase 2, `rulings.md`, `spikes/`). Python 3 stdlib only (ruling R1). It runs
-locally and on the standing build hosts; no CI workflow invokes it.
+Phase 2, `rulings.md`, `spikes/`). `2026-09-22-consolidated-test-binaries-wave-2`
+(rulings R1, R2, R18) added its packages and promoted that feature's mover
+and acceptance scripts to the `move`, `check-metadata`, and `body-diff`
+subcommands. Python 3 stdlib only (ruling R1). It runs locally and on the
+standing build hosts; no CI workflow invokes it.
 
 ## Examples
 
@@ -20,6 +23,10 @@ python3 scripts/ci/consolidation.py plan --package claudine-cli --listings <capt
 python3 scripts/ci/consolidation.py compare --before <captures> --after <captures> --manifest manifest.json
 python3 scripts/ci/consolidation.py check-attributes --manifest manifest.json --before-rev HEAD
 python3 scripts/ci/consolidation.py check-snapshots --manifest manifest.json --mapping snapshots.json
+python3 scripts/ci/consolidation.py move manifest.json --layout-gate test_layout.rs
+python3 scripts/ci/consolidation.py check-proptest --manifest manifest.json --before-rev <base>
+python3 scripts/ci/consolidation.py check-metadata --manifest manifest.json [--manifest …]
+python3 scripts/ci/consolidation.py body-diff --manifest manifest.json --base-rev <base> --markdown body-diff.md
 ```
 
 ## Exit status
@@ -45,6 +52,7 @@ error is never reported as a test difference.
 from __future__ import annotations
 
 import argparse
+import difflib
 import fnmatch
 import gzip
 import hashlib
@@ -52,6 +60,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -62,12 +71,19 @@ from typing import Any, Callable, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PACKAGES = ("claudine-cli", "darkmatter", "darkmatter-cli", "biscuit-terminal")
+#: Wave 1 (`2026-09-21-consolidated-test-binaries`), then wave 2
+#: (`2026-09-22-consolidated-test-binaries-wave-2`, ruling R1). A package
+#: outside this list is refused: its feature sets have not been reviewed.
+PACKAGES = (
+    "claudine-cli", "darkmatter", "darkmatter-cli", "biscuit-terminal",
+    "tree-hugger", "claudine", "sniff", "biscuit-file", "schematic-gen",
+    "biscuit-terminal-cli", "claudine-gen", "dmls", "sniff-cli", "biscuit-tui-cli",
+)
 
 #: Every `--features` value a package's canonical recipes pass, plus the CI
 #: union from `[package.metadata.ci.tests].features` (validated at capture
-#: time). The order inside each set is the file-name order the Phase 1
-#: baseline used.
+#: time). Reviewed data, never derived from justfiles. The order inside each
+#: set is the file-name order its feature's baseline used.
 PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     "claudine-cli": ((), ("daemon-tests",), ("terminal-tests",), ("daemon-tests", "terminal-tests"), ("real-tests",)),
     "darkmatter": (
@@ -80,6 +96,33 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     ),
     "darkmatter-cli": ((), ("terminal-tests",)),
     "biscuit-terminal": ((), ("image",), ("terminal-tests",), ("browser-tests",), ("image", "terminal-tests", "browser-tests")),
+    "tree-hugger": ((),),
+    "claudine": ((),),
+    # `remote` implies `network`, but `test-real` builds `network` alone.
+    "sniff": ((), ("remote",), ("network",)),
+    "sniff-cli": ((), ("test-fixtures",)),
+    "biscuit-file": ((), ("fetch",)),
+    "schematic-gen": ((), ("terminal-tests",)),
+    "biscuit-terminal-cli": ((), ("terminal-tests",)),
+    "claudine-gen": ((), ("terminal-tests",)),
+    "dmls": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
+    "biscuit-tui-cli": ((), ("terminal-tests",)),
+}
+WAVE_2_PACKAGES = PACKAGES[4:]
+
+#: Old targets whose consolidated target a ruling decides, overriding the
+#: tier-by-name default (`2026-09-22-consolidated-test-binaries-wave-2`
+#: rulings). `None` rules the target a helper of another module rather than a
+#: module; it must list no test. `plan` checks every entry against the
+#: captures and fails rather than trusting it.
+RULED_TARGETS: dict[str, dict[str, tuple[str | None, str]]] = {
+    "schematic-gen": {"terminal_capture": ("level2", "R4: every test is level2_ (F2)")},
+    "biscuit-tui-cli": {
+        "real_terminal_render": ("level2", "R4/R5: its tests are level2_; as `real` its target would be stranded (F4)"),
+        "windows_captured_stdout": ("level2", "R4: an L1 test requiring terminal-tests joins that feature's target (F5)"),
+    },
+    "sniff-cli": {"level2_recent_commits_rendering": ("level2", "R14: #![cfg(feature = \"test-fixtures\")] gates every item")},
+    "sniff": {"fixtures": (None, "R19: a child module of integration with no test of its own")},
 }
 
 #: Selectors produced by `just _tier_filter`, in capture order.
@@ -137,6 +180,10 @@ IDENTITY_DETECTORS: dict[str, re.Pattern[str]] = {
     "module_path_macro": re.compile(r"\bmodule_path!\s*\(\s*\)"),
     "crate_name_env": re.compile(r"CARGO_CRATE_NAME"),
 }
+#: A disposition-only kind, never detected: a file that names itself or a
+#: sibling by its path under `tests/`, so the move must add its target
+#: directory to that string (R19's `spawn_site_guard` self-exclusion key).
+PATH_KEY_DISPOSITION = "path_key"
 CURRENT_EXE = re.compile(r"current_exe\s*\(")
 LIST_ARG = re.compile(r"--list\b")
 #: Constructs that resolve relative to the containing file (S2). Reported with
@@ -868,10 +915,13 @@ def plan_package(
 ) -> PlanResult:
     """Group targets into consolidated targets and assign module names.
 
-    A module keeps its former target name unless that name changes some
-    test's verdict under some filter (R2). A change every module name would
-    cause (an exact-name override) is recorded as a required override
-    rewrite instead (R5).
+    A target's contract is its tier by name and its exact `required-features`,
+    unless `RULED_TARGETS` places it. A module keeps its former target name
+    unless that name changes some test's verdict under some filter (R2). A
+    change every module name would cause (an exact-name override) is recorded
+    as a required override rewrite instead (R5). Tests inside the shared
+    `common` module are recorded as `shared_tests`: each old binary compiled a
+    copy, and the consolidated root compiles one.
     """
     failures: list[str] = []
     if package not in inventory["packages"]:
@@ -890,7 +940,11 @@ def plan_package(
             if suite.get("kind") == "test":
                 tests_by_binary[binary_id].update(suite["tests"])
 
+    features_by_capture = {feature_set: set(capture["features"]) for (_h, p, feature_set), capture in captures.items() if p == package}
+    ruled = RULED_TARGETS.get(package, {})
     contracts: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    assigned: list[tuple[dict[str, Any], str, str]] = []
+    dropped: list[dict[str, Any]] = []
     for target in record["test_targets"]:
         others = [k for k in target["target_wide_keys"] if k not in ("required-features", "harness")]
         if not target["harness"]:
@@ -899,8 +953,20 @@ def plan_package(
         if others:
             failures.append(f"{package}: test target {target['name']!r} sets {', '.join(others)}; a target-wide key needs a recorded decision before it can be consolidated (R3)")
             continue
+        if target["name"] in ruled:
+            destination, ruling = ruled[target["name"]]
+            if destination is None:
+                listed = sorted(tests_by_binary.get(f"{package}::{target['name']}", set()))
+                if listed:
+                    failures.append(f"{package}: {target['name']!r} is ruled a helper, not a module ({ruling}), but lists tests {listed[:3]}")
+                dropped.append({"old_target": target["name"], "old_path": target["src_path"], "ruling": ruling})
+            else:
+                assigned.append((target, destination, ruling))
+            continue
         tier = marker_tier(package, target["name"])
         contracts[(tier, tuple(target["required_features"]))].append(target)
+    for old_name in sorted(set(ruled) - {t["name"] for t in record["test_targets"]}):
+        failures.append(f"{package}: RULED_TARGETS names {old_name!r}, which is not a test target in the inventory")
 
     names: dict[tuple, str] = {}
     by_tier: dict[str, list[tuple]] = defaultdict(list)
@@ -916,15 +982,37 @@ def plan_package(
                 names[key] = base + "-" + "-".join(f.removesuffix("-tests") for f in features)
     if len(set(names.values())) != len(names):
         failures.append(f"{package}: consolidated target names collide: {sorted(names.values())}")
+    groups = {names[key]: {"tier": key[0], "features": key[1], "members": members} for key, members in contracts.items()}
+
+    rulings: list[dict[str, str]] = []
+    for target, destination, ruling in assigned:
+        features = tuple(target["required_features"])
+        rulings.append({"old_target": target["name"], "target": destination, "ruling": ruling})
+        group = groups.setdefault(destination, {"tier": _target_name_tier(destination), "features": features, "members": []})
+        group["members"].append(target)
+        missing = sorted(set(features) - set(group["features"]))
+        extra = set(group["features"]) - set(features)
+        if missing:
+            failures.append(f"{package}: {target['name']!r} requires {missing}, which target {destination!r} does not; its tests would compile where they never did")
+        elif extra:
+            # Joining a target that needs more features is sound only if the
+            # old target already had no tests without them (an inner cfg).
+            without = sorted(fs for fs, have in features_by_capture.items() if not extra <= have)
+            listed = [fs for fs in without if tests_in_capture(captures, package, fs, f"{package}::{target['name']}")]
+            if not without:
+                failures.append(f"{package}: no capture lacks {sorted(extra)}, so nothing proves {target['name']!r} has no test without them")
+            elif listed:
+                failures.append(f"{package}: {target['name']!r} lists tests without {sorted(extra)} (feature sets {listed}); joining {destination!r} would drop them")
 
     targets_out = []
     modules_out = []
+    shared_out: dict[tuple[str, str], dict[str, Any]] = {}
     rewrites: dict[str, dict[str, Any]] = {}
-    for key in sorted(contracts, key=lambda k: names[k]):
-        target_name = names[key]
+    for target_name in sorted(groups):
+        group = groups[target_name]
         crate_prefix = f"{crate_dir}/tests/{target_name}"
         module_names: list[str] = []
-        for old in sorted(contracts[key], key=lambda t: t["name"]):
+        for old in sorted(group["members"], key=lambda t: t["name"]):
             old_name = old["name"]
             binary_id = f"{package}::{old_name}"
             tests = sorted(tests_by_binary.get(binary_id, set()))
@@ -934,6 +1022,16 @@ def plan_package(
                 text = source.read_text(encoding="utf-8", errors="replace") if source.is_file() else ""
                 tests = sorted(set(TEST_FN.findall(text)))
                 basis = "source-scan" if tests else "none"
+            if old.get("declares_mod_common"):
+                # `move` declares the shared `common` once per root, so a test
+                # inside it keeps its path and every copy becomes one identity.
+                for test in [t for t in tests if t.startswith("common::")]:
+                    tests.remove(test)
+                    shared = shared_out.setdefault((target_name, test), {"target": target_name, "test": test, "old_binary_ids": []})
+                    shared["old_binary_ids"].append(binary_id)
+                    for selector, node in parsed.items():
+                        if evaluate_filter(node, _subject(package, old_name, test)) != evaluate_filter(node, _subject(package, target_name, test)):
+                            failures.append(f"{package}: shared test {test} changes its verdict under {selector} in {target_name!r}")
 
             candidate = old_name.replace("-", "_")
             alias_reason: list[str] = []
@@ -981,8 +1079,8 @@ def plan_package(
         targets_out.append({
             "name": target_name,
             "path": f"{crate_prefix}/main.rs",
-            "tier": key[0],
-            "required_features": list(key[1]),
+            "tier": group["tier"],
+            "required_features": list(group["features"]),
             "harness": True,
             "modules": module_names,
         })
@@ -1005,10 +1103,27 @@ def plan_package(
         "targets": targets_out,
         "modules": modules_out,
         "override_rewrites": sorted(rewrites.values(), key=lambda r: r["selector"]),
+        "shared_tests": [shared_out[key] for key in sorted(shared_out)],
+        "ruled_targets": rulings,
+        "dropped_targets": dropped,
         "additions": [],
         "dispositions": [],
     }
     return PlanResult(manifest=manifest, failures=failures)
+
+
+def tests_in_capture(captures: dict[CaptureKey, dict[str, Any]], package: str, feature_set: str, binary_id: str) -> bool:
+    """Whether any host's capture of `feature_set` lists a test in `binary_id`."""
+    return any(capture["suites"].get(binary_id, {}).get("tests")
+               for (_h, p, fs), capture in captures.items() if p == package and fs == feature_set)
+
+
+def _target_name_tier(name: str) -> str:
+    base = name.split("-", 1)[0]
+    tiers = {target: tier for tier, target in TIER_TARGET_NAMES.items()}
+    if base not in tiers:
+        raise ToolError(f"ruled target {name!r} does not start with a tier target name ({sorted(tiers)})")
+    return tiers[base]
 
 
 def _project(
@@ -1055,15 +1170,15 @@ def capture_package(
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
 ) -> list[Path]:
     """List every selector for every feature set; write one capture per set."""
+    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(package)
+    if sets is None:
+        raise ToolError(f"no feature sets are known for {package}; pass --feature-set")
     metadata = cargo_metadata(repo)
     manifest_path = next((Path(p["manifest_path"]) for p in metadata["packages"] if p["name"] == package), None)
     if manifest_path is None:
         raise ToolError(f"{package} is not a workspace package")
     manifest = tomllib.loads(_read_text(manifest_path))
     declared_features = set(manifest.get("features", {}))
-    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(package)
-    if sets is None:
-        raise ToolError(f"no feature sets are known for {package}; pass --feature-set")
     for features in sets:
         unknown = sorted(set(features) - declared_features)
         if unknown:
@@ -1155,6 +1270,29 @@ def _present(capture: dict[str, Any]) -> set[str]:
     return {f"{binary_id} {test}" for binary_id, suite in capture["suites"].items() for test in suite["tests"]}
 
 
+def collapse_shared_copies(capture: dict[str, Any], manifest: dict[str, Any] | None, where: str, failures: list[str]) -> dict[str, Any]:
+    """The before capture with each shared `common` test's copies folded into one identity.
+
+    The identity is the consolidated one (`<package>::<target> common::…`),
+    which the after capture lists unchanged. Copies are the same source
+    compiled into different binaries, so every copy must carry the same
+    record; one that differs fails rather than being folded.
+    """
+    shared = {(old, entry["test"]): f"{manifest['package']}::{entry['target']}"
+              for entry in (manifest or {}).get("shared_tests", []) for old in entry["old_binary_ids"]}
+    if not shared:
+        return capture
+    suites: dict[str, dict[str, Any]] = {}
+    for binary_id, suite in capture["suites"].items():
+        for test, record in suite["tests"].items():
+            destination = shared.get((binary_id, test), binary_id)
+            target = suites.setdefault(destination, {**suite, "binary_name": destination.partition("::")[2], "tests": {}})
+            if test in target["tests"] and target["tests"][test] != record:
+                failures.append(f"{where}: copies of shared test {test} disagree ({destination} from {binary_id}: {record} vs {target['tests'][test]})")
+            target["tests"][test] = record
+    return {**capture, "suites": suites}
+
+
 def normalize_capture(
     capture: dict[str, Any],
     manifest: dict[str, Any] | None,
@@ -1164,6 +1302,7 @@ def normalize_capture(
     """The after capture with every identity mapped back to its before form."""
     normalize = _normalizer(manifest)
     additions = {(f"{manifest['package']}::{a['target']}", a["test"]) for a in (manifest or {}).get("additions", [])}
+    shared = {(f"{manifest['package']}::{e['target']}", e["test"]) for e in (manifest or {}).get("shared_tests", [])}
     seen_additions = set()
     suites: dict[str, dict[str, Any]] = {}
     for binary_id, suite in capture["suites"].items():
@@ -1171,7 +1310,7 @@ def normalize_capture(
             if (binary_id, test) in additions:
                 seen_additions.add((binary_id, test))
                 continue
-            mapped = normalize(binary_id, test)
+            mapped = (binary_id, test) if (binary_id, test) in shared else normalize(binary_id, test)
             if mapped is None:
                 failures.append(f"{where}: {binary_id} {test} is not mapped by the migration manifest (no module entry for its first path segment)")
                 continue
@@ -1213,11 +1352,12 @@ def compare_captures(
         for extra in sorted({key[0] for key in after if key[1] == package} - set(hosts)):
             notes.append(f"{package}: after captures for host {extra} have no before side and were not compared")
         cells = []
+        normalized_before: dict[CaptureKey, dict[str, Any]] = {}
         normalized_after: dict[CaptureKey, dict[str, Any]] = {}
         for key in sorted(before_keys & after_keys):
             where = "/".join(key)
-            b, a = before[key], normalize_capture(after[key], manifest, where, failures)
-            normalized_after[key] = a
+            b, a = collapse_shared_copies(before[key], manifest, where, failures), normalize_capture(after[key], manifest, where, failures)
+            normalized_before[key], normalized_after[key] = b, a
             b_selectors, a_selectors = set(b["selectors"]), set(a["selectors"])
             selectors = sorted(b_selectors & a_selectors)
             for selector in sorted(b_selectors ^ a_selectors):
@@ -1257,7 +1397,7 @@ def compare_captures(
         report["packages"][package] = {
             "manifest": bool(manifest),
             "cells": cells,
-            "platform_absent": _platform_absent(package, before, normalized_after, before_keys & after_keys, failures),
+            "platform_absent": _platform_absent(package, normalized_before, normalized_after, before_keys & after_keys, failures),
         }
     report["failures"] = failures
     report["notes"] = notes
@@ -1925,6 +2065,531 @@ def _snapshot_name_pattern(text: str, after_bang: int, owner: str) -> tuple[int,
 
 
 # ---------------------------------------------------------------------------
+# move
+# ---------------------------------------------------------------------------
+
+TIER_TITLES = {"L1": "Level 1", "L2": "Level 2", "L3": "Level 3", "browser": "browser", "real": "real-provider"}
+INCLUDE_LITERAL = re.compile(r'(\binclude_(?:str|bytes)!\s*\(\s*")([^"]+)(")')
+PATH_ATTR_LITERAL = re.compile(r'(#\[\s*path\s*=\s*")([^"]+)("\s*\])')
+MOD_DECL_LINE = re.compile(r"^([ \t]*)(?:pub(?:\([a-z]+\))?[ \t]+)?mod[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;[ \t]*$")
+ATTRIBUTE_LINE = re.compile(r"^[ \t]*#\[.*\][ \t]*$")
+CRATE_COMMON_USE = re.compile(r"\bcrate::common\b")
+
+
+def proptest_regression_path(source: Path) -> Path:
+    """Where proptest 1.11's default persistence reads and writes seeds for `source`.
+
+    Mirrors `FileFailurePersistence::SourceParallel("proptest-regressions")`
+    (`proptest-1.11.0/src/test_runner/failure_persistence/file.rs:326-367`):
+    the nearest ancestor holding `lib.rs` or `main.rs` is the root, and the
+    file is `<root's parent>/proptest-regressions/<path under root>.txt`.
+    With no such ancestor it falls back to `<source>.proptest-regressions`.
+    So a file beside a module inside `tests/<target>/` is never read (R18).
+    """
+    source = Path(os.path.abspath(source))
+    directory = source.parent
+    while True:
+        if (directory / "lib.rs").is_file() or (directory / "main.rs").is_file():
+            return (directory.parent / "proptest-regressions" / source.relative_to(directory)).with_suffix(".txt")
+        if directory.parent == directory:
+            return source.with_suffix(".proptest-regressions")
+        directory = directory.parent
+
+
+class _MovePlan:
+    """Old → new locations of every file a manifest moves, known before any move."""
+
+    def __init__(self, manifest: dict[str, Any], repo: Path) -> None:
+        self.files: dict[Path, Path] = {}
+        self.directories: list[tuple[Path, Path]] = []
+        for row in manifest["modules"]:
+            old, new = _absolute(repo / row["old_path"]), _absolute(repo / row["new_path"])
+            self.files[old] = new
+            if row["nested_root"]:
+                self.directories.append((old.parent, new.parent))
+
+    def __call__(self, path: Path) -> Path:
+        if path in self.files:
+            return self.files[path]
+        for old, new in self.directories:
+            if path.is_relative_to(old):
+                return new / path.relative_to(old)
+        return path
+
+
+def _absolute(path: Path) -> Path:
+    return Path(os.path.normpath(os.path.abspath(path)))
+
+
+def _relative_path(target: Path, start: Path) -> str:
+    return Path(os.path.relpath(target, start)).as_posix()
+
+
+def _natural_module_paths(file: Path, name: str, owns_directory: bool) -> tuple[Path, Path]:
+    """Where a bare `mod name;` in `file` resolves; a crate root or `mod.rs` owns its directory."""
+    base = file.parent if owns_directory else file.parent / file.stem
+    return base / f"{name}.rs", base / name / "mod.rs"
+
+
+def rewrite_moved_source(
+    text: str,
+    *,
+    old_file: Path,
+    new_file: Path,
+    crate_root: bool,
+    common: Path,
+    mapped: Callable[[Path], Path],
+) -> tuple[str, list[str], list[str]]:
+    """(text, repairs, failures) for one moved file.
+
+    Every construct that resolves relative to the file keeps its target (S2):
+    `include_str!`/`include_bytes!` and `#[path]` literals are rewritten
+    against the new directory; in a former crate root, `mod common;` (bare or
+    `#[path]` to `tests/common/mod.rs`) becomes `use crate::common;` with its
+    other attributes kept, and any other bare `mod x;` that would now resolve
+    elsewhere gains a `#[path]` to its old file. A literal whose resolution
+    did not change is left as written.
+    """
+    old_dir, new_dir = old_file.parent, new_file.parent
+    repairs: list[str] = []
+    failures: list[str] = []
+
+    def repair_literal(match: re.Match[str]) -> str:
+        written = match.group(2)
+        if os.path.isabs(written):
+            return match.group(0)
+        target = mapped(_absolute(old_dir / written))
+        if _absolute(new_dir / written) == target:
+            return match.group(0)
+        replacement = _relative_path(target, new_dir)
+        repairs.append(f"{written} → {replacement}")
+        return match.group(1) + replacement + match.group(3)
+
+    out: list[tuple[str, str]] = []  # (original line, rewritten line)
+    line_repairs: dict[int, list[str]] = {}
+    pending: list[int] = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        declaration = MOD_DECL_LINE.match(body) if crate_root else None
+        if declaration is None:
+            logged = len(repairs)
+            rewritten = PATH_ATTR_LITERAL.sub(repair_literal, INCLUDE_LITERAL.sub(repair_literal, body)) + ending
+            line_repairs[len(out)] = repairs[logged:]
+            out.append((line, rewritten))
+            pending = pending + [len(out) - 1] if ATTRIBUTE_LINE.match(body) else []
+            continue
+        indent, name = declaration.groups()
+        path_index = next((i for i in pending if PATH_ATTR_LITERAL.search(out[i][0])), None)
+        if path_index is not None:
+            resolved = _absolute(old_dir / PATH_ATTR_LITERAL.search(out[path_index][0]).group(2))
+        else:
+            resolved = next((p for p in _natural_module_paths(old_file, name, True) if p.is_file()), None)
+        if resolved is None:
+            failures.append(f"{old_file}: `mod {name};` resolves to no file in the before tree")
+        elif indent:
+            failures.append(f"{old_file}: indented `mod {name};` (inside an inline module?) needs a hand edit")
+        elif resolved == common:
+            if path_index is not None:
+                out[path_index] = (out[path_index][0], "")
+                # The attribute goes, so its literal was never repaired.
+                for dropped in line_repairs.get(path_index, []):
+                    repairs.remove(dropped)
+            out.append((line, f"{indent}use crate::common;{ending}"))
+            repairs.append(f"mod {name}; → use crate::common;")
+            pending = []
+            continue
+        elif path_index is None and mapped(resolved) not in _natural_module_paths(new_file, name, new_file.name == "mod.rs"):
+            attribute = f'{indent}#[path = "{_relative_path(mapped(resolved), new_dir)}"]'
+            out.append(("", attribute + (ending or "\n")))
+            repairs.append(f"mod {name}; gains {attribute.strip()}")
+        out.append((line, line))
+        pending = []
+    return "".join(rewritten for _, rewritten in out), repairs, failures
+
+
+def _strip_inner_cfg(text: str, conditions: list[str], path: str) -> str:
+    for condition in conditions:
+        # The attribute and the blank line under it go; the blank line that
+        # separated it from the doc block above stays as the separator.
+        pattern = re.compile(rf"^#!\[cfg\({re.escape(condition)}\)\][ \t]*\n(\n)?", re.M)
+        text, count = pattern.subn("", text, count=1)
+        if count != 1:
+            raise ToolError(f"{path}: expected one #![cfg({condition})] to move onto the module declaration")
+    return text
+
+
+def consolidated_root_source(target: dict[str, Any], modules: dict[str, dict[str, Any]], package: str,
+                             layout_gate: str, declare_common: bool) -> str:
+    """One consolidated `main.rs`: shared `common` if used, then modules in rustfmt order."""
+    tier = TIER_TITLES.get(target["tier"], target["tier"])
+    if target["required_features"]:
+        tier += " (" + ", ".join(f"`{f}`" for f in target["required_features"]) + ")"
+    lines = [
+        f"//! {tier} integration tests for `{package}`, one test binary per",
+        "//! execution contract (`2026-09-21-consolidated-test-binaries`).",
+        "//!",
+        "//! Each module was its own test target before the consolidation and keeps",
+        "//! that target's name, which is the first segment of every test path here.",
+        "//! `Cargo.toml` sets `autotests = false`, so a file in this directory that is",
+        f"//! not declared below never compiles; `{layout_gate}` rejects one.",
+        "",
+    ]
+    if declare_common:
+        lines += ['#[path = "../common/mod.rs"]', "mod common;", ""]
+    # rustfmt reorders adjacent `mod` items by byte order, attributes included.
+    for name in sorted(target["modules"]):
+        for condition in modules[name]["inner_cfg"]:
+            lines.append(f"#[cfg({condition})]")
+        lines.append(f"mod {name};")
+    return "\n".join(lines) + "\n"
+
+
+def cargo_test_entries(manifest: dict[str, Any]) -> str:
+    """The `[[test]]` tables the package's `Cargo.toml` needs (a hand edit, with `autotests = false`)."""
+    blocks = []
+    for target in manifest["targets"]:
+        path = Path(target["path"]).relative_to(manifest["crate_dir"]).as_posix()
+        block = f'[[test]]\nname = "{target["name"]}"\npath = "{path}"\n'
+        if target["required_features"]:
+            block += "required-features = [" + ", ".join(f'"{f}"' for f in target["required_features"]) + "]\n"
+        blocks.append(block)
+    return "\n".join(blocks)
+
+
+def move_package(manifest: dict[str, Any], *, repo: Path = REPO_ROOT, layout_gate: str = "test_layout.rs") -> dict[str, Any]:
+    """Apply the mechanical half of one package's consolidation from its manifest.
+
+    Moves every module file (a nested root moves with its directory and its
+    `main.rs` becomes `mod.rs`), removes each `inner_cfg` from the file unless
+    the row sets `keep_inner_cfg` (R17), repairs relative paths, writes one
+    root per target, and relocates proptest seeds to where proptest reads them
+    once the root exists (R18). Refuses before touching anything when a
+    source is missing or a destination exists. `Cargo.toml`, helper
+    directories, snapshots, guards, and overrides stay reviewed hand edits.
+    """
+    tests_dir = _absolute(repo / manifest["crate_dir"] / "tests")
+    common = tests_dir / "common" / "mod.rs"
+    mapped = _MovePlan(manifest, repo)
+    rows = manifest["modules"]
+    by_target = {t["name"]: {m["module"]: m for m in rows if m["target"] == t["name"]} for t in manifest["targets"]}
+
+    problems = []
+    for row in rows:
+        old, new = repo / row["old_path"], repo / row["new_path"]
+        if not old.is_file():
+            problems.append(f"{row['old_path']}: source does not exist")
+        if new.exists() or (row["nested_root"] and new.parent.exists()):
+            problems.append(f"{row['new_path']}: destination already exists")
+        if row["target"] not in by_target:
+            problems.append(f"{row['old_path']}: maps to undeclared target {row['target']!r}")
+    for target in manifest["targets"]:
+        if (repo / target["path"]).exists():
+            problems.append(f"{target['path']}: consolidated root already exists")
+        missing = sorted(set(target["modules"]) - set(by_target[target["name"]]))
+        if missing:
+            problems.append(f"{target['name']}: declares modules with no manifest row: {missing}")
+
+    rewritten: dict[Path, str] = {}
+    repairs: dict[str, list[str]] = {}
+    uses_common: dict[str, bool] = defaultdict(bool)
+    seeds: list[tuple[Path, Path]] = []
+    for row in rows:
+        old = _absolute(repo / row["old_path"])
+        if not old.is_file():
+            continue
+        files = sorted(old.parent.rglob("*.rs")) if row["nested_root"] else [old]
+        for file in files:
+            file = _absolute(file)
+            text = file.read_text(encoding="utf-8")
+            if file == old and not row.get("keep_inner_cfg"):
+                text = _strip_inner_cfg(text, row["inner_cfg"], row["old_path"])
+            text, changes, failures = rewrite_moved_source(text, old_file=file, new_file=mapped(file), crate_root=file == old,
+                                                           common=common, mapped=mapped)
+            problems += failures
+            rewritten[mapped(file)] = text
+            if changes:
+                repairs[_rel(mapped(file), repo)] = changes
+            uses_common[row["target"]] |= bool(CRATE_COMMON_USE.search(text))
+            seed = proptest_regression_path(file)
+            if seed.is_file():
+                seeds.append((file, seed))
+    if problems:
+        raise ToolError("move refused; nothing was changed:\n" + "\n".join(f"  {p}" for p in problems))
+
+    for row in rows:
+        old, new = _absolute(repo / row["old_path"]), _absolute(repo / row["new_path"])
+        new.parent.mkdir(parents=True, exist_ok=True)
+        # A plain move, not `git mv`: the index is left for the author to stage.
+        if row["nested_root"]:
+            new.parent.rmdir()
+            shutil.move(old.parent, new.parent)
+            (new.parent / old.name).rename(new)
+        else:
+            shutil.move(old, new)
+    for path, text in rewritten.items():
+        path.write_text(text, encoding="utf-8")
+    roots = {}
+    for target in manifest["targets"]:
+        declare_common = uses_common[target["name"]] and common.is_file()
+        root = repo / target["path"]
+        root.write_text(consolidated_root_source(target, by_target[target["name"]], manifest["package"], layout_gate, declare_common),
+                        encoding="utf-8")
+        roots[target["path"]] = {"modules": len(target["modules"]), "declares_common": declare_common}
+
+    relocated = []
+    for source, seed in seeds:
+        current, destination = mapped(seed), proptest_regression_path(mapped(source))
+        if current == destination:
+            continue
+        if destination.exists():
+            raise ToolError(f"{_rel(destination, repo)}: proptest seed destination already exists (from {_rel(seed, repo)})")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(current, destination)
+        relocated.append({"old": _rel(seed, repo), "new": _rel(destination, repo)})
+
+    return {
+        "kind": "consolidation-move",
+        "version": 1,
+        "package": manifest["package"],
+        "moved": [{"old": m["old_path"], "new": m["new_path"]} for m in rows],
+        "roots": roots,
+        "path_repairs": repairs,
+        "proptest_relocated": relocated,
+        "cargo_test_entries": cargo_test_entries(manifest),
+    }
+
+
+# ---------------------------------------------------------------------------
+# check-proptest
+# ---------------------------------------------------------------------------
+
+
+def _is_proptest_seed_file(path: str) -> bool:
+    return path.endswith(".proptest-regressions") or ("/proptest-regressions/" in f"/{path}" and path.endswith(".txt"))
+
+
+def check_proptest(manifest: dict[str, Any], before: SourceReader, *, repo: Path = REPO_ROOT) -> dict[str, Any]:
+    """Every seed file survives the move byte for byte, where proptest reads it (R18).
+
+    A seed file no current test source resolves to is never replayed: that
+    is the wave-1 darkmatter defect, and it fails here.
+    """
+    failures: list[str] = []
+    prefix = f"{manifest['crate_dir']}/tests"
+    before_files = [p for p in before.list_files(prefix) if _is_proptest_seed_file(p)]
+    before_hashes = {p: hashlib.sha256(blob).hexdigest() for p, blob in before.read_bytes_many(before_files).items()}
+    tests_dir = repo / prefix
+    after_hashes = {}
+    if tests_dir.is_dir():
+        for file in sorted(tests_dir.rglob("*")):
+            if file.is_file() and _is_proptest_seed_file(_rel(file, repo)):
+                after_hashes[_rel(file, repo)] = _sha256_file(file)
+    by_hash: dict[str, tuple[list[str], list[str]]] = defaultdict(lambda: ([], []))
+    for path, digest in before_hashes.items():
+        by_hash[digest][0].append(path)
+    for path, digest in after_hashes.items():
+        by_hash[digest][1].append(path)
+    relocated = []
+    for digest, (old, new) in sorted(by_hash.items()):
+        if len(old) != len(new):
+            failures.append(f"seed content {digest[:12]} is in {sorted(old) or 'nothing'} before and {sorted(new) or 'nothing'} after (seeds move byte for byte, never regenerated)")
+        elif old != new:
+            relocated += [{"old": o, "new": n} for o, n in zip(sorted(old), sorted(new), strict=True) if o != n]
+    live = {proptest_regression_path(source) for source in tests_dir.rglob("*.rs")} if tests_dir.is_dir() else set()
+    for path in after_hashes:
+        if _absolute(repo / path) not in live:
+            failures.append(f"{path}: no test source resolves to this seed file, so proptest never replays it (R18: tests/proptest-regressions/<module>.txt)")
+    return {
+        "kind": "consolidation-proptest-check",
+        "version": 1,
+        "package": manifest["package"],
+        "before": sorted(before_hashes),
+        "after": sorted(after_hashes),
+        "relocated": relocated,
+        "failures": failures,
+    }
+
+
+# ---------------------------------------------------------------------------
+# check-metadata
+# ---------------------------------------------------------------------------
+
+
+def check_metadata(manifests: list[dict[str, Any]], metadata: dict[str, Any], *, repo: Path = REPO_ROOT) -> tuple[list[str], list[str]]:
+    """(summary lines, failures): each package's Cargo test targets against its manifest.
+
+    Compares name, source path, and exact `required-features`; requires
+    `autotests = false`; and requires every old target to map to exactly one
+    module of a declared target.
+    """
+    packages = {package["name"]: package for package in metadata["packages"]}
+    summary: list[str] = []
+    failures: list[str] = []
+    for manifest in manifests:
+        name = manifest["package"]
+        package = packages.get(name)
+        if package is None:
+            failures.append(f"{name}: not in cargo metadata")
+            continue
+        cargo_toml = tomllib.loads(_read_text(repo / manifest["manifest"]))
+        if cargo_toml.get("package", {}).get("autotests") is not False:
+            failures.append(f"{name}: `autotests = false` missing from {manifest['manifest']}")
+        actual = {
+            (target["name"], _rel(Path(target["src_path"]), repo), tuple(sorted(target.get("required-features") or [])))
+            for target in package["targets"]
+            if "test" in target["kind"]
+        }
+        declared = {(t["name"], t["path"], tuple(sorted(t["required_features"]))) for t in manifest["targets"]}
+        failures += [f"{name}: undeclared Cargo test target {extra}" for extra in sorted(actual - declared)]
+        failures += [f"{name}: declared target absent from Cargo {missing}" for missing in sorted(declared - actual)]
+        target_names = {t["name"] for t in manifest["targets"]}
+        old_targets: dict[str, int] = defaultdict(int)
+        for module in manifest["modules"]:
+            old_targets[module["old_target"]] += 1
+            if module["target"] not in target_names:
+                failures.append(f"{name}: {module['old_target']} maps to unknown target {module['target']}")
+        failures += [f"{name}: old target {old} maps to {count} modules" for old, count in sorted(old_targets.items()) if count != 1]
+        summary.append(f"{name}: {len(actual)} Cargo test targets, {len(declared)} declared, {len(old_targets)} old targets mapped")
+    return summary, failures
+
+
+# ---------------------------------------------------------------------------
+# body-diff
+# ---------------------------------------------------------------------------
+
+BODY_STRUCTURAL = re.compile(
+    r"""^(
+        \#!?\[.*\]\s*$                        # attribute on one line
+      | (pub(\(crate\))?\s+)?mod\s+\w+\s*;    # module declaration
+      | (pub(\(crate\))?\s+)?use\s            # import
+      | [\w:{}*,\s]*\}?\s*;?\s*$              # continuation of a multi-line use
+    )""",
+    re.VERBOSE,
+)
+BODY_KINDS = ("structural", "comment", "other")
+
+
+def _body_kind(line: str) -> str:
+    stripped = line.strip()
+    if not stripped or BODY_STRUCTURAL.match(stripped):
+        return "structural"
+    return "comment" if stripped.startswith("//") else "other"
+
+
+def _body_normalize(line: str, identity_prefix: str | None = None, path_key_prefix: str | None = None) -> str:
+    """The line with path literals masked, so a path repair is not a body change.
+
+    With `identity_prefix` (`<module>::`, for a file whose identity-sensitive
+    construct has a manifest disposition), that prefix is masked too, so the
+    R19 repair of a self-exec test path is structural and nothing else is.
+    With `path_key_prefix` (`<target>/`, for a file with a `path_key`
+    disposition), a string literal that gained exactly that prefix is too.
+    """
+    line = INCLUDE_LITERAL.sub(r"\1<path>\3", line.replace("super::", "crate::"))
+    if identity_prefix:
+        line = re.sub(rf"(?<![\w:]){re.escape(identity_prefix)}(?=[A-Za-z_])", "", line)
+    if path_key_prefix:
+        line = line.replace(f'"{path_key_prefix}', '"')
+    return PATH_ATTR_LITERAL.sub(r"\1<path>\3", line).rstrip()
+
+
+def diff_body(before: list[str], after: list[str], identity_prefix: str | None = None,
+              path_key_prefix: str | None = None) -> tuple[dict[str, int], list[str]]:
+    """(changed lines by kind, the `other` lines) between an old file and its moved module."""
+    counts = dict.fromkeys(BODY_KINDS, 0)
+    others: list[str] = []
+    matcher = difflib.SequenceMatcher(a=[_body_normalize(l, identity_prefix, path_key_prefix) for l in before],
+                                      b=[_body_normalize(l, identity_prefix, path_key_prefix) for l in after], autojunk=False)
+    for tag, a0, a1, b0, b1 in matcher.get_opcodes():
+        if tag == "equal":
+            # Equal once masked: a repaired path literal, a structural edit.
+            counts["structural"] += 2 * sum(1 for x, y in zip(before[a0:a1], after[b0:b1], strict=True) if x.rstrip() != y.rstrip())
+            continue
+        for sign, lines in (("-", before[a0:a1]), ("+", after[b0:b1])):
+            for line in lines:
+                kind = _body_kind(line)
+                counts[kind] += 1
+                if kind == "other":
+                    others.append(f"{sign} {line.strip()}")
+    return counts, others
+
+
+def body_diff(manifest: dict[str, Any], base: SourceReader, after: SourceReader) -> dict[str, Any]:
+    """Classify every line that changed between each old file and its new module.
+
+    A nested root's children are paired by their path under the moved
+    directory. A module with any `other` line, or a file missing on one side,
+    is a failure: wave 2 permits structural edits only. A file whose
+    identity-sensitive construct has a manifest disposition may also gain its
+    own module prefix on a test path (R19's self-exec repair), and a file with
+    a `path_key` disposition its own target directory on a `tests/` path.
+    """
+    failures: list[str] = []
+    totals = dict.fromkeys(BODY_KINDS, 0)
+    identical = files = 0
+    details: list[str] = []
+    identity_repaired = {path for path, detector in _dispositions(manifest) if detector in IDENTITY_DETECTORS}
+    path_keyed = {path for path, detector in _dispositions(manifest) if detector == PATH_KEY_DISPOSITION}
+    for module in manifest["modules"]:
+        pairs = [(module["old_path"], module["new_path"])]
+        if module["nested_root"]:
+            old_dir, new_dir = Path(module["old_path"]).parent.as_posix(), Path(module["new_path"]).parent.as_posix()
+            pairs += [(p, f"{new_dir}/{p[len(old_dir) + 1:]}") for p in base.list_files(old_dir)
+                      if p.endswith(".rs") and p != module["old_path"]]
+        for old_path, new_path in pairs:
+            files += 1
+            old_text, new_text = base.read(old_path), after.read(new_path)
+            if old_text is None or new_text is None:
+                failures.append(f"{old_path} → {new_path}: missing on one side (before={old_text is not None}, after={new_text is not None})")
+                continue
+            if old_text == new_text:
+                identical += 1
+                continue
+            prefix = f"{module['module']}::" if new_path in identity_repaired else None
+            path_key_prefix = f"{module['target']}/" if new_path in path_keyed else None
+            counts, others = diff_body(old_text.splitlines(), new_text.splitlines(), prefix, path_key_prefix)
+            for kind, count in counts.items():
+                totals[kind] += count
+            if others:
+                failures.append(f"{old_path} → {new_path}: {len(others)} changed lines are neither structural nor comments")
+                details += [f"### `{old_path}` → `{new_path}`", "", "```diff", *others, "```", ""]
+    return {
+        "kind": "consolidation-body-diff",
+        "version": 1,
+        "package": manifest["package"],
+        "files": files,
+        "identical": identical,
+        "changed_lines": totals,
+        "details": details,
+        "failures": failures,
+    }
+
+
+def render_body_diff_markdown(report: dict[str, Any], base_rev: str, after_label: str) -> str:
+    lines = [
+        f"# Source changes by kind: `{report['package']}`",
+        "",
+        f"Generated by `scripts/ci/consolidation.py body-diff`: each old file at `{base_rev}` against",
+        f"its new module in {after_label}. `structural` is an attribute, `mod`, `use`, blank,",
+        "path-literal repair, or dispositioned self-exec test-path or path-key repair line;",
+        "`comment` is a `//` line; `other` is anything else and fails.",
+        "",
+        "| Files | Byte-identical | Structural lines | Comment lines | Other lines |",
+        "|---:|---:|---:|---:|---:|",
+        f"| {report['files']} | {report['identical']} | {report['changed_lines']['structural']} | "
+        f"{report['changed_lines']['comment']} | {report['changed_lines']['other']} |",
+        "",
+        "## Other lines, by file",
+        "",
+    ]
+    lines += report["details"] or ["None."]
+    if report["failures"]:
+        lines += ["", "## Failures", ""] + [f"- {failure}" for failure in report["failures"]]
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers and CLI
 # ---------------------------------------------------------------------------
 
@@ -1986,7 +2651,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     inventory = sub.add_parser("inventory", help="merge cargo metadata and manifests into the target table")
-    inventory.add_argument("--package", action="append", help="package to include (repeatable; default: the four in scope)")
+    inventory.add_argument("--package", action="append", help="package to include (repeatable; default: every package in PACKAGES)")
     inventory.add_argument("--listings", action="append", default=[], help="capture documents or raw listings for tier counts")
     inventory.add_argument("--out", type=Path, help="inventory JSON (default: stdout)")
     inventory.add_argument("--markdown", type=Path, help="also write a human summary")
@@ -1998,7 +2663,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     plan.add_argument("--out", type=Path, help="manifest JSON (default: stdout)")
 
     capture = sub.add_parser("capture", help="list every selector for every feature set with nextest")
-    capture.add_argument("--package", action="append", help="package to capture (repeatable; default: the four in scope)")
+    capture.add_argument("--package", action="append", help="package to capture (repeatable; default: every package in PACKAGES)")
     capture.add_argument("--feature-set", action="append", help="comma-separated features, or 'none' (repeatable; default: the package's known sets)")
     capture.add_argument("--out", type=Path, required=True)
     capture.add_argument("--raw-dir", type=Path, help="also keep every raw listing here")
@@ -2026,6 +2691,29 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
             mode.add_argument("--mapping", type=Path, help="committed mapping table to validate")
             mode.add_argument("--emit-mapping", type=Path, help="write the rule-derived mapping table")
             checker.add_argument("--listings", action="append", default=[], help="before captures, to state which snapshots a running test reads")
+
+    move = sub.add_parser("move", help="apply a manifest's mechanical moves, path repairs, roots, and proptest seed relocation")
+    move.add_argument("manifest", type=Path)
+    move.add_argument("--layout-gate", default="test_layout.rs", help="the l1 module holding the package's layout gate (named in each root's doc)")
+    move.add_argument("--out", type=Path, help="move summary JSON (default: stdout)")
+
+    proptest = sub.add_parser("check-proptest", help="prove proptest seed files moved byte for byte to where proptest reads them")
+    proptest.add_argument("--manifest", type=Path, required=True)
+    source = proptest.add_mutually_exclusive_group()
+    source.add_argument("--before-rev", help="git revision holding the before state (default: HEAD)")
+    source.add_argument("--before-root", help="directory holding the before state")
+    proptest.add_argument("--out", type=Path)
+
+    metadata = sub.add_parser("check-metadata", help="compare each package's Cargo test targets with its migration manifest")
+    metadata.add_argument("--manifest", type=Path, action="append", required=True, help="migration manifest (repeatable)")
+    metadata.add_argument("--metadata", type=Path, help="saved `cargo metadata --no-deps` JSON in place of running Cargo")
+
+    body = sub.add_parser("body-diff", help="classify every changed line between old test files and their new modules")
+    body.add_argument("--manifest", type=Path, required=True)
+    body.add_argument("--base-rev", required=True, help="the package's unmigrated revision")
+    body.add_argument("--after-rev", help="revision holding the moved tree (default: the working tree)")
+    body.add_argument("--markdown", type=Path, help="write the report here")
+    body.add_argument("--out", type=Path, help="report JSON")
     return parser.parse_args(argv)
 
 
@@ -2033,6 +2721,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         if args.command == "inventory":
+            unlisted = sorted(set(args.package or ()) - set(PACKAGES))
+            if unlisted:
+                raise ToolError(f"{', '.join(unlisted)} not in PACKAGES; add the package and its reviewed feature sets first")
             captures = load_captures(Path(p) for p in args.listings) if args.listings else {}
             inventory, failures = build_inventory(cargo_metadata(), REPO_ROOT, packages=args.package or PACKAGES, captures=captures)
             _write_json(args.out, inventory)
@@ -2089,6 +2780,31 @@ def main(argv: list[str] | None = None) -> int:
             captures = load_captures(Path(p) for p in args.listings) if args.listings else None
             report = check_snapshots(manifest, before, _load_json(args.mapping), captures=captures)
             _write_json(args.out, report)
+            return _finish(report["failures"])
+        if args.command == "move":
+            summary = move_package(_load_json(args.manifest), repo=REPO_ROOT, layout_gate=args.layout_gate)
+            _write_json(args.out, summary)
+            print(f"move: {len(summary['moved'])} modules into {len(summary['roots'])} roots; add to Cargo.toml with autotests = false:\n\n"
+                  + summary["cargo_test_entries"], file=sys.stderr)
+            return 0
+        if args.command == "check-proptest":
+            report = check_proptest(_load_json(args.manifest), _before_reader(args), repo=REPO_ROOT)
+            _write_json(args.out, report)
+            return _finish(report["failures"])
+        if args.command == "check-metadata":
+            metadata = _load_json(args.metadata) if args.metadata else cargo_metadata(REPO_ROOT)
+            summary, failures = check_metadata([_load_json(path) for path in args.manifest], metadata, repo=REPO_ROOT)
+            print("\n".join(summary))
+            print("PASS" if not failures else f"{len(failures)} problem(s)")
+            return _finish(failures)
+        if args.command == "body-diff":
+            after = SourceReader(rev=args.after_rev) if args.after_rev else SourceReader(root=REPO_ROOT)
+            report = body_diff(_load_json(args.manifest), SourceReader(rev=args.base_rev), after)
+            if args.out:
+                _write_json(args.out, report)
+            if args.markdown:
+                args.markdown.write_text(render_body_diff_markdown(report, args.base_rev, f"`{args.after_rev}`" if args.after_rev else "the working tree"), encoding="utf-8")
+            print(f"body-diff: {report['files']} files, {report['identical']} byte-identical, {report['changed_lines']}", file=sys.stderr)
             return _finish(report["failures"])
     except ToolError as error:
         print(f"error: {error}", file=sys.stderr)

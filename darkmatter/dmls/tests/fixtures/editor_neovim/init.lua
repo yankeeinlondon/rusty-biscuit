@@ -1,4 +1,4 @@
--- Level-2 tmux init config, templated by tests/level2_editor_neovim.rs
+-- Level-2 tmux init config, templated by tests/level2/level2_editor_neovim.rs
 -- (__DMLS_BIN__ / __ROOT__ are substituted before use; [[ ]] long strings
 -- keep Windows backslashes literal).
 --

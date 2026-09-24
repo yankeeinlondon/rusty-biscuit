@@ -1,0 +1,13 @@
+[package]
+name = "fa-owner-third"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fa-core = { path = "../core" }
+
+# Third-party cause: a dev-dependency turns on `fa-base/extra`, which feature
+# unification hands to `fa-util` and `fa-core` in this archive only.
+[dev-dependencies]
+fa-base = { path = "../vendor/base", features = ["extra"] }

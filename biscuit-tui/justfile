@@ -67,7 +67,7 @@ test-l2 *args="":
 # trips; each test also skips cleanly when its backend (WezTerm + cliclick,
 # macOS only) is absent. Covers physical Ctrl+Shift / Alt+Shift chord selection
 # for choose-one and choose-many (`level3_chord_select.rs`) — the always-on L2
-# byte-injection tests in `real_terminal_render.rs` remain the headless
+# byte-injection tests in `level2/terminal_render.rs` remain the headless
 # contract; L3 is the opt-in physical-keypress proof. These steal desktop focus,
 # so they are intentionally NOT part of `test`/`all`.
 test-l3 *args="":
@@ -124,9 +124,9 @@ lint-fix:
 # (keyboard protocol, completions shell, choose-cli PTY).
 # Requires bash + zsh on the host. macOS/Linux only.
 test-pty:
-    @RUN_PTY_TESTS=1 cargo test -p {{CLI}} --test keyboard_protocol -- --nocapture
-    @RUN_SHELL_TESTS=1 cargo test -p {{CLI}} --test completions_shell -- --nocapture
-    @QUESTION_INTERACTIVE_PTY=1 cargo test -p {{CLI}} --test choose_cli pty:: -- --nocapture
+    @RUN_PTY_TESTS=1 cargo test -p {{CLI}} --test l1 keyboard_protocol:: -- --nocapture
+    @RUN_SHELL_TESTS=1 cargo test -p {{CLI}} --test l1 completions_shell:: -- --nocapture
+    @QUESTION_INTERACTIVE_PTY=1 cargo test -p {{CLI}} --test l1 choose_cli::pty:: -- --nocapture
 
 # install CLI binary
 install *args="":

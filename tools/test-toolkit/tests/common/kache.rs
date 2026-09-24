@@ -48,9 +48,9 @@
 //!   after [`KacheHostFixture::place_off_device`] on the native host.
 //!
 //! Repository files are passed in through [`RepoInputs`] because the CI
-//! test-input index only attributes a `repo_root().join("…")` read to the
-//! binary that spells it; a literal here would name this helper module,
-//! which holds no tests.
+//! test-input index schedules every L1 test of every binary that includes a
+//! module naming the path; a literal here would schedule every binary that
+//! includes `common`, including those whose tests never read the file.
 
 use std::{
     fs,

@@ -1,0 +1,11 @@
+biscuit-file: 2 Cargo test targets, 2 declared, 15 old targets mapped
+biscuit-terminal-cli: 2 Cargo test targets, 2 declared, 14 old targets mapped
+biscuit-tui-cli: 3 Cargo test targets, 3 declared, 15 old targets mapped
+claudine-gen: 2 Cargo test targets, 2 declared, 11 old targets mapped
+claudine: 1 Cargo test targets, 1 declared, 15 old targets mapped
+dmls: 2 Cargo test targets, 2 declared, 11 old targets mapped
+schematic-gen: 2 Cargo test targets, 2 declared, 14 old targets mapped
+sniff-cli: 2 Cargo test targets, 2 declared, 11 old targets mapped
+sniff: 1 Cargo test targets, 1 declared, 19 old targets mapped
+tree-hugger: 1 Cargo test targets, 1 declared, 10 old targets mapped
+PASS

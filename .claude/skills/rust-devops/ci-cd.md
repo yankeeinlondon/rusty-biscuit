@@ -633,6 +633,40 @@ producer's checkout, and run it from somewhere else. `producer_workspace` stays
 in the manifest as provenance inside the realized digest, and nothing executes
 by it.
 
+### Divergent base features multiply workspace compiles
+
+In one owner tree, Cargo reuses a unit only when its features **and every
+dependency's identity** match. One third-party flag that only some owners
+enable therefore gives a new identity to every workspace crate above it,
+and that crate is rebuilt. The dependency cache restores the third-party
+variants, so only the workspace crates cost time. Measured for a ten-package
+selection (`fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md`):
+25 workspace crates in 90 configurations on Linux, and 93% of the divergent
+compile seconds came from third-party flags.
+
+- **The flags arrive in bundles.** No single flag was the only cause of more
+  than 2 s. Aligning the obvious base flags (`libc/extra_traits`,
+  `proc-macro2/span-locations`, `serde_core/default`) would save about 1 s.
+  Only aligning nearly every divergent third-party crate saves much (about
+  70%).
+- **Host and target sides are separate.** The owner passes `--target`, so a
+  dev-dependency's `proc-macro2` flag reaches the target-side copy only,
+  never the derive macros.
+- **A heavy crate on a light incidental edge is the multiplier.**
+  `schematic-definitions` was 49% of the divergent seconds because one
+  `biscuit-file` edge tied it to the whole runtime stack.
+
+To measure a selection, run `cargo run -p repo-deps --bin feature-attribution --
+--owners <pkgs> --target x86_64-unknown-linux-gnu`. It needs no build: each
+configuration beyond a crate's first names its root cause (`own`,
+`workspace-dependency`, or `third-party`, with the crate and flag).
+`--events <ci-build counter dir>` from a timed local pass adds seconds.
+Read **sole** (what removing that cause alone saves) before **split**, and
+use `--align <crates>` to model a proposed alignment before writing one.
+It stays a local `local-tools` diagnostic on purpose: no CI job emits it, and
+it is not a `ci-build` subcommand. It answers a question asked when owner
+build time regresses, not on every run.
+
 ### What each stage cost, and why three numbers are observed from outside
 
 Seven windows are reported, never folded into one another: producer **queue**,
@@ -728,8 +762,9 @@ owner's `companion-suites` manifest list, or `validate_suite_registry` refuses
 the plan — registration alone schedules nothing.
 
 `repo-deps` owns the thirteen `scripts/ci/test_*.py` planner contracts plus
-`artifact-publisher`; its Rust binaries (`ci-rollup`, `ci-plan`, `ci-build`,
-`drift`) run in its own `repo-deps-l1` cell. `test-toolkit` owns
+`artifact-publisher`; the unit tests of its Rust binaries (`ci-rollup`, `ci-plan`,
+`ci-build`, `drift`, `feature-attribution`) run in its own `repo-deps-l1`
+cell. `test-toolkit` owns
 `ci_workflow_contracts` (`test-toolkit-l1`), `test-audit-typecheck`,
 `test-audit-vitest`, and the **lint-only** `archive-path-guard`.
 

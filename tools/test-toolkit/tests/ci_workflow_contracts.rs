@@ -7151,7 +7151,7 @@ fn an_all_reused_area_still_produces_its_result_slice() {
 /// `features/2026-07-24-devops/ci-failure-inventory.md` records.
 #[test]
 fn the_windows_captured_stdout_test_is_discoverable_as_ordinary_l1() {
-    let test = read("biscuit-tui/cli/tests/windows_captured_stdout.rs");
+    let test = read("biscuit-tui/cli/tests/level2/windows_captured_stdout.rs");
     assert!(
         !test.contains("#[ignore"),
         "the test must be reachable by the canonical L1 recipe, but it \

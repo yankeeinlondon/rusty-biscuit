@@ -1,0 +1,942 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "schematic/gen",
+  "dispositions": [
+    {
+      "detector": "crate_path",
+      "path": "schematic/gen/tests/l1/e2e_generation.rs",
+      "reason": "R19: inside a string literal naming generated code (:214, `\"use crate::shared::{RequestParts, SchematicError}\"`); not a path"
+    },
+    {
+      "detector": "crate_path",
+      "path": "schematic/gen/tests/l1/http_client.rs",
+      "reason": "R19: inside a string literal naming generated code (:471, `\"crate::shared::RequestBody::Json(json)\"`); not a path"
+    }
+  ],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "schematic/gen/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "artifact_drift",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/artifact_drift.rs",
+      "old_binary_id": "schematic-gen::artifact_drift",
+      "old_path": "schematic/gen/tests/artifact_drift.rs",
+      "old_target": "artifact_drift",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "artifact_drift::artificial_analysis_attribution_present_in_all_artifacts",
+          "old": "artificial_analysis_attribution_present_in_all_artifacts"
+        },
+        {
+          "new": "artifact_drift::committed_openapi_filenames_match_modules",
+          "old": "committed_openapi_filenames_match_modules"
+        },
+        {
+          "new": "artifact_drift::generated_openapi_artifacts_are_up_to_date",
+          "old": "generated_openapi_artifacts_are_up_to_date"
+        },
+        {
+          "new": "artifact_drift::generated_openapi_no_legacy_per_api_files",
+          "old": "generated_openapi_no_legacy_per_api_files"
+        },
+        {
+          "new": "artifact_drift::generated_postman_artifacts_are_up_to_date",
+          "old": "generated_postman_artifacts_are_up_to_date"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "e2e_generation",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/e2e_generation.rs",
+      "old_binary_id": "schematic-gen::e2e_generation",
+      "old_path": "schematic/gen/tests/e2e_generation.rs",
+      "old_target": "e2e_generation",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "e2e_generation::binary_response_generates_request_bytes_method",
+          "old": "binary_response_generates_request_bytes_method"
+        },
+        {
+          "new": "e2e_generation::elevenlabs_binary_endpoints_generate_correctly",
+          "old": "elevenlabs_binary_endpoints_generate_correctly"
+        },
+        {
+          "new": "e2e_generation::empty_response_generates_request_empty_method",
+          "old": "empty_response_generates_request_empty_method"
+        },
+        {
+          "new": "e2e_generation::generate_code_for_various_api_configurations",
+          "old": "generate_code_for_various_api_configurations"
+        },
+        {
+          "new": "e2e_generation::generated_code_compiles",
+          "old": "generated_code_compiles"
+        },
+        {
+          "new": "e2e_generation::generated_code_passes_clippy",
+          "old": "generated_code_passes_clippy"
+        },
+        {
+          "new": "e2e_generation::generated_files_exist_and_have_expected_structure",
+          "old": "generated_files_exist_and_have_expected_structure"
+        },
+        {
+          "new": "e2e_generation::generated_openapi_filenames_use_module_names",
+          "old": "generated_openapi_filenames_use_module_names"
+        },
+        {
+          "new": "e2e_generation::grouped_export_fails_when_module_registry_missing",
+          "old": "grouped_export_fails_when_module_registry_missing"
+        },
+        {
+          "new": "e2e_generation::mixed_response_types_generate_all_methods",
+          "old": "mixed_response_types_generate_all_methods"
+        },
+        {
+          "new": "e2e_generation::multiple_apis_compile",
+          "old": "multiple_apis_compile"
+        },
+        {
+          "new": "e2e_generation::multiple_apis_generate_together",
+          "old": "multiple_apis_generate_together"
+        },
+        {
+          "new": "e2e_generation::paginated_endpoints_generate_paginated_trait",
+          "old": "paginated_endpoints_generate_paginated_trait"
+        },
+        {
+          "new": "e2e_generation::shared_module_contains_paginated_trait",
+          "old": "shared_module_contains_paginated_trait"
+        },
+        {
+          "new": "e2e_generation::text_response_generates_request_text_method",
+          "old": "text_response_generates_request_text_method"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "http_client",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/http_client.rs",
+      "old_binary_id": "schematic-gen::http_client",
+      "old_path": "schematic/gen/tests/http_client.rs",
+      "old_target": "http_client",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "http_client::api_key_uses_runtime_auth_matching",
+          "old": "api_key_uses_runtime_auth_matching"
+        },
+        {
+          "new": "http_client::api_struct_has_base_url_field",
+          "old": "api_struct_has_base_url_field"
+        },
+        {
+          "new": "http_client::api_struct_has_client_field",
+          "old": "api_struct_has_client_field"
+        },
+        {
+          "new": "http_client::api_struct_has_new_constructor",
+          "old": "api_struct_has_new_constructor"
+        },
+        {
+          "new": "http_client::basic_auth_uses_reqwest_basic_auth",
+          "old": "basic_auth_uses_reqwest_basic_auth"
+        },
+        {
+          "new": "http_client::bearer_token_uses_runtime_auth_matching",
+          "old": "bearer_token_uses_runtime_auth_matching"
+        },
+        {
+          "new": "http_client::bearer_token_with_custom_header",
+          "old": "bearer_token_with_custom_header"
+        },
+        {
+          "new": "http_client::client_adds_body_when_present",
+          "old": "client_adds_body_when_present"
+        },
+        {
+          "new": "http_client::client_adds_content_type_for_body",
+          "old": "client_adds_content_type_for_body"
+        },
+        {
+          "new": "http_client::client_checks_response_status",
+          "old": "client_checks_response_status"
+        },
+        {
+          "new": "http_client::client_constructs_url_from_base_and_path",
+          "old": "client_constructs_url_from_base_and_path"
+        },
+        {
+          "new": "http_client::client_deserializes_json_response",
+          "old": "client_deserializes_json_response"
+        },
+        {
+          "new": "http_client::client_handles_api_error",
+          "old": "client_handles_api_error"
+        },
+        {
+          "new": "http_client::client_handles_unsupported_method",
+          "old": "client_handles_unsupported_method"
+        },
+        {
+          "new": "http_client::client_matches_delete_method",
+          "old": "client_matches_delete_method"
+        },
+        {
+          "new": "http_client::client_matches_get_method",
+          "old": "client_matches_get_method"
+        },
+        {
+          "new": "http_client::client_matches_head_method",
+          "old": "client_matches_head_method"
+        },
+        {
+          "new": "http_client::client_matches_options_method",
+          "old": "client_matches_options_method"
+        },
+        {
+          "new": "http_client::client_matches_patch_method",
+          "old": "client_matches_patch_method"
+        },
+        {
+          "new": "http_client::client_matches_post_method",
+          "old": "client_matches_post_method"
+        },
+        {
+          "new": "http_client::client_matches_put_method",
+          "old": "client_matches_put_method"
+        },
+        {
+          "new": "http_client::dual_auth_generates_descriptive_authentication_required_error",
+          "old": "dual_auth_generates_descriptive_authentication_required_error"
+        },
+        {
+          "new": "http_client::dual_auth_generates_explicit_api_key_and_oauth_helpers",
+          "old": "dual_auth_generates_explicit_api_key_and_oauth_helpers"
+        },
+        {
+          "new": "http_client::no_auth_generates_no_auth_code",
+          "old": "no_auth_generates_no_auth_code"
+        },
+        {
+          "new": "http_client::request_enum_has_into_parts_method",
+          "old": "request_enum_has_into_parts_method"
+        },
+        {
+          "new": "http_client::request_enum_has_variants_for_all_endpoints",
+          "old": "request_enum_has_variants_for_all_endpoints"
+        },
+        {
+          "new": "http_client::text_endpoint_is_rejected_through_generic_request",
+          "old": "text_endpoint_is_rejected_through_generic_request"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "openapi_import_test",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/openapi_import_test.rs",
+      "old_binary_id": "schematic-gen::openapi_import_test",
+      "old_path": "schematic/gen/tests/openapi_import_test.rs",
+      "old_target": "openapi_import_test",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "openapi_import_test::import_complex_auth_json_succeeds",
+          "old": "import_complex_auth_json_succeeds"
+        },
+        {
+          "new": "openapi_import_test::import_dry_run_does_not_write_files",
+          "old": "import_dry_run_does_not_write_files"
+        },
+        {
+          "new": "openapi_import_test::import_nonexistent_file_returns_error",
+          "old": "import_nonexistent_file_returns_error"
+        },
+        {
+          "new": "openapi_import_test::import_petstore_generates_models_to_disk",
+          "old": "import_petstore_generates_models_to_disk"
+        },
+        {
+          "new": "openapi_import_test::import_petstore_yaml_succeeds",
+          "old": "import_petstore_yaml_succeeds"
+        },
+        {
+          "new": "openapi_import_test::import_with_api_name_override",
+          "old": "import_with_api_name_override"
+        },
+        {
+          "new": "openapi_import_test::import_with_module_path_override",
+          "old": "import_with_module_path_override"
+        },
+        {
+          "new": "openapi_import_test::import_with_verbose_includes_diagnostics",
+          "old": "import_with_verbose_includes_diagnostics"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "openapi_strict_completeness",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/openapi_strict_completeness.rs",
+      "old_binary_id": "schematic-gen::openapi_strict_completeness",
+      "old_path": "schematic/gen/tests/openapi_strict_completeness.rs",
+      "old_target": "openapi_strict_completeness",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "openapi_strict_completeness::dangling_json_ref_cannot_be_emitted",
+          "old": "dangling_json_ref_cannot_be_emitted"
+        },
+        {
+          "new": "openapi_strict_completeness::grouped_module_with_missing_schema_in_one_member_fails",
+          "old": "grouped_module_with_missing_schema_in_one_member_fails"
+        },
+        {
+          "new": "openapi_strict_completeness::real_module_registries_still_pass_strict_completeness",
+          "old": "real_module_registries_still_pass_strict_completeness"
+        },
+        {
+          "new": "openapi_strict_completeness::real_registries_still_pass_strict_completeness",
+          "old": "real_registries_still_pass_strict_completeness"
+        },
+        {
+          "new": "openapi_strict_completeness::request_body_types_must_be_registered",
+          "old": "request_body_types_must_be_registered"
+        },
+        {
+          "new": "openapi_strict_completeness::single_api_with_missing_schema_fails_validation",
+          "old": "single_api_with_missing_schema_fails_validation"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "path_substitution",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/path_substitution.rs",
+      "old_binary_id": "schematic-gen::path_substitution",
+      "old_path": "schematic/gen/tests/path_substitution.rs",
+      "old_target": "path_substitution",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "path_substitution::all_http_methods_generate_correct_method_string",
+          "old": "all_http_methods_generate_correct_method_string"
+        },
+        {
+          "new": "path_substitution::consecutive_path_params",
+          "old": "consecutive_path_params"
+        },
+        {
+          "new": "path_substitution::multiple_path_params_into_parts_format_string",
+          "old": "multiple_path_params_into_parts_format_string"
+        },
+        {
+          "new": "path_substitution::multiple_path_params_struct_has_all_fields",
+          "old": "multiple_path_params_struct_has_all_fields"
+        },
+        {
+          "new": "path_substitution::multiple_path_params_with_body",
+          "old": "multiple_path_params_with_body"
+        },
+        {
+          "new": "path_substitution::no_path_params_no_fields",
+          "old": "no_path_params_no_fields"
+        },
+        {
+          "new": "path_substitution::path_param_at_start",
+          "old": "path_param_at_start"
+        },
+        {
+          "new": "path_substitution::path_param_values_are_percent_encoded",
+          "old": "path_param_values_are_percent_encoded"
+        },
+        {
+          "new": "path_substitution::path_param_with_body_has_both_fields",
+          "old": "path_param_with_body_has_both_fields"
+        },
+        {
+          "new": "path_substitution::single_path_param_into_parts_format_string",
+          "old": "single_path_param_into_parts_format_string"
+        },
+        {
+          "new": "path_substitution::single_path_param_struct_has_field",
+          "old": "single_path_param_struct_has_field"
+        },
+        {
+          "new": "path_substitution::special_char_path_params_are_sanitized_with_serde_rename",
+          "old": "special_char_path_params_are_sanitized_with_serde_rename"
+        },
+        {
+          "new": "path_substitution::three_path_params_into_parts_format_string",
+          "old": "three_path_params_into_parts_format_string"
+        },
+        {
+          "new": "path_substitution::underscore_in_param_name",
+          "old": "underscore_in_param_name"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "postman_artifact_validation",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/postman_artifact_validation.rs",
+      "old_binary_id": "schematic-gen::postman_artifact_validation",
+      "old_path": "schematic/gen/tests/postman_artifact_validation.rs",
+      "old_target": "postman_artifact_validation",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "postman_artifact_validation::every_committed_postman_artifact_validates_against_schema",
+          "old": "every_committed_postman_artifact_validates_against_schema"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "postman_golden",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/postman_golden.rs",
+      "old_binary_id": "schematic-gen::postman_golden",
+      "old_path": "schematic/gen/tests/postman_golden.rs",
+      "old_target": "postman_golden",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "postman_golden::golden_api_key_query_auth",
+          "old": "golden_api_key_query_auth"
+        },
+        {
+          "new": "postman_golden::golden_auth_variables_openai",
+          "old": "golden_auth_variables_openai"
+        },
+        {
+          "new": "postman_golden::golden_file_upload_elevenlabs",
+          "old": "golden_file_upload_elevenlabs"
+        },
+        {
+          "new": "postman_golden::golden_grouped_module_ollama",
+          "old": "golden_grouped_module_ollama"
+        },
+        {
+          "new": "postman_golden::golden_mixed_auth_emqx",
+          "old": "golden_mixed_auth_emqx"
+        },
+        {
+          "new": "postman_golden::golden_path_query_params_github",
+          "old": "golden_path_query_params_github"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "postman_schema",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/postman_schema.rs",
+      "old_binary_id": "schematic-gen::postman_schema",
+      "old_path": "schematic/gen/tests/postman_schema.rs",
+      "old_target": "postman_schema",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "postman_schema::emqx_grouped_collection_validates_against_postman_schema",
+          "old": "emqx_grouped_collection_validates_against_postman_schema"
+        },
+        {
+          "new": "postman_schema::invalid_collection_reports_errors",
+          "old": "invalid_collection_reports_errors"
+        },
+        {
+          "new": "postman_schema::minimal_collection_validates_ok",
+          "old": "minimal_collection_validates_ok"
+        },
+        {
+          "new": "postman_schema::vendored_schema_compiles_as_json_schema",
+          "old": "vendored_schema_compiles_as_json_schema"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "postman_var_consistency",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/postman_var_consistency.rs",
+      "old_binary_id": "schematic-gen::postman_var_consistency",
+      "old_path": "schematic/gen/tests/postman_var_consistency.rs",
+      "old_target": "postman_var_consistency",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "postman_var_consistency::every_referenced_variable_is_declared_for_all_apis",
+          "old": "every_referenced_variable_is_declared_for_all_apis"
+        },
+        {
+          "new": "postman_var_consistency::extract_var_names_ignores_unmatched_braces",
+          "old": "extract_var_names_ignores_unmatched_braces"
+        },
+        {
+          "new": "postman_var_consistency::extract_var_names_picks_up_typical_postman_references",
+          "old": "extract_var_names_picks_up_typical_postman_references"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "query_param_detection",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/query_param_detection.rs",
+      "old_binary_id": "schematic-gen::query_param_detection",
+      "old_path": "schematic/gen/tests/query_param_detection.rs",
+      "old_target": "query_param_detection",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "query_param_detection::classify_gitea_releases_params",
+          "old": "classify_gitea_releases_params"
+        },
+        {
+          "new": "query_param_detection::classify_github_pullrequests_params",
+          "old": "classify_github_pullrequests_params"
+        },
+        {
+          "new": "query_param_detection::classify_gitlab_tree_params",
+          "old": "classify_gitlab_tree_params"
+        },
+        {
+          "new": "query_param_detection::detect_multiple_hardcoded_query_params",
+          "old": "detect_multiple_hardcoded_query_params"
+        },
+        {
+          "new": "query_param_detection::detect_recursive_flag_query_param",
+          "old": "detect_recursive_flag_query_param"
+        },
+        {
+          "new": "query_param_detection::detect_single_hardcoded_query_param",
+          "old": "detect_single_hardcoded_query_param"
+        },
+        {
+          "new": "query_param_detection::empty_path",
+          "old": "empty_path"
+        },
+        {
+          "new": "query_param_detection::gitea_style_pagination_path",
+          "old": "gitea_style_pagination_path"
+        },
+        {
+          "new": "query_param_detection::github_style_pagination_path",
+          "old": "github_style_pagination_path"
+        },
+        {
+          "new": "query_param_detection::gitlab_style_pagination_with_recursive",
+          "old": "gitlab_style_pagination_with_recursive"
+        },
+        {
+          "new": "query_param_detection::no_query_params_in_nested_path",
+          "old": "no_query_params_in_nested_path"
+        },
+        {
+          "new": "query_param_detection::no_query_params_in_simple_path",
+          "old": "no_query_params_in_simple_path"
+        },
+        {
+          "new": "query_param_detection::parse_boolean_style_query_params",
+          "old": "parse_boolean_style_query_params"
+        },
+        {
+          "new": "query_param_detection::parse_empty_query_string",
+          "old": "parse_empty_query_string"
+        },
+        {
+          "new": "query_param_detection::parse_multiple_query_params",
+          "old": "parse_multiple_query_params"
+        },
+        {
+          "new": "query_param_detection::parse_query_param_without_value",
+          "old": "parse_query_param_without_value"
+        },
+        {
+          "new": "query_param_detection::parse_single_query_param",
+          "old": "parse_single_query_param"
+        },
+        {
+          "new": "query_param_detection::path_with_multiple_ampersands",
+          "old": "path_with_multiple_ampersands"
+        },
+        {
+          "new": "query_param_detection::path_with_only_question_mark",
+          "old": "path_with_only_question_mark"
+        },
+        {
+          "new": "query_param_detection::path_with_query_param_and_path_params",
+          "old": "path_with_query_param_and_path_params"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "query_params_codegen",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/query_params_codegen.rs",
+      "old_binary_id": "schematic-gen::query_params_codegen",
+      "old_path": "schematic/gen/tests/query_params_codegen.rs",
+      "old_target": "query_params_codegen",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "query_params_codegen::array_of_integers_generates_vec_i64",
+          "old": "array_of_integers_generates_vec_i64"
+        },
+        {
+          "new": "query_params_codegen::array_query_param_generates_loop_for_values",
+          "old": "array_query_param_generates_loop_for_values"
+        },
+        {
+          "new": "query_params_codegen::array_query_param_generates_vec_field",
+          "old": "array_query_param_generates_vec_field"
+        },
+        {
+          "new": "query_params_codegen::boolean_query_param_generates_correctly",
+          "old": "boolean_query_param_generates_correctly"
+        },
+        {
+          "new": "query_params_codegen::enum_query_param_generates_as_string",
+          "old": "enum_query_param_generates_as_string"
+        },
+        {
+          "new": "query_params_codegen::generated_code_uses_urlencoding_for_query_values",
+          "old": "generated_code_uses_urlencoding_for_query_values"
+        },
+        {
+          "new": "query_params_codegen::integer_query_param_generates_correctly",
+          "old": "integer_query_param_generates_correctly"
+        },
+        {
+          "new": "query_params_codegen::into_parts_returns_result_with_query_params",
+          "old": "into_parts_returns_result_with_query_params"
+        },
+        {
+          "new": "query_params_codegen::multiple_query_params_uses_correct_separators",
+          "old": "multiple_query_params_uses_correct_separators"
+        },
+        {
+          "new": "query_params_codegen::number_query_param_generates_correctly",
+          "old": "number_query_param_generates_correctly"
+        },
+        {
+          "new": "query_params_codegen::path_immutable_when_no_query_params",
+          "old": "path_immutable_when_no_query_params"
+        },
+        {
+          "new": "query_params_codegen::path_uses_mut_when_query_params_present",
+          "old": "path_uses_mut_when_query_params_present"
+        },
+        {
+          "new": "query_params_codegen::query_only_endpoint_has_new_method",
+          "old": "query_only_endpoint_has_new_method"
+        },
+        {
+          "new": "query_params_codegen::query_param_builder_for_array_accepts_vec",
+          "old": "query_param_builder_for_array_accepts_vec"
+        },
+        {
+          "new": "query_params_codegen::query_param_builder_methods_return_self",
+          "old": "query_param_builder_methods_return_self"
+        },
+        {
+          "new": "query_params_codegen::query_params_in_example_use_builder_pattern",
+          "old": "query_params_in_example_use_builder_pattern"
+        },
+        {
+          "new": "query_params_codegen::query_params_initialized_to_none_in_new",
+          "old": "query_params_initialized_to_none_in_new"
+        },
+        {
+          "new": "query_params_codegen::query_params_with_existing_path_query_uses_ampersand",
+          "old": "query_params_with_existing_path_query_uses_ampersand"
+        },
+        {
+          "new": "query_params_codegen::query_params_with_path_params_generates_both",
+          "old": "query_params_with_path_params_generates_both"
+        },
+        {
+          "new": "query_params_codegen::single_path_param_with_query_params_has_from_impls",
+          "old": "single_path_param_with_query_params_has_from_impls"
+        },
+        {
+          "new": "query_params_codegen::single_query_param_uses_question_mark",
+          "old": "single_query_param_uses_question_mark"
+        },
+        {
+          "new": "query_params_codegen::special_char_query_params_are_sanitized_with_serde_rename",
+          "old": "special_char_query_params_are_sanitized_with_serde_rename"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::l1",
+      "inner_cfg": [],
+      "module": "ws_codegen",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/l1/ws_codegen.rs",
+      "old_binary_id": "schematic-gen::ws_codegen",
+      "old_path": "schematic/gen/tests/ws_codegen.rs",
+      "old_target": "ws_codegen",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "ws_codegen::all_apis_lower_without_errors",
+          "old": "all_apis_lower_without_errors"
+        },
+        {
+          "new": "ws_codegen::all_client_modules_parse_as_valid_rust",
+          "old": "all_client_modules_parse_as_valid_rust"
+        },
+        {
+          "new": "ws_codegen::all_clients_have_auth_header_support",
+          "old": "all_clients_have_auth_header_support"
+        },
+        {
+          "new": "ws_codegen::all_clients_have_events_stream",
+          "old": "all_clients_have_events_stream"
+        },
+        {
+          "new": "ws_codegen::client_connect_uses_transport_config_and_disable_nagle",
+          "old": "client_connect_uses_transport_config_and_disable_nagle"
+        },
+        {
+          "new": "ws_codegen::client_struct_name_avoids_ws_duplication",
+          "old": "client_struct_name_avoids_ws_duplication"
+        },
+        {
+          "new": "ws_codegen::correlated_clients_have_request_method",
+          "old": "correlated_clients_have_request_method"
+        },
+        {
+          "new": "ws_codegen::correlated_clients_use_options_request_timeout",
+          "old": "correlated_clients_use_options_request_timeout"
+        },
+        {
+          "new": "ws_codegen::dial_surfaces_unparsable_headers_instead_of_dropping_them",
+          "old": "dial_surfaces_unparsable_headers_instead_of_dropping_them"
+        },
+        {
+          "new": "ws_codegen::elevenlabs_client_has_api_key_env_mapping",
+          "old": "elevenlabs_client_has_api_key_env_mapping"
+        },
+        {
+          "new": "ws_codegen::elevenlabs_connect_signature_uses_typed_path_and_query_params",
+          "old": "elevenlabs_connect_signature_uses_typed_path_and_query_params"
+        },
+        {
+          "new": "ws_codegen::elevenlabs_has_two_endpoints_no_correlation",
+          "old": "elevenlabs_has_two_endpoints_no_correlation"
+        },
+        {
+          "new": "ws_codegen::full_assembly_produces_valid_rust_for_all_apis",
+          "old": "full_assembly_produces_valid_rust_for_all_apis"
+        },
+        {
+          "new": "ws_codegen::host_generated_only_for_bidirectional_apis",
+          "old": "host_generated_only_for_bidirectional_apis"
+        },
+        {
+          "new": "ws_codegen::host_module_parses_as_valid_rust",
+          "old": "host_module_parses_as_valid_rust"
+        },
+        {
+          "new": "ws_codegen::host_struct_name_avoids_ws_duplication",
+          "old": "host_struct_name_avoids_ws_duplication"
+        },
+        {
+          "new": "ws_codegen::integration_ws_has_both_role",
+          "old": "integration_ws_has_both_role"
+        },
+        {
+          "new": "ws_codegen::module_docs_include_api_info",
+          "old": "module_docs_include_api_info"
+        },
+        {
+          "new": "ws_codegen::non_correlated_clients_lack_request_method",
+          "old": "non_correlated_clients_lack_request_method"
+        },
+        {
+          "new": "ws_codegen::samsung_remote_connect_has_connection_params",
+          "old": "samsung_remote_connect_has_connection_params"
+        },
+        {
+          "new": "ws_codegen::samsung_remote_has_no_correlation",
+          "old": "samsung_remote_has_no_correlation"
+        },
+        {
+          "new": "ws_codegen::unfolded_circle_core_has_correlated_endpoints",
+          "old": "unfolded_circle_core_has_correlated_endpoints"
+        },
+        {
+          "new": "ws_codegen::ws_shared_exposes_options_builder",
+          "old": "ws_shared_exposes_options_builder"
+        },
+        {
+          "new": "ws_codegen::ws_shared_module_parses_as_valid_rust",
+          "old": "ws_shared_module_parses_as_valid_rust"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "schematic-gen::level2",
+      "inner_cfg": [],
+      "module": "terminal_capture",
+      "nested_root": false,
+      "new_path": "schematic/gen/tests/level2/terminal_capture.rs",
+      "old_binary_id": "schematic-gen::terminal_capture",
+      "old_path": "schematic/gen/tests/terminal_capture.rs",
+      "old_target": "terminal_capture",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "terminal_capture::level2_generate_dry_run_emits_module_grouped_filenames",
+          "old": "level2_generate_dry_run_emits_module_grouped_filenames"
+        },
+        {
+          "new": "terminal_capture::level2_validate_emits_ansi_styled_ok_on_success",
+          "old": "level2_validate_emits_ansi_styled_ok_on_success"
+        },
+        {
+          "new": "terminal_capture::level2_validate_unknown_api_emits_red_error",
+          "old": "level2_validate_unknown_api_emits_red_error"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "schematic-gen",
+  "ruled_targets": [
+    {
+      "old_target": "terminal_capture",
+      "ruling": "R4: every test is level2_ (F2)",
+      "target": "level2"
+    }
+  ],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "artifact_drift",
+        "e2e_generation",
+        "http_client",
+        "openapi_import_test",
+        "openapi_strict_completeness",
+        "path_substitution",
+        "postman_artifact_validation",
+        "postman_golden",
+        "postman_schema",
+        "postman_var_consistency",
+        "query_param_detection",
+        "query_params_codegen",
+        "ws_codegen"
+      ],
+      "name": "l1",
+      "path": "schematic/gen/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "terminal_capture"
+      ],
+      "name": "level2",
+      "path": "schematic/gen/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}

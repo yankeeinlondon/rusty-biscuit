@@ -1,0 +1,32 @@
+{
+  "failures": [],
+  "kind": "consolidation-snapshot-check",
+  "moved": 12,
+  "package": "sniff-cli",
+  "readers": {
+    "snapshots": {
+      "asserting_functions": {
+        "cargo_monorepo_structure_json_snapshot": "running",
+        "cargo_monorepo_structure_text_snapshot": "running",
+        "cargo_pnpm_monorepo_structure_json_snapshot": "running",
+        "cargo_pnpm_monorepo_structure_text_snapshot": "running",
+        "completions_help_output_snapshot": "running",
+        "degenerate_cargo_structure_text_is_empty": "running",
+        "help_output_snapshot": "running",
+        "os_json_snapshot": "running",
+        "pnpm_nx_monorepo_structure_json_snapshot": "running",
+        "pnpm_nx_monorepo_structure_text_snapshot": "running",
+        "repo_aggregate_json_snapshot": "running",
+        "topics_table_snapshot": "running"
+      },
+      "read_by_no_running_test": [],
+      "reader_unresolved": [],
+      "snapshots": {
+        "running": 12
+      },
+      "statement": "every moved snapshot is read by a running test"
+    }
+  },
+  "unaffected": 0,
+  "version": 1
+}

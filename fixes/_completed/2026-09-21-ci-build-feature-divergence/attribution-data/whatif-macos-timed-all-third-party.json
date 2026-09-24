@@ -1,0 +1,5166 @@
+{
+  "schema_version": 1,
+  "target": "aarch64-apple-darwin",
+  "aligned": [
+    "aho-corasick",
+    "bit-set",
+    "bit-vec",
+    "bitflags",
+    "bytecount",
+    "bytemuck",
+    "cast",
+    "chrono",
+    "clap",
+    "clap_builder",
+    "criterion",
+    "crossterm",
+    "dispatch2",
+    "either",
+    "errno",
+    "fastrand",
+    "form_urlencoded",
+    "futures-sink",
+    "futures-util",
+    "getrandom",
+    "git2",
+    "gix",
+    "gix-diff",
+    "gix-features",
+    "gix-packetline",
+    "gix-revision",
+    "gix-tempfile",
+    "gix-utils",
+    "half",
+    "hashbrown",
+    "hyper",
+    "hyper-rustls",
+    "hyper-util",
+    "indexmap",
+    "insta",
+    "libc",
+    "libgit2-sys",
+    "memchr",
+    "miniz_oxide",
+    "mio",
+    "num",
+    "num-bigint",
+    "num-integer",
+    "num-rational",
+    "num-traits",
+    "objc2",
+    "objc2-core-foundation",
+    "object",
+    "once_cell",
+    "proc-macro2",
+    "quote",
+    "regex",
+    "regex-automata",
+    "regex-syntax",
+    "reqwest",
+    "rustix",
+    "rustls",
+    "rustls-webpki",
+    "serde",
+    "serde_core",
+    "serde_json",
+    "sha1",
+    "simd-adler32",
+    "slab",
+    "smallvec",
+    "syn",
+    "time",
+    "tinystr",
+    "tokio",
+    "tokio-stream",
+    "tokio-util",
+    "toml_datetime",
+    "toml_parser",
+    "toml_writer",
+    "tower",
+    "tower-http",
+    "ttf-parser",
+    "url",
+    "uuid",
+    "which",
+    "winnow",
+    "xxhash-rust",
+    "zerovec"
+  ],
+  "owners": [
+    {
+      "owner": "biscuit-file",
+      "features": [
+        "fetch"
+      ],
+      "invocations": [
+        "archive"
+      ],
+      "new_configurations": 3
+    },
+    {
+      "owner": "claudine",
+      "features": [],
+      "invocations": [
+        "archive"
+      ],
+      "new_configurations": 13
+    },
+    {
+      "owner": "claudine-cli",
+      "features": [
+        "daemon-tests",
+        "terminal-tests",
+        "test-fixtures"
+      ],
+      "invocations": [
+        "archive",
+        "sidecar backend-proof",
+        "sidecar darkmatter-md-fixture",
+        "sidecar harness-broker"
+      ],
+      "new_configurations": 9
+    },
+    {
+      "owner": "claudine-gen",
+      "features": [
+        "terminal-tests"
+      ],
+      "invocations": [
+        "archive",
+        "sidecar backend-proof",
+        "sidecar harness-broker"
+      ],
+      "new_configurations": 1
+    },
+    {
+      "owner": "darkmatter",
+      "features": [
+        "terminal-tests",
+        "browser-tests",
+        "effects-instrumentation"
+      ],
+      "invocations": [
+        "archive"
+      ],
+      "new_configurations": 4
+    },
+    {
+      "owner": "darkmatter-cli",
+      "features": [
+        "terminal-tests"
+      ],
+      "invocations": [
+        "archive",
+        "sidecar backend-proof",
+        "sidecar harness-broker"
+      ],
+      "new_configurations": 1
+    },
+    {
+      "owner": "dmls",
+      "features": [
+        "terminal-tests",
+        "effects-instrumentation"
+      ],
+      "invocations": [
+        "archive",
+        "sidecar backend-proof",
+        "sidecar harness-broker"
+      ],
+      "new_configurations": 2
+    },
+    {
+      "owner": "repo-deps",
+      "features": [],
+      "invocations": [
+        "archive"
+      ],
+      "new_configurations": 5
+    },
+    {
+      "owner": "sniff",
+      "features": [
+        "remote"
+      ],
+      "invocations": [
+        "archive"
+      ],
+      "new_configurations": 2
+    },
+    {
+      "owner": "sniff-cli",
+      "features": [
+        "test-fixtures"
+      ],
+      "invocations": [
+        "archive",
+        "sidecar backend-proof",
+        "sidecar harness-broker"
+      ],
+      "new_configurations": 1
+    }
+  ],
+  "totals": {
+    "workspace_crates": 25,
+    "configurations": 41,
+    "divergent_configurations": 16,
+    "divergent_by_origin": {
+      "workspace-own": 16
+    },
+    "seconds_first": 86.89,
+    "seconds_divergent": 79.45700000000001,
+    "seconds_removed": 218.38400000000001,
+    "seconds_by_category": {
+      "own": 26.071499999999997,
+      "workspace-dependency": 53.3855
+    }
+  },
+  "causes": [
+    {
+      "category": "workspace-dependency",
+      "crate": "biscuit-file",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "fetch"
+      ],
+      "configurations": 4,
+      "crates": [
+        "biscuit-terminal",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 28.2405,
+      "sole_seconds": 25.016000000000002,
+      "involved_seconds": 31.465000000000003
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "biscuit-hash",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "blake3"
+      ],
+      "configurations": 1,
+      "crates": [
+        "sniff"
+      ],
+      "seconds": 9.007,
+      "sole_seconds": 9.007,
+      "involved_seconds": 9.007
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "effects-instrumentation"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "claudine"
+      ],
+      "seconds": 8.794,
+      "sole_seconds": 8.794,
+      "involved_seconds": 8.794
+    },
+    {
+      "category": "own",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "effects-instrumentation"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 7.494,
+      "sole_seconds": 7.494,
+      "involved_seconds": 7.494
+    },
+    {
+      "category": "own",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "effects-instrumentation",
+        "work-counters"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 6.995,
+      "sole_seconds": 6.995,
+      "involved_seconds": 6.995
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "renderable",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "hint-access-counter"
+      ],
+      "removed": [],
+      "configurations": 2,
+      "crates": [
+        "biscuit-terminal",
+        "darkmatter"
+      ],
+      "seconds": 6.105,
+      "sole_seconds": 2.281,
+      "involved_seconds": 9.929
+    },
+    {
+      "category": "own",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "browser-tests",
+        "effects-instrumentation",
+        "terminal-tests"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 3.824,
+      "sole_seconds": 0.0,
+      "involved_seconds": 7.648
+    },
+    {
+      "category": "own",
+      "crate": "sniff",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "network",
+        "remote"
+      ],
+      "configurations": 1,
+      "crates": [
+        "sniff"
+      ],
+      "seconds": 2.1165,
+      "sole_seconds": 0.0,
+      "involved_seconds": 4.233
+    },
+    {
+      "category": "own",
+      "crate": "renderable",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "hint-access-counter"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "renderable"
+      ],
+      "seconds": 1.944,
+      "sole_seconds": 1.944,
+      "involved_seconds": 1.944
+    },
+    {
+      "category": "own",
+      "crate": "darkmatter-cli",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "terminal-tests"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter-cli"
+      ],
+      "seconds": 1.279,
+      "sole_seconds": 1.279,
+      "involved_seconds": 1.279
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "effects-instrumentation"
+      ],
+      "configurations": 1,
+      "crates": [
+        "darkmatter-cli"
+      ],
+      "seconds": 1.239,
+      "sole_seconds": 1.239,
+      "involved_seconds": 1.239
+    },
+    {
+      "category": "own",
+      "crate": "biscuit-terminal",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "image"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-terminal"
+      ],
+      "seconds": 1.108,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.216
+    },
+    {
+      "category": "own",
+      "crate": "biscuit-file",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "fetch"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.889,
+      "sole_seconds": 0.889,
+      "involved_seconds": 0.889
+    },
+    {
+      "category": "own",
+      "crate": "test-toolkit",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "backend-proof"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "test-toolkit"
+      ],
+      "seconds": 0.341,
+      "sole_seconds": 0.341,
+      "involved_seconds": 0.341
+    },
+    {
+      "category": "own",
+      "crate": "biscuit-hash",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "blake3"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-hash"
+      ],
+      "seconds": 0.081,
+      "sole_seconds": 0.081,
+      "involved_seconds": 0.081
+    }
+  ],
+  "crates": [
+    {
+      "crate": "biscuit-browser-harness",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "darkmatter",
+          "owners": [
+            "darkmatter"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.83
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-file",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "default",
+            "extract",
+            "fetch",
+            "file-reference",
+            "json5",
+            "lopdf",
+            "toml",
+            "url",
+            "yaml"
+          ],
+          "host": false,
+          "first_owner": "biscuit-file",
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 1.052
+        },
+        {
+          "features": [
+            "default",
+            "extract",
+            "file-reference",
+            "json5",
+            "lopdf",
+            "toml",
+            "url",
+            "yaml"
+          ],
+          "host": false,
+          "first_owner": "repo-deps",
+          "owners": [
+            "repo-deps"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "biscuit-file",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "fetch"
+              ]
+            }
+          ],
+          "seconds": 0.889
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-hash",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "blake3",
+            "default",
+            "xx_hash"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.13
+        },
+        {
+          "features": [
+            "default",
+            "xx_hash"
+          ],
+          "host": false,
+          "first_owner": "sniff",
+          "owners": [
+            "sniff"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "biscuit-hash",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "blake3"
+              ]
+            }
+          ],
+          "seconds": 0.081
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-speaks",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "default",
+            "playa"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 1.049
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-terminal",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "image"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 2.682
+        },
+        {
+          "features": [
+            "image"
+          ],
+          "host": false,
+          "first_owner": "darkmatter",
+          "owners": [
+            "darkmatter"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "renderable",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "hint-access-counter"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 2.281
+        },
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "repo-deps",
+          "owners": [
+            "repo-deps"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "biscuit-terminal",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "image"
+              ]
+            },
+            {
+              "category": "workspace-dependency",
+              "crate": "biscuit-file",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "fetch"
+              ]
+            }
+          ],
+          "seconds": 2.216
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-test-harness",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "biscuit-file",
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.324
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-tui",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.542
+        }
+      ]
+    },
+    {
+      "crate": "biscuit-visualized",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "clap",
+            "image"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.746
+        }
+      ]
+    },
+    {
+      "crate": "claudine",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 9.083
+        },
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "darkmatter",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "effects-instrumentation"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 8.794
+        }
+      ]
+    },
+    {
+      "crate": "claudine-catalog-types",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.434
+        }
+      ]
+    },
+    {
+      "crate": "claudine-gen",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "terminal-tests"
+          ],
+          "host": false,
+          "first_owner": "claudine-gen",
+          "owners": [
+            "claudine-gen"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 1.442
+        }
+      ]
+    },
+    {
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "default"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 7.415
+        },
+        {
+          "features": [
+            "default",
+            "effects-instrumentation"
+          ],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "darkmatter",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "effects-instrumentation"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 7.494
+        },
+        {
+          "features": [
+            "browser-tests",
+            "default",
+            "effects-instrumentation",
+            "terminal-tests"
+          ],
+          "host": false,
+          "first_owner": "darkmatter",
+          "owners": [
+            "darkmatter"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "darkmatter",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "browser-tests",
+                "effects-instrumentation",
+                "terminal-tests"
+              ],
+              "removed": []
+            },
+            {
+              "category": "workspace-dependency",
+              "crate": "renderable",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "hint-access-counter"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 7.648
+        },
+        {
+          "features": [
+            "default",
+            "effects-instrumentation",
+            "work-counters"
+          ],
+          "host": false,
+          "first_owner": "dmls",
+          "owners": [
+            "dmls"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "darkmatter",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "effects-instrumentation",
+                "work-counters"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 6.995
+        }
+      ]
+    },
+    {
+      "crate": "darkmatter-cli",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 1.393
+        },
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "darkmatter",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "effects-instrumentation"
+              ]
+            }
+          ],
+          "seconds": 1.239
+        },
+        {
+          "features": [
+            "terminal-tests"
+          ],
+          "host": false,
+          "first_owner": "darkmatter-cli",
+          "owners": [
+            "darkmatter-cli"
+          ],
+          "compared_with": 1,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "darkmatter-cli",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "terminal-tests"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 1.279
+        }
+      ]
+    },
+    {
+      "crate": "dmls",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "effects-instrumentation",
+            "terminal-tests"
+          ],
+          "host": false,
+          "first_owner": "dmls",
+          "owners": [
+            "dmls"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 2.169
+        }
+      ]
+    },
+    {
+      "crate": "messenger",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "desktop",
+            "discord",
+            "signal",
+            "slack",
+            "whatsapp"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 2.106
+        }
+      ]
+    },
+    {
+      "crate": "playa",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "async",
+            "default",
+            "native-playback",
+            "rodio",
+            "sfx-atmosphere",
+            "sfx-cartoon",
+            "sfx-motion",
+            "sfx-native",
+            "sfx-reactions",
+            "sfx-scifi",
+            "sfx-ui",
+            "sound-effects",
+            "tokio"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 1.741
+        }
+      ]
+    },
+    {
+      "crate": "renderable",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 3.258
+        },
+        {
+          "features": [
+            "hint-access-counter"
+          ],
+          "host": false,
+          "first_owner": "darkmatter",
+          "owners": [
+            "darkmatter"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "renderable",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "hint-access-counter"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 1.944
+        }
+      ]
+    },
+    {
+      "crate": "rendezvous-client",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.346
+        }
+      ]
+    },
+    {
+      "crate": "rendezvous-core",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "test-support"
+          ],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.962
+        }
+      ]
+    },
+    {
+      "crate": "rendezvous-daemon",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 7.061
+        }
+      ]
+    },
+    {
+      "crate": "schematic-define",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "biscuit-file",
+            "default",
+            "openapi"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 2.0
+        },
+        {
+          "features": [
+            "biscuit-file",
+            "default",
+            "openapi"
+          ],
+          "host": false,
+          "first_owner": "repo-deps",
+          "owners": [
+            "repo-deps"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "biscuit-file",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "fetch"
+              ]
+            }
+          ],
+          "seconds": 1.262
+        }
+      ]
+    },
+    {
+      "crate": "schematic-definitions",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 29.085
+        },
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "repo-deps",
+          "owners": [
+            "repo-deps"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "biscuit-file",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "fetch"
+              ]
+            }
+          ],
+          "seconds": 23.754
+        }
+      ]
+    },
+    {
+      "crate": "sniff",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "default",
+            "network",
+            "remote"
+          ],
+          "host": false,
+          "first_owner": "claudine",
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 8.157
+        },
+        {
+          "features": [
+            "default"
+          ],
+          "host": false,
+          "first_owner": "repo-deps",
+          "owners": [
+            "repo-deps"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "sniff",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "network",
+                "remote"
+              ]
+            },
+            {
+              "category": "workspace-dependency",
+              "crate": "biscuit-file",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "fetch"
+              ]
+            }
+          ],
+          "seconds": 4.233
+        },
+        {
+          "features": [
+            "default",
+            "network",
+            "remote"
+          ],
+          "host": false,
+          "first_owner": "sniff",
+          "owners": [
+            "sniff"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "workspace-dependency",
+              "crate": "biscuit-hash",
+              "version": "0.1.0",
+              "host": false,
+              "added": [],
+              "removed": [
+                "blake3"
+              ]
+            }
+          ],
+          "seconds": 9.007
+        }
+      ]
+    },
+    {
+      "crate": "sniff-cli",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [
+            "test-fixtures"
+          ],
+          "host": false,
+          "first_owner": "sniff-cli",
+          "owners": [
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 2.53
+        }
+      ]
+    },
+    {
+      "crate": "test-toolkit",
+      "version": "0.1.0",
+      "configurations": [
+        {
+          "features": [],
+          "host": false,
+          "first_owner": "biscuit-file",
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ],
+          "compared_with": null,
+          "causes": [],
+          "seconds": 0.353
+        },
+        {
+          "features": [
+            "backend-proof"
+          ],
+          "host": false,
+          "first_owner": "claudine-cli",
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ],
+          "compared_with": 0,
+          "causes": [
+            {
+              "category": "own",
+              "crate": "test-toolkit",
+              "version": "0.1.0",
+              "host": false,
+              "added": [
+                "backend-proof"
+              ],
+              "removed": []
+            }
+          ],
+          "seconds": 0.341
+        }
+      ]
+    }
+  ],
+  "third_party_divergence": [
+    {
+      "crate": "aho-corasick",
+      "version": "1.1.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "perf-literal",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "perf-literal",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "bit-set",
+      "version": "0.8.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "bit-vec",
+      "version": "0.8.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "bitflags",
+      "version": "2.11.1",
+      "host": true,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "bytecount",
+      "version": "0.6.9",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file",
+            "repo-deps",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "runtime-dispatch-simd"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "bytemuck",
+      "version": "1.25.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "aarch64_simd",
+            "extern_crate_alloc"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "extern_crate_alloc"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "cast",
+      "version": "0.3.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "chrono",
+      "version": "0.4.44",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "clock",
+            "default",
+            "iana-time-zone",
+            "js-sys",
+            "now",
+            "oldtime",
+            "serde",
+            "std",
+            "wasm-bindgen",
+            "wasmbind",
+            "winapi",
+            "windows-link"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "clock",
+            "iana-time-zone",
+            "now",
+            "std",
+            "winapi",
+            "windows-link"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "clap",
+      "version": "4.6.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "color",
+            "default",
+            "derive",
+            "env",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "unstable-ext",
+            "usage",
+            "wrap_help"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "color",
+            "default",
+            "derive",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "unstable-ext",
+            "usage",
+            "wrap_help"
+          ],
+          "owners": [
+            "claudine-cli",
+            "darkmatter-cli",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "color",
+            "default",
+            "derive",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "usage"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "clap_builder",
+      "version": "4.6.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "color",
+            "env",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "unstable-ext",
+            "usage",
+            "wrap_help"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "color",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "unstable-ext",
+            "usage",
+            "wrap_help"
+          ],
+          "owners": [
+            "claudine-cli",
+            "darkmatter-cli",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "color",
+            "error-context",
+            "help",
+            "std",
+            "suggestions",
+            "usage"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "criterion",
+      "version": "0.5.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "cargo_bench_support",
+            "default",
+            "html_reports",
+            "plotters",
+            "rayon"
+          ],
+          "owners": [
+            "biscuit-file",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "cargo_bench_support",
+            "default",
+            "plotters",
+            "rayon"
+          ],
+          "owners": [
+            "claudine"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "crossterm",
+      "version": "0.29.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "bracketed-paste",
+            "default",
+            "derive-more",
+            "events",
+            "windows"
+          ],
+          "owners": [
+            "claudine-cli",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "dispatch2",
+      "version": "0.3.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "block2",
+            "default",
+            "libc",
+            "objc2",
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "objc2"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "either",
+      "version": "1.15.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std",
+            "use_std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std",
+            "use_std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "repo-deps",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "either",
+      "version": "1.15.0",
+      "host": true,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std",
+            "use_std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "errno",
+      "version": "0.3.14",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "darkmatter",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "fastrand",
+      "version": "2.4.1",
+      "host": true,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "form_urlencoded",
+      "version": "1.2.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "futures-sink",
+      "version": "0.3.32",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "futures-util",
+      "version": "0.3.32",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "async-await",
+            "async-await-macro",
+            "channel",
+            "default",
+            "futures-channel",
+            "futures-io",
+            "futures-macro",
+            "futures-sink",
+            "io",
+            "memchr",
+            "sink",
+            "slab",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "async-await",
+            "async-await-macro",
+            "channel",
+            "futures-channel",
+            "futures-io",
+            "futures-macro",
+            "futures-sink",
+            "io",
+            "memchr",
+            "sink",
+            "slab",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "getrandom",
+      "version": "0.2.17",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine"
+          ]
+        },
+        {
+          "features": [
+            "js",
+            "js-sys",
+            "rdrand",
+            "std",
+            "wasm-bindgen"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "git2",
+      "version": "0.20.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "https",
+            "openssl-probe",
+            "openssl-sys",
+            "ssh"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix",
+      "version": "0.84.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "attributes",
+            "blob-diff",
+            "command",
+            "dirwalk",
+            "excludes",
+            "gix-status",
+            "index",
+            "merge",
+            "parallel",
+            "revision",
+            "sha1",
+            "status",
+            "tree-editor"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "sha1"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-diff",
+      "version": "0.64.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "blob",
+            "index"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-features",
+      "version": "0.48.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "crc32",
+            "default",
+            "fs-read-dir",
+            "once_cell",
+            "parallel",
+            "prodash",
+            "progress",
+            "walkdir",
+            "zlib"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "crc32",
+            "default",
+            "fs-read-dir",
+            "once_cell",
+            "prodash",
+            "progress",
+            "walkdir",
+            "zlib"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-packetline",
+      "version": "0.21.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "blocking-io",
+            "default"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-revision",
+      "version": "0.46.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "describe",
+            "merge_base"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-tempfile",
+      "version": "23.0.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "hp-hashmap"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "gix-utils",
+      "version": "0.3.3",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "bstr"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "half",
+      "version": "2.7.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "num-traits",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "hashbrown",
+      "version": "0.14.5",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "ahash",
+            "inline-more",
+            "raw"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "raw"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "hashbrown",
+      "version": "0.17.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "allocator-api2",
+            "default",
+            "default-hasher",
+            "equivalent",
+            "inline-more",
+            "raw-entry"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "inline-more"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "hyper",
+      "version": "1.9.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "client",
+            "default",
+            "full",
+            "http1",
+            "http2",
+            "server"
+          ],
+          "owners": [
+            "biscuit-file",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "default",
+            "http1"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "default",
+            "http1",
+            "http2"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "default",
+            "http1",
+            "http2",
+            "server"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "hyper-rustls",
+      "version": "0.27.9",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "aws-lc-rs",
+            "http1",
+            "http2",
+            "rustls-platform-verifier",
+            "tls12"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "aws-lc-rs",
+            "http1",
+            "http2",
+            "tls12"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "aws-lc-rs",
+            "http1",
+            "tls12"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "hyper-util",
+      "version": "0.1.20",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "client",
+            "client-legacy",
+            "client-proxy",
+            "default",
+            "http1",
+            "http2",
+            "server",
+            "server-auto",
+            "service",
+            "tokio"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "client-legacy",
+            "client-proxy",
+            "default",
+            "http1",
+            "http2",
+            "server",
+            "tokio"
+          ],
+          "owners": [
+            "biscuit-file",
+            "darkmatter",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "client-legacy",
+            "client-proxy",
+            "default",
+            "http1",
+            "http2",
+            "tokio"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "client",
+            "client-legacy",
+            "client-proxy",
+            "default",
+            "http1",
+            "tokio"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "indexmap",
+      "version": "2.14.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "serde",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "insta",
+      "version": "1.47.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "colors",
+            "console",
+            "default"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "colors",
+            "console",
+            "default",
+            "json",
+            "serde"
+          ],
+          "owners": [
+            "claudine-cli",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "libc",
+      "version": "0.2.186",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "extra_traits",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "darkmatter",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "libgit2-sys",
+      "version": "0.18.5+1.9.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "https",
+            "libssh2-sys",
+            "openssl-sys",
+            "ssh"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "memchr",
+      "version": "2.8.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std",
+            "use_std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "memchr",
+      "version": "2.8.0",
+      "host": true,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "miniz_oxide",
+      "version": "0.8.9",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "simd",
+            "simd-adler32",
+            "with-alloc"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "simd",
+            "simd-adler32",
+            "with-alloc"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "mio",
+      "version": "1.2.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "log",
+            "net",
+            "os-ext",
+            "os-poll"
+          ],
+          "owners": [
+            "claudine-cli",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "net",
+            "os-ext",
+            "os-poll"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "num",
+      "version": "0.4.3",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "num-bigint",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "num-bigint",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "num-bigint",
+      "version": "0.4.8",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "num-integer",
+      "version": "0.1.46",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "i128",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "i128",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "num-rational",
+      "version": "0.4.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "num-bigint",
+            "num-bigint-std",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "num-bigint",
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "num-traits",
+      "version": "0.2.19",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "i128",
+            "libm",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "i128",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "objc2",
+      "version": "0.6.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "objc2-core-foundation",
+      "version": "0.3.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "CFArray",
+            "CFAttributedString",
+            "CFAvailability",
+            "CFBag",
+            "CFBase",
+            "CFBinaryHeap",
+            "CFBitVector",
+            "CFBundle",
+            "CFByteOrder",
+            "CFCGTypes",
+            "CFCalendar",
+            "CFCharacterSet",
+            "CFData",
+            "CFDate",
+            "CFDateFormatter",
+            "CFDictionary",
+            "CFError",
+            "CFFileDescriptor",
+            "CFFileSecurity",
+            "CFLocale",
+            "CFMachPort",
+            "CFMessagePort",
+            "CFNotificationCenter",
+            "CFNumber",
+            "CFNumberFormatter",
+            "CFPlugIn",
+            "CFPlugInCOM",
+            "CFPreferences",
+            "CFPropertyList",
+            "CFRunLoop",
+            "CFSet",
+            "CFSocket",
+            "CFStream",
+            "CFString",
+            "CFStringEncodingExt",
+            "CFStringTokenizer",
+            "CFTimeZone",
+            "CFTree",
+            "CFURL",
+            "CFURLAccess",
+            "CFURLEnumerator",
+            "CFUUID",
+            "CFUserNotification",
+            "CFUtilities",
+            "CFXMLNode",
+            "CFXMLParser",
+            "alloc",
+            "bitflags",
+            "block2",
+            "default",
+            "dispatch2",
+            "libc",
+            "objc2",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "CFArray",
+            "CFBase",
+            "CFData",
+            "CFDictionary",
+            "CFError",
+            "CFNumber",
+            "CFPlugInCOM",
+            "CFRunLoop",
+            "CFString",
+            "CFURL",
+            "CFUUID",
+            "alloc",
+            "bitflags",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "object",
+      "version": "0.37.3",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "archive",
+            "coff",
+            "elf",
+            "macho",
+            "pe",
+            "read",
+            "read_core",
+            "std",
+            "unaligned",
+            "xcoff"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "archive",
+            "coff",
+            "elf",
+            "macho",
+            "pe",
+            "read_core",
+            "unaligned",
+            "xcoff"
+          ],
+          "owners": [
+            "claudine-cli",
+            "darkmatter-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "once_cell",
+      "version": "1.21.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "race",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "race",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "proc-macro2",
+      "version": "1.0.106",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "proc-macro"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "proc-macro",
+            "span-locations"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "quote",
+      "version": "1.0.45",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "proc-macro"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "proc-macro"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "regex",
+      "version": "1.12.3",
+      "host": true,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "perf",
+            "perf-backtrack",
+            "perf-cache",
+            "perf-dfa",
+            "perf-inline",
+            "perf-literal",
+            "perf-onepass",
+            "std",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "std",
+            "unicode-perl"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "regex-automata",
+      "version": "0.4.18",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "dfa-build",
+            "dfa-onepass",
+            "dfa-search",
+            "hybrid",
+            "meta",
+            "nfa",
+            "nfa-backtrack",
+            "nfa-pikevm",
+            "nfa-thompson",
+            "perf",
+            "perf-inline",
+            "perf-literal",
+            "perf-literal-multisubstring",
+            "perf-literal-substring",
+            "std",
+            "syntax",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment",
+            "unicode-word-boundary"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "dfa-build",
+            "dfa-onepass",
+            "dfa-search",
+            "hybrid",
+            "meta",
+            "nfa-backtrack",
+            "nfa-pikevm",
+            "nfa-thompson",
+            "perf-inline",
+            "perf-literal",
+            "perf-literal-multisubstring",
+            "perf-literal-substring",
+            "std",
+            "syntax",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment",
+            "unicode-word-boundary"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "dfa-build",
+            "dfa-search",
+            "nfa-thompson",
+            "std",
+            "syntax"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "regex-automata",
+      "version": "0.4.18",
+      "host": true,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "dfa-onepass",
+            "hybrid",
+            "meta",
+            "nfa-backtrack",
+            "nfa-pikevm",
+            "nfa-thompson",
+            "perf-inline",
+            "perf-literal",
+            "perf-literal-multisubstring",
+            "perf-literal-substring",
+            "std",
+            "syntax",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment",
+            "unicode-word-boundary"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "meta",
+            "nfa-pikevm",
+            "nfa-thompson",
+            "std",
+            "syntax",
+            "unicode-perl",
+            "unicode-word-boundary"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "regex-syntax",
+      "version": "0.8.10",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "regex-syntax",
+      "version": "0.8.10",
+      "host": true,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std",
+            "unicode",
+            "unicode-age",
+            "unicode-bool",
+            "unicode-case",
+            "unicode-gencat",
+            "unicode-perl",
+            "unicode-script",
+            "unicode-segment"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "std",
+            "unicode-perl"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "reqwest",
+      "version": "0.12.28",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "__tls",
+            "charset",
+            "default-tls",
+            "h2",
+            "http2",
+            "json",
+            "multipart"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "reqwest",
+      "version": "0.13.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "__rustls",
+            "__rustls-aws-lc-rs",
+            "__tls",
+            "blocking",
+            "charset",
+            "default-tls",
+            "form",
+            "gzip",
+            "http2",
+            "json",
+            "multipart",
+            "rustls"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "__rustls",
+            "__rustls-aws-lc-rs",
+            "__tls",
+            "blocking",
+            "charset",
+            "default-tls",
+            "form",
+            "http2",
+            "json",
+            "multipart",
+            "rustls"
+          ],
+          "owners": [
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "__rustls",
+            "__rustls-aws-lc-rs",
+            "__tls",
+            "charset",
+            "default-tls",
+            "http2",
+            "json",
+            "rustls"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "__rustls",
+            "__rustls-aws-lc-rs",
+            "__tls",
+            "form",
+            "json",
+            "multipart",
+            "rustls"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "rustix",
+      "version": "0.38.44",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "fs",
+            "libc-extra-traits",
+            "std"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "libc-extra-traits",
+            "std",
+            "stdio",
+            "termios"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "rustix",
+      "version": "1.1.4",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "fs",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "fs",
+            "std",
+            "stdio",
+            "termios"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "rustls",
+      "version": "0.23.38",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "aws-lc-rs",
+            "aws_lc_rs",
+            "ring",
+            "std",
+            "tls12"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "aws-lc-rs",
+            "aws_lc_rs",
+            "std",
+            "tls12"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "rustls-webpki",
+      "version": "0.103.13",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "aws-lc-rs",
+            "ring",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "aws-lc-rs",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "serde",
+      "version": "1.0.228",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "derive",
+            "rc",
+            "serde_derive",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "derive",
+            "serde_derive",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "serde_core",
+      "version": "1.0.228",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "rc",
+            "result",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "rc",
+            "result",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "result",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "serde_json",
+      "version": "1.0.149",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "float_roundtrip",
+            "raw_value",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "raw_value",
+            "std"
+          ],
+          "owners": [
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "raw_value",
+            "std",
+            "unbounded_depth"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "sha1",
+      "version": "0.10.6",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "compress"
+          ],
+          "owners": [
+            "biscuit-file"
+          ]
+        },
+        {
+          "features": [
+            "compress",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "simd-adler32",
+      "version": "0.3.9",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        },
+        {
+          "features": [
+            "const-generics",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "slab",
+      "version": "0.4.12",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "std"
+          ],
+          "owners": [
+            "repo-deps"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "smallvec",
+      "version": "1.15.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "const_generics",
+            "const_new",
+            "serde",
+            "write"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "const_generics",
+            "const_new",
+            "write"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "syn",
+      "version": "2.0.117",
+      "host": true,
+      "variants": [
+        {
+          "features": [
+            "clone-impls",
+            "default",
+            "derive",
+            "extra-traits",
+            "fold",
+            "full",
+            "parsing",
+            "printing",
+            "proc-macro",
+            "visit",
+            "visit-mut"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "clone-impls",
+            "default",
+            "derive",
+            "extra-traits",
+            "full",
+            "parsing",
+            "printing",
+            "proc-macro",
+            "visit-mut"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "time",
+      "version": "0.3.47",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "formatting",
+            "local-offset",
+            "parsing",
+            "std"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "default",
+            "formatting",
+            "parsing",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tinystr",
+      "version": "0.8.3",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "zerovec"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "zerovec"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tokio",
+      "version": "1.52.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "bytes",
+            "default",
+            "fs",
+            "full",
+            "io-std",
+            "io-util",
+            "libc",
+            "macros",
+            "mio",
+            "net",
+            "parking_lot",
+            "process",
+            "rt",
+            "rt-multi-thread",
+            "signal",
+            "signal-hook-registry",
+            "socket2",
+            "sync",
+            "test-util",
+            "time",
+            "tokio-macros"
+          ],
+          "owners": [
+            "darkmatter"
+          ]
+        },
+        {
+          "features": [
+            "bytes",
+            "default",
+            "fs",
+            "io-util",
+            "libc",
+            "macros",
+            "mio",
+            "net",
+            "process",
+            "rt",
+            "rt-multi-thread",
+            "signal",
+            "signal-hook-registry",
+            "socket2",
+            "sync",
+            "time",
+            "tokio-macros"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "bytes",
+            "default",
+            "fs",
+            "io-util",
+            "libc",
+            "macros",
+            "mio",
+            "net",
+            "process",
+            "rt",
+            "rt-multi-thread",
+            "signal-hook-registry",
+            "socket2",
+            "sync",
+            "time",
+            "tokio-macros"
+          ],
+          "owners": [
+            "claudine"
+          ]
+        },
+        {
+          "features": [
+            "bytes",
+            "default",
+            "io-util",
+            "libc",
+            "macros",
+            "mio",
+            "net",
+            "rt",
+            "rt-multi-thread",
+            "socket2",
+            "sync",
+            "time",
+            "tokio-macros"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "bytes",
+            "default",
+            "io-util",
+            "libc",
+            "macros",
+            "mio",
+            "net",
+            "rt",
+            "socket2",
+            "sync",
+            "time",
+            "tokio-macros"
+          ],
+          "owners": [
+            "repo-deps",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tokio-stream",
+      "version": "0.1.18",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "net",
+            "time"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "time"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tokio-util",
+      "version": "0.7.18",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "codec",
+            "default",
+            "io"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "codec",
+            "default",
+            "io",
+            "slab",
+            "time"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "toml_datetime",
+      "version": "1.1.1+spec-1.1.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "serde",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "serde",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "toml_parser",
+      "version": "1.1.2+spec-1.1.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "toml_writer",
+      "version": "1.1.1+spec-1.1.0",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "default",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tower",
+      "version": "0.5.3",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "balance",
+            "buffer",
+            "discover",
+            "futures-core",
+            "futures-util",
+            "indexmap",
+            "limit",
+            "load",
+            "load-shed",
+            "make",
+            "pin-project-lite",
+            "ready-cache",
+            "retry",
+            "slab",
+            "sync_wrapper",
+            "timeout",
+            "tokio",
+            "tokio-util",
+            "tracing",
+            "util"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "futures-core",
+            "futures-util",
+            "pin-project-lite",
+            "retry",
+            "sync_wrapper",
+            "timeout",
+            "tokio",
+            "util"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "tower-http",
+      "version": "0.6.8",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "async-compression",
+            "decompression-gzip",
+            "follow-redirect",
+            "futures-core",
+            "futures-util",
+            "iri-string",
+            "tokio",
+            "tokio-util",
+            "tower"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "follow-redirect",
+            "futures-util",
+            "iri-string",
+            "tower"
+          ],
+          "owners": [
+            "biscuit-file",
+            "repo-deps",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "ttf-parser",
+      "version": "0.25.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "apple-layout",
+            "core_maths",
+            "default",
+            "glyph-names",
+            "no-std-float",
+            "opentype-layout",
+            "std",
+            "variable-fonts"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "apple-layout",
+            "default",
+            "glyph-names",
+            "opentype-layout",
+            "std",
+            "variable-fonts"
+          ],
+          "owners": [
+            "biscuit-file",
+            "repo-deps",
+            "sniff"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "url",
+      "version": "2.5.8",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "serde",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "uuid",
+      "version": "1.23.1",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "rng",
+            "std",
+            "v4"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "default",
+            "std"
+          ],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "which",
+      "version": "8.0.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "default",
+            "real-sys"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "real-sys"
+          ],
+          "owners": [
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "winnow",
+      "version": "1.0.2",
+      "host": false,
+      "variants": [
+        {
+          "features": [],
+          "owners": [
+            "biscuit-file",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "alloc",
+            "ascii",
+            "binary",
+            "default",
+            "parser",
+            "std"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "xxhash-rust",
+      "version": "0.8.15",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "xxh32",
+            "xxh64"
+          ],
+          "owners": [
+            "claudine-cli"
+          ]
+        },
+        {
+          "features": [
+            "xxh64"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff",
+            "sniff-cli"
+          ]
+        }
+      ]
+    },
+    {
+      "crate": "zerovec",
+      "version": "0.11.6",
+      "host": false,
+      "variants": [
+        {
+          "features": [
+            "alloc",
+            "derive",
+            "yoke"
+          ],
+          "owners": [
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "repo-deps",
+            "sniff-cli"
+          ]
+        },
+        {
+          "features": [
+            "derive",
+            "yoke"
+          ],
+          "owners": [
+            "biscuit-file",
+            "sniff"
+          ]
+        }
+      ]
+    }
+  ],
+  "unexplained_compiles": []
+}

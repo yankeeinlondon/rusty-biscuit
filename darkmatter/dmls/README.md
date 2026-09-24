@@ -22,7 +22,7 @@ local files, but they **never** execute shell commands (`$(...)`, `::shell`),
 fetch remote URLs, mutate files, or run side-effecting compose phases. Shell and
 remote surfaces are *explained* statically (hover + diagnostics report what
 compose would do and whether policy allows it). This is proven by
-[`tests/no_side_effects.rs`](tests/no_side_effects.rs) (spec acceptance
+[`tests/l1/no_side_effects.rs`](tests/l1/no_side_effects.rs) (spec acceptance
 criterion 7).
 
 ## Feature layers (v1)
@@ -144,8 +144,8 @@ just lint
 ```
 
 Testing follows `.claude/skills/rust-testing/SKILL.md` (nextest, L1 default).
-The in-process JSON-RPC session tests (`tests/lsp_session.rs`) are L1. The L2
-tier (`tests/level2_editor_neovim.rs`) drives Neovim's real LSP client against
+The in-process JSON-RPC session tests (`tests/l1/lsp_session.rs`) are L1. The L2
+tier (`tests/level2/level2_editor_neovim.rs`) drives Neovim's real LSP client against
 the built `dmls` binary — headless token-decode probes plus a tmux-rendered
 SGR capture — and skips cleanly when `nvim`/`tmux` are missing
 (`BISCUIT_TEST_LEVEL_REQUIRED=2` hard-fails instead). The remaining manual

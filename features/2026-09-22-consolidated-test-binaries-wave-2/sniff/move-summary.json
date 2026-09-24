@@ -1,0 +1,112 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "sniff/lib/tests/l1/bench_fixtures.rs",
+      "old": "sniff/lib/tests/bench_fixtures.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/bench_ids_sync.rs",
+      "old": "sniff/lib/tests/bench_ids_sync.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/bench_plans.rs",
+      "old": "sniff/lib/tests/bench_plans.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/benchmark_workloads.rs",
+      "old": "sniff/lib/tests/benchmark_workloads.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/focused_provider.rs",
+      "old": "sniff/lib/tests/focused_provider.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/git_parity.rs",
+      "old": "sniff/lib/tests/git_parity.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/host_capability_cache.rs",
+      "old": "sniff/lib/tests/host_capability_cache.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/integration.rs",
+      "old": "sniff/lib/tests/integration.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/merge_conflict_prediction.rs",
+      "old": "sniff/lib/tests/merge_conflict_prediction.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/network_primitives.rs",
+      "old": "sniff/lib/tests/network_primitives.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/program_installable.rs",
+      "old": "sniff/lib/tests/program_installable.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/program_serialization.rs",
+      "old": "sniff/lib/tests/program_serialization.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/recent_commits.rs",
+      "old": "sniff/lib/tests/recent_commits.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/remote_observation.rs",
+      "old": "sniff/lib/tests/remote_observation.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/remote_providers.rs",
+      "old": "sniff/lib/tests/remote_providers.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/remote_resolution.rs",
+      "old": "sniff/lib/tests/remote_resolution.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/uv_with_install_plan.rs",
+      "old": "sniff/lib/tests/uv_with_install_plan.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/windows_app_paths_orphan.rs",
+      "old": "sniff/lib/tests/windows_app_paths_orphan.rs"
+    },
+    {
+      "new": "sniff/lib/tests/l1/windows_find_program_priority.rs",
+      "old": "sniff/lib/tests/windows_find_program_priority.rs"
+    }
+  ],
+  "package": "sniff",
+  "path_repairs": {
+    "sniff/lib/tests/l1/bench_fixtures.rs": [
+      "../benches/support/builder.rs \u2192 ../../benches/support/builder.rs"
+    ],
+    "sniff/lib/tests/l1/bench_ids_sync.rs": [
+      "../benches/support/bench_ids.rs \u2192 ../../benches/support/bench_ids.rs"
+    ],
+    "sniff/lib/tests/l1/bench_plans.rs": [
+      "../benches/support/plans.rs \u2192 ../../benches/support/plans.rs"
+    ],
+    "sniff/lib/tests/l1/benchmark_workloads.rs": [
+      "../benches/support/builder.rs \u2192 ../../benches/support/builder.rs",
+      "../benches/support/fixtures.rs \u2192 ../../benches/support/fixtures.rs"
+    ],
+    "sniff/lib/tests/l1/git_parity.rs": [
+      "../benches/support/builder.rs \u2192 ../../benches/support/builder.rs"
+    ],
+    "sniff/lib/tests/l1/integration.rs": [
+      "mod fixtures; gains #[path = \"../fixtures.rs\"]"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "sniff/lib/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 19
+    }
+  },
+  "version": 1
+}

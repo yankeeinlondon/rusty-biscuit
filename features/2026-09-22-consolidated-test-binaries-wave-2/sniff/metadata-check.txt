@@ -1,0 +1,2 @@
+sniff: 1 Cargo test targets, 1 declared, 19 old targets mapped
+PASS

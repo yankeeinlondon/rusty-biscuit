@@ -1,0 +1,3 @@
+# tree-hugger L1 on build-linux (c02e691d9 + Phase 3 patch, RUSTC_WRAPPER="" KACHE_AUTO=0)
+$ cargo nextest run -p tree-hugger --no-fail-fast -E "$(just _tier_filter L1 tree-hugger)"
+Summary: 484 tests run: 484 passed, 0 skipped

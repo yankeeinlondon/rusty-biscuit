@@ -1,0 +1,20 @@
+# claudine L1 on build-linux (private --shared clone, RUSTC_WRAPPER="" KACHE_AUTO=0)
+
+## After (c02e691d9 + the Phase 3 working-tree patch)
+$ cargo nextest run -p claudine --no-fail-fast -E "$(just _tier_filter L1 claudine)"
+Summary: 4343 tests run: 4339 passed, 4 failed, 0 skipped
+FAIL claudine composition::sequence::task::tests::group_framing::a_members_body_output_lands_on_the_data_channel_not_the_status_one
+FAIL claudine composition::sequence::task::tests::group_framing::a_serial_group_uses_the_invisible_bar_at_the_same_left_edge
+FAIL claudine composition::sequence::task::tests::group_framing::every_member_task_opens_and_closes_exactly_one_stream
+FAIL claudine composition::sequence::task::tests::group_framing::every_body_line_carries_its_own_tasks_bar
+Every claudine::l1 test passed. All four failures are lib unit tests (claudine/lib/src), which the move does not touch.
+
+## Base (c02e691d9, patch stashed in the scratch clone, 0 dirty paths)
+$ cargo nextest run -p claudine --no-fail-fast group_framing
+Summary: 12 tests run: 8 passed, 4 failed, 4330 skipped
+FAIL the same four tests.
+Pre-existing on this host's non-interactive SSH session; not attributable to the migration.
+The same package passed 4343/4343 on WSL2 through cross-check (claudine/cross-check-wsl.txt).
+
+# tree-hugger L1 on build-linux (after): 484 tests run: 484 passed, 0 skipped
+# sniff L1 on build-linux (after, --features remote): 1946 tests run: 1946 passed, 29 skipped

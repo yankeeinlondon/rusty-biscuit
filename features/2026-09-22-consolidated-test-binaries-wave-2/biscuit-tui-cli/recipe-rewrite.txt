@@ -1,0 +1,35 @@
+# biscuit-tui/justfile test-pty (R19): each rewritten line lists the same tests as before
+# before: /tmp/w2p5-base (8255ee228); after: the moved tree. `cargo test ... -- --list`, names prefixed by the module on the after side.
+
+## --test keyboard_protocol  → --test l1 keyboard_protocol::
+before: 4 tests; after: 4 tests; before prefixed with 'keyboard_protocol::' equals after: yes
+  keyboard_protocol::degraded_terminal::dumb_terminal_chord_fallback_works
+  keyboard_protocol::degraded_terminal::dumb_terminal_does_not_panic
+  keyboard_protocol::keyboard_protocol::bare_ctrl_shows_hotkey_badges
+  keyboard_protocol::keyboard_protocol::chord_fallback_still_works
+
+## --test completions_shell  → --test l1 completions_shell::
+before: 15 tests; after: 15 tests; before prefixed with 'completions_shell::' equals after: yes
+  completions_shell::bash::empty_option_position_does_not_offer_hotkey_prefixes
+  completions_shell::bash::enum_value_completion_active_color_after_positionals
+  completions_shell::bash::hotkey_prefix_bracket_tab
+  completions_shell::bash::post_positional_flag_completion
+  completions_shell::bash::root_subcommand_completion
+  completions_shell::tests::make_temp_dir_returns_unique_existing_directories
+  completions_shell::zsh::empty_option_position_does_not_offer_hotkey_prefixes
+  completions_shell::zsh::enum_value_completion_active_color_space_form
+  completions_shell::zsh::enum_value_completion_after_positionals
+  completions_shell::zsh::enum_value_completion_all_flags_after_positionals
+  completions_shell::zsh::enum_value_completion_sort_space_form
+  completions_shell::zsh::hotkey_prefix_bare_bracket_tab
+  completions_shell::zsh::hotkey_prefix_quoted_bracket_tab
+  completions_shell::zsh::post_positional_flag_completion
+  completions_shell::zsh::root_subcommand_completion
+
+## --test choose_cli pty:: → --test l1 choose_cli::pty::
+before: 4 tests; after: 4 tests; before prefixed with 'choose_cli::' equals after: yes
+  choose_cli::pty::choose_many_ctrl_a_then_submit_writes_all_values
+  choose_cli::pty::choose_one_height_100_percent_runs_end_to_end
+  choose_cli::pty::ctrl_c_exits_with_code_130
+  choose_cli::pty::esc_restores_initial_and_exits_with_code_0
+Recipe run: keyboard_protocol 1/4 (3 pre-existing, identical on base 8255ee228: test-pty-keyboard-base.log.gz); completions_shell 15/15; choose_cli::pty 4/4

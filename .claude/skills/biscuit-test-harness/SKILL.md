@@ -163,7 +163,7 @@ WezTerm (mux server persists independent of any window):
 
 ```bash
 export WEZTERM_UNIX_SOCKET="$(ls "$HOME/.local/share/wezterm/gui-sock-"* | head -1)"
-cargo test -p biscuit-terminal-cli --test level2_prose_styling
+cargo test -p biscuit-terminal-cli --features terminal-tests --test level2 level2_prose_styling::
 ```
 
 Kitty (no daemon; start an instance with remote control):
@@ -171,7 +171,7 @@ Kitty (no daemon; start an instance with remote control):
 ```bash
 kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty-l2 --start-as=minimized &
 sleep 2
-KITTY_LISTEN_ON=unix:/tmp/kitty-l2 cargo test -p biscuit-terminal-cli --test level2_prose_styling
+KITTY_LISTEN_ON=unix:/tmp/kitty-l2 cargo test -p biscuit-terminal-cli --features terminal-tests --test level2 level2_prose_styling::
 ```
 
 ## `SpawnVisibility` — default is `Background`

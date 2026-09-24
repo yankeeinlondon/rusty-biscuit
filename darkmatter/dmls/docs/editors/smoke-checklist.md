@@ -1,12 +1,12 @@
 # DMLS Manual Smoke Checklist
 
 **Status:** This checklist contains **manual** Level 2 (real-editor) verification
-steps that remain OUTSTANDING. The automated `darkmatter/dmls/tests/lsp_session.rs`
+steps that remain OUTSTANDING. The automated `darkmatter/dmls/tests/l1/lsp_session.rs`
 tests are Level 1 (in-process JSON-RPC protocol tests) and do not exercise real
 editor GUIs or OS-specific rendering. The items below require execution in each
 real editor (VS Code, Zed, Neovim, Helix) on each target OS (macOS, Windows, Linux).
 
-**Automated for Neovim:** `tests/level2_editor_neovim.rs` (run via
+**Automated for Neovim:** `tests/level2/level2_editor_neovim.rs` (run via
 `just test-l2`; requires `nvim` on `PATH`, plus `tmux` for the rendering test)
 drives Neovim's real LSP client against the real `dmls` binary and covers the
 Neovim column of these semantic-token rows: **capability** (the documented
@@ -93,7 +93,7 @@ For each editor (VS Code, Zed, Neovim, Helix):
   interpolation and directive styling in place.
 - [ ] **No side effects.** Confirm no child process is spawned and no socket is
   opened for any of the above (also proven automatically by
-  `tests/no_side_effects.rs`).
+  `tests/l1/no_side_effects.rs`).
 
 ## Recording template
 

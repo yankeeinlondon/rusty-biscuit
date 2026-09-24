@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Code generator for schematic REST API definitions"
+autotests = false
 
 [lib]
 name = "schematic_gen"
@@ -38,9 +39,21 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 jsonschema = { version = "0.55", default-features = false }
+# The Level 1 layout gate (`tests/l1/test_layout.rs`) calls
+# `test_toolkit::test_layout`. The optional normal dependency above only
+# exists under `terminal-tests`.
+test-toolkit = { path = "../../tools/test-toolkit" }
+
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "terminal_capture"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.

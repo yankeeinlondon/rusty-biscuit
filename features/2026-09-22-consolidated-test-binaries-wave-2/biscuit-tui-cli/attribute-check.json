@@ -1,0 +1,13 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "biscuit-tui-cli",
+  "review": [
+    {
+      "attribute": "cfg(windows)",
+      "kind": "inner-cfg-duplicated",
+      "path": "biscuit-tui/cli/tests/level2/windows_captured_stdout.rs"
+    }
+  ],
+  "version": 1
+}

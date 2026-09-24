@@ -1,0 +1,17 @@
+# R10: the rewritten biscuit-terminal-cli override matches exactly one test in each profile (CI features: terminal-tests)
+
+$ cargo nextest list -p biscuit-terminal-cli --features terminal-tests --profile default -E 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
+biscuit-terminal-cli::level2 level2_render_tree_style::level2_render_tree_style_in_wezterm
+matched: 1
+
+$ cargo nextest list -p biscuit-terminal-cli --features terminal-tests --profile default -E 'test(=level2_render_tree_style_in_wezterm)'
+matched: 0
+
+$ cargo nextest list -p biscuit-terminal-cli --features terminal-tests --profile ci -E 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
+biscuit-terminal-cli::level2 level2_render_tree_style::level2_render_tree_style_in_wezterm
+matched: 1
+
+$ cargo nextest list -p biscuit-terminal-cli --features terminal-tests --profile ci -E 'test(=level2_render_tree_style_in_wezterm)'
+matched: 0
+
+The old spelling matches nothing after the move in either profile: left unrewritten, the override would silently apply to no test.

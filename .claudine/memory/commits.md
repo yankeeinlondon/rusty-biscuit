@@ -178,6 +178,27 @@ belong here.
   blob at `git show :<new-path>` (or `git cat-file -p :<new-path>` under zsh).
   For a rename-only commit the OLD path's content is whatever `git show
   HEAD:<old-path>` prints; if the rename is R100 the two blobs match.
+- **`--pathspec-from-file` silently drops the rename destination.** When a
+  staged batch is dominated by renames (e.g. a move to
+  `_completed/<name>/`) and the pathspec list contains BOTH the old and new
+  path of every renamed file, `git commit --only -F <msg>
+  --pathspec-from-file=<list>` records the source D's and any unrelated A's
+  but NOT the destination A's for the renamed files. The commit looks
+  successful (D entries + new file A's all show), `git status` shows the
+  destination paths still staged as `A`, and the commit tree at HEAD is
+  missing the moved files — the rename was half-committed. Verify with
+  `git ls-tree HEAD <new-dir>/` after the commit; a missing
+  `<new-dir>/spec.md` (or any other renamed file) is the giveaway.
+  Recover with `git update-ref HEAD HEAD~1` (index and working tree are
+  preserved) and recommit with the inline `--` pathspec form
+  (`git commit --only -F <msg> -- <old1> <new1> <old2> <new2> ...`),
+  which records the renames correctly. The inline form escapes the
+  ARG_MAX concern only when the rename batch is under ~40 pairs; for a
+  larger rename set, dispatch as parallel `--only` commits, one per
+  half-batch of paths, and let the orchestrator collapse them if the
+  journal rule requires a single atomic commit (each commit re-signs
+  with a fresh hash; verify with `git diff` between original and
+  recomposed commit that only the messages differ).
 - Splitting a single file's content across two commits (e.g. two
   `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
   commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
@@ -590,6 +611,20 @@ belong here.
 
 ## Content Patterns
 
+- A cycle-close that updates `acceptance.md` (the spec's pass/fail
+  record against its acceptance criteria) to reflect a finding's
+  outcome belongs with the cycle close, not with the per-finding
+  fix commit. `acceptance.md` is a spec-level planning artifact
+  parallel to `implementation-log.md`; a criterion's pass/fail
+  state is finalized when the cycle closes, not when each finding's
+  code lands. Multiple findings can change a single criterion in
+  one cycle (e.g. finding 1 fixes the underlying defect while
+  finding 2 makes the criterion's gate even reachable), so folding
+  the criterion update into a per-finding commit captures a state
+  that subsequent findings in the same cycle will overrule. Bundle
+  the acceptance.md update with the spec.md `review_iterations`
+  bump and `message_to_agent` outcome text in the same
+  `planning(<area>): close cycle N, open cycle N+1` commit.
 - A new docs subtree frequently lands with several 0-byte placeholder files
   (e.g. `shared-resources/agent-definitions/agent.md`, `mcp/mcp-services.md`,
   `prompts/prompts.md`, `agent-skills/upgrading-skill-props.md`) alongside
@@ -798,6 +833,54 @@ belong here.
   keyed on the relevant `research-contract` / SKILL section so the
   findings survive the wait for operator input. See `58b946717` for the
   2026-09-17-research-metadata-pipeline Phase 7 example.
+- A `planning(<area>):` phase close can also land as "closed-with-rationale"
+  when a *prior* phase's measurement disproved the need for this phase's
+  main work (e.g. Task 2.1 showed the alignment crate is not warranted, so
+  the phase that was going to scaffold it collapses to a no-op). Distinct
+  from "blocked on human input" (no progress, no ticked boxes) and from
+  "deliverables shipped" (code in HEAD): the wave checkboxes ARE ticked
+  in plan.md, but every ticked task except one carries an inline
+  "Closed (Phase N): not built — see Task M" rationale explaining why the
+  prior measurement made it a no-op. The exception is a *technical
+  prerequisite* task that was actually executed as a temporary side-effect
+  check: a `publish = false` candidate crate was wired into one publishable
+  member as a versionless path dev-dependency, `cargo publish --dry-run`
+  was run, the normalized `.crate` Cargo.toml was inspected to confirm
+  Cargo strips the dev-dep from the published manifest, then
+  `git checkout -- Cargo.toml Cargo.lock <member>/Cargo.toml` reverted
+  the change in the same step (`git status` clean afterward, `cargo
+  metadata` verified). That single evidence-gathering task ships as
+  `Closed (Phase N): done — does not block` with the commands and outputs
+  in the log; the rest ship as `Closed (Phase N): not built`. The commit
+  subject still reads `planning(<area>): record Phase N close for <fix>`,
+  the body calls out which tasks delivered and which were no-ops, and the
+  `source_files_during_phase_N: []` block is honest because nothing ships
+  in HEAD. See `d245b8adf` for the 2026-09-21-ci-build-feature-divergence
+  Phase 3 example (Task 3.1 executed as a biscuit-hash publish-interaction
+  check; Tasks 3.2–3.4 closed "not built" because Task 2.1 measured 0.6 s
+  and the alignment crate would never pay).
+- A terminal "closed-with-rationale" phase that closes the
+  investigation can flip spec.md `implemented: false` to `implemented:
+  true` while leaving `human_review_items` open, when "implementation"
+  in this fix means "investigation complete" rather than "remediation
+  complete". The author's remaining rulings then gate BOTH the
+  follow-on change (e.g. option B applied as its own commit) AND the
+  eventual move to `_completed/`; the close itself neither blocks on
+  those rulings nor pretends the spec's Outcome was achieved. The
+  acceptance-criteria status table records the per-criterion
+  resolution (criteria met; criterion 5 as "recorded, not achieved"
+  because no remedy landed; the goal stays unmet but the fix is done
+  recording it). The spec's `implemented_by:` field names the agent
+  that closed the investigation, which may differ from
+  `agent:` / `reviewed_by:` (the spec's author and reviewer) when
+  multiple agents cycle through a long-running fix; recording each
+  role separately is the audit trail. See `9e2140a32` for the
+  2026-09-21-ci-build-feature-divergence Phase 4 example (the same fix
+  as the prior entry's Phase 3 — Phase 4 is measurement-only with
+  `source_files_during_phase_4: []`, the re-run is identical to
+  Phase 1's numbers, `implemented: true` is now accurate, and the
+  two `human_review_items` still gate the option B follow-on and the
+  move to `_completed/`).
 - Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
   `git ls-files -s <old> <new>` — the rename is a single index fact
   but the index holds independent `D` + `A` entries, and the

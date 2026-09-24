@@ -1,0 +1,2 @@
+sniff-cli: 2 Cargo test targets, 2 declared, 11 old targets mapped
+PASS

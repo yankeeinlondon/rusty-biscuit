@@ -21,8 +21,8 @@ publish = false
 #     cargo run -p repo-deps \
 #       --no-default-features --features build-tools --bin ci-build
 #
-# `local-tools` adds the workspace-inspecting crates only `repo-deps` and
-# `drift` need.
+# `local-tools` adds the workspace-inspecting crates only `repo-deps`,
+# `drift`, and `feature-attribution` need.
 [features]
 default = ["local-tools"]
 build-tools = ["dep:biscuit-hash", "dep:biscuit-terminal", "dep:object", "dep:find-msvc-tools"]
@@ -41,6 +41,11 @@ required-features = ["local-tools"]
 [[bin]]
 name = "drift"
 path = "drift.rs"
+required-features = ["local-tools"]
+
+[[bin]]
+name = "feature-attribution"
+path = "feature-attribution.rs"
 required-features = ["local-tools"]
 
 [[bin]]
@@ -80,9 +85,9 @@ find-msvc-tools = { version = "0.1.12", optional = true }
 [dev-dependencies]
 rstest = "0.23"
 
-# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, and `drift`, all of
-# which need the default `local-tools` feature; declaring no `features` here is
-# what selects it.
+# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, `drift`, and
+# `feature-attribution`, all of which need the default `local-tools` feature;
+# declaring no `features` here is what selects it.
 #
 # The planner's Python contracts are this package's companion suites: they test
 # `scripts/ci/`, they are not reachable through `cargo nextest`, and every one

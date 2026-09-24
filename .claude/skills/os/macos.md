@@ -82,6 +82,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   both `HOME=/Users/ken` and `GNUPGHOME=/Users/ken/.gnupg`. If a wrong-home
   agent was already started, kill and relaunch `gpg-agent` with those same two
   values; setting only one did not prevent the dialog on 2026-09-12.
+- **A background Kitty is not an L2 host.** The dev host has `kitty` but no
+  remote-control instance, so every `*_in_kitty` test skips in `just test-l2`.
+  On 2026-09-23 an instance started without taking focus (`open -g -n -a kitty
+  --args -o allow_remote_control=yes --listen-on unix:<sock>
+  --start-as=minimized`) gave panes a few columns wide and no graphics
+  detection. 19 or 20 of `biscuit-terminal-cli`'s 25 Kitty tests failed, on the
+  unmigrated base too, and the failing set varied between runs. Treat such a
+  run as no evidence either way. It also ignores `SIGTERM`: stop it with
+  `kitty @ --to unix:<sock> close-window --match all`.
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
   spawns an interactive login shell, so anything the host's shell startup
   does interactively lands in the pane. A first-run tool prompt (seen with

@@ -1,0 +1,10 @@
+[package]
+name = "fa-owner-wsdep"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Workspace-dependency cause: `fa-util` gains `wide`, re-identifying `fa-core`.
+[dependencies]
+fa-core = { path = "../core" }
+fa-util = { path = "../util", features = ["wide"] }

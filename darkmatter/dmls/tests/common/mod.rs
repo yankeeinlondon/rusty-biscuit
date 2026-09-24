@@ -1,8 +1,8 @@
-//! Shared in-memory DMLS session fixture for the Level-1 LSP integration
-//! binaries: `lsp_session`, `no_side_effects`, and `suggest_constraint_phase1`.
+//! Shared in-memory DMLS session fixture for the `l1` integration binary's LSP
+//! modules: `lsp_session`, `no_side_effects`, and `suggest_constraint_phase1`.
 //!
 //! `spec.md` requires DMLS sessions to own bounded cleanup on success, failure,
-//! *and* cancellation. Each of those three targets previously carried its own
+//! *and* cancellation. Each of those three modules previously carried its own
 //! near-duplicate copy of this client driver and only one of them retained the
 //! server `JoinHandle` at all, so an assertion failure detached a live server
 //! thread. This module is the single implementation of that cleanup contract.
@@ -23,9 +23,9 @@
 //!
 //! ## Notes
 //!
-//! Each consuming binary uses a different subset of this API, so the module is
-//! blanket `dead_code`-exempt rather than carrying per-item exemptions that
-//! would drift as tests move between targets.
+//! The consuming modules use only a subset of this API between them, so the
+//! module is blanket `dead_code`-exempt rather than carrying per-item
+//! exemptions that would drift as tests change.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};

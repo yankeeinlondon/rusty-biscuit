@@ -1,6 +1,6 @@
 ---
 area: repo
-status: draft-spec
+status: implemented
 created: 2026-09-22
 owner: Ken Snyder <ken@ken.net>
 origin: follow-on to 2026-09-21-consolidated-test-binaries — every remaining package with ten or more integration-test binaries, 2026-09-22
@@ -42,7 +42,16 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-implemented: false
+review_iterations: 4
+implemented: true
+implemented_by: claude/opus
+completed: true
+human_review: false
+message_to_agent: |-
+    All six phases are implemented. The tree is at "implementation complete, ready for review". Phase 6 is NOT committed (the phase instructions forbid it); its changes are listed in the Phase 6 section of `implementation-log.md`, with a suggested commit split.
+    Start with `acceptance.md`: every first-feature criterion (1–8, 10–12) and new criteria 4–6, each linked to its evidence file. The one pending item is first-feature criterion 10 (CI observations); `ci-observations.md` holds the empty table and the harvest procedure. No run was triggered for it.
+    Known failures, none caused by this feature: `claudine`'s 2 native-Windows lib unit tests (Phase 3; path spelling). `claudine-cli`'s 2 `shipped_prompt_route_drift` failures (from prompt change `9d44e7988`) were fixed in review-1: the fixture and hash pin were refreshed.
+    Do not move the spec to `_completed`; that is the author's step after review.
 ---
 
 # Consolidate integration tests in the ten remaining double-digit packages

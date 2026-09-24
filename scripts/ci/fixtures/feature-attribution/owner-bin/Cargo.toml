@@ -1,0 +1,10 @@
+[package]
+name = "fa-owner-bin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# No library and no build script: its archive compiles only a test harness, so
+# it is a graph root and never a configuration.
+[dependencies]
+fa-core = { path = "../core" }

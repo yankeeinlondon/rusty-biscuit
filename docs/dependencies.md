@@ -121,6 +121,29 @@
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
+- `biscuit-file` uses `test-toolkit` only as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
+- `biscuit-terminal-cli` keeps its optional `terminal-tests` dependency on
+  `test-toolkit` and also declares it as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
+- `claudine-gen` keeps its optional `terminal-tests` dependency on
+  `test-toolkit` and also declares it as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
+- `schematic-gen` keeps its optional `terminal-tests` dependency on
+  `test-toolkit` and also declares it as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
+- `tree-hugger` uses `test-toolkit` only as a development dependency, for the
+  `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
+  the workspace: every crate it brings is already in `Cargo.lock`.
+- `biscuit-tui-cli` keeps its optional `terminal-tests` dependency on the
+  workspace `biscuit-test-harness` and also declares it as a development
+  dependency, so the `test_layout` gate in its feature-less `l1` test binary
+  resolves the crate through `manifest_dir!()` on the WSL2 nextest-archive leg.
+  `Cargo.lock` is unchanged: the edge already existed.
 - `messenger/lib` depends on `darkmatter`, `biscuit-file` (only
   `file-reference`), `biscuit-hash`, and `serde_path_to_error` only through its
   opt-in `research` feature (`messenger::research`: typed loading and semantic
