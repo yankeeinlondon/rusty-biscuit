@@ -11,43 +11,43 @@ implemented: false
 human_review: true
 human_review_items:
     - |-
-      **The planned fix would save about one second. Which direction should the rest of this fix take?**
+      **Which direction should the rest of this fix take? (Still open from Phase 1, now with a measured answer for option B.)**
 
-      *Why this has to be decided before Phase 2:* Phase 2 writes a decision (fix it or leave it) for every flag, and Phase 3 builds a shared "alignment" crate. The spec assumed three low-level third-party options (`libc/extra_traits`, `proc-macro2/span-locations`, `serde_core/default`) caused most of the rebuilds. Phase 1 measured it (`attribution-2026-09-21.md`). Workspace crates are rebuilt about 65 extra times, costing roughly 300 s on this Mac. 93% of that comes from third-party options, as the spec suspected. But the options always arrive **in bundles of 3 to 25**. Aligning the three planned ones collapses almost nothing: **about 1 s saved**. A rebuild only goes away once *every* option in its bundle is aligned. Most bundle members are options the spec ruled "leave alone by default" (web server, `tower`, `time`, `mio`, `clap`). The remaining phases would be wasted work without a new direction.
+      *Why this has to be decided before Phase 3:* Phase 3 builds a shared "alignment" crate that switches on the same third-party options for every package. Phase 2 wrote a decision for every option and found that the three options the spec made eligible save **0.6 s**. A rebuild only disappears when *every* option in its bundle is aligned, and the options arrive in bundles of 3 to 25. So without your ruling, Phase 3 has nothing worth building.
+
+      Phase 2 also measured the one change that does help (option B below) by temporarily making it and re-running the attribution tool. It removes **6 of the 65 extra builds and about 77 s** of the 298 s spent on them on this Mac. That is more than aligning every third-party option outside the spec's "leave alone by default" list (49 s). The temporary change was undone. Nothing has been changed for real.
 
       *Options:*
-      - **A. Close with the measurement.** Leave every option as it is, skip the alignment crate, and finish Phases 2–4 as recorded "no-op" decisions.
-        Pro: no risk, and the spec's protection stays whole. Con: no speed-up.
-      - **B. Remove one internal link instead (new remedy).** `schematic-definitions`, 55,000 lines of API definitions, is almost half of the extra cost (146 s): it is rebuilt 7 times at about 24 s each. It depends on the heavy runtime stack only because `schematic-define` pulls in `biscuit-file` just to reach its re-export of the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly should drop most of those rebuilds.
-        Pro: small, local, and it keeps the spec's "don't unify features" protection fully. Con: the saving is estimated, not measured; the upper bound is 146 s and the true figure is lower; the spec does not list it yet, so it needs a line added to the spec.
+      - **A. Close with the measurement.** Leave every option as it is, skip the alignment crate, and record Phases 3–4 as "no-op" decisions.
+        Pro: no risk, nothing to maintain. Con: no speed-up.
+      - **B. Remove one internal link (a new remedy, needs one spec line).** `schematic-define` depends on `biscuit-file` only to reach its re-export of the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly (same version) means `schematic-definitions`, a 55,000-line crate that takes about 24 s per build, is no longer rebuilt for other packages' web-server and terminal options.
+        Pro: about 77 s saved (measured), and no options are unified, so the protection chosen on 2026-09-12 stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: it is a remedy the spec did not list, so it needs your approval and a spec line.
       - **C. Align nearly all third-party options** (hand-written, or generated with `cargo-hakari`).
-        Pro: the biggest saving, about 211 s (about 70% of the extra cost). Con: gives up the protection the 2026-09-12 decision relied on. A package's tests could pass only because another package switched on a third-party option (for example a web server) that its own manifest never asked for. It also means reviewing about 80 entries and keeping them current.
-      - **D. A middle ground:** align `libc`, `serde_core`, `proc-macro2`, plus `mio` (and `errno`).
-        Pro: about 36 s saved. Con: `mio` is on the "leave alone by default" list, so it needs its own written ruling, and the gain is modest.
+        Pro: about 211 s saved. Con: a package's tests could pass only because another package switched on an option (for example a web server) that its own manifest never asked for, which is exactly what the 2026-09-12 decision guards against. It also means about 80 entries to review and keep current.
+      - **D. Middle ground:** align `libc`, `serde_core`, and `proc-macro2`, plus `mio` and `errno`.
+        Pro: about 37 s saved. Con: `mio` is on the "leave alone by default" list, so it needs its own written ruling. B saves twice as much without unifying anything.
 
-      *Recommendation: B, combined with A for every flag.* It goes after the biggest single cost without weakening the protection this repository chose on purpose, and it is a one-line manifest change that is easy to measure with the new tool. Revisit C only if the author decides that protection is worth trading for about 3.5 minutes of local build time (likely more on CI runners).
+      *Recommendation: B, with A for every option.* It is the biggest single saving that keeps the protection intact. If you approve it, the next agent applies it as a Task 2.2 change (with the dependency-docs update and `schematic-define`'s tests) and Phase 3 records the alignment crate as not warranted.
     - |-
       **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
 
-      *Why now:* the Open Questions ruling (Option 1) says to align `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". Phase 1 shows the alignment crate is not warranted. It also shows the flag affects only 6 crates and is never the sole reason for a rebuild. So moving the test would save **0 s** while adding a new CI-planner mechanism.
+      *Why now:* the Open Questions ruling (Option 1) aligns `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". The alignment crate is not warranted (item above), so the fallback has technically fired. But the option affects only 6 crates, is never the sole reason for a rebuild, and was measured at **0 s**. Moving the test would add a new CI-planner mechanism for no gain. Phase 2 did not act on the fallback.
 
       *Options:*
-      - **Leave the flag and the test exactly as they are** (amend the ruling). Pro: nothing changes, and the evidence says nothing is lost. Con: none.
-      - **Follow the recorded fallback (Option 2).** Pro: it follows the ruling to the letter. Con: CI-planner work and a new way to miss coverage, for no measured gain.
+      - **Leave the option and the test exactly as they are** (amend the ruling in Open Questions). Pro: nothing changes, and the evidence says nothing is lost. Con: none.
+      - **Follow the recorded fallback (Option 2).** Pro: follows the ruling to the letter. Con: CI-planner work and a new way to miss test coverage, for 0 s saved.
 
       *Recommendation: leave it as it is,* and record the amendment in Open Questions.
 message_to_agent: |-
-    Phase 1 is complete, but the author must rule on `human_review_items` before any Phase 2 remedy work starts. Measured result: the spec's three eligible flags remove about 1 s if aligned. See the "One-page reading" in implementation-log.md and attribution-2026-09-21.md.
-    Tooling you will want:
-    - `cargo run -p repo-deps --bin feature-attribution -- --owners <pkgs> --target x86_64-unknown-linux-gnu [--align crates] [--json f]` needs no compile.
-    - `--events target/feature-attribution-timing-out/events` joins the macOS timed pass. The target tree `target/feature-attribution-timing` is still warm, and `timed-pass.sh` regenerates both.
-    - The `--align` what-if refuses workspace crates. Use it to size any remedy before editing manifests.
-    - `nextest` rebuilds only the test binary, so run `cargo build -p repo-deps --bin feature-attribution` before using `./target/debug/feature-attribution`. An earlier stale binary produced wrong own/workspace-dependency seconds.
-    Facts that differ from the spec:
-    - `proc-macro2/span-locations` is target-side only (the owner passes `--target`).
-    - `repo-deps` also demands `libc/extra_traits`, via `ctrlc` → `nix 0.31.3`.
-    - The spec's 13 divergence rows reproduce only without `claudine-cli`'s CI features. With them there are 24.
-    If the author picks option B (the `schematic-define` → `serde_yaml_ng` edge), it is a "remove the source" row in Task 2.2. It must update `docs/dependencies.md`, and it can be sized first by re-running the tool after the manifest edit.
+    Phase 2 is complete as records only. The decision table is under "## Phase 2" in implementation-log.md. No source, manifest, or lock file changed, and the author has not yet ruled on `human_review_items`.
+    - Every flag row is "leave divergent". `proc-macro2/span-locations` is "leave divergent — pending ruling": ruling 1's Option 2 fallback was triggered but not executed, because it saves 0 s.
+    - Option B (`schematic-define` → `biscuit-file` edge replaced by a direct optional `serde_yaml_ng = "0.10"`) is measured at 92 → 86 Linux configurations and ≈77 s on macOS. The exact edit is in the log. If the author approves B, apply it first as a Task 2.2 change:
+      - `schematic/define/Cargo.toml`: the `openapi` feature and the dependency.
+      - `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`. The test file was missed by the what-if.
+      - `schematic/docs/dependencies.md` (plus the root `docs/dependencies.md` if affected).
+      - Run `just test schematic-define`, and re-run `feature-attribution` to confirm 86 configurations.
+    - If the author picks A or B, Phase 3 collapses to its no-op rationale (alignment not warranted). C or D need a ruling 4 entry in the spec before any alignment entry is written.
+    - Before trusting `./target/debug/feature-attribution`, rebuild it with `cargo build -p repo-deps --bin feature-attribution`.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21
 related:

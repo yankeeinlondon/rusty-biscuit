@@ -37,6 +37,13 @@ docs_created_during_phase_1:
     - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
 skills_files_updated_during_phase_1:
     - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - repo-deps
 ---
@@ -389,3 +396,181 @@ all-third-party what-if already counts them.
 - **Stopping for human review** (spec `human_review: true`): the evidence
   says the planned alignment crate saves about 1 s, so the author should
   choose Phase 2's direction before any remedy work.
+
+## Phase 2
+
+Base: `fix/ci-build-feature-divergence` at `9ac58f1c8`, macOS host. The
+`rust-devops` skill was loaded before any Phase 2 work. No CI run was
+triggered. No manifest, lock file, or source file is changed by this phase:
+the one manifest edit below was a temporary what-if, reverted in the same
+step (`git status` clean afterward).
+
+**Author ruling status.** Phase 1 stopped with `human_review: true` and two
+open items (the direction of part 2, and the amendment to the Open Questions
+ruling). Neither had been answered when Phase 2 started. Task 2.1 records
+decisions and changes no source, so it follows the recorded rulings and marks
+every row that needs the author with **pending ruling**. Nothing that needs
+the ruling was executed: no isolation, no alignment, and no option B edit.
+
+### Sizing option B (the `schematic-define` → `biscuit-file` edge)
+
+Phase 1 gave option B only a 146 s upper bound. It is now measured, because
+it is the only candidate large enough to change the outcome.
+
+- **What-if edit** (temporary, reverted): in `schematic/define/Cargo.toml`,
+  the `openapi` feature's `"biscuit-file"` became `"dep:serde_yaml_ng"`, and
+  the optional `biscuit-file = { …, features = ["yaml"] }` dependency became
+  `serde_yaml_ng = { version = "0.10", optional = true }` (the same version
+  `biscuit-file` re-exports). `use biscuit_file::serde_yaml_ng;` became
+  `use serde_yaml_ng;` in `src/openapi/options.rs` and
+  `src/openapi/import/builder.rs`. `cargo check -p schematic-define
+  --all-features` compiled the library. The integration test
+  `tests/openapi_tests.rs` also imports `biscuit_file::serde_yaml_ng`, so the
+  real change touches that one line too (or keeps `biscuit-file` as a
+  dev-dependency; its dev edge is only built when `schematic-define` is an
+  owner, which it is not in this selection).
+- **Linux model** (`feature-attribution --target x86_64-unknown-linux-gnu`):
+  92 → **86** configurations (65 → 59 divergent). `schematic-define` and
+  `schematic-definitions` each go **7 → 4**. The four left are `claudine`'s
+  (now shared with `claudine-cli`'s sidecar build, `claudine-gen`,
+  `darkmatter`, `darkmatter-cli`, `dmls`, and `sniff-cli`), plus
+  `claudine-cli` (`serde_core +default`), `repo-deps`, and `sniff` (both
+  `serde_json` feature differences).
+- **macOS seconds** (joined with the Phase 1 timed-pass events): the model no
+  longer predicts four measured compiles: `darkmatter`'s and `sniff-cli`'s
+  builds of both crates, **52.1 s**. The join also hides a fifth. `claudine-cli`
+  compiled both crates twice (23.7 s + 1.2 s for its sidecar
+  configuration), and that configuration now equals `claudine`'s. The join
+  charges an owner's compiles to the configurations it built first, so it
+  still counts both. Removed in total: **≈77 s**, about 26% of the 297.9 s
+  divergent seconds.
+- For comparison, on the same measured seconds: the spec's eligible trio
+  0.6 s; trio + `mio` + `errno` 36.9 s; every third-party crate outside the
+  "default no" set 49.4 s; every divergent third-party crate (hakari-like)
+  210.8 s.
+
+Option B keeps ruling `2026-09-12-single-os-compile` whole. It unifies no
+feature. It deletes one incidental workspace edge whose only purpose was a
+re-export, so it is a "remove the source" remedy. The spec lists source
+removal only for third-party chains, so option B still needs the author's
+ruling and a spec line before it lands.
+
+### Decision table (Task 2.1)
+
+Seconds are macOS timed, split evenly between a configuration's causes
+(**split**), with **sole** being what removing that cause alone is certain
+to save. Configuration counts are macOS / Linux. Shapes: *member-declared*
+(a workspace manifest names the flag), *transitive* (a third-party crate
+some owners hold enables it), *workspace-own* (a workspace crate's own
+features). Isolation applies only to the member-declared shape. Source
+removal is tried before alignment on every row.
+
+#### The spec's three base flags
+
+| Crate / flag | Shape | Configs | Split / sole | Remedy | Rationale |
+|---|---|---|---|---|---|
+| `libc` `+extra_traits` | transitive: `claudine-cli` and `sniff-cli` via dev-dep `expectrl 0.8` → `nix 0.26.4`; `repo-deps` via `ctrlc` → `nix 0.31.3` | 38 / 31 | 34.5 s / 0.6 s | **leave divergent** | Isolation does not apply (no member declares it). Source removal is blocked upstream (ruling 3: `expectrl 0.9.0` still needs `nix ^0.26`), and `ctrlc` would keep the flag even without `expectrl`. Alignment would save 0.6 s, because the flag always arrives with `mio`/`errno` (and with `claudine-cli`'s 10–25-flag bundle), so it collapses no configuration alone. |
+| `proc-macro2` `+span-locations` | member-declared: `claudine/cli` dev-dependency for the source-scan guard | 0 / 7 | 0 s / 0 s | **leave divergent — pending ruling** | Ruling 1 aligns it only "whenever the alignment crate is created". Phase 1 shows the crate is not warranted, which triggers ruling 1's Option 2 fallback (isolate the guard plus a planner watch). But the flag reaches only the target-side `proc-macro2` and is never a sole cause (0 s), so Option 2 would add a planner-contract change for no saving. Option 2 is not executed. This phase has no isolation task, and acceptance criterion 2 bars isolation work without a recorded ruling that fits. The author's amendment is the open review item. |
+| `serde_core` `+default` | transitive: `claudine-cli` via `axum 0.8.9`; `repo-deps` via `camino` ← `cargo_metadata` | 33 / 31 | 13.9 s / 0 s | **leave divergent** | No source-removal path: `axum` is in `claudine-cli`'s closure by design (the rendezvous daemon), and `cargo_metadata` is `repo-deps`' core input. Alignment would save 0 s alone. |
+
+#### Third-party flags in ruling 4's "default no" set
+
+All **leave divergent** (ruling 4). No per-flag ruling is recorded in the
+spec, which ruling 4 requires before any of them is aligned. Isolation does not
+apply (all transitive or ordinary normal dependencies). Source removal does
+not apply: each is a capability its owner uses (the daemon's HTTP server,
+terminal event handling, CLI parsing).
+
+| Crate / flags | Configs | Split / sole | Owners that add it |
+|---|---|---|---|
+| `mio` `+default +log` | 17 / 17 | 18.2 s / 0 s | `claudine-cli`, `sniff-cli` |
+| `hyper` `+server` / `+full` | 20 / 19 | 13.2 s / 0 s | `claudine-cli`, `darkmatter` |
+| `hyper-util` `+server +server-auto +service` | 20 / 19 | 13.2 s / 0 s | `claudine-cli`, `darkmatter` |
+| `clap`, `clap_builder` `+env +unstable-ext +wrap_help` | 10 / 10 each | 7.1 s / 0 s each | `claudine-cli` (and others without `env`) |
+| `time` `+local-offset` | 11 / 11 | 4.1 s / 0 s | `claudine-cli` |
+| `tower` (twelve flags) | 11 / 11 | 4.1 s / 0 s | `claudine-cli` |
+| `crossterm` `+events …` | 6 / 6 | 3.3 s / 0 s | `claudine-cli`, `sniff-cli` |
+| `tokio-stream` `+net` | 7 / 7 | 1.5 s / 0 s | `claudine-cli` |
+
+`mio` is the only one with a material bundle effect: aligning it with the
+trio and `errno` removes 36.9 s. That is the spec's option D, and it needs a
+ruling 4 entry in the spec first.
+
+#### Remaining third-party flags
+
+All **leave divergent**. None is on the spec's eligible list, so each would
+need its own spec ruling (ruling 4, last sentence), and several add
+observable behavior (`tokio +signal/+test-util`, `getrandom +js`,
+`reqwest` feature sets, `rustls` crypto provider). Isolation does not apply,
+and each arrives as an ordinary dependency feature of a crate its owner uses.
+Aligning every one of them together with the trio removes 49.4 s (macOS) /
+≈82 s (Linux estimate), less than option B alone on macOS.
+
+| Group | Crates (macOS split seconds) | Likely origin (inferred from which owners diverge, not traced per crate) |
+|---|---|---|
+| `errno` (macOS only) | `errno` 27.0 s | `sniff-cli`/`claudine-cli` terminal stack (`default`) versus others (no default) |
+| async runtime | `tokio` 16.2 s, `tokio-util` 3.1 s, `bitflags` 1.5 s (macOS), `slab` 0.2 s, `futures-sink`, `futures-util`, `futures-io` | per-owner `tokio` feature sets (`+signal`, `+full`, `+test-util`, `-fs -process`) |
+| `claudine-cli`'s daemon bundle | `num-traits` 7.4 s, `smallvec` 5.2 s, `getrandom` 4.0 s, `xxhash-rust` 1.8 s, `num-integer` 1.0 s, `half` 0.8 s, `num` 0.7 s, `fastrand` (host) 0.7 s, `syn +visit` 0.1 s | `rendezvous-daemon`/`duckdb`, the guard test, and `biscuit-hash`'s `xxh32` under the CI features |
+| JSON / text | `serde_json` 8.9 s, `either` 6.2 s, `url` 4.9 s (the only sole seconds here: 1.8 s), `ttf-parser` 4.7 s, `bytecount` 4.7 s, `memchr` 1.7 s, `regex-automata` 1.3 s, `regex-syntax` 1.1 s, `regex` 1.0 s, `aho-corasick` 0.2 s | `repo-deps`' `serde_json +unbounded_depth`, `sniff`'s narrower closure, and `test-toolkit`/harness no-default builds |
+| TLS / config / ids (`claudine-cli` sidecar, `darkmatter-cli`, `dmls`, `claudine-gen` no-default closures) | `hyper-rustls`, `rustls`, `rustls-webpki`, `hashbrown`, `uuid` 3.1–3.3 s each; `toml_parser`, `toml_datetime`, `toml_writer`, `winnow` 3.2 s each; `which`, `bit-set`, `bit-vec` ≤1.2 s | builds that lack `biscuit-file/fetch`'s `reqwest`/`gix` stack drop these features |
+| compression / unicode / OS | `rustix` 3.8 s, `tinystr`, `zerovec`, `simd-adler32`, `miniz_oxide` 3.2 s each, `objc2-core-foundation` 0.8 s (macOS), `linux-raw-sys` (Linux) | `sniff` and `sniff-cli`'s narrower closures |
+| HTTP client / misc | `tower-http`, `reqwest` 0.8 s each; `bytemuck`, `num-rational`, `num-bigint`, `once_cell`, `serde`, `indexmap`, `chrono`, `sha1`, `form_urlencoded`, `gix`, `gix-*` ≤0.2 s each | `sniff -network -remote` (under `repo-deps`), `biscuit-terminal -image` |
+
+#### Workspace-own divergence (ruling-protected)
+
+All **leave divergent by design**. These are exactly what
+`2026-09-12-single-os-compile` protects, and no row aligns a workspace
+crate's own feature. Total 20.8 s (7%).
+
+| Crate / flag | Kind | Split / sole |
+|---|---|---|
+| `darkmatter` `+effects-instrumentation` (`claudine-cli`), `+browser-tests +terminal-tests` (`darkmatter`), `+work-counters` (`dmls`) | own | 8.2 s / 7.0 s |
+| `biscuit-file` `±fetch` (`biscuit-file`, `repo-deps`, `sniff`) | own 0.2 s; as a workspace dependency 6.5 s | — / 0 s |
+| `renderable` `+hint-access-counter` (`darkmatter`) | own 1.9 s; as a workspace dependency 1.2 s | 1.9 s sole |
+| `darkmatter-cli` `+terminal-tests` | own | 1.3 s / 1.3 s |
+| `biscuit-hash` `-blake3` (`sniff`) | own 0.1 s; as a workspace dependency 0.6 s | 0.1 s sole |
+| `darkmatter` `±effects-instrumentation` as a workspace dependency | workspace dependency | 0.4 s |
+| `sniff` `-network -remote` (`repo-deps`), `biscuit-terminal` `-image` (`repo-deps`), `test-toolkit` `+backend-proof` | own | ≤0.2 s each |
+
+**Missing-declaration hazard (report-only):** none found. Each owner is a
+separate Cargo invocation, so a package's own archive never resolves another
+owner's workspace features. Every workspace-own row above is a feature its
+own owner (or its own dependency chain) declares. Nothing was changed.
+
+#### New remedy, outside the spec's list
+
+| Edge | Shape | Configs removed | Seconds removed | Remedy | Rationale |
+|---|---|---|---|---|---|
+| `schematic-define` `openapi` → `biscuit-file` (`yaml`), used only for the re-exported `serde_yaml_ng` | workspace edge (incidental) | 6 on Linux (3 each for `schematic-define` and `schematic-definitions`); 6 on macOS | **≈77 s** macOS (52.1 s visible to the join + 25.0 s from `claudine-cli`'s duplicate compile) | **remove the source — pending ruling** | The single largest lever, and it unifies nothing. Measured above. Not executed, because the author has not ruled and the spec does not yet list the remedy. If approved, it runs as a Task 2.2 change with the manifest edit, three `use` lines, `schematic/docs/dependencies.md` (plus the root `docs/dependencies.md` if it lists the edge), and `just test schematic-define`. |
+
+#### Conclusion for Phases 3 and 4
+
+- **The alignment crate is not warranted** on the spec's eligible terms
+  (0.6 s). Phase 3 collapses to its no-op rationale unless the author rules
+  "default no" or off-list flags eligible (options C or D).
+- **Ruling 1's Option 2 fallback is triggered on paper but not executed:**
+  it removes 0 s and extends the planner contract. The recommended
+  amendment is "leave `proc-macro2/span-locations` divergent, guard stays in
+  `claudine-cli`". This is the second review item.
+- **Task 2.2:** no flag row assigns "remove the source". Every
+  third-party source removal is blocked or not applicable, as recorded above.
+  Option B is the only candidate, and it waits on the author's ruling.
+
+### Phase 2 validation
+
+- **Requirement-to-test mapping.** Phase 2 changes no behavior. It changes no
+  source, manifest, or lock file, so there is no new test. The one
+  measurement (option B) reused the Phase 1 tool, whose 18 tests already
+  cover the `--align` what-if and the timed-events join.
+- `just test repo-deps` (macOS): **467 passed, 1 skipped** (the skip was
+  already there). It includes
+  `one_owner_tree_shares_a_dependency_compile_without_unifying_features` and
+  the rest of `scripts/ci-build-archive-tests.rs`, unchanged.
+- `just _lint repo-deps`: clean.
+- GitNexus `detect_changes` (scope `all`): 0 changed symbols, risk low. The
+  only changed file is this log (plus plan and spec frontmatter).
+- No cross-OS run: nothing compiled differs from Phase 1.
+- `docs/dependencies.md` is untouched: no dependency edge moved (the option B
+  what-if was reverted).
+- **Stopping for human review** again (spec `human_review: true`). The two
+  items from Phase 1 stand, now with option B measured at ≈77 s.

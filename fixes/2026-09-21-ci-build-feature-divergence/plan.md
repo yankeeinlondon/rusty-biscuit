@@ -2,7 +2,7 @@
 title: Stop divergent base features from recompiling the workspace per archive
 status: ready
 created: 2026-09-21
-phase: 1
+phase: 2
 total_phases: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -45,6 +45,13 @@ docs_created_during_phase_1:
     - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
 skills_files_updated_during_phase_1:
     - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Plan: Stop divergent base features from recompiling the workspace per archive
@@ -344,7 +351,7 @@ before this phase's work.
 
 #### Wave 5 (single task; depends on Phase 1's ranking and rulings)
 
-- [ ] **Task 2.1 — Write decision table** (prerequisite: Task 1.8 and
+- [x] **Task 2.1 — Write decision table** (prerequisite: Task 1.8 and
   recorded rulings; no source changes).
   - For **every** divergent configuration the attribution table found (the
     three base flags, the remaining ten third-party rows, and the
@@ -373,7 +380,7 @@ before this phase's work.
 
 #### Wave 6 (conditional; tasks exist only if the decision table assigns them)
 
-- [ ] **Task 2.2 — Execute source removals** (only for flags whose decision
+- [x] **Task 2.2 — Execute source removals** (only for flags whose decision
   row says "remove the source"; expected: none, per ruling 3 — then this
   task is closed with the recorded block evidence).
   - Each removal is a separate, reviewable change: the manifest/lock edit,
@@ -382,6 +389,11 @@ before this phase's work.
     change.
   - Verify no behavior change: the affected packages' L1 suites pass
     locally (`just test <pkg>`).
+  - **Closed (Phase 2):** no flag row assigns source removal; every
+    third-party removal is blocked or not applicable (see the decision
+    table). The `schematic-define` → `biscuit-file` edge (option B, measured
+    at ≈77 s) is a source-removal candidate waiting on the author's ruling;
+    if approved, it runs here as a separate change before Phase 3.
 
 **Phase 2 validation checkpoint.** Every divergent configuration has a
 decision row; no row aligns a workspace crate's own feature; every executed
