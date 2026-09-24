@@ -46,6 +46,28 @@ fn file_and_dir_verbs() {
     assert!(eng.ensure_file("../escape.md").is_err());
 }
 
+/// Parallel sequence members append to one log through separate engines; every
+/// line must survive, which a read-modify-write replacement cannot guarantee.
+#[test]
+fn concurrent_append_line_calls_keep_every_line() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    thread::scope(|scope| {
+        for writer in 0..8 {
+            let root = dir.path();
+            scope.spawn(move || {
+                let eng = EffectEngine::builder().mutation_root(root).build();
+                for line in 0..50 {
+                    eng.append_line("events.log", &format!("{writer}-{line}")).unwrap();
+                }
+            });
+        }
+    });
+
+    let log = std::fs::read_to_string(dir.path().join("events.log")).unwrap();
+    assert_eq!(log.lines().count(), 8 * 50, "lost appends:\n{log}");
+}
+
 #[test]
 fn http_post_uses_allowed_host_policy() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
