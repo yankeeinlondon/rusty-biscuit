@@ -1254,9 +1254,14 @@ impl ComposeOptions {
 
     /// Adds a custom search root for `@`-prefixed file references.
     ///
-    /// Paths added with `PathPosition::Start` are searched before the
-    /// git repository root; paths with `PathPosition::End` are searched
-    /// after HOME.
+    /// The root's tier is inferred from where it lies: a root inside the
+    /// launch local root (the repository root, or the request directory when
+    /// there is no repository) joins the local tier searched before every
+    /// home-based root; every other root joins the user tier searched after
+    /// it. Within a tier, `PathPosition::Start` roots are searched before
+    /// that tier's intrinsic roots (package, package area, local root for the
+    /// local tier; home for the user tier) and `PathPosition::End` roots
+    /// after them.
     ///
     /// ## Examples
     ///
@@ -2246,6 +2251,13 @@ fn baseline_canonical_json(
 }
 
 /// Encodes every file-resolution input that can change candidate construction.
+///
+/// Besides the authoring anchors, this covers the three inputs that can change
+/// the winning `@` candidate without touching any other field: `package_root`
+/// (an intrinsic local-tier root), the captured launch `@` scope (which anchors
+/// the whole `@` chain independently of the source anchors), and each
+/// configured magic root's tier policy (a `User` override reorders the chain
+/// even when the root path is unchanged).
 fn encode_file_resolution_context(
     enc: &mut GraphIdentityEncoder,
     context: &Option<biscuit_file::FileResolutionContext>,
@@ -2261,6 +2273,7 @@ fn encode_file_resolution_context(
         Some(context.base_dir()),
         Some(context.request_base_dir()),
         context.repository_root(),
+        context.package_root(),
         context.package_area(),
         context.home_dir(),
     ] {
@@ -2274,6 +2287,23 @@ fn encode_file_resolution_context(
     }
     enc.bool(context.is_trusted_external_authoring_base());
 
+    let scope = context.launch_magic_scope();
+    enc.field("launch_magic_scope");
+    for path in [
+        Some(scope.request_dir()),
+        scope.repository_root(),
+        scope.package_root(),
+        scope.package_area(),
+    ] {
+        match path {
+            Some(path) => {
+                enc.tag(1);
+                enc.path(path);
+            }
+            None => enc.tag(0),
+        }
+    }
+
     let mut env: Vec<(&str, &str)> = context
         .env()
         .iter()
@@ -2286,15 +2316,27 @@ fn encode_file_resolution_context(
         enc.str(value);
     }
 
-    for paths in [
-        context.prepended_magic_paths(),
-        context.appended_magic_paths(),
-        context.vault_roots(),
-    ] {
-        enc.count(paths.len());
-        for path in paths {
-            enc.path(path);
-        }
+    // Tier-aware registrations: position alone no longer fixes where a root
+    // sits in the chain, so the tier policy is part of the identity.
+    enc.field("magic_path_registrations");
+    let registrations = context.magic_path_registrations();
+    enc.count(registrations.len());
+    for registration in &registrations {
+        enc.path(registration.path());
+        enc.tag(match registration.position() {
+            biscuit_file::PathPosition::Start => 0,
+            biscuit_file::PathPosition::End => 1,
+        });
+        enc.tag(match registration.tier() {
+            biscuit_file::MagicPathTier::Inferred => 0,
+            biscuit_file::MagicPathTier::User => 1,
+        });
+    }
+
+    enc.field("vault_roots");
+    enc.count(context.vault_roots().len());
+    for path in context.vault_roots() {
+        enc.path(path);
     }
 }
 
@@ -2459,6 +2501,9 @@ impl ComposeOptions {
                 biscuit_file::RootProvenance::Magic => 4,
                 biscuit_file::RootProvenance::Vault => 5,
                 biscuit_file::RootProvenance::Absolute => 6,
+                // Appended after the historical codes; never renumber them —
+                // the codes are persisted with graph identities.
+                biscuit_file::RootProvenance::LocalRoot => 8,
             });
         }
 
@@ -3297,6 +3342,101 @@ mod tests {
         assert_eq!(
             a.caller_input_records()["spec"].raw(),
             &serde_json::json!("fixes/case/spec.md")
+        );
+    }
+
+    /// A bare source context for the identity fixtures below.
+    fn identity_source_context() -> biscuit_file::FileResolutionContext {
+        biscuit_file::FileResolutionContext::from_snapshot(
+            "/repo/docs",
+            Some("/repo".into()),
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root("/repo")
+    }
+
+    /// The captured launch `@` scope anchors the whole `@` chain independently
+    /// of the source anchors: two otherwise-identical options whose contexts
+    /// differ only in that scope can resolve the same `@` reference to
+    /// different files, so both identity products must distinguish them.
+    #[test]
+    fn identities_distinguish_launch_magic_scope() {
+        let launch_a = biscuit_file::FileResolutionContext::from_snapshot(
+            "/repo/area-a",
+            None,
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root("/repo");
+        let launch_b = biscuit_file::FileResolutionContext::from_snapshot(
+            "/repo/area-b",
+            None,
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root("/repo");
+        assert_ne!(
+            launch_a.launch_magic_scope(),
+            launch_b.launch_magic_scope(),
+            "fixture must vary only the launch scope"
+        );
+
+        let source = identity_source_context();
+        let a = fixed_opts().with_file_resolution_context(
+            source
+                .clone()
+                .with_launch_magic_scope(launch_a.launch_magic_scope().clone()),
+        );
+        let b = fixed_opts().with_file_resolution_context(
+            source
+                .clone()
+                .with_launch_magic_scope(launch_b.launch_magic_scope().clone()),
+        );
+
+        assert_ne!(id(&a), id(&b));
+        assert_ne!(
+            a.compose_cache_fingerprint(),
+            b.compose_cache_fingerprint()
+        );
+    }
+
+    /// A configured magic root's tier policy can reorder the `@` chain without
+    /// changing the root path, its position, or any other field — a `User`
+    /// override moves a local-looking root behind every local-tier candidate.
+    #[test]
+    fn identities_distinguish_magic_tier_override() {
+        let base = identity_source_context();
+        let inferred = fixed_opts().with_file_resolution_context(
+            base.clone()
+                .add_magic_path("/repo/configs", biscuit_file::PathPosition::Start),
+        );
+        let user = fixed_opts().with_file_resolution_context(
+            base.add_magic_path_with_tier(
+                "/repo/configs",
+                biscuit_file::PathPosition::Start,
+                biscuit_file::MagicPathTier::User,
+            ),
+        );
+
+        assert_ne!(id(&inferred), id(&user));
+        assert_ne!(
+            inferred.compose_cache_fingerprint(),
+            user.compose_cache_fingerprint()
+        );
+    }
+
+    /// `package_root` is an intrinsic local-tier `@` root; a context that
+    /// supplies it resolves `@x.md` differently from one that does not, so the
+    /// field participates in both identity products.
+    #[test]
+    fn identities_distinguish_context_package_root() {
+        let without = fixed_opts().with_file_resolution_context(identity_source_context());
+        let with = fixed_opts().with_file_resolution_context(
+            identity_source_context().with_package_root("/repo/darkmatter/lib"),
+        );
+
+        assert_ne!(id(&without), id(&with));
+        assert_ne!(
+            without.compose_cache_fingerprint(),
+            with.compose_cache_fingerprint()
         );
     }
 

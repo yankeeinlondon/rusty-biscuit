@@ -1026,12 +1026,15 @@ mod schema_validation_integration {
             ),
             (
                 "@collision/spec.md",
+                // Local-tier chain first (2026-09-23-local-before-home R2):
+                // the Start magic root, package area, repository, then the
+                // End magic root — local appends precede home — and home last.
                 vec![
                     RootProvenance::Magic,
                     RootProvenance::PackageArea,
                     RootProvenance::Repository,
-                    RootProvenance::Home,
                     RootProvenance::Magic,
+                    RootProvenance::Home,
                 ],
             ),
             ("./collision/spec.md", vec![RootProvenance::Source]),
