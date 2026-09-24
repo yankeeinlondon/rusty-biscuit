@@ -39,6 +39,14 @@ skills_files_updated_during_phase_3:
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/macos.md
     - .claude/skills/rust-devops/kache.md
+source_files_during_phase_4:
+    - scripts/kache-host.sh
+    - tools/test-toolkit/tests/kache_host_contracts.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
 packages:
     - test-toolkit
 ---
@@ -462,3 +470,373 @@ mentions it.
 | No workflow runs `just init` or installs/upgrades kache (Necessary Rule 3) | `ci_workflow_contracts::ci_never_runs_init_nor_installs_or_upgrades_kache` (proven failing on a planted workflow step) |
 | No tracked wrapper / CI kache wiring | `ci_workflow_contracts::ci_does_not_wire_the_kache_wrapper` (unchanged) |
 | Docs/skills no longer state the old policy | drift scan (manual; documentation is not test-pinned) |
+
+## Phase 4
+
+### Wave 1 — Host pre-cleanup (dev Mac)
+
+- The hand-made symlinks were not beside `rust-lld` (`…/rustlib/aarch64-apple-darwin/bin/`)
+  but one level over, at
+  `~/.rustup/toolchains/{1.98.1,stable}-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/lib/libLLVM.dylib -> ../../../libLLVM.dylib`
+  (the stable one dated 2026-09-05; the 1.98.1 one 2026-09-23 14:47, made
+  during the original diagnosis). Both removed after confirming they were
+  symlinks (`[ -L ]`); the real `<toolchain>/lib/libLLVM.dylib` files are
+  untouched. No other `libLLVM*` exists under any toolchain's `rustlib/`.
+- `~/.env` line 51 (`KACHE_CACHE_DIR=/Volumes/coding/kache`) deleted after
+  asserting the line's exact text first; 54 → 53 lines, `diff` shows only
+  that line. A backup is kept at `~/.env.bak-20260923-kache` (mode 600,
+  because the file holds credentials). `~/.config/sh/adaptive.sh` untouched.
+- Verified with a fresh interactive zsh under `env -i` (`zsh -i -c`):
+  `KACHE_CACHE_DIR=[]`, and all 44 assignments in `~/.env` still arrive
+  exported (`printenv` per key, 0 missing), so the allexport block survived.
+- Daemon plist deliberately NOT regenerated yet (check 8 needs its stale env).
+
+### Wave 1 — WSL negative host (`build-win`, spec check 6)
+
+Method: `git archive HEAD` of the recipe inputs (`justfile`, `just/`,
+`scripts/cargo-path.sh`, `scripts/kache-host.sh`,
+`scripts/kache-config-merge.py`, `.github/kache-min-version`) unpacked into a
+scratch git repo on the guest's ext4 root volume, run with a scratch
+`HOME`/`CARGO_HOME`/`XDG_*` (real `RUSTUP_HOME`, real `~/.cargo/bin` tools on
+PATH) so the build host's own install could not change. I ran
+`just _ensure-kache` (the `init` step) instead of the whole `init`, which
+would have reinstalled every host tool into the scratch home. The contract
+tests pin that `init` calls `_ensure-kache`.
+The guest has no kache installed. The scratch directory was removed afterwards,
+and the guest's real home still has no kache and no kache systemd unit.
+
+- **First attempt, under `/tmp`**: the verdict was `clone-unsupported-on-tmpfs`.
+  The guest's `/tmp` is tmpfs, so this was not the ext4 case, and the scratch
+  directory moved to `~`.
+- **DEFECT FOUND AND FIXED — the placement cascade and a fresh home.** On ext4 with a
+  scratch home that had no `~/.cache`, the verdict was
+  `no-user-writable-store-location-on-the-checkout-volume` rather than the
+  clone-probe failure. `candidate_store` decided the user cache dir's device
+  from its *immediate parent* and skipped the step when that parent did
+  not exist. It then fell through to the root-owned mount point (`/kache`) and
+  failed. The same thing happened on the dev Mac for a Data-volume checkout
+  with a home that has no `~/Library/Caches`. The consequence is that a
+  fresh or minimal home on btrfs/XFS/APFS would be told it does not qualify.
+  A second, smaller defect: on a non-qualifying host the cascade created
+  `~/.cache/kache` and never removed it.
+  Fix (`scripts/kache-host.sh`): the nearest *existing* ancestor now decides the
+  device, so nothing is created before the device is known. A cache dir that the
+  cascade creates is recorded (`CREATED_CANDIDATE` plus the outermost created
+  directory, `CREATED_TOP`), and `drop_created_candidate` removes that chain
+  while it is still empty on a no verdict. Regression test:
+  `qualify_places_the_candidate_in_a_fresh_home_and_cleans_up_on_no`. It
+  failed on macOS against the old script with the exact reason above, and
+  passes after the fix. On macOS it exercises the qualify branch: the
+  candidate is under the fresh home. On Linux ext4 it exercises the no-qualify
+  cleanup branch: the home is left untouched.
+- **After the fix, on ext4** (fresh home, then a home with `~/.cache`):
+  `kache-host: verdict=no-qualify reason=clone-unsupported-on-ext4` →
+  "kache: this filesystem does not earn kache (clone-unsupported-on-ext4);
+  kache stays off." / "not installed — init leaves it that way", rc 0. The
+  scratch home held nothing new afterwards (`~/.cache/kache` cleaned up, and a
+  pre-existing `~/.cache` left alone). `just kache-status` agreed:
+  "installed no / active no / VERDICT: not in use", rc 0.
+- **Below floor**: a real kache 0.22.0 went into the scratch `CARGO_HOME` via
+  `cargo binstall kache@0.22.0`.
+  - Non-interactive (`</dev/null`): "ERROR: kache 0.22.0 is below the floor
+    0.23.0 and this init is non-interactive; refusing to upgrade or skip
+    silently…", recipe exit 1, binary unchanged.
+  - Interactive (`printf 'y\n' | script -qec 'just _ensure-kache'` gives stdin
+    a pty so `[ -t 0 ]` holds): the prompt appeared, `y` ran
+    `just install-kache true` (0.22.0 → 0.26.3, x86_64-musl), and it printed
+    "binary-only mode: no config written, no daemon touched.", rc 0.
+    Afterwards there was no `$XDG_CONFIG_HOME` at all (no config), `kache
+    daemon --json` showed `daemon_running: false`, `service_installed: false`,
+    no daemon process, and no systemd unit.
+
+### Wave 2 — First init + core checks (dev Mac)
+
+Pre-state: kache 0.26.3 ad hoc (`flags=0x2(adhoc)`), config pair already
+written by the Phase 2 drill, daemon PID 8160 running. PID 8160 is **not
+launchd's job**: `launchctl print` shows the `ninja.kunobi.kache` job as
+`exited`, and 8160's parent is `kache monitor` (PID 70818). Its environment
+still carries `KACHE_CACHE_DIR=/Volumes/coding/kache`, and it listens at
+`/Volumes/coding/kache/daemon.sock`.
+
+- **`just init`** (full, `</dev/null`, 9m39s, rc 0). The one-block report:
+  verdict qualifies (checkout/store/base all device 16777235), base covered
+  (`/Volumes/coding/wt`, store→base clone probe: clone), version 0.26.3 (floor
+  0.23.0), passthrough pass, store `/Volumes/coding/kache` "moved: no — pinned
+  deliberately", old store "56G at /Users/ken/Library/Caches/kache —
+  abandoned; deleting it is left to you", daemon running 0.26.3 at the
+  store-dir socket, activation in `~/.cargo/config.toml`. binstall was a
+  no-op ("already installed"), and both merge writes reported "already holds".
+  Side effect worth knowing: `init` reinstalls the repo CLIs (sniff,
+  darkmatter, claudine, …) from the checkout it runs in, so they now come from
+  this worktree.
+- **Finding: `llvm-tools-preview` masks check 1.** `init` →
+  `scripts/ensure-ci-tools.sh:189` runs `rustup component add
+  llvm-tools-preview`. That component installed a *real* `libLLVM.dylib`
+  (139 MB, 19:16:15) at `…/1.98.1-…/lib/rustlib/aarch64-apple-darwin/lib/`,
+  the same path the removed hand-made symlink occupied, and `rust-lld`'s
+  `@rpath` finds it with or without `DYLD_*`. A plain `just zed-wasm` passing
+  therefore proves nothing about the fix. It is rustup-managed, so it
+  stays; the check was re-run with it renamed aside (trap-restored), as
+  below. Consequence: on any host where `init` has run, the toolchain
+  symptom is hidden, although `DYLD_*` stripping still matters for anything
+  outside that component's reach.
+- **Finding: the 17 `rust-objcopy` SIGABRT warnings in the init log are
+  replayed diagnostics**, not live failures. All 17 carry the same dyld PID
+  (26246) and belong to the same unit (`renderable` build script, "stripping
+  debug info with `rust-objcopy` failed"). *Corrected in Wave 5:* I first
+  attributed them to kache replaying stored stderr. The replay is actually
+  **cargo's**: cargo re-emits cached warnings for up-to-date units. The same
+  warning, with the same PID, reappears under `RUSTC_WRAPPER=""` (no kache at
+  all). The unit dates from 14:46, during the original diagnosis, before any
+  fix. Proof it is not live: a fresh `cargo build --release -p renderable`
+  (scratch target dir, unique `--cfg`, libLLVM aside) produced 0
+  `rust-objcopy` warnings. The stale unit is an unstripped build script and
+  is harmless. It keeps replaying until that unit rebuilds.
+- **Check 1 (pristine toolchain)**: PASS. `libLLVM.dylib` in rustlib renamed
+  aside; `rm -rf dmls/zed-dmls/target`; a unique `RUSTFLAGS=--cfg …` forces
+  every crate, including the final link, to execute rather than restore.
+  - control, `RUSTC_WRAPPER=/tmp/p4/pristine/bin/kache` (pristine hardened
+    0.26.3): rc 101, `linking with wasm-component-ld failed … dyld: Library
+    not loaded: @rpath/libLLVM.dylib … failed to invoke LLD: signal: 6
+    (SIGABRT)`, which is the original failure reproduced exactly.
+  - installed re-signed kache through the config-file wrapper: rc 0, "rebuilt
+    dmls/zed-dmls/extension.wasm", 0 dyld lines.
+  - The tracked `extension.wasm` the recipe overwrites was restored with `git
+    checkout`.
+- **Check 2 (passthrough probe)**: PASS. The pristine binstall 0.26.3 fetched to
+  `/tmp/p4/pristine` (`cargo binstall --root`) is `flags=0x10000(runtime)`.
+  `KACHE_HOST_BIN=<pristine> scripts/kache-host.sh probe-passthrough` gave
+  `passthrough=fail`, rc 1. The installed binary gave `passthrough=pass`, rc 0.
+- **Check 5 (idempotence)**: PASS. A second full `just init` gave rc 0, the
+  same verdict line, daemon PID 8160 unchanged (no restart, which also shows
+  no re-sign rewrote the binary), `~/.config/kache/config.toml` and
+  `~/.cargo/config.toml` SHA-1 identical before and after, and no new backup
+  files.
+
+### Wave 3 — Lifecycle parity (dev Mac)
+
+**Finding: this agent session inherited the stale `KACHE_CACHE_DIR`.** The
+Claude Code process was started from an interactive shell that had already
+sourced `~/.env` before line 51 was deleted, so every command it ran carried
+the variable. That includes both `init` runs, which account for the 873
+probe files that appeared in `~/Library/Caches/kache` after the edit. It is
+not a defect in the change: a fresh shell has no variable. From here on each
+check runs under `env -u KACHE_CACHE_DIR` or `env -i` to reproduce a fresh
+process faithfully.
+
+- **Check 3 (worktree lifecycle)**: PASS, and nothing kache-specific ran between
+  the steps.
+  1. `wt create p4/kache-lifecycle --stay` created
+     `/Volumes/coding/wt/rusty-biscuit/p4-kache-lifecycle`, and
+     `cargo build -p sniff` ran there in 41.6 s: 395 crates, 385 hits, 10 misses
+     (the new `sniff` crates at this commit), 0 errors, 0 store failures.
+     `store_bytes = 115,413,897,337`, `entries = 22,487`.
+  2. `wt remove p4-kache-lifecycle -ff -b` removed both the worktree and the
+     branch.
+  3. `wt create p4/kache-lifecycle-2 --stay` followed by `cargo build -p sniff`
+     ran in **6.5 s**: 395 crates, **395 local hits, 0 misses**, 0 errors,
+     0 store failures, 0 fallbacks.
+     `store_bytes = 115,413,897,337`, `entries = 22,487`, byte-identical to
+     step 1 (there was no index churn either).
+  4. `kache doctor --json`: no failing checks. `kache stats` (last-build
+     summary): errors 0, store_failures 0.
+  5. The throwaway worktree and branch were removed.
+  - Note: the store is over its cap (115.0 GB against a 107.4 GB
+    `local_max_size`). `kache stats` suggests `kache clean --tracked --stale
+    14d`. That is left to Ken.
+- **Check 4 (launcher parity)**: PASS. `kache doctor --json` `Cache dir` was
+  `/Volumes/coding/kache` in each context:
+  - a fresh interactive zsh under `env -i` (`zsh -i -c`, which sources
+    `~/.zshrc` → `adaptive.sh` → `~/.env`);
+  - `env -i HOME PATH`;
+  - a `launchctl submit` one-shot (its environment had no `KACHE*` variable).
+
+  Old-store drip test: a clean-env compile (`env -i`, fresh target dir) added
+  0 files to `~/Library/Caches/kache`. I ran a discriminating control because
+  probe files are cached per toolchain, so a no-drip result alone proves
+  nothing. The same compile with `KACHE_CACHE_DIR=<empty scratch dir>` wrote
+  `probes/<hash>.json` into that dir, which shows the raw-env drip is live
+  and that only the variable steers it. The "no managed launcher still sets
+  `KACHE_CACHE_DIR`" clause is **not yet** true at this point: the daemon
+  plist still carries it (kept deliberately for check 8). It is re-verified
+  after Wave 4.
+
+### Wave 4 — Daemon confirmation + plist (dev Mac, spec check 8)
+
+**The check as written would not discriminate.** The plist's stale
+`KACHE_CACHE_DIR` held the *same* value as the ratified store
+(`/Volumes/coding/kache`), so "daemon resolves the same store as the CLI" was
+true whether or not the daemon honors `ignore_env`. I used the spec's
+"re-set by hand for the test" allowance to make it discriminate:
+
+1. I backed up the plist and config (`/tmp/p4/plist.orig`, `config.orig`),
+   set the plist's `KACHE_CACHE_DIR` to an empty scratch store
+   `/tmp/p4/plist-store` (PlistBuddy), and set `ignore_env = false` through the
+   merge helper as the **control** state.
+2. Control: `kache daemon stop`, `launchctl bootout` + `bootstrap`. launchd's
+   daemon (parent 1) carried `KACHE_CACHE_DIR=/tmp/p4/plist-store` and built a
+   complete store *there* (`index.db`, `daemon.sock`, `store/`, …). This proves
+   the plist env is live and reaches the daemon.
+3. `env -u KACHE_CACHE_DIR just _ensure-kache`: the step-4 write reported
+   "wrote … ignore_env" and the config-change trigger fired ("kache:
+   restarting the daemon — config changed."). **That restart failed**, and
+   the failure contract ran live: "WARNING: 'kache daemon restart' failed.",
+   the existing activation was neutralized (`rustc-wrapper = ""`, dated
+   backup), "kache left OFF; 'just init' continues…", rc 0.
+4. Diagnosis of the failed restart: it was an artifact of my test
+   construction, and the recipe did not change. Ken's long-running
+   interactive `kache monitor` (PID 70818) autospawns a daemon, with its own
+   inherited env, whenever none is reachable. After step 2's stop it had
+   spawned one on `/Volumes/coding/kache`, so two daemons were serving two
+   different stores at once. The restart failed only in that state. It
+   succeeded 3/3 from the normal launchd-owned state, and it also succeeded
+   from the monitor-owned state this phase started in (daemon 8160). In
+   both cases it handed ownership to launchd (parent 1).
+5. **Check 8 result**: PASS. After the (manual) restart there was exactly one
+   daemon, launchd's, whose env still said
+   `KACHE_CACHE_DIR=/tmp/p4/plist-store`. `lsof` showed it holding
+   `/Volumes/coding/kache/{index.db,daemon.sock,daemon.control.v2.sock}`, and
+   `kache daemon --json` from a fresh shell reached it at
+   `/Volumes/coding/kache/daemon.sock`. The daemon honors the config over a
+   stale plist env on the real host.
+
+**Plist regeneration**: `env -u KACHE_CACHE_DIR kache daemon uninstall` then
+`install`. This has to run from a clean env, because `install` is how the
+variable got into the plist originally. The new plist's
+`EnvironmentVariables` holds only `KACHE_LOG=kache=info`. Uninstall briefly
+left no daemon, so the monitor respawned one with its stale env. One `kache
+daemon restart` returned ownership to launchd: PID 69350, parent 1, env
+`KACHE_LOG` only, serving `/Volumes/coding/kache`, reachable from `env -i`.
+`env -u KACHE_CACHE_DIR just _ensure-kache` re-activated
+(`rustc-wrapper = "kache"`, "already holds" for the config pair) and
+reported the daemon running at the store-dir socket. The scratch store was
+removed. The config's other keys are unchanged against the backup (only
+`local_store`/`ignore_env` differ, now `"/Volumes/coding/kache"`/`true`).
+
+**Drips**: 0 new files in `~/Library/Caches/kache` since the Wave 3 clean-env
+marker. Check 4's remaining clause ("no managed launcher still sets
+`KACHE_CACHE_DIR`") is now true. The one process that still carries the
+variable is Ken's interactive `kache monitor`, whose env came from a shell
+opened before the `~/.env` edit. It is not a managed launcher and clears
+when the monitor is restarted from a fresh shell.
+
+**Abandoned store (for Ken)**: `~/Library/Caches/kache` is **56 GB**, with
+`index.db` last written 2026-09-12. Deleting it is left to Ken.
+
+Merge-helper dated backups created by this wave's writes (left in place by
+design): `~/.config/kache/config.toml.bak-20260923-193338`, `…-193433`;
+`~/.cargo/config.toml.bak-20260923-193442`, `…-193622`.
+
+### Wave 5 — Failure contract drill (dev Mac, spec check 7)
+
+**Upgrade path**: `cargo binstall --force kache@0.22.0` installed kache 0.22.0,
+`flags=0x10000(runtime)`, and the probe failed. A full `env -u KACHE_CACHE_DIR
+just init` then ran in 1m10s, rc 0. The kache block shows binstall fetching
+0.26.3, the probe reporting `passthrough=fail` (hardened), `codesign`
+"replacing existing signature", and the probe then reporting
+`passthrough=pass`. The config pair was "already holds", activation "already
+holds", and the report showed version 0.26.3 (floor 0.23.0). Afterwards:
+`kache --version` 0.26.3, `flags=0x2(adhoc)`, and check 2's probe passes.
+- **Daemon restart: happened, but not through `init`'s version trigger.** The
+  downgrade did not leave a 0.22.0 daemon running: launchd's daemon kept its
+  0.26.3 image. `init`'s upgrade plus re-sign then replaced the executable,
+  and that daemon exited. Ken's `kache monitor` respawned one a second later
+  (PID 75713, 19:37:47) from the new file: its `txt` inode 733346752 is the
+  re-signed 0.26.3 binary, mtime 19:37:46. When step 6 ran, the daemon
+  already reported 0.26.3 = installed, so by design no explicit restart was
+  needed. The end state is what the check asks for (the daemon runs the new,
+  re-signed binary), but **the version-mismatch trigger itself was not
+  exercised live**. That needs a 0.22.0 daemon running against the real
+  115 GB store, and I deliberately did not do that: an older daemon opening
+  an index written by 0.26.3 risks that index. The trigger's logic is
+  text-pinned by `ensure_kache_runs_the_spec_section_4_order`. If Ken wants
+  it exercised live, the construction is: downgrade, `kache daemon restart`
+  (confirm `daemon_version` 0.22.0), then `just init`.
+
+**Pre-activation failure**:
+- **The spec's construction does not fail.** A regular file at
+  `/Volumes/coding/kache/daemon.sock` after `kache daemon stop` was simply
+  replaced by a socket: the monitor-respawned daemon bound it within 10 s. kache
+  recovers from a stale socket-path file gracefully.
+- A **non-empty directory** at the socket path (`daemon.sock/p4-block/keep`)
+  does block it: no daemon could start (`daemon_running: false`, no process).
+  Then a full `env -u KACHE_CACHE_DIR just init` ran, rc 0: "kache: daemon not
+  running — starting it …" → "WARNING: the kache daemon is not running after
+  install/start/restart." → the activation was neutralized (`rustc-wrapper =
+  ""`, dated backup) → "WARNING: kache left OFF; 'just init' continues…". It
+  went on to run `_ensure-gitnexus` ("GitNexus is ready."), `_ensure-git-hooks`,
+  and every CLI install through to "Claudine installed!".
+- (Wave 4 also ran the contract live by accident, through a failed
+  `kache daemon restart`. The contract has now held for two different step-6
+  failures.)
+- Restore: removed the blocker, ran `kache daemon start`, and
+  `env -u KACHE_CACHE_DIR just _ensure-kache` re-activated. Daemon PID 20063,
+  parent 1, env `KACHE_LOG` only.
+
+**Final host state** (`env -u KACHE_CACHE_DIR just kache-status`, rc 0):
+installed 0.26.3 (floor 0.23.0); active YES via `~/.cargo/config.toml`; store
+`/Volumes/coding/kache` (from doctor); checkout, store, and base all on device
+16777235; base `/Volumes/coding/wt` on the store's device; passthrough pass;
+"VERDICT: active on a filesystem that clones blocks".
+
+### Linux qualifier (conditional)
+
+No qualifying Linux host is available. `build-linux` (`$BUILD_LINUX`, the only
+declared Linux host) runs ZFS (`rpool/data/subvol-700-disk-0`), but block
+cloning does not work there: `cp --reflink=always` fails with "Operation not
+permitted" (a container subvolume, or the `block_cloning` feature is off), and
+its `/tmp` is tmpfs. The spec marks this host "if one is available", so its
+absence blocks nothing and checks 1–4 on Linux are unmet for lack of a host.
+As extra negative evidence, the fixed `qualify` ran there with a scratch home
+and reported `verdict=no-qualify reason=clone-unsupported-on-zfs` (rc 1),
+leaving the scratch home empty. That is the fresh-home cleanup branch on
+real Linux.
+
+### Skill updates (repo rule: OS traps learned the hard way land in the skill)
+
+- `.claude/skills/kache/installation.md` (hardened-runtime section): how
+  `llvm-tools-preview` masks the symptom and how to test around it, and that a
+  repeating-PID dyld *warning* is cargo replaying a cached diagnostic.
+- `.claude/skills/kache/platforms.md` (macOS): run `kache daemon install`
+  from a clean env (a clean install writes only `KACHE_LOG`); `kache monitor`
+  autospawns its own daemon, so the running daemon may not be launchd's;
+  `restart` returns ownership; the two-daemon state makes `restart` fail.
+
+### Linux cross-check: a Phase 1 test defect found and fixed
+
+`just cross-check test-toolkit --os linux` (build-linux, ZFS without
+cloning) first failed
+`kache_host_contracts::qualify_prints_a_stable_verdict_line_that_matches_its_exit_code`.
+The test required the `kache-host: devices` line on every verdict, but the
+script emits it only on a qualify verdict. A no-qualify verdict prints just
+the reason line (spec §6: "one line naming the reason"), and `_ensure-kache`
+reads the devices line only on the qualifying path. The test had only ever
+run on the qualifying dev Mac, so it would have failed on CI's
+`ubuntu-latest` (ext4). The defect is in the test, not in the script: the
+assertion moved into the qualify branch. Second run: all `kache_*` tests
+pass on Linux, including the new fresh-home test on its no-qualify branch.
+
+### Gates
+
+- `just test` (tools area, macOS): 378 passed, 2 skipped. The skips are the
+  pre-existing `#[ignore]` fixtures in `nextest_config_verification`.
+- `just lint` (tools area): rc 0.
+- `bash -n scripts/kache-host.sh`: clean (pinned by `kache_host_script_parses`).
+- `just cross-check test-toolkit --os linux`: 376 passed, 1 failed, 2 skipped.
+  The failure is **pre-existing and unrelated**:
+  `ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero`
+  ("wrote duration_s=0.0" — the stub ran below the measurable resolution on
+  build-linux). It failed on both runs, passes on macOS, and this phase does
+  not touch its code or subject. Recorded, not fixed.
+- Windows: no Windows-specific code changed (the cascade edit is in the
+  darwin/linux/wsl branch; the ReFS branch is untouched), so there was no
+  native-Windows run. The WSL guest ran the changed script live (above).
+
+### Requirement → test mapping (Phase 4)
+
+| Behavior | Evidence |
+|---|---|
+| Fresh home (no user cache dir) still gets the user-cache-dir placement | `kache_host_contracts::qualify_places_the_candidate_in_a_fresh_home_and_cleans_up_on_no` (failed before the fix with the exact wrong reason, passes after; qualify branch on macOS) |
+| No-qualify verdict leaves no created cache dirs behind | same test, no-qualify branch (Linux cross-check), plus live WSL ext4 and build-linux ZFS runs |
+| No-qualify output format (reason line only) is contract-correct | `kache_host_contracts::qualify_prints_a_stable_verdict_line_that_matches_its_exit_code` (fixed; green on macOS qualify and Linux no-qualify) |
+| Spec checks 1–8 | host verification, not automatable (they mutate the dev Mac's toolchain, daemon, store, and Cargo config); evidence per check in Waves 1–5 above |

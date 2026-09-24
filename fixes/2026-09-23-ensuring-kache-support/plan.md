@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-23
-phase: 3
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 source_files_during_phase_1:
@@ -40,6 +40,14 @@ skills_files_updated_during_phase_3:
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/macos.md
     - .claude/skills/rust-devops/kache.md
+source_files_during_phase_4:
+    - scripts/kache-host.sh
+    - tools/test-toolkit/tests/kache_host_contracts.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
 packages:
     - test-toolkit
 ---
@@ -360,7 +368,7 @@ some of them require. Dev-Mac tasks mutate one host and run serially; the WSL
 negative-host task rides in Wave 1 on a different machine. Load the `os` skill
 for host reach before claiming any host is unavailable.
 
-- [ ] **Host pre-cleanup** (dev Mac)
+- [x] **Host pre-cleanup** (dev Mac)
     - Remove the hand-made `libLLVM.dylib` symlinks from the `1.98.1` and
       `stable` toolchains (spec Changes; required by check 1).
     - Delete exactly `~/.env` line 51 (`KACHE_CACHE_DIR=...`) and nothing
@@ -370,7 +378,7 @@ for host reach before claiming any host is unavailable.
       still exports.
     - Do NOT regenerate the daemon plist yet — check 8 needs its stale
       `KACHE_CACHE_DIR` (or re-sets it by hand later).
-- [ ] **WSL negative host**
+- [x] **WSL negative host**
     - Spec check 6 on the WSL ext4 host: `just init` leaves kache off, never
       installs it, names the reason; `kache-status` agrees.
     - With a below-0.23.0 kache installed there: non-interactive `init` stops
@@ -383,14 +391,14 @@ for host reach before claiming any host is unavailable.
 Wave 1: **Host pre-cleanup** (dev Mac) and **WSL negative host** run
 concurrently — different hosts.
 
-- [ ] **First init + core checks** (dev Mac; after Wave 1)
+- [x] **First init + core checks** (dev Mac; after Wave 1)
     - Run `just init`; capture the one-block report (spec §6). Check 1:
       `just zed-wasm` in `darkmatter` links through kache with the pristine
       toolchain. Check 2: passthrough probe passes on the installed binary and
       **fails** on a pristine binstall release fetched to a temp location
       (proves the probe can fail). Check 5: a second `just init` changes
       nothing, restarts no daemon, reports the same verdict.
-- [ ] **Lifecycle parity** (dev Mac)
+- [x] **Lifecycle parity** (dev Mac)
     - Check 3: `wt` create → build a package → record store size → destroy →
       fresh worktree → rebuild; rebuild served from the store, size stable
       apart from index/event-log churn, `kache doctor`/`kache stats` clean,
@@ -399,7 +407,7 @@ concurrently — different hosts.
       `HOME`/`PATH` resolves the same store as an interactive shell; no new
       files appear under `~/Library/Caches/kache` (the `~/.env` deletion from
       Wave 1 is what makes this true).
-- [ ] **Daemon confirmation + plist** (dev Mac)
+- [x] **Daemon confirmation + plist** (dev Mac)
     - Check 8: with the plist still carrying (or re-set with)
       `KACHE_CACHE_DIR`, the running daemon resolves the same store as the
       CLI; the first `init` restarted it on the config-change trigger; from a
@@ -410,7 +418,7 @@ concurrently — different hosts.
       the old store have stopped.
     - Report the abandoned 56 GiB `~/Library/Caches/kache` store to Ken;
       deletion stays with him.
-- [ ] **Failure contract drill** (dev Mac)
+- [x] **Failure contract drill** (dev Mac)
     - Check 7: downgrade kache below 0.23.0, run `just init` — upgrades to
       latest, re-signs, restarts the daemon, check 2 passes again. Then force
       a pre-activation failure (stop the daemon; place a regular file at its
@@ -422,7 +430,7 @@ checks; Wave 3 = lifecycle parity; Wave 4 = daemon confirmation + plist; Wave
 5 = failure contract drill. (All dev-Mac waves share the daemon and store —
 strictly serial.)
 
-- [ ] **Linux qualifier** (conditional, any wave after Wave 1)
+- [x] **Linux qualifier** (conditional, any wave after Wave 1)
     - Spec checks 1–4 on one qualifying Linux host (btrfs/XFS-reflink/ZFS), if
       one is available per the os skill's host map; otherwise record the
       unavailability in the fix directory — the spec marks this host

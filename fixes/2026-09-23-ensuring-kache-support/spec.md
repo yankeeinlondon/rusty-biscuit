@@ -39,27 +39,54 @@ $schema:
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |
-    Phase 3 (contract tests, docs, skills) is complete. `just test` and
-    `just lint` in tools/ are green (377 passed, 2 pre-existing ignored skips).
-    Notes for Phase 4 (dev-Mac verification and host cleanup):
+    Phase 4 (dev-Mac verification + host cleanup) is complete. The per-check
+    evidence is in implementation-log.md under "## Phase 4". For Phase 5's
+    Verification summary:
 
-    - The docs and skills now describe the init-owned flow as landed in
-      Phase 2 (positional `just install-kache true` for binary-only). The
-      kache skill's installation.md carries the hardened-runtime / DYLD_*
-      trap and ad hoc re-sign; os/macos.md points at it. If Phase 4
-      verification shows a recipe behaving differently from these docs, fix
-      the docs in the same change (repo comment-drift rule).
-    - Contract tests in ci_workflow_contracts.rs pin: init runs
-      `_ensure-kache`; install-kache stays a recipe with a binary_only
-      parameter; no line in the root justfile or its imports starts with
-      `kache init` / `export RUSTC_WRAPPER=kache`; the non-empty
-      `rustc-wrapper kache` merge-helper write appears only inside
-      `_ensure-kache`; no workflow runs `just init` or installs kache. Any
-      recipe edit Phase 4 makes to fix a host finding must keep these true.
-    - The drift scan also caught `.claude/skills/rust-devops/kache.md`
-      (not in the plan's list); it is updated. The remaining `KACHE_DIR` /
-      "not reinstalling" hits are deliberate historical wording (justfile
-      comment above kache-status, docs/kache-strategy.md changes list).
+    - PASS on the dev Mac: checks 1, 2, 3, 4, 5, and 8. Check 6 PASS on the
+      WSL ext4 guest (build-win), including below-floor non-interactive ERROR
+      and the interactively confirmed binary-only upgrade (no daemon).
+    - Check 7: the upgrade path passed (0.22.0 hardened -> init -> 0.26.3,
+      re-signed, probe passes, daemon ends on the new binary), but the
+      version-mismatch restart trigger itself was NOT fired live. The daemon
+      restarted because the executable was replaced, not because init saw a
+      version mismatch. Firing the trigger means running a 0.22.0 daemon
+      against the real 115 GB store, which was deliberately avoided. The
+      failure-contract half passed with a NON-EMPTY DIRECTORY at the socket
+      path. The spec's "regular file at the socket path" construction does
+      not fail: kache just replaces the file with a socket. It is recorded as
+      found, and the spec text was not edited.
+    - Linux checks 1-4: no qualifying Linux host. build-linux is ZFS without
+      working block cloning (reflink "Operation not permitted"); it gives
+      no-qualify clone-unsupported-on-zfs.
+    - Code changed this phase (both are real defects surfaced by
+      verification, each with a test):
+      1. scripts/kache-host.sh: the placement cascade decided the user cache
+         dir's device from its immediate parent, so a fresh home with no
+         ~/.cache (or ~/Library/Caches) fell through to a root-owned mount
+         point and was wrongly declared non-qualifying. It also left
+         ~/.cache/kache behind on no verdicts. Test:
+         qualify_places_the_candidate_in_a_fresh_home_and_cleans_up_on_no.
+      2. kache_host_contracts.rs: the Phase 1 format test required the
+         devices line on every verdict, but the script prints it only on
+         qualify. It had only ever run on the (qualifying) dev Mac, so it
+         would fail on CI's ubuntu-latest (ext4). Fixed in the test.
+    - Pre-existing and unrelated: on build-linux,
+      ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero
+      fails (the stub measured duration_s=0.0). It passes on macOS. It was
+      not touched.
+    - Host state: kache 0.26.3 ad hoc, launchd-owned daemon (plist
+      regenerated; env holds KACHE_LOG only), config pair pinned, activation
+      on, kache-status healthy. ~/.env line 51 is deleted (backup
+      ~/.env.bak-20260923-kache). The toolchain symlinks are removed; note
+      that init's llvm-tools-preview component now puts a real libLLVM.dylib
+      at the same rustlib path. The abandoned ~/Library/Caches/kache (56 GB)
+      is reported, not deleted. The live store is over its cap (115.0 of
+      107.4 GB).
+    - Ken's long-running `kache monitor` (started before the ~/.env edit)
+      still carries KACHE_CACHE_DIR and autospawns a daemon when none is
+      reachable. It is not a managed launcher; restarting it from a fresh
+      shell clears the variable.
 ---
 
 # Make kache a host setup that `just init` owns end to end
