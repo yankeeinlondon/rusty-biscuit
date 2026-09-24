@@ -854,111 +854,372 @@ _ensure-native-libs *packages="":
     install_packages "${packages[@]}"
     echo "Native libraries installed."
 
-# `just init` step: on macOS and Linux install kache when it is absent, and
-# never reinstall one that is present (a below-floor install is reported, not
-# replaced — `just install-kache` upgrades it). Windows and WSL skip: the
-# 2026-09-09 ruling keeps kache off there (docs/kache-strategy.md). Installing
-# activates nothing.
+# `just init` step: own kache end to end on hosts whose filesystem earns it
+# (fixes/2026-09-23-ensuring-kache-support). The FILESYSTEM decides — via the
+# shared probe `scripts/kache-host.sh qualify`, never the OS name. Qualifying
+# hosts run the spec §4 order: install/upgrade to latest, place the store from
+# `kache doctor`, write `[cache] local_store` + `ignore_env = true` into the
+# user config (the single source of truth — always written, even when it
+# equals the default, because the pin is deliberate), re-assert the macOS
+# DYLD_* passthrough gate, then the daemon lifecycle strictly after the config
+# write, and activation LAST. Any pre-activation failure prints WARNING lines,
+# leaves kache off (undoing an earlier activation), and `just init` completes
+# its other steps. Non-qualifying hosts never get kache installed; a
+# below-floor install there needs an interactively confirmed binary-only
+# upgrade (a non-interactive init errors instead), and an already-active
+# wrapper is reported as drift and left to the human.
 _ensure-kache:
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/cargo-path.sh
-    case "$(uname -s)" in
-        Darwin) ;;
-        Linux)
-            if grep -qi microsoft /proc/version 2> /dev/null; then
-                echo "kache: skipped on WSL (repository policy keeps it off here)"
-                exit 0
-            fi
-            ;;
-        *)
-            echo "kache: skipped on Windows (repository policy keeps it off here)"
-            exit 0
-            ;;
-    esac
-    if command -v kache &> /dev/null; then
-        installed="$(kache --version | cut -d' ' -f2)"
-        if [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
-            echo "kache: $installed already installed (floor {{ KACHE_MIN_VERSION }})"
-        else
-            echo "kache: $installed is below the floor {{ KACHE_MIN_VERSION }} — run 'just install-kache' to upgrade"
-        fi
-    else
-        just install-kache
+
+    # CI guard (2026-09-23 ruling): CI never installs or upgrades kache, and
+    # if a workflow ever runs `just init`, init must not fight the runner's
+    # own cache setup.
+    if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "kache: CI environment detected — kache management left to the runner; nothing installed or upgraded"
+        exit 0
     fi
 
-# Activation stays a host decision: the filesystem, not the OS, decides whether
-# a restore is a clone, a hard link, or a copy, and only clone mode is worth it.
-# This recipe installs; `just kache-status` answers whether THIS host earns it.
+    warn() { echo -e "{{ YELLOW }}WARNING{{ RESET }}: $*"; }
+    dev_id() {
+        case "$(uname -s)" in
+            Darwin) stat -f %d "$1" ;;
+            *)      stat -c %d "$1" ;;
+        esac
+    }
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    meets_floor() {
+        [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$1" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]
+    }
+    installed_version() { kache --version 2>/dev/null | cut -d' ' -f2; }
 
-# install or upgrade the Rust compiler cache to the latest release (does NOT activate it)
-install-kache:
+    # Failure contract (spec §4): a pre-activation failure ends the kache
+    # sequence with WARNING lines and kache OFF — `just init` itself continues.
+    # An activation an earlier run wrote is undone too, because a wrapper
+    # sitting on top of a broken kache is exactly the dyld failure this fix
+    # exists for. (Activation is the last step, so nothing follows it.)
+    kache_off() {
+        warn "$1"
+        if [[ -f "$cargo_home/config.toml" ]] \
+            && grep -Eq 'rustc-wrapper *= *"kache"' "$cargo_home/config.toml"; then
+            if python3 scripts/kache-config-merge.py "$cargo_home/config.toml" build rustc-wrapper ""; then
+                warn "an existing activation was neutralized in $cargo_home/config.toml (dated backup kept beside it)."
+            else
+                warn "could not neutralize the existing activation — remove the rustc-wrapper line from $cargo_home/config.toml by hand."
+            fi
+        fi
+        warn "kache left OFF; 'just init' continues with its other setup steps."
+        exit 0
+    }
+
+    # (1) filesystem qualification — needs no kache installed
+    probe_out=""
+    probe_rc=0
+    probe_out="$(./scripts/kache-host.sh qualify 2>&1)" || probe_rc=$?
+    echo "$probe_out"
+    echo
+
+    if [[ $probe_rc -eq 2 ]]; then
+        kache_off "the qualification probe could not run (see above); kache left off."
+    fi
+
+    if [[ $probe_rc -ne 0 ]]; then
+        # Non-qualifying: the sequence ends at step (1) — one reason line, the
+        # floor check when kache is installed, drift reporting; never an
+        # install (spec §3).
+        reason="$(sed -n 's/^kache-host: verdict=no-qualify reason=//p' <<<"$probe_out" | head -1)"
+        echo "kache: this filesystem does not earn kache (${reason:-see probe output above}); kache stays off."
+        if command -v kache &> /dev/null; then
+            installed="$(installed_version)"
+            if meets_floor "$installed"; then
+                echo "kache: $installed present and meets the floor {{ KACHE_MIN_VERSION }} — report only."
+            elif [[ -t 0 ]]; then
+                read -r -p "kache $installed is below the floor {{ KACHE_MIN_VERSION }}. Upgrade to the latest release now, binary-only? [y/N] " answer
+                if [[ "${answer:-n}" == "y" || "${answer:-n}" == "Y" ]]; then
+                    just install-kache true
+                else
+                    echo "kache: below-floor install left as is — 'just install-kache true' upgrades it by hand."
+                fi
+            else
+                echo "ERROR: kache $installed is below the floor {{ KACHE_MIN_VERSION }} and this init is non-interactive;" >&2
+                echo "       refusing to upgrade or skip silently. Run 'just install-kache true' by hand, then" >&2
+                echo "       re-run 'just init'." >&2
+                exit 1
+            fi
+        else
+            echo "kache: not installed — init leaves it that way ('just install-kache' installs it by hand)."
+        fi
+        if [[ -n "${RUSTC_WRAPPER:-}" ]] \
+            || { [[ -f "$cargo_home/config.toml" ]] && grep -q 'rustc-wrapper' "$cargo_home/config.toml"; } \
+            || { [[ -f .cargo/config.toml ]] && grep -q 'rustc-wrapper' .cargo/config.toml; }; then
+            warn "kache is ACTIVE on a filesystem that does not earn it — restores are copies. This init changed nothing."
+            echo "         undo, this shell : export RUSTC_WRAPPER=\"\"   (the empty value wins over the config file)"
+            echo "         undo, host-wide  : neutralize or remove the rustc-wrapper line in $cargo_home/config.toml"
+        fi
+        exit 0
+    fi
+
+    candidate="$(sed -n 's/^kache-host: verdict=qualify candidate=//p' <<<"$probe_out" | head -1)"
+    echo "kache: filesystem qualifies — running the init-owned sequence."
+
+    # (2) install or upgrade to the latest release (full mode)
+    just install-kache || kache_off "install-kache failed; the kache binary is not verified usable."
+    installed="$(installed_version)"
+
+    # (3) placement: `kache doctor` reads the store the runtime resolves
+    # today. Already on the serving device → that IS the store (still pinned in
+    # the config file; spec §2 ruling); otherwise the probe's cascade
+    # candidate. A doctor failure here makes placement undecidable — same skip
+    # bucket as any other pre-activation failure.
+    report_out=""
+    report_rc=0
+    report_out="$(./scripts/kache-host.sh report 2>&1)" || report_rc=$?
+    if [[ $report_rc -ne 0 ]]; then
+        kache_off "kache doctor failed after install ($(sed -n 's/^kache-host: error=//p' <<<"$report_out" | head -1)) — store placement is undecidable."
+    fi
+    doctor_store="$(sed -n 's/^kache-host: store=\(.*\) source=doctor$/\1/p' <<<"$report_out" | head -1)"
+    checkout_dev="$(dev_id "$PWD")"
+    if [[ -n "$doctor_store" && "$(dev_id "$doctor_store" 2>/dev/null || echo "?")" == "$checkout_dev" ]]; then
+        store="$doctor_store"
+        moved="no — already the store kache resolves; pinned deliberately"
+    elif [[ -n "$candidate" && "$candidate" != "-" ]]; then
+        store="$candidate"
+        moved="yes — from ${doctor_store:-the kache default} to $store (placement cascade, spec §2)"
+    else
+        kache_off "no decidable store placement: doctor resolves '${doctor_store:-(nothing)}' off-device and the probe named no cascade candidate."
+    fi
+
+    # (4) write the user config — the single source of truth every process
+    # reads (shells, daemon, editors, launchd jobs). Always written, even when
+    # it equals the default. The pre/post CONTENT snapshot (not mtime) feeds
+    # the daemon-restart trigger in step (6).
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) kache_config="$(cygpath "${APPDATA:?}")/kache/config.toml" ;;
+        *)                    kache_config="${XDG_CONFIG_HOME:-$HOME/.config}/kache/config.toml" ;;
+    esac
+    snapshot="$(mktemp)"
+    trap 'rm -f "$snapshot"' EXIT
+    if [[ -f "$kache_config" ]]; then cp "$kache_config" "$snapshot"; else : > "$snapshot"; fi
+    python3 scripts/kache-config-merge.py "$kache_config" cache local_store "$store" ignore_env true \
+        || kache_off "could not write [cache] local_store/ignore_env into $kache_config."
+    config_changed=0
+    cmp -s "$snapshot" "$kache_config" || config_changed=1
+
+    # (5) re-assert the macOS passthrough gate — idempotent when install-kache
+    # already re-signed; the gate is the verification, not the re-sign.
+    if [[ "$(uname -s)" == "Darwin" ]] && ! ./scripts/kache-host.sh probe-passthrough; then
+        kache_off "env-passthrough verification failed — a wrapped compiler would not receive DYLD_* variables."
+    fi
+
+    # (6) daemon lifecycle — strictly after the config write so the daemon's
+    # first read of the store is the ratified one. Install when absent, ensure
+    # running, restart when the running daemon's version mismatches the
+    # installed binary or step (4) changed the config (content, not mtime).
+    read_daemon() {
+        daemon_running=no daemon_installed=no daemon_version=- daemon_socket=-
+        local json state key value
+        json="$(kache daemon --json 2>/dev/null)" || true
+        [[ -n "$json" ]] || return 1
+        state="$(python3 -c '
+    import json, sys
+    try:
+        d = json.load(sys.stdin)
+    except Exception:
+        raise SystemExit(1)
+    def field(key):
+        value = d.get(key)
+        return value if isinstance(value, str) and value else "-"
+    print("running=" + ("yes" if d.get("daemon_running") else "no"))
+    print("installed=" + ("yes" if d.get("service_installed") else "no"))
+    print("version=" + field("daemon_version"))
+    print("socket=" + field("socket"))
+    ' <<<"$json")" || return 1
+        while IFS='=' read -r key value; do
+            case "$key" in
+                running)   daemon_running="$value" ;;
+                installed) daemon_installed="$value" ;;
+                version)   daemon_version="$value" ;;
+                socket)    daemon_socket="$value" ;;
+            esac
+        done <<<"$state"
+    }
+    wait_daemon() {
+        local tries="$1" i
+        for ((i = 0; i < tries; i++)); do
+            read_daemon || true
+            [[ "$daemon_running" == "yes" ]] && return 0
+            sleep 1
+        done
+        return 1
+    }
+
+    read_daemon || kache_off "could not read the daemon state ('kache daemon --json')."
+    if [[ "$daemon_installed" != "yes" ]]; then
+        kache daemon install >/dev/null || kache_off "'kache daemon install' failed."
+        read_daemon || true
+    fi
+    if [[ "$daemon_running" == "yes" ]]; then
+        restart_why=""
+        if [[ "$daemon_version" != "$installed" ]]; then
+            restart_why="binary changed (daemon reports $daemon_version, installed $installed)"
+        fi
+        if [[ "$config_changed" == "1" ]]; then
+            restart_why="${restart_why:+$restart_why; }config changed"
+        fi
+        if [[ -n "$restart_why" ]]; then
+            echo "kache: restarting the daemon — $restart_why."
+            kache daemon restart >/dev/null || kache_off "'kache daemon restart' failed."
+        fi
+    fi
+    if ! wait_daemon 10; then
+        echo "kache: daemon not running — starting it (launchd throttles a relaunch for up to 10s after the binary changed)."
+        kache daemon start >/dev/null 2>&1 || true
+        wait_daemon 20 || kache_off "the kache daemon is not running after install/start/restart."
+    fi
+
+    # (7) activation — LAST, only after every prior check passed. Host-wide via
+    # Cargo home; a tracked .cargo/config.toml wrapper stays forbidden.
+    python3 scripts/kache-config-merge.py "$cargo_home/config.toml" build rustc-wrapper kache \
+        || kache_off "could not write the activation into $cargo_home/config.toml."
+
+    # One report block (spec §6)
+    devices_line="$(sed -n 's/^kache-host: devices //p' <<<"$probe_out" | head -1)"
+    base_line="$(sed -n 's/^kache-host: base=//p' <<<"$probe_out" | head -1)"
+    base_state="${base_line%% *}"
+    base_path="${base_line#*path=}"
+    case "$base_state" in
+        covered)    base_summary="covered — ${base_path:-?} on the serving device" ;;
+        off-device) base_summary="${base_path:-?} is on ANOTHER device than the store — no placement can serve both; kache-status reports this" ;;
+        *)          base_summary="unconfigured — not covered by this verdict" ;;
+    esac
+    case "$(uname -s)" in
+        Darwin) builtin_default="$HOME/Library/Caches/kache" ;;
+        *)      builtin_default="${XDG_CACHE_HOME:-$HOME/.cache}/kache" ;;
+    esac
+    abandoned="none found"
+    if [[ "$builtin_default" != "$store" && -d "$builtin_default" ]] \
+        && [[ -n "$(ls -A "$builtin_default" 2>/dev/null)" ]]; then
+        abandoned="$(du -sh "$builtin_default" 2>/dev/null | cut -f1) at $builtin_default — abandoned; deleting it is left to you"
+    fi
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        passthrough_summary="DYLD_* reaches the wrapped compiler (probe passed)"
+    else
+        passthrough_summary="n/a outside macOS"
+    fi
+    say() { printf '  %-14s %s\n' "$1" "$2"; }
+    echo
+    echo "kache: qualified and set up —"
+    say "verdict" "qualifies (${devices_line:-devices unknown})"
+    say "worktree base" "$base_summary"
+    say "version" "$installed (floor {{ KACHE_MIN_VERSION }})"
+    say "passthrough" "$passthrough_summary"
+    say "store" "$store — moved: $moved"
+    say "old store" "$abandoned"
+    say "daemon" "running, version $daemon_version, socket $daemon_socket"
+    say "activation" "[build] rustc-wrapper = \"kache\" in $cargo_home/config.toml"
+
+# The ownership split (2026-09-23 ruling): this recipe owns the BINARY —
+# install/upgrade to latest, the macOS ad hoc re-sign with the passthrough
+# verification as the gate, and (full mode only) the default store-cap seed —
+# and does no daemon work in either mode. `_ensure-kache` owns everything
+# else on qualifying hosts: store placement, the user config write, the daemon
+# lifecycle (strictly after the config write), and activation last.
+
+# install or upgrade the Rust compiler cache to the LATEST release (the floor
+# in .github/kache-min-version is a check the recipes apply, never a pin). On
+# macOS every install or upgrade re-signs the binary ad hoc and is GATED on the
+# env-passthrough probe — the binstall release ships with the hardened
+# runtime, and dyld strips every DYLD_* variable from a hardened process at
+# launch, which is the rust-lld/libLLVM.dylib link failure this fix exists
+# for — with a source install (ad hoc-signed by construction) as the fallback.
+# binary_only=true ("just install-kache true", passed positionally) performs
+# no config writes at all.
+install-kache binary_only="false":
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/cargo-path.sh
 
-    installed_version=""
-    if command -v kache &> /dev/null; then
-        installed_version=$(kache --version | cut -d' ' -f2)
+    if [[ "{{ binary_only }}" != "true" && "{{ binary_only }}" != "false" ]]; then
+        echo "install-kache: binary_only must be exactly 'true' or 'false', passed positionally:" >&2
+        echo "  just install-kache        # full: binary (+ default store-cap seed on a config-less host)" >&2
+        echo "  just install-kache true   # binary-only: no config writes, no daemon work" >&2
+        exit 2
     fi
 
-    meets_floor=0
-    if [[ -n "$installed_version" ]] && [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed_version" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
-        meets_floor=1
+    # cargo-binstall is the install path on every OS: it fetches a prebuilt
+    # kache binary instead of compiling from source. Install it first when
+    # absent (that one install is from source). Plain --no-confirm (no
+    # --force) still installs or upgrades to the latest release and is a
+    # no-op when the latest is already installed — the floor elsewhere is a
+    # check, not a pin, and a second `just init` changes nothing.
+    if ! command -v cargo-binstall &> /dev/null; then
+        echo "Installing cargo-binstall (used to fetch prebuilt kache binaries)..."
+        RUSTC_WRAPPER="" cargo install --locked cargo-binstall
     fi
+    RUSTC_WRAPPER="" cargo binstall --no-confirm kache
 
-    if (( meets_floor )); then
-        echo "kache $installed_version already installed (floor {{ KACHE_MIN_VERSION }}); not reinstalling."
-    else
-        # cargo-binstall is the install path on every OS: it fetches a prebuilt
-        # kache binary instead of compiling from source. Install it first when
-        # absent (that one install is from source).
-        if ! command -v cargo-binstall &> /dev/null; then
-            echo "Installing cargo-binstall (used to fetch prebuilt kache binaries)..."
-            RUSTC_WRAPPER="" cargo install --locked cargo-binstall
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        # The gate is the verification, so the probe runs FIRST: an already
+        # re-signed binary passes and is left untouched (re-signing rewrites
+        # the file, which the running daemon treats as a binary change and
+        # restarts itself over), while any fresh binstall release is
+        # hardened, fails the probe, and is re-signed — so no upgrade path
+        # can skip the re-sign.
+        if ! ./scripts/kache-host.sh probe-passthrough; then
+            codesign --force -s - "$(command -v kache)"
+            if ! ./scripts/kache-host.sh probe-passthrough; then
+                echo "install-kache: the re-signed binary still fails the env-passthrough probe;" >&2
+                echo "                falling back to a source install, which is ad hoc-signed by construction" >&2
+                # --force is deliberate here and nowhere else: the fallback
+                # exists to REPLACE a binary that cannot pass the gate, which
+                # cargo install would skip as "already installed".
+                RUSTC_WRAPPER="" cargo install --locked --force kache
+                ./scripts/kache-host.sh probe-passthrough
+            fi
         fi
-
-        # Latest release, not a pin: hosts track upstream and the repository
-        # only guarantees the floor.
-        RUSTC_WRAPPER="" cargo binstall --no-confirm --force kache
     fi
 
-    # Seed a default store config when the host has none. An uncapped store
-    # thrashes: LRU can evict fresh entries before they score a hit. 100 GiB is
-    # the agreed starting point (docs/kache-strategy.md); never overwrite an
-    # existing config — hosts size against their own volume. A read-only
-    # config directory (build-linux mounts ~/.config over CIFS) is reported,
-    # not fatal, so `just init` still completes there.
-    case "$(uname -s)" in
-        MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
-        *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
-    esac
-    if [[ ! -f "$kache_config_dir/config.toml" ]]; then
-        if mkdir -p "$kache_config_dir" 2> /dev/null \
-            && printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml" 2> /dev/null; then
-            echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
-        else
-            echo "WARNING: could not write $kache_config_dir/config.toml; the store cap defaults to kache's own (50GiB)."
+    if [[ "{{ binary_only }}" == "false" ]]; then
+        # Seed a default store config when the host has none. An uncapped store
+        # thrashes: LRU can evict fresh entries before they score a hit. 100 GiB is
+        # the agreed starting point (docs/kache-strategy.md); never overwrite an
+        # existing config — hosts size against their own volume. A read-only
+        # config directory (build-linux mounts ~/.config over CIFS) is reported,
+        # not fatal, so `just init` still completes there.
+        case "$(uname -s)" in
+            MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
+            *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
+        esac
+        if [[ ! -f "$kache_config_dir/config.toml" ]]; then
+            if mkdir -p "$kache_config_dir" 2> /dev/null \
+                && printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml" 2> /dev/null; then
+                echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
+            else
+                echo "WARNING: could not write $kache_config_dir/config.toml; the store cap defaults to kache's own (50GiB)."
+            fi
         fi
     fi
 
     kache --version
     echo
-    echo "Installed, NOT activated. Nothing uses kache until you set RUSTC_WRAPPER."
-    echo "  ruling      : just kache-status   (macOS: on, same APFS volume as the store;"
-    echo "                                     Linux: on only when the clone probe passes;"
-    echo "                                     Windows and WSL: off)"
-    echo "  this shell  : export RUSTC_WRAPPER=kache"
-    echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
-    echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
-    echo "  never mix   : a target/ is always wrapped or never wrapped; standing"
-    echo "                cross-check clones are never wrapped"
+    echo "kache installed or upgraded (above), verified where the OS requires it (macOS: DYLD_* passthrough)."
+    if [[ "{{ binary_only }}" == "true" ]]; then
+        echo "binary-only mode: no config written, no daemon touched."
+    else
+        echo "Nothing here activates it and no daemon is touched:"
+        echo "  qualifying host : 'just init' owns placement, daemon, and activation (activation is last)"
+        echo "  by hand         : 'just kache-status' rules whether THIS filesystem earns kache"
+    fi
 
-# Exists because activation is HOST policy and the repository therefore cannot
-# see it: `kache init` writes `$CARGO_HOME/config.toml` and affects every Rust
-# repo on the machine. Nothing here can prevent that — this recipe makes it
-# visible, and answers the question the tool's own advisory does not: whether
-# this repo wants the cache on THIS filesystem at all.
+# The durable guard. Init's verdict is point-in-time, but the worktree base
+# can be configured — or re-pointed — after activation and binaries can be
+# replaced, so this recipe re-checks the facts through the SAME probe init
+# used (`scripts/kache-host.sh report`): the store is whatever `kache doctor`
+# resolves (never a reconstruction — the pre-2026-09-23 recipe guessed from
+# KACHE_DIR and reported false verdicts), plus the checkout/worktree-base
+# device check and the macOS env-passthrough result. Exits non-zero on drift
+# while kache is active.
 
 # report whether kache is active here, and whether this filesystem earns it
 kache-status:
@@ -976,7 +1237,7 @@ kache-status:
             say "installed" "$installed — BELOW the floor {{ KACHE_MIN_VERSION }}; 'just install-kache' upgrades"
         fi
     else
-        say "installed" "no — 'just install-kache' installs it (does not activate it)"
+        say "installed" "no — 'just install-kache' installs it ('just init' owns activation on qualifying hosts)"
     fi
 
     # Cargo's own precedence order, highest first. Reporting only the winner
@@ -999,77 +1260,81 @@ kache-status:
     done
     [[ -z "$active" ]] && say "active" "no — nothing sets a rustc wrapper"
 
-    # Never inferred from the OS: the restore mode is a property of the
-    # FILESYSTEM, and one host can have several. Clones do not cross volumes,
-    # so the probe runs from the STORE to target/ — a probe inside target/
-    # alone said "clone" for a checkout on a second APFS volume that kache
-    # restores by copy (2026-09-09).
-    probe_dir="target"; [[ -d "$probe_dir" ]] || probe_dir="."
-    cow="unknown"
-    case "$(uname -s)" in
-        Darwin) store_dir="${KACHE_DIR:-$HOME/Library/Caches/kache}" ;;
-        *)      store_dir="${KACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/kache}" ;;
-    esac
-    src_dir="$probe_dir"; from="target/ (store dir absent)"
-    if [[ -d "$store_dir" ]]; then src_dir="$store_dir"; from="store"; fi
-    case "$(uname -s)" in
-        Darwin)
-            # `cp -c` falls back to a plain copy across volumes and still exits
-            # 0, so success alone proves nothing: the store and target/ must
-            # also be on the same device (APFS clones never cross volumes).
-            src="$(mktemp "$src_dir/.kache-probe.XXXXXX")"
-            dst="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"; rm -f "$dst"
-            if [[ "$(stat -f %d "$src_dir")" == "$(stat -f %d "$probe_dir")" ]] \
-                && cp -c "$src" "$dst" &> /dev/null; then cow="yes"; else cow="no"; fi
-            rm -f "$src" "$dst"
-            if [[ "$cow" == "yes" ]]; then
-                say "target/ fs" "clone-on-write from $from: yes (same APFS volume, cp -c probe)"
-            else
-                say "target/ fs" "clone-on-write from $from: no — $probe_dir is on a different volume than $src_dir; restores are copies"
-            fi
-            ;;
-        Linux)
-            src="$(mktemp "$src_dir/.kache-probe.XXXXXX")"
-            dst="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"; rm -f "$dst"
-            cp --reflink=always "$src" "$dst" &> /dev/null && cow="yes" || cow="no"
-            rm -f "$src" "$dst"
-            say "target/ fs" "$(df -PT "$probe_dir" | awk 'NR==2{print $2}') — reflink from $from: $cow"
-            ;;
-        MINGW*|MSYS*|CYGWIN*)
-            # No userspace reflink probe exists on Windows, so the filesystem
-            # type IS the answer: ReFS clones blocks, NTFS restores by copy.
-            drive="$(pwd -W 2>/dev/null | cut -c1)"
-            fstype="$(powershell.exe -NoProfile -NonInteractive -Command \
-                "(Get-Volume -DriveLetter $drive).FileSystemType" 2>/dev/null | tr -d '\r\n')"
-            [[ "$fstype" == "ReFS" ]] && cow="yes" || cow="no"
-            say "target/ fs" "${drive}: ${fstype:-unknown} — block cloning: $cow"
-            ;;
-    esac
-
+    # Store, devices, worktree base, and passthrough all come from the shared
+    # probe so this report and the init verdict can never disagree.
+    store="-" store_dev="-" checkout_dev="-" base_state="unknown" base_path="-" passthrough="n/a" report_failed=0
     if command -v kache &> /dev/null; then
-        say "store" "$(kache doctor 2>&1 | head -3 | tr '\n' ' ' | tr -s ' ')"
+        report_out="$(./scripts/kache-host.sh report 2>&1)"
+        report_rc=$?
+        if [[ $report_rc -ne 0 ]]; then
+            report_failed=1
+            say "store" "cannot report ($(sed -n 's/^kache-host: error=//p' <<<"$report_out" | head -1))"
+        else
+            store="$(sed -n 's/^kache-host: store=\(.*\) source=doctor$/\1/p' <<<"$report_out" | head -1)"
+            devices_line="$(sed -n 's/^kache-host: devices //p' <<<"$report_out" | head -1)"
+            checkout_dev="$(cut -d' ' -f1 <<<"$devices_line" | cut -d= -f2-)"
+            store_dev="$(cut -d' ' -f2 <<<"$devices_line" | cut -d= -f2-)"
+            base_line="$(sed -n 's/^kache-host: base=//p' <<<"$report_out" | head -1)"
+            base_state="${base_line%% *}"
+            base_path="${base_line#*path=}"
+            passthrough="$(sed -n 's/^kache-host: passthrough=//p' <<<"$report_out" | head -1 | cut -d' ' -f1)"
+            say "store" "$store (from kache doctor)"
+            say "devices" "$devices_line"
+            case "$base_state" in
+                covered)    say "worktree base" "$base_path — same device as the store" ;;
+                off-device) say "worktree base" "$base_path — ANOTHER device than the store" ;;
+                *)          say "worktree base" "unconfigured — not covered by this check" ;;
+            esac
+            if [[ "$passthrough" == "n/a" ]]; then
+                say "passthrough" "n/a outside macOS"
+            else
+                say "passthrough" "$passthrough (DYLD_* through the wrapped compiler)"
+            fi
+        fi
+    else
+        say "store" "unknown — kache is not installed"
     fi
 
     echo
     if [[ -z "$active" ]]; then
         echo "  VERDICT: not in use. Cargo builds normally; nothing to undo."
-    elif [[ "$cow" == "yes" ]]; then
-        echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
+        exit 0
+    fi
+
+    problems=()
+    if ! command -v kache &> /dev/null; then
+        problems+=("kache is not installed, but a rustc wrapper is active — every build would fail")
+    elif [[ "$report_failed" == "1" ]]; then
+        problems+=("kache doctor could not report the store — the store location is undecidable")
     else
-        echo "  VERDICT: active WITHOUT copy-on-write. Restores are hard links or copies: the store"
-        echo "           is a real second copy, and a read-only hard link breaks the next unwrapped"
-        echo "           rebuild (\"output file ... is not writeable\")."
-        echo "           Ruling 2026-09-09 (docs/kache-strategy.md): Windows and WSL OFF; Linux ON"
-        echo "           only when this probe passes; macOS ON only with store and target/ on the"
-        echo "           same APFS volume. A target/ is always wrapped or never wrapped."
-        echo
+        if [[ "$store_dev" != "-" && "$store_dev" != "$checkout_dev" ]]; then
+            problems+=("the store ($store, device $store_dev) is on another device than this checkout (device $checkout_dev) — restores are copies")
+        fi
+        if [[ "$base_state" == "off-device" ]]; then
+            problems+=("the worktree base ($base_path) is on another device than the store — no placement can serve both")
+        fi
+        case "$passthrough" in
+            fail)  problems+=("the wrapped compiler does not receive DYLD_* — re-sign: codesign --force -s - \$(command -v kache)") ;;
+            error) problems+=("the env-passthrough probe could not run") ;;
+        esac
+    fi
+    if [[ ${#problems[@]} -eq 0 ]]; then
+        echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
+        exit 0
+    fi
+    echo "  VERDICT: DRIFT — kache is active but the facts above disagree; failing loudly:"
+    for problem in "${problems[@]}"; do
+        echo "           - $problem"
+    done
+    echo "           A target/ is always wrapped or never wrapped."
+    if [[ "$store_dev" != "$checkout_dev" && "$store_dev" != "-" ]]; then
         echo "           Do NOT take kache's own first two suggestions here:"
         echo "             windows_hardlink = true        unsafe — Cargo DOES rewrite object outputs"
         echo "             storage_layout_advice = false  silences the signal rather than the cause"
-        echo
-        echo "           Undo — this shell : export RUSTC_WRAPPER=\"\""
-        echo "                  host-wide  : remove the rustc-wrapper line from $cargo_home/config.toml"
     fi
+    echo "           Undo — this shell : export RUSTC_WRAPPER=\"\"   (the empty value overrides the config file)"
+    echo "           Undo — host-wide  : neutralize or remove the rustc-wrapper line in $cargo_home/config.toml"
+    exit 1
 
 # ensure cargo-sweep is available for target/ hygiene (just sweep)
 _ensure-cargo-sweep:
