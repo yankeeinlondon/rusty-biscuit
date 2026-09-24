@@ -2,7 +2,7 @@
 title: Stop divergent base features from recompiling the workspace per archive
 status: ready
 created: 2026-09-21
-phase: 2
+phase: 3
 total_phases: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
@@ -52,6 +52,13 @@ docs_updated_during_phase_2:
     - fixes/2026-09-21-ci-build-feature-divergence/spec.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: Stop divergent base features from recompiling the workspace per archive
@@ -411,7 +418,7 @@ seconds order. No workspace crate's own feature is ever an entry.
 
 #### Wave 7 (two tasks in parallel)
 
-- [ ] **Task 3.1 — Verify publish interaction** (ruling 7; must complete
+- [x] **Task 3.1 — Verify publish interaction** (ruling 7; must complete
   before Task 3.2's fan-out — a blocking prerequisite, scheduled early so
   the result is known before any member manifest is touched).
   - On a scratch branch of the manifests, add the prospective path
@@ -420,7 +427,13 @@ seconds order. No workspace crate's own feature is ever an entry.
     repository's release-plz dry run) to prove packaging is unaffected.
   - Record the outcome in `implementation-notes.md`. If it blocks, record
     the chosen remedy as a ruling amendment before proceeding.
-- [ ] **Task 3.2 — Scaffold alignment crate** (parallel with 3.1; no member
+  - **Done (Phase 3): does not block.** A temporary `publish = false`
+    crate, wired as a versionless path dev-dependency of the publishable
+    `biscuit-hash`: `cargo package --list` and `cargo publish --dry-run`
+    both succeed, and the normalized `Cargo.toml` inside the `.crate` has no
+    `feature-alignment` entry (Cargo strips it). The edit was reverted. No
+    ruling amendment is needed.
+- [x] **Task 3.2 — Scaffold alignment crate** (parallel with 3.1; no member
   edges yet).
   - Create `tools/feature-alignment` per ruling 2: root workspace member
     (`members` list entry beside `tools/test-toolkit`), empty `src/lib.rs`,
@@ -429,10 +442,16 @@ seconds order. No workspace crate's own feature is ever an entry.
     lib doc: third-party base-graph features only, add-only, one reviewed
     entry at a time, never a workspace crate's own features.
   - Update `docs/dependencies.md` (new workspace member) in the same change.
+  - **Closed (Phase 3): not built.** Task 2.1 found the alignment crate not
+    warranted: the spec's eligible entries remove 0.6 s, and every option
+    that removes more (C/D) needs a ruling-4 spec entry that does not exist.
+    This phase exists only if the crate is warranted, so it collapses to
+    that no-op rationale. If the author later rules C or D, Tasks 3.2–3.4
+    run as written. Task 3.1's result already clears their prerequisite.
 
 #### Wave 8 (after 3.1 and 3.2)
 
-- [ ] **Task 3.3 — Fan out dev-dependency edges** (prerequisite: Tasks 3.1
+- [x] **Task 3.3 — Fan out dev-dependency edges** (prerequisite: Tasks 3.1
   and 3.2; one atomic change — the crate is inert until every member
   carries it).
   - Add `feature-alignment` as a path **dev-dependency** (dev-only: normal
@@ -450,10 +469,12 @@ seconds order. No workspace crate's own feature is ever an entry.
   - Validation in-change: `cargo check -p feature-alignment` and
     `cargo check -p repo-deps --all-targets` pass; `just test repo-deps`
     (including `scripts/ci-build-archive-tests.rs`) passes unchanged.
+  - **Closed (Phase 3): not built.** See Task 3.2. No member manifest or
+    `Cargo.lock` was edited, so no fan-out cost exists to record.
 
 #### Wave 9 (sequential entries; same file, ranked order)
 
-- [ ] **Task 3.4 — Add ranked entries** (prerequisite: Task 3.3; one
+- [x] **Task 3.4 — Add ranked entries** (prerequisite: Task 3.3; one
   separate change per entry, highest-seconds first; expected order from the
   spec's evidence: `libc/extra_traits`, then `proc-macro2/span-locations`
   per ruling 1, then `serde_core/default` if the ranking justifies it).
@@ -471,6 +492,9 @@ seconds order. No workspace crate's own feature is ever an entry.
     `just test repo-deps`.
   - Any "default no" flag promoted per ruling 4 requires its spec ruling
     recorded **before** its entry is written — not after.
+  - **Closed (Phase 3): no entries.** See Task 3.2. Under ruling 1,
+    `proc-macro2/span-locations` is aligned only if the crate exists, so it
+    stays divergent (the pending Open Questions amendment in the spec).
 
 **Phase 3 validation checkpoint.** `just test repo-deps` green including the
 unchanged archive contract fixture; the attribution script run over the

@@ -44,6 +44,13 @@ docs_updated_during_phase_2:
     - fixes/2026-09-21-ci-build-feature-divergence/spec.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - repo-deps
 ---
@@ -574,3 +581,91 @@ own owner (or its own dependency chain) declares. Nothing was changed.
   what-if was reverted).
 - **Stopping for human review** again (spec `human_review: true`). The two
   items from Phase 1 stand, now with option B measured at ≈77 s.
+
+## Phase 3
+
+Base: `fix/ci-build-feature-divergence` at `0760976a0`, macOS host, toolchain
+1.98.1. No CI run was triggered. No source, manifest, or lock file is changed
+by this phase. The one manifest edit below was a temporary check, reverted
+with `git checkout` in the same step (`git status` clean afterward).
+
+**Author ruling status.** Both `human_review_items` from Phases 1–2 were still
+unanswered when Phase 3 started. Neither changes this phase's outcome:
+
+- The plan says Phase 3 "exists only if Task 2.1 concluded the alignment crate
+  is warranted". Task 2.1 concluded it is not. The spec's eligible entries
+  (`libc`, `proc-macro2`, `serde_core`) remove 0.6 s.
+- Options A and B both leave the crate unwarranted.
+- Options C and D need a ruling-4 entry in the spec before any alignment
+  entry is written (ruling 4, and plan Task 3.4's last bullet). No such entry
+  exists, so an agent cannot choose them.
+
+So Phase 3 collapses to its no-op rationale under every ruling the author
+could give without first writing a new spec entry. Option B is a Task 2.2
+change and still waits on the author. It was not executed here.
+
+### Task 3.1 — publish interaction (ruling 7): does not block
+
+This was run even though no fan-out follows. It is a cheap check with no
+side effects, and it is the one technical prerequisite that options C and D
+would hit. 71 of the 74 workspace members are publishable (no
+`publish = false`), so the trap was real.
+
+Temporary edit: a `tools/feature-alignment` crate (`publish = false`, one
+`libc` entry with `extra_traits`, empty `src/lib.rs`) added to the root
+`members`, and wired into `biscuit-hash/lib/Cargo.toml` as
+`[dev-dependencies.feature-alignment] path = "../../tools/feature-alignment"`
+(no version). `biscuit-hash` was chosen because it is publishable and has only
+registry dependencies, so a full verify build is possible.
+
+| Command | Result |
+|---|---|
+| `cargo package -p biscuit-hash --list --allow-dirty` | succeeds; 9 files |
+| `cargo publish -p biscuit-hash --dry-run --allow-dirty` | packages, verifies (compiles the packaged crate), stops at "aborting upload due to dry run" |
+| normalized `Cargo.toml` inside the `.crate` | `[dev-dependencies]` lists `criterion` only; **0** mentions of `feature-alignment` (it is still in `Cargo.toml.orig`) |
+
+Cargo strips a versionless path dev-dependency from the manifest it publishes,
+so the spec's dev-only wiring does not block publishing. No ruling amendment
+is needed. Reverted with `git checkout -- Cargo.toml Cargo.lock
+biscuit-hash/lib/Cargo.toml`, the temporary crate and `target/package`
+outputs were removed, and `git status` was clean.
+
+(A self-inflicted slip during the revert: the backup copies of the root and
+member `Cargo.toml` shared a basename and one overwrote the other. Restoring
+from git, which was clean before the step, avoided any damage. Verified with
+`git status` and `cargo metadata`.)
+
+### Tasks 3.2–3.4 — closed, not built
+
+- **3.2 (scaffold):** no `tools/feature-alignment` crate. It would be a changed
+  direct dependency of every member (the fan-out the spec records) for a
+  0.6 s saving.
+- **3.3 (fan-out):** no member manifest or `Cargo.lock` edited, so there is no
+  fan-out cost to record.
+- **3.4 (entries):** none. Under ruling 1, `proc-macro2/span-locations` is
+  aligned only if the crate exists, so it stays divergent. The guard stays in
+  `claudine-cli`. Whether ruling 1's Option 2 fallback applies is the
+  still-pending Open Questions amendment. It is not executed, for the same
+  reason as in Phase 2 (0 s saved).
+- `docs/dependencies.md` and the `rust-devops` skill are untouched: no crate or
+  edge was added. The skill's Phase 1 note already records why alignment of
+  the base trio does not pay.
+
+If the author later rules C or D (with the ruling-4 spec entries), Tasks
+3.2–3.4 run as written, and Task 3.1's result already clears their
+prerequisite.
+
+### Phase 3 validation
+
+- **Requirement-to-test mapping.** No behavior changed, so there is no new
+  test. The one check (Task 3.1) is recorded above with its commands.
+- `just test repo-deps` (macOS): **467 passed, 1 skipped** (the skip was
+  already there), including
+  `one_owner_tree_shares_a_dependency_compile_without_unifying_features` and
+  the rest of `scripts/ci-build-archive-tests.rs`, unchanged.
+- `just _lint repo-deps`: clean.
+- GitNexus `detect_changes` (scope `all`): risk low, 0 affected processes; only
+  `plan.md` sections are touched (plus this log and spec frontmatter).
+- No cross-OS run: nothing compiled differs from Phase 1.
+- **Still stopped for human review** (spec `human_review: true`). The two items
+  stand. Phase 4's content depends on whether option B lands first.

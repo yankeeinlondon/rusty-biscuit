@@ -11,9 +11,9 @@ implemented: false
 human_review: true
 human_review_items:
     - |-
-      **Which direction should the rest of this fix take? (Still open from Phase 1, now with a measured answer for option B.)**
+      **Which direction should the rest of this fix take? (Still open from Phase 1. Phase 3 has now been recorded as "not built".)**
 
-      *Why this has to be decided before Phase 3:* Phase 3 builds a shared "alignment" crate that switches on the same third-party options for every package. Phase 2 wrote a decision for every option and found that the three options the spec made eligible save **0.6 s**. A rebuild only disappears when *every* option in its bundle is aligned, and the options arrive in bundles of 3 to 25. So without your ruling, Phase 3 has nothing worth building.
+      *Why this has to be decided before Phase 4:* Phase 4 re-measures and closes the fix, so what it measures depends on whether option B lands first. Phase 3 was meant to build a shared "alignment" crate that switches on the same third-party options for every package. The three options the spec made eligible save only **0.6 s**, because a rebuild disappears only when *every* option in its bundle is aligned, and the options arrive in bundles of 3 to 25. So Phase 3 built nothing and recorded why. It did confirm one thing: if you ever choose C or D, the crate would not block publishing any package (checked with a dry-run publish).
 
       Phase 2 also measured the one change that does help (option B below) by temporarily making it and re-running the attribution tool. It removes **6 of the 65 extra builds and about 77 s** of the 298 s spent on them on this Mac. That is more than aligning every third-party option outside the spec's "leave alone by default" list (49 s). The temporary change was undone. Nothing has been changed for real.
 
@@ -27,7 +27,7 @@ human_review_items:
       - **D. Middle ground:** align `libc`, `serde_core`, and `proc-macro2`, plus `mio` and `errno`.
         Pro: about 37 s saved. Con: `mio` is on the "leave alone by default" list, so it needs its own written ruling. B saves twice as much without unifying anything.
 
-      *Recommendation: B, with A for every option.* It is the biggest single saving that keeps the protection intact. If you approve it, the next agent applies it as a Task 2.2 change (with the dependency-docs update and `schematic-define`'s tests) and Phase 3 records the alignment crate as not warranted.
+      *Recommendation: B, with A for every option.* It is the biggest single saving that keeps the protection intact. If you approve it, the next agent applies it as a Task 2.2 change (with the dependency-docs update and `schematic-define`'s tests) before Phase 4. Phase 3 already records the alignment crate as not warranted. If you choose C or D, write the per-option rulings into the spec first, and Phase 3's tasks are reopened.
     - |-
       **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
 
@@ -39,15 +39,12 @@ human_review_items:
 
       *Recommendation: leave it as it is,* and record the amendment in Open Questions.
 message_to_agent: |-
-    Phase 2 is complete as records only. The decision table is under "## Phase 2" in implementation-log.md. No source, manifest, or lock file changed, and the author has not yet ruled on `human_review_items`.
-    - Every flag row is "leave divergent". `proc-macro2/span-locations` is "leave divergent — pending ruling": ruling 1's Option 2 fallback was triggered but not executed, because it saves 0 s.
-    - Option B (`schematic-define` → `biscuit-file` edge replaced by a direct optional `serde_yaml_ng = "0.10"`) is measured at 92 → 86 Linux configurations and ≈77 s on macOS. The exact edit is in the log. If the author approves B, apply it first as a Task 2.2 change:
-      - `schematic/define/Cargo.toml`: the `openapi` feature and the dependency.
-      - `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`. The test file was missed by the what-if.
-      - `schematic/docs/dependencies.md` (plus the root `docs/dependencies.md` if affected).
-      - Run `just test schematic-define`, and re-run `feature-attribution` to confirm 86 configurations.
-    - If the author picks A or B, Phase 3 collapses to its no-op rationale (alignment not warranted). C or D need a ruling 4 entry in the spec before any alignment entry is written.
-    - Before trusting `./target/debug/feature-attribution`, rebuild it with `cargo build -p repo-deps --bin feature-attribution`.
+    Phase 3 is complete as records only (see "## Phase 3" in implementation-log.md). No source, manifest, or lock file changed, and the author has still not ruled on `human_review_items`.
+    - Tasks 3.2–3.4 are closed "not built": the alignment crate is not warranted (0.6 s), and options C/D need ruling-4 entries in this spec that do not exist.
+    - Task 3.1 was run: a versionless path dev-dependency on a `publish = false` crate does not block `cargo publish --dry-run` for the publishable `biscuit-hash`. Cargo strips it from the published manifest.
+    - Before Phase 4, check whether the author approved option B. If so, apply it first as a Task 2.2 change (exact edit in the Phase 2 log and in the previous message: `schematic/define/Cargo.toml`, three `use serde_yaml_ng;` lines including `tests/openapi_tests.rs`, `schematic/docs/dependencies.md`, `just test schematic-define`, then re-run `feature-attribution` for 86 Linux configurations). Phase 4's before/after then shows that change. If not, Phase 4's re-run should show the Phase 1 counts unchanged (92 Linux / 95 macOS).
+    - If the author chose C or D, Phase 3 must be reopened (the spec rulings come first) before Phase 4.
+    - Rebuild `feature-attribution` before trusting it: `cargo build -p repo-deps --bin feature-attribution`.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21
 related:
