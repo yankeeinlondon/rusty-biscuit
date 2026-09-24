@@ -321,6 +321,9 @@ fn compose_plain_git_committed_dir_uses_git_root() {
 // compose @ magic-path resolution
 // ---------------------------------------------------------------------
 
+// Native Windows reads the known-folder home and ignores the fixture's
+// `HOME` (D11; `os` skill, windows.md), so the user tier cannot be staged there.
+#[cfg(not(windows))]
 #[test]
 fn compose_path_shaped_magic_offers_user_tier_from_plain_repo_under_home() {
     // `claudine compose @prompts/<TAB>` from `~/config/sh`: a plain repository

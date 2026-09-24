@@ -8,7 +8,7 @@
 
 use crate::common;
 use common::completion::{run_complete_with_home, seed_cargo_workspace_members, write_file};
-use common::CliProcessFixture;
+use common::{CliProcessFixture, init_git_repo};
 
 fn emitted_magic_token(cwd: &std::path::Path, home: &std::path::Path, partial: &str) -> String {
     let candidates = run_complete_with_home(cwd, home, &["compose", partial]);
@@ -86,4 +86,38 @@ fn discrete_package_only_prompt_round_trips_the_completion_value_unchanged() {
         composed.contains("DISCRETE_PACKAGE_MAGIC_ROOT"),
         "runtime must consume the discrete-package root completion used; stdout:\n{composed}",
     );
+}
+
+#[test]
+fn path_shaped_local_and_user_duplicates_round_trip_to_the_local_prompt() {
+    // 2026-09-23-local-before-home: from a repository under `$HOME`, the same
+    // `prompts/plan.md` reachable through the repository's `.claudine` tier,
+    // the user `~/.claudine` tier, and the intrinsic home root collapses to one
+    // offer, and composing it selects the local file.
+    let fixture = CliProcessFixture::named("completion-resolution-local-before-home");
+    let home = fixture.home().to_path_buf();
+    let launch = home.join("config").join("sh");
+    std::fs::create_dir_all(&launch).unwrap();
+    assert!(init_git_repo(&launch), "git init failed at {}", launch.display());
+
+    write_file(
+        &launch.join(".claudine/prompts/plan.md"),
+        "LOCAL_CLAUDINE_TIER\n",
+    );
+    write_file(&home.join(".claudine/prompts/plan.md"), "USER_CLAUDINE_TIER\n");
+    write_file(&home.join("prompts/plan.md"), "HOME_ROOT\n");
+
+    let token = emitted_magic_token(&launch, &home, "@prompts/");
+    assert_eq!(token, "@prompts/plan.md");
+    let composed = compose_dry_run(&fixture, &launch, &token);
+    assert!(
+        composed.contains("LOCAL_CLAUDINE_TIER"),
+        "runtime must select the local duplicate completion offered; stdout:\n{composed}",
+    );
+    for decoy in ["USER_CLAUDINE_TIER", "HOME_ROOT"] {
+        assert!(
+            !composed.contains(decoy),
+            "the `{decoy}` duplicate must not win; stdout:\n{composed}",
+        );
+    }
 }
