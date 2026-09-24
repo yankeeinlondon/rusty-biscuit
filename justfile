@@ -860,9 +860,12 @@ _ensure-native-libs *packages="":
 # hosts run the spec §4 order: install/upgrade to latest, place the store from
 # `kache doctor`, write `[cache] local_store` + `ignore_env = true` into the
 # user config (the single source of truth — always written, even when it
-# equals the default, because the pin is deliberate), re-assert the macOS
-# DYLD_* passthrough gate, then the daemon lifecycle strictly after the config
-# write, and activation LAST. Any pre-activation failure prints WARNING lines,
+# equals the default, because the pin is deliberate) and confirm this
+# environment's kache loads that file and resolves the pinned store, re-assert
+# the macOS DYLD_* passthrough gate, then the daemon lifecycle strictly after
+# the config write, confirm the daemon loaded that file too, and activation
+# LAST. Any pre-activation failure (a KACHE_CONFIG override included, named
+# in the warning) prints WARNING lines,
 # leaves kache off (undoing an earlier activation), and `just init` completes
 # its other steps. Non-qualifying hosts never get kache installed; a
 # below-floor install there needs an interactively confirmed binary-only
@@ -889,6 +892,10 @@ _ensure-kache:
         esac
     }
     cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    # The one host file Cargo reads: a legacy extensionless `config` hides a
+    # `config.toml` beside it, so activation and its undo go where Cargo looks.
+    host_config="$cargo_home/config.toml"
+    [[ -e "$cargo_home/config" ]] && host_config="$cargo_home/config"
     meets_floor() {
         [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$1" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]
     }
@@ -899,17 +906,48 @@ _ensure-kache:
     # An activation an earlier run wrote is undone too, because a wrapper
     # sitting on top of a broken kache is exactly the dyld failure this fix
     # exists for. (Activation is the last step, so nothing follows it.)
+    # "OFF" is a claim about the wrapper Cargo would EFFECTIVELY use, so it is
+    # re-decided after the undo: an inherited RUSTC_WRAPPER or
+    # CARGO_BUILD_RUSTC_WRAPPER, an unwritable config, or a config this helper
+    # does not edit keeps kache active, and that is reported as a manual-action
+    # state instead. It still exits 0: init must finish its other steps, and
+    # the fix is the human's (an environment variable in their shell).
     kache_off() {
         warn "$1"
-        if [[ -f "$cargo_home/config.toml" ]] \
-            && grep -Eq 'rustc-wrapper *= *"kache"' "$cargo_home/config.toml"; then
-            if python3 scripts/kache-config-merge.py "$cargo_home/config.toml" build rustc-wrapper ""; then
-                warn "an existing activation was neutralized in $cargo_home/config.toml (dated backup kept beside it)."
+        local wrapper_out wrapper_rc=0 line kind rest src
+        wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)" || wrapper_rc=$?
+        if [[ $wrapper_rc -eq 0 ]] \
+            && grep -qF "kind=kache source=$host_config value=" <<<"$wrapper_out"; then
+            if python3 scripts/kache-config-merge.py "$host_config" build rustc-wrapper ""; then
+                warn "an existing activation was neutralized in $host_config (dated backup kept beside it)."
             else
-                warn "could not neutralize the existing activation — remove the rustc-wrapper line from $cargo_home/config.toml by hand."
+                warn "could not neutralize the existing activation in $host_config."
             fi
+            wrapper_rc=0
+            wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)" || wrapper_rc=$?
         fi
-        warn "kache left OFF; 'just init' continues with its other setup steps."
+        if [[ $wrapper_rc -ne 0 ]]; then
+            warn "kache MAY STILL BE ACTIVE — manual action required: the rustc wrapper cannot be decided ($(sed -n 's/^kache-host: error=//p' <<<"$wrapper_out" | head -1))."
+            echo "         fix that Cargo config, then confirm with 'just kache-status'; 'just init' continues with its other setup steps."
+        elif grep -q '^kache-host: wrapper=kache ' <<<"$wrapper_out"; then
+            warn "kache STILL ACTIVE — manual action required; Cargo keeps wrapping rustc with kache through:"
+            # Every kache source down to the first one that sets another
+            # value: undoing only the winner would expose the next.
+            while IFS= read -r line; do
+                kind="${line#* kind=}"; kind="${kind%% *}"
+                [[ "$kind" == "kache" ]] || break
+                rest="${line#* source=}"
+                src="${rest%% value=*}"
+                if [[ "$line" == "scope=env "* ]]; then
+                    echo "         environment $src — undo: 'unset $src' in the shell that runs init, and drop it wherever it is exported"
+                else
+                    echo "         $src — undo: set [build] rustc-wrapper = \"\" there, or delete that line"
+                fi
+            done < <(sed -n 's/^kache-host: wrapper-source //p' <<<"$wrapper_out")
+            echo "         confirm with 'just kache-status'; 'just init' continues with its other setup steps."
+        else
+            warn "kache left OFF; 'just init' continues with its other setup steps."
+        fi
         exit 0
     }
 
@@ -950,12 +988,16 @@ _ensure-kache:
         else
             echo "kache: not installed — init leaves it that way ('just install-kache' installs it by hand)."
         fi
-        if [[ -n "${RUSTC_WRAPPER:-}" ]] \
-            || { [[ -f "$cargo_home/config.toml" ]] && grep -q 'rustc-wrapper' "$cargo_home/config.toml"; } \
-            || { [[ -f .cargo/config.toml ]] && grep -q 'rustc-wrapper' .cargo/config.toml; }; then
+        # The same effective-wrapper decision `kache-status` makes, so an
+        # empty (neutralized) or foreign wrapper is not reported as drift.
+        wrapper_rc=0
+        wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)" || wrapper_rc=$?
+        if [[ $wrapper_rc -ne 0 ]]; then
+            warn "could not decide whether kache is active ($(sed -n 's/^kache-host: error=//p' <<<"$wrapper_out" | head -1)). This init changed nothing."
+        elif grep -q '^kache-host: wrapper=kache ' <<<"$wrapper_out"; then
             warn "kache is ACTIVE on a filesystem that does not earn it — restores are copies. This init changed nothing."
             echo "         undo, this shell : export RUSTC_WRAPPER=\"\"   (the empty value wins over the config file)"
-            echo "         undo, host-wide  : neutralize or remove the rustc-wrapper line in $cargo_home/config.toml"
+            echo "         undo, host-wide  : neutralize or remove the rustc-wrapper line in $host_config"
         fi
         exit 0
     fi
@@ -994,10 +1036,7 @@ _ensure-kache:
     # reads (shells, daemon, editors, launchd jobs). Always written, even when
     # it equals the default. The pre/post CONTENT snapshot (not mtime) feeds
     # the daemon-restart trigger in step (6).
-    case "$(uname -s)" in
-        MINGW*|MSYS*|CYGWIN*) kache_config="$(cygpath "${APPDATA:?}")/kache/config.toml" ;;
-        *)                    kache_config="${XDG_CONFIG_HOME:-$HOME/.config}/kache/config.toml" ;;
-    esac
+    kache_config="$(./scripts/kache-host.sh config-path)"
     snapshot="$(mktemp)"
     trap 'rm -f "$snapshot"' EXIT
     if [[ -f "$kache_config" ]]; then cp "$kache_config" "$snapshot"; else : > "$snapshot"; fi
@@ -1005,6 +1044,44 @@ _ensure-kache:
         || kache_off "could not write [cache] local_store/ignore_env into $kache_config."
     config_changed=0
     cmp -s "$snapshot" "$kache_config" || config_changed=1
+
+    # The pin is the single source of truth only while every kache process
+    # loads $kache_config. A non-empty KACHE_CONFIG selects another file, and
+    # `ignore_env = true` does not gate that selector — so re-read which file
+    # this environment's kache (and, after step 6, the daemon) loads, and
+    # which store doctor now resolves, before anything is activated.
+    # check_config_source cli|daemon
+    check_config_source() {
+        local scope="$1" out rc=0 line state selector path pin_line
+        out="$(./scripts/kache-host.sh config-source 2>&1)" || rc=$?
+        if [[ $rc -ne 0 ]]; then
+            kache_off "could not confirm which config kache loads after the pin write ($(sed -n 's/^kache-host: error=//p' <<<"$out" | head -1))."
+        fi
+        line="$(sed -n "s/^kache-host: config-source scope=$scope //p" <<<"$out" | head -1)"
+        state="${line#state=}"; state="${state%% *}"
+        selector="${line#* selector=}"; selector="${selector%% *}"
+        path="${line#* path=}"
+        if [[ "$scope" == cli && "$state" == override ]]; then
+            warn "kache CONFIG OVERRIDE — this environment exports $selector=$path, so kache reads that file, not $kache_config;"
+            echo "         the store pinned there never reaches builds run with it ('ignore_env = true' does not stop this selector)."
+            echo "         undo: 'unset $selector' in the shell that runs init and cargo, drop it wherever it is exported, then re-run 'just init'"
+            kache_off "the single-source store pin does not hold for this environment."
+        elif [[ "$scope" == daemon && "$state" == override ]]; then
+            warn "kache CONFIG OVERRIDE — the running kache daemon loaded $path ($selector), not $kache_config;"
+            echo "         its launch environment selects another config (KACHE_CONFIG=$path), so it serves another store."
+            echo "         undo: remove KACHE_CONFIG from the daemon's service environment, 'kache daemon restart', then re-run 'just init'"
+            kache_off "the single-source store pin does not hold for the daemon."
+        elif [[ "$state" != managed ]]; then
+            kache_off "could not confirm which config the kache $scope loads ('${state:-no report}') — the single-source store pin is unverified."
+        fi
+        if [[ "$scope" == cli ]]; then
+            pin_line="$(sed -n 's/^kache-host: config pin=//p' <<<"$out" | head -1)"
+            if [[ "${pin_line%% *}" != match ]]; then
+                kache_off "kache resolves the store '$(sed -n 's/^kache-host: store=\(.*\) source=doctor$/\1/p' <<<"$out" | head -1)', not the '$store' just pinned in $kache_config."
+            fi
+        fi
+    }
+    check_config_source cli
 
     # (5) re-assert the macOS passthrough gate — idempotent when install-kache
     # already re-signed; the gate is the verification, not the re-sign.
@@ -1044,14 +1121,24 @@ _ensure-kache:
             esac
         done <<<"$state"
     }
+    # Ready means running AT THE INSTALLED VERSION, whatever brought it up: a
+    # service manager can report a restart as done while the old daemon is
+    # still the one answering, and activating on top of it breaks the
+    # same-version requirement (spec §3). Bounded: one read per second.
     wait_daemon() {
         local tries="$1" i
         for ((i = 0; i < tries; i++)); do
             read_daemon || true
-            [[ "$daemon_running" == "yes" ]] && return 0
+            [[ "$daemon_running" == "yes" && "$daemon_version" == "$installed" ]] && return 0
             sleep 1
         done
         return 1
+    }
+    daemon_not_ready() {
+        if [[ "$daemon_running" == "yes" ]]; then
+            kache_off "the kache daemon still runs version $daemon_version, not the installed $installed, after $1 — it must match the binary before activation."
+        fi
+        kache_off "the kache daemon is not running after $1."
     }
 
     read_daemon || kache_off "could not read the daemon state ('kache daemon --json')."
@@ -1059,6 +1146,7 @@ _ensure-kache:
         kache daemon install >/dev/null || kache_off "'kache daemon install' failed."
         read_daemon || true
     fi
+    lifecycle_step="install/start"
     if [[ "$daemon_running" == "yes" ]]; then
         restart_why=""
         if [[ "$daemon_version" != "$installed" ]]; then
@@ -1070,27 +1158,54 @@ _ensure-kache:
         if [[ -n "$restart_why" ]]; then
             echo "kache: restarting the daemon — $restart_why."
             kache daemon restart >/dev/null || kache_off "'kache daemon restart' failed."
+            lifecycle_step="restart"
         fi
     fi
     if ! wait_daemon 10; then
+        # Up but at another version: `start` cannot replace a running daemon.
+        [[ "$daemon_running" == "yes" ]] && daemon_not_ready "$lifecycle_step"
         echo "kache: daemon not running — starting it (launchd throttles a relaunch for up to 10s after the binary changed)."
         kache daemon start >/dev/null 2>&1 || true
-        wait_daemon 20 || kache_off "the kache daemon is not running after install/start/restart."
+        wait_daemon 20 || daemon_not_ready "install/start/restart"
     fi
+
+    check_config_source daemon
 
     # (7) activation — LAST, only after every prior check passed. Host-wide via
     # Cargo home; a tracked .cargo/config.toml wrapper stays forbidden.
-    python3 scripts/kache-config-merge.py "$cargo_home/config.toml" build rustc-wrapper kache \
-        || kache_off "could not write the activation into $cargo_home/config.toml."
+    python3 scripts/kache-config-merge.py "$host_config" build rustc-wrapper kache \
+        || kache_off "could not write the activation into $host_config."
+
+    # (8) confirm the activation took: an inherited RUSTC_WRAPPER (even set
+    # but empty), CARGO_BUILD_RUSTC_WRAPPER, or a repository/ancestor
+    # .cargo/config outranks the host file, and then Cargo never runs kache.
+    # A kache-NAMED winner counts only when it resolves to the kache on PATH
+    # — the binary steps (2)-(6) verified; a missing path, or another
+    # executable called kache, is not the kache init certified.
+    # The host entry is kept — it is correct and takes effect once the
+    # override goes — but the report says "not active" and names each source
+    # above it. Still exit 0: init finishes its other steps (spec §4).
+    active_out=""
+    active_rc=0
+    active_out="$(./scripts/kache-host.sh wrapper 2>&1)" || active_rc=$?
+    activation_summary="[build] rustc-wrapper = \"kache\" in $host_config"
+    active=yes
+    if [[ $active_rc -ne 0 ]] || ! grep -q '^kache-host: wrapper=kache ' <<<"$active_out" \
+        || ! grep -q '^kache-host: wrapper-binary state=certified ' <<<"$active_out"; then
+        active=no
+        activation_summary="$activation_summary — written, but NOT in effect (see WARNING below)"
+    fi
 
     # One report block (spec §6)
     devices_line="$(sed -n 's/^kache-host: devices //p' <<<"$probe_out" | head -1)"
     base_line="$(sed -n 's/^kache-host: base=//p' <<<"$probe_out" | head -1)"
     base_state="${base_line%% *}"
     base_path="${base_line#*path=}"
+    base_reason="$(sed -n 's/^[^ ]* reason=\([^ ]*\) .*/\1/p' <<<"$base_line")"
     case "$base_state" in
         covered)    base_summary="covered — ${base_path:-?} on the serving device" ;;
         off-device) base_summary="${base_path:-?} is on ANOTHER device than the store — no placement can serve both; kache-status reports this" ;;
+        invalid)    base_summary="INVALID setting (${base_reason:-?}: ${base_path:-?}) — wt refuses it; not covered by this verdict, and kache-status fails until it is fixed" ;;
         *)          base_summary="unconfigured — not covered by this verdict" ;;
     esac
     case "$(uname -s)" in
@@ -1109,7 +1224,11 @@ _ensure-kache:
     fi
     say() { printf '  %-14s %s\n' "$1" "$2"; }
     echo
-    echo "kache: qualified and set up —"
+    if [[ "$active" == "yes" ]]; then
+        echo "kache: qualified and set up —"
+    else
+        echo "kache: qualified, but activation INCOMPLETE — Cargo does not run kache for this checkout —"
+    fi
     say "verdict" "qualifies (${devices_line:-devices unknown})"
     say "worktree base" "$base_summary"
     say "version" "$installed (floor {{ KACHE_MIN_VERSION }})"
@@ -1117,7 +1236,54 @@ _ensure-kache:
     say "store" "$store — moved: $moved"
     say "old store" "$abandoned"
     say "daemon" "running, version $daemon_version, socket $daemon_socket"
-    say "activation" "[build] rustc-wrapper = \"kache\" in $cargo_home/config.toml"
+    say "activation" "$activation_summary"
+    [[ "$active" == "yes" ]] && exit 0
+
+    echo
+    if [[ $active_rc -ne 0 ]]; then
+        warn "kache NOT CONFIRMED ACTIVE — the rustc wrapper cannot be decided ($(sed -n 's/^kache-host: error=//p' <<<"$active_out" | head -1))."
+        echo "         fix that Cargo config, then confirm with 'just kache-status'; 'just init' continues with its other setup steps."
+        exit 0
+    fi
+    binary_line="$(sed -n 's/^kache-host: wrapper-binary //p' <<<"$active_out" | head -1)"
+    if [[ -n "$binary_line" ]]; then
+        binary_state="${binary_line#state=}"; binary_state="${binary_state%% *}"
+        binary_path="${binary_line#* path=}"; binary_path="${binary_path% certified=*}"
+        certified="${binary_line##* certified=}"
+        winner_source="$(sed -n 's/^kache-host: wrapper=kache source=\(.*\) value=.*$/\1/p' <<<"$active_out" | head -1)"
+        case "$binary_state" in
+            missing)        why="does not exist — Cargo fails every build" ;;
+            not-executable) why="is not executable — Cargo fails every build" ;;
+            *)              why="is not the kache init verified ($certified)" ;;
+        esac
+        warn "kache NOT ACTIVE — the rustc wrapper Cargo would run, $binary_path (set by $winner_source), $why."
+        if [[ "$winner_source" == RUSTC_WRAPPER || "$winner_source" == CARGO_BUILD_RUSTC_WRAPPER ]]; then
+            echo "         undo: 'unset $winner_source' in the shell that runs cargo, and drop it wherever it is exported"
+        else
+            [[ "$winner_source" == .cargo/* ]] && winner_source="$PWD/$winner_source"
+            echo "         undo: set [build] rustc-wrapper = \"kache\" in $winner_source, or delete that line"
+        fi
+        echo "         confirm with 'just kache-status'; 'just init' continues with its other setup steps."
+        exit 0
+    fi
+    warn "kache NOT ACTIVE — Cargo uses another rustc wrapper, which outranks the host entry just written:"
+    # Every source above the host file: removing only the winner would expose
+    # the next one.
+    while IFS= read -r line; do
+        rest="${line#* source=}"
+        src="${rest%% value=*}"
+        value="${line#* value=}"
+        [[ "$src" == "$host_config" ]] && break
+        [[ "$line" == *" kind=kache "* ]] && continue
+        if [[ "$line" == "scope=env "* ]]; then
+            echo "         environment $src=\"$value\" — undo: 'unset $src' in the shell that runs cargo, and drop it wherever it is exported"
+        else
+            [[ "$line" == "scope=repo "* ]] && src="$PWD/$src"
+            echo "         $src sets \"$value\" — undo: delete its [build] rustc-wrapper line"
+        fi
+    done < <(sed -n 's/^kache-host: wrapper-source //p' <<<"$active_out")
+    echo "         the host entry stays in $host_config and applies once those are gone;"
+    echo "         confirm with 'just kache-status'; 'just init' continues with its other setup steps."
 
 # The ownership split (2026-09-23 ruling): this recipe owns the BINARY —
 # install/upgrade to latest, the macOS ad hoc re-sign with the passthrough
@@ -1214,12 +1380,15 @@ install-kache binary_only="false":
 
 # The durable guard. Init's verdict is point-in-time, but the worktree base
 # can be configured — or re-pointed — after activation and binaries can be
-# replaced, so this recipe re-checks the facts through the SAME probe init
-# used (`scripts/kache-host.sh report`): the store is whatever `kache doctor`
+# replaced, so this recipe re-checks the facts through the script init used
+# (`scripts/kache-host.sh report`): the store is whatever `kache doctor`
 # resolves (never a reconstruction — the pre-2026-09-23 recipe guessed from
 # KACHE_DIR and reported false verdicts), plus the checkout/worktree-base
-# device check and the macOS env-passthrough result. Exits non-zero on drift
-# while kache is active.
+# device check, init's clone check re-run from that store, the macOS
+# env-passthrough result, the daemon (service installed, running, same version
+# as the binary), and the user config's `local_store` pin and `ignore_env`.
+# Exits non-zero on drift while kache is active; with kache not in use every
+# fact is still printed, but nothing is judged.
 
 # report whether kache is active here, and whether this filesystem earns it
 kache-status:
@@ -1229,43 +1398,124 @@ kache-status:
     say() { printf '  %-12s %s\n' "$1" "$2"; }
     echo "=== kache status — policy: docs/kache-strategy.md ==="
 
+    installed="-" below_floor=0
     if command -v kache &> /dev/null; then
         installed="$(kache --version 2>/dev/null | cut -d' ' -f2)"
         if [[ "$(printf '%s\n%s\n' "{{ KACHE_MIN_VERSION }}" "$installed" | sort -V | head -1)" == "{{ KACHE_MIN_VERSION }}" ]]; then
             say "installed" "$installed (floor {{ KACHE_MIN_VERSION }})"
         else
+            below_floor=1
             say "installed" "$installed — BELOW the floor {{ KACHE_MIN_VERSION }}; 'just install-kache' upgrades"
         fi
     else
         say "installed" "no — 'just install-kache' installs it ('just init' owns activation on qualifying hosts)"
     fi
 
-    # Cargo's own precedence order, highest first. Reporting only the winner
-    # would hide a second activation that survives undoing the first.
-    active=""
-    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
-        active="RUSTC_WRAPPER=${RUSTC_WRAPPER}"
-        say "active" "YES — environment: $active"
-    fi
-    if [[ -f .cargo/config.toml ]] && grep -q 'rustc-wrapper' .cargo/config.toml; then
-        active="${active:+$active; }repo .cargo/config.toml"
-        say "active" "YES — repo .cargo/config.toml (tracked wrapper is forbidden here)"
-    fi
+    # The wrapper Cargo would use, decided by the same helper `_ensure-kache`
+    # uses. Every source that names kache is listed, not only the winner: a
+    # shadowed activation takes over once the one above it is undone. A
+    # kache-named winner is healthy only when it resolves to the kache on
+    # PATH, the binary whose version and passthrough are checked below.
     cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    for candidate in "$cargo_home/config.toml" "$cargo_home/config"; do
-        if [[ -f "$candidate" ]] && grep -q 'rustc-wrapper' "$candidate"; then
-            active="${active:+$active; }$candidate"
-            say "active" "YES — $candidate (host-wide: every repo on this machine)"
-        fi
-    done
-    [[ -z "$active" ]] && say "active" "no — nothing sets a rustc wrapper"
+    active="" wrapper_error="" wrapper_problem=""
+    if wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)"; then
+        winner="$(sed -n 's/^kache-host: wrapper=//p' <<<"$wrapper_out" | head -1)"
+        winner_kind="${winner%% *}"
+        winner_rest="${winner#* source=}"
+        winner_source="${winner_rest%% value=*}"
+        binary_line="$(sed -n 's/^kache-host: wrapper-binary //p' <<<"$wrapper_out" | head -1)"
+        binary_state="${binary_line#state=}"; binary_state="${binary_state%% *}"
+        binary_path="${binary_line#* path=}"; binary_path="${binary_path% certified=*}"
+        binary_certified="${binary_line##* certified=}"
+        case "$binary_state" in
+            certified) ;;
+            missing)        wrapper_problem="Cargo would run the rustc wrapper $binary_path, which does not exist — every build fails" ;;
+            not-executable) wrapper_problem="Cargo would run the rustc wrapper $binary_path, which is not executable — every build fails" ;;
+            different)      wrapper_problem="Cargo would run the rustc wrapper $binary_path, not the kache on PATH ($binary_certified) whose version and passthrough are checked here" ;;
+            *)              wrapper_problem="the helper did not resolve the kache wrapper to an executable" ;;
+        esac
+        while IFS= read -r line; do
+            scope="${line#*scope=}"; scope="${scope%% *}"
+            kind="${line#* kind=}"; kind="${kind%% *}"
+            rest="${line#* source=}"
+            src="${rest%% value=*}"
+            value="${rest#* value=}"
+            case "$scope" in
+                env)  where="environment $src=$value" ;;
+                repo) where="repo $src (tracked wrapper is forbidden here)" ;;
+                ancestor) where="$src (a parent directory of this checkout)" ;;
+                *)    where="$src (host-wide: every repo on this machine)" ;;
+            esac
+            if [[ "$src" == "$winner_source" && "$kind" == "kache" && -n "$wrapper_problem" ]]; then
+                active="$where"
+                say "active" "BROKEN — $where names kache, but resolves to $binary_path ($binary_state)"
+            elif [[ "$src" == "$winner_source" && "$kind" == "kache" ]]; then
+                active="$where"
+                say "active" "YES — $where"
+            elif [[ "$src" == "$winner_source" && "$kind" == "none" ]]; then
+                say "active" "no — $where sets an empty wrapper, which disables wrapping"
+            elif [[ "$src" == "$winner_source" ]]; then
+                say "active" "no — $where wraps rustc with '$value', not kache"
+            elif [[ "$kind" == "kache" ]]; then
+                say "shadowed" "kache in $where — takes effect if $winner_source is undone"
+            fi
+        done < <(sed -n 's/^kache-host: wrapper-source //p' <<<"$wrapper_out")
+        [[ "$winner_kind" == "none" && "$winner_source" == "-" ]] && say "active" "no — nothing sets a rustc wrapper"
+    else
+        wrapper_error="$(sed -n 's/^kache-host: error=//p' <<<"$wrapper_out" | head -1)"
+        say "active" "UNKNOWN — cannot decide the rustc wrapper (${wrapper_error:-wrapper helper failed})"
+    fi
 
-    # Store, devices, worktree base, and passthrough all come from the shared
-    # probe so this report and the init verdict can never disagree.
-    store="-" store_dev="-" checkout_dev="-" base_state="unknown" base_path="-" passthrough="n/a" report_failed=0
+    # Daemon, config pin, store, devices, worktree base, clone checks, and
+    # passthrough all come from the shared script; the clone check is init's,
+    # run from the store kache resolves now, so a store that moved or never
+    # cloned shows as drift. The daemon and config lines precede doctor, so
+    # they are judged even when doctor fails.
+    store="-" store_dev="-" checkout_dev="-" base_state="unknown" base_path="-" base_reason="" passthrough="n/a" report_failed=0
+    checkout_clone="-" checkout_clone_reason="" base_clone="-" base_clone_reason=""
+    daemon_line="" config_state="" config_path="-" ignore_env="" pin="" pin_value=""
+    cli_source_state="" cli_source_path="" daemon_source_state="" daemon_source_path=""
     if command -v kache &> /dev/null; then
         report_out="$(./scripts/kache-host.sh report 2>&1)"
         report_rc=$?
+        daemon_line="$(sed -n 's/^kache-host: daemon //p' <<<"$report_out" | head -1)"
+        config_line="$(sed -n 's/^kache-host: config state=//p' <<<"$report_out" | head -1)"
+        config_state="${config_line%% *}"
+        [[ "$config_line" == *" path="* ]] && config_path="${config_line#* path=}"
+        ignore_env="$(sed -n 's/^kache-host: config ignore_env=//p' <<<"$report_out" | head -1)"
+        pin_line="$(sed -n 's/^kache-host: config pin=//p' <<<"$report_out" | head -1)"
+        pin="${pin_line%% *}"
+        pin_value="${pin_line#* value=}"
+        # Which file kache here and the running daemon actually load: a
+        # KACHE_CONFIG selector bypasses the managed file, `ignore_env` or not.
+        for scope in cli daemon; do
+            source_line="$(sed -n "s/^kache-host: config-source scope=$scope //p" <<<"$report_out" | head -1)"
+            source_state="${source_line#state=}"; source_state="${source_state%% *}"
+            source_path="${source_line#* path=}"
+            printf -v "${scope}_source_state" '%s' "$source_state"
+            printf -v "${scope}_source_path" '%s' "$source_path"
+        done
+        daemon_installed="-" daemon_running="-" daemon_version="-"
+        if [[ "$daemon_line" == installed=* ]]; then
+            read -r daemon_installed daemon_running daemon_version <<<"$daemon_line"
+            daemon_installed="${daemon_installed#installed=}"
+            daemon_running="${daemon_running#running=}"
+            daemon_version="${daemon_version#version=}"
+            say "daemon" "service installed: $daemon_installed, running: $daemon_running, version $daemon_version"
+        else
+            say "daemon" "UNKNOWN — 'kache daemon --json' gave no readable state"
+        fi
+        pin_display="unknown (doctor did not report the store)"
+        [[ -n "$pin" ]] && pin_display="${pin_value:-unset}"
+        case "$config_state" in
+            present) say "config" "$config_path — local_store $pin_display, ignore_env ${ignore_env:-?}" ;;
+            absent)  say "config" "$config_path — missing" ;;
+            *)       say "config" "$config_path — cannot be read (${config_state:-no report})" ;;
+        esac
+        [[ "$cli_source_state" == "override" ]] \
+            && say "override" "KACHE_CONFIG=$cli_source_path — kache in this shell reads that file instead"
+        [[ "$daemon_source_state" == "override" ]] \
+            && say "override" "the running daemon loaded $daemon_source_path instead"
         if [[ $report_rc -ne 0 ]]; then
             report_failed=1
             say "store" "cannot report ($(sed -n 's/^kache-host: error=//p' <<<"$report_out" | head -1))"
@@ -1277,12 +1527,21 @@ kache-status:
             base_line="$(sed -n 's/^kache-host: base=//p' <<<"$report_out" | head -1)"
             base_state="${base_line%% *}"
             base_path="${base_line#*path=}"
+            base_reason="$(sed -n 's/^[^ ]* reason=\([^ ]*\) .*/\1/p' <<<"$base_line")"
             passthrough="$(sed -n 's/^kache-host: passthrough=//p' <<<"$report_out" | head -1 | cut -d' ' -f1)"
+            checkout_clone_line="$(sed -n 's/^kache-host: clone checkout=//p' <<<"$report_out" | head -1)"
+            checkout_clone="${checkout_clone_line%% *}"
+            [[ "$checkout_clone_line" == *" reason="* ]] && checkout_clone_reason="${checkout_clone_line#* reason=}"
+            base_clone_line="$(sed -n 's/^kache-host: clone base=//p' <<<"$report_out" | head -1)"
+            base_clone="${base_clone_line%% *}"
+            [[ "$base_clone_line" == *" reason="* ]] && base_clone_reason="${base_clone_line#* reason=}"
             say "store" "$store (from kache doctor)"
             say "devices" "$devices_line"
+            say "clone" "store -> checkout: ${checkout_clone:-?}${checkout_clone_reason:+ ($checkout_clone_reason)}"
             case "$base_state" in
-                covered)    say "worktree base" "$base_path — same device as the store" ;;
+                covered)    say "worktree base" "$base_path — same device as the store; store -> base: ${base_clone:-?}${base_clone_reason:+ ($base_clone_reason)}" ;;
                 off-device) say "worktree base" "$base_path — ANOTHER device than the store" ;;
+                invalid)    say "worktree base" "INVALID setting (${base_reason:-?}: $base_path) — wt refuses it" ;;
                 *)          say "worktree base" "unconfigured — not covered by this check" ;;
             esac
             if [[ "$passthrough" == "n/a" ]]; then
@@ -1296,27 +1555,85 @@ kache-status:
     fi
 
     echo
-    if [[ -z "$active" ]]; then
-        echo "  VERDICT: not in use. Cargo builds normally; nothing to undo."
+    if [[ -z "$active" && -z "$wrapper_error" ]]; then
+        echo "  VERDICT: not in use. Cargo builds without kache; nothing of kache's to undo."
         exit 0
     fi
 
     problems=()
-    if ! command -v kache &> /dev/null; then
+    if [[ -n "$wrapper_error" ]]; then
+        problems+=("the rustc wrapper Cargo would use is undecidable: $wrapper_error")
+    elif ! command -v kache &> /dev/null; then
         problems+=("kache is not installed, but a rustc wrapper is active — every build would fail")
-    elif [[ "$report_failed" == "1" ]]; then
-        problems+=("kache doctor could not report the store — the store location is undecidable")
     else
-        if [[ "$store_dev" != "-" && "$store_dev" != "$checkout_dev" ]]; then
-            problems+=("the store ($store, device $store_dev) is on another device than this checkout (device $checkout_dev) — restores are copies")
+        [[ -n "$wrapper_problem" ]] && problems+=("$wrapper_problem")
+        [[ "$below_floor" == "1" ]] \
+            && problems+=("kache $installed is below the floor {{ KACHE_MIN_VERSION }} — 'just install-kache' upgrades")
+        if [[ "$daemon_line" != installed=* ]]; then
+            problems+=("the daemon state is unreadable ('kache daemon --json' failed)")
+        else
+            [[ "$daemon_installed" == "yes" ]] \
+                || problems+=("the kache daemon service is not installed — 'kache daemon install'")
+            if [[ "$daemon_running" != "yes" ]]; then
+                problems+=("the kache daemon is not running — 'kache daemon start'")
+            elif [[ "$daemon_version" != "$installed" ]]; then
+                problems+=("the running daemon is kache $daemon_version but the installed binary is $installed — 'kache daemon restart'")
+            fi
         fi
-        if [[ "$base_state" == "off-device" ]]; then
-            problems+=("the worktree base ($base_path) is on another device than the store — no placement can serve both")
-        fi
-        case "$passthrough" in
-            fail)  problems+=("the wrapped compiler does not receive DYLD_* — re-sign: codesign --force -s - \$(command -v kache)") ;;
-            error) problems+=("the env-passthrough probe could not run") ;;
+        # The pin and ignore_env in the user config are the store's single
+        # source of truth (spec §2); 'just init' writes both. The pin can only
+        # be judged against the store doctor resolves.
+        case "$config_state" in
+            present | absent)
+                case "$ignore_env" in
+                    true)  ;;
+                    false) problems+=("[cache] ignore_env is false in $config_path — KACHE_* environment overrides can move the store") ;;
+                    *)     problems+=("[cache] ignore_env is missing from $config_path — KACHE_* environment overrides can move the store") ;;
+                esac
+                if [[ "$report_failed" != "1" ]]; then
+                    case "$pin" in
+                        match)    ;;
+                        mismatch) problems+=("[cache] local_store ($pin_value) in $config_path is not the store kache resolves ($store)") ;;
+                        *)        problems+=("[cache] local_store is missing from $config_path — the store is not pinned; 'just init' writes it") ;;
+                    esac
+                fi
+                ;;
+            *) problems+=("the kache user config $config_path cannot be read (${config_state:-no report}) — the store pin is undecidable") ;;
         esac
+        # The pin is the single source of truth only while every kache
+        # process loads that file; `ignore_env` does not gate KACHE_CONFIG.
+        case "$cli_source_state" in
+            managed)  ;;
+            override) problems+=("this shell exports KACHE_CONFIG=$cli_source_path, so kache reads that file, not $config_path — the store pin is bypassed; 'unset KACHE_CONFIG' wherever it is exported") ;;
+            *)        problems+=("cannot tell which config file kache loads here (${cli_source_state:-no report})") ;;
+        esac
+        if [[ "$daemon_running" == "yes" ]]; then
+            case "$daemon_source_state" in
+                managed)  ;;
+                override) problems+=("the running daemon loaded $daemon_source_path, not $config_path — its launch environment selects another config (KACHE_CONFIG); remove it there and 'kache daemon restart'") ;;
+                *)        problems+=("the running daemon does not report which config file it loaded — the store pin is unconfirmed for it") ;;
+            esac
+        fi
+        if [[ "$report_failed" == "1" ]]; then
+            problems+=("kache doctor could not report the store — the store location is undecidable")
+        else
+            if [[ "$store_dev" != "-" && "$store_dev" != "$checkout_dev" ]]; then
+                problems+=("the store ($store, device $store_dev) is on another device than this checkout (device $checkout_dev) — restores are copies")
+            elif [[ "$checkout_clone" != "clone" ]]; then
+                problems+=("the store ($store) cannot clone into this checkout: ${checkout_clone_reason:-no clone check reported} — restores are copies")
+            fi
+            if [[ "$base_state" == "invalid" ]]; then
+                problems+=("the worktree base setting is invalid (${base_reason:-?}: $base_path) — wt refuses it, so worktree coverage is undecidable")
+            elif [[ "$base_state" == "off-device" ]]; then
+                problems+=("the worktree base ($base_path) is on another device than the store — no placement can serve both")
+            elif [[ "$base_state" == "covered" && "$base_clone" != "clone" ]]; then
+                problems+=("the store ($store) cannot clone into the worktree base ($base_path): ${base_clone_reason:-no clone check reported} — worktrees there restore by copy")
+            fi
+            case "$passthrough" in
+                fail)  problems+=("the wrapped compiler does not receive DYLD_* — re-sign: codesign --force -s - \$(command -v kache)") ;;
+                error) problems+=("the env-passthrough probe could not run") ;;
+            esac
+        fi
     fi
     if [[ ${#problems[@]} -eq 0 ]]; then
         echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
@@ -1333,7 +1650,9 @@ kache-status:
         echo "             storage_layout_advice = false  silences the signal rather than the cause"
     fi
     echo "           Undo — this shell : export RUSTC_WRAPPER=\"\"   (the empty value overrides the config file)"
-    echo "           Undo — host-wide  : neutralize or remove the rustc-wrapper line in $cargo_home/config.toml"
+    host_config="$cargo_home/config.toml"
+    [[ -e "$cargo_home/config" ]] && host_config="$cargo_home/config"
+    echo "           Undo — host-wide  : neutralize or remove the rustc-wrapper line in $host_config"
     exit 1
 
 # ensure cargo-sweep is available for target/ hygiene (just sweep)
