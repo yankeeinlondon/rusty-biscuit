@@ -94,6 +94,31 @@ fn one_forward_slash_after_a_defensive_sigil_is_optional() {
         assert_eq!(compact.class().kind, expected);
         assert_eq!(separated.class().kind, expected);
         assert_eq!(compact.class(), separated.class());
+        assert_eq!(compact.payload(), "docs/spec.md");
+        assert_eq!(separated.payload(), "docs/spec.md");
+    }
+}
+
+#[test]
+fn payload_strips_only_the_modifier_sigil_and_one_separator() {
+    for (raw, payload) in [
+        ("@missing.md", "missing.md"),
+        ("@/missing.md", "missing.md"),
+        ("%@missing.md", "missing.md"),
+        ("%@/missing.md", "missing.md"),
+        ("@@name.md", "@name.md"),
+        ("@/@name.md", "@name.md"),
+        ("@%name.md", "%name.md"),
+        ("&/docs/x.md", "docs/x.md"),
+        ("%^docs/x.md", "docs/x.md"),
+        ("~/notes.md", "notes.md"),
+        ("vault:notes/today.md", "notes/today.md"),
+        ("./foo.md", "./foo.md"),
+        ("foo.md", "foo.md"),
+        ("https://example.com/x.md", "https://example.com/x.md"),
+    ] {
+        let reference = FileReference::new(raw).unwrap_or_else(|e| panic!("`{raw}`: {e}"));
+        assert_eq!(reference.payload(), payload, "payload of `{raw}`");
     }
 }
 

@@ -575,6 +575,28 @@ impl FileReference {
         }
     }
 
+    /// The authored payload: the reference text after the recursive (`%`)
+    /// modifier, the kind's sigil (`@`, `&`, `^`, `~`, `vault:`), and the
+    /// separator the grammar accepts after that sigil.
+    ///
+    /// `@missing.md`, `@/missing.md`, and `%@/missing.md` all have the payload
+    /// `missing.md`; `@@name.md` has the payload `@name.md`. A kind without a
+    /// sigil (explicit or implicit relative, absolute, URL) keeps its whole
+    /// text. Environment templates are returned unexpanded.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_file::FileReference;
+    ///
+    /// assert_eq!(FileReference::new("%@/prompts/x.md")?.payload(), "prompts/x.md");
+    /// assert_eq!(FileReference::new("@@name.md")?.payload(), "@name.md");
+    /// # Ok::<(), biscuit_file::FileReferenceError>(())
+    /// ```
+    pub fn payload(&self) -> &str {
+        &self.parsed.authored[self.parsed.payload_offset..]
+    }
+
     /// Add a custom search path for magic (`@`) references, with its tier
     /// inferred from containment in the local root.
     ///
@@ -967,6 +989,8 @@ impl FileReference {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedReference {
     pub authored: String,
+    /// Byte offset of the payload within `authored`.
+    pub payload_offset: usize,
     pub recursive: bool,
     pub kind: ReferenceKind,
 }

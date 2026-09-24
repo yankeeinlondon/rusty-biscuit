@@ -1835,6 +1835,7 @@ mod tests {
         // directory (the "no git root discoverable" branch).
         let parsed = ParsedReference {
             authored: "nope.md".to_string(),
+            payload_offset: 0,
             recursive: false,
             kind: ReferenceKind::ImplicitRelative(PathTemplate {
                 segments: vec![TemplateSegment::Literal("nope.md".to_string())],
