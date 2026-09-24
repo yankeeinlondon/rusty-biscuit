@@ -9,7 +9,9 @@ fixes/2026-09-23-ensuring-kache-support). No comment-preserving TOML writer
 is available (python3's tomllib only parses), so the edit is line-oriented
 and confined to the target table:
 
-  * an existing `key =` line in the table is replaced in place;
+  * an existing `key =` line in the table has its value replaced in place,
+    keeping the line's indentation and any trailing `# comment` (a
+    multi-line value there is refused, not rewritten);
   * a missing key is inserted at the table's end;
   * the table itself is appended when the file has none.
 
@@ -103,6 +105,68 @@ def insert_at_table_end(lines: list[str], start: int, end: int) -> int:
     return index
 
 
+def value_end(line: str, start: int) -> int | None:
+    """The index just past the single-line TOML value that begins at `start`,
+    or None when the value does not end on this line.
+
+    A `#` inside a basic (`"..."`, backslash escapes) or literal (`'...'`)
+    string is part of the value, not a comment. Multi-line strings and
+    arrays or inline tables left open at the end of the line are None: a
+    line-oriented edit cannot replace them without leaving their tail lines
+    behind as garbage.
+    """
+    if line.startswith(('"""', "'''"), start):
+        return None
+    depth = 0
+    index = start
+    while index < len(line):
+        char = line[index]
+        if char in "\"'":
+            index += 1
+            while index < len(line) and line[index] != char:
+                index += 2 if char == '"' and line[index] == "\\" else 1
+            if index >= len(line):
+                return None
+            index += 1
+            if depth == 0:
+                return index
+            continue
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        elif depth == 0 and (char.isspace() or char == "#"):
+            return index
+        elif depth > 0 and char == "#":
+            return None
+        index += 1
+    return None if depth > 0 else index
+
+
+def replace_value(line: str, value_start: int, key: str, raw: str) -> str:
+    """`line` with only its value replaced: indentation, the spacing around
+    `=`, and any trailing comment (with the spacing before its `#`) are kept.
+    A value that already equals the requested one is left byte-for-byte, so
+    a repeated write stays a no-op whatever spelling the file uses.
+    """
+    end = value_end(line, value_start)
+    if end is None:
+        fail(f"{key}: existing value is multi-line or unterminated; edit it by hand")
+    tail = line[end:]
+    if tail.strip() and not tail.lstrip().startswith("#"):
+        fail(f"{key}: unexpected text after the existing value: {tail.strip()!r}")
+    want = toml_value(raw)
+    try:
+        current = tomllib.loads(f"v = {line[value_start:end]}")["v"]
+    except tomllib.TOMLDecodeError:
+        current = None
+    if current == want and type(current) is type(want):
+        return line
+    return f"{line[:value_start]}{render_value(raw)}{tail}"
+
+
 def merge(lines: list[str], table: str, pairs: list[tuple[str, str]]) -> list[str]:
     scope = table_range(lines, table)
     if scope is None:
@@ -117,10 +181,11 @@ def merge(lines: list[str], table: str, pairs: list[tuple[str, str]]) -> list[st
     start, end = scope
     result = list(lines)
     for key, raw in pairs:
-        pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+        pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*")
         for index in range(start + 1, end):
-            if pattern.match(result[index]):
-                result[index] = f"{key} = {render_value(raw)}"
+            match = pattern.match(result[index])
+            if match:
+                result[index] = replace_value(result[index], match.end(), key, raw)
                 break
         else:
             result.insert(
