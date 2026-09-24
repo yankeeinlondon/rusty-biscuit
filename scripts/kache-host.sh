@@ -159,14 +159,16 @@ clone_probe() {
 # both OSes share one cascade — the user cache dir when it is on the serving
 # device, else a user-owned `kache/` directory on that volume; never the
 # mount point itself (/, /home, … are root-owned). Sets CANDIDATE and, when
-# this call created the directory, CREATED_CANDIDATE (a non-qualifying verdict
-# removes it again while it is still empty). Returns 1 with a reason in
+# this call created the directory, CREATED_CANDIDATE plus CREATED_TOP, the
+# outermost directory it created (a non-qualifying verdict removes them again
+# while they are still empty). Returns 1 with a reason in
 # CASCADE_REASON when no user-writable placement exists.
 CANDIDATE=""
 CREATED_CANDIDATE=""
+CREATED_TOP=""
 CASCADE_REASON=""
 candidate_store() {
-    local checkout="$1" cache_parent cache_dir mount_point try
+    local checkout="$1" cache_anchor cache_dir created_top mount_point try
 
     if [[ "$(uname -s)" == "Darwin" ]]; then
         mount_point="$(mount_point_of "$checkout")"
@@ -184,17 +186,28 @@ candidate_store() {
 
     # The user cache dir when it is already on the serving device — the common
     # single-disk btrfs/XFS case, where it usually equals kache's default
-    # anyway. The parent decides the device so nothing is created before the
-    # device is known.
+    # anyway. The nearest EXISTING ancestor decides the device, so nothing is
+    # created before the device is known and a fresh home without ~/.cache
+    # (or ~/Library/Caches) still gets this placement.
     cache_dir="$(user_cache_dir)"
-    cache_parent="$(dirname "$cache_dir")"
-    if [[ "$cache_parent" == "/" ]]; then
-        cache_parent="$cache_dir"
+    cache_anchor="$(dirname "$cache_dir")"
+    while [[ ! -d "$cache_anchor" && "$cache_anchor" != "/" ]]; do
+        cache_anchor="$(dirname "$cache_anchor")"
+    done
+    created_top=""
+    if [[ ! -d "$cache_dir" ]]; then
+        created_top="$cache_dir"
+        while [[ ! -d "$(dirname "$created_top")" ]]; do
+            created_top="$(dirname "$created_top")"
+        done
     fi
-    if [[ -d "$cache_parent" ]] \
-        && [[ "$(device_id "$cache_parent")" == "$(device_id "$checkout")" ]] \
+    if [[ "$(device_id "$cache_anchor")" == "$(device_id "$checkout")" ]] \
         && mkdir -p "$cache_dir" 2> /dev/null && [[ -w "$cache_dir" ]]; then
         CANDIDATE="$cache_dir"
+        if [[ -n "$created_top" ]]; then
+            CREATED_CANDIDATE="$cache_dir"
+            CREATED_TOP="$created_top"
+        fi
         return 0
     fi
 
@@ -217,7 +230,14 @@ candidate_store() {
 # empties go — anything that appeared inside it is left strictly alone.
 drop_created_candidate() {
     [[ -n "$CREATED_CANDIDATE" && -d "$CREATED_CANDIDATE" ]] || return 0
-    [[ -z "$(ls -A "$CREATED_CANDIDATE" 2> /dev/null)" ]] && rmdir "$CREATED_CANDIDATE" 2> /dev/null || true
+    [[ -z "$(ls -A "$CREATED_CANDIDATE" 2> /dev/null)" ]] && rmdir "$CREATED_CANDIDATE" 2> /dev/null || return 0
+    # Parents `mkdir -p` created on the way (a fresh home's ~/.cache), up to
+    # and including CREATED_TOP, go too while empty.
+    local dir="$CREATED_CANDIDATE"
+    while [[ -n "$CREATED_TOP" && "$dir" != "$CREATED_TOP" ]]; do
+        dir="$(dirname "$dir")"
+        rmdir "$dir" 2> /dev/null || return 0
+    done
 }
 
 do_qualify() {
