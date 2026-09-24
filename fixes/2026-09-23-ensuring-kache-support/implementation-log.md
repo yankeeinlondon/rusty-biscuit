@@ -47,6 +47,37 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/kache/installation.md
     - .claude/skills/kache/platforms.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - .github/kache-min-version
+    - justfile
+    - scripts/kache-host.sh
+    - scripts/kache-config-merge.py
+    - scripts/fixtures/kache/config-with-cache.toml
+    - scripts/fixtures/kache/config-without-cache.toml
+    - scripts/fixtures/kache/config-malformed.toml
+    - scripts/fixtures/kache/cargo-config.toml
+    - tools/test-toolkit/tests/kache_host_contracts.rs
+    - tools/test-toolkit/tests/kache_config_merge_contracts.rs
+    - tools/test-toolkit/tests/kache_recipe_contracts.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+documentation:
+    - README.md
+    - docs/initialization.md
+    - docs/kache-strategy.md
+    - fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md
+    - .claude/skills/kache/SKILL.md
+    - .claude/skills/kache/configuration.md
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/rust-devops/kache.md
+completed_phase: 5
+implemented: true
 packages:
     - test-toolkit
 ---
@@ -840,3 +871,73 @@ pass on Linux, including the new fresh-home test on its no-qualify branch.
 | No-qualify verdict leaves no created cache dirs behind | same test, no-qualify branch (Linux cross-check), plus live WSL ext4 and build-linux ZFS runs |
 | No-qualify output format (reason line only) is contract-correct | `kache_host_contracts::qualify_prints_a_stable_verdict_line_that_matches_its_exit_code` (fixed; green on macOS qualify and Linux no-qualify) |
 | Spec checks 1–8 | host verification, not automatable (they mutate the dev Mac's toolchain, daemon, store, and Cargo config); evidence per check in Waves 1–5 above |
+
+## Phase 5
+
+Closure only. This phase changed no source, docs, or skill files; its only
+edits are to this fix's plan, log, and spec frontmatter.
+
+### Final validation (2026-09-23, dev Mac)
+
+- `just test` (tools area → `test-toolkit`): **378 passed, 2 skipped**, rc 0.
+  The 2 skips are the pre-existing `#[ignore]` fixtures in
+  `nextest_config_verification`. All 33 `kache_*` contract tests
+  (`kache_host_contracts`, `kache_config_merge_contracts`,
+  `kache_recipe_contracts`) ran in L1 and passed.
+- `just lint` (tools area): rc 0.
+- `bash -n scripts/kache-host.sh`: clean. `python3 -m py_compile
+  scripts/kache-config-merge.py`: clean.
+- Drift scan (`rg -n "never activated|never reinstalling|not reinstalling|KACHE_DIR|NOT activated|Activation stays a host decision"`
+  over `docs/`, `README.md`, `.claude/skills/`, `justfile`, `just/`,
+  `scripts/`): 3 hits, all deliberately historical. Each describes the
+  pre-2026-09-23 behavior as superseded: `justfile:1220` (kache-status
+  header), `docs/kache-strategy.md:26` ("…skip is gone"),
+  `scripts/kache-host.sh:331` (why doctor is the authority). A wider scan
+  for the old OS-name policy (`installed by just init on macOS`,
+  `never activate`, the `0.15.0` floor) found nothing kache-related.
+- Coherence review: the working tree was clean at the start of the phase, and
+  the whole fix is committed on `fix/dmls`. I re-read the header comments of
+  `_ensure-kache`, `install-kache`, and `kache-status` against their behavior,
+  plus the Phase 4 `candidate_store`/`drop_created_candidate` edit in
+  `scripts/kache-host.sh` against its comments. All match, and no drift was
+  found.
+
+### Spec verification summary
+
+| # | Check | Where | Result |
+|---|---|---|---|
+| 1 | Pristine toolchain: `just zed-wasm` links through kache | dev Mac | PASS. Pristine hardened kache reproduced the dyld SIGABRT; the re-signed install linked. `llvm-tools-preview`'s real `libLLVM.dylib` was renamed aside for the run because it masks the symptom |
+| 2 | Passthrough probe can pass and fail | dev Mac | PASS. Installed (ad hoc) → `passthrough=pass`; pristine binstall 0.26.3 (`flags=0x10000(runtime)`) → `passthrough=fail` |
+| 3 | Worktree lifecycle served from store | dev Mac | PASS. Rebuild in a fresh worktree: 395/395 local hits, byte-identical store size, doctor/stats clean |
+| 4 | Launcher parity, no old-store drip | dev Mac | PASS. Fresh interactive shell, `env -i`, and a `launchctl` one-shot all resolve `/Volumes/coding/kache`; 0 new files in `~/Library/Caches/kache`. The drip control proved the test can fail |
+| 5 | Idempotence | dev Mac | PASS. Second `init`: same verdict, same daemon PID, config files SHA-identical, no new backups |
+| 6 | Negative host | WSL ext4 (`build-win`) | PASS. `clone-unsupported-on-ext4`, never installed, `kache-status` agrees; below floor: a non-interactive run errors and an interactive run does a binary-only upgrade with no daemon |
+| 7 | Upgrade path + failure contract | dev Mac | PASS with two caveats. (a) The upgrade/re-sign/probe path passed, and the daemon ended on the new binary. It restarted because the executable was replaced, though, so `init`'s version-mismatch trigger was **not fired live** (that would need a 0.22.0 daemon on the real 115 GB store; deliberately avoided). The trigger is text-pinned by `ensure_kache_runs_the_spec_section_4_order`. (b) The spec's "regular file at the socket path" construction does not fail, because kache replaces the file. A non-empty directory at that path did fail, and the contract held: WARNING lines, kache left off, and `init` completed its other steps |
+| 8 | Daemon honors the config over plist env | dev Mac | PASS. Made discriminating with a scratch-store plist env plus an `ignore_env = false` control; after the config-change restart the launchd daemon served the configured store |
+| 1–4 | on a qualifying Linux host | — | UNAVAILABLE. `build-linux` is ZFS without working block cloning (`reflink` "Operation not permitted"), so the verdict is `clone-unsupported-on-zfs`. The spec says "if one is available" |
+
+**Host cleanup state (dev Mac):** toolchain `libLLVM.dylib` symlinks removed
+(1.98.1, stable); `~/.env` line 51 deleted (backup
+`~/.env.bak-20260923-kache`); the daemon plist regenerated from a clean env
+(`KACHE_LOG` only), with a launchd-owned daemon on `/Volumes/coding/kache`;
+kache 0.26.3 ad hoc, config pair pinned, activation on, `kache-status` healthy.
+**For Ken:** the abandoned `~/Library/Caches/kache` (56 GB) needs your
+decision on deletion; the live store is over its cap (115.0 of 107.4 GB;
+`kache clean --tracked --stale 14d` suggested); and the long-running
+`kache monitor` still carries the stale `KACHE_CACHE_DIR` until it is
+restarted from a fresh shell.
+
+### Ready for review
+
+Spec frontmatter set to `implemented: true`, `status: implemented`,
+`implemented_by`. Terminal state: implementation complete, ready for review.
+I have not moved the fix to `_completed` and have not run `just complete`.
+
+### Requirement → test mapping (Phase 5)
+
+Phase 5 changed no behavior, so it added no tests. The gates above re-ran the
+full contract suite that pins Phases 1–4 (see those phases' mapping tables).
+No skipped or failing tests beyond the 2 pre-existing `#[ignore]` fixtures on
+macOS. The previously recorded build-linux-only failure
+(`the_lint_step_measures_a_sub_second_command_instead_of_recording_zero`) is
+pre-existing and unrelated, and was not re-run this phase.

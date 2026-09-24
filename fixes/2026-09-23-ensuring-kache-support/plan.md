@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-23
-phase: 4
+phase: 5
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 source_files_during_phase_1:
@@ -48,6 +48,37 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/kache/installation.md
     - .claude/skills/kache/platforms.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - .github/kache-min-version
+    - justfile
+    - scripts/kache-host.sh
+    - scripts/kache-config-merge.py
+    - scripts/fixtures/kache/config-with-cache.toml
+    - scripts/fixtures/kache/config-without-cache.toml
+    - scripts/fixtures/kache/config-malformed.toml
+    - scripts/fixtures/kache/cargo-config.toml
+    - tools/test-toolkit/tests/kache_host_contracts.rs
+    - tools/test-toolkit/tests/kache_config_merge_contracts.rs
+    - tools/test-toolkit/tests/kache_recipe_contracts.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+documentation:
+    - README.md
+    - docs/initialization.md
+    - docs/kache-strategy.md
+    - fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md
+    - .claude/skills/kache/SKILL.md
+    - .claude/skills/kache/configuration.md
+    - .claude/skills/kache/installation.md
+    - .claude/skills/kache/platforms.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/rust-devops/kache.md
+completed_phase: 5
+implemented: true
 packages:
     - test-toolkit
 ---
@@ -438,7 +469,7 @@ strictly serial.)
 
 ## Phase 5 — Closure and readiness
 
-- [ ] **Final validation**
+- [x] **Final validation**
     - `just test tools` green; `bash -n` clean on new/edited scripts; the
       Phase 3 drift scan re-run clean; `git status`/`git diff` reviewed for
       comment/code coherence in every edited recipe (behavior-changing edits
@@ -446,7 +477,7 @@ strictly serial.)
     - Summarize against the spec's Verification list: each of the 8 checks
       with where it ran and its result (or why unavailable), plus host
       cleanup state.
-- [ ] **Ready for review**
+- [x] **Ready for review**
     - Set the spec frontmatter `implemented: true` and `implemented_by` per
       repo convention; terminal state is "implementation complete, ready for
       review" — the author moves the fix to `_completed`; the agent never

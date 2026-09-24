@@ -1,6 +1,6 @@
 ---
 area: repo
-status: finalized-spec
+status: implemented
 created: 2026-09-23
 clarified: true
 clarified_by: opencode/zai-coding-plan/glm-5.3
@@ -9,7 +9,8 @@ reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-23
 needs_rulings: false
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: "opencode/zai-coding-plan/glm-5.3 (phases 1-4); claude-code/claude-opus-5-5 (phase 5)"
 owner: "Ken Snyder <ken@ken.net>"
 origin: "`just install` in darkmatter could not link the zed-dmls wasm extension on the dev Mac, 2026-09-23"
 packages: []
@@ -39,54 +40,26 @@ $schema:
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |
-    Phase 4 (dev-Mac verification + host cleanup) is complete. The per-check
-    evidence is in implementation-log.md under "## Phase 4". For Phase 5's
-    Verification summary:
+    All five phases are implemented; the fix is ready for review (do not move
+    it to _completed or run `just complete` — that is the author's call).
+    The per-check verification summary is in implementation-log.md under
+    "## Phase 5 → Spec verification summary". Points a reviewer should weigh:
 
-    - PASS on the dev Mac: checks 1, 2, 3, 4, 5, and 8. Check 6 PASS on the
-      WSL ext4 guest (build-win), including below-floor non-interactive ERROR
-      and the interactively confirmed binary-only upgrade (no daemon).
-    - Check 7: the upgrade path passed (0.22.0 hardened -> init -> 0.26.3,
-      re-signed, probe passes, daemon ends on the new binary), but the
-      version-mismatch restart trigger itself was NOT fired live. The daemon
-      restarted because the executable was replaced, not because init saw a
-      version mismatch. Firing the trigger means running a 0.22.0 daemon
-      against the real 115 GB store, which was deliberately avoided. The
-      failure-contract half passed with a NON-EMPTY DIRECTORY at the socket
-      path. The spec's "regular file at the socket path" construction does
-      not fail: kache just replaces the file with a socket. It is recorded as
-      found, and the spec text was not edited.
-    - Linux checks 1-4: no qualifying Linux host. build-linux is ZFS without
-      working block cloning (reflink "Operation not permitted"); it gives
-      no-qualify clone-unsupported-on-zfs.
-    - Code changed this phase (both are real defects surfaced by
-      verification, each with a test):
-      1. scripts/kache-host.sh: the placement cascade decided the user cache
-         dir's device from its immediate parent, so a fresh home with no
-         ~/.cache (or ~/Library/Caches) fell through to a root-owned mount
-         point and was wrongly declared non-qualifying. It also left
-         ~/.cache/kache behind on no verdicts. Test:
-         qualify_places_the_candidate_in_a_fresh_home_and_cleans_up_on_no.
-      2. kache_host_contracts.rs: the Phase 1 format test required the
-         devices line on every verdict, but the script prints it only on
-         qualify. It had only ever run on the (qualifying) dev Mac, so it
-         would fail on CI's ubuntu-latest (ext4). Fixed in the test.
-    - Pre-existing and unrelated: on build-linux,
-      ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero
-      fails (the stub measured duration_s=0.0). It passes on macOS. It was
-      not touched.
-    - Host state: kache 0.26.3 ad hoc, launchd-owned daemon (plist
-      regenerated; env holds KACHE_LOG only), config pair pinned, activation
-      on, kache-status healthy. ~/.env line 51 is deleted (backup
-      ~/.env.bak-20260923-kache). The toolchain symlinks are removed; note
-      that init's llvm-tools-preview component now puts a real libLLVM.dylib
-      at the same rustlib path. The abandoned ~/Library/Caches/kache (56 GB)
-      is reported, not deleted. The live store is over its cap (115.0 of
-      107.4 GB).
-    - Ken's long-running `kache monitor` (started before the ~/.env edit)
-      still carries KACHE_CACHE_DIR and autospawns a daemon when none is
-      reachable. It is not a managed launcher; restarting it from a fresh
-      shell clears the variable.
+    - Check 7: init's daemon version-mismatch restart trigger was not fired
+      live (the daemon restarted because its executable was replaced). It is
+      pinned only by the recipe text contract test
+      ensure_kache_runs_the_spec_section_4_order.
+    - Check 7's spec text ("place a regular file at the socket path") does not
+      produce a failure on kache 0.26.3; a non-empty directory does. The spec
+      text was left unedited.
+    - Linux checks 1-4 are unmet for lack of a qualifying host (build-linux is
+      ZFS without working block cloning).
+    - Pre-existing, unrelated, build-linux only:
+      ci_workflow_contracts::the_lint_step_measures_a_sub_second_command_instead_of_recording_zero.
+    - Left to Ken: deleting the abandoned 56 GB ~/Library/Caches/kache, the
+      live store being over its cap, and restarting the long-running
+      `kache monitor` from a fresh shell.
+
 ---
 
 # Make kache a host setup that `just init` owns end to end
