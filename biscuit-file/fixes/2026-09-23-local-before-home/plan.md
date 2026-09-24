@@ -1,8 +1,8 @@
 ---
 total_phases: 4
 created: 2026-09-23
-phase: 2
-agent: "codex/gpt-6-sol"
+phase: 3
+agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
@@ -19,8 +19,29 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/invocation_context/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/provider.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/cli/src/completion/scopes.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - biscuit-file
+    - claudine
+    - claudine-cli
+    - darkmatter
 ---
 
 # Implementation plan — local `@` roots before home
@@ -82,14 +103,14 @@ These tasks are sequential because each establishes an API or root chain used by
 
 **Wave 2 — parallel after Phase 2.** Assign separate owners to these tasks. Keep shared Claudine CLI regression edits for Phase 4 to avoid conflicting writes.
 
-- [ ] **3.1 Wire Claudine scopes**
+- [x] **3.1 Wire Claudine scopes**
   - Make `with_prompt_magic_roots` register local conventions against the launch local root, even without a repository, in composition, `InvocationContext`, and CLI completion. Explicitly mark the two `~/.claudine` roots as user-tier; keep their Start/End positions and Defect 1's path-shaped fallback registrations.
   - Carry the launch `@` snapshot into contexts rebuilt for external or other-repository sources in both `derive_source` paths and completion. Preserve source-specific behavior for `./`, bare, `&`, and `^`. Update `composition/resolve/tests.rs` for the registration shape.
   - Review `composition/sequence/expr.rs` and composition and sequence preflight tests for changed `@` winners; adjust only expectations governed by the new order.
-- [ ] **3.2 Render search roots**
+- [x] **3.2 Render search roots**
   - Store the ordered `@` root list beside Claudine's existing `ResolutionDetail` probe record on direct `@` misses. Render the payload once and list directories in priority order, marking only configured roots `(*)`; remove joined candidates and provenance labels from that human-readable branch.
   - Update the provider renderer and any other renderer of the same error. Preserve structured concrete candidates, dispositions, and provenance, as well as existing reports for bare and absolute references. Update exhaustive `RootProvenance` mappings and add focused renderer tests using `biscuit-terminal` renderable components.
-- [ ] **3.3 Update Darkmatter identity**
+- [x] **3.3 Update Darkmatter identity**
   - Update exhaustive provenance mappings and append a new cache encoding code for `LocalRoot` without renumbering prior codes. Encode `package_root`, the captured launch `@` scope, and configured-root tier overrides in graph identity; inspect the separate compose cache key for the same winner-changing inputs.
   - Review `ComposeOptions.magic_paths` callers in compose utilities, transclusion, reference graph and validation, and type tests. Update tests that expected an outside configured Start root to beat the repository. Prove cache identities differ when only launch scope or tier changes; retain `AuthoringBaseFirst` behavior for bare references.
 

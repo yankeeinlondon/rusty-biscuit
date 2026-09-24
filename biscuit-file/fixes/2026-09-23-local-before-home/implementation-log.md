@@ -18,8 +18,29 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/invocation_context/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/provider.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/cli/src/completion/scopes.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - biscuit-file
+    - claudine
+    - claudine-cli
+    - darkmatter
 ---
 
 # Implementation Log for 2026-09-23-local-before-home (4 phases)
@@ -416,3 +437,181 @@ incident; 372 read-only files present). Repaired by deleting only the
 non-writable files in the standing clone's `target/` (regenerable build
 artifacts) over `ssh -o BatchMode=yes build-linux`; the leg then passed in
 35 s. No source or repository files were touched on the host.
+
+## Phase 3
+
+Consumer integration: Claudine scope wiring (3.1), the R4 search-root miss
+report (3.2), and Darkmatter identity (3.3). All three tasks implemented;
+`just test` and `just lint` pass in the claudine (7341 tests), darkmatter
+(8497), and claudine-cli (2776, `test-fixtures`) package areas, and
+`cargo check --workspace --all-targets` is clean. A cross-platform OS note:
+all Phase 3 logic is lexical path handling rendered through
+`to_portable_string`; task 4.3 owns the multi-OS evidence runs.
+
+**Session note.** This phase started from an uncommitted, non-compiling
+work-in-progress tree (a previous session had begun 3.1 and 3.3 — the
+user-tier registration, launch-root fallback, `derive_source` scope
+carrying, and the Darkmatter identity encoder). This session completed,
+corrected, and verified that work and implemented all of 3.2.
+
+### Task 3.1 — Wire Claudine scopes
+
+- `with_prompt_magic_roots` (`claudine/lib/src/composition/resolve.rs`) is
+  the single registration point and now (a) takes the launch **local root**
+  (repository root, else the launch directory) instead of a repository
+  `Option`, so a plain directory registers the same convention rows a
+  repository does (R5 / Defect 4); (b) registers the two `~/.claudine` rows
+  (`~/.claudine/prompts` Start, `~/.claudine` End) through
+  `add_magic_path_with_tier(..., MagicPathTier::User)` — the ruling-1
+  override — and skips an inferred local twin naming the same directory in
+  the launch-equals-home layouts, where local-first dedup would otherwise
+  reclassify the user row. `prompt_magic_roots`/`prompt_magic_fallback_roots`
+  signatures changed from `Option<&Path>` to `&Path` for the local root.
+- All three registration callers pass the launch local root:
+  `capture_file_resolution_context` (composition compat),
+  `build_file_resolution_context` in `invocation_context.rs`
+  (`InvocationContext` + `derive_source`), and CLI completion's
+  `file_resolution_context` (`claudine/cli/src/completion/scopes.rs`,
+  `repository_root.unwrap_or(ctx.cwd)`).
+- Ruling 2 carrying: `build_file_resolution_context` gained a
+  `launch_scope: Option<&LaunchMagicScope>` parameter. The launch context
+  passes `None` (captures its scope naturally); `derive_source` and the
+  compat `derive_request_context_for_source` pass the launch context's
+  captured `launch_magic_scope()`, register conventions against its local
+  root, and seed the snapshot **last** via `with_launch_magic_scope`, so
+  `./`, bare, `&`, and `^` keep the source-derived anchors while `@` keeps
+  the launch tree. Completion never derives source contexts (Phase 1
+  finding), so its wiring is the local-root change alone.
+- `composition/sequence/expr.rs` reviewed: its `@magic.flag` fixture uses a
+  configured root inside the repository (local-tier Start) — no changed
+  winner; composition and sequence preflight tests stage unique files per
+  root, likewise unchanged. Two stale WIP call signatures in
+  `composition/resolve/tests.rs` (`Some(&repo)` → `&repo`) were corrected.
+- **Governed expectation changes** (ruling 2 flips the nested-`@` winner):
+  - `invocation_context/tests.rs`:
+    `nested_sources_rebuild_their_own_prompt_convention_roots` →
+    `nested_sources_keep_launch_at_conventions_while_reanchoring_source_scopes`
+    — both derived contexts keep the launch (alpha) `@` conventions and
+    launch scope, while `package_root()` still re-anchors per source.
+  - `claudine/cli/tests/l1/sequence_magic_reference.rs`:
+    `sequence_magic_reference_uses_source_doc_location_not_cwd` →
+    `sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored`
+    — a nested `@fixtures/steps.yaml` launched from an unrelated repository
+    now resolves against the **launch** tree (3 steps), while
+    `./fixtures/steps.yaml` stays anchored beside the source document
+    (1 step), preserving the original CWD-hijack regression under the
+    reference kind that now owns it.
+
+### Task 3.2 — Render search roots
+
+- `ResolutionDetail` (`claudine/lib/src/harness/error.rs`) stores the
+  ordered `@` root list beside its probe record: new
+  `magic_search_roots: Vec<MagicSearchRoot>` (empty except for direct magic
+  misses), `with_magic_search_roots` builder, and `kind()`/`
+  `magic_search_roots()` accessors.
+- `CompositionError::from_detailed_no_match(detailed, context)` now takes
+  the resolving context and records `context.magic_search_roots()` when the
+  reference kind is Magic. Both production call sites (composition
+  `resolve_composition_source_in_context`, CLI sequence YAML fallback) and
+  the two recovery-test call sites pass it.
+- `render/provider.rs` splits the `FileReferenceNoMatch` body: a direct
+  magic miss renders the R4 shape — the payload once (the authored
+  reference minus `%`/`@` prefixes), the search-root directories in
+  priority order via `UnorderedList`, `(*)` only on
+  `RootProvenance::Magic` roots, the footnote
+  `(*) searched in addition to the standard `@` roots, for this context`,
+  and the existing "Did you mean:" block when suggestions exist. No joined
+  candidate paths, no provenance labels. Every other reference kind keeps
+  the exact prior "Cannot resolve … Tried:" body. The structured
+  `detail["candidates"]` record (concrete paths, dispositions, provenance)
+  is unchanged for both branches.
+- Exhaustive `RootProvenance::LocalRoot` arms added:
+  `provider.rs` candidate labels ("local root"),
+  `render/mod.rs::caller_root_provenance_slug` ("local-root"),
+  `harness/error.rs::root_provenance_slug` ("local_root"). These were the
+  three remaining compile breakers from Phase 2; the workspace now builds.
+- **Focused renderer tests** (biscuit-terminal `StatusBlock`/`Prose`/
+  `UnorderedList` through `report_block_error`, plain 500-col terminal):
+  - `magic_no_match_report_lists_search_roots_in_priority_order` — the
+    reported layout (plain repo under `$HOME`), the exact reported input
+    `@prompts/missing.md`: payload-once (which also proves no joined
+    candidates, since every join repeats the payload as a suffix), no
+    `@`-prefixed raw reference, no provenance labels, six representative
+    root lines in local-before-user priority order, `(*)` count ==
+    configured roots + footnote, footnote present, and structured
+    candidates/dispositions/provenance intact.
+  - `magic_no_match_without_repository_lists_the_launch_directory_without_marker`
+    — plain `$HOME/scratch`, no repository: the launch directory is listed
+    first and **unmarked**, precedes the home root, and the machine detail
+    reports the new `local_root` candidate provenance.
+  - `bare_no_match_keeps_the_candidate_report` — a bare miss keeps
+    "Cannot resolve … Tried:" and never sees the `@` sentence.
+- Registration-shape tests in `composition/resolve/tests.rs` (from the WIP,
+  verified/corrected here): launch-directory convention rows without a
+  repository, `.claudine` rows registered user-tier exactly once under
+  launch-equals-home, and the observable
+  `user_tier_prompt_row_stays_behind_local_files_when_launch_is_home`
+  first-match proof.
+
+### Task 3.3 — Update Darkmatter identity
+
+- `encode_file_resolution_context`
+  (`darkmatter/lib/src/markdown/compose/context/options.rs`) now encodes
+  `package_root`, the full captured launch `@` scope
+  (`launch_magic_scope`: request dir, repository, package, package-area),
+  and the tier-aware `magic_path_registrations()` (path, position tag, tier
+  tag) in place of the tier-less prepend/append lists. One encoder serves
+  both identity domains, so the separate compose-cache key
+  (`options_hash` → `compose_cache_fingerprint`) covers the same
+  winner-changing inputs alongside its existing raw `magic_paths` encoding.
+- `RootProvenance` cache-code match: `LocalRoot` appends as code **8**
+  (Repository=0 … PackageArea=7 untouched; codes are persisted with graph
+  identities).
+- Identity proofs added (all assert `graph_value_fingerprint` **and**
+  `compose_cache_fingerprint` differ):
+  `identities_distinguish_launch_magic_scope`,
+  `identities_distinguish_magic_tier_override`,
+  `identities_distinguish_context_package_root`.
+- `ComposeOptions.magic_paths` callers reviewed (compose util
+  `document_resolution_context`, transclusion resolver, link resolver,
+  expression contexts, reference graph/validation, type tests): all add
+  configured roots through the inferred-tier `add_magic_path`, which
+  ruling 1 preserves verbatim — no signature or behavior change needed.
+  The `with_magic_path` doc comment now states the tier semantics.
+- `compose/tests/schema.rs` `@collision/spec.md` expectation reordered to
+  the governing chain (local Start root → package area → repository →
+  local End root → home). `AuthoringBaseFirst` retention for bare
+  references stays proven by biscuit-file's
+  `authoring_base_first_does_not_boost_the_local_root` plus the passing
+  darkmatter schema-validation tests that use the order.
+
+### Verification
+
+- `just test` / `just lint` per area: claudine 7341 passed / clean;
+  darkmatter 8497 passed / clean (incl. wasm32-wasip2 zed-dmls check);
+  claudine-cli 2776 passed (`test-fixtures`) / clean.
+- `cargo check --workspace --all-targets`: clean.
+- Defect 1 retention: the five `compose_prompt_tiers` tests plus
+  `completion_compose::compose_path_shaped_magic_offers_user_tier_from_plain_repo_under_home`
+  — 6/6 PASS.
+- Full completion suite (470 tests) passes with the `scopes.rs` local-root
+  wiring.
+- Tier placement: new/renamed tests are plain L1 — claudine lib `#[test]`s
+  and the `l1` test binary (module declared in `tests/l1/main.rs`); all ran
+  in the suites above. No new tier markers, no stranded tests.
+- Cross-OS evidence deferred to task 4.3 per the plan's wave structure.
+
+### Requirement-to-test mapping (Phase 3 scope)
+
+| Requirement | Test |
+|---|---|
+| R5 registration against launch local root, no repository | `prompt_magic_roots_without_repository_register_launch_conventions`, `prompt_magic_fallback_roots_are_local_then_home_claudine`, CLI `both_reference_forms_reach_user_tier_outside_any_repository` (retained) |
+| Ruling 1 explicit user tier for `~/.claudine` rows | `with_prompt_magic_roots_marks_the_claudine_home_rows_user_tier`, `user_tier_prompt_row_stays_behind_local_files_when_launch_is_home` |
+| Ruling 2 launch `@` scope through `derive_source` | `nested_sources_keep_launch_at_conventions_while_reanchoring_source_scopes`, CLI `sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored` |
+| Ruling 2 `./` keeps source anchoring | same CLI test's explicit-relative half |
+| R4 payload-once, ordered roots, `(*)` only on configured | `magic_no_match_report_lists_search_roots_in_priority_order` |
+| R4 no-repository intrinsic local root, unmarked | `magic_no_match_without_repository_lists_the_launch_directory_without_marker` |
+| R4 structured record preserved; other kinds unchanged | same tests' `detail` assertions + `bare_no_match_keeps_the_candidate_report` + `recovery_enriches_explicit_no_match_without_selecting_suggestion` (retained) |
+| R2 consumer order (local before user, both Defect 2 rows) | `path_shaped_prompt_reference_keeps_closest_tier_first`, `prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once`, CLI `repository_prompt_wins_over_user_tier_for_both_forms` / `repository_claudine_tier_wins_over_user_tier_for_path_shaped_form` (retained) |
+| Darkmatter identity: scope/tier/package_root | `identities_distinguish_launch_magic_scope`, `identities_distinguish_magic_tier_override`, `identities_distinguish_context_package_root` |
+| Darkmatter chain order change | `compose/tests/schema.rs` `@collision/spec.md` row |

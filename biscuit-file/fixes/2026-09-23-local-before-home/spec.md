@@ -12,12 +12,14 @@ packages:
 human_review: true
 human_review_items:
     - |-
-        **Ruling 1 — how `@` roots are split into local versus user tiers when the
-        launch directory or repository is `$HOME` itself.** Phase 2 implemented
-        the recommended option (infer by containment, with an explicit
-        `MagicPathTier::User` override via `add_magic_path_with_tier`); Phase 3
-        wires that override through Claudine's two `~/.claudine` registrations,
-        so confirming or overturning the ruling is cheapest now.
+        **Ruling 1 — how `@` roots are split into local versus user tiers when
+        the launch directory or repository is `$HOME` itself.** Phases 2 and 3
+        implemented the recommended option (infer by containment, with an
+        explicit `MagicPathTier::User` override via
+        `add_magic_path_with_tier`), and Phase 3 wired that override through
+        Claudine's two `~/.claudine` registrations; the consumer tests now
+        depend on it, so confirming or overturning the ruling is cheapest
+        before Phase 4 hardens the CLI regression suite and documentation.
 
         A path-only rule cannot tell Claudine's user-level prompt directory
         (`~/.claudine/prompts`) apart from a local convention when the launch tree
@@ -38,17 +40,20 @@ human_review_items:
 
         **Recommendation: keep the implemented infer-with-override design.** The
         caller knows whether a root is a user convention; a path comparison
-        cannot. Please confirm, or pick a different option before Phase 3's
-        Claudine wiring lands.
+        cannot. Please confirm, or pick a different option before Phase 4's
+        CLI regression and documentation work lands.
     - |-
         **Ruling 2 — which tree is local for `@` references nested inside a prompt
-        loaded from `~/.claudine` or another repository.** Phase 2 implemented
-        the recommended option: an immutable `LaunchMagicScope` on
+        loaded from `~/.claudine` or another repository.** Phases 2 and 3
+        implemented the recommended option: an immutable `LaunchMagicScope` on
         `FileResolutionContext`, preserved through `for_source`/`for_base`/
         trusted-external derivations, plus `with_launch_magic_scope` for
-        requests that rebuild their context around an external source. Phase 3
+        requests that rebuild their context around an external source; Phase 3
         carries the snapshot through Claudine's `derive_source` paths and
-        completion, so confirming the ruling is cheapest now.
+        registers conventions against the launch local root. One CLI
+        expectation was deliberately flipped to the new rule (nested `@` now
+        resolves from the launch tree), so confirming the ruling is cheapest
+        before Phase 4 hardens the CLI regression suite and documentation.
 
         Options:
 
@@ -65,46 +70,40 @@ human_review_items:
 
         **Recommendation: keep the implemented separate-scope design.** It meets
         the user-facing rule without changing the meaning of the other reference
-        kinds. Please confirm, or pick a different option before Phase 3's
-        `derive_source` and completion wiring lands.
+        kinds. Please confirm, or pick a different option before Phase 4's
+        `derive_source`-dependent CLI tests and docs land.
 message_to_agent: |-
-    Phase 2 (biscuit-file foundation) is complete; `just test`/`just lint`
-    pass in the biscuit-file area and cross-check legs pass on Linux,
-    native Windows, and WSL2. The Phase 3 API you build on:
+    Phase 3 (consumer integration) is complete; `just test` / `just lint`
+    pass in the claudine (7341), darkmatter (8497), and claudine-cli (2776,
+    `test-fixtures`) areas and `cargo check --workspace --all-targets` is
+    clean. What Phase 4 builds on:
 
-    - `FileResolutionContext::launch_magic_scope()` -> `&LaunchMagicScope`
-      (accessors `request_dir`, `repository_root`, `package_root`,
-      `package_area`, `local_root`), preserved verbatim by
-      `for_source`/`for_base`/`for_trusted_external_*`; synced only by the
-      direct builders.
-    - `with_launch_magic_scope(scope)` — the seeding builder for rebuilt
-      source contexts (the ruling-2 cross-repository path); natural source
-      is `launch_ctx.launch_magic_scope().clone()`.
-    - `add_magic_path_with_tier(path, pos, MagicPathTier::User)` — use for
-      Claudine's `~/.claudine/prompts` (Start) and `~/.claudine` (End);
-      plain `add_magic_path` remains inferred.
-    - `magic_search_roots() -> Vec<MagicSearchRoot>` — the R4 ordered,
-      deduplicated root list (path + provenance) to store beside the probe
-      record and render on `@` misses; configured roots carry
-      `RootProvenance::Magic` (the `(*)` marker), the no-repo local root
-      carries the new `RootProvenance::LocalRoot`.
-    - `magic_path_registrations() -> Vec<MagicPathRegistration>`
-      (path/position/tier) — encode this, the launch scope, and
-      `package_root` in Darkmatter identity; `LocalRoot` appends as cache
-      code 8 without renumbering.
-
-    Known compile breakage you own (verified with cargo check): the two
-    exhaustive `RootProvenance` matches in claudine
-    (`composition/error/render/provider.rs`, `composition/error/render/mod.rs`)
-    and, in darkmatter `compose/context/options.rs`, the provenance code
-    match plus an E0308 at `encode_file_resolution_context` because
-    `prepended_magic_paths()`/`appended_magic_paths()` now return owned
-    `Vec<PathBuf>`. Ambient behavior changes to carry through consumer
-    tests: a relative configured magic root passed to `resolve_from(base)`
-    now follows `base` (not the process CWD), and `@` completion without a
-    repository now enumerates the launch directory as the local root before
-    home. Details and the full requirement-to-test table are in
-    implementation-log.md under "Phase 2".
+    - Claudine registers conventions against the launch local root
+      (repo root, else launch dir) everywhere, and the two `~/.claudine`
+      rows are explicit `MagicPathTier::User`. `derive_source` and the
+      compat `derive_request_context_for_source` seed
+      `with_launch_magic_scope(launch.launch_magic_scope().clone())` last.
+    - `CompositionError::from_detailed_no_match(detailed, context)` now
+      takes the resolving context; `ResolutionDetail::magic_search_roots()`
+      carries the ordered chain for direct `@` misses (empty otherwise).
+    - The `@` miss report is live: payload once, ordered search-root
+      directories, `(*)` only on configured roots, footnote
+      "(*) searched in addition to the standard `@` roots, for this
+      context"; bare/absolute misses keep "Cannot resolve … Tried:". For
+      task 4.1's CLI assertions, render through `report_block_error` with
+      a `ColorDepth::None` terminal (see `plain_terminal()` in
+      `claudine/lib/src/composition/resolve/tests.rs`) and note that a
+      100-column terminal word-wraps long root lines — assert on paths,
+      not exact lines, or use a wide terminal.
+    - Ruling 2 flipped one CLI expectation on purpose:
+      `sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored`
+      (nested `@` follows the launch tree; `./` stays source-anchored).
+      Task 4.1's nested-prompt cases should follow the same rule.
+    - Darkmatter identity encodes package_root, the launch `@` scope, and
+      tier-aware magic registrations; `LocalRoot` is cache code 8.
+    - Docs/skills are untouched so far — task 4.2 owns them, including the
+      `shell-completions.md` magic-order section and the unfinished
+      "Local Wins" section of `compose-prompt-rules.md`.
 $schema:
     status: |-
         enum(
