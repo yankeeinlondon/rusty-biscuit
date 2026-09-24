@@ -7,8 +7,7 @@
 //! them at all. These tests materialize each fixture into a tempdir
 //! and assert the invariants the bench cases rely on.
 
-#[path = "../../benches/support/builder.rs"]
-mod builder;
+use crate::builder;
 
 use std::fs;
 use std::path::Path;

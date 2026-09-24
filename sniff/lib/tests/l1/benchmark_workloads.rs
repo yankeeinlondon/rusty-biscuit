@@ -1,7 +1,6 @@
 //! Contract checks for the parameterized Criterion fixture families.
 
-#[path = "../../benches/support/builder.rs"]
-mod builder;
+use crate::builder;
 #[path = "../../benches/support/fixtures.rs"]
 mod fixtures;
 

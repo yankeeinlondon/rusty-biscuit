@@ -6,6 +6,11 @@
 //! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
+// Shared by `bench_fixtures`, `benchmark_workloads`, and `git_parity`; one
+// binary may load a file as a module only once.
+#[path = "../../benches/support/builder.rs"]
+mod builder;
+
 mod bench_fixtures;
 mod bench_ids_sync;
 mod bench_plans;

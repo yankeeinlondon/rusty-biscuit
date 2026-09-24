@@ -8,8 +8,7 @@
 //! against a freshly-opened git2 handle or against structural invariants that
 //! must survive the backend swap.
 
-#[path = "../../benches/support/builder.rs"]
-mod builder;
+use crate::builder;
 
 use std::fs;
 use std::path::{Path, PathBuf};
