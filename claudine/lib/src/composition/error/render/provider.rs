@@ -6,7 +6,7 @@
 //! The dispatcher in [`super`] routes this family here, including its `_` arm.
 
 use super::super::*;
-use biscuit_file::{FileReferenceKind, RootProvenance};
+use biscuit_file::{FileReference, FileReferenceKind, RootProvenance};
 use biscuit_terminal::components::list::UnorderedList;
 use crate::composition::types::CompositionMode;
 use crate::harness::ResolutionDetail;
@@ -112,9 +112,10 @@ fn render_magic_no_match_body(
     suggestions: &[String],
     term: &Terminal,
 ) -> String {
-    // The payload is the authored reference without its `%` recursive and `@`
-    // magic prefixes, matching how the spec spells the miss line.
-    let payload = reference.trim_start_matches('%').trim_start_matches('@');
+    // The reference already parsed to reach a no-match, so the fallback to the
+    // authored text is unreachable in practice.
+    let parsed = FileReference::new(reference).ok();
+    let payload = parsed.as_ref().map_or(reference, FileReference::payload);
     let mut body = Prose::new(format!(
         "<cyan>`{}`</cyan> was not found under any directory an <b>`@` reference</b> searches:",
         Prose::escape_text(payload),
