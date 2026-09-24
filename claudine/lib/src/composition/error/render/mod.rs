@@ -337,6 +337,7 @@ fn caller_root_provenance_slug(provenance: biscuit_file::RootProvenance) -> &'st
         biscuit_file::RootProvenance::Magic => "magic",
         biscuit_file::RootProvenance::Vault => "vault",
         biscuit_file::RootProvenance::Absolute => "absolute",
+        biscuit_file::RootProvenance::LocalRoot => "local-root",
     }
 }
 

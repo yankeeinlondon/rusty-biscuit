@@ -107,6 +107,24 @@ to async-signal-safe operations:
   active, that loop's own handler owns the child-targeted SIGINT → SIGTERM →
   SIGKILL ladder, so the compose guard defers to it rather than killing the
   wrapper out from under a still-reaping child.
+- A repeat press that lands while a **terminal lifecycle event** (`success`,
+  `blocked`, `failure`, `finalize`) is running — and no wait loop owns the
+  ladder — does not force-exit at once. The lib marks those events with
+  `claudine::interrupt::TerminalLifecycleScope` (entered in
+  `LifecycleRunGuard::run_event_stack`); the press arms a 500 ms deadline
+  (`TERMINAL_LIFECYCLE_EXIT_GRACE`), and a run that finishes inside it exits
+  normally. On Unix the signal handler cannot wait, so it writes one byte to a
+  process-lifetime self-pipe and a watcher thread sleeps out the grace before
+  `_exit(130)`; on Windows the console-handler thread waits itself. Later
+  presses do not extend the deadline.
+- The **post-exit process-group teardown** (`kill_process_group`, Unix) raises
+  the same counter. After the agent exits, a descendant that inherited its
+  stdout/stderr (an OpenCode server, a subagent) can outlive it; the teardown
+  sends `SIGTERM`, polls until the group is empty, and escalates to `SIGKILL`
+  at the end of the kill grace **or at once when a Ctrl+C has been observed**.
+  Holding the counter means a repeated press there is deferred, so the run
+  still reaches its `failure` and `finalize` lifecycle events instead of being
+  force-exited past them.
 
 `signal_hook::low_level::register` stacks handlers, so this compose-scoped
 guard composes cleanly with the per-iteration handler installed around

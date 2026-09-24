@@ -10,6 +10,7 @@ mod completion_round_trip;
 mod detailed_resolution;
 mod finalized_reference_resolution;
 mod implicit_relative;
+mod magic_local_roots;
 mod parse_count;
 mod precedence_flip;
 mod reference_grammar;

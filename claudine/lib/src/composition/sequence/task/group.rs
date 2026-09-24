@@ -62,6 +62,14 @@ use crate::render::{TaskBar, TaskLiveOutput, TaskStream};
 /// incomplete and cannot be reported honestly.
 const SLOT_POISONED: &str = "group result slot poisoned by a panicking task";
 
+/// Stack reserved for each parallel member thread.
+///
+/// A member runs a prompt task's whole compose pipeline in-process, so it needs
+/// the same 8 MiB the `claudine` main thread gets on every OS (see
+/// `claudine/cli/build.rs`); Rust's 2 MiB spawn default left a debug build under
+/// 4x headroom. The reservation is address space, committed only as used.
+const MEMBER_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 /// One finished member, with the wall clock the scheduler measured around it.
 struct MemberRun {
     outcome: TaskOutcome,
@@ -263,7 +271,9 @@ impl TaskExecution<'_> {
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
-                scope.spawn(|| {
+                std::thread::Builder::new()
+                    .stack_size(MEMBER_THREAD_STACK_BYTES)
+                    .spawn_scoped(scope, || {
                     loop {
                         let index = cursor.fetch_add(1, Ordering::SeqCst);
                         let Some(task) = group.tasks.get(index) else {
@@ -306,7 +316,8 @@ impl TaskExecution<'_> {
                         *slots[index].lock().expect(SLOT_POISONED) =
                             Some(MemberRun { duration, outcome });
                     }
-                });
+                })
+                    .expect("spawn a parallel group member thread");
             }
         });
 

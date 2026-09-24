@@ -124,7 +124,7 @@ fn resolve_sequence_source(
     let resolved_path = match detailed.outcome() {
         biscuit_file::DetailedOutcome::Matched(path) => path.clone(),
         biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch) => {
-            return Err(CompositionError::from_detailed_no_match(&detailed));
+            return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
         biscuit_file::DetailedOutcome::Failed(_) => {
             let source = match detailed.into_convenience() {

@@ -22,7 +22,22 @@ all Markdown documents contained in a directory starting with the `_` character 
 
 ### Local Wins
 
-By default, the paths you provide are interpreted as _relative_ file paths from any the document roots listed above but that means that multiple matches with the same filename are possible. To handle this we will always resolve to the most "local" variant. By _most local_ we mean the document root 
+By default, the paths you provide are interpreted as _relative_ file paths from any of the document roots listed above but that means that multiple matches with the same filename are possible. To handle this we will always resolve to the most "local" variant. By _most local_ we mean the document root closest to where you launched Claudine, and the rule behind that is simple:
+
+> **The local file tree resolves first.** Its root is the repository root when you launch inside a repository, and the launch directory itself when you don't — whether or not that directory lives under `$HOME`. Only when the local tree can't resolve a reference do we fall back to your home directory.
+
+So every local root — `{package}/prompts`, `{package-area}/prompts`, `{local}/prompts`, `{local}/.claudine/prompts`, `{local}/docs`, the local agent-skill directories, and the package, package-area, and local roots themselves — is searched before `~/.claudine/prompts`, `~`, or `~/.claudine`. A `commit.md` sitting in your `~/config/sh` repository (or in a plain `~/scratch` directory) beats the `~/.claudine/prompts/commit.md` you keep for everywhere else. Your user prompts are still reachable from any directory; they just never shadow a local file with the same name. The full order is listed under [Scopes](./shell-completions.md#scopes).
+
+The same holds when you launch from `$HOME` itself: `~/.claudine/prompts` and `~/.claudine` are always treated as _user_ locations, so they stay behind your local files even when the local tree and your home directory are the same place.
+
+#### Prompts that live somewhere else
+
+A prompt doesn't have to come from the local tree — `@commit.md` may well resolve to `~/.claudine/prompts/commit.md` or to a prompt in another repository. When _that_ prompt contains references of its own, they are resolved like this:
+
+- **`@` references** keep the launch tree: a nested `@style.md` is searched for in the tree you launched Claudine from first, then in your home locations — not in the directory or repository the prompt was loaded from. `@` means "the usual places for this invocation", so a shared user prompt picks up the local project's files.
+- **`./`, bare, `&`, and `^` references** keep their source-relative meaning: `./style.md` and `style.md` resolve from the prompt's own directory (a bare path then falls back to the prompt's repository root), and `&` / `^` anchor on the prompt's own repository and packages.
+
+In other words, pick `@` when a prompt should adapt to wherever it's run, and a relative path when it must always use its own companion file.
 
 ## Magic Paths
 

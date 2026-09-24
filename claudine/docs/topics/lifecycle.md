@@ -277,8 +277,10 @@ At most one flow-control action may appear in a stack item, and it must be the l
 `biscuit-file::FileReference` contract, anchored on the document that authored
 it: a bare implicit path (`other.md`) checks next to the authoring document first,
 then the repository root; an explicit `./`/`../` path is source-relative only;
-`@` searches Claudine's registered convention roots before the intrinsic package,
-package-area, repository, and home roots; `&` pins to the repository root; `^`
+`@` searches the local tree (Claudine's local convention roots, then the
+intrinsic package, package-area, and repository or launch-directory roots)
+before the home-based ones (`~/.claudine/prompts`, home, `~/.claudine`); `&`
+pins to the repository root; `^`
 searches package, package-area, then repository roots; and `~/` is home-pinned.
 The target must name an existing document, so a
 missing target fails loudly with a typed `Unresolvable file reference` rather than

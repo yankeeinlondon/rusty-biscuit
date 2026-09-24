@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_file::{
-    DetailedResolution, FileReferenceError, FileReferenceKind, ProbeDisposition, ProbedCandidate,
-    RootProvenance,
+    DetailedResolution, FileReferenceError, FileReferenceKind, MagicSearchRoot, ProbeDisposition,
+    ProbedCandidate, RootProvenance,
 };
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
@@ -66,6 +66,12 @@ pub struct ResolutionDetail {
     base_dir: PathBuf,
     repository_root: Option<PathBuf>,
     candidates: Vec<ProbedCandidate>,
+    /// The ordered `@` search roots the resolution actually used, populated
+    /// only for a direct magic (`@`) reference: the human-readable miss
+    /// report lists these directories instead of the joined candidate paths
+    /// (2026-09-23-local-before-home R4). Empty for every other kind and for
+    /// details built without a context.
+    magic_search_roots: Vec<MagicSearchRoot>,
 }
 
 impl ResolutionDetail {
@@ -78,12 +84,29 @@ impl ResolutionDetail {
             base_dir: detailed.base_dir().to_path_buf(),
             repository_root: detailed.repository_root().map(Path::to_path_buf),
             candidates: detailed.candidates().to_vec(),
+            magic_search_roots: Vec::new(),
         }
+    }
+
+    /// Attach the ordered `@` search roots a direct magic miss reports.
+    ///
+    /// Taken from the resolving context's `magic_search_roots()` snapshot;
+    /// the resolver's `DetailedResolution` does not carry the root chain, so
+    /// the boundary that still holds the context records it here.
+    #[must_use]
+    pub fn with_magic_search_roots(mut self, roots: Vec<MagicSearchRoot>) -> Self {
+        self.magic_search_roots = roots;
+        self
     }
 
     /// The reference exactly as authored.
     pub fn reference(&self) -> &str {
         &self.reference
+    }
+
+    /// The reference's authored kind.
+    pub fn kind(&self) -> FileReferenceKind {
+        self.kind
     }
 
     /// The captured directory against which source-relative candidates resolve.
@@ -99,6 +122,12 @@ impl ResolutionDetail {
     /// The ordered candidates the resolver attempted, each with its disposition.
     pub fn candidates(&self) -> &[ProbedCandidate] {
         &self.candidates
+    }
+
+    /// The ordered `@` search roots recorded for a direct magic miss, in
+    /// resolution priority order. Empty for every other reference kind.
+    pub fn magic_search_roots(&self) -> &[MagicSearchRoot] {
+        &self.magic_search_roots
     }
 
     /// Populate the resolver-owned fields in the shared file-reference payload.
@@ -494,6 +523,7 @@ fn root_provenance_slug(provenance: RootProvenance) -> &'static str {
         P::Magic => "magic",
         P::Vault => "vault",
         P::Absolute => "absolute",
+        P::LocalRoot => "local_root",
     }
 }
 

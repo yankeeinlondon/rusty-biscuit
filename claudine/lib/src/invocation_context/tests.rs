@@ -339,7 +339,7 @@ fn standalone_darkmatter_and_claudine_file_plans_have_scope_parity() {
 }
 
 #[test]
-fn nested_sources_rebuild_their_own_prompt_convention_roots() {
+fn nested_sources_keep_launch_at_conventions_while_reanchoring_source_scopes() {
     let fixture = TempDir::new().unwrap();
     init_repo(fixture.path());
     fs::create_dir_all(fixture.path().join("alpha/lib")).unwrap();
@@ -360,17 +360,45 @@ fn nested_sources_rebuild_their_own_prompt_convention_roots() {
     let beta = fixture.path().join("beta/lib/beta.md");
     fs::write(&alpha, "alpha").unwrap();
     fs::write(&beta, "beta").unwrap();
+    // Launched from alpha/lib: the launch `@` scope selects alpha's package.
     let invocation = InvocationContext::capture_at(fixture.path().join("alpha/lib").as_path());
 
     let alpha_context = invocation.derive_source(&alpha).unwrap();
     let beta_context = invocation.derive_source(&beta).unwrap();
-    let alpha_roots = alpha_context.file_resolution_context().prepended_magic_paths();
-    let beta_roots = beta_context.file_resolution_context().prepended_magic_paths();
 
-    assert!(alpha_roots.contains(&fixture.path().join("alpha/lib/prompts")));
-    assert!(!alpha_roots.contains(&fixture.path().join("beta/lib/prompts")));
-    assert!(beta_roots.contains(&fixture.path().join("beta/lib/prompts")));
-    assert!(!beta_roots.contains(&fixture.path().join("alpha/lib/prompts")));
+    // Ruling 2 of 2026-09-23-local-before-home: a nested `@x.md` keeps
+    // searching the launch tree, so the prompt conventions of BOTH derived
+    // contexts stay pinned to the launch package rather than re-anchoring on
+    // each source's own package.
+    for context in [
+        alpha_context.file_resolution_context(),
+        beta_context.file_resolution_context(),
+    ] {
+        let roots = context.prepended_magic_paths();
+        assert!(
+            roots.contains(&fixture.path().join("alpha/lib/prompts")),
+            "launch conventions missing: {roots:?}"
+        );
+        assert!(
+            !roots.contains(&fixture.path().join("beta/lib/prompts")),
+            "source package must not re-anchor `@` conventions: {roots:?}"
+        );
+        assert_eq!(
+            context.launch_magic_scope().package_root(),
+            Some(fixture.path().join("alpha/lib").as_path())
+        );
+    }
+
+    // The source-relative anchors still follow each source: `&`, `^`, and
+    // bare references from the beta prompt keep beta's own package scope.
+    assert_eq!(
+        alpha_context.file_resolution_context().package_root(),
+        Some(fixture.path().join("alpha/lib").as_path())
+    );
+    assert_eq!(
+        beta_context.file_resolution_context().package_root(),
+        Some(fixture.path().join("beta/lib").as_path())
+    );
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use crate::effects::EffectEngine;
 use crate::effects::error::EffectError;
-use crate::effects::fs_write::{atomic_write_guarded, ensure_within};
+use crate::effects::fs_write::{append_guarded, atomic_write_guarded, ensure_within};
 use crate::markdown::FrontmatterMap;
 use crate::markdown::Markdown;
 use crate::markdown::hash::MdHashOptions;
@@ -278,13 +278,12 @@ impl EffectEngine {
     }
 
     /// `append_line(file, text)` → absolute path.
+    ///
+    /// Safe under concurrent appenders; see [`append_guarded`].
     pub fn append_line(&self, file: &str, text: &str) -> Result<String, EffectError> {
         let path = self.resolve(file)?;
         let cleaned = ensure_within(self.mutation_root(), &path)?;
-        let mut existing = std::fs::read_to_string(&cleaned).unwrap_or_default();
-        existing.push_str(text);
-        existing.push('\n');
-        atomic_write_guarded(self.mutation_root(), &cleaned, existing.as_bytes())?;
+        append_guarded(self.mutation_root(), &cleaned, format!("{text}\n").as_bytes())?;
         Ok(cleaned.to_string_lossy().to_string())
     }
 

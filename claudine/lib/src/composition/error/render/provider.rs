@@ -6,9 +6,10 @@
 //! The dispatcher in [`super`] routes this family here, including its `_` arm.
 
 use super::super::*;
-use biscuit_file::RootProvenance;
+use biscuit_file::{FileReference, FileReferenceKind, RootProvenance};
 use biscuit_terminal::components::list::UnorderedList;
 use crate::composition::types::CompositionMode;
+use crate::harness::ResolutionDetail;
 
 /// Render the [`StatusBlock`] for a provider/execution/file-reference-family
 /// [`CompositionError`], or the generic block for any remaining variant.
@@ -66,51 +67,20 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             resolution,
             suggestions,
         } => {
-            let mut body = Prose::new(format!(
-                "Cannot resolve <cyan>`{}`</cyan> from launch directory <cyan>`{}`</cyan>.",
-                Prose::escape_text(reference),
-                Prose::escape_text(&biscuit_file::to_portable_string(resolution.base_dir())),
-            ))
-            .render(term);
-
-            if !resolution.candidates().is_empty() {
-                body.push_str("\n\n");
-                body.push_str(&Prose::new("<b>Tried:</b>").render(term));
-                body.push('\n');
-                let mut candidates = UnorderedList::empty();
-                for probed in resolution.candidates() {
-                    let provenance = match probed.candidate().provenance() {
-                        RootProvenance::Repository => "repository",
-                        RootProvenance::Source => "launch directory",
-                        RootProvenance::PackageRoot => "package",
-                        RootProvenance::PackageArea => "package area",
-                        RootProvenance::Home => "home",
-                        RootProvenance::Magic => "magic",
-                        RootProvenance::Vault => "vault",
-                        RootProvenance::Absolute => "absolute",
-                    };
-                    let path = biscuit_file::to_portable_string(probed.candidate().path());
-                    candidates.add(Prose::new(format!(
-                        "<b>{provenance}</b>: <cyan>`{}`</cyan>",
-                        Prose::escape_text(&path),
-                    )));
-                }
-                body.push_str(&candidates.render(term));
-            }
-
-            if !suggestions.is_empty() {
-                body.push_str("\n\n");
-                body.push_str(&Prose::new("<b>Did you mean:</b>").render(term));
-                body.push('\n');
-                let mut paths = UnorderedList::empty();
-                for path in suggestions {
-                    paths.add(Prose::new(format!(
-                        "<cyan>`{}`</cyan>",
-                        Prose::escape_text(path),
-                    )));
-                }
-                body.push_str(&paths.render(term));
-            }
+            // A direct magic (`@`) miss reports the directories the `@`
+            // chain searched, not the joined candidate paths: a nonmatching
+            // join such as `<root>/prompts/prompts/<x>` is just the rules
+            // applied and reads as a resolver bug (R4 of
+            // 2026-09-23-local-before-home). Every other reference kind
+            // keeps the "Tried:" candidate list, because a bare or explicit
+            // relative reference has no search chain to name.
+            let body = if resolution.kind() == FileReferenceKind::Magic
+                && !resolution.magic_search_roots().is_empty()
+            {
+                render_magic_no_match_body(reference, resolution, suggestions, term)
+            } else {
+                render_candidate_no_match_body(reference, resolution, suggestions, term)
+            };
 
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -127,4 +97,113 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                 .body(msg)
         }
     }
+}
+
+/// The human-readable body for a direct magic (`@`) reference miss.
+///
+/// Names the reference payload once, then lists the `@` search roots in
+/// priority order — every local root before the first home root, exactly as
+/// resolution searched them. Only configured roots carry the `(*)` marker; the
+/// intrinsic roots (package, package area, local root, home) do not. No joined
+/// candidate paths and no provenance labels appear in this branch (R4).
+fn render_magic_no_match_body(
+    reference: &str,
+    resolution: &ResolutionDetail,
+    suggestions: &[String],
+    term: &Terminal,
+) -> String {
+    // The reference already parsed to reach a no-match, so the fallback to the
+    // authored text is unreachable in practice.
+    let parsed = FileReference::new(reference).ok();
+    let payload = parsed.as_ref().map_or(reference, FileReference::payload);
+    let mut body = Prose::new(format!(
+        "<cyan>`{}`</cyan> was not found under any directory an <b>`@` reference</b> searches:",
+        Prose::escape_text(payload),
+    ))
+    .render(term);
+    body.push('\n');
+    let mut roots = UnorderedList::empty();
+    for root in resolution.magic_search_roots() {
+        let path = biscuit_file::to_portable_string(root.path());
+        let marker = (root.provenance() == RootProvenance::Magic).then_some(" (*)");
+        roots.add(Prose::new(format!(
+            "<cyan>`{}`</cyan>{}",
+            Prose::escape_text(&path),
+            marker.unwrap_or_default(),
+        )));
+    }
+    body.push_str(&roots.render(term));
+    body.push_str("\n\n");
+    body.push_str(
+        &Prose::new(
+            "<i>(*) searched in addition to the standard `@` roots, for this context</i>",
+        )
+        .render(term),
+    );
+    append_suggestions(&mut body, suggestions, term);
+    body
+}
+
+/// The human-readable body for a non-magic reference miss: the anchor the
+/// reference resolved from plus the ordered candidate list with provenance
+/// labels. Bare, explicit-relative, absolute, and vault references have no
+/// search chain to name, so their joined candidates remain the report.
+fn render_candidate_no_match_body(
+    reference: &str,
+    resolution: &ResolutionDetail,
+    suggestions: &[String],
+    term: &Terminal,
+) -> String {
+    let mut body = Prose::new(format!(
+        "Cannot resolve <cyan>`{}`</cyan> from launch directory <cyan>`{}`</cyan>.",
+        Prose::escape_text(reference),
+        Prose::escape_text(&biscuit_file::to_portable_string(resolution.base_dir())),
+    ))
+    .render(term);
+
+    if !resolution.candidates().is_empty() {
+        body.push_str("\n\n");
+        body.push_str(&Prose::new("<b>Tried:</b>").render(term));
+        body.push('\n');
+        let mut candidates = UnorderedList::empty();
+        for probed in resolution.candidates() {
+            let provenance = match probed.candidate().provenance() {
+                RootProvenance::Repository => "repository",
+                RootProvenance::Source => "launch directory",
+                RootProvenance::PackageRoot => "package",
+                RootProvenance::PackageArea => "package area",
+                RootProvenance::Home => "home",
+                RootProvenance::Magic => "magic",
+                RootProvenance::Vault => "vault",
+                RootProvenance::Absolute => "absolute",
+                RootProvenance::LocalRoot => "local root",
+            };
+            let path = biscuit_file::to_portable_string(probed.candidate().path());
+            candidates.add(Prose::new(format!(
+                "<b>{provenance}</b>: <cyan>`{}`</cyan>",
+                Prose::escape_text(&path),
+            )));
+        }
+        body.push_str(&candidates.render(term));
+    }
+
+    append_suggestions(&mut body, suggestions, term);
+    body
+}
+
+fn append_suggestions(body: &mut String, suggestions: &[String], term: &Terminal) {
+    if suggestions.is_empty() {
+        return;
+    }
+    body.push_str("\n\n");
+    body.push_str(&Prose::new("<b>Did you mean:</b>").render(term));
+    body.push('\n');
+    let mut paths = UnorderedList::empty();
+    for path in suggestions {
+        paths.add(Prose::new(format!(
+            "<cyan>`{}`</cyan>",
+            Prose::escape_text(path),
+        )));
+    }
+    body.push_str(&paths.render(term));
 }

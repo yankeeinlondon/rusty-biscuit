@@ -52,7 +52,9 @@ Both enforced inside Darkmatter, both configured by the host:
   `append_frontmatter` / `prepend_frontmatter`
 - **File & directory (shipped):** `ensure_file` (with an
   `ensure_file_with_content` two-arg form), `ensure_dir`, `append_line`,
-  `append_jsonl`
+  `append_jsonl`. Whole-file writes replace the file atomically; the two
+  append verbs write through an append-mode handle instead, so concurrent
+  appenders (parallel sequence members, separate processes) never lose a line.
 - **Network:** `http_post(url, body)` posts a body and returns an object with
   `status` and `body`. It is host-allowlist gated and deny-all by default.
 

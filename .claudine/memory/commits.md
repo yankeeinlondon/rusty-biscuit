@@ -198,7 +198,18 @@ belong here.
   half-batch of paths, and let the orchestrator collapse them if the
   journal rule requires a single atomic commit (each commit re-signs
   with a fresh hash; verify with `git diff` between original and
-  recomposed commit that only the messages differ).
+  recomposed commit that only the messages differ). The "~40 pairs"
+  figure is conservative — a single atomic `--only` invocation
+  succeeded for 499 renames (998 paths = ~103 KB inline pathspec) on
+  a host with `ARG_MAX=1048576` (`getconf ARG_MAX`); the per-path cost
+  is ~200 bytes on the rename pairs seen here, so the practical
+  limit is roughly `ARG_MAX / 250`. Pre-flight `wc -c` on the inline
+  pathspec before dispatch; if it stays well under ARG_MAX, the
+  atomic single-commit shape preserves the journal's "one rename
+  event = one commit" preference. Verify the result with
+  `git ls-tree HEAD <new-dir>/` (count files; the count should equal
+  the rename pair count) and `git ls-tree HEAD <old-dir>/` (should be
+  empty) before reporting success.
 - Splitting a single file's content across two commits (e.g. two
   `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
   commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
@@ -595,6 +606,17 @@ belong here.
   written — `--only` rewrites the index entry to the blob it just committed,
   so a later re-capture returns the previous commit's content, not the
   original staged snapshot.
+- Sub-agent commit dependency on a sibling's commit is orthogonal to
+  index-lock contention. The lock-retry rule (1–3 s × 5) covers
+  `index.lock` failures, not "the parent commit my brief listed isn't in
+  HEAD yet because the sibling agent that owns it hasn't finished." A
+  consumer sub-agent must pre-flight `git log --oneline -N | grep -E
+  '<expected-hash>|<expected-subject>'` and short-sleep retries (×5)
+  until the dependency commits show up. Without this, the consumer
+  either lands a commit whose tree refers to a not-yet-defined symbol
+  (silent intermediate breakage) or returns failure and the
+  orchestrator re-dispatches it as wasted work. The pre-flight is the
+  small cost; the silent breakage is the expensive one to debug later.
 
 ## Verification
 

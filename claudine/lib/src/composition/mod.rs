@@ -132,9 +132,10 @@ pub(crate) use resolve::resolve_fixture_source;
 pub use resolve::{
     build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
     enrich_composition_source_load_error, enrich_composition_source_load_error_in_context,
-    is_yaml_source, load_yaml_document, prompt_magic_roots, reload_composition_source,
+    is_yaml_source, load_yaml_document, prompt_magic_fallback_roots, prompt_magic_roots,
+    reload_composition_source,
     resolve_composition_source, resolve_composition_source_in_context, validate_file_permissions,
-    without_formal_sequence_keys,
+    with_prompt_magic_roots, without_formal_sequence_keys,
 };
 pub use runtime_state::{
     OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,

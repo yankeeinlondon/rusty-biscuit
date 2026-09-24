@@ -145,6 +145,87 @@ impl RepositoryScope {
     }
 }
 
+/// The immutable, request-scoped launch scope `@` (magic) references search.
+///
+/// Captured once from the directory a request was launched from: that
+/// directory plus the repository, package, and package-area roots selected
+/// for it. Derivations ([`for_source`](FileResolutionContext::for_source),
+/// [`for_base`](FileResolutionContext::for_base), and the trusted-external
+/// forms) preserve this snapshot unchanged, so a nested `@` reference keeps
+/// searching the launch tree even when the authoring source lives in another
+/// repository or an external prompt directory, while `./`, bare, `&`, and `^`
+/// references keep their source-specific anchors.
+///
+/// The [`local_root`](Self::local_root) — the repository root when one was
+/// selected for the request directory, else the request directory itself —
+/// anchors the local tier of the `@` root chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchMagicScope {
+    request_dir: PathBuf,
+    repository_root: Option<PathBuf>,
+    package_root: Option<PathBuf>,
+    package_area: Option<PathBuf>,
+}
+
+impl LaunchMagicScope {
+    /// The request directory the scope was captured from.
+    pub fn request_dir(&self) -> &Path {
+        &self.request_dir
+    }
+
+    /// The repository root selected for the request directory, when one was.
+    pub fn repository_root(&self) -> Option<&Path> {
+        self.repository_root.as_deref()
+    }
+
+    /// The package root selected for the request directory, when one was.
+    pub fn package_root(&self) -> Option<&Path> {
+        self.package_root.as_deref()
+    }
+
+    /// The package-area root selected for the request directory, when one was.
+    pub fn package_area(&self) -> Option<&Path> {
+        self.package_area.as_deref()
+    }
+
+    /// The root of the local tree for `@` references: the launch repository
+    /// root when one exists, otherwise the request directory itself.
+    pub fn local_root(&self) -> &Path {
+        self.repository_root.as_deref().unwrap_or(&self.request_dir)
+    }
+}
+
+/// One configured magic (`@`) root registration, as supplied to
+/// [`add_magic_path`](FileResolutionContext::add_magic_path) or
+/// [`add_magic_path_with_tier`](FileResolutionContext::add_magic_path_with_tier).
+///
+/// Exposed so cache and graph identity can encode exactly what a context
+/// registered — including its tier policy, which can change the winning
+/// candidate without changing any other context field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MagicPathRegistration {
+    path: PathBuf,
+    position: super::PathPosition,
+    tier: super::MagicPathTier,
+}
+
+impl MagicPathRegistration {
+    /// The registered root, exactly as supplied (possibly relative).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The registered position.
+    pub fn position(&self) -> super::PathPosition {
+        self.position
+    }
+
+    /// The registered tier policy.
+    pub fn tier(&self) -> super::MagicPathTier {
+        self.tier
+    }
+}
+
 fn validate_catalog_roots(
     root_kind: &'static str,
     roots: Vec<PathBuf>,
@@ -220,6 +301,12 @@ pub(crate) struct ResolutionContext {
     /// is authoritative (D2/D10), so a missing anchor is consumed as absent
     /// rather than re-probed from the filesystem after construction.
     pub allow_ambient_discovery: bool,
+    /// The immutable launch `@` scope captured by the originating
+    /// [`FileResolutionContext`]. `None` for the ambient compatibility
+    /// methods, whose live anchors *are* the launch scope. `@` resolution
+    /// reads the local-root anchors from here rather than from the
+    /// source-derived anchors above.
+    pub launch_magic_scope: Option<LaunchMagicScope>,
 }
 
 impl ResolutionContext {
@@ -244,6 +331,7 @@ impl ResolutionContext {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         })
     }
 
@@ -271,6 +359,7 @@ impl ResolutionContext {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         })
     }
 
@@ -289,6 +378,7 @@ impl ResolutionContext {
             package_root: ctx.package_root.clone(),
             package_area: ctx.package_area.clone(),
             allow_ambient_discovery: false,
+            launch_magic_scope: Some(ctx.launch_magic_scope.clone()),
         }
     }
 }
@@ -318,6 +408,17 @@ impl ResolutionContext {
 /// must use [`for_trusted_external_source`](Self::for_trusted_external_source)
 /// or [`for_trusted_external_base`](Self::for_trusted_external_base).
 ///
+/// The context also captures an immutable launch `@` scope (see
+/// [`LaunchMagicScope`]): the construction directory plus the repository,
+/// package, and package-area roots selected for it. `@` resolution anchors on
+/// that snapshot across every derivation, so a nested `@` reference keeps
+/// searching the launch tree; the direct builder methods
+/// ([`with_repository_root`](Self::with_repository_root),
+/// [`with_repository_scope_catalog`](Self::with_repository_scope_catalog),
+/// [`with_package_root`](Self::with_package_root),
+/// [`with_package_area`](Self::with_package_area)) update it, while
+/// `for_source`/`for_base` derivations never do.
+///
 /// [`with_repository_root`]: Self::with_repository_root
 /// [`validate`]: Self::validate
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,6 +439,8 @@ pub struct FileResolutionContext {
     /// Whether the current authoring base intentionally crosses the request
     /// repository boundary.
     trusted_external_authoring_base: bool,
+    /// The immutable launch `@` scope; see the struct documentation.
+    launch_magic_scope: LaunchMagicScope,
 }
 
 impl FileResolutionContext {
@@ -354,6 +457,12 @@ impl FileResolutionContext {
         env: HashMap<String, String>,
     ) -> Self {
         let base_dir = base_dir.into();
+        let launch_magic_scope = LaunchMagicScope {
+            request_dir: base_dir.clone(),
+            repository_root: None,
+            package_root: None,
+            package_area: None,
+        };
         Self {
             source_path: None,
             request_base_dir: base_dir.clone(),
@@ -367,6 +476,7 @@ impl FileResolutionContext {
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
             trusted_external_authoring_base: false,
+            launch_magic_scope,
         }
     }
 
@@ -377,6 +487,12 @@ impl FileResolutionContext {
     /// the remaining anchors on top.
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
         let base_dir = base_dir.into();
+        let launch_magic_scope = LaunchMagicScope {
+            request_dir: base_dir.clone(),
+            repository_root: None,
+            package_root: None,
+            package_area: None,
+        };
         Self {
             source_path: None,
             request_base_dir: base_dir.clone(),
@@ -390,6 +506,7 @@ impl FileResolutionContext {
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
             trusted_external_authoring_base: false,
+            launch_magic_scope,
         }
     }
 
@@ -398,7 +515,10 @@ impl FileResolutionContext {
     /// Only the authoring source and its base directory change. Repository,
     /// package-area, home, environment, magic-root, and vault-root inputs are
     /// cloned from the captured request without reading process state or
-    /// performing discovery.
+    /// performing discovery. The launch `@` scope
+    /// ([`launch_magic_scope`](Self::launch_magic_scope)) is likewise
+    /// preserved verbatim: a nested `@` reference keeps searching the launch
+    /// tree while the source-relative kinds re-anchor on the new base.
     ///
     /// Both the request boundary and the derived source directory must remain
     /// inside the supplied repository root. Use
@@ -470,31 +590,47 @@ impl FileResolutionContext {
     }
 
     /// Supply the trusted repository (worktree) root.
+    ///
+    /// Updates both the current repository anchor and the launch `@` scope's
+    /// repository root.
     #[must_use]
     pub fn with_repository_root(mut self, repository_root: impl Into<PathBuf>) -> Self {
         self.repository_root = Some(repository_root.into());
+        self.sync_launch_magic_scope();
         self
     }
 
     /// Supply a captured repository topology and select scopes for this base.
+    ///
+    /// The selected repository, package-area, and package roots become both
+    /// the current anchors and the launch `@` scope's anchors.
     #[must_use]
     pub fn with_repository_scope_catalog(mut self, catalog: RepositoryScopeCatalog) -> Self {
         self.repository_scope_catalog = Some(catalog);
         self.recompute_repository_scopes();
+        self.sync_launch_magic_scope();
         self
     }
 
     /// Supply the package root used by intrinsic magic and repository-scoped searches.
+    ///
+    /// Updates both the current package anchor and the launch `@` scope's
+    /// package root.
     #[must_use]
     pub fn with_package_root(mut self, package_root: impl Into<PathBuf>) -> Self {
         self.package_root = Some(package_root.into());
+        self.sync_launch_magic_scope();
         self
     }
 
     /// Supply the package-area root.
+    ///
+    /// Updates both the current package-area anchor and the launch `@`
+    /// scope's package-area root.
     #[must_use]
     pub fn with_package_area(mut self, package_area: impl Into<PathBuf>) -> Self {
         self.package_area = Some(package_area.into());
+        self.sync_launch_magic_scope();
         self
     }
 
@@ -524,12 +660,59 @@ impl FileResolutionContext {
         self
     }
 
-    /// Add a magic (`@`) search root at the given position.
+    /// Add a magic (`@`) search root at the given position, with its tier
+    /// inferred from containment in the local root.
+    ///
+    /// Tier is decided at resolution time against the launch `@` scope's
+    /// local root (see [`LaunchMagicScope::local_root`]): a configured root
+    /// that lexically lies inside it — compared after `.`/`..` and Windows
+    /// verbatim normalization — joins the local tier searched before every
+    /// home-based root; every other root (including one under `$HOME` but
+    /// outside the local tree, and one outside both trees such as
+    /// `/opt/configs`) joins the user tier searched after the local tier.
+    /// Registration order is preserved within each tier position. Use
+    /// [`add_magic_path_with_tier`](Self::add_magic_path_with_tier) when a
+    /// caller knows a root is a user convention regardless of layout.
+    ///
+    /// A relative root is interpreted against the captured request directory
+    /// (the launch `@` scope's `request_dir`), never against the process
+    /// working directory: the joined candidate and the tier test use that
+    /// same absolute spelling. For the ambient `resolve_from(base)` form the
+    /// captured request directory is `base`, so a relative root follows
+    /// `base` rather than the process working directory.
     #[must_use]
-    pub fn add_magic_path(mut self, path: impl Into<PathBuf>, position: super::PathPosition) -> Self {
+    pub fn add_magic_path(self, path: impl Into<PathBuf>, position: super::PathPosition) -> Self {
+        self.add_configured_root(path, position, super::MagicPathTier::Inferred)
+    }
+
+    /// Add a magic (`@`) search root with an explicit tier policy.
+    ///
+    /// [`super::MagicPathTier::User`] forces the user tier regardless of where the
+    /// root lies, winning over containment inference in every layout —
+    /// including a launch directory equal to `$HOME` and `$HOME` itself being
+    /// a repository, where a path-only rule cannot tell a user convention
+    /// from a local one. [`super::MagicPathTier::Inferred`] behaves exactly like
+    /// [`add_magic_path`](Self::add_magic_path).
+    #[must_use]
+    pub fn add_magic_path_with_tier(
+        self,
+        path: impl Into<PathBuf>,
+        position: super::PathPosition,
+        tier: super::MagicPathTier,
+    ) -> Self {
+        self.add_configured_root(path, position, tier)
+    }
+
+    fn add_configured_root(
+        mut self,
+        path: impl Into<PathBuf>,
+        position: super::PathPosition,
+        tier: super::MagicPathTier,
+    ) -> Self {
+        let entry = (path.into(), tier);
         match position {
-            super::PathPosition::Start => self.magic_paths.prepend.push(path.into()),
-            super::PathPosition::End => self.magic_paths.append.push(path.into()),
+            super::PathPosition::Start => self.magic_paths.prepend.push(entry),
+            super::PathPosition::End => self.magic_paths.append.push(entry),
         }
         self
     }
@@ -588,14 +771,91 @@ impl FileResolutionContext {
         self.trusted_external_authoring_base
     }
 
-    /// Magic roots searched before repository and home defaults.
-    pub fn prepended_magic_paths(&self) -> &[PathBuf] {
-        &self.magic_paths.prepend
+    /// The immutable launch `@` scope captured at construction: the request
+    /// directory plus the repository, package, and package-area roots
+    /// selected for it.
+    ///
+    /// `@` resolution, recursive `%@` traversal, and `@` completion all read
+    /// their local-root anchors from this snapshot, which derivations never
+    /// rewrite. It is also a cache-identity input: two contexts differing
+    /// only in this scope can resolve the same `@` reference to different
+    /// files.
+    pub fn launch_magic_scope(&self) -> &LaunchMagicScope {
+        &self.launch_magic_scope
     }
 
-    /// Magic roots searched after repository and home defaults.
-    pub fn appended_magic_paths(&self) -> &[PathBuf] {
-        &self.magic_paths.append
+    /// Replace the launch `@` scope with an explicitly captured one.
+    ///
+    /// For requests that rebuild their resolution context around a source in
+    /// another repository or an external prompt directory: the context's own
+    /// anchors may then be re-anchored on that source (giving `./`, bare,
+    /// `&`, and `^` references their source-specific meanings) while `@`
+    /// keeps searching the invocation's launch tree. The natural source is
+    /// [`launch_magic_scope`](Self::launch_magic_scope) on the launch
+    /// context, captured before derivation.
+    #[must_use]
+    pub fn with_launch_magic_scope(mut self, scope: LaunchMagicScope) -> Self {
+        self.launch_magic_scope = scope;
+        self
+    }
+
+    /// Magic roots registered at [`PathPosition::Start`](super::PathPosition::Start),
+    /// in registration order.
+    ///
+    /// Roots are reported exactly as registered (possibly relative); tier is
+    /// not included — use [`magic_path_registrations`](Self::magic_path_registrations)
+    /// for the tier-aware view resolution orders them by.
+    pub fn prepended_magic_paths(&self) -> Vec<PathBuf> {
+        self.magic_paths.prepend_paths().collect()
+    }
+
+    /// Magic roots registered at [`PathPosition::End`](super::PathPosition::End),
+    /// in registration order.
+    ///
+    /// Roots are reported exactly as registered (possibly relative); tier is
+    /// not included — use [`magic_path_registrations`](Self::magic_path_registrations)
+    /// for the tier-aware view resolution orders them by.
+    pub fn appended_magic_paths(&self) -> Vec<PathBuf> {
+        self.magic_paths.append_paths().collect()
+    }
+
+    /// Every configured magic root with its registration position and tier
+    /// policy, prepended roots first in registration order, then appended
+    /// roots in registration order.
+    ///
+    /// This is the tier-aware view cache and graph identity should encode: a
+    /// tier override alone can change the winning candidate without changing
+    /// any other context field.
+    pub fn magic_path_registrations(&self) -> Vec<MagicPathRegistration> {
+        let mut registrations = Vec::with_capacity(
+            self.magic_paths.prepend.len() + self.magic_paths.append.len(),
+        );
+        let mut extend =
+            |entries: &[(PathBuf, super::MagicPathTier)], position: super::PathPosition| {
+                for (path, tier) in entries {
+                    registrations.push(MagicPathRegistration {
+                        path: path.clone(),
+                        position,
+                        tier: *tier,
+                    });
+                }
+            };
+        extend(&self.magic_paths.prepend, super::PathPosition::Start);
+        extend(&self.magic_paths.append, super::PathPosition::End);
+        registrations
+    }
+
+    /// The ordered, deduplicated `@` search roots for this context, each
+    /// carrying its provenance.
+    ///
+    /// Built by the same chain resolver `@` resolution, `%@` traversal, and
+    /// completion use, in local-before-user tier order (see
+    /// [`add_magic_path`](Self::add_magic_path)). Intrinsic roots carry their
+    /// kind provenance (package, package area, repository or
+    /// [`super::RootProvenance::LocalRoot`], home); configured roots carry
+    /// [`super::RootProvenance::Magic`].
+    pub fn magic_search_roots(&self) -> Vec<super::MagicSearchRoot> {
+        crate::file_reference::resolve::magic_root_chain_for_context(self)
     }
 
     /// Explicit roots searched for `vault:` references.
@@ -615,6 +875,19 @@ impl FileResolutionContext {
         self.repository_root = scope.repository_root;
         self.package_area = scope.package_area_root;
         self.package_root = scope.package_root;
+    }
+
+    /// Mirror the current repository/package anchors into the launch `@`
+    /// scope.
+    ///
+    /// Called only by the direct builder methods, never by the
+    /// `for_source`/`for_base` derivations: those re-anchor the
+    /// source-relative kinds through `recompute_repository_scopes` while the
+    /// launch `@` scope stays frozen at what the request captured.
+    fn sync_launch_magic_scope(&mut self) {
+        self.launch_magic_scope.repository_root = self.repository_root.clone();
+        self.launch_magic_scope.package_root = self.package_root.clone();
+        self.launch_magic_scope.package_area = self.package_area.clone();
     }
 
     /// Validate repository containment for the request and authoring bases.

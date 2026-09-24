@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileResolutionContext, PathPosition, to_portable_string};
+use biscuit_file::{FileResolutionContext, to_portable_string};
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
 
 /// The composition command the scopes are being resolved for.
@@ -232,6 +232,8 @@ impl ScopeContext {
 /// magic roots that runtime composition registers. Repository, package-area,
 /// discrete-package, home, and environment state are captured once here;
 /// completion does not rediscover or reclassify them while walking candidates.
+/// Without a repository the launch (completion) directory is the local `@`
+/// root, so it registers the same convention rows a repository would.
 pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionContext {
     let repository_root = effective_repo_root(ctx);
 
@@ -250,15 +252,14 @@ pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionConte
     }
     let package_area = resolution.package_area().map(Path::to_path_buf);
     let package = resolution.package_root().map(Path::to_path_buf);
-    for root in claudine::composition::prompt_magic_roots(
-        repository_root,
+    let local_root = repository_root.unwrap_or(ctx.cwd.as_path());
+    claudine::composition::with_prompt_magic_roots(
+        resolution,
+        local_root,
         package_area.as_deref(),
         package.as_deref(),
         ctx.home.as_deref(),
-    ) {
-        resolution = resolution.add_magic_path(root, PathPosition::Start);
-    }
-    resolution
+    )
 }
 
 /// Walk upward from `start` until a `.git` entry is found.

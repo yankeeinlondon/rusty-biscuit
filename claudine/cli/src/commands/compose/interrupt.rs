@@ -8,11 +8,11 @@
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
 pub(crate) const USER_INTERRUPT_EXIT_CODE: i32 = 130;
 
-/// RAII guard returned by [`install_user_interrupt_guard`]. Drops the
-/// underlying registration when the compose subcommand returns: on Unix the
-/// `signal_hook` handler, restoring whatever handler was previously installed;
-/// on Windows the notice registration plus this run's hold on the process-wide
-/// console handler.
+/// RAII guard returned by [`install_user_interrupt_guard`]. On Windows,
+/// dropping it withdraws the notice registration and this run's hold on the
+/// process-wide console handler. On Unix the `signal_hook` handler is **not**
+/// unregistered — [`signal_hook::SigId`] has no `Drop` — so it stays installed
+/// for the rest of the process.
 pub(crate) struct UserInterruptGuard {
     #[cfg(unix)]
     _hook: Option<signal_hook::SigId>,
@@ -30,6 +30,22 @@ pub(crate) struct UserInterruptGuard {
 const FORCE_EXIT_NOTICE: &[u8] =
     "\n\u{26a0} second interrupt — force-exiting compose\n".as_bytes();
 
+/// How long a repeat press lets an in-flight terminal lifecycle event
+/// (`success`/`blocked`/`failure`/`finalize`) keep running before the wrapper
+/// force-exits. A run that finishes sooner exits normally.
+pub(crate) const TERMINAL_LIFECYCLE_EXIT_GRACE: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
+/// Written when a repeat press arms the [`TERMINAL_LIFECYCLE_EXIT_GRACE`]
+/// deadline. Static bytes for the same async-signal-safety reason.
+const GRACE_EXIT_NOTICE: &[u8] =
+    "\n\u{26a0} second interrupt — letting the lifecycle event finish (500ms max) before exiting\n"
+        .as_bytes();
+
+/// Written when the grace deadline passes with the run still going.
+const GRACE_EXPIRED_NOTICE: &[u8] =
+    "\n\u{26a0} lifecycle event still running — force-exiting compose\n".as_bytes();
+
 /// Rung of the compose-scoped interrupt ladder one press lands on.
 ///
 /// Shared by both hosts so the two handlers cannot drift: a Unix signal handler
@@ -43,6 +59,11 @@ pub(crate) enum PressRung {
     /// That loop escalates its own child; force-exiting here would kill the
     /// wrapper out from under a still-reaping child.
     Defer,
+    /// Repeat press while a terminal lifecycle event is running and no wait
+    /// loop owns the ladder. Force-exiting at once would cut `failure` or
+    /// `finalize` off mid-side-effect, so the run gets
+    /// [`TERMINAL_LIFECYCLE_EXIT_GRACE`] to finish before a force-exit.
+    GraceExit,
     /// Repeat press with no wait loop to defer to. The interrupt flag alone
     /// only short-circuits at the next explicit checkpoint, so a main thread
     /// wedged in a synchronous call (network send, hung TTS subprocess) would
@@ -54,14 +75,70 @@ pub(crate) enum PressRung {
 ///
 /// `const` and allocation-free so the Unix SIGINT handler can call it while
 /// remaining async-signal-safe.
-pub(crate) const fn press_rung(count: u8, wait_loop_active: bool) -> PressRung {
+pub(crate) const fn press_rung(
+    count: u8,
+    wait_loop_active: bool,
+    terminal_lifecycle_active: bool,
+) -> PressRung {
     if count == 1 {
         PressRung::Notice
     } else if wait_loop_active {
         PressRung::Defer
+    } else if terminal_lifecycle_active {
+        PressRung::GraceExit
     } else {
         PressRung::ForceExit
     }
+}
+
+/// Write end of the Unix grace-exit self-pipe, or `-1` before the watcher
+/// exists. Read from the SIGINT handler, so it is a plain atomic.
+#[cfg(unix)]
+static GRACE_EXIT_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// Start (once per process) the thread that enforces the grace deadline.
+///
+/// The SIGINT handler cannot wait, so a [`PressRung::GraceExit`] press writes
+/// one byte to a self-pipe; this thread wakes, sleeps
+/// [`TERMINAL_LIFECYCLE_EXIT_GRACE`], and force-exits. A run that finishes in
+/// the meantime has already exited. Both pipe ends live for the whole process
+/// because the handler that writes to them is never unregistered.
+#[cfg(unix)]
+fn ensure_grace_exit_watcher() {
+    use std::io::Read as _;
+    use std::os::fd::IntoRawFd as _;
+
+    static WATCHER: std::sync::Once = std::sync::Once::new();
+    WATCHER.call_once(|| {
+        let Ok((mut reader, writer)) = std::os::unix::net::UnixStream::pair() else {
+            return;
+        };
+        let spawned = std::thread::Builder::new()
+            .name("compose-grace-exit".into())
+            .spawn(move || {
+                let mut byte = [0u8; 1];
+                loop {
+                    match reader.read(&mut byte) {
+                        Ok(1) => break,
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        _ => return,
+                    }
+                }
+                std::thread::sleep(TERMINAL_LIFECYCLE_EXIT_GRACE);
+                // SAFETY: `write(2)` and `_exit(2)` on a static buffer.
+                unsafe {
+                    libc::write(
+                        libc::STDERR_FILENO,
+                        GRACE_EXPIRED_NOTICE.as_ptr() as *const libc::c_void,
+                        GRACE_EXPIRED_NOTICE.len(),
+                    );
+                    libc::_exit(USER_INTERRUPT_EXIT_CODE);
+                }
+            });
+        if spawned.is_ok() {
+            GRACE_EXIT_FD.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
+        }
+    });
 }
 
 /// Install a process-scoped user-interrupt handler that covers the **entire**
@@ -94,13 +171,18 @@ pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGu
 
     #[cfg(unix)]
     {
+        ensure_grace_exit_watcher();
         let bytes_handler = std::sync::Arc::clone(&bytes);
         let presses_handler = std::sync::Arc::clone(&presses);
         let hook = unsafe {
             signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
                 crate::output::mark_user_interrupted();
                 let count = presses_handler.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                match press_rung(count, crate::output::wait_loop_active()) {
+                match press_rung(
+                    count,
+                    crate::output::wait_loop_active(),
+                    claudine::interrupt::terminal_lifecycle_active(),
+                ) {
                     // `write(2)` on a file descriptor is async-signal-safe; the
                     // Rust stdio macros (`eprintln!`, `println!`) are not, and
                     // any allocation or `tracing` call would be unsafe here.
@@ -113,6 +195,27 @@ pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGu
                         );
                     }
                     PressRung::Defer => {}
+                    PressRung::GraceExit => {
+                        let fd = GRACE_EXIT_FD.load(std::sync::atomic::Ordering::SeqCst);
+                        if fd >= 0 {
+                            libc::write(
+                                libc::STDERR_FILENO,
+                                GRACE_EXIT_NOTICE.as_ptr() as *const libc::c_void,
+                                GRACE_EXIT_NOTICE.len(),
+                            );
+                            // Arms the watcher; later presses add bytes it never
+                            // reads, so the deadline is not extended.
+                            libc::write(fd, b"!".as_ptr() as *const libc::c_void, 1);
+                        } else {
+                            // No watcher could be started: keep the old rung.
+                            libc::write(
+                                libc::STDERR_FILENO,
+                                FORCE_EXIT_NOTICE.as_ptr() as *const libc::c_void,
+                                FORCE_EXIT_NOTICE.len(),
+                            );
+                            libc::_exit(USER_INTERRUPT_EXIT_CODE);
+                        }
+                    }
                     PressRung::ForceExit => {
                         libc::write(
                             libc::STDERR_FILENO,
@@ -194,6 +297,9 @@ pub(crate) enum ComposeInterruptEffect {
     Notice(std::sync::Arc<Vec<u8>>),
     /// A child wait loop owns the ladder; do nothing.
     Defer,
+    /// Write [`GRACE_EXIT_NOTICE`], let the in-flight terminal lifecycle event
+    /// run for [`TERMINAL_LIFECYCLE_EXIT_GRACE`], then force-exit.
+    GraceExit,
     /// Write [`FORCE_EXIT_NOTICE`] and end the process with
     /// [`USER_INTERRUPT_EXIT_CODE`].
     ForceExit,
@@ -204,13 +310,15 @@ pub(crate) enum ComposeInterruptEffect {
 pub(crate) fn classify_console_interrupt(
     count: u8,
     wait_loop_active: bool,
+    terminal_lifecycle_active: bool,
 ) -> ComposeInterruptEffect {
     let Some(notice) = lock_notice().clone() else {
         return ComposeInterruptEffect::Inactive;
     };
-    match press_rung(count, wait_loop_active) {
+    match press_rung(count, wait_loop_active, terminal_lifecycle_active) {
         PressRung::Notice => ComposeInterruptEffect::Notice(notice),
         PressRung::Defer => ComposeInterruptEffect::Defer,
+        PressRung::GraceExit => ComposeInterruptEffect::GraceExit,
         PressRung::ForceExit => ComposeInterruptEffect::ForceExit,
     }
 }
@@ -236,7 +344,11 @@ pub(crate) fn classify_console_interrupt(
 /// installed its handler.
 #[cfg_attr(unix, allow(dead_code))]
 pub(crate) fn on_console_interrupt(count: u8) {
-    let effect = classify_console_interrupt(count, crate::output::wait_loop_active());
+    let effect = classify_console_interrupt(
+        count,
+        crate::output::wait_loop_active(),
+        claudine::interrupt::terminal_lifecycle_active(),
+    );
     if effect == ComposeInterruptEffect::Inactive {
         return;
     }
@@ -245,6 +357,14 @@ pub(crate) fn on_console_interrupt(count: u8) {
         ComposeInterruptEffect::Inactive | ComposeInterruptEffect::Defer => {}
         ComposeInterruptEffect::Notice(bytes) => {
             let _ = std::io::Write::write_all(&mut std::io::stderr(), &bytes);
+        }
+        ComposeInterruptEffect::GraceExit => {
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), GRACE_EXIT_NOTICE);
+            // This is the console handler's own thread, so it can wait out the
+            // grace itself; a run that finishes sooner has already exited.
+            std::thread::sleep(TERMINAL_LIFECYCLE_EXIT_GRACE);
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), GRACE_EXPIRED_NOTICE);
+            force_exit();
         }
         ComposeInterruptEffect::ForceExit => {
             let _ = std::io::Write::write_all(&mut std::io::stderr(), FORCE_EXIT_NOTICE);
@@ -325,9 +445,10 @@ mod tests {
 
     #[test]
     fn first_press_takes_the_notice_rung() {
-        assert_eq!(press_rung(1, false), PressRung::Notice);
+        assert_eq!(press_rung(1, false, false), PressRung::Notice);
+        assert_eq!(press_rung(1, false, true), PressRung::Notice);
         assert_eq!(
-            press_rung(1, true),
+            press_rung(1, true, false),
             PressRung::Notice,
             "a wait loop must not suppress the one-and-only notice"
         );
@@ -335,17 +456,28 @@ mod tests {
 
     #[test]
     fn a_repeat_press_force_exits_only_when_no_wait_loop_owns_the_ladder() {
-        assert_eq!(press_rung(2, false), PressRung::ForceExit);
-        assert_eq!(press_rung(2, true), PressRung::Defer);
-        assert_eq!(press_rung(9, false), PressRung::ForceExit);
-        assert_eq!(press_rung(9, true), PressRung::Defer);
+        assert_eq!(press_rung(2, false, false), PressRung::ForceExit);
+        assert_eq!(press_rung(2, true, false), PressRung::Defer);
+        assert_eq!(press_rung(9, false, false), PressRung::ForceExit);
+        assert_eq!(press_rung(9, true, false), PressRung::Defer);
+    }
+
+    #[test]
+    fn a_repeat_press_during_a_terminal_lifecycle_event_takes_the_grace_rung() {
+        assert_eq!(press_rung(2, false, true), PressRung::GraceExit);
+        assert_eq!(press_rung(9, false, true), PressRung::GraceExit);
+        assert_eq!(
+            press_rung(2, true, true),
+            PressRung::Defer,
+            "a wait loop still owns the ladder while its child runs"
+        );
     }
 
     #[test]
     #[serial_test::serial]
     fn a_press_with_no_compose_run_registered_is_inert() {
         assert_eq!(
-            classify_console_interrupt(1, false),
+            classify_console_interrupt(1, false, false),
             ComposeInterruptEffect::Inactive
         );
     }
@@ -357,12 +489,12 @@ mod tests {
         {
             let _registration = NoticeRegistration::install(Arc::clone(&bytes));
             assert_eq!(
-                classify_console_interrupt(1, false),
+                classify_console_interrupt(1, false, false),
                 ComposeInterruptEffect::Notice(bytes)
             );
         }
         assert_eq!(
-            classify_console_interrupt(1, false),
+            classify_console_interrupt(1, false, false),
             ComposeInterruptEffect::Inactive,
             "a press after the compose subcommand returned must not act on it"
         );
@@ -374,11 +506,15 @@ mod tests {
         let _registration = NoticeRegistration::install(notice_bytes());
 
         assert_eq!(
-            classify_console_interrupt(2, true),
+            classify_console_interrupt(2, true, false),
             ComposeInterruptEffect::Defer
         );
         assert_eq!(
-            classify_console_interrupt(2, false),
+            classify_console_interrupt(2, false, true),
+            ComposeInterruptEffect::GraceExit
+        );
+        assert_eq!(
+            classify_console_interrupt(2, false, false),
             ComposeInterruptEffect::ForceExit
         );
     }

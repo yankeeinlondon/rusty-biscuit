@@ -102,6 +102,15 @@ turn. OpenCode can emit both for one failure; Claudine emits and retains only
 the actionable first error so terminal output and the end-of-run summary agree.
 Other error sequences retain their normal last-event behavior.
 
+Since OpenCode 1.18 some failures (an unknown model, `ProviderModelNotFoundError`)
+reach stdout **only** as that generic error, carrying `error.data.ref`
+(`err_…`). The cause is in the stderr `level=ERROR message=failed ref=err_…
+error="…"` record, which the bridge surfaces live as an `unclassified_error`
+`Warning` and records by `ref`. `merge_stderr_state_into_summary` then replaces
+the generic `error_message` with the cause sharing its `ref`, and the JS error
+class (`ProviderModelNotFoundError`) becomes `error_kind`, so lifecycle
+`err.msg`/`err.variant` name the real failure.
+
 The `ProviderLimit` classification replaces the earlier monolithic `RateLimit`
 variant with a four-kind model that distinguishes **provider capacity** from
 **account consumption** on two independent axes.

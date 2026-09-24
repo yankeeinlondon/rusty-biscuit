@@ -434,6 +434,7 @@ fn merge_stderr_state_backfills_summary_model_from_primary_llm_call() {
         rate_limit: None,
         primary_provider_id: Some("kimi-for-coding".into()),
         primary_model_id: Some("k2p6".into()),
+        failure_causes: Default::default(),
     }));
     let mut summary = StreamExecutionSummary {
         provider: Provider::OpenCode,
@@ -458,6 +459,7 @@ fn merge_stderr_state_does_not_overwrite_existing_summary_model() {
         rate_limit: None,
         primary_provider_id: Some("kimi-for-coding".into()),
         primary_model_id: Some("k2p6".into()),
+        failure_causes: Default::default(),
     }));
     let mut summary = StreamExecutionSummary {
         provider: Provider::OpenCode,

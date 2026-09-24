@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::{
-    DetailedOutcome, FileReference, FileResolutionContext, PathPosition, ResolutionFailure,
+    DetailedOutcome, FileReference, FileResolutionContext, MagicPathTier, PathPosition,
+    ResolutionFailure,
 };
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::{Markdown, MarkdownError};
@@ -80,15 +81,17 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
     }
     let package_area = context.package_area().map(Path::to_path_buf);
     let package = context.package_root().map(Path::to_path_buf);
-    for root in prompt_magic_roots(
-        git_root.as_deref(),
+    let home = context.home_dir().map(Path::to_path_buf);
+    // Without a repository the launch directory is the local `@` root, so it
+    // registers the same convention rows a repository would (R5).
+    let local_root = git_root.as_deref().unwrap_or(cwd.as_path());
+    Ok(with_prompt_magic_roots(
+        context,
+        local_root,
         package_area.as_deref(),
         package.as_deref(),
-        context.home_dir(),
-    ) {
-        context = context.add_magic_path(root, PathPosition::Start);
-    }
-    Ok(context)
+        home.as_deref(),
+    ))
 }
 
 /// Build a source-anchored snapshot for compatibility callers.
@@ -103,10 +106,12 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
 ///   the process CWD: a top-level document selected from a different
 ///   repository keeps that repository's nested references rather than being
 ///   hijacked by wherever the binary was launched from (D2/D10, AC12).
-/// - When `source_path` lives outside any git repository (e.g. a trusted
-///   `~/.claudine/prompts/foo.md` document), the returned context has no
-///   `repository_root` and `@` magic search falls back to the home directory
-///   — matching the legacy trusted-external behavior.
+/// - The launch `@` scope captured by `provisional_context` is carried into
+///   the rebuilt context, and the prompt conventions are registered against
+///   the launch local root rather than the source's repository (ruling 2 of
+///   2026-09-23-local-before-home): a nested `@x.md` searches the launch
+///   tree first, while `./`, bare, `&`, and `^` references keep the
+///   source-specific anchors above.
 /// - Environment and home directory are retained from the provisional
 ///   snapshot, but Git root and repository topology are rediscovered
 ///   ambiently by this compatibility helper.
@@ -152,17 +157,16 @@ pub fn derive_request_context_for_source(
     } else if let Some(root) = git_root.as_ref() {
         context = context.with_repository_root(root);
     }
-    let package_area = context.package_area().map(Path::to_path_buf);
-    let package = context.package_root().map(Path::to_path_buf);
-    for root in prompt_magic_roots(
-        git_root.as_deref(),
-        package_area.as_deref(),
-        package.as_deref(),
-        context.home_dir(),
-    ) {
-        context = context.add_magic_path(root, PathPosition::Start);
-    }
-    Ok(context)
+    let launch_scope = provisional_context.launch_magic_scope();
+    let home = context.home_dir().map(Path::to_path_buf);
+    Ok(with_prompt_magic_roots(
+        context,
+        launch_scope.local_root(),
+        launch_scope.package_area(),
+        launch_scope.package_root(),
+        home.as_deref(),
+    )
+    .with_launch_magic_scope(launch_scope.clone()))
 }
 
 /// Resolves and loads a top-level composition source using a previously
@@ -186,7 +190,7 @@ pub fn resolve_composition_source_in_context(
     let resolved_path = match detailed.outcome() {
         DetailedOutcome::Matched(path) => path.clone(),
         DetailedOutcome::Failed(ResolutionFailure::NoMatch) => {
-            return Err(CompositionError::from_detailed_no_match(&detailed));
+            return Err(CompositionError::from_detailed_no_match(&detailed, context));
         }
         DetailedOutcome::Failed(_) => {
             let source = match detailed.into_convenience() {
@@ -404,16 +408,19 @@ pub fn build_prompt_reference(file_ref: &str) -> Result<FileReference, Compositi
 /// The ordered magic roots shared by composition completion and execution.
 ///
 /// Roots are **closest-first**: the discrete package's prompt directory, the
-/// package-area prompt directory, repository prompt/document/peer-skill
-/// conventions, then the user prompt directory. Bare package, package-area,
-/// repository, and home roots are intrinsic `@` scopes supplied by
+/// package-area prompt directory, the local tree's prompt/document/peer-skill
+/// conventions, then the user prompt directory. The local rows anchor on
+/// `local_root` — the launch repository root when one exists, otherwise the
+/// launch directory itself, so a plain directory registers the same
+/// convention rows a repository does. Bare package, package-area,
+/// local-root, and home roots are intrinsic `@` scopes supplied by
 /// [`FileResolutionContext`] and are intentionally not registered again.
 ///
 /// This function is pure; callers are responsible for discovering the anchors
 /// once for their request.
 #[must_use]
 pub fn prompt_magic_roots(
-    git_root: Option<&Path>,
+    local_root: &Path,
     package_area: Option<&Path>,
     package: Option<&Path>,
     home: Option<&Path>,
@@ -425,20 +432,108 @@ pub fn prompt_magic_roots(
     if let Some(area) = package_area {
         push_unique_root(&mut roots, area.join("prompts"));
     }
-    if let Some(root) = git_root {
-        push_unique_root(&mut roots, root.join("prompts"));
-        push_unique_root(&mut roots, root.join(".claudine").join("prompts"));
-        push_unique_root(&mut roots, root.join("docs"));
-        for peer in [
-            ".claude", ".codex", ".gemini", ".opencode", ".goose", ".qwen", ".kimi",
-        ] {
-            push_unique_root(&mut roots, root.join(peer).join("skills"));
-        }
+    push_unique_root(&mut roots, local_root.join("prompts"));
+    push_unique_root(&mut roots, local_root.join(".claudine").join("prompts"));
+    push_unique_root(&mut roots, local_root.join("docs"));
+    for peer in [
+        ".claude", ".codex", ".gemini", ".opencode", ".goose", ".qwen", ".kimi",
+    ] {
+        push_unique_root(&mut roots, local_root.join(peer).join("skills"));
     }
     if let Some(home) = home {
         push_unique_root(&mut roots, home.join(".claudine").join("prompts"));
     }
     roots
+}
+
+/// The bare `.claudine` roots, searched after every intrinsic `@` scope of
+/// their tier.
+///
+/// These let the path-shaped `@prompts/<x>` form reach the local and user
+/// Claudine prompt tiers, which the concise `@<x>` form reaches through
+/// [`prompt_magic_roots`]. Without them `@prompts/<x>` resolves only where a
+/// package, area, or local root happens to contain `prompts/`, so it fails
+/// in a local tree with no `prompts/` directory and outside any repository.
+/// They are appended, not prepended, so a closer `prompts/<x>` still wins.
+#[must_use]
+pub fn prompt_magic_fallback_roots(local_root: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    push_unique_root(&mut roots, local_root.join(".claudine"));
+    if let Some(home) = home {
+        push_unique_root(&mut roots, home.join(".claudine"));
+    }
+    roots
+}
+
+/// Register Claudine's prompt conventions on a file-resolution context.
+///
+/// The single registration point shared by composition resolution, the
+/// invocation context, and shell completion, so a value completion offers
+/// is one runtime resolves. Convention rows anchor on `local_root` — the
+/// launch repository root when one exists, otherwise the launch directory —
+/// so the local tree registers the same prompt conventions whether or not it
+/// is a repository.
+///
+/// The two `~/.claudine` rows are registered with an explicit user-tier
+/// override: they are user conventions wherever the launch tree lies,
+/// including when the local root is or contains `$HOME`, where containment
+/// inference alone could not tell them from local rows. When the local root
+/// is `$HOME` itself, its `.claudine` convention rows are the user rows and
+/// are dropped instead of registered inferred — the chain deduplicates by
+/// path with the local tier first, so an inferred twin would reclassify the
+/// user convention as local. That overlap is matched by directory identity
+/// as well as spelling: the launch directory arrives in its physical
+/// spelling while `$HOME` keeps the environment's, so under a symlinked home
+/// (macOS `/var` → `/private/var`, a Windows 8.3 alias) the same directory
+/// is spelled two ways. Any other local root keeps every row, including a
+/// `<root>/.claudine` that is a symlink to `~/.claudine`: tier follows the
+/// lexical path (spec R2), so such a row stays local.
+#[must_use]
+pub fn with_prompt_magic_roots(
+    mut context: FileResolutionContext,
+    local_root: &Path,
+    package_area: Option<&Path>,
+    package: Option<&Path>,
+    home: Option<&Path>,
+) -> FileResolutionContext {
+    let user_prompt_root = home.map(|home| home.join(".claudine").join("prompts"));
+    let user_fallback_root = home.map(|home| home.join(".claudine"));
+    let local_root_is_home = home.is_some_and(|home| {
+        home == local_root
+            || fs::canonicalize(home)
+                .is_ok_and(|physical| fs::canonicalize(local_root).is_ok_and(|local| local == physical))
+    });
+    // Physical identity decides only whether the local root is `$HOME`; a
+    // row is never classified by where a symlink points (spec R2).
+    let is_user_row = |root: &Path| {
+        local_root_is_home
+            && (root == local_root.join(".claudine")
+                || root == local_root.join(".claudine").join("prompts"))
+    };
+
+    // Local-tier rows, registered inferred: their tier follows from
+    // containment in the local root, and every row here lies inside it.
+    for root in prompt_magic_roots(local_root, package_area, package, None) {
+        if is_user_row(&root) {
+            continue;
+        }
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+    for root in prompt_magic_fallback_roots(local_root, None) {
+        if is_user_row(&root) {
+            continue;
+        }
+        context = context.add_magic_path(root, PathPosition::End);
+    }
+    // User-tier rows, registered with the explicit override so they stay
+    // behind every local-tier candidate in every layout.
+    if let Some(root) = user_prompt_root {
+        context = context.add_magic_path_with_tier(root, PathPosition::Start, MagicPathTier::User);
+    }
+    if let Some(root) = user_fallback_root {
+        context = context.add_magic_path_with_tier(root, PathPosition::End, MagicPathTier::User);
+    }
+    context
 }
 
 fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {

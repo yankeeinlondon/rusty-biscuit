@@ -116,55 +116,59 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn sequence_magic_reference_uses_source_doc_location_not_cwd() {
-    // A `@` magic reference in the sequence frontmatter MUST resolve
-    // relative to the markdown source document's location, not the
-    // process CWD. Otherwise a user running
-    // `claudine sequence /abs/path/to/seq.md` from some other directory
-    // would get the wrong file or a spurious "not found" error.
+fn sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored() {
+    // Ruling 2 of 2026-09-23-local-before-home: a nested `@` reference keeps
+    // the invocation's launch tree as its local root, while explicit-relative
+    // references stay anchored on the source document. Launching from
+    // `unrelated/` with the document in `repo_root/`, `@fixtures/steps.yaml`
+    // resolves against the launch tree (`unrelated/fixtures`), and
+    // `./fixtures/steps.yaml` resolves beside the document
+    // (`repo_root/prompts/fixtures`) regardless of the process CWD.
     //
     // This test sets up TWO distinct git repos: `repo_root/` (where the
-    // source doc lives) and `unrelated/` (the process CWD). Each repo
-    // has its own `fixtures/steps.yaml` with a different step count.
-    // If resolution was driven by CWD, the wrong file would be loaded.
+    // source doc lives) and `unrelated/` (the process CWD), each carrying
+    // its own fixtures with a distinguishable step count.
     let fixture = CliProcessFixture::named("sequence-magic-reference");
 
-    // --- Primary repo: source doc + correct fixtures (2 steps) ---
+    // --- Primary repo: source doc + source-relative fixtures (1 step) ---
     let repo_root = fixture.cwd().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
     if !init_git_repo(&repo_root) {
         eprintln!("git init unavailable; skipping magic reference test");
         return;
     }
-    let correct_fixtures = repo_root.join("fixtures");
-    fs::create_dir_all(&correct_fixtures).unwrap();
+    let md_dir = repo_root.join("prompts");
+    let relative_fixtures = md_dir.join("fixtures");
+    fs::create_dir_all(&relative_fixtures).unwrap();
     fs::write(
-        correct_fixtures.join("steps.yaml"),
-        "sequence:\n  - alpha\n  - beta\n",
+        relative_fixtures.join("steps.yaml"),
+        "sequence:\n  - beside-doc\n",
     )
     .unwrap();
-    let md_dir = repo_root.join("prompts");
-    fs::create_dir_all(&md_dir).unwrap();
-    let md_file = md_dir.join("seq.md");
+    let magic_md = md_dir.join("seq-magic.md");
     fs::write(
-        &md_file,
+        &magic_md,
         "---\nsequence: '@fixtures/steps.yaml'\n---\nStep {{state}}\n",
     )
     .unwrap();
-
-    // --- Unrelated repo: decoy fixtures (3 steps) used iff resolution is CWD-driven ---
-    let unrelated = fixture.cwd().join("unrelated");
-    fs::create_dir_all(&unrelated).unwrap();
-    init_git_repo(&unrelated);
-    let decoy_fixtures = unrelated.join("fixtures");
-    fs::create_dir_all(&decoy_fixtures).unwrap();
+    let relative_md = md_dir.join("seq-relative.md");
     fs::write(
-        decoy_fixtures.join("steps.yaml"),
-        "sequence:\n  - wrong1\n  - wrong2\n  - wrong3\n",
+        &relative_md,
+        "---\nsequence: './fixtures/steps.yaml'\n---\nStep {{state}}\n",
     )
     .unwrap();
 
-    let count_path = fixture.cwd().join("call-count.txt");
+    // --- Unrelated repo: launch-tree fixtures (3 steps), searched by `@` ---
+    let unrelated = fixture.cwd().join("unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    init_git_repo(&unrelated);
+    let launch_fixtures = unrelated.join("fixtures");
+    fs::create_dir_all(&launch_fixtures).unwrap();
+    fs::write(
+        launch_fixtures.join("steps.yaml"),
+        "sequence:\n  - launch1\n  - launch2\n  - launch3\n",
+    )
+    .unwrap();
 
     write_executable(
         &fixture.bin_dir().join("goose"),
@@ -179,25 +183,39 @@ exit 0
 "#,
     );
 
-    // Run FROM the unrelated repo, but target the doc inside repo_root.
+    // `@` resolves from the launch tree: the launch repository's fixtures
+    // are the intended winner, not a decoy.
+    let magic_count = fixture.cwd().join("magic-count.txt");
     fixture
         .command_builder()
-        // The decoy repository *is* the subject: the launch CWD must lose to
-        // the source document's own location.
         .ambient_context(&unrelated)
         .build()
-        .env("CLAUDINE_COUNT_FILE", &count_path)
-        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .env("CLAUDINE_COUNT_FILE", &magic_count)
+        .args(["sequence", "--goose", magic_md.to_str().unwrap()])
         .assert()
         .success();
-
-    let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
-        calls.trim(),
-        "2",
-        "@ magic reference must resolve from the source document's location \
-         (repo_root/fixtures/steps.yaml — 2 steps), not the process CWD \
-         (unrelated/fixtures/steps.yaml — 3 steps). Got {calls} invocations."
+        fs::read_to_string(&magic_count).unwrap().trim(),
+        "3",
+        "nested `@` must resolve from the launch tree \
+         (unrelated/fixtures/steps.yaml — 3 steps)."
+    );
+
+    // Explicit-relative resolves beside the source document, not the CWD.
+    let relative_count = fixture.cwd().join("relative-count.txt");
+    fixture
+        .command_builder()
+        .ambient_context(&unrelated)
+        .build()
+        .env("CLAUDINE_COUNT_FILE", &relative_count)
+        .args(["sequence", "--goose", relative_md.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(&relative_count).unwrap().trim(),
+        "1",
+        "explicit-relative must resolve from the source document's directory \
+         (repo_root/prompts/fixtures/steps.yaml — 1 step), not the process CWD."
     );
 }
 

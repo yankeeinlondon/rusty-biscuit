@@ -291,6 +291,11 @@ pub struct OpenCodeErrorDetail {
 pub struct OpenCodeErrorData {
     #[serde(default)]
     pub message: Option<String>,
+    /// OpenCode's correlation id (`err_…`). Since 1.18 a failure's stdout event
+    /// often carries only a generic message; the stderr log record with the
+    /// same `ref=` names the actual cause.
+    #[serde(rename = "ref", default)]
+    pub reference: Option<String>,
 }
 
 impl OpenCodeError {
@@ -318,6 +323,13 @@ impl OpenCodeError {
                 })
             })
             .or_else(|| self.message.clone())
+    }
+
+    pub fn resolved_reference(&self) -> Option<String> {
+        self.error
+            .as_ref()
+            .and_then(|error| error.data.as_ref())
+            .and_then(|data| data.reference.clone())
     }
 }
 

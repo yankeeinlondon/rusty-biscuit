@@ -1087,7 +1087,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
     /// Deliberately non-terminal: the shape is unknown, so whether the run can
     /// continue is unknown too. When it cannot, the stdout NDJSON `type=error`
     /// event still fires the terminal error — this only supplies the "why"
-    /// that event lacks.
+    /// that event lacks, both live and, through the `ref`-keyed
+    /// `failure_causes`, as the summary's final error message.
     fn on_unclassified_error(
         &mut self,
         record: &OpenCodeLogRecord,
@@ -1098,6 +1099,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         extra_map.insert("error".into(), Value::String(error.clone()));
         if let Some(reference) = &reference {
             extra_map.insert("ref".into(), Value::String(reference.clone()));
+            self.state
+                .lock()
+                .expect("stderr state poisoned")
+                .failure_causes
+                .insert(reference.clone(), error.clone());
         }
 
         let rendered = match &reference {

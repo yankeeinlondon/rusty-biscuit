@@ -70,6 +70,11 @@ pub struct StreamExecutionSummary {
     pub error_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// The provider's correlation id for the terminal error, when it emits one
+    /// (OpenCode's `err_…` `ref`). Lets a stderr log record naming the actual
+    /// cause be joined back to a generic stdout error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_reference: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,6 +129,7 @@ impl Default for StreamExecutionSummary {
             is_error: false,
             error_kind: None,
             error_message: None,
+            error_reference: None,
             duration_ms: None,
             duration_api_ms: None,
             num_turns: None,

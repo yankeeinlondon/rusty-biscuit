@@ -321,6 +321,27 @@ fn compose_plain_git_committed_dir_uses_git_root() {
 // compose @ magic-path resolution
 // ---------------------------------------------------------------------
 
+// Native Windows reads the known-folder home and ignores the fixture's
+// `HOME` (D11; `os` skill, windows.md), so the user tier cannot be staged there.
+#[cfg(not(windows))]
+#[test]
+fn compose_path_shaped_magic_offers_user_tier_from_plain_repo_under_home() {
+    // `claudine compose @prompts/<TAB>` from `~/config/sh`: a plain repository
+    // with no `prompts/` of its own, nested under HOME. Runtime resolves
+    // `@prompts/<x>` to `~/.claudine/prompts/<x>`, so completion must offer it.
+    let ws = TestWorkspace::named("complete-compose-magic-home-nested");
+    let home = ws.path().join("home");
+    let launch = home.join("config").join("sh");
+    seed_plain_git_repo(&launch);
+    write_file(&home.join(".claudine").join("prompts").join("plan.md"), "# user\n");
+
+    let got = run_complete_with_home(&launch, &home, &["compose", "@prompts/"]);
+    assert!(
+        got.iter().any(|c| c == "@prompts/plan.md"),
+        "path-shaped magic partial must reach the user prompt tier: {got:?}"
+    );
+}
+
 #[test]
 fn compose_magic_keeps_sigil_and_renders_filename() {
     let ws = TestWorkspace::named("complete-compose-magic");

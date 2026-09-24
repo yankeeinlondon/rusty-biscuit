@@ -26,6 +26,9 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
 
     let parsed = ParsedReference {
         authored: raw.to_string(),
+        // Every kind detector returns a suffix of its input, so the payload is
+        // the authored text's tail of the same length.
+        payload_offset: raw.len() - path_str.len(),
         recursive,
         kind: match kind {
             DetectedKind::Relative => ReferenceKind::Relative(template),

@@ -14,13 +14,16 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 | _(none)_ | `ImplicitRelative` | Authoring base, then repository root |
 | POSIX root, Windows drive/UNC | `Absolute` | Authored absolute path only |
 | `~`, `~/` (`~\` on Windows) | `Home` | Captured home only; `~user` is rejected |
-| `@`, `@/` | `Magic` | Configured prepends → package → package area → repository → home → configured appends |
+| `@`, `@/` | `Magic` | Local tier (local prepends → package → package area → local root → local appends), then user tier (user prepends → home → user appends) |
 | `&`, `&/` | `RepositoryRoot` | Repository root only; repository-contained |
 | `^`, `^/` | `RepositoryScoped` | Package → package area → repository; repository-contained |
 | `vault:`, `vault::` | `Vault` | Configured roots → captured `VAULT` paths |
 | `http://`, `https://` | `Url` | Remote target; no local candidate |
 
 `FileReference::class()` returns `FileReferenceClass { kind, recursive }`.
+`FileReference::payload()` returns the authored text after `%`, the sigil,
+and its optional `/` (`%@/@x.md` → `@x.md`); diagnostics use it instead of
+trimming prefixes.
 Recursive `%` is a modifier, not another kind. It traverses the same ordered
 roots, does not follow directory symlinks, sorts all matches lexically, and
 records roots as `ProbeDisposition::SearchRoot`.
@@ -29,6 +32,22 @@ Magic consumes exactly the authored `@` or `@/` sigil form. Its remaining
 payload must be relative: repeated POSIX separators and Windows
 drive-qualified, rooted, or UNC payloads return `InvalidSyntax` rather than
 replacing a configured magic root. This also applies under recursive `%`.
+
+### Magic (`@`) tiers
+
+Every local-tier root is searched before any home-based root. The **local
+root** is the launch repository root, or the request directory when there is
+none (provenance `LocalRoot`, not `Source`). A configured root is local when
+it lexically lies inside the local root (after normalization), otherwise user
+tier — containment in the local root decides, never containment in `$HOME`.
+`add_magic_path(path, position)` infers the tier (`MagicPathTier::Inferred`);
+`add_magic_path_with_tier(path, position, MagicPathTier::User)` forces the
+user tier, which a caller needs for home conventions when the local root *is*
+`$HOME`. `PathPosition` orders a root only within its tier (`Start` before
+that tier's intrinsic roots, `End` after). Roots are deduplicated after
+ordering, keeping first-seen provenance. A relative configured root joins onto
+the captured request directory — for ambient `resolve_from(base)`, onto
+`base` rather than the process CWD.
 
 ### Authoritative explicit context
 
@@ -80,6 +99,17 @@ original request boundary. No derivation reads ambient state or performs
 discovery. `with_source_path()` records provenance only and does not derive the
 base.
 
+`@` does not follow those re-anchored scopes. The context carries an immutable
+`LaunchMagicScope` (request directory plus its repository, package, and
+package-area roots), captured by `new` and the anchor builders and copied
+unchanged by `for_source`, `for_base`, and the trusted-external derivations.
+A nested `@x.md` in a prompt from `~/.claudine` or another repository searches
+the launch tree first; `./`, bare, `&`, and `^` keep source anchors. A caller
+that rebuilds a context around an external source (rather than deriving it)
+seeds `with_launch_magic_scope(launch.launch_magic_scope().clone())`.
+`magic_search_roots()` returns the ordered, deduplicated `@` chain with
+provenance for diagnostics.
+
 The explicit context is authoritative. `resolve_in_context()`,
 `resolve_detailed()`, `candidate_plan()`, and
 `complete_partial_in_context()` do not perform late CWD, HOME, environment,
@@ -122,7 +152,7 @@ outcomes retain a `FileReferenceError`.
 `DetailedResolution::candidates()` contains only attempts made before the first
 match or terminal I/O error. Each `ResolutionCandidate` exposes its path and
 `RootProvenance`: `Repository`, `Source`, `PackageRoot`, `PackageArea`, `Home`,
-`Magic`, `Vault`, or `Absolute`.
+`Magic`, `Vault`, `Absolute`, or `LocalRoot`.
 
 `candidate_plan_with_order()` applies an explicit `CandidatePlanOrder` to that
 unprobed plan. The default `Resolution` order matches execution.
@@ -175,8 +205,8 @@ magic, repository-root, repository-scoped, and implicit-relative tokens. Its
 `active_segment()`, and `rendered_prefix()`.
 
 The completion roots mirror execution: implicit is base then repository; magic
-is configured prepends, package, package area, repository, home, then configured
-appends, with stable deduplication. Enumerate roots in order and execute the emitted string unchanged
+is the same tier-ordered chain (built once, from the launch `@` scope) with the
+typed segment appended after root selection, with stable deduplication. Enumerate roots in order and execute the emitted string unchanged
 through `FileReference::new()` plus `resolve_in_context()` so the displayed and
 executed candidate cannot diverge. Completion rejects rooted magic tokens with
 `InvalidSyntax`, including invalid recursive magic tokens that completion does

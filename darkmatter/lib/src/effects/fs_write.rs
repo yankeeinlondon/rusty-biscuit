@@ -1,4 +1,4 @@
-//! Mutation-root-guarded atomic file writes.
+//! Mutation-root-guarded file writes: atomic replacement and appends.
 //!
 //! These helpers are the write primitive for the effect verbs
 //! (`set_frontmatter`, file/dir mutations) defined in [`super::verbs`].
@@ -39,6 +39,38 @@ pub(crate) fn atomic_write_guarded(
         source: e.error,
     })?;
     Ok(())
+}
+
+/// Appends `bytes` to `target` through an append-mode handle, but only if
+/// `target` resolves inside `root`. Creates the file and its parent directories
+/// under `root` as needed.
+///
+/// The OS positions every append-mode write at the current end of file, so
+/// concurrent appenders — parallel sequence members, separate processes — each
+/// land their bytes. A read-modify-write replacement loses all but the last
+/// writer's line. Unlike [`atomic_write_guarded`], a crash mid-write can leave a
+/// partial final line; existing content is never rewritten.
+pub(crate) fn append_guarded(root: &Path, target: &Path, bytes: &[u8]) -> Result<(), EffectError> {
+    use std::io::Write;
+
+    let normalized = normalize_within(root, target)?;
+    if let Some(parent) = normalized.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| EffectError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let io_error = |source| EffectError::Io {
+        path: normalized.clone(),
+        source,
+    };
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&normalized)
+        .map_err(io_error)?
+        .write_all(bytes)
+        .map_err(io_error)
 }
 
 /// Resolves `target` and verifies it is contained within `root`.
@@ -136,6 +168,64 @@ mod tests {
             err,
             crate::effects::EffectError::OutsideMutationRoot { .. }
         ));
+    }
+
+    #[test]
+    fn concurrent_appends_keep_every_line() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let log = root.join("logs/events.log");
+
+        std::thread::scope(|scope| {
+            for writer in 0..8 {
+                let (root, log) = (&root, &log);
+                scope.spawn(move || {
+                    for line in 0..50 {
+                        append_guarded(root, log, format!("{writer}-{line}\n").as_bytes()).unwrap();
+                    }
+                });
+            }
+        });
+
+        let mut lines: Vec<String> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        lines.sort();
+        let mut expected: Vec<String> = (0..8)
+            .flat_map(|writer| (0..50).map(move |line| format!("{writer}-{line}")))
+            .collect();
+        expected.sort();
+        assert_eq!(lines, expected);
+    }
+
+    #[test]
+    fn append_keeps_existing_non_utf8_bytes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().to_path_buf();
+        let file = root.join("binary.log");
+        std::fs::write(&file, [0xff, 0xfe, b'\n']).unwrap();
+
+        append_guarded(&root, &file, b"next\n").unwrap();
+
+        assert_eq!(std::fs::read(&file).unwrap(), b"\xff\xfe\nnext\n");
+    }
+
+    #[test]
+    fn append_outside_root_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = dir.path().join("escape.log");
+
+        let err = append_guarded(&root, &outside, b"no\n").unwrap_err();
+
+        assert!(matches!(
+            err,
+            crate::effects::EffectError::OutsideMutationRoot { .. }
+        ));
+        assert!(!outside.exists());
     }
 
     #[cfg(unix)]

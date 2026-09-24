@@ -144,21 +144,48 @@ Default iteration order (`ScopeSet::iter_scopes`):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
-Magic convention roots come from Claudine's shared `prompt_magic_roots` builder
-and are expanded by `FileReference::complete_partial_in_context`. Because
-Claudine registers them as prepends, the complete effective `@` order is:
+Magic convention roots come from Claudine's shared `with_prompt_magic_roots`
+registration and are expanded by `FileReference::complete_partial_in_context`.
+Claudine registers its prompt conventions around biscuit-file's intrinsic
+roots, and biscuit-file orders every `@` root into two tiers: the **local**
+tree is exhausted before anything home-based. `<local>` is the repository
+root when the launch directory is inside one, and the launch directory itself
+when it is not. The complete effective `@` order is:
 
-1. **Discrete package** — `<pkg>/`, then `<pkg>/prompts/`.
-2. **Package area** — `<repo>/<area>/`, then `<repo>/<area>/prompts/`.
-3. **Repo prompts** — `<repo>/prompts/`.
-4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
-5. **Repo document scopes** — `docs/`, then the agent-skill peers.
-6. **User Claudine scope** — `~/.claudine/prompts/`.
-7. **Intrinsic roots** — discrete package, package area, repository, then home.
+**Local tier**
 
-Runtime composition registers this identical ordered list. The package and
-area bare roots keep path-shaped values such as `@prompts/plan.md` resolvable;
-the prompt children support the concise `@plan.md` form. The default
+1. **Discrete package prompts** — `<pkg>/prompts/`.
+2. **Package-area prompts** — `<repo>/<area>/prompts/`.
+3. **Local prompts** — `<local>/prompts/`.
+4. **Local Claudine scope** — `<local>/.claudine/prompts/`.
+5. **Local document scopes** — `<local>/docs/`, then the agent-skill peers
+   (`<local>/.claude/skills/`, `.codex`, `.gemini`, `.opencode`, `.goose`,
+   `.qwen`, `.kimi`).
+6. **Intrinsic local roots** — discrete package, package area, then
+   `<local>`.
+7. **Local Claudine fallback** — `<local>/.claudine/`.
+
+**User tier**
+
+8. **User Claudine scope** — `~/.claudine/prompts/`.
+9. **Intrinsic home root** — `~`.
+10. **User Claudine fallback** — `~/.claudine/`.
+
+Runtime composition, the invocation context, and completion all register
+this identical ordered list. The prompt directories (1–5, 8) serve the
+concise `@plan.md` form. The path-shaped `@prompts/plan.md` form is served by
+the bare roots: the intrinsic roots (6, 9) reach any `prompts/` under the
+package, area, local root, or home, and the Claudine fallbacks (7, 10) reach
+`<local>/.claudine/prompts/` and `~/.claudine/prompts/`, so the form also
+works in a local tree with no `prompts/` directory and outside any
+repository. Within each tier the fallback comes last so a closer `prompts/`
+still wins; across tiers, every local match beats every user match.
+
+The two `~/.claudine` rows are registered explicitly as user tier, so they
+stay behind the local tree even when the launch directory or repository *is*
+`$HOME`. A prompt loaded from `~/.claudine` or another repository that
+itself contains `@` references resolves them against the same launch tree
+first (see [Local Wins](./compose-prompt-rules.md#local-wins)). The default
 non-magic pipeline retains its separate display-oriented scope ordering.
 
 **Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
@@ -260,10 +287,10 @@ Directory drilling is a Word-mode (non-`@`) behavior — type a bare path like
 
 #### Magic-path priority
 
-Magic resolution uses the full convention-prepend → package → package-area →
-repository → home order documented under [Scopes](#scopes).
+Magic resolution uses the full local-tier → user-tier order documented under
+[Scopes](#scopes).
 
-The user-global scope is **last**. The basename dedup keeps the closest
+The user tier is **last**. The basename dedup keeps the closest
 occurrence, so a repo-local `plan.md` owns the `@plan.md` candidate's rank
 over a `~/.claudine/prompts/plan.md` of the same basename. Filenames that
 exist **only** in a lower-priority scope (e.g. a global-only prompt) still

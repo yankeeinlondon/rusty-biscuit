@@ -38,7 +38,7 @@ Mutually exclusive: `--json` (default for data), `--json5`, `--yaml`, `--toml`, 
 ### File Reference Resolution
 
 ```sh
-bf reference @docs/spec.md           # magic: package, area, repo root, HOME
+bf reference @docs/spec.md           # magic: package, area, repo root (or CWD outside a repo), then HOME
 bf reference &README.md              # repository root only
 bf reference ^README.md              # repository scopes, most specific first
 bf reference %foo.md                  # recursive: walk directories for a match

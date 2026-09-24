@@ -109,9 +109,16 @@ pub(crate) fn resolve_core(
     let effective_kind = effective_public_kind(parsed, anchoring);
 
     let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
-        match resolve_repository_root(ctx) {
-            Ok(root) => root,
-            Err(e) => return failed_core(classify_error(&e), e),
+        if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
+            // `@` anchors on the immutable launch scope (ruling 2): the
+            // snapshot's repository root — or its absence — is authoritative,
+            // never the source-derived anchors or a fresh discovery.
+            scope.repository_root().map(Path::to_path_buf)
+        } else {
+            match resolve_repository_root(ctx) {
+                Ok(root) => root,
+                Err(e) => return failed_core(classify_error(&e), e),
+            }
         }
     } else {
         ctx.repository_root.clone()
@@ -681,6 +688,177 @@ struct RootEntry {
     provenance: RootProvenance,
 }
 
+/// The inputs the unified `@` root chain is built from.
+///
+/// One instance of this type is the single authority for `@` ordering:
+/// direct candidates, recursive `%@` traversal, completion, and the
+/// diagnostics root list all consume the chain it produces, so they cannot
+/// teach different precedence. The anchors come from the launch `@` scope
+/// for request contexts (ruling 2) or from the live ambient anchors for the
+/// compatibility methods.
+struct MagicChainInputs<'a> {
+    /// The launch repository root, when the request directory had one.
+    repository_root: Option<&'a Path>,
+    /// The captured request directory; also the local root when no repository
+    /// exists, and the base relative configured roots resolve against.
+    request_dir: &'a Path,
+    package_root: Option<&'a Path>,
+    package_area: Option<&'a Path>,
+    home: Option<&'a Path>,
+    magic_paths: &'a MagicPathList,
+}
+
+impl MagicChainInputs<'_> {
+    /// The root of the local tree: the launch repository root when one
+    /// exists, otherwise the captured request directory.
+    fn local_root(&self) -> &Path {
+        self.repository_root.unwrap_or(self.request_dir)
+    }
+}
+
+/// Build the ordered, deduplicated `@` root chain (R2 tier order).
+///
+/// Order: local configured prepends; package root; package-area root; local
+/// root; local configured appends; user configured prepends; home; user
+/// configured appends. A configured root explicitly marked
+/// [`super::MagicPathTier::User`] is user tier regardless of where it lies;
+/// otherwise tier is inferred from normalized lexical containment in the
+/// local root. Every root is normalized ([`normalize_components`]); relative
+/// configured roots are joined onto the captured request directory first, so
+/// the tier test and the joined candidate share one absolute spelling.
+/// Duplicates collapse after ordering, keeping the first root and its
+/// provenance — so a configured root equal to an intrinsic one keeps its
+/// `Magic` provenance.
+fn build_magic_chain(inputs: &MagicChainInputs) -> Vec<RootEntry> {
+    let local_root = normalize_components(inputs.local_root());
+
+    let resolve_configured = |path: &Path| -> PathBuf {
+        if path.is_absolute() {
+            normalize_components(path)
+        } else {
+            normalize_components(&inputs.request_dir.join(path))
+        }
+    };
+    let is_local = |resolved: &Path, tier: super::MagicPathTier| match tier {
+        super::MagicPathTier::User => false,
+        super::MagicPathTier::Inferred => resolved.starts_with(&local_root),
+    };
+
+    let split_by_tier = |entries: &[(PathBuf, super::MagicPathTier)]| {
+        let mut local = Vec::new();
+        let mut user = Vec::new();
+        for (path, tier) in entries {
+            let resolved = resolve_configured(path);
+            let entry = RootEntry {
+                path: resolved.clone(),
+                provenance: RootProvenance::Magic,
+            };
+            if is_local(&resolved, *tier) {
+                local.push(entry);
+            } else {
+                user.push(entry);
+            }
+        }
+        (local, user)
+    };
+    let (local_prepends, user_prepends) = split_by_tier(&inputs.magic_paths.prepend);
+    let (local_appends, user_appends) = split_by_tier(&inputs.magic_paths.append);
+
+    let mut roots = Vec::with_capacity(
+        local_prepends.len()
+            + local_appends.len()
+            + user_prepends.len()
+            + user_appends.len()
+            + 4,
+    );
+    roots.extend(local_prepends);
+    if let Some(package_root) = inputs.package_root {
+        roots.push(RootEntry {
+            path: normalize_components(package_root),
+            provenance: RootProvenance::PackageRoot,
+        });
+    }
+    if let Some(package_area) = inputs.package_area {
+        roots.push(RootEntry {
+            path: normalize_components(package_area),
+            provenance: RootProvenance::PackageArea,
+        });
+    }
+    roots.push(RootEntry {
+        path: local_root,
+        provenance: if inputs.repository_root.is_some() {
+            RootProvenance::Repository
+        } else {
+            RootProvenance::LocalRoot
+        },
+    });
+    roots.extend(local_appends);
+    roots.extend(user_prepends);
+    if let Some(home) = inputs.home {
+        roots.push(RootEntry {
+            path: normalize_components(home),
+            provenance: RootProvenance::Home,
+        });
+    }
+    roots.extend(user_appends);
+
+    // Roots are already normalized, so the dedupe key is the path itself;
+    // first-seen provenance wins.
+    let mut seen = std::collections::HashSet::new();
+    roots.retain(|root| seen.insert(root.path.clone()));
+    roots
+}
+
+/// The ordered `@` search roots for an explicit [`FileResolutionContext`]:
+/// the launch `@` scope's anchors plus the context's configured roots and
+/// home, run through the shared chain builder. This is the R4 diagnostics
+/// view; resolution and completion consume the same chain internally.
+pub(crate) fn magic_root_chain_for_context(
+    ctx: &FileResolutionContext,
+) -> Vec<super::MagicSearchRoot> {
+    let scope = ctx.launch_magic_scope();
+    let inputs = MagicChainInputs {
+        repository_root: scope.repository_root(),
+        request_dir: scope.request_dir(),
+        package_root: scope.package_root(),
+        package_area: scope.package_area(),
+        home: ctx.home_dir(),
+        magic_paths: ctx.magic_paths(),
+    };
+    build_magic_chain(&inputs)
+        .into_iter()
+        .map(|root| super::make_magic_search_root(root.path, root.provenance))
+        .collect()
+}
+
+/// The `@` chain inputs for an internal [`ResolutionContext`]: the launch
+/// `@` scope when one was captured, otherwise the live ambient anchors (whose
+/// request directory is the CWD and whose local root falls back to it).
+fn magic_chain_inputs<'a>(
+    magic_paths: &'a MagicPathList,
+    ctx: &'a ResolutionContext,
+    repository_root: Option<&'a Path>,
+) -> MagicChainInputs<'a> {
+    match &ctx.launch_magic_scope {
+        Some(scope) => MagicChainInputs {
+            repository_root: scope.repository_root(),
+            request_dir: scope.request_dir(),
+            package_root: scope.package_root(),
+            package_area: scope.package_area(),
+            home: ctx.home_dir.as_deref(),
+            magic_paths,
+        },
+        None => MagicChainInputs {
+            repository_root,
+            request_dir: &ctx.cwd,
+            package_root: ctx.package_root.as_deref(),
+            package_area: ctx.package_area.as_deref(),
+            home: ctx.home_dir.as_deref(),
+            magic_paths,
+        },
+    }
+}
+
 /// Strip a Windows `\\?\` verbatim prefix from a search root. No-op elsewhere.
 ///
 /// Roots arrive in whichever spelling the caller produced: `std::fs::canonicalize`
@@ -722,42 +900,11 @@ fn collect_roots(
             path: PathBuf::from("/"),
             provenance: RootProvenance::Absolute,
         }]),
-        ReferenceKind::Magic(_) => {
-            let mut roots = Vec::new();
-            roots.extend(magic_paths.prepend.iter().cloned().map(|path| RootEntry {
-                path,
-                provenance: RootProvenance::Magic,
-            }));
-            if let Some(package_root) = &ctx.package_root {
-                roots.push(RootEntry {
-                    path: package_root.clone(),
-                    provenance: RootProvenance::PackageRoot,
-                });
-            }
-            if let Some(package_area) = &ctx.package_area {
-                roots.push(RootEntry {
-                    path: package_area.clone(),
-                    provenance: RootProvenance::PackageArea,
-                });
-            }
-            if let Some(git_root) = repository_root {
-                roots.push(RootEntry {
-                    path: git_root.to_path_buf(),
-                    provenance: RootProvenance::Repository,
-                });
-            }
-            if let Some(ref home) = ctx.home_dir {
-                roots.push(RootEntry {
-                    path: home.clone(),
-                    provenance: RootProvenance::Home,
-                });
-            }
-            roots.extend(magic_paths.append.iter().cloned().map(|path| RootEntry {
-                path,
-                provenance: RootProvenance::Magic,
-            }));
-            Ok(roots)
-        }
+        ReferenceKind::Magic(_) => Ok(build_magic_chain(&magic_chain_inputs(
+            magic_paths,
+            ctx,
+            repository_root,
+        ))),
         ReferenceKind::RepositoryRoot(_) => match repository_root {
             Some(root) => Ok(vec![RootEntry {
                 path: root.to_path_buf(),
@@ -1036,7 +1183,13 @@ pub(crate) fn candidate_plan(
     let interpolated = interpolate(parsed.kind.template(), ctx)?;
     let anchoring = compute_effective_anchoring(parsed, &interpolated)?;
     let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
-        resolve_repository_root(ctx)?
+        if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
+            // Same launch-scope authority as `resolve_core`; see the comment
+            // there.
+            scope.repository_root().map(Path::to_path_buf)
+        } else {
+            resolve_repository_root(ctx)?
+        }
     } else {
         ctx.repository_root.clone()
     };
@@ -1265,13 +1418,23 @@ pub(crate) fn complete_partial(
     // The ambient completer has no request-configured magic roots; they only
     // reach completion through the context-aware entry point.
     let magic_paths = MagicPathList::default();
+    let magic_roots: Vec<PathBuf> = build_magic_chain(&MagicChainInputs {
+        repository_root: repository_root.as_deref(),
+        request_dir: &base_abs,
+        package_root: None,
+        package_area: None,
+        home: home.as_deref(),
+        magic_paths: &magic_paths,
+    })
+    .into_iter()
+    .map(|root| root.path)
+    .collect();
     let anchors = CompletionAnchors {
         base: &base_abs,
         repository_root: repository_root.as_deref(),
         package_root: None,
         package_area: None,
-        home: home.as_deref(),
-        magic_paths: &magic_paths,
+        magic_root_paths: &magic_roots,
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1290,13 +1453,20 @@ pub(crate) fn complete_partial_in_context(
     };
     ctx.validate()?;
 
+    // `@` completion enumerates from the launch `@` scope's chain — the same
+    // roots resolution probes — with the typed scope segment appended only
+    // after root selection. Completion never re-derives the scope from the
+    // authoring base (ruling 2).
+    let magic_roots: Vec<PathBuf> = magic_root_chain_for_context(ctx)
+        .iter()
+        .map(|root| root.path().to_path_buf())
+        .collect();
     let anchors = CompletionAnchors {
         base: ctx.base_dir(),
         repository_root: ctx.repository_root(),
         package_root: ctx.package_root(),
         package_area: ctx.package_area(),
-        home: ctx.home_dir(),
-        magic_paths: ctx.magic_paths(),
+        magic_root_paths: &magic_roots,
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1309,14 +1479,14 @@ pub(crate) fn complete_partial_in_context(
 /// (`complete_partial_in_context`), so both entry points share one root builder.
 /// This is the D9 seam: a value completion emits enumerates from the same roots
 /// execution's candidate builder probes, so the two cannot teach different
-/// precedence.
+/// precedence. `magic_roots` is the prebuilt `@` chain (R3): completion appends
+/// its scope segment only after those roots are selected.
 struct CompletionAnchors<'a> {
     base: &'a Path,
     repository_root: Option<&'a Path>,
     package_root: Option<&'a Path>,
     package_area: Option<&'a Path>,
-    home: Option<&'a Path>,
-    magic_paths: &'a MagicPathList,
+    magic_root_paths: &'a [PathBuf],
 }
 
 /// Split a token's path portion, build its roots from the shared anchors, and
@@ -1365,13 +1535,12 @@ fn expand_completion(
 /// Build the ordered completion roots for an entry form, each with the scope
 /// appended.
 ///
-/// Mirrors the execution candidate builder ([`collect_roots`]): `Magic` walks
-/// configured prepend roots, package root, package-area root, repository root,
-/// home, then configured append roots; `RepositoryRoot` uses only the
-/// repository root; `RepositoryScoped` walks package root, package-area root,
-/// then repository root; `ImplicitRelative` walks the base directory then the
-/// repository root. Lexically duplicate roots collapse, keeping first-seen
-/// order.
+/// `Magic` reuses the prebuilt `@` chain from [`build_magic_chain`] — the
+/// same roots execution probes — appending the typed scope segment only
+/// after root selection (R3). `RepositoryRoot` uses only the repository root;
+/// `RepositoryScoped` walks package root, package-area root, then repository
+/// root; `ImplicitRelative` walks the base directory then the repository
+/// root. Lexically duplicate roots collapse, keeping first-seen order.
 fn completion_roots(
     form: CompletionEntryForm,
     scope: &str,
@@ -1380,23 +1549,8 @@ fn completion_roots(
     let mut roots: Vec<PathBuf> = Vec::new();
     match form {
         CompletionEntryForm::Magic => {
-            for prepend in &anchors.magic_paths.prepend {
-                push_unique(&mut roots, append_scope(prepend, scope));
-            }
-            if let Some(package_root) = anchors.package_root {
-                push_unique(&mut roots, append_scope(package_root, scope));
-            }
-            if let Some(package_area) = anchors.package_area {
-                push_unique(&mut roots, append_scope(package_area, scope));
-            }
-            if let Some(repo) = anchors.repository_root {
-                push_unique(&mut roots, append_scope(repo, scope));
-            }
-            if let Some(home) = anchors.home {
-                push_unique(&mut roots, append_scope(home, scope));
-            }
-            for append in &anchors.magic_paths.append {
-                push_unique(&mut roots, append_scope(append, scope));
+            for root in anchors.magic_root_paths {
+                push_unique(&mut roots, append_scope(root, scope));
             }
         }
         CompletionEntryForm::ImplicitRelative => {
@@ -1604,6 +1758,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::Literal("foo/bar.md".to_string())],
@@ -1624,6 +1779,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let template = PathTemplate {
             segments: vec![
@@ -1645,6 +1801,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::EnvVar("MISSING".to_string())],
@@ -1678,6 +1835,7 @@ mod tests {
         // directory (the "no git root discoverable" branch).
         let parsed = ParsedReference {
             authored: "nope.md".to_string(),
+            payload_offset: 0,
             recursive: false,
             kind: ReferenceKind::ImplicitRelative(PathTemplate {
                 segments: vec![TemplateSegment::Literal("nope.md".to_string())],
@@ -1691,6 +1849,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let roots =
             collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx, None).unwrap();
@@ -1711,6 +1870,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap();
         assert_eq!(root_paths(&roots), vec![PathBuf::from("/home/test")]);
@@ -1730,6 +1890,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap_err();
         assert!(
@@ -1753,6 +1914,7 @@ mod tests {
             package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
+            launch_magic_scope: None,
         };
         let roots = collect_roots(
             &parsed,

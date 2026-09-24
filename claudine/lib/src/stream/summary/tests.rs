@@ -25,6 +25,7 @@ fn serde_round_trip_full() {
         is_error: false,
         error_kind: None,
         error_message: None,
+        error_reference: None,
         duration_ms: Some(12345),
         duration_api_ms: Some(11000),
         num_turns: Some(3),

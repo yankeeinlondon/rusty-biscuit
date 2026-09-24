@@ -19,9 +19,9 @@ state to get a real path:
 ```rust,no_run
 use biscuit_file::FileReference;
 
-// "@" means: search the well-known roots (package, package area, git repo
-// root, then HOME, plus any roots you configure). Parsing reads nothing
-// from the environment.
+// "@" means: search the local tree's well-known roots (package, package
+// area, git repo root) before HOME, plus any roots you configure. Parsing
+// reads nothing from the environment.
 let spec = FileReference::new("@docs/spec.md")?;
 
 // Resolution probes the filesystem. Some(path) = found; None = clean miss.
@@ -80,7 +80,7 @@ Rust but nothing about this library.
 | _(none)_              | **Implicit relative** | The base directory, then the git repository root                | `README.md`, `docs/spec.md`        |
 | `/`, drive, or UNC    | **Absolute**          | Used verbatim                                                   | `/etc/config.toml`, `C:\\cfg.toml` |
 | `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)            | `~/.config/app.toml`               |
-| `@` or `@/`           | **Magic**             | Custom, package, package-area, repository, and HOME roots       | `@docs/spec.md`                    |
+| `@` or `@/`           | **Magic**             | Local-tier roots (package, package area, local root), then HOME | `@docs/spec.md`                    |
 | `&` or `&/`           | **Repository root**   | The repository root only; repository-contained                  | `&README.md`                       |
 | `^` or `^/`           | **Repository scoped** | Package, package area, then repository; repository-contained    | `^README.md`                       |
 | `vault:` or `vault::` | **Vault**             | Configured vault root directories                               | `vault:notes/today.md`             |
@@ -88,7 +88,7 @@ Rust but nothing about this library.
 
 Two modifiers compose with the kinds above:
 
-- a leading `%` switches to [recursive directory search](#recursive-search);
+- a leading `%` switches to [recursive directory search](#recursive-search-);
 - any segment may contain [`{{VAR}}` environment interpolation](#environment-variable-interpolation).
 
 **"Base directory"** above means: the process CWD in ambient mode, or the
@@ -205,15 +205,50 @@ relative. Repeated POSIX separators and Windows drive-qualified, rooted, or
 UNC payloads are rejected with `InvalidSyntax` rather than being allowed to
 replace a configured magic root.
 
-The search order is:
+The governing rule is **local before home**: every root in the local tree is
+searched before any home-based root, so a file beside the user always beats a
+same-named file in their home configuration.
 
-1. **Prepended roots** — added via `add_magic_path(path, PathPosition::Start)`,
-   in registration order;
-2. **the package root** selected for the reference base (when known);
-3. **the package-area root** selected for the reference base (when known);
-4. **the git repository root** (when known);
-5. **the home directory** (when known);
-6. **Appended roots** — added via `add_magic_path(path, PathPosition::End)`.
+The **local root** is the repository root when the request directory is inside
+one, and otherwise the request directory itself — whether or not that
+directory is below `$HOME`. (Before this rule, a request outside any
+repository never searched its own directory.) Every root belongs to one of two
+tiers, and the search order is:
+
+1. **Local prepends** — local-tier roots added at `PathPosition::Start`, in
+   registration order;
+2. **the package root** selected for the request directory (when known);
+3. **the package-area root** selected for the request directory (when known);
+4. **the local root** — the repository root, or the request directory when
+   there is no repository;
+5. **Local appends** — local-tier roots added at `PathPosition::End`;
+6. **User prepends** — user-tier roots added at `PathPosition::Start`;
+7. **the home directory** (when known);
+8. **User appends** — user-tier roots added at `PathPosition::End`.
+
+A configured root's **tier** is inferred by lexical containment (after
+`.`/`..` and Windows verbatim normalization) in the local root: inside it is
+local; everything else — `~/.myapp`, `/opt/configs` — is user tier. Tier is
+decided by the local root, never by `$HOME`, so a repository nested in home
+(`~/config/sh`) is unambiguous: `~/config/sh/.myapp` is local and `~/.myapp`
+is user. Containment cannot tell the two apart when the local root *is*
+`$HOME` (a launch from `$HOME`, or `$HOME` as a repository), so a caller that
+knows a root is a user convention registers it with
+`add_magic_path_with_tier(path, position, MagicPathTier::User)`; the override
+wins over inference in every layout. Plain `add_magic_path` means
+`MagicPathTier::Inferred`.
+
+`PathPosition` therefore orders a root only **within its tier**: `Start`
+precedes and `End` follows that tier's intrinsic roots. No position can move a
+user-tier root ahead of a local one. After ordering, roots are deduplicated by
+normalized path, keeping the first occurrence and its provenance — a
+configured root equal to an intrinsic root is searched once, as `Magic`.
+
+A relative configured root is joined onto the captured request directory, not
+the process working directory, and the tier test uses that same absolute path.
+For the ambient `resolve_from(base)` form the request directory is `base`, so
+a relative root follows `base`; earlier releases interpreted it against the
+process working directory.
 
 The first candidate confirmed to be a regular file wins. Missing and
 non-file candidates advance the search; any other I/O failure stops it with a
@@ -222,6 +257,7 @@ typed error.
 ```text
 @docs/spec.md       → <package>/docs/spec.md, <area>/docs/spec.md, <repo>/docs/spec.md, ~/docs/spec.md
 @.bashrc            → <package>/.bashrc, <area>/.bashrc, <repo>/.bashrc, ~/.bashrc
+@notes.md (no repo) → <request-dir>/notes.md, ~/notes.md
 ```
 
 ```rust,no_run
@@ -230,10 +266,12 @@ use biscuit_file::{FileReference, PathPosition};
 // Out of the box: package → package area → repository → HOME.
 let path = FileReference::new("@docs/spec.md")?.resolve()?;
 
-// With application convention directories:
+// With application convention directories. Neither root lies in the local
+// tree, so both are user tier: /opt/configs is searched after every local
+// root but before HOME; /etc/defaults is searched last.
 let path = FileReference::new("@config.toml")?
-    .add_magic_path("/opt/configs", PathPosition::Start)   // searched first
-    .add_magic_path("/etc/defaults", PathPosition::End)    // searched last
+    .add_magic_path("/opt/configs", PathPosition::Start)
+    .add_magic_path("/etc/defaults", PathPosition::End)
     .resolve()?;
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
@@ -241,7 +279,14 @@ let path = FileReference::new("@config.toml")?
 **Use it when** you want convention-over-configuration lookup — "find
 `plan.md` wherever this application usually keeps prompts." Applications
 embedding this library typically prepend their own convention roots so that
-`@name.md` checks the nearest, most specific location first.
+`@name.md` checks the nearest, most specific location first: local convention
+directories as local prepends, and home convention directories as user-tier
+roots that sit behind the whole local tree.
+
+In an explicit context the local root and its package anchors come from the
+[launch `@` scope](#the-launch--scope), which survives derivation, so `@`
+inside a nested document still searches the tree the request was launched
+from.
 
 ### Repository Root (`&`) and Repository Scoped (`^`)
 
@@ -262,8 +307,6 @@ primitives.
 
 In a shell, `&` is a control operator. Quote repository-root references passed
 as arguments or setter values, for example `spec='&docs/plan.md'`.
-
-### Recursive Search (`%`)
 
 ### Vault (`vault:` / `vault::`)
 
@@ -437,6 +480,35 @@ and package anchors from the catalog for the new base. A trusted external base
 outside the catalog clears those anchors. No derivation re-reads process state
 or performs discovery.
 
+### The launch `@` scope
+
+Recomputed anchors serve `./`, bare, `&`, and `^` references, which mean
+"relative to the document that wrote me." `@` means "the usual places for this
+request," so it reads a separate, immutable `LaunchMagicScope`: the request
+directory plus the repository, package, and package-area roots selected for
+it. `new` captures it, and the anchor builders (`with_repository_root`,
+`with_repository_scope_catalog`, `with_package_root`, `with_package_area`)
+keep it in sync. `for_source`, `for_base`, and both trusted-external
+derivations copy it unchanged. A prompt loaded from `~/.myapp/prompts` or
+another repository that writes `@x.md` therefore searches the launch tree
+first, while its `./x.md`, `x.md`, `&x.md`, and `^x.md` keep their
+source-specific anchors.
+
+A caller that rebuilds a context around an external source, instead of
+deriving it, seeds the launch scope explicitly:
+
+```rust,no_run
+# use biscuit_file::FileResolutionContext;
+# let launch = FileResolutionContext::new("/work/repo");
+let scope = launch.launch_magic_scope().clone();
+let source = FileResolutionContext::new("/other/repo/prompts")
+    .with_launch_magic_scope(scope); // `@` keeps searching /work/repo first
+```
+
+`magic_search_roots()` returns the resulting ordered, deduplicated `@` roots
+with their provenance — the same chain resolution and completion use — for
+diagnostics that list where an `@` reference looked.
+
 ### Trust boundaries and containment
 
 When a repository root is supplied, `validate()` enforces that the original
@@ -469,9 +541,13 @@ snapshot into a valid one.
 | `with_package_area(area)` | Supply the authoritative package-area root |
 | `with_home_dir(home)` / `without_home_dir()` | Override or explicitly clear captured home |
 | `with_env(env)` | Replace the captured interpolation/`VAULT` environment |
-| `add_magic_path(path, position)` | Add an authoritative magic root |
+| `add_magic_path(path, position)` | Add an authoritative magic root, tier inferred from containment in the local root |
+| `add_magic_path_with_tier(path, position, tier)` | Add a magic root with an explicit `MagicPathTier` (`User` forces the user tier) |
 | `add_vault(path)` | Add an authoritative vault root |
+| `with_launch_magic_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
 | `source_path()`, `base_dir()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `launch_magic_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
+| `magic_search_roots()` | The ordered, deduplicated `@` roots with provenance |
 | `validate()` | Check repository containment of request and derived bases |
 
 ## Choosing an Entry Point
@@ -492,7 +568,9 @@ compatibility operations.
 **One easy-to-miss rule:** the explicit methods use the magic and vault roots
 stored on the *context*. Roots added directly to a `FileReference` via its
 own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
-`resolve()` / `resolve_from()` path.
+`resolve()` / `resolve_from()` path, where the request directory — the local
+root without a repository, and the base for relative magic roots — is the
+process CWD or `base` respectively.
 
 ### `FileReference` method summary
 
@@ -501,6 +579,7 @@ own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 | `new(raw)` | Parse without reading ambient state |
 | `raw()` | The authored string |
 | `class()` | `FileReferenceClass { kind, recursive }` — branch on typed kind, not prefixes |
+| `payload()` | Authored text after `%`, the sigil, and its optional `/` (`@/@x.md` → `@x.md`); name a reference in diagnostics with this, not prefix trimming |
 | `add_magic_path(path, position)` | Add an ambient-path magic root |
 | `add_vault(path)` | Add an ambient-path vault root |
 | `resolve()` / `resolve_from(base)` | Resolve through the ambient compatibility APIs |
@@ -515,8 +594,10 @@ own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 | `resolve_target()` | With `url`: distinguish `Resolved::Local` from `Resolved::Remote` |
 
 All builder methods consume and return `self` for chaining.
-`PathPosition::Start` inserts a magic root before the default roots;
-`PathPosition::End` inserts one after them.
+`PathPosition::Start` inserts a magic root before its tier's intrinsic roots;
+`PathPosition::End` inserts one after them (see [Magic](#magic-)). The
+`FileReference` builder always infers the tier; the explicit override is on
+the context.
 
 `CandidatePlanOrder::Resolution` preserves the reference kind's normal order.
 `CandidatePlanOrder::AuthoringBaseFirst` stably moves `Source` candidates first
@@ -560,7 +641,11 @@ data — never re-derive it from the reference kind:
 
 Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 `RootProvenance` vocabulary is `Repository`, `Source`, `PackageRoot`,
-`PackageArea`, `Home`, `Magic`, `Vault`, and `Absolute`. Every attempted
+`PackageArea`, `Home`, `Magic`, `Vault`, `Absolute`, and `LocalRoot`.
+`LocalRoot` marks the request directory serving as an `@` chain's local root
+when there is no repository; it is deliberately distinct from `Source` (the
+authoring base of bare and explicit-relative references), so
+`CandidatePlanOrder::AuthoringBaseFirst` never promotes it. Every attempted
 `ProbedCandidate` adds a
 `ProbeDisposition`:
 
@@ -585,8 +670,10 @@ unsupported token recursive.
 
 The parity guarantee: with one shared `FileResolutionContext`, completion and
 execution consume the same captured roots in the same precedence (implicit:
-base, then repository; magic: configured prepends, package, package area,
-repository, home, configured appends; duplicates removed in first-seen order).
+base, then repository; magic: the one tier-ordered chain from
+[Magic](#magic-), read from the launch `@` scope, with the typed path segment
+appended only after the roots are selected; duplicates removed in first-seen
+order).
 A consumer that
 enumerates those roots in order can pass its emitted value unchanged to
 `FileReference::new()` + `resolve_in_context()` and get the file it
@@ -647,7 +734,7 @@ which belongs to the optional fetching API rather than local resolution.
    | Implicit relative | Base, then repository root |
    | Absolute | The authored path only |
    | Home | Home directory only |
-   | Magic | Configured prepends, package, package area, repository, home, configured appends |
+   | Magic | Local prepends, package, package area, local root, local appends, user prepends, home, user appends |
    | Repository root | Repository only |
    | Repository scoped | Package, package area, repository |
    | Vault | Configured roots, then captured `$VAULT` paths |

@@ -468,9 +468,14 @@ fn level2_nested_package_compose_resolves_all_finalized_reference_forms_in_tmux(
         &root.join("alpha/lib/package-only.md"),
         "PACKAGE-ROOT-MARKER\n",
     );
+    // `@` resolves through the launch scope, never the source document's
+    // package (2026-09-23-local-before-home, nested-prompts ruling): launched
+    // from the repository root, `@magic.md` is `<repo>/prompts/magic.md`, and
+    // the source package's copy is a decoy.
+    write(&root.join("prompts/magic.md"), "MAGIC-PROMPT-MARKER\n");
     write(
         &root.join("alpha/lib/prompts/magic.md"),
-        "MAGIC-PROMPT-MARKER\n",
+        "SOURCE-PACKAGE-DECOY\n",
     );
     write(&nested.join("implicit.md"), "IMPLICIT-SOURCE-MARKER\n");
     let document = nested.join("router.md");
@@ -504,6 +509,10 @@ fn level2_nested_package_compose_resolves_all_finalized_reference_forms_in_tmux(
             capture.frame.plain
         );
     }
+    assert!(
+        !prompt.contains("SOURCE-PACKAGE-DECOY"),
+        "`@` must not search the source document's package; prompt:\n{prompt}"
+    );
     assert_eq!(
         fs::read_to_string(&staged.launch_log)
             .unwrap_or_default()

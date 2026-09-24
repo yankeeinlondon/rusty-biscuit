@@ -1,11 +1,13 @@
 //! Shared stderr-side state accumulated by the bridge and merged into the
 //! final execution summary.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::stream::badges::derive_badges;
 use crate::stream::logs::opencode::classify::merge_rate_limit;
+use crate::stream::providers::opencode::GENERIC_SERVER_ERROR;
 use crate::stream::summary::{RateLimitInfo, StderrDiagnostics, StreamExecutionSummary};
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.
@@ -26,6 +28,9 @@ pub struct SharedStderrState {
     /// log line. Used to enrich [`StreamExecutionSummary::model`]
     /// when the stdout NDJSON stream does not include an `init` payload.
     pub primary_model_id: Option<String>,
+    /// Headline of each unrecognized `ERROR` record, keyed by its `ref=`.
+    /// Joined to the stdout error carrying the same ref at merge time.
+    pub failure_causes: BTreeMap<String, String>,
 }
 
 impl SharedStderrState {
@@ -43,7 +48,8 @@ impl SharedStderrState {
 /// one structured log record. Always merges `summary.rate_limit` when the
 /// bridge accumulated stderr-side rate-limit state. Backfills
 /// `summary.model` from the first observed `mode=primary` LLM call when the
-/// stdout NDJSON stream did not surface a model. Always recomputes
+/// stdout NDJSON stream did not surface a model. Replaces a generic stdout
+/// server error with the stderr cause sharing its `ref`. Always recomputes
 /// `summary.badges` via [`derive_badges`] so the
 /// stderr-derived badge categories (rate-limit resets, malformed-asset
 /// warnings) appear in the final output.
@@ -65,6 +71,28 @@ pub fn merge_stderr_state_into_summary(
     {
         summary.model = Some(model);
     }
+    // Since OpenCode 1.18 a failure such as an unknown model reaches stdout
+    // only as the generic server error; the stderr record with the same `ref`
+    // is the one that names the cause.
+    if summary.error_message.as_deref() == Some(GENERIC_SERVER_ERROR)
+        && let Some(cause) = summary
+            .error_reference
+            .as_ref()
+            .and_then(|reference| state.failure_causes.get(reference))
+    {
+        if let Some(name) = error_name(cause) {
+            summary.error_kind = Some(name.to_string());
+        }
+        summary.error_message = Some(cause.clone());
+    }
     drop(state);
     summary.badges = derive_badges(summary, summary.provider);
+}
+
+/// The JS error class leading an OpenCode error headline
+/// (`ProviderModelNotFoundError: Model not found: …`), if there is one.
+fn error_name(headline: &str) -> Option<&str> {
+    let (name, _) = headline.split_once(':')?;
+    let name = name.trim();
+    (name.ends_with("Error") && name.chars().all(|c| c.is_ascii_alphanumeric())).then_some(name)
 }
