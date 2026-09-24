@@ -170,9 +170,9 @@ Keep these aligned when docs/examples mention built-in APIs:
 Focused response-method generation coverage:
 
 ```bash
-cargo test -p schematic-gen --test e2e_generation binary_response_generates_request_bytes_method
-cargo test -p schematic-gen --test e2e_generation text_response_generates_request_text_method
-cargo test -p schematic-gen --test e2e_generation empty_response_generates_request_empty_method
+cargo test -p schematic-gen --test l1 e2e_generation::binary_response_generates_request_bytes_method
+cargo test -p schematic-gen --test l1 e2e_generation::text_response_generates_request_text_method
+cargo test -p schematic-gen --test l1 e2e_generation::empty_response_generates_request_empty_method
 ```
 
 Definitions/auth sanity checks:

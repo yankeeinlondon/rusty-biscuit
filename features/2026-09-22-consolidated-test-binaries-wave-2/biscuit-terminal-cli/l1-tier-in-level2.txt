@@ -1,0 +1,64 @@
+# F3 and F15: L1-tier tests inside the level2 binary under the CI feature union (terminal-tests)
+
+$ cargo nextest list -p biscuit-terminal-cli --features terminal-tests -E "$(just _tier_filter L1 biscuit-terminal-cli)"   # level2 rows only
+biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_param
+biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_param_first_position
+biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_for_garbage_value
+biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_without_param
+biscuit-terminal-cli::level2 common::pane_geometry::tests::finds_row_of
+biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_cursor_before_line
+biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_cursor_rows
+biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_height_line
+biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_width_line
+biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_width_returns_none_when_absent
+biscuit-terminal-cli::level2 diagrams::helper_tests::cases_table_covers_all_ten_subcommands
+biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers
+biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_marker
+biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_terminator
+biscuit-terminal-cli::level2 diagrams::helper_tests::sha256_hex_distinguishes_inputs
+biscuit-terminal-cli::level2 diagrams::helper_tests::sha256_hex_matches_known_digest
+biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_bold_reset_before_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_explicit_bold_off_encoding
+biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_itu_colon_color_plus_bold
+biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_wezterm_charset_designation_around_reset
+biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_bleeding_into_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_border_after_reset
+biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_on_leading_border
+biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_on_leading_padding
+biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_non_bold_content
+biscuit-terminal-cli::level2 prose_cells::cell_alignment::equal_slack_is_ambiguous
+biscuit-terminal-cli::level2 prose_cells::cell_alignment::left_alignment_has_fill_on_the_right
+biscuit-terminal-cli::level2 prose_cells::cell_alignment::right_alignment_has_fill_on_the_left
+biscuit-terminal-cli::level2 prose_cells::cell_alignment::splits_inner_cells_dropping_borders_and_pane_padding
+biscuit-terminal-cli::level2 prose_cells::cell_alignment::too_few_borders_yields_no_cells
+biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_dim_reset_before_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_normal_intensity_off_encoding
+biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_wezterm_charset_designation_around_reset
+biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_bleeding_into_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_border_after_reset
+biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_on_leading_border
+biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_on_leading_padding
+biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_non_dim_content
+biscuit-terminal-cli::level2 prose_cells::dim_containment::truecolor_channel_two_is_not_read_as_dim
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_basic_red_reset_before_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_bright_red
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_default_foreground_off_encoding
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_red_256_color_index
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_wezterm_maroon_truecolor_capture_form
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_blue_foreground
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_non_red_content
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_bleeding_from_preceding_cell_across_separator
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_bleeding_into_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_border_after_reset
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_on_leading_border
+biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_on_leading_padding
+biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_closed_before_padding_and_border_bel
+biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_closed_before_padding_and_border_st
+biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_with_params_in_opener
+biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_wezterm_charset_designation_around_link
+biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_bleeding_into_padding_and_border
+biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_opened_before_leading_border
+biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_reopened_over_border
+biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_unlinked_label
+
+level2 L1-tier tests: 59 (prose_cells: 43, diagrams: 6, common::pane_geometry: 10)

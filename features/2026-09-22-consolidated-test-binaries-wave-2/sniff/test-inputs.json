@@ -1,0 +1,45 @@
+{
+  "probe": "sniff/lib/benches/ci-bench-ids.txt",
+  "before_rows": [
+    {
+      "package": "sniff",
+      "path": "sniff/lib/benches/ci-bench-ids.txt",
+      "source": "sniff/lib/tests/bench_ids_sync.rs",
+      "line": 21,
+      "embedded": false,
+      "unit": "binary_id(sniff::bench_ids_sync)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "sniff",
+      "path": "sniff/lib/benches/ci-bench-ids.txt",
+      "source": "sniff/lib/tests/l1/bench_ids_sync.rs",
+      "line": 21,
+      "embedded": false,
+      "unit": "binary_id(sniff::l1) & test(/^bench_ids_sync::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(sniff::bench_ids_sync)": [
+      "sniff::bench_ids_sync ci_filter_regex_compiles_and_matches_exactly",
+      "sniff::bench_ids_sync every_ci_bench_id_is_well_formed",
+      "sniff::bench_ids_sync text_file_matches_rust_constant"
+    ]
+  },
+  "after_units": {
+    "binary_id(sniff::l1) & test(/^bench_ids_sync::/)": [
+      "sniff::l1 bench_ids_sync::ci_filter_regex_compiles_and_matches_exactly",
+      "sniff::l1 bench_ids_sync::every_ci_bench_id_is_well_formed",
+      "sniff::l1 bench_ids_sync::text_file_matches_rust_constant"
+    ]
+  },
+  "before_mapped": [
+    "sniff::l1 bench_ids_sync::ci_filter_regex_compiles_and_matches_exactly",
+    "sniff::l1 bench_ids_sync::every_ci_bench_id_is_well_formed",
+    "sniff::l1 bench_ids_sync::text_file_matches_rust_constant"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

@@ -22,7 +22,8 @@ Two reference forms are recognized, and nothing else:
 Files are found the way rustc finds them — by walking `mod` declarations from
 each Cargo target root — so the nextest identity of every reference is exact:
 a literal inside a test function names that test, and one in a helper names the
-module it lives in. A file no target reaches is not compiled and is not read.
+whole binary, since a helper's callers may live in any of its modules. A file no
+target reaches is not compiled and is not read.
 
 ## Notes
 
@@ -37,7 +38,7 @@ from __future__ import annotations
 import bisect
 import posixpath
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 #: Test-name markers the L1 tier excludes (`just _tier_filter L1`). A test
@@ -125,7 +126,9 @@ class Target:
 
     `binary_id` is nextest's identity for the target's test binary:
     `<package>` for a library, `<package>::bin/<name>` for a binary, and
-    `<package>::<name>` for an integration test.
+    `<package>::<name>` for an integration test. `built_for_l1` is false when
+    the target's `required-features` are not all enabled by the package's CI
+    feature contract, so the L1 cell never compiles it.
     """
 
     package: str
@@ -133,6 +136,7 @@ class Target:
     name: str
     root: str
     manifest_dir: str
+    built_for_l1: bool = True
 
     @property
     def binary_id(self) -> str:
@@ -149,8 +153,11 @@ class Reference:
 
     `path` is the resolved repository path the literal names — the changed path
     itself, or a directory containing it. `unit` is the nextest filterset that
-    selects the test reading it, and is `None` exactly when `product` is true:
-    an embedded file outside test code has no test to narrow to.
+    selects the L1 tests that may read it: one test, or a whole binary for a
+    helper. It is `None` when no L1 cell can run a reader: the reference is
+    `product` (an embedded file outside test code has no test to narrow to),
+    its test is not L1, its target needs features CI does not enable, or it is
+    a helper in a binary with no L1 test.
     """
 
     path: str
@@ -196,19 +203,51 @@ def normalize(path: str) -> str | None:
     return "/".join(parts) if parts else None
 
 
+def _l1_features(package: dict) -> set[str] | None:
+    """The features a package's L1 cell compiles with, or `None` for all of them.
+
+    Mirrors `affected_scope.feature_args`, which reads the same
+    `[package.metadata.ci.tests]` `features` / `all-features` keys: the
+    requested features plus `default`, closed over the package's feature table.
+    """
+    tests = (((package.get("metadata") or {}).get("ci") or {}).get("tests")) or {}
+    if tests.get("all-features"):
+        return None
+    table = package.get("features") or {}
+    enabled: set[str] = set()
+    pending = ["default", *tests.get("features", [])]
+    while pending:
+        feature = pending.pop()
+        if feature in enabled or feature.startswith("dep:"):
+            continue
+        # `dep/feature` enables the optional dependency's implicit feature
+        # `dep`; `dep?/feature` does not.
+        name = feature.split("/", 1)[0]
+        if "/" in feature and name.endswith("?"):
+            continue
+        if name in enabled:
+            continue
+        enabled.add(name)
+        pending.extend(table.get(name, []))
+    return enabled
+
+
 def targets_from_metadata(
     packages: Iterable[dict], root: str
 ) -> list[Target]:
     """The lib, bin, and test targets of workspace packages.
 
     Benches and examples are left out on purpose: no L1 cell runs them, so a
-    reference found there could only schedule a cell that selects nothing.
+    reference found there could only schedule a cell that selects nothing. A
+    target whose `required-features` the L1 cell does not enable is kept, with
+    `built_for_l1` false: its embeds are still product source.
     """
     prefix = root.replace("\\", "/").rstrip("/") + "/"
     targets: list[Target] = []
     for package in packages:
         manifest = package["manifest_path"].replace("\\", "/")
         manifest_dir = posixpath.dirname(manifest).removeprefix(prefix)
+        features = _l1_features(package)
         for target in package.get("targets", []):
             kinds = set(target.get("kind", []))
             if kinds & {"lib", "rlib", "proc-macro", "dylib", "cdylib", "staticlib"}:
@@ -229,6 +268,8 @@ def targets_from_metadata(
                     name=target["name"],
                     root=source.removeprefix(prefix),
                     manifest_dir=manifest_dir,
+                    built_for_l1=features is None
+                    or set(target.get("required-features") or ()) <= features,
                 )
             )
     return targets
@@ -248,32 +289,30 @@ def _is_l1(name: str, include_slow: bool) -> bool:
     return not any(segment.startswith(markers) for segment in name.split("::"))
 
 
-#: Test-binary name prefixes of the tiers L1 never runs. Tier membership is
-#: decided by test NAME, but these binaries hold only such tests by convention,
-#: and a narrowed L1 cell pointed at one would select nothing.
-NON_L1_BINARIES = ("level2", "level3", "browser", "real")
-
-
 def _unit(
     target: Target, module: tuple[str, ...], test_fn: str | None, include_slow: bool
 ) -> str | None:
     """The nextest filterset for a reference at `module` (inside `test_fn`).
 
-    `None` when the reference can only be read by a test the L1 tier excludes.
+    Inside a test function the unit is that test, or `None` when its path
+    carries a marker the L1 tier excludes; a binary's name says nothing about
+    its tier (`biscuit-tui-cli::level2` holds L1 tests). Anywhere else the
+    reference sits in a helper whose callers are unknown: a `pub` item, or a
+    private one wrapped by a public one, can be called from any module of the
+    binary. So the unit is the whole binary, and `scan` drops it only when the
+    binary holds no L1 test. The unit never needs to exclude non-L1 tests
+    itself: the cell intersects it with the tier expression
+    (`BISCUIT_TEST_NARROW`).
     """
-    if target.kind == "test" and target.name.startswith(NON_L1_BINARIES):
+    if not target.built_for_l1:
         return None
     binary = f"binary_id({target.binary_id})"
-    if test_fn is not None:
-        name = "::".join((*module, test_fn))
-        if not _is_l1(name, include_slow):
-            return None
-        return f"{binary} & test(={name})"
-    if not _is_l1("::".join(module), include_slow):
+    if test_fn is None:
+        return binary
+    name = "::".join((*module, test_fn))
+    if not _is_l1(name, include_slow):
         return None
-    if module:
-        return f"{binary} & test(/^{'::'.join(module)}::/)"
-    return binary
+    return f"{binary} & test(={name})"
 
 
 def _depth(literal: str) -> int:
@@ -376,8 +415,16 @@ def _scan_file(
     matcher: _Matcher,
     out: list[Reference],
     include_slow: bool = False,
+    *,
+    wide: list[Reference] | None = None,
+    tests: list[str] | None = None,
 ) -> None:
-    """Record every reference in one file and its `mod` declarations."""
+    """Record every reference in one file and its `mod` declarations.
+
+    A reference whose unit is binary-wide rather than one test is also added to
+    `wide`; `tests` collects the full name of every test function the file
+    defines.
+    """
     target = unit.target
     lines = [0]
     lines.extend(match.end() for match in re.finditer("\n", text))
@@ -463,17 +510,18 @@ def _scan_file(
         product = embedded and not in_test
         for path in sorted(entry for entry in resolved if entry):
             for hit in matcher.matches(path, target.manifest_dir, directories=directories):
-                out.append(
-                    Reference(
-                        path=hit,
-                        package=target.package,
-                        source=unit.path,
-                        line=line_of(start),
-                        embedded=embedded,
-                        product=product,
-                        unit=None if product else _unit(target, module, test_fn, include_slow),
-                    )
+                reference = Reference(
+                    path=hit,
+                    package=target.package,
+                    source=unit.path,
+                    line=line_of(start),
+                    embedded=embedded,
+                    product=product,
+                    unit=None if product else _unit(target, module, test_fn, include_slow),
                 )
+                out.append(reference)
+                if wide is not None and test_fn is None and reference.unit is not None:
+                    wide.append(reference)
 
     def free(literal: str) -> set[str | None]:
         if _depth(literal) < 2 or not anchored_file():
@@ -501,6 +549,10 @@ def _scan_file(
             elif function:
                 is_test = bool(_TEST_ATTRIBUTE.search(header))
                 scope = _Scope("test_fn" if is_test else "fn", function.group(2), is_test)
+                if is_test and tests is not None:
+                    _, module, enclosing = context()
+                    if enclosing is None:
+                        tests.append("::".join((*module, function.group(2))))
             if _CFG_TEST.search(header):
                 scope.test = True
             stack.append(scope)
@@ -566,6 +618,10 @@ def scan(
     (a declared module whose file is missing is simply not walked). A file
     reached from several targets — a shared `tests/common` helper — is reported
     once per target, because each target's binary reads it.
+
+    A reference outside any test function names its whole binary, and gets no
+    unit when that binary holds no L1 test. Only those targets' files are
+    tokenized a second time.
     """
     matcher = _Matcher(candidates)
     if not matcher.exact:
@@ -595,6 +651,9 @@ def scan(
             ) or any(match.group("indent") for match in _MOD_LINE.finditer(text))
         return hot[path]
 
+    wide: dict[Target, list[Reference]] = {}
+    walked: dict[Target, list[_File]] = {}
+
     for target in targets:
         pending = [
             _File(
@@ -614,8 +673,16 @@ def scan(
             text = cached(unit.path)
             if text is None:
                 continue
+            walked.setdefault(target, []).append(unit)
             if needs_tokens(unit.path, text):
-                _scan_file(text, unit, matcher, references, target.package in include_slow)
+                _scan_file(
+                    text,
+                    unit,
+                    matcher,
+                    references,
+                    target.package in include_slow,
+                    wide=wide.setdefault(target, []),
+                )
             else:
                 _declarations(text, unit)
             for name, module, is_test, path_attribute in unit.children:
@@ -641,7 +708,37 @@ def scan(
                             )
                         )
                         break
+
+    unreachable = {
+        reference
+        for target, entries in wide.items()
+        if entries
+        and not _has_l1_test(walked.get(target, []), cached, target.package in include_slow)
+        for reference in entries
+    }
+    references = [
+        replace(entry, unit=None) if entry in unreachable else entry for entry in references
+    ]
     return sorted(
         set(references),
         key=lambda entry: (entry.path, entry.package, entry.source, entry.line, entry.unit or ""),
     )
+
+
+def _has_l1_test(
+    walked: list[_File], cached: Callable[[str], str | None], include_slow: bool
+) -> bool:
+    """Whether any test in one binary's walked files belongs to the L1 tier.
+
+    A binary-wide unit in a binary holding only `level2_*` tests would be
+    emptied by the tier expression, and the narrowed cell, which runs with
+    `--no-tests=fail`, would go red having found nothing to run.
+    """
+    silent = _Matcher(())
+    for unit in walked:
+        found: list[str] = []
+        fresh = _File(unit.target, unit.path, unit.module, unit.test, unit.module_dir)
+        _scan_file(cached(unit.path) or "", fresh, silent, [], tests=found)
+        if any(_is_l1(name, include_slow) for name in found):
+            return True
+    return False

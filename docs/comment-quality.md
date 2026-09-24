@@ -290,7 +290,7 @@ pub fn compile_canonical_runtime(...) -> Result<CanonicalRuntimeConfig> { ... }
 ```
 
 End-to-end usage is covered by
-`claudine/lib/tests/canonical_dispatch.rs`, which exercises the full
+`claudine/lib/tests/l1/canonical_dispatch.rs`, which exercises the full
 config-to-runtime pipeline against real dispatch fixtures. The summary
 docblock plus the integration test is more durable than a contrived
 fixture inlined in rustdoc.

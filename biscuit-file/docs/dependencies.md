@@ -31,3 +31,9 @@
 
 The default feature set includes URL classification through `file-reference`,
 but it does not compile the HTTP client stack unless `fetch` is enabled.
+
+## Development Only
+
+- `test-toolkit` is a development dependency for the `test_layout` gate in the
+  consolidated `l1` test binary. It adds no crate to the workspace: every crate
+  it brings is already in `Cargo.lock`.

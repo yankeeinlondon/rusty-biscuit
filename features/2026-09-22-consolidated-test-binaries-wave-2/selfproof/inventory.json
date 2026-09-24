@@ -1,0 +1,5166 @@
+{
+  "generator": "scripts/ci/consolidation.py inventory",
+  "packages": {
+    "biscuit-file": {
+      "autotests": true,
+      "bench_targets": [
+        {
+          "harness": false,
+          "name": "parsers"
+        }
+      ],
+      "ci_tests": {
+        "features": [
+          "fetch"
+        ]
+      },
+      "features": [
+        "default",
+        "extract",
+        "fetch",
+        "file-reference",
+        "full",
+        "json5",
+        "lopdf",
+        "pdfium",
+        "schema",
+        "toml",
+        "url",
+        "yaml"
+      ],
+      "manifest": "biscuit-file/lib/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "completion_round_trip",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/completion_round_trip.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "detailed_resolution",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/detailed_resolution.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "fetch_integration",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [
+            "fetch"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "fetch"
+          ],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/fetch_integration.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 9,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "finalized_reference_resolution",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/finalized_reference_resolution.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 20,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "implicit_relative",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 20,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 20,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/implicit_relative.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "parse_count",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/parse_count.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 11,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "precedence_flip",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/precedence_flip.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 15,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "reference_grammar",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 15,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 15,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/reference_grammar.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "repository_scope_catalog",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/repository_scope_catalog.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 17,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "resolution_context",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 17,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 17,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/resolution_context.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "round_trip",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/round_trip.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "span_compat",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/span_compat.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "yaml_corpus",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/yaml_corpus.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "yaml_mutation",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/yaml_mutation.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "yaml_safety",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "fetch": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-file/lib/tests/yaml_safety.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 15
+    },
+    "biscuit-terminal-cli": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "terminal-tests"
+        ],
+        "l2-backends": [
+          "tmux",
+          "wezterm",
+          "kitty",
+          "apple-terminal"
+        ],
+        "local-features": [],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "terminal-tests"
+      ],
+      "manifest": "biscuit-terminal/cli/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 19,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "about",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/about.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 9,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "dir_targets",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/dir_targets.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 229,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "integration_test",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 229,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 229,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/integration_test.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 14,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_apple_terminal_prose",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 4,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_apple_terminal_prose.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 14,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_container_fenced_code",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 4,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_container_fenced_code.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_cursor_and_hygiene",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 40,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_diagrams",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 16,
+              "L2": 24,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_diagrams.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 17,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_image",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 7,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_image.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_layout",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_layout.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 46,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_prose_cells",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 43,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_prose_cells.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 25,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_prose_styling",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 15,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_prose_styling.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 8,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_render_tree_style",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 8,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_render_tree_style.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 12,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_status_block",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 2,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_status_block.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "level2_style_everywhere_matrix",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-terminal/cli/tests/level2_style_everywhere_matrix.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        }
+      ],
+      "top_level_test_files": 14
+    },
+    "biscuit-tui-cli": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "terminal-tests"
+        ],
+        "l2-backends": [
+          "tmux",
+          "wezterm",
+          "kitty"
+        ],
+        "local-features": [],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "terminal-tests"
+      ],
+      "manifest": "biscuit-tui/cli/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "boolean_switch_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/boolean_switch_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 64,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "choose_cli",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 64,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 64,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/choose_cli.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "choose_many_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 5,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 5,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/choose_many_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "choose_one_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 5,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 5,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/choose_one_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 18,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "completions",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 18,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 18,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/completions.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 15,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "completions_shell",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 15,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 15,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/completions_shell.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "exit_codes",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/exit_codes.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "help_contract",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/help_contract.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "input_table_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 6,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 6,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/input_table_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "keyboard_protocol",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/keyboard_protocol.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "target_os = \"macos\""
+          ],
+          "listed_tests": 4,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level3_chord_select",
+          "name_marker": "level3_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 4,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/level3_chord_select.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "unix"
+          ],
+          "listed_tests": 14,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": true,
+          "name": "real_terminal_render",
+          "name_marker": "real_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 14,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/real_terminal_render.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "text_area_input_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/text_area_input_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "text_input_output",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/text_input_output.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "windows"
+          ],
+          "listed_tests": 0,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "windows_captured_stdout",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "biscuit-tui/cli/tests/windows_captured_stdout.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        }
+      ],
+      "top_level_test_files": 15
+    },
+    "claudine": {
+      "autotests": true,
+      "bench_targets": [
+        {
+          "harness": false,
+          "name": "runtime_hot_paths"
+        }
+      ],
+      "ci_tests": {},
+      "features": [],
+      "manifest": "claudine/lib/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 2,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "agent_errors_fleet",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/agent_errors_fleet.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "boundary_lint",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/boundary_lint.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "canonical_dispatch",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/canonical_dispatch.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "deprecated_compatibility",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/deprecated_compatibility.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "diagnostic_detail_conformance",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/diagnostic_detail_conformance.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "kimi_wire",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/kimi_wire.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "lifecycle_control_flow_spike",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/lifecycle_control_flow_spike.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 2,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "model_catalog_integration",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/model_catalog_integration.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "opencode_stderr_lifecycle",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/opencode_stderr_lifecycle.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 9,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "protocol_fixture_replay",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/protocol_fixture_replay.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 35,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "semantic_fidelity",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 35,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/semantic_fidelity.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "strict_mode_provenance_spike",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/strict_mode_provenance_spike.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "tts_phase1_contract",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/tts_phase1_contract.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 2,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "tts_phase5_contract",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/tts_phase5_contract.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 23,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "typed_stream_protocols",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 23,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/lib/tests/typed_stream_protocols.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 15
+    },
+    "claudine-gen": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "terminal-tests"
+        ],
+        "l2-backends": [
+          "tmux"
+        ],
+        "local-features": [],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "terminal-tests"
+      ],
+      "manifest": "claudine/gen/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 10,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "agent_errors_check",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 10,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 10,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/agent_errors_check.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "drift",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/drift.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "fixtures_provenance",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/fixtures_provenance.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 11,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "generate_ux",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/generate_ux.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "unix"
+          ],
+          "listed_tests": 3,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_report_terminal",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/level2_report_terminal.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 30,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "pipeline",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 30,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 30,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/pipeline.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "registry_coverage",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/registry_coverage.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "signals_sidecar_mirror",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/signals_sidecar_mirror.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 9,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "signals_validation",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/signals_validation.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "steering_check",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/steering_check.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "vocabulary",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "claudine/gen/tests/vocabulary.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 11
+    },
+    "dmls": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "terminal-tests",
+          "effects-instrumentation"
+        ],
+        "l1-include-slow": true,
+        "l2-backends": [
+          "tmux"
+        ],
+        "local-features": [
+          "effects-instrumentation"
+        ],
+        "runner-tools": [
+          "neovim",
+          "zed-extension"
+        ],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "effects-instrumentation",
+        "terminal-tests"
+      ],
+      "manifest": "darkmatter/dmls/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "level1_graph_index",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/level1_graph_index.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 11,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "level1_wiki",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 11,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/level1_wiki.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_editor_neovim",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 0,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/level2_editor_neovim.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 5,
+          "inner_cfg": [],
+          "listed_tests": 110,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "lsp_session",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 105,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 105,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 105,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 105,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/lsp_session.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 2,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "mapping_only_corpus",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 2,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "no_side_effects",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/no_side_effects.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "packaging_contract",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/packaging_contract.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "stdio_subprocess",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/stdio_subprocess.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "strict_mode_recovery_spike",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/strict_mode_recovery_spike.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 19,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "suggest_constraint_phase1",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 19,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "zed_extension_contract",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests+effects-instrumentation": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "darkmatter/dmls/tests/zed_extension_contract.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 11
+    },
+    "schematic-gen": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "terminal-tests"
+        ],
+        "l2-backends": [
+          "tmux"
+        ],
+        "local-features": [],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "terminal-tests"
+      ],
+      "manifest": "schematic/gen/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "artifact_drift",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/artifact_drift.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 3,
+          "inner_cfg": [],
+          "listed_tests": 15,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "e2e_generation",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 12,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 12,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/e2e_generation.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 27,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "http_client",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 27,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 27,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/http_client.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 8,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "openapi_import_test",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 8,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 8,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/openapi_import_test.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "openapi_strict_completeness",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 2
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 2
+            }
+          },
+          "src_path": "schematic/gen/tests/openapi_strict_completeness.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 14,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "path_substitution",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/path_substitution.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "postman_artifact_validation",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/postman_artifact_validation.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "postman_golden",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/postman_golden.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "postman_schema",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/postman_schema.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "postman_var_consistency",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/postman_var_consistency.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 20,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "query_param_detection",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 20,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 20,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/query_param_detection.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 22,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "query_params_codegen",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 22,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 22,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/query_params_codegen.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "terminal_capture",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [
+            "terminal-tests"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "terminal-tests"
+          ],
+          "selected_by_tier": {
+            "terminal-tests": {
+              "L1": 0,
+              "L2": 3,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/terminal_capture.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 24,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "ws_codegen",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 24,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "terminal-tests": {
+              "L1": 24,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "schematic/gen/tests/ws_codegen.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 14
+    },
+    "sniff": {
+      "autotests": true,
+      "bench_targets": [
+        {
+          "harness": false,
+          "name": "perf"
+        }
+      ],
+      "ci_tests": {
+        "features": [
+          "remote"
+        ]
+      },
+      "features": [
+        "bench-internals",
+        "default",
+        "metrics",
+        "network",
+        "remote"
+      ],
+      "manifest": "sniff/lib/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 5,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "bench_fixtures",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 5,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/bench_fixtures.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "bench_ids_sync",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/bench_ids_sync.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 3,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "bench_plans",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 3,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/bench_plans.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "benchmark_workloads",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/benchmark_workloads.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 0,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "fixtures",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/fixtures.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"remote\""
+          ],
+          "listed_tests": 51,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "focused_provider",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 51,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/focused_provider.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 83,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "git_parity",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 83,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 83,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 83,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/git_parity.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "host_capability_cache",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/host_capability_cache.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 94,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "integration",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 94,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 94,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 94,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/integration.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "merge_conflict_prediction",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/merge_conflict_prediction.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "network_primitives",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 5
+            },
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 5
+            },
+            "remote": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 5
+            }
+          },
+          "src_path": "sniff/lib/tests/network_primitives.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "program_installable",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/program_installable.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 4,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "program_serialization",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 4,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/program_serialization.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 34,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "recent_commits",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 34,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 34,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 34,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/recent_commits.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"network\""
+          ],
+          "listed_tests": 14,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "remote_observation",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/remote_observation.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"remote\""
+          ],
+          "listed_tests": 70,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "remote_providers",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 70,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/remote_providers.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "remote_resolution",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/remote_resolution.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 6,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "uv_with_install_plan",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 6,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/uv_with_install_plan.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "target_os = \"windows\""
+          ],
+          "listed_tests": 0,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "windows_app_paths_orphan",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/windows_app_paths_orphan.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "target_os = \"windows\""
+          ],
+          "listed_tests": 0,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "windows_find_program_priority",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "network": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "remote": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/lib/tests/windows_find_program_priority.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 20
+    },
+    "sniff-cli": {
+      "autotests": true,
+      "bench_targets": [],
+      "ci_tests": {
+        "features": [
+          "test-fixtures"
+        ],
+        "l2-backends": [
+          "tmux"
+        ],
+        "local-features": [],
+        "sidecars": [
+          "backend-proof",
+          "harness-broker"
+        ],
+        "tiers": [
+          "L1",
+          "L2"
+        ]
+      },
+      "features": [
+        "test-fixtures"
+      ],
+      "manifest": "sniff/cli/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 355,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "cli",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 355,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 355,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/cli.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 14,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "cli_process_fixture",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 1
+            },
+            "test-fixtures": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 1
+            }
+          },
+          "src_path": "sniff/cli/tests/cli_process_fixture.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "install_interview_cli",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/install_interview_cli.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 9,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "install_plan",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 9,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/install_plan.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"test-fixtures\""
+          ],
+          "listed_tests": 1,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_cicd_styling",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "test-fixtures"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "test-fixtures"
+          ],
+          "selected_by_tier": {
+            "test-fixtures": {
+              "L1": 0,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/level2_cicd_styling.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"test-fixtures\""
+          ],
+          "listed_tests": 1,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_git_status_styling",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "test-fixtures"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "test-fixtures"
+          ],
+          "selected_by_tier": {
+            "test-fixtures": {
+              "L1": 0,
+              "L2": 1,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/level2_git_status_styling.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": true,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"test-fixtures\""
+          ],
+          "listed_tests": 2,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_perf_tree_rendering",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [
+            "test-fixtures"
+          ],
+          "required_features_agree": true,
+          "required_features_manifest": [
+            "test-fixtures"
+          ],
+          "selected_by_tier": {
+            "test-fixtures": {
+              "L1": 0,
+              "L2": 2,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/level2_perf_tree_rendering.rs",
+          "target_wide_keys": [
+            "required-features"
+          ]
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [
+            "feature = \"test-fixtures\""
+          ],
+          "listed_tests": 2,
+          "module_name_alias_basis": "macos-listing",
+          "module_name_alias_required": false,
+          "name": "level2_recent_commits_rendering",
+          "name_marker": "level2_",
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 0,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 0,
+              "L2": 2,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/level2_recent_commits_rendering.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 14,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "snapshots",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 14,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/snapshots.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 8,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "spawn_site_guard",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 8,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 8,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/spawn_site_guard.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": true,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 1,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "tty",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            },
+            "test-fixtures": {
+              "L1": 1,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "sniff/cli/tests/tty.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 11
+    },
+    "tree-hugger": {
+      "autotests": true,
+      "bench_targets": [
+        {
+          "harness": false,
+          "name": "tree_file"
+        }
+      ],
+      "ci_tests": {},
+      "features": [],
+      "manifest": "tree-hugger/lib/Cargo.toml",
+      "nested_main_rs": [],
+      "test_targets": [
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 17,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "adapter_tests",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 17,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/adapter_tests.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 27,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "cache_tests",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 27,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/cache_tests.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 32,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "corpus_tests",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 32,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/corpus_tests.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 77,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "lint_diagnostics",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 77,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/lint_diagnostics.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 15,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "phase1_diagnostics",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 15,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/phase1_diagnostics.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 24,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "phase6_neovim_query_reuse",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 24,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/phase6_neovim_query_reuse.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 33,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "query_compile",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 33,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/query_compile.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 13,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "resolver_tests",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 13,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/resolver_tests.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 89,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "tree_file",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 89,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/tree_file.rs",
+          "target_wide_keys": []
+        },
+        {
+          "declared_in_manifest": false,
+          "declares_mod_common": false,
+          "edition": "2024",
+          "harness": true,
+          "ignored_tests": 0,
+          "inner_cfg": [],
+          "listed_tests": 7,
+          "module_name_alias_basis": null,
+          "module_name_alias_required": null,
+          "name": "tree_package",
+          "name_marker": null,
+          "nested_root": false,
+          "required_features": [],
+          "required_features_agree": true,
+          "required_features_manifest": [],
+          "selected_by_tier": {
+            "none": {
+              "L1": 7,
+              "L2": 0,
+              "L3": 0,
+              "browser": 0,
+              "real": 0
+            }
+          },
+          "src_path": "tree-hugger/lib/tests/tree_package.rs",
+          "target_wide_keys": []
+        }
+      ],
+      "top_level_test_files": 10
+    }
+  },
+  "workspace": {
+    "integration_test_targets": 236,
+    "packages_with_test_targets": 51,
+    "workspace_members": 74
+  }
+}

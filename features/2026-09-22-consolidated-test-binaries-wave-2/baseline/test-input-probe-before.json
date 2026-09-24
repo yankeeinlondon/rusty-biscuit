@@ -1,0 +1,4714 @@
+[
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/Cargo.toml",
+    "source": "biscuit-file/lib/tests/detailed_resolution.rs",
+    "line": 391,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::detailed_resolution) & test(=explicit_implicit_reference_does_not_discover_repository_root)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/corpus/YAML-TEST-SUITE-NOTICE.md",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/corpus/YAML-TEST-SUITE-NOTICE.md",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-file",
+    "path": "biscuit-file/lib/tests/yaml_mutation.proptest-regressions",
+    "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(biscuit-file::yaml_corpus)"
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/README.md",
+    "source": "biscuit-terminal/cli/tests/integration_test.rs",
+    "line": 2206,
+    "embedded": false,
+    "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/README.md",
+    "source": "biscuit-terminal/cli/tests/integration_test.rs",
+    "line": 2205,
+    "embedded": false,
+    "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/13x13.png",
+    "source": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+    "line": 39,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/13x13.png",
+    "source": "biscuit-terminal/cli/tests/level2_image.rs",
+    "line": 53,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/README.md",
+    "source": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+    "line": 39,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/README.md",
+    "source": "biscuit-terminal/cli/tests/level2_image.rs",
+    "line": 53,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/tiny.jpg",
+    "source": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+    "line": 39,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/tiny.jpg",
+    "source": "biscuit-terminal/cli/tests/level2_image.rs",
+    "line": 53,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/tiny.png",
+    "source": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+    "line": 39,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/tiny.png",
+    "source": "biscuit-terminal/cli/tests/level2_image.rs",
+    "line": 53,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/unicode_dir/regular.txt",
+    "source": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+    "line": 39,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/cli/tests/fixtures/unicode_dir/regular.txt",
+    "source": "biscuit-terminal/cli/tests/level2_image.rs",
+    "line": 53,
+    "embedded": false,
+    "unit": null
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/docs/components/compose.md",
+    "source": "biscuit-terminal/cli/tests/integration_test.rs",
+    "line": 2207,
+    "embedded": false,
+    "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/docs/components/index.md",
+    "source": "biscuit-terminal/cli/tests/integration_test.rs",
+    "line": 2208,
+    "embedded": false,
+    "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+  },
+  {
+    "package": "biscuit-terminal-cli",
+    "path": "biscuit-terminal/docs/components/prose.md",
+    "source": "biscuit-terminal/cli/tests/integration_test.rs",
+    "line": 2209,
+    "embedded": false,
+    "unit": "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/Cargo.toml",
+    "source": "claudine/lib/tests/tts_phase5_contract.rs",
+    "line": 14,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase5_contract) & test(=shipped_claudine_artifacts_enable_native_detached_audio)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/claudine/cli/tests/snapshots/wrap_commands__wrapper_help_includes_expected_flags.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/clippy.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/src/commands/config_tui/tabs/snapshots/claudine__commands__config_tui__tabs__services__tests__services_tab_buffer.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/src/commands/config_tui/widgets/snapshots/claudine__commands__config_tui__widgets__modal__tests__list_modal_buffer.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/fixtures/nested_span_regression/commit.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/l1/error_guards/boxed-diagnostic-allow.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/l1/error_guards/transport-allow.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_help_includes_expected_flags.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 78,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "claudine/docs/providers/facts/codex.yaml",
+    "source": "claudine/gen/tests/agent_errors_check.rs",
+    "line": 174,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::agent_errors_check) & test(=workspace_archived_seed_survives_graduation_and_detects_identity_changes)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/docs/research/agent-errors/_fleet.md",
+    "source": "claudine/lib/tests/agent_errors_fleet.rs",
+    "line": 30,
+    "embedded": false,
+    "unit": "binary_id(claudine::agent_errors_fleet)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "claudine/docs/research/agent-errors/_fleet.md",
+    "source": "claudine/gen/tests/agent_errors_check.rs",
+    "line": 356,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::agent_errors_check) & test(=fleet_clean_action_requires_explicit_clean_status)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "claudine/docs/research/agent-errors/_schema.yaml",
+    "source": "claudine/gen/tests/agent_errors_check.rs",
+    "line": 46,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::agent_errors_check)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "claudine/docs/research/steering/_schema.yaml",
+    "source": "claudine/gen/tests/steering_check.rs",
+    "line": 17,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::steering_check) & test(=generation_stops_before_writes_when_steering_gate_fails)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/evidence.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-delegated-report.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-delegated-report.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-journal-record.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-journal-record.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-missing-identity-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-missing-identity-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-preparing-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-preparing-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-ready-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-ready-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v2-unsupported-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v2-unsupported-job.json",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract) & test(=protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/log.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/phase-1-baseline.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/plan.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/review-2.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/review-3.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/review-4.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/fixes/_completed/2026-09-03-tts-not-finishing/spec.md",
+    "source": "claudine/lib/tests/tts_phase1_contract.rs",
+    "line": 5,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase1_contract)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "claudine/gen/tests/fixtures/generated-artifact-baseline.json",
+    "source": "claudine/gen/tests/drift.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::drift) & test(=committed_generated_artifacts_match_phase_1_byte_baseline)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/lib/Cargo.toml",
+    "source": "claudine/lib/tests/tts_phase5_contract.rs",
+    "line": 14,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase5_contract) & test(=shipped_claudine_artifacts_enable_native_detached_audio)"
+  },
+  {
+    "package": "claudine",
+    "path": "claudine/lib/tests/fixtures/logs/opencode-subagent-lifecycle.txt",
+    "source": "claudine/lib/tests/opencode_stderr_lifecycle.rs",
+    "line": 33,
+    "embedded": true,
+    "unit": "binary_id(claudine::opencode_stderr_lifecycle)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_implement___fm.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_implement___fm.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_interactive-prompting.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_interactive-prompting.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_repo-context.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_repo-context.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__observability.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__observability.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-implementation.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-implementation.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__review-spec-inline.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__suggestion-review.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__suggestion-review.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_writing-clearly.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_writing-clearly.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 121,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus) & test(=mapping_only_corpus_diagnostics_match_pre_descent_baseline)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/daily.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/daily.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/dependency-risk.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/dependency-risk.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/design.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/design.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/dream.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/dream.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/feature.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/feature.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/lineage.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/lineage.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/sentrux.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/sentrux.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/snippets__debug.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/snippets__debug.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/snippets__test-rigor.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/snippets__test-rigor.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/summary-and-suggest.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/summary-and-suggest.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/validate.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/mapping_only_corpus/validate.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/completion.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/completion.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/completion.md",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 15,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/inline.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/inline.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/inline.md",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 12,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/pure.yaml",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/pure.yaml",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/pure.yaml",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 13,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-consumer.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-consumer.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-consumer.md",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 18,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-schema.json",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-schema.json",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/raw-schema.json",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 17,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 14,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/unions.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/unions.md",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 48,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/tests/fixtures/suggest_constraint/unions.md",
+    "source": "darkmatter/dmls/tests/suggest_constraint_phase1.rs",
+    "line": 16,
+    "embedded": true,
+    "unit": "binary_id(dmls::suggest_constraint_phase1)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/Cargo.lock",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 13,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/Cargo.lock",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 36,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract) & test(=zed_extension_manifest_and_crate_shape_are_loadable)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/Cargo.toml",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 13,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/Cargo.toml",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 35,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract) & test(=zed_extension_manifest_and_crate_shape_are_loadable)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/README.md",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 13,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/extension.toml",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 13,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/extension.toml",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 34,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract) & test(=zed_extension_manifest_and_crate_shape_are_loadable)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/dmls/zed-dmls/extension.wasm",
+    "source": "darkmatter/dmls/tests/zed_extension_contract.rs",
+    "line": 13,
+    "embedded": false,
+    "unit": "binary_id(dmls::zed_extension_contract)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/docs/schemas/claudine.yaml",
+    "source": "darkmatter/dmls/tests/mapping_only_corpus.rs",
+    "line": 62,
+    "embedded": false,
+    "unit": "binary_id(dmls::mapping_only_corpus)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/docs/schemas/darkmatter.yaml",
+    "source": "darkmatter/dmls/tests/lsp_session.rs",
+    "line": 5463,
+    "embedded": false,
+    "unit": "binary_id(dmls::lsp_session) & test(=meta_schema_phase7_shipped_schema_provider_path)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/docs/schemas/darkmatter.yaml",
+    "source": "darkmatter/dmls/tests/lsp_session.rs",
+    "line": 5495,
+    "embedded": false,
+    "unit": "binary_id(dmls::lsp_session) & test(=meta_schema_phase6_shipped_schema_activation_and_current_error)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/docs/topics/darkmatter-expressions.md",
+    "source": "darkmatter/dmls/tests/lsp_session.rs",
+    "line": 6029,
+    "embedded": false,
+    "unit": "binary_id(dmls::lsp_session)"
+  },
+  {
+    "package": "dmls",
+    "path": "darkmatter/justfile",
+    "source": "darkmatter/dmls/tests/packaging_contract.rs",
+    "line": 33,
+    "embedded": false,
+    "unit": "binary_id(dmls::packaging_contract) & test(=dist_recipe_and_zed_extension_agree_on_archive_names)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/.gitignore",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/Cargo.lock",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/corpus-seed/markdown/basic.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/crashes/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/crashes/markdown_parser/.gitkeep",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/fuzz/rust-toolchain.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/proptest-regressions/markdown/compose/expression/lint.txt",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/catalog/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/layout/page/snapshots/darkmatter__layout__page__tests__pronounced_background_snapshot.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/markdown/compose/shell_expansion/plan.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/markdown/delta/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/markdown/toc/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/src/mermaid/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/arrays/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/arrays/inputs/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/basic_scalars/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/basic_scalars/inputs/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/date_url_email/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/date_url_email/inputs/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_disjoint_union/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_disjoint_union/inputs/a.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_disjoint_union/inputs/b.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_disjoint_union/options.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_required_promotion/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_required_promotion/inputs/a.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_required_promotion/inputs/b.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_required_promotion/options.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_widen_number/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_widen_number/inputs/a.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_widen_number/inputs/b.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/merge_widen_number/options.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/no_merge_no_required/expected.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/no_merge_no_required/inputs/a.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/no_merge_no_required/inputs/b.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/detect/no_merge_no_required/options.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/mermaid/11.6.0/.gitignore",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/mermaid/README.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/code_block.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/frontmatter.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/headings.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/html.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/inline_styles.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/links_images.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/lists.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/paragraph.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/table.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/task_list.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/render_tree/unsupported_math_or_definition.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/boolish_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/boolish_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/date_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/date_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/date_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/date_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/datetime_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/datetime_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/email_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/email_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/email_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/email_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/enum_member_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_eager_match_nonmatching_still_valid/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_eager_match_nonmatching_still_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_eager_match_nonmatching_still_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_nonmatching_still_valid/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_nonmatching_still_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_nonmatching_still_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_valid/Cargo.toml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/file_match_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_extra_property_rejected/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_extra_property_rejected/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_missing_required/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_missing_required/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_wrong_type/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_object_array_wrong_type/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_schema/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/inline_schema/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/json_schema_ref/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/json_schema_ref/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/json_schema_ref/schema.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/missing_required/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/missing_required/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/missing_required/schema.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/not_empty_violation/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/not_empty_violation/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/numberlike_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/numberlike_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/numberlike_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/numberlike_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/opaque_object_array_accepts_extra_property/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/opaque_object_array_accepts_extra_property/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/pattern_violation/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/pattern_violation/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/property_union_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/property_union_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/range_violation/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/range_violation/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union_fileref/arm-a.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union_fileref/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/root_union_none_match/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/simple_required_present/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/simple_required_present/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/simple_required_present/schema.yaml",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/time_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/time_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/unique_violation/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/unique_violation/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/url_scheme_invalid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/url_scheme_invalid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/url_scheme_valid/doc.md",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/fixtures/validate/url_scheme_valid/expected.json",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__condition__eval.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__condition__parse.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__deferred_set__invalid_assignment.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__deferred_set__reassigned_property.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__empty_source.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_decoding.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_fetch_priority.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_loading.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_referrer_policy_no_match.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_referrer_policy_suggests.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__invalid_style_delegates.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_html.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_markdown_with_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__malformed_markdown_without_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__missing_source.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__image_ref__unrecognized_format.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__empty_href.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__invalid_style_delegates.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__invalid_target.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_html.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_markdown_with_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__malformed_markdown_without_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__missing_href.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__link__unrecognized_format.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_missing_required_renders_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_multiple_problems_renders_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_preparation_failure_renders_summary.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_preparation_failure_with_description_renders_summary.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_root_union_arm_index_renders_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_wrong_type_renders_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__condition_delegates.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__parse_directive.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__unmatched_end.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__page_block__unterminated_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__compose_delegates.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__file_reference.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__io_error.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__missing_source_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__parse_directive.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__url_error.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__validation.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_color.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_custom_property.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_declaration.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_integer.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_multi_sizing.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_property_name.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_raw_value.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__invalid_sizing.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__stylesheet__property_value_type_mismatch.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__condition_eval.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__condition_parse.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__cycle_detected.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__file_reference.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_frontmatter_assignment.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_reassigned_frontmatter_property.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__invalid_reference.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__io_error.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__json_error.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__max_depth_exceeded.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__missing_source_context.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__missing_source_context_markup.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__non_text_code_source.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__parse_directive.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__relevel.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_file_type.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_reference_type.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__unsupported_reference_type_markup.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__url_execution_disabled.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__url_parse_error.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/schema_quoting_safety.proptest-regressions",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/schemas_grammar_proptest.proptest-regressions",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_block_quote_width_and_left_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_block_quote_width_and_left_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_centered_table_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_centered_table_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_list_left_margin_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_list_left_margin_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_background_pronounced_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_background_pronounced_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_table_max_width_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_table_max_width_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_all_attributes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_centered_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_complex_document.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_custom_color.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_custom_width.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_dashes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_dots.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_simple_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__html_thick_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_all_attributes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_centered_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_complex_document.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_custom_color.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_custom_width.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_left_dots.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_right_dashes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_curtain_rod.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_dashes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_dots.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_inset_line.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_line_circle.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_line_star.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_simple_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_thick_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__horizontal_rule_snapshots__tests__terminal_thin_dots.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__align_center.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__align_right.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__baseline.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__bottom_margin_2.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__left_margin_4.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__left_margin_pct_10.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__right_margin_4.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__top_margin_2.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__width_120.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__width_40.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_matrix__CodeBlock__word_wrap_prose.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__end_to_end_example_snapshot.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__pronounced_background_snapshot.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__layout_snapshots__zero_config_prose_snapshot.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_all_attributes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_kind_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_mark_dim_hr.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__html_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_all_attributes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_kind_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_mark_dim_hr.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__markdown_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_all_attributes.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_kind_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_mark_dim_hr.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_hr_snapshots__terminal_waves.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__code_block.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__document_json_surface.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__frontmatter.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__headings.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__html.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__inline_styles.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__links_images.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__lists.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__paragraph.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__table.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__task_list.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__render_tree_roundtrip__unsupported_math_or_definition.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_string_with_pattern_and_array_constraints.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_array_with_description.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_any.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolean.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_boolish.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_date.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_datetime.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_email.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_enum_members.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_array_min_items.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_bare.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_file_match.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_number_integer_with_min.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_numberlike.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_object.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_min_max.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_not_empty.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_string_pattern.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_time.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_bare.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_url_scheme.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_atom_with_description.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_default_and_required_atoms.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_enum_with_default_and_required.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_full_document_schema.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_array.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_as_union_arm.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_bare.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_constrained_array.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_empty.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_mixed_with_string_fallback.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_multi_line.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_nested.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_inline_object_required_value.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_basic.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_required.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_root_union_inline_only.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__style_features_phase5__full_page_standalone_document.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__style_features_phase5__mermaid_body_only_wrapper.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__suggest_constraint_phase3__conversion_snapshot_covers_valid_and_invalid_metadata.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_current_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_half_opacity_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_inherit_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_opaque_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_component_color_transparent_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_exact_width_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_max_width_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_local_image_inline_css_precedence_browser.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_structured_link_attributes_html.snap",
+    "source": "claudine/lib/tests/boundary_lint.rs",
+    "line": 150,
+    "embedded": false,
+    "unit": "binary_id(claudine::boundary_lint)"
+  },
+  {
+    "package": "claudine",
+    "path": "just/notify.just",
+    "source": "claudine/lib/tests/tts_phase5_contract.rs",
+    "line": 77,
+    "embedded": false,
+    "unit": "binary_id(claudine::tts_phase5_contract) & test(=notification_recipes_keep_their_background_cli_contract)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/complex_auth.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/complex_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/complex_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/petstore.yaml",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/petstore.yaml",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/petstore.yaml",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/README.md",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/README.md",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/README.md",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/README.md",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/api_key_query_auth.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/auth_variables_openai.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/file_upload_elevenlabs.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/grouped_module_ollama.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/mixed_auth_emqx.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/golden/path_query_params_github.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 72,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/openapi_import_test.rs",
+    "line": 9,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::openapi_import_test)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 20,
+    "embedded": true,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 40,
+    "embedded": true,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 69,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 70,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_golden.rs",
+    "line": 71,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_golden)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/gen/tests/fixtures/postman/v2.1.0-collection.schema.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 28,
+    "embedded": true,
+    "unit": "binary_id(schematic-gen::postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/anthropic.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/anthropic.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/anthropic.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/artificial_analysis.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/artificial_analysis.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/artificial_analysis.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/bitbucket.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/bitbucket.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/bitbucket.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/elevenlabs.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/elevenlabs.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/elevenlabs.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/emqx.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/emqx.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/emqx.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 119,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/emqx.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/eversolo.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/eversolo.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/eversolo.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitea.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitea.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitea.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/github.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/github.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/github.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitlab.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitlab.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/gitlab.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/huggingface.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/huggingface.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/huggingface.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/lmstudio.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/lmstudio.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/lmstudio.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/ollama.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/ollama.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/ollama.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/openai.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/openai.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/openai.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/samsung_smart_tv.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/samsung_smart_tv.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/samsung_smart_tv.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/unfolded_circle_core_rest.postman_collection.json",
+    "source": "schematic/gen/tests/postman_artifact_validation.rs",
+    "line": 54,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_artifact_validation)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/unfolded_circle_core_rest.postman_collection.json",
+    "source": "schematic/gen/tests/postman_schema.rs",
+    "line": 118,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_schema) & test(=emqx_grouped_collection_validates_against_postman_schema)"
+  },
+  {
+    "package": "schematic-gen",
+    "path": "schematic/postman/unfolded_circle_core_rest.postman_collection.json",
+    "source": "schematic/gen/tests/postman_var_consistency.rs",
+    "line": 92,
+    "embedded": false,
+    "unit": "binary_id(schematic-gen::postman_var_consistency)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__completions_help_output.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__degenerate_cargo_structure_text.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__help_output.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__os_json_summary.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__repo_aggregate_json.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff-cli",
+    "path": "sniff/cli/tests/snapshots/snapshots__topics_table.snap",
+    "source": "sniff/cli/tests/spawn_site_guard.rs",
+    "line": 38,
+    "embedded": false,
+    "unit": "binary_id(sniff-cli::spawn_site_guard)"
+  },
+  {
+    "package": "sniff",
+    "path": "sniff/lib/benches/ci-bench-ids.txt",
+    "source": "sniff/lib/tests/bench_ids_sync.rs",
+    "line": 21,
+    "embedded": false,
+    "unit": "binary_id(sniff::bench_ids_sync)"
+  },
+  {
+    "package": "tree-hugger",
+    "path": "tree-hugger/lib/tests/fixtures/corpus_manifest.yaml",
+    "source": "tree-hugger/lib/tests/tree_file.rs",
+    "line": 126,
+    "embedded": false,
+    "unit": "binary_id(tree-hugger::tree_file)"
+  },
+  {
+    "package": "tree-hugger",
+    "path": "tree-hugger/lib/tests/fixtures/corpus_manifest.yaml",
+    "source": "tree-hugger/lib/tests/tree_file.rs",
+    "line": 127,
+    "embedded": false,
+    "unit": "binary_id(tree-hugger::tree_file)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "unchained-ai/artifacts/models-catalog.json",
+    "source": "claudine/gen/tests/generate_ux.rs",
+    "line": 93,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::generate_ux)"
+  },
+  {
+    "package": "claudine-gen",
+    "path": "unchained-ai/artifacts/models-catalog.json",
+    "source": "claudine/gen/tests/pipeline.rs",
+    "line": 27,
+    "embedded": false,
+    "unit": "binary_id(claudine-gen::pipeline)"
+  }
+]

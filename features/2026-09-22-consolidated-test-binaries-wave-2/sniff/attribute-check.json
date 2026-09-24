@@ -1,0 +1,130 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "sniff",
+  "review": [
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        11
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_fixtures.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        10
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_fixtures.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        12
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_ids_sync.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        11
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_ids_sync.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        7
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_plans.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        6
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/bench_plans.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        4,
+        6
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/benchmark_workloads.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        3,
+        5
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/benchmark_workloads.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        12
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/git_parity.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        11
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/git_parity.rs"
+    },
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        10
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/integration.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        9
+      ],
+      "new_dir": "sniff/lib/tests/l1",
+      "old_dir": "sniff/lib/tests",
+      "path": "sniff/lib/tests/l1/integration.rs"
+    }
+  ],
+  "version": 1
+}

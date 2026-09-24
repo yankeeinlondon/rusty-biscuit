@@ -1,0 +1,30 @@
+# R18 proof: where proptest 1.11.0 persists seeds once tests/<target>/main.rs exists
+#
+# Throwaway crate at /tmp/proptest-scratch (outside the repository, local only,
+# not a CI cell), 2026-09-23. Cargo.toml: autotests = false, one [[test]]
+# `l1` at tests/l1/main.rs, dev-dependency proptest = "=1.11.0".
+# tests/l1/main.rs is `mod always_fails;`; tests/l1/always_fails.rs holds
+# `fn deliberately_fails(x in 0u32..1000) { prop_assert!(x < 10); }`.
+#
+# Run 1: CARGO_TARGET_DIR=/tmp/proptest-scratch/target RUSTC_WRAPPER="" cargo test --offline --test l1
+     Running tests/l1/main.rs (/tmp/proptest-scratch/target/debug/deps/l1-95277b4a0b900c59)
+proptest: Saving this and future failures in /private/tmp/proptest-scratch/tests/proptest-regressions/always_fails.txt
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#
+# Files under tests/ after the run:
+tests/l1/always_fails.rs
+tests/l1/main.rs
+tests/proptest-regressions/always_fails.txt
+#
+# Last line of the seed file:
+cc 8277a8f602eeab38be2ea419e653ed9edc44ad73e57009fb268c5d7d96a31ad2 # shrinks to x = 10
+#
+# consolidation.proptest_regression_path("/tmp/proptest-scratch/tests/l1/always_fails.rs"):
+/tmp/proptest-scratch/tests/proptest-regressions/always_fails.txt
+# (/tmp is a symlink to /private/tmp on macOS: the same file.)
+#
+# Run 2 (same command): no "Saving" line, because the file now exists and is
+# loaded. Loading and saving both go through FileFailurePersistence::resolve
+# (failure_persistence/file.rs:84-92 load, :326-367 resolve), so the path
+# proptest writes is the path it reads.
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -1,0 +1,9 @@
+{
+  "after": [],
+  "before": [],
+  "failures": [],
+  "kind": "consolidation-proptest-check",
+  "package": "biscuit-terminal-cli",
+  "relocated": [],
+  "version": 1
+}

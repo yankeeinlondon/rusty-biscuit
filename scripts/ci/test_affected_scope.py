@@ -7267,6 +7267,38 @@ def write_tree(root: Path, files: dict[str, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def narrowed_selection(
+    test_filter: str, listing: dict[str, list[str]], include_slow: bool = False
+) -> set[tuple[str, str]]:
+    """The `(binary, test)` pairs a narrowed L1 cell runs from `listing`.
+
+    Evaluates exactly the unit forms `test_inputs` emits, ORed as
+    `select_test_inputs` joins them, then intersects with the L1 tier as
+    `BISCUIT_TEST_NARROW` does. Any other form raises rather than matching
+    nothing, so a new unit shape cannot make an assertion here vacuous.
+    """
+    selected: set[tuple[str, str]] = set()
+    for clause in test_filter.split(" | "):
+        if not (clause.startswith("(") and clause.endswith(")")):
+            raise ValueError(f"unparenthesized unit: {clause}")
+        binary_part, _, test_part = clause[1:-1].partition(" & ")
+        if not (binary_part.startswith("binary_id(") and binary_part.endswith(")")):
+            raise ValueError(f"unit without a binary: {clause}")
+        binary = binary_part[len("binary_id(") : -1]
+        for name in listing.get(binary, []):
+            if test_part == "":
+                matched = True
+            elif test_part.startswith("test(=") and test_part.endswith(")"):
+                matched = name == test_part[len("test(=") : -1]
+            elif test_part.startswith("test(/^") and test_part.endswith("/)"):
+                matched = name.startswith(test_part[len("test(/^") : -2])
+            else:
+                raise ValueError(f"unknown test predicate: {test_part}")
+            if matched and test_inputs._is_l1(name, include_slow):
+                selected.add((binary, name))
+    return selected
+
+
 class TestInputIndexTests(unittest.TestCase):
     """The static index: which compiled code names a path, and as which test.
 
@@ -7288,14 +7320,24 @@ class TestInputIndexTests(unittest.TestCase):
         candidates: list[str],
         targets: list[tuple[str, str, str]] | None = None,
         include_slow: frozenset[str] = frozenset(),
+        ci: object | None = None,
+        feature_table: dict[str, list[str]] | None = None,
+        required_features: dict[str, list[str]] | None = None,
     ) -> list[tuple[str, str | None, bool]]:
+        """`required_features` maps a target name to its `required-features`."""
         write_tree(self.root, files)
         record = rust_package(
             self.root,
             "pkg",
             "pkg/lib",
             targets or [("lib", "pkg", "src/lib.rs"), ("test", "l1", "tests/l1/main.rs")],
+            ci=ci,
         )
+        if feature_table is not None:
+            record["features"] = feature_table
+        for target in record["targets"]:  # type: ignore[union-attr]
+            if target["name"] in (required_features or {}):
+                target["required-features"] = required_features[target["name"]]  # type: ignore[index]
         targets_ = test_inputs.targets_from_metadata([record], self.root.as_posix())
         found = test_inputs.scan(
             targets_,
@@ -7324,23 +7366,42 @@ class TestInputIndexTests(unittest.TestCase):
             found,
         )
 
-    def test_a_literal_in_a_helper_names_its_module(self) -> None:
+    def test_a_literal_in_a_helper_names_its_binary(self) -> None:
+        # Which tests call a helper is not known statically: `pub` makes it
+        # callable from every module of the binary, here `render`.
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/tests/l1/main.rs": "mod docs;\nmod render;\n",
+                "pkg/lib/tests/l1/docs.rs": (
+                    "const PAGES: &[&str] = &[\"pkg/docs/guide.md\"];\n"
+                    "pub fn read(page: &str) -> String {\n"
+                    "    std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(page)).unwrap()\n"
+                    "}\n"
+                ),
+                "pkg/lib/tests/l1/render.rs": (
+                    "#[test]\nfn renders() { let _ = crate::docs::read(\"x\"); }\n"
+                ),
+            },
+            ["pkg/docs/guide.md"],
+        )
+        self.assertEqual([("pkg/docs/guide.md", "binary_id(pkg::l1)", False)], found)
+
+    def test_a_helper_in_a_binary_with_no_tests_is_not_a_unit(self) -> None:
+        # Any unit there would select nothing, and the narrowed cell, run with
+        # `--no-tests=fail`, would go red.
         found = self.references(
             {
                 "pkg/lib/src/lib.rs": "",
                 "pkg/lib/tests/l1/main.rs": "mod docs;\n",
                 "pkg/lib/tests/l1/docs.rs": (
-                    "const PAGES: &[&str] = &[\"pkg/docs/guide.md\"];\n"
-                    "fn read(page: &str) -> String {\n"
-                    "    std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(page)).unwrap()\n"
-                    "}\n"
+                    "pub fn read() -> std::path::PathBuf {\n"
+                    "    biscuit_test_harness::manifest_dir!().join(\"docs/guide.md\")\n}\n"
                 ),
             },
-            ["pkg/docs/guide.md"],
+            ["pkg/lib/docs/guide.md"],
         )
-        self.assertEqual(
-            [("pkg/docs/guide.md", "binary_id(pkg::l1) & test(/^docs::/)", False)], found
-        )
+        self.assertEqual([("pkg/lib/docs/guide.md", None, False)], found)
 
     def test_a_unit_test_module_declared_under_cfg_test_is_test_code(self) -> None:
         found = self.references(
@@ -7500,6 +7561,168 @@ class TestInputIndexTests(unittest.TestCase):
         )
         self.assertEqual([], found)
 
+    # A `level2` binary may hold L1 tests: `biscuit-tui-cli`'s
+    # `windows_captured_stdout` and `biscuit-terminal-cli`'s `prose_cells` do.
+    # Tier follows the test's path, never the binary's name.
+    MIXED_TIER = {
+        "pkg/lib/src/lib.rs": "",
+        "pkg/lib/tests/level2/main.rs": (
+            "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+            "mod captured;\nmod level2_render;\nmod render;\n"
+        ),
+        "pkg/lib/tests/level2/captured.rs": (
+            "#[test]\nfn reads_the_guide() {\n"
+            "    let _ = crate::repo_root().join(\"docs/guide.md\");\n}\n"
+            "#[test]\nfn level2_reads_the_guide() {\n"
+            "    let _ = crate::repo_root().join(\"docs/guide.md\");\n}\n"
+        ),
+        "pkg/lib/tests/level2/level2_render.rs": (
+            "#[test]\nfn paints() {\n"
+            "    let _ = crate::repo_root().join(\"docs/guide.md\");\n}\n"
+        ),
+        # A helper in an unmarked module whose tests are all Level 2.
+        "pkg/lib/tests/level2/render.rs": (
+            "fn guide() -> String {\n"
+            "    std::fs::read_to_string(crate::repo_root().join(\"docs/guide.md\")).unwrap()\n}\n"
+            "#[test]\nfn level2_paints_the_guide() { let _ = guide(); }\n"
+        ),
+    }
+    LEVEL2 = [("lib", "pkg", "src/lib.rs"), ("test", "level2", "tests/level2/main.rs")]
+
+    def test_an_l1_test_in_a_level2_binary_is_a_unit(self) -> None:
+        found = self.references(self.MIXED_TIER, ["docs/guide.md"], self.LEVEL2)
+        self.assertIn(
+            ("docs/guide.md", "binary_id(pkg::level2) & test(=captured::reads_the_guide)", False),
+            found,
+        )
+
+    def test_level2_tests_in_a_mixed_tier_binary_are_still_not_units(self) -> None:
+        found = self.references(self.MIXED_TIER, ["docs/guide.md"], self.LEVEL2)
+        # `captured::level2_…` by its name and `level2_render::paints` by its
+        # module may not schedule an L1 cell. The `render` helper names the
+        # binary even though its own module's tests are all Level 2: an L1
+        # test elsewhere in the binary may call it.
+        self.assertEqual(
+            [
+                ("docs/guide.md", None, False),
+                ("docs/guide.md", None, False),
+                ("docs/guide.md", "binary_id(pkg::level2)", False),
+                ("docs/guide.md", "binary_id(pkg::level2) & test(=captured::reads_the_guide)", False),
+            ],
+            sorted(found, key=lambda entry: entry[1] or ""),
+        )
+
+    # review-2's reproduction: the only L1 reader of the guide is a test in
+    # another module that calls the `render` helper.
+    SHARED_HELPER = {
+        "pkg/lib/src/lib.rs": "",
+        "pkg/lib/tests/level2/main.rs": (
+            "fn repo_root() -> std::path::PathBuf { todo!() }\nmod captured;\nmod render;\n"
+        ),
+        "pkg/lib/tests/level2/render.rs": (
+            "pub fn guide() -> String {\n"
+            "    std::fs::read_to_string(crate::repo_root().join(\"docs/guide.md\")).unwrap()\n}\n"
+            "#[test]\nfn level2_uses_guide() { let _ = guide(); }\n"
+        ),
+        "pkg/lib/tests/level2/captured.rs": (
+            "#[test]\nfn uses_guide() { let _ = crate::render::guide(); }\n"
+        ),
+    }
+
+    def test_a_helper_whose_module_is_all_level2_still_covers_its_l1_callers(self) -> None:
+        found = self.references(self.SHARED_HELPER, ["docs/guide.md"], self.LEVEL2)
+        self.assertEqual([("docs/guide.md", "binary_id(pkg::level2)", False)], found)
+        listing = {"pkg::level2": ["captured::uses_guide", "render::level2_uses_guide"]}
+        self.assertEqual(
+            {("pkg::level2", "captured::uses_guide")},
+            narrowed_selection(f"({found[0][1]})", listing),
+        )
+
+    def test_a_crate_root_helper_of_a_mixed_tier_binary_names_the_binary(self) -> None:
+        # The unit is binary-wide; the cell intersects it with the L1 tier
+        # expression (`BISCUIT_TEST_NARROW`), so its `level2_*` tests stay out.
+        files = {
+            **self.MIXED_TIER,
+            "pkg/lib/tests/level2/main.rs": (
+                "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                "fn guide() -> std::path::PathBuf { repo_root().join(\"docs/other.md\") }\n"
+                "mod captured;\nmod level2_render;\n"
+            ),
+        }
+        found = self.references(files, ["docs/other.md"], self.LEVEL2)
+        self.assertEqual([("docs/other.md", "binary_id(pkg::level2)", False)], found)
+
+    def test_a_crate_root_helper_of_an_all_level2_binary_is_not_a_unit(self) -> None:
+        files = {
+            "pkg/lib/src/lib.rs": "",
+            "pkg/lib/tests/level2/main.rs": (
+                "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                "fn guide() -> std::path::PathBuf { repo_root().join(\"docs/other.md\") }\n"
+                "mod level2_render;\n#[path = \"../common/mod.rs\"]\nmod common;\n"
+            ),
+            "pkg/lib/tests/level2/level2_render.rs": "#[test]\nfn paints() {}\n",
+            # A test-less helper module falls back to its binary's tests.
+            "pkg/lib/tests/common/mod.rs": (
+                "pub fn guide() -> std::path::PathBuf { crate::repo_root().join(\"docs/other.md\") }\n"
+            ),
+        }
+        found = self.references(files, ["docs/other.md"], self.LEVEL2)
+        self.assertEqual([("docs/other.md", None, False)] * 2, found)
+
+    CAPTURED = {
+        "pkg/lib/src/lib.rs": "",
+        "pkg/lib/tests/level2/main.rs": "mod captured;\n",
+        "pkg/lib/tests/level2/captured.rs": MIXED_TIER["pkg/lib/tests/level2/captured.rs"].replace(
+            "crate::repo_root()", "biscuit_test_harness::manifest_dir!()"
+        ),
+    }
+    CAPTURED_UNIT = "binary_id(pkg::level2) & test(=captured::reads_the_guide)"
+
+    def captured(self, **kwargs: object) -> list[str | None]:
+        found = self.references(
+            self.CAPTURED,
+            ["pkg/lib/docs/guide.md"],
+            self.LEVEL2,
+            required_features={"level2": ["terminal-tests"]},
+            **kwargs,  # type: ignore[arg-type]
+        )
+        return sorted({unit for _, unit, _ in found} - {None})
+
+    def test_a_target_whose_required_features_ci_enables_is_a_unit(self) -> None:
+        self.assertEqual(
+            [self.CAPTURED_UNIT], self.captured(ci={"tests": {"features": ["terminal-tests"]}})
+        )
+        self.assertEqual([self.CAPTURED_UNIT], self.captured(ci={"tests": {"all-features": True}}))
+        self.assertEqual(
+            [self.CAPTURED_UNIT],
+            self.captured(feature_table={"default": ["tests"], "tests": ["terminal-tests"]}),
+        )
+
+    def test_a_target_whose_required_features_ci_leaves_off_is_not_a_unit(self) -> None:
+        # The L1 cell never compiles it, so a unit there would select nothing
+        # and the cell, run with `--no-tests=fail`, would go red.
+        self.assertEqual([], self.captured())
+        self.assertEqual([], self.captured(ci={"tests": {"features": ["image"]}}))
+        self.assertEqual(
+            [],
+            self.captured(
+                ci={"tests": {"features": ["image"]}},
+                feature_table={"image": ["dep:png", "viewer?/terminal-tests"]},
+            ),
+        )
+
+    def test_an_embed_in_a_target_ci_does_not_build_is_still_product(self) -> None:
+        found = self.references(
+            {
+                "pkg/lib/src/lib.rs": "",
+                "pkg/lib/src/bin/tool.rs": "const S: &str = include_str!(\"../../schema.yaml\");\n",
+            },
+            ["pkg/lib/schema.yaml"],
+            [("lib", "pkg", "src/lib.rs"), ("bin", "tool", "src/bin/tool.rs")],
+            required_features={"tool": ["tools"]},
+        )
+        self.assertEqual([("pkg/lib/schema.yaml", None, True)], found)
+
 
 class TestInputSelectionTests(unittest.TestCase):
     """What the planner schedules for a changed file that code reads."""
@@ -7617,6 +7840,93 @@ class TestInputSelectionTests(unittest.TestCase):
         self.assertIn(
             ("ubuntu-latest", "L1"),
             {(cell["environment"], cell["gate"]) for cell in plan["cells"]},
+        )
+
+    def test_an_l1_test_in_a_feature_gated_level2_binary_gets_a_cell_built_with_it(self) -> None:
+        write_tree(
+            self.root,
+            {
+                "gated/lib/src/lib.rs": "",
+                "gated/lib/tests/level2/main.rs": "mod captured;\n",
+                "gated/lib/tests/level2/captured.rs": (
+                    "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+                    "#[test]\nfn reads_the_guide() {\n"
+                    "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
+                ),
+            },
+        )
+        gated = rust_package(
+            self.root,
+            "gated",
+            "gated/lib",
+            [("lib", "gated", "src/lib.rs"), ("test", "level2", "tests/level2/main.rs")],
+            ci={"tests": {"features": ["terminal-tests"]}},
+        )
+        gated["targets"][1]["required-features"] = ["terminal-tests"]  # type: ignore[index]
+        self.metadata["packages"].append(gated)
+        self.metadata["workspace_members"].append("gated")
+        self.metadata["resolve"]["nodes"].append({"id": "gated", "deps": []})
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        plan = self.plan(["docs/guide.md"])
+        cell = next(cell for cell in plan["cells"] if cell["package"] == "gated")
+        self.assertEqual(
+            "(binary_id(gated::level2) & test(=captured::reads_the_guide))", cell["test_filter"]
+        )
+        record = next(entry for entry in plan["packages"] if entry["package"] == "gated")
+        self.assertEqual("--features terminal-tests", record["test_args"])
+
+    def test_a_shared_helper_change_schedules_its_l1_caller_in_another_module(self) -> None:
+        # review-2's reproduction: `render::guide()` reads the guide, its own
+        # module holds only a Level 2 test, and the one L1 reader is
+        # `captured::uses_guide`, which calls it.
+        write_tree(
+            self.root,
+            {
+                "shared/lib/src/lib.rs": "",
+                "shared/lib/tests/level2/main.rs": (
+                    "fn repo_root() -> std::path::PathBuf { todo!() }\nmod captured;\nmod render;\n"
+                ),
+                "shared/lib/tests/level2/render.rs": (
+                    "pub fn guide() -> String {\n"
+                    "    std::fs::read_to_string(crate::repo_root().join(\"docs/guide.md\")).unwrap()\n}\n"
+                    "#[test]\nfn level2_uses_guide() { let _ = guide(); }\n"
+                ),
+                "shared/lib/tests/level2/captured.rs": (
+                    "#[test]\nfn uses_guide() { let _ = crate::render::guide(); }\n"
+                ),
+            },
+        )
+        self.metadata["packages"].append(
+            rust_package(
+                self.root,
+                "shared",
+                "shared/lib",
+                [("lib", "shared", "src/lib.rs"), ("test", "level2", "tests/level2/main.rs")],
+            )
+        )
+        self.metadata["workspace_members"].append("shared")
+        self.metadata["resolve"]["nodes"].append({"id": "shared", "deps": []})
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        plan = self.plan(["docs/guide.md"])
+        cells = [cell for cell in plan["cells"] if cell["package"] == "shared"]
+        self.assertEqual(
+            [("ubuntu-latest", "L1", "execute")],
+            [(cell["environment"], cell["gate"], cell["execution"]) for cell in cells],
+        )
+        listing = {"shared::level2": ["captured::uses_guide", "render::level2_uses_guide"]}
+        self.assertEqual(
+            {("shared::level2", "captured::uses_guide")},
+            narrowed_selection(cells[0]["test_filter"], listing),
         )
 
     def test_an_event_that_plans_no_linux_cell_schedules_no_narrowed_cell(self) -> None:

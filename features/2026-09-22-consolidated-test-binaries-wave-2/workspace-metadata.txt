@@ -1,0 +1,71 @@
+# cargo metadata --no-deps: integration-test targets per workspace package
+# rev: 35295e442 (working tree: Phase 6, no manifest changes since Phase 5)
+workspace total: 118 targets across 74 packages (was 236 at 208051f75)
+packages with >= 10 targets: none
+largest remaining: 8 targets: biscuit-clipboard-cli, worktree-cli
+
+wave-2 packages:
+  biscuit-tui-cli: 3 ['l1', 'level2', 'level3']
+  biscuit-file: 2 ['l1', 'l1-fetch']
+  biscuit-terminal-cli: 2 ['l1', 'level2']
+  claudine-gen: 2 ['l1', 'level2']
+  dmls: 2 ['l1', 'level2']
+  schematic-gen: 2 ['l1', 'level2']
+  sniff-cli: 2 ['l1', 'level2']
+  claudine: 1 ['l1']
+  sniff: 1 ['l1']
+  tree-hugger: 1 ['l1']
+  total: 18 (was 136)
+
+all packages with targets:
+    8 biscuit-clipboard-cli
+    8 worktree-cli
+    7 messenger
+    7 test-toolkit
+    5 darkmatter
+    5 playa
+    4 claudine-cli
+    4 research
+    3 biscuit-icon
+    3 biscuit-speaks
+    3 biscuit-tui-cli
+    3 messenger-cli
+    3 renderable
+    3 rendezvous-daemon
+    3 schematic-define
+    2 biscuit-file
+    2 biscuit-icon-cli
+    2 biscuit-speaks-cli
+    2 biscuit-terminal
+    2 biscuit-terminal-cli
+    2 biscuit-test-harness
+    2 claudine-gen
+    2 darkmatter-cli
+    2 dmls
+    2 rendezvous-client
+    2 schematic-gen
+    2 sniff-cli
+    2 tree-hugger-cli
+    1 biscuit-clipboard-service
+    1 biscuit-file-cli
+    1 biscuit-hash-cli
+    1 biscuit-location-cli
+    1 biscuit-tui
+    1 claudine
+    1 claudine-contract
+    1 homelab-cli
+    1 homelab-server
+    1 model-citizen-cli
+    1 model_id
+    1 playa-cli
+    1 queue
+    1 queue-cli
+    1 schematic-definitions
+    1 schematic-oauth
+    1 sniff
+    1 tree-hugger
+    1 unchained-ai-cli
+    1 unchained-ai-contract
+    1 unchained-ai-gen
+    1 visualizer
+    1 zed-dmls-cli

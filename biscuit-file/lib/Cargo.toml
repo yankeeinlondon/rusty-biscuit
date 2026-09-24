@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "File format utilities for PDF, TOML, and YAML"
 license = "MIT"
+autotests = false
 
 [lib]
 name = "biscuit_file"
@@ -99,16 +100,26 @@ proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 wiremock = "0.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+# `test_toolkit::test_layout`, for the layout gate in the `l1` binary.
+test-toolkit = { path = "../../tools/test-toolkit" }
 
 [[bench]]
 name = "parsers"
 harness = false
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "fetch_integration"
+name = "l1"
+path = "tests/l1/main.rs"
+
+[[test]]
+name = "l1-fetch"
+path = "tests/l1-fetch/main.rs"
 required-features = ["fetch"]
 
 # CI policy: the L1 suite runs with `fetch`, which gates the fetch helper unit
-# tests and the `fetch_integration` target (wiremock; no external network).
+# tests and the `l1-fetch` target (wiremock; no external network).
 [package.metadata.ci.tests]
 features = ["fetch"]

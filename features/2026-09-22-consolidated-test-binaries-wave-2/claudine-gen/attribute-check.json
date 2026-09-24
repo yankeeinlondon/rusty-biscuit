@@ -1,0 +1,17 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "claudine-gen",
+  "review": [
+    {
+      "detector": "exact_path_string",
+      "kind": "identity-dispositioned",
+      "lines": [
+        16,
+        159
+      ],
+      "path": "claudine/gen/tests/level2/level2_report_terminal.rs"
+    }
+  ],
+  "version": 1
+}

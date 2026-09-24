@@ -268,7 +268,7 @@ test-e2e:
     @echo "Running E2E Tests"
     @echo "-----------------"
     @echo ""
-    @cargo test -p schematic-gen --test e2e_generation -- --ignored
+    @cargo test -p schematic-gen --test l1 -- --ignored e2e_generation::
 
 # build and show the docs for the library code
 docs:

@@ -1,4 +1,4 @@
--- Level-2 headless probe driven by tests/level2_editor_neovim.rs.
+-- Level-2 headless probe driven by tests/level2/level2_editor_neovim.rs.
 --
 -- Runs under `nvim --clean --headless -l probe.lua`, attaches Neovim's real
 -- LSP client to the dmls binary, and reports the decoded semantic-token state

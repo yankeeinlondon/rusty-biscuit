@@ -1,0 +1,104 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"terminal-tests\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "biscuit-terminal/cli/tests/l1/about.rs",
+      "old": "biscuit-terminal/cli/tests/about.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/dir_targets.rs",
+      "old": "biscuit-terminal/cli/tests/dir_targets.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/l1/integration_test.rs",
+      "old": "biscuit-terminal/cli/tests/integration_test.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs",
+      "old": "biscuit-terminal/cli/tests/level2_apple_terminal_prose.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_container_fenced_code.rs",
+      "old": "biscuit-terminal/cli/tests/level2_container_fenced_code.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_cursor_and_hygiene.rs",
+      "old": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/diagrams.rs",
+      "old": "biscuit-terminal/cli/tests/level2_diagrams.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_image.rs",
+      "old": "biscuit-terminal/cli/tests/level2_image.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_layout.rs",
+      "old": "biscuit-terminal/cli/tests/level2_layout.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/prose_cells.rs",
+      "old": "biscuit-terminal/cli/tests/level2_prose_cells.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_prose_styling.rs",
+      "old": "biscuit-terminal/cli/tests/level2_prose_styling.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_render_tree_style.rs",
+      "old": "biscuit-terminal/cli/tests/level2_render_tree_style.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_status_block.rs",
+      "old": "biscuit-terminal/cli/tests/level2_status_block.rs"
+    },
+    {
+      "new": "biscuit-terminal/cli/tests/level2/level2_style_everywhere_matrix.rs",
+      "old": "biscuit-terminal/cli/tests/level2_style_everywhere_matrix.rs"
+    }
+  ],
+  "package": "biscuit-terminal-cli",
+  "path_repairs": {
+    "biscuit-terminal/cli/tests/level2/diagrams.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_container_fenced_code.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_cursor_and_hygiene.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_image.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_layout.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_prose_styling.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_status_block.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-terminal/cli/tests/level2/level2_style_everywhere_matrix.rs": [
+      "mod common; \u2192 use crate::common;"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "biscuit-terminal/cli/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 3
+    },
+    "biscuit-terminal/cli/tests/level2/main.rs": {
+      "declares_common": true,
+      "modules": 11
+    }
+  },
+  "version": 1
+}

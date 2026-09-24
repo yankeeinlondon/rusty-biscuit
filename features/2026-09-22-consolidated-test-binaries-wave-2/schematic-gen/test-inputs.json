@@ -1,0 +1,114 @@
+{
+  "probe": "schematic/gen/tests/fixtures/complex_auth.json",
+  "before_rows": [
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/openapi_import_test.rs",
+      "line": 9,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::openapi_import_test)"
+    },
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/postman_golden.rs",
+      "line": 69,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::postman_golden)"
+    },
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/postman_golden.rs",
+      "line": 70,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::postman_golden)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/l1/openapi_import_test.rs",
+      "line": 9,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::l1) & test(/^openapi_import_test::/)"
+    },
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/l1/postman_golden.rs",
+      "line": 69,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::l1) & test(/^postman_golden::/)"
+    },
+    {
+      "package": "schematic-gen",
+      "path": "schematic/gen/tests/fixtures/complex_auth.json",
+      "source": "schematic/gen/tests/l1/postman_golden.rs",
+      "line": 70,
+      "embedded": false,
+      "unit": "binary_id(schematic-gen::l1) & test(/^postman_golden::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(schematic-gen::openapi_import_test)": [
+      "schematic-gen::openapi_import_test import_complex_auth_json_succeeds",
+      "schematic-gen::openapi_import_test import_dry_run_does_not_write_files",
+      "schematic-gen::openapi_import_test import_nonexistent_file_returns_error",
+      "schematic-gen::openapi_import_test import_petstore_generates_models_to_disk",
+      "schematic-gen::openapi_import_test import_petstore_yaml_succeeds",
+      "schematic-gen::openapi_import_test import_with_api_name_override",
+      "schematic-gen::openapi_import_test import_with_module_path_override",
+      "schematic-gen::openapi_import_test import_with_verbose_includes_diagnostics"
+    ],
+    "binary_id(schematic-gen::postman_golden)": [
+      "schematic-gen::postman_golden golden_api_key_query_auth",
+      "schematic-gen::postman_golden golden_auth_variables_openai",
+      "schematic-gen::postman_golden golden_file_upload_elevenlabs",
+      "schematic-gen::postman_golden golden_grouped_module_ollama",
+      "schematic-gen::postman_golden golden_mixed_auth_emqx",
+      "schematic-gen::postman_golden golden_path_query_params_github"
+    ]
+  },
+  "after_units": {
+    "binary_id(schematic-gen::l1) & test(/^openapi_import_test::/)": [
+      "schematic-gen::l1 openapi_import_test::import_complex_auth_json_succeeds",
+      "schematic-gen::l1 openapi_import_test::import_dry_run_does_not_write_files",
+      "schematic-gen::l1 openapi_import_test::import_nonexistent_file_returns_error",
+      "schematic-gen::l1 openapi_import_test::import_petstore_generates_models_to_disk",
+      "schematic-gen::l1 openapi_import_test::import_petstore_yaml_succeeds",
+      "schematic-gen::l1 openapi_import_test::import_with_api_name_override",
+      "schematic-gen::l1 openapi_import_test::import_with_module_path_override",
+      "schematic-gen::l1 openapi_import_test::import_with_verbose_includes_diagnostics"
+    ],
+    "binary_id(schematic-gen::l1) & test(/^postman_golden::/)": [
+      "schematic-gen::l1 postman_golden::golden_api_key_query_auth",
+      "schematic-gen::l1 postman_golden::golden_auth_variables_openai",
+      "schematic-gen::l1 postman_golden::golden_file_upload_elevenlabs",
+      "schematic-gen::l1 postman_golden::golden_grouped_module_ollama",
+      "schematic-gen::l1 postman_golden::golden_mixed_auth_emqx",
+      "schematic-gen::l1 postman_golden::golden_path_query_params_github"
+    ]
+  },
+  "before_mapped": [
+    "schematic-gen::l1 openapi_import_test::import_complex_auth_json_succeeds",
+    "schematic-gen::l1 openapi_import_test::import_dry_run_does_not_write_files",
+    "schematic-gen::l1 openapi_import_test::import_nonexistent_file_returns_error",
+    "schematic-gen::l1 openapi_import_test::import_petstore_generates_models_to_disk",
+    "schematic-gen::l1 openapi_import_test::import_petstore_yaml_succeeds",
+    "schematic-gen::l1 openapi_import_test::import_with_api_name_override",
+    "schematic-gen::l1 openapi_import_test::import_with_module_path_override",
+    "schematic-gen::l1 openapi_import_test::import_with_verbose_includes_diagnostics",
+    "schematic-gen::l1 postman_golden::golden_api_key_query_auth",
+    "schematic-gen::l1 postman_golden::golden_auth_variables_openai",
+    "schematic-gen::l1 postman_golden::golden_file_upload_elevenlabs",
+    "schematic-gen::l1 postman_golden::golden_grouped_module_ollama",
+    "schematic-gen::l1 postman_golden::golden_mixed_auth_emqx",
+    "schematic-gen::l1 postman_golden::golden_path_query_params_github"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

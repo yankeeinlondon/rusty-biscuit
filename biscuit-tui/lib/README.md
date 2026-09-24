@@ -198,7 +198,7 @@ which documents the harness variants and the environment each requires.
 The lib's render correctness for hotkey badges is verified at Level 2 by
 piping kitty keyboard-protocol bytes into a real WezTerm pane via
 `wezterm cli send-text` and capturing the rendered output — see
-`cli/tests/real_terminal_render.rs::level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`.
+`cli/tests/level2/terminal_render.rs::level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`.
 
 ## Documentation
 

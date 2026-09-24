@@ -1,0 +1,80 @@
+{
+  "probe": "claudine/cli/Cargo.toml",
+  "before_rows": [
+    {
+      "package": "claudine",
+      "path": "claudine/cli/Cargo.toml",
+      "source": "claudine/lib/tests/boundary_lint.rs",
+      "line": 78,
+      "embedded": false,
+      "unit": "binary_id(claudine::boundary_lint)"
+    },
+    {
+      "package": "claudine",
+      "path": "claudine/cli/Cargo.toml",
+      "source": "claudine/lib/tests/tts_phase5_contract.rs",
+      "line": 14,
+      "embedded": false,
+      "unit": "binary_id(claudine::tts_phase5_contract) & test(=shipped_claudine_artifacts_enable_native_detached_audio)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "claudine",
+      "path": "claudine/cli/Cargo.toml",
+      "source": "claudine/lib/tests/l1/boundary_lint.rs",
+      "line": 78,
+      "embedded": false,
+      "unit": "binary_id(claudine::l1) & test(/^boundary_lint::/)"
+    },
+    {
+      "package": "claudine",
+      "path": "claudine/cli/Cargo.toml",
+      "source": "claudine/lib/tests/l1/tts_phase5_contract.rs",
+      "line": 14,
+      "embedded": false,
+      "unit": "binary_id(claudine::l1) & test(=tts_phase5_contract::shipped_claudine_artifacts_enable_native_detached_audio)"
+    }
+  ],
+  "before_units": {
+    "binary_id(claudine::boundary_lint)": [
+      "claudine::boundary_lint closure_does_not_flatten_atomic_write_error",
+      "claudine::boundary_lint control_dispatch_does_not_bypass_the_existence_check",
+      "claudine::boundary_lint darkmatter_compose_surfaces_route_through_file_reference",
+      "claudine::boundary_lint darkmatter_link_resolve_does_not_source_join_after_a_miss",
+      "claudine::boundary_lint darkmatter_path_shape_functions_do_not_source_join_a_missing_reference",
+      "claudine::boundary_lint every_proxy_route_uses_the_shared_resolver_and_typed_error",
+      "claudine::boundary_lint resolve_proxy_target_does_not_flatten_harness_error"
+    ],
+    "binary_id(claudine::tts_phase5_contract) & test(=shipped_claudine_artifacts_enable_native_detached_audio)": [
+      "claudine::tts_phase5_contract shipped_claudine_artifacts_enable_native_detached_audio"
+    ]
+  },
+  "after_units": {
+    "binary_id(claudine::l1) & test(/^boundary_lint::/)": [
+      "claudine::l1 boundary_lint::closure_does_not_flatten_atomic_write_error",
+      "claudine::l1 boundary_lint::control_dispatch_does_not_bypass_the_existence_check",
+      "claudine::l1 boundary_lint::darkmatter_compose_surfaces_route_through_file_reference",
+      "claudine::l1 boundary_lint::darkmatter_link_resolve_does_not_source_join_after_a_miss",
+      "claudine::l1 boundary_lint::darkmatter_path_shape_functions_do_not_source_join_a_missing_reference",
+      "claudine::l1 boundary_lint::every_proxy_route_uses_the_shared_resolver_and_typed_error",
+      "claudine::l1 boundary_lint::resolve_proxy_target_does_not_flatten_harness_error"
+    ],
+    "binary_id(claudine::l1) & test(=tts_phase5_contract::shipped_claudine_artifacts_enable_native_detached_audio)": [
+      "claudine::l1 tts_phase5_contract::shipped_claudine_artifacts_enable_native_detached_audio"
+    ]
+  },
+  "before_mapped": [
+    "claudine::l1 boundary_lint::closure_does_not_flatten_atomic_write_error",
+    "claudine::l1 boundary_lint::control_dispatch_does_not_bypass_the_existence_check",
+    "claudine::l1 boundary_lint::darkmatter_compose_surfaces_route_through_file_reference",
+    "claudine::l1 boundary_lint::darkmatter_link_resolve_does_not_source_join_after_a_miss",
+    "claudine::l1 boundary_lint::darkmatter_path_shape_functions_do_not_source_join_a_missing_reference",
+    "claudine::l1 boundary_lint::every_proxy_route_uses_the_shared_resolver_and_typed_error",
+    "claudine::l1 boundary_lint::resolve_proxy_target_does_not_flatten_harness_error",
+    "claudine::l1 tts_phase5_contract::shipped_claudine_artifacts_enable_native_detached_audio"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

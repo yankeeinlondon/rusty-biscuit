@@ -216,9 +216,12 @@ Compare against that, never against `to_string_lossy()`.
 
 ## Attaching a console inside a nextest process
 
-`biscuit-tui/cli/tests/windows_captured_stdout.rs` is ordinary `windows-latest`
+`biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary `windows-latest`
 **L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
-behind a hand-invoked recipe or workflow. Everything below was measured on
+behind a hand-invoked recipe or workflow. It compiles into the `level2` binary
+because it needs `terminal-tests`, but its test name has no tier marker, so the
+L1 filter selects it there (2026-09-22-consolidated-test-binaries-wave-2, R4).
+Everything below was measured on
 `build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
 
 - **Process-wide handle rewiring is safe only because nextest gives each test

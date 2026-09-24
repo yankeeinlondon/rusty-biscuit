@@ -1,5 +1,5 @@
 # Fixture provenance manifest — one entry per file under fixtures/ (relative
-# path from this directory). CI-enforced by `gen/tests/fixtures_provenance.rs`:
+# path from this directory). CI-enforced by `gen/tests/l1/fixtures_provenance.rs`:
 # every fixture file must have exactly one entry, every entry must point at an
 # existing file, `class` must be one of the four values below, and `source`
 # must be non-empty. `README.md`, `.gitkeep`, and this manifest are not

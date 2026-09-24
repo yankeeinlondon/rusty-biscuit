@@ -1,0 +1,15 @@
+package: claudine-gen
+series: after
+revision: 5a396aeb5 (dirty paths under claudine/gen: 14)
+features: terminal-tests
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+nextest: cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)
+wrapper: RUSTC_WRAPPER='' (kache off)
+load at start: 6.84 9.23 9.73
+test executables: 2
+test executable bytes: 198317176
+clean test build wall: 72 s
+edit file: claudine/gen/tests/l1/vocabulary.rs
+edit command: cargo nextest run --locked -p claudine-gen --features terminal-tests --target-dir /var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//w2-measure-claudine-gen-after.VwqawI --color=never -E !(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/)) --no-tests=fail every_research_vocabulary_projects_to_runtime_strings
+warm edit-to-one-module wall: 1.77 s
+load at end: 8.98 9.92 9.99

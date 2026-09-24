@@ -2,6 +2,7 @@
 name = "tree-hugger"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 
 [lib]
 name = "tree_hugger"
@@ -45,6 +46,15 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 criterion = { version = "0.5", features = ["html_reports"] }
 serde_yaml = "0.9"
+# `test_toolkit::test_layout`, for the layout gate in the `l1` binary.
+test-toolkit = { path = "../../tools/test-toolkit" }
+
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[bench]]
 name = "tree_file"

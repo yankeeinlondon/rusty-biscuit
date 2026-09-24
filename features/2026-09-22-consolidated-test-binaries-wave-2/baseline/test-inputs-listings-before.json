@@ -1,0 +1,190 @@
+{
+  "tree-hugger/lib/tests/fixtures/corpus_manifest.yaml": {
+    "binary_id(tree-hugger::tree_file)": [
+      "tree-hugger::tree_file c_enum_not_duplicated",
+      "tree-hugger::tree_file captures_exports_for_javascript",
+      "tree-hugger::tree_file captures_imports_for_javascript",
+      "tree-hugger::tree_file captures_method_container_context",
+      "tree-hugger::tree_file captures_typescript_class_symbol",
+      "tree-hugger::tree_file cpp_enum_not_duplicated",
+      "tree-hugger::tree_file dead_code_is_empty_for_clean_file",
+      "tree-hugger::tree_file dead_code_returns_unreachable_blocks",
+      "tree-hugger::tree_file detects_csharp_static_methods",
+      "tree-hugger::tree_file detects_java_static_methods",
+      "tree-hugger::tree_file detects_tsx_as_typescript",
+      "tree-hugger::tree_file distinguishes_c_types",
+      "tree-hugger::tree_file distinguishes_cpp_types",
+      "tree-hugger::tree_file distinguishes_csharp_types",
+      "tree-hugger::tree_file distinguishes_go_types",
+      "tree-hugger::tree_file distinguishes_java_types",
+      "tree-hugger::tree_file distinguishes_php_types",
+      "tree-hugger::tree_file distinguishes_rust_struct_from_enum",
+      "tree-hugger::tree_file distinguishes_scala_types",
+      "tree-hugger::tree_file distinguishes_swift_types",
+      "tree-hugger::tree_file distinguishes_typescript_interface_from_enum",
+      "tree-hugger::tree_file does_not_report_typescript_class_declaration_as_undefined_symbol",
+      "tree-hugger::tree_file emits_symbol_index_v2_with_completed_passes",
+      "tree-hugger::tree_file emits_symbol_records_v2",
+      "tree-hugger::tree_file extracts_c_function_signature",
+      "tree-hugger::tree_file extracts_c_type_metadata",
+      "tree-hugger::tree_file extracts_cpp_function_signature",
+      "tree-hugger::tree_file extracts_cpp_type_metadata",
+      "tree-hugger::tree_file extracts_csharp_function_signature",
+      "tree-hugger::tree_file extracts_csharp_type_metadata",
+      "tree-hugger::tree_file extracts_go_aliased_import",
+      "tree-hugger::tree_file extracts_go_doc_comments",
+      "tree-hugger::tree_file extracts_go_function_signature",
+      "tree-hugger::tree_file extracts_go_generic_types",
+      "tree-hugger::tree_file extracts_go_import_source",
+      "tree-hugger::tree_file extracts_java_function_signature",
+      "tree-hugger::tree_file extracts_java_import_source",
+      "tree-hugger::tree_file extracts_java_type_metadata",
+      "tree-hugger::tree_file extracts_java_wildcard_import",
+      "tree-hugger::tree_file extracts_javascript_arrow_function_signatures",
+      "tree-hugger::tree_file extracts_javascript_import_source",
+      "tree-hugger::tree_file extracts_multiple_imports_from_same_source",
+      "tree-hugger::tree_file extracts_php_function_signature",
+      "tree-hugger::tree_file extracts_php_import_source",
+      "tree-hugger::tree_file extracts_php_type_metadata",
+      "tree-hugger::tree_file extracts_python_aliased_import",
+      "tree-hugger::tree_file extracts_python_function_signature",
+      "tree-hugger::tree_file extracts_python_generic_types",
+      "tree-hugger::tree_file extracts_python_import_source",
+      "tree-hugger::tree_file extracts_python_multiple_imports_from_same_source",
+      "tree-hugger::tree_file extracts_rust_aliased_import",
+      "tree-hugger::tree_file extracts_rust_doc_comments",
+      "tree-hugger::tree_file extracts_rust_enum_variants",
+      "tree-hugger::tree_file extracts_rust_function_return_type",
+      "tree-hugger::tree_file extracts_rust_generic_type_parameters",
+      "tree-hugger::tree_file extracts_rust_generic_types",
+      "tree-hugger::tree_file extracts_rust_import_source",
+      "tree-hugger::tree_file extracts_rust_struct_fields",
+      "tree-hugger::tree_file extracts_rust_tuple_struct_fields",
+      "tree-hugger::tree_file extracts_scala_default_parameters",
+      "tree-hugger::tree_file extracts_scala_function_signature",
+      "tree-hugger::tree_file extracts_scala_type_metadata",
+      "tree-hugger::tree_file extracts_swift_function_signature",
+      "tree-hugger::tree_file extracts_swift_import_source",
+      "tree-hugger::tree_file extracts_swift_multiple_parameters",
+      "tree-hugger::tree_file extracts_swift_type_metadata",
+      "tree-hugger::tree_file extracts_typescript_aliased_import",
+      "tree-hugger::tree_file extracts_typescript_arrow_function_signatures",
+      "tree-hugger::tree_file extracts_typescript_arrow_function_with_multiple_params",
+      "tree-hugger::tree_file extracts_typescript_arrow_function_with_rest_params",
+      "tree-hugger::tree_file extracts_typescript_doc_comments_through_export",
+      "tree-hugger::tree_file extracts_typescript_function_signature",
+      "tree-hugger::tree_file extracts_typescript_generic_types",
+      "tree-hugger::tree_file extracts_typescript_import_source",
+      "tree-hugger::tree_file extracts_typescript_namespace_import",
+      "tree-hugger::tree_file extracts_typescript_visibility_modifiers",
+      "tree-hugger::tree_file forced_typescript_preserves_tsx_grammar",
+      "tree-hugger::tree_file infers_csharp_interface_method_visibility",
+      "tree-hugger::tree_file infers_java_interface_method_visibility",
+      "tree-hugger::tree_file parses_all_fixtures",
+      "tree-hugger::tree_file reports_javascript_syntax_errors",
+      "tree-hugger::tree_file reports_python_syntax_errors",
+      "tree-hugger::tree_file reports_rust_syntax_errors",
+      "tree-hugger::tree_file rust_enum_is_included_in_types_filter",
+      "tree-hugger::tree_file semantic_analysis_runs_for_reference_query_languages",
+      "tree-hugger::tree_file stable_ids_ignore_leading_whitespace_changes",
+      "tree-hugger::tree_file symbol_index_relations_are_scoped_to_owning_symbol",
+      "tree-hugger::tree_file try_diagnostics_succeeds_for_all_languages",
+      "tree-hugger::tree_file typescript_exports_exclude_class_members"
+    ]
+  },
+  "claudine/cli/Cargo.toml": {
+    "binary_id(claudine::boundary_lint)": [
+      "claudine::boundary_lint closure_does_not_flatten_atomic_write_error",
+      "claudine::boundary_lint control_dispatch_does_not_bypass_the_existence_check",
+      "claudine::boundary_lint darkmatter_compose_surfaces_route_through_file_reference",
+      "claudine::boundary_lint darkmatter_link_resolve_does_not_source_join_after_a_miss",
+      "claudine::boundary_lint darkmatter_path_shape_functions_do_not_source_join_a_missing_reference",
+      "claudine::boundary_lint every_proxy_route_uses_the_shared_resolver_and_typed_error",
+      "claudine::boundary_lint resolve_proxy_target_does_not_flatten_harness_error"
+    ],
+    "binary_id(claudine::tts_phase5_contract) & test(=shipped_claudine_artifacts_enable_native_detached_audio)": [
+      "claudine::tts_phase5_contract shipped_claudine_artifacts_enable_native_detached_audio"
+    ]
+  },
+  "sniff/lib/benches/ci-bench-ids.txt": {
+    "binary_id(sniff::bench_ids_sync)": [
+      "sniff::bench_ids_sync ci_filter_regex_compiles_and_matches_exactly",
+      "sniff::bench_ids_sync every_ci_bench_id_is_well_formed",
+      "sniff::bench_ids_sync text_file_matches_rust_constant"
+    ]
+  },
+  "biscuit-file/lib/tests/corpus/yaml_corpus.json": {
+    "binary_id(biscuit-file::yaml_corpus)": [
+      "biscuit-file::yaml_corpus analysis_never_panics_across_corpus",
+      "biscuit-file::yaml_corpus bom_does_not_suppress_line_ending_normalization",
+      "biscuit-file::yaml_corpus bom_makes_multi_key_documents_unparseable",
+      "biscuit-file::yaml_corpus corpus_is_populated_and_uniquely_named",
+      "biscuit-file::yaml_corpus pipeline_is_idempotent_across_corpus",
+      "biscuit-file::yaml_corpus preserved_cases_are_byte_identical",
+      "biscuit-file::yaml_corpus preserved_cases_report_their_pinned_codes",
+      "biscuit-file::yaml_corpus repair_is_deterministic_across_corpus",
+      "biscuit-file::yaml_corpus repaired_cases_match_expected_output",
+      "biscuit-file::yaml_corpus repaired_parseable_cases_preserve_their_value",
+      "biscuit-file::yaml_corpus single_pass_is_a_fixed_point_once_parseable",
+      "biscuit-file::yaml_corpus untouched_bytes_preserved_across_corpus",
+      "biscuit-file::yaml_corpus yaml_test_suite_subset_is_release_pinned_and_preserved"
+    ]
+  },
+  "schematic/gen/tests/fixtures/complex_auth.json": {
+    "binary_id(schematic-gen::openapi_import_test)": [
+      "schematic-gen::openapi_import_test import_complex_auth_json_succeeds",
+      "schematic-gen::openapi_import_test import_dry_run_does_not_write_files",
+      "schematic-gen::openapi_import_test import_nonexistent_file_returns_error",
+      "schematic-gen::openapi_import_test import_petstore_generates_models_to_disk",
+      "schematic-gen::openapi_import_test import_petstore_yaml_succeeds",
+      "schematic-gen::openapi_import_test import_with_api_name_override",
+      "schematic-gen::openapi_import_test import_with_module_path_override",
+      "schematic-gen::openapi_import_test import_with_verbose_includes_diagnostics"
+    ],
+    "binary_id(schematic-gen::postman_golden)": [
+      "schematic-gen::postman_golden golden_api_key_query_auth",
+      "schematic-gen::postman_golden golden_auth_variables_openai",
+      "schematic-gen::postman_golden golden_file_upload_elevenlabs",
+      "schematic-gen::postman_golden golden_grouped_module_ollama",
+      "schematic-gen::postman_golden golden_mixed_auth_emqx",
+      "schematic-gen::postman_golden golden_path_query_params_github"
+    ]
+  },
+  "biscuit-terminal/cli/README.md": {
+    "binary_id(biscuit-terminal-cli::integration_test) & test(=public_docs_do_not_advertise_removed_atomic_tokens)": [
+      "biscuit-terminal-cli::integration_test public_docs_do_not_advertise_removed_atomic_tokens"
+    ]
+  },
+  "claudine/docs/research/agent-errors/_schema.yaml": {
+    "binary_id(claudine-gen::agent_errors_check)": [
+      "claudine-gen::agent_errors_check all_archived_seeds_match_their_post_graduation_research_rows",
+      "claudine-gen::agent_errors_check checker_process_report_write_failure_is_nonzero_and_never_prints_clean",
+      "claudine-gen::agent_errors_check checker_process_schema_failure_emits_gate_error_not_clean_success",
+      "claudine-gen::agent_errors_check clean_document_writes_explicit_clean_outcome",
+      "claudine-gen::agent_errors_check corrected_document_replaces_findings_with_explicit_clean",
+      "claudine-gen::agent_errors_check failing_document_writes_findings_and_persists_across_reruns",
+      "claudine-gen::agent_errors_check fleet_clean_action_requires_explicit_clean_status",
+      "claudine-gen::agent_errors_check invalid_seed_writes_terminal_gate_input_error_scope",
+      "claudine-gen::agent_errors_check schema_invalid_document_writes_gate_error_and_never_reports_clean",
+      "claudine-gen::agent_errors_check workspace_archived_seed_survives_graduation_and_detects_identity_changes"
+    ]
+  },
+  "darkmatter/dmls/tests/fixtures/mapping_only_corpus/_docs.md": {
+    "binary_id(dmls::mapping_only_corpus)": [
+      "dmls::mapping_only_corpus mapping_only_corpus_contains_no_sequences",
+      "dmls::mapping_only_corpus mapping_only_corpus_diagnostics_match_pre_descent_baseline"
+    ]
+  },
+  "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap": {
+    "binary_id(sniff-cli::spawn_site_guard)": [
+      "sniff-cli::spawn_site_guard detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings",
+      "sniff-cli::spawn_site_guard escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings",
+      "sniff-cli::spawn_site_guard escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes",
+      "sniff-cli::spawn_site_guard l1_path_escapes_carry_a_call_site_reason",
+      "sniff-cli::spawn_site_guard l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry",
+      "sniff-cli::spawn_site_guard reconciliation_rejects_stale_and_unexplained_entries",
+      "sniff-cli::spawn_site_guard restored_detector_rejects_a_violation_that_a_neutered_detector_misses",
+      "sniff-cli::spawn_site_guard restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses"
+    ]
+  }
+}

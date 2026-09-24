@@ -35,7 +35,7 @@ Requests parse your documents and resolve local file paths, but they **never**:
 Shell and remote surfaces are *explained* statically — hover and diagnostics
 tell you what compose *would* do and whether policy allows it, without ever
 doing it. This guarantee is enforced by a dedicated test
-([`tests/no_side_effects.rs`](../tests/no_side_effects.rs)).
+([`tests/l1/no_side_effects.rs`](../tests/l1/no_side_effects.rs)).
 
 ## Feature reference
 

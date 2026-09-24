@@ -1,0 +1,742 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: schematic-gen @ origin/fix/ci-build-feature-divergence (1879dd880) + 553 changed file(s) as e8dc8ce83
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  849526df6db3a425 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\mac--feat-dark-fixes
+
+== windows (build-win-native, archive 849526df6db3a425 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: 874667ca923a03fdd7adef2ec4ee04861d6d8830
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.70s
+   Compiling memchr v2.8.0
+   Compiling smallvec v1.15.1
+   Compiling windows-sys v0.61.2
+   Compiling hashbrown v0.17.0
+   Compiling num-traits v0.2.19
+   Compiling zerocopy v0.8.48
+   Compiling serde_json v1.0.149
+   Compiling bytecount v0.6.9
+   Compiling ref-cast v1.0.25
+   Compiling heck v0.5.0
+   Compiling ref-cast-impl v1.0.25
+   Compiling either v1.15.0
+   Compiling parking_lot_core v0.9.12
+   Compiling icu_normalizer v2.2.0
+   Compiling rayon v1.12.0
+   Compiling strum_macros v0.28.0
+   Compiling aho-corasick v1.1.4
+   Compiling parking_lot v0.12.5
+   Compiling indexmap v2.14.0
+   Compiling nom v8.0.0
+   Compiling idna_adapter v1.2.1
+   Compiling regex-automata v0.4.18
+   Compiling prodash v31.0.0
+   Compiling idna v1.1.0
+   Compiling proc-macro2 v1.0.106
+   Compiling once_cell_polyfill v1.70.2
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling serde_yaml_ng v0.10.0
+   Compiling num-integer v0.1.46
+   Compiling winapi-util v0.1.11
+   Compiling tempfile v3.27.0
+   Compiling dirs-sys v0.5.0
+   Compiling same-file v1.0.6
+   Compiling euclid v0.20.14
+   Compiling walkdir v2.5.0
+   Compiling chrono v0.4.44
+   Compiling dirs v6.0.0
+   Compiling num-bigint v0.4.8
+   Compiling strum v0.28.0
+   Compiling url v2.5.8
+   Compiling anstyle-query v1.1.5
+   Compiling anstyle-wincon v3.0.11
+   Compiling serde_derive_internals v0.29.1
+   Compiling ahash v0.8.12
+   Compiling quote v1.0.45
+   Compiling colorchoice v1.0.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling openapiv3 v2.2.0
+   Compiling anstream v1.0.0
+   Compiling num-iter v0.1.45
+   Compiling nu-ansi-term v0.50.3
+   Compiling nom_locate v5.0.0
+   Compiling num-rational v0.4.2
+   Compiling num-complex v0.4.6
+   Compiling prettyplease v0.2.37
+   Compiling strsim v0.11.1
+   Compiling dyn-clone v1.0.20
+   Compiling bstr v1.12.1
+   Compiling schemars_derive v1.2.1
+   Compiling matchers v0.2.0
+   Compiling clap_builder v4.6.0
+   Compiling biscuit-test-harness v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-test-harness)
+   Compiling num v0.4.3
+   Compiling tracing-subscriber v0.3.23
+   Compiling syn v2.0.117
+   Compiling clap_derive v4.6.1
+   Compiling borrow-or-share v0.2.4
+   Compiling bit-vec v0.8.0
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.4
+   Compiling ppv-lite86 v0.2.21
+   Compiling gix-path v0.12.1
+   Compiling gix-date v0.15.4
+   Compiling gix-chunk v0.7.2
+   Compiling gix-quote v0.7.2
+   Compiling gix-features v0.48.1
+   Compiling gix-actor v0.41.1
+   Compiling gix-sec v0.14.1
+   Compiling rand_chacha v0.9.0
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling rand v0.9.4
+   Compiling gix-glob v0.26.1
+   Compiling gix-command v0.9.1
+   Compiling gix-hashtable v0.15.1
+   Compiling gix-tempfile v23.0.1
+   Compiling gix-commitgraph v0.37.1
+   Compiling gix-object v0.61.0
+   Compiling gix-url v0.36.1
+   Compiling gix-packetline v0.21.4
+   Compiling gix-lock v23.0.1
+   Compiling gix-config-value v0.18.1
+   Compiling lopdf v0.38.0
+   Compiling lopdf v0.39.0
+   Compiling schemars v1.2.1
+   Compiling gix-transport v0.57.1
+   Compiling gix-shallow v0.12.1
+   Compiling clap v4.6.1
+   Compiling test-toolkit v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\tools\test-toolkit)
+   Compiling bit-set v0.8.0
+   Compiling fluent-uri v0.4.1
+   Compiling fraction v0.17.0
+   Compiling colored v3.1.1
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-revision v0.46.0
+   Compiling gix-pack v0.71.0
+   Compiling gix-traverse v0.58.0
+   Compiling gix-diff v0.64.0
+   Compiling gix-refspec v0.42.0
+   Compiling num-cmp v0.1.0
+   Compiling outref v0.5.2
+   Compiling vsimd v0.8.0
+   Compiling micromap v0.3.0
+   Compiling fancy-regex v0.19.1
+   Compiling regex v1.12.3
+   Compiling jsonschema-value v0.55.0
+   Compiling email_address v0.2.9
+   Compiling referencing v0.55.0
+   Compiling gix-odb v0.81.0
+   Compiling gix-protocol v0.62.0
+   Compiling gix-config v0.57.0
+   Compiling gix-discover v0.52.0
+   Compiling uuid-simd v0.8.0
+   Compiling jsonschema-regex v0.55.0
+   Compiling data-encoding v2.10.0
+   Compiling pdf-extract v0.10.0
+   Compiling jsonschema v0.55.0
+   Compiling gix v0.84.0
+   Compiling biscuit-file v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+   Compiling schematic-define v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\define)
+   Compiling schematic-definitions v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\definitions)
+   Compiling schematic-gen v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\gen)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 09s
+   Archiving 5 binaries (including 1 non-test binary) and 2 standard libraries to B:\coding\mac--feat-dark-fixes\cross-check-Mac-88921-1790199189-build\build-schematic-gen-windows-latest-849526df6db3a425.tar.zst
+    Archived 9 files to B:\coding\mac--feat-dark-fixes\cross-check-Mac-88921-1790199189-build\build-schematic-gen-windows-latest-849526df6db3a425.tar.zst in 0.10s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 65 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `849526df6db3a425` for `windows-latest` — digest `cdd0be458e158c13`, produced on `windows-latest`.
+cross-check-key: 849526df6db3a425
+cross-check-digest: cdd0be458e158c13
+
+Testing [1mschematic-gen[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 5 binaries (including 1 non-test binary) to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-WY9kyI
+   Extracted 9 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-WY9kyI in 0.29s
+────────────
+ Nextest run ID d640bac7-6ef8-4f11-893e-f0a2ce8ba3e4 with nextest profile: ci
+    Starting 559 tests across 4 binaries (8 tests skipped)
+        PASS [   0.012s] (  1/559) schematic-gen cargo_gen::tests::generate_cargo_toml_has_correct_license
+        PASS [   0.023s] (  2/559) schematic-gen cargo_gen::tests::generate_cargo_toml_has_correct_package_name
+        PASS [   0.026s] (  3/559) schematic-gen asyncapi_import::tests::maps_http_api_key_auth_scheme
+        PASS [   0.029s] (  4/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_bytes
+        PASS [   0.029s] (  5/559) schematic-gen asyncapi_import::tests::imports_minimal_asyncapi_document
+        PASS [   0.033s] (  6/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_schematic_define
+        PASS [   0.037s] (  7/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_generated_notice
+        PASS [   0.042s] (  8/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_reqwest
+        PASS [   0.045s] (  9/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_serde_with_derive
+        PASS [   0.050s] ( 10/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_serde_json
+        PASS [   0.042s] ( 11/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_serial_test_dev_dependency
+        PASS [   0.035s] ( 12/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_thiserror
+        PASS [   0.036s] ( 13/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_tokio
+        PASS [   0.038s] ( 14/559) schematic-gen cargo_gen::tests::generate_cargo_toml_includes_urlencoding
+        PASS [   0.042s] ( 15/559) schematic-gen cargo_gen::tests::generate_cargo_toml_produces_valid_toml
+        PASS [   0.041s] ( 16/559) schematic-gen cargo_gen::tests::generate_cargo_toml_uses_edition_2024
+        PASS [   0.041s] ( 17/559) schematic-gen cargo_gen::tests::generate_cargo_toml_with_workspace_root_uses_absolute_paths
+        PASS [   0.040s] ( 18/559) schematic-gen cargo_gen::tests::generate_cargo_toml_without_workspace_root_uses_relative_paths
+        PASS [   0.045s] ( 19/559) schematic-gen cargo_gen::tests::write_cargo_toml_creates_file
+        PASS [   0.042s] ( 20/559) schematic-gen cargo_gen::tests::write_cargo_toml_dry_run_does_not_create_file
+        PASS [   0.047s] ( 21/559) schematic-gen cargo_gen::tests::write_cargo_toml_creates_parent_directories
+        PASS [   0.045s] ( 22/559) schematic-gen cargo_gen::tests::write_cargo_toml_no_temp_file_left_behind
+        PASS [   0.052s] ( 23/559) schematic-gen cargo_gen::tests::write_cargo_toml_file_contains_expected_content
+        PASS [   0.048s] ( 24/559) schematic-gen cargo_gen::tests::write_cargo_toml_overwrites_existing_file
+        PASS [   0.049s] ( 25/559) schematic-gen codegen::api_struct::tests::generate_api_struct_basic
+        PASS [   0.049s] ( 26/559) schematic-gen codegen::api_struct::tests::generate_api_struct_doc_comment_includes_description
+        PASS [   0.049s] ( 27/559) schematic-gen codegen::api_struct::tests::generate_api_struct_docs_url_none
+        PASS [   0.051s] ( 28/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_docs_url_constant
+        PASS [   0.046s] ( 29/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_headers_field
+        PASS [   0.044s] ( 30/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_variant_method
+        PASS [   0.047s] ( 31/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_variant_with_method
+        PASS [   0.040s] ( 32/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_with_client_and_base_url_constructor
+        PASS [   0.043s] ( 33/559) schematic-gen codegen::api_struct::tests::generate_api_struct_has_with_client_constructor
+        PASS [   0.041s] ( 34/559) schematic-gen codegen::api_struct::tests::generate_api_struct_validates_syntax
+        PASS [   0.041s] ( 35/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_api_key_auth
+        PASS [   0.053s] ( 36/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_basic_auth
+        PASS [   0.054s] ( 37/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_bearer_auth
+        PASS [   0.055s] ( 38/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_headers
+        PASS [   0.048s] ( 39/559) schematic-gen codegen::api_struct::tests::generate_auth_strategy_init_api_key
+        PASS [   0.053s] ( 40/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_special_url_characters
+        PASS [   0.049s] ( 41/559) schematic-gen codegen::api_struct::tests::generate_auth_strategy_init_basic
+        PASS [   0.065s] ( 42/559) schematic-gen codegen::api_struct::tests::generate_api_struct_with_different_names
+        PASS [   0.048s] ( 43/559) schematic-gen codegen::api_struct::tests::generate_auth_strategy_init_bearer_with_header
+        PASS [   0.049s] ( 44/559) schematic-gen codegen::api_struct::tests::generate_auth_strategy_init_bearer_without_header
+        PASS [   0.047s] ( 45/559) schematic-gen codegen::api_struct::tests::generate_auth_strategy_init_none
+        PASS [   0.036s] ( 46/559) schematic-gen codegen::api_struct::tests::generate_headers_init_empty
+        PASS [   0.036s] ( 47/559) schematic-gen codegen::api_struct::tests::generate_headers_init_with_values
+        PASS [   0.036s] ( 48/559) schematic-gen codegen::api_struct::tests::variant_builder_checks_env_override_before_consuming_option
+        PASS [   0.038s] ( 49/559) schematic-gen codegen::api_struct::tests::variant_builder_clones_client
+        PASS [   0.040s] ( 50/559) schematic-gen codegen::api_struct::tests::variant_builder_clones_env_username
+        PASS [   0.041s] ( 51/559) schematic-gen codegen::api_struct::tests::variant_builder_handles_change_to
+        PASS [   0.046s] ( 52/559) schematic-gen codegen::api_struct::tests::variant_builder_clones_headers
+        PASS [   0.046s] ( 53/559) schematic-gen codegen::api_struct::tests::variant_builder_handles_no_change
+        PASS [   0.045s] ( 54/559) schematic-gen codegen::api_struct::tests::variant_builder_has_mutate_response_method
+        PASS [   0.045s] ( 55/559) schematic-gen codegen::api_struct::tests::variant_builder_has_pre_response_json_method
+        PASS [   0.041s] ( 56/559) schematic-gen codegen::client::tests::generate_auth_setup_handles_all_strategies
+        PASS [   0.042s] ( 57/559) schematic-gen codegen::client::tests::generate_auth_setup_produces_runtime_match
+        PASS [   0.041s] ( 58/559) schematic-gen codegen::client::tests::generate_auth_setup_skips_env_check_when_programmatic_auth_set
+        PASS [   0.041s] ( 59/559) schematic-gen codegen::client::tests::generate_convenience_methods_snake_case
+        PASS [   0.041s] ( 60/559) schematic-gen codegen::client::tests::generate_request_method_api_key_uses_self_env_auth
+        PASS [   0.042s] ( 61/559) schematic-gen codegen::client::tests::generate_request_method_applies_headers
+        PASS [   0.041s] ( 62/559) schematic-gen codegen::client::tests::generate_request_method_basic_auth
+        PASS [   0.042s] ( 63/559) schematic-gen codegen::client::tests::generate_request_method_bearer_uses_self_env_auth
+        PASS [   0.059s] ( 64/559) schematic-gen codegen::client::tests::generate_request_method_all_auth_strategies_validate
+        PASS [   0.041s] ( 65/559) schematic-gen codegen::client::tests::generate_request_method_binary_endpoint
+        PASS [   0.046s] ( 66/559) schematic-gen codegen::client::tests::generate_request_method_doc_comments
+        PASS [   0.045s] ( 67/559) schematic-gen codegen::client::tests::generate_request_method_empty_endpoint
+        PASS [   0.040s] ( 68/559) schematic-gen codegen::client::tests::generate_request_method_has_merge_headers
+        PASS [   0.042s] ( 69/559) schematic-gen codegen::client::tests::generate_request_method_has_must_use
+        PASS [   0.037s] ( 70/559) schematic-gen codegen::client::tests::generate_request_method_mixed_endpoints
+        PASS [   0.035s] ( 71/559) schematic-gen codegen::client::tests::generate_request_method_no_auth
+        PASS [   0.036s] ( 72/559) schematic-gen codegen::client::tests::generate_request_method_no_unwrap_in_error_path
+        PASS [   0.035s] ( 73/559) schematic-gen codegen::client::tests::generate_request_method_text_endpoint
+        PASS [   0.040s] ( 74/559) schematic-gen codegen::client::tests::generate_request_method_uses_runtime_auth_matching
+        PASS [   0.035s] ( 75/559) schematic-gen codegen::client::tests::to_snake_case_converts_correctly
+        PASS [   0.040s] ( 76/559) schematic-gen codegen::client::tests::generate_request_method_validates_syntax
+        PASS [   0.037s] ( 77/559) schematic-gen codegen::error::tests::generate_error_type_api_error_has_fields
+        PASS [   0.036s] ( 78/559) schematic-gen codegen::error::tests::generate_error_type_contains_all_variants
+        PASS [   0.035s] ( 79/559) schematic-gen codegen::error::tests::generate_error_type_enum_is_public
+        PASS [   0.035s] ( 80/559) schematic-gen codegen::error::tests::generate_error_type_has_debug_derive
+        PASS [   0.036s] ( 81/559) schematic-gen codegen::error::tests::generate_error_type_has_doc_comments
+        PASS [   0.036s] ( 82/559) schematic-gen codegen::error::tests::generate_error_type_has_error_handling_examples
+        PASS [   0.037s] ( 83/559) schematic-gen codegen::error::tests::generate_error_type_has_error_messages
+        PASS [   0.035s] ( 84/559) schematic-gen codegen::error::tests::generate_error_type_has_from_attributes
+        PASS [   0.038s] ( 85/559) schematic-gen codegen::error::tests::generate_error_type_has_header_variant
+        PASS [   0.042s] ( 86/559) schematic-gen codegen::error::tests::generate_error_type_has_thiserror_derive
+        PASS [   0.040s] ( 87/559) schematic-gen codegen::error::tests::generate_error_type_produces_valid_syntax
+        PASS [   0.041s] ( 88/559) schematic-gen codegen::error::tests::generate_error_type_supports_from_conversion
+        PASS [   0.040s] ( 89/559) schematic-gen codegen::module_docs::tests::auth_section_api_key
+        PASS [   0.040s] ( 90/559) schematic-gen codegen::module_docs::tests::auth_section_basic
+        PASS [   0.040s] ( 91/559) schematic-gen codegen::module_docs::tests::auth_section_bearer_token_custom_header
+        PASS [   0.040s] ( 92/559) schematic-gen codegen::module_docs::tests::auth_section_bearer_token_default_header
+        PASS [   0.040s] ( 93/559) schematic-gen codegen::module_docs::tests::auth_section_none
+        PASS [   0.041s] ( 94/559) schematic-gen codegen::module_docs::tests::build_preserves_code_block_indentation
+        PASS [   0.040s] ( 95/559) schematic-gen codegen::module_docs::tests::build_produces_line_doc_attributes
+        PASS [   0.040s] ( 96/559) schematic-gen codegen::module_docs::tests::builder_creates_valid_tokenstream
+        PASS [   0.041s] ( 97/559) schematic-gen codegen::module_docs::tests::builder_includes_api_name
+        PASS [   0.040s] ( 98/559) schematic-gen codegen::module_docs::tests::builder_includes_docs_url_when_present
+        PASS [   0.040s] ( 99/559) schematic-gen codegen::module_docs::tests::builder_omits_docs_url_when_none
+        PASS [   0.040s] (100/559) schematic-gen codegen::module_docs::tests::env_auth_multiple_vars
+        PASS [   0.040s] (101/559) schematic-gen codegen::module_docs::tests::example_section_fallback_to_first_endpoint
+        PASS [   0.040s] (102/559) schematic-gen codegen::module_docs::tests::example_section_no_endpoints
+        PASS [   0.040s] (103/559) schematic-gen codegen::module_docs::tests::example_section_uses_first_get_endpoint
+        PASS [   0.040s] (104/559) schematic-gen codegen::module_docs::tests::features_section_empty_endpoints
+        PASS [   0.040s] (105/559) schematic-gen codegen::module_docs::tests::features_section_groups_by_method
+        PASS [   0.040s] (106/559) schematic-gen codegen::module_docs::tests::to_snake_case_converts_pascal_case
+        PASS [   0.040s] (107/559) schematic-gen codegen::request_enum::tests::from_impls_are_individual_not_combined
+        PASS [   0.041s] (108/559) schematic-gen codegen::request_enum::tests::generate_enum_doc_comments
+        PASS [   0.041s] (109/559) schematic-gen codegen::request_enum::tests::generate_enum_empty_api_produces_valid_code
+        PASS [   0.041s] (110/559) schematic-gen codegen::request_enum::tests::generate_enum_single_variant
+        PASS [   0.041s] (111/559) schematic-gen codegen::request_enum::tests::generate_enum_three_variants
+        PASS [   0.041s] (112/559) schematic-gen codegen::request_enum::tests::generate_enum_two_variants
+        PASS [   0.041s] (113/559) schematic-gen codegen::request_enum::tests::generate_enum_validates_syntax
+        PASS [   0.040s] (114/559) schematic-gen codegen::request_enum::tests::generate_enum_with_body_endpoints
+        PASS [   0.043s] (115/559) schematic-gen codegen::request_structs::tests::all_http_methods_generate_correct_string
+        PASS [   0.041s] (116/559) schematic-gen codegen::request_structs::tests::format_generated_code_produces_valid_rust
+        PASS [   0.040s] (117/559) schematic-gen codegen::request_structs::tests::generate_delete_with_path_param
+        PASS [   0.039s] (118/559) schematic-gen codegen::request_structs::tests::generate_get_no_params
+        PASS [   0.040s] (119/559) schematic-gen codegen::request_structs::tests::generate_get_with_multiple_path_params
+        PASS [   0.040s] (120/559) schematic-gen codegen::request_structs::tests::generate_get_with_path_param
+        PASS [   0.039s] (121/559) schematic-gen codegen::request_structs::tests::generate_patch_with_body
+        PASS [   0.040s] (122/559) schematic-gen codegen::request_structs::tests::generate_post_with_body
+        PASS [   0.039s] (123/559) schematic-gen codegen::request_structs::tests::generate_post_with_path_param_and_body
+        PASS [   0.040s] (124/559) schematic-gen codegen::request_structs::tests::generates_array_query_param
+        PASS [   0.038s] (125/559) schematic-gen codegen::request_structs::tests::generates_different_query_param_types
+        PASS [   0.039s] (126/559) schematic-gen codegen::request_structs::tests::generates_example_with_body_construction
+        PASS [   0.039s] (127/559) schematic-gen codegen::request_structs::tests::generates_example_with_custom_module_path
+        PASS [   0.039s] (128/559) schematic-gen codegen::request_structs::tests::generates_example_with_default_for_no_required_fields
+        PASS [   0.039s] (129/559) schematic-gen codegen::request_structs::tests::generates_example_with_multiple_path_params
+        PASS [   0.039s] (130/559) schematic-gen codegen::request_structs::tests::generates_example_with_new_for_path_params
+        PASS [   0.040s] (131/559) schematic-gen codegen::request_structs::tests::generates_example_with_path_params_and_body
+        PASS [   0.039s] (132/559) schematic-gen codegen::request_structs::tests::generates_from_body_for_body_only_request
+        PASS [   0.040s] (133/559) schematic-gen codegen::request_structs::tests::generates_from_str_for_single_path_param_no_body
+        PASS [   0.040s] (134/559) schematic-gen codegen::request_structs::tests::generates_from_string_for_single_path_param_no_body
+        PASS [   0.012s] (135/559) schematic-gen codegen::request_structs::tests::generates_snake_case_query_param_fields_from_camel_case
+        PASS [   0.040s] (136/559) schematic-gen codegen::request_structs::tests::generates_new_for_path_param_and_body
+        PASS [   0.039s] (137/559) schematic-gen codegen::request_structs::tests::generates_new_for_path_param_only
+        PASS [   0.040s] (138/559) schematic-gen codegen::request_structs::tests::generates_new_with_multiple_path_params
+        PASS [   0.040s] (139/559) schematic-gen codegen::request_structs::tests::generates_query_param_builder_methods
+        PASS [   0.040s] (140/559) schematic-gen codegen::request_structs::tests::generates_query_param_fields
+        PASS [   0.039s] (141/559) schematic-gen codegen::request_structs::tests::generates_query_param_in_into_parts
+        PASS [   0.067s] (142/559) schematic-gen codegen::request_structs::tests::generates_new_for_body_only
+        PASS [   0.040s] (143/559) schematic-gen codegen::request_structs::tests::pagination_doc_tests::bitbucket_pagination_docs_have_correct_values
+        PASS [   0.039s] (144/559) schematic-gen codegen::request_structs::tests::pagination_doc_tests::cursor_pagination_docs_show_default_limit
+        PASS [   0.039s] (145/559) schematic-gen codegen::request_structs::tests::pagination_doc_tests::gitea_pagination_docs_have_limit_param
+        PASS [   0.040s] (146/559) schematic-gen codegen::request_structs::tests::pagination_doc_tests::github_pagination_docs_include_default_and_max_values
+        PASS [   0.012s] (147/559) schematic-gen codegen::request_structs::tests::skips_from_body_for_request_with_path_params
+        PASS [   0.040s] (148/559) schematic-gen codegen::request_structs::tests::plain_path_param_is_still_encoded
+        PASS [   0.040s] (149/559) schematic-gen codegen::request_structs::tests::query_params_with_path_params
+        PASS [   0.040s] (150/559) schematic-gen codegen::request_structs::tests::reserved_path_param_is_emitted_without_encoding
+        PASS [   0.040s] (151/559) schematic-gen codegen::request_structs::tests::single_impl_block_for_no_param_request
+        PASS [   0.040s] (152/559) schematic-gen codegen::request_structs::tests::single_impl_block_with_body_and_both_methods
+        PASS [   0.039s] (153/559) schematic-gen codegen::request_structs::tests::single_impl_block_with_new_and_into_parts
+        PASS [   0.069s] (154/559) schematic-gen codegen::request_structs::tests::pagination_doc_tests::offset_limit_pagination_docs_show_values
+        PASS [   0.040s] (155/559) schematic-gen codegen::request_structs::tests::skips_from_string_impls_for_multi_param_requests
+        PASS [   0.039s] (156/559) schematic-gen codegen::request_structs::tests::skips_from_string_impls_for_no_params
+        PASS [   0.011s] (157/559) schematic-gen codegen::traits::tests::generate_paginated_impl_for_offset_limit_pagination
+        PASS [   0.040s] (158/559) schematic-gen codegen::request_structs::tests::skips_from_string_impls_for_single_param_with_body
+        PASS [   0.039s] (159/559) schematic-gen codegen::request_structs::tests::skips_new_for_empty_request
+        PASS [   0.040s] (160/559) schematic-gen codegen::request_structs::tests::validate_generated_code_passes
+        PASS [   0.039s] (161/559) schematic-gen codegen::traits::tests::custom_suffix_used_in_impl
+        PASS [   0.039s] (162/559) schematic-gen codegen::traits::tests::generate_paginated_impl_for_cursor_pagination
+        PASS [   0.039s] (163/559) schematic-gen codegen::traits::tests::generate_paginated_impl_for_github_style_pagination
+        PASS [   0.068s] (164/559) schematic-gen codegen::request_structs::tests::skips_from_string_impls_for_requests_with_body
+        PASS [   0.039s] (165/559) schematic-gen codegen::traits::tests::generate_paginated_trait_produces_valid_rust
+        PASS [   0.039s] (166/559) schematic-gen codegen::traits::tests::skip_impl_when_endpoint_has_no_params
+        PASS [   0.040s] (167/559) schematic-gen codegen::traits::tests::skip_impl_when_endpoint_has_params_but_no_pagination
+        PASS [   0.039s] (168/559) schematic-gen codegen::variant::tests::generate_endpoint_spec_has_associated_type_and_const
+        PASS [   0.039s] (169/559) schematic-gen codegen::variant::tests::generate_endpoint_spec_produces_valid_syntax
+        PASS [   0.039s] (170/559) schematic-gen codegen::variant::tests::generate_response_context_has_required_fields
+        PASS [   0.040s] (171/559) schematic-gen codegen::variant::tests::generate_response_context_produces_valid_syntax
+        PASS [   0.040s] (172/559) schematic-gen codegen::variant::tests::generate_response_mutator_types_has_trait_and_struct
+        PASS [   0.040s] (173/559) schematic-gen codegen::variant::tests::generate_response_mutator_types_produces_valid_syntax
+        PASS [   0.040s] (174/559) schematic-gen codegen::variant::tests::generate_variant_hooks_has_required_fields
+        PASS [   0.040s] (175/559) schematic-gen codegen::variant::tests::generate_variant_hooks_produces_valid_syntax
+        PASS [   0.042s] (176/559) schematic-gen codegen::variant::tests::generate_variant_types_combines_all_types
+        PASS [   0.040s] (177/559) schematic-gen definition_gen::tests::emits_each_endpoint
+        PASS [   0.040s] (178/559) schematic-gen definition_gen::tests::emits_form_fields_with_optionality_and_description
+        PASS [   0.040s] (179/559) schematic-gen definition_gen::tests::emits_parseable_rust
+        PASS [   0.040s] (180/559) schematic-gen definition_gen::tests::emits_required_form_fields_without_optional
+        PASS [   0.040s] (181/559) schematic-gen definition_gen::tests::emits_the_conventional_function_name
+        PASS [   0.039s] (182/559) schematic-gen export::auth::tests::map_auth_api_key
+        PASS [   0.039s] (183/559) schematic-gen export::auth::tests::map_auth_api_key_param_cookie
+        PASS [   0.039s] (184/559) schematic-gen export::auth::tests::map_auth_api_key_param_query
+        PASS [   0.039s] (185/559) schematic-gen export::auth::tests::map_auth_basic
+        PASS [   0.037s] (186/559) schematic-gen export::auth::tests::map_auth_bearer_custom_header
+        PASS [   0.039s] (187/559) schematic-gen export::auth::tests::map_auth_bearer_default_header
+        PASS [   0.040s] (188/559) schematic-gen export::auth::tests::map_auth_none
+        PASS [   0.039s] (189/559) schematic-gen export::body::tests::map_body_binary
+        PASS [   0.039s] (190/559) schematic-gen export::body::tests::map_body_form_data
+        PASS [   0.039s] (191/559) schematic-gen export::body::tests::map_body_form_data_preserves_file_accept_patterns
+        PASS [   0.040s] (192/559) schematic-gen export::body::tests::map_body_form_data_preserves_file_kind
+        PASS [   0.039s] (193/559) schematic-gen export::body::tests::map_body_form_data_preserves_files_constraints
+        PASS [   0.040s] (194/559) schematic-gen export::body::tests::map_body_form_data_preserves_json_part
+        PASS [   0.040s] (195/559) schematic-gen export::body::tests::map_body_form_data_preserves_text_for_text
+        PASS [   0.040s] (196/559) schematic-gen export::body::tests::map_body_json
+        PASS [   0.039s] (197/559) schematic-gen export::body::tests::map_body_text
+        PASS [   0.039s] (198/559) schematic-gen export::body::tests::map_body_url_encoded
+        PASS [   0.039s] (199/559) schematic-gen export::openapi::tests::snake_case_handles_camel_and_pascal_case
+        PASS [   0.043s] (200/559) schematic-gen export::openapi::tests::write_openapi_filename_uses_module_path_when_set
+        PASS [   0.043s] (201/559) schematic-gen export::openapi::tests::write_openapi_grouped_collides_on_duplicate_method_path
+        PASS [   0.045s] (202/559) schematic-gen export::openapi::tests::write_openapi_grouped_creates_module_named_file
+        PASS [   0.043s] (203/559) schematic-gen export::openapi::tests::write_openapi_grouped_error_on_missing_directory
+        PASS [   0.052s] (204/559) schematic-gen export::openapi::tests::write_openapi_grouped_emits_grouped_extension
+        PASS [   0.034s] (205/559) schematic-gen export::openapi::tests::write_openapi_grouped_skip_extensions_omits_grouped_marker
+        PASS [   0.029s] (206/559) schematic-gen export::openapi::tests::write_openapi_grouped_unions_paths
+        PASS [   0.039s] (207/559) schematic-gen export::openapi::tests::write_openapi_grouped_real_ollama_module
+        PASS [   0.030s] (208/559) schematic-gen export::openapi::tests::write_openapi_grouped_unions_security_schemes_distinct
+        PASS [   0.028s] (209/559) schematic-gen export::openapi::tests::write_openapi_grouped_uses_module_name_in_info_title
+        PASS [   0.028s] (210/559) schematic-gen export::openapi::tests::write_openapi_grouped_yaml_round_trips
+        PASS [   0.012s] (211/559) schematic-gen export::path_params::tests::folder_key_nested_path
+        PASS [   0.012s] (212/559) schematic-gen export::path_params::tests::folder_key_no_leading_slash
+        PASS [   0.012s] (213/559) schematic-gen export::path_params::tests::folder_key_only_path_params
+        PASS [   0.012s] (214/559) schematic-gen export::path_params::tests::folder_key_only_version
+        PASS [   0.012s] (215/559) schematic-gen export::path_params::tests::folder_key_root_path
+        PASS [   0.178s] (216/559) schematic-gen export::openapi::tests::write_openapi_error_on_missing_directory
+        PASS [   0.012s] (217/559) schematic-gen export::path_params::tests::folder_key_simple_path
+        PASS [   0.016s] (218/559) schematic-gen export::path_params::tests::folder_key_with_path_params
+        PASS [   0.013s] (219/559) schematic-gen export::path_params::tests::folder_key_with_version_prefix
+        PASS [   0.013s] (220/559) schematic-gen export::path_params::tests::strip_reserved_markers_leaves_plain_form
+        PASS [   0.012s] (221/559) schematic-gen export::path_params::tests::strip_reserved_markers_rewrites_plus_form
+        PASS [   0.013s] (222/559) schematic-gen export::path_params::tests::version_prefix_detection
+        PASS [   0.013s] (223/559) schematic-gen export::postman::tests::auth_api_key
+        PASS [   0.012s] (224/559) schematic-gen export::postman::tests::auth_api_key_cookie_location
+        PASS [   0.012s] (225/559) schematic-gen export::postman::tests::auth_api_key_query_location
+        PASS [   0.252s] (226/559) schematic-gen export::openapi::tests::write_openapi_creates_json_file
+        PASS [   0.013s] (227/559) schematic-gen export::postman::tests::auth_basic
+        PASS [   0.014s] (228/559) schematic-gen export::postman::tests::auth_bearer_token
+        PASS [   0.013s] (229/559) schematic-gen export::postman::tests::auth_none
+        PASS [   0.017s] (230/559) schematic-gen export::postman::tests::auth_variables_for_api_key_returns_api_key_variable
+        PASS [   0.012s] (231/559) schematic-gen export::postman::tests::auth_variables_for_basic_returns_username_and_password
+        PASS [   0.015s] (232/559) schematic-gen export::postman::tests::auth_variables_for_bearer_returns_one_variable_named_bearer_token
+        PASS [   0.271s] (233/559) schematic-gen export::openapi::tests::write_openapi_file_name_lowercase
+        PASS [   0.013s] (234/559) schematic-gen export::postman::tests::auth_variables_for_none_returns_empty
+        PASS [   0.015s] (235/559) schematic-gen export::postman::tests::body_binary
+        PASS [   0.017s] (236/559) schematic-gen export::postman::tests::body_form_data
+        PASS [   0.304s] (237/559) schematic-gen export::openapi::tests::write_openapi_can_skip_extensions
+        PASS [   0.018s] (238/559) schematic-gen export::postman::tests::body_form_data_real_unfolded_circle_file_upload
+        PASS [   0.028s] (239/559) schematic-gen export::postman::tests::body_form_data_real_elevenlabs_upload
+        PASS [   0.025s] (240/559) schematic-gen export::postman::tests::body_json
+        PASS [   0.021s] (241/559) schematic-gen export::postman::tests::body_text
+        PASS [   0.023s] (242/559) schematic-gen export::postman::tests::body_url_encoded
+        PASS [   0.025s] (243/559) schematic-gen export::postman::tests::build_collection_with_endpoints
+        PASS [   0.020s] (244/559) schematic-gen export::postman::tests::build_minimal_collection
+        PASS [   0.022s] (245/559) schematic-gen export::postman::tests::build_postman_collection_api_key_declares_api_key_variable
+        PASS [   0.021s] (246/559) schematic-gen export::postman::tests::build_postman_collection_basic_declares_username_and_password
+        PASS [   0.024s] (247/559) schematic-gen export::postman::tests::build_postman_collection_bearer_declares_bearer_token
+        PASS [   0.023s] (248/559) schematic-gen export::postman::tests::build_postman_collection_grouped_mixed_auth_unions_variables
+        PASS [   0.022s] (249/559) schematic-gen export::postman::tests::build_postman_collection_grouped_uniform_bearer_declares_bearer_token
+        PASS [   0.354s] (250/559) schematic-gen export::openapi::tests::write_openapi_creates_yaml_file
+        PASS [   0.023s] (251/559) schematic-gen export::postman::tests::build_postman_collection_none_declares_only_base_url
+        PASS [   0.023s] (252/559) schematic-gen export::postman::tests::capitalize_folder_name_cases
+        PASS [   0.021s] (253/559) schematic-gen export::postman::tests::folder_grouping
+        PASS [   0.021s] (254/559) schematic-gen export::postman::tests::form_param_file_emits_type_file
+        PASS [   0.022s] (255/559) schematic-gen export::postman::tests::form_param_files_emits_type_file
+        PASS [   0.289s] (256/559) schematic-gen export::openapi::tests::write_openapi_includes_schemas
+        PASS [   0.296s] (257/559) schematic-gen export::openapi::tests::write_openapi_json_produces_valid_json
+        PASS [   0.047s] (258/559) schematic-gen export::postman::tests::form_param_json_emits_type_text
+        PASS [   0.302s] (259/559) schematic-gen export::openapi::tests::write_openapi_respects_version_option
+        PASS [   0.050s] (260/559) schematic-gen export::postman::tests::form_param_text_emits_type_text
+        PASS [   0.051s] (261/559) schematic-gen export::postman::tests::grouped_mixed_auth_declares_both_auth_variable_sets
+        PASS [   0.051s] (262/559) schematic-gen export::postman::tests::grouped_mixed_auth_disambiguates_duplicate_request_names
+        PASS [   0.052s] (263/559) schematic-gen export::postman::tests::grouped_mixed_auth_omits_collection_auth_and_emits_per_request
+        PASS [   0.052s] (264/559) schematic-gen export::postman::tests::grouped_mixed_auth_preserves_unique_request_names
+        PASS [   0.046s] (265/559) schematic-gen export::postman::tests::grouped_uniform_auth_uses_collection_auth_and_no_request_auth
+        PASS [   0.043s] (266/559) schematic-gen export::postman::tests::merge_variables_dedupes_by_key
+        PASS [   0.037s] (267/559) schematic-gen export::postman::tests::postman_collection_json_structure
+        PASS [   0.040s] (268/559) schematic-gen export::postman::tests::reserved_path_param_strips_marker_in_collection
+        PASS [   0.042s] (269/559) schematic-gen export::postman::tests::rest_method_to_string_conversion
+        PASS [   0.041s] (270/559) schematic-gen export::postman::tests::url_with_path_params
+        PASS [   0.041s] (271/559) schematic-gen export::postman::tests::write_postman_dry_run
+        PASS [   0.039s] (272/559) schematic-gen import_pipeline::tests::import_options_debug
+        PASS [   0.049s] (273/559) schematic-gen export::postman::tests::write_postman_creates_file
+        PASS [   0.040s] (274/559) schematic-gen import_pipeline::tests::run_import_nonexistent_file_returns_error
+        PASS [   0.039s] (275/559) schematic-gen inference::tests::infer_module_path_all_caps
+        PASS [   0.040s] (276/559) schematic-gen inference::tests::infer_module_path_elevenlabs_no_inference
+        PASS [   0.038s] (277/559) schematic-gen inference::tests::infer_module_path_empty
+        PASS [   0.039s] (278/559) schematic-gen inference::tests::infer_module_path_http_client
+        PASS [   0.035s] (279/559) schematic-gen inference::tests::infer_module_path_huggingface_hub
+        PASS [   0.068s] (280/559) schematic-gen import_pipeline::tests::run_import_from_petstore_yaml
+        PASS [   0.037s] (281/559) schematic-gen inference::tests::infer_module_path_huggingface_no_inference
+        PASS [   0.039s] (282/559) schematic-gen inference::tests::infer_module_path_multi_word_with_suffix
+        PASS [   0.034s] (283/559) schematic-gen inference::tests::infer_module_path_ollama_native
+        PASS [   0.035s] (284/559) schematic-gen inference::tests::infer_module_path_openai_no_inference
+        PASS [   0.035s] (285/559) schematic-gen inference::tests::infer_module_path_simple_capitalized
+        PASS [   0.036s] (286/559) schematic-gen inference::tests::infer_module_path_simple_lowercase
+        PASS [   0.035s] (287/559) schematic-gen inference::tests::infer_module_path_with_api_suffix
+        PASS [   0.034s] (288/559) schematic-gen inference::tests::infer_module_path_with_sdk_suffix
+        PASS [   0.037s] (289/559) schematic-gen inference::tests::infer_module_path_with_service_suffix
+        PASS [   0.038s] (290/559) schematic-gen inference::tests::split_camel_case_acronym_at_start
+        PASS [   0.038s] (291/559) schematic-gen inference::tests::split_camel_case_empty
+        PASS [   0.038s] (292/559) schematic-gen inference::tests::split_camel_case_lowercase
+        PASS [   0.037s] (293/559) schematic-gen inference::tests::split_camel_case_multi_word
+        PASS [   0.037s] (294/559) schematic-gen inference::tests::split_camel_case_single_word
+        PASS [   0.037s] (295/559) schematic-gen inference::tests::split_camel_case_two_words
+        PASS [   0.038s] (296/559) schematic-gen inference::tests::split_camel_case_with_acronym
+        PASS [   0.037s] (297/559) schematic-gen model_gen::tests::all_primitive_types_map_correctly
+        PASS [   0.039s] (298/559) schematic-gen model_gen::tests::array_type_generates_vec
+        PASS [   0.038s] (299/559) schematic-gen model_gen::tests::assemble_model_tokens_produces_valid_code
+        PASS [   0.038s] (300/559) schematic-gen model_gen::tests::empty_catalog_generates_valid_code
+        PASS [   0.039s] (301/559) schematic-gen model_gen::tests::enum_has_rename_attrs
+        PASS [   0.039s] (302/559) schematic-gen model_gen::tests::generate_models_dry_run
+        PASS [   0.042s] (303/559) schematic-gen model_gen::tests::generate_models_writes_file
+        PASS [   0.038s] (304/559) schematic-gen model_gen::tests::generated_enum_derives_default_on_first_variant
+        PASS [   0.039s] (305/559) schematic-gen model_gen::tests::map_type_generates_hashmap
+        PASS [   0.040s] (306/559) schematic-gen model_gen::tests::optional_fields_wrapped_in_option
+        PASS [   0.039s] (307/559) schematic-gen model_gen::tests::serde_rename_on_fields
+        PASS [   0.040s] (308/559) schematic-gen model_gen::tests::struct_has_doc_comment
+        PASS [   0.040s] (309/559) schematic-gen model_gen::tests::struct_has_serde_derives
+        PASS [   0.040s] (310/559) schematic-gen model_gen::tests::struct_with_additional_properties
+        PASS [   0.041s] (311/559) schematic-gen model_gen::tests::struct_with_required_enum_field_is_default_compatible
+        PASS [   0.535s] (312/559) schematic-gen export::openapi::tests::write_openapi_yaml_produces_valid_yaml
+        PASS [   0.051s] (313/559) schematic-gen model_gen::tests::type_alias_generates_correctly
+        PASS [   0.052s] (314/559) schematic-gen model_gen::tests::unknown_type_falls_back_to_value
+        PASS [   0.048s] (315/559) schematic-gen model_gen::tests::untagged_enum
+        PASS [   0.045s] (316/559) schematic-gen model_gen::tests::validate_model_names_catches_duplicates
+        PASS [   0.044s] (317/559) schematic-gen model_gen::tests::validate_model_names_passes_for_unique
+        PASS [   0.046s] (318/559) schematic-gen output::tests::assemble_api_code_has_no_unnecessary_lint_allows
+        PASS [   0.047s] (319/559) schematic-gen output::tests::assemble_api_code_includes_all_components
+        PASS [   0.047s] (320/559) schematic-gen output::tests::assemble_api_code_includes_imports
+        PASS [   0.045s] (321/559) schematic-gen output::tests::assemble_api_code_produces_valid_tokenstream
+        PASS [   0.035s] (322/559) schematic-gen output::tests::assemble_lib_rs_deduplicates_modules
+        PASS [   0.059s] (323/559) schematic-gen output::tests::assemble_combined_module_includes_both_apis
+        PASS [   0.054s] (324/559) schematic-gen output::tests::format_code_preserves_structure
+        PASS [   0.055s] (325/559) schematic-gen output::tests::format_code_produces_readable_output
+        PASS [   0.056s] (326/559) schematic-gen output::tests::format_code_produces_string
+        PASS [   0.166s] (327/559) schematic-gen output::tests::cleanup_preserves_hand_written_files_and_foreign_dirs
+        PASS [   0.161s] (328/559) schematic-gen output::tests::full_pipeline_empty_api_produces_valid_code
+        PASS [   0.118s] (329/559) schematic-gen output::tests::generate_and_write_dry_run_returns_code
+        PASS [   0.124s] (330/559) schematic-gen output::tests::generate_and_write_dry_run_no_file_created
+        PASS [   0.169s] (331/559) schematic-gen output::tests::full_pipeline_with_all_http_methods
+        PASS [   0.156s] (332/559) schematic-gen output::tests::generate_and_write_creates_lib_rs
+        PASS [   0.155s] (333/559) schematic-gen output::tests::generate_and_write_creates_nested_output_dir
+        PASS [   0.186s] (334/559) schematic-gen output::tests::generate_and_write_all_cleans_stale_files
+        PASS [   0.022s] (335/559) schematic-gen output::tests::prelude_exports_all_apis_in_shared_module
+        PASS [   0.199s] (336/559) schematic-gen output::tests::generate_and_write_all_groups_shared_modules
+        PASS [   0.027s] (337/559) schematic-gen output::tests::validate_code_accepts_complex_api
+        PASS [   0.053s] (338/559) schematic-gen output::tests::standalone_import_preserves_hand_written_conflicting_directory
+        PASS [   0.098s] (339/559) schematic-gen output::tests::generated_code_has_module_documentation
+        PASS [   0.067s] (340/559) schematic-gen output::tests::standalone_import_removes_conflicting_owned_directory
+        PASS [   0.015s] (341/559) schematic-gen output::tests::validate_code_rejects_invalid_code
+        PASS [   0.033s] (342/559) schematic-gen output::tests::validate_code_accepts_valid_code
+        PASS [   0.024s] (343/559) schematic-gen output::tests::write_atomic_creates_file
+        PASS [   0.028s] (344/559) schematic-gen output::tests::write_atomic_creates_parent_directories
+        PASS [   0.030s] (345/559) schematic-gen output::tests::write_atomic_no_temp_file_left_behind
+        PASS [   0.014s] (346/559) schematic-gen parser::tests::extract_consecutive_params
+        PASS [   0.028s] (347/559) schematic-gen output::tests::write_atomic_overwrites_existing_file
+        PASS [   0.013s] (348/559) schematic-gen parser::tests::extract_multiple_params
+        PASS [   0.160s] (349/559) schematic-gen output::tests::generate_and_write_file_contains_formatted_code
+        PASS [   0.017s] (350/559) schematic-gen parser::tests::extract_no_params
+        PASS [   0.155s] (351/559) schematic-gen output::tests::generate_and_write_returns_same_as_file_content
+        PASS [   0.016s] (352/559) schematic-gen parser::tests::extract_single_param
+        PASS [   0.016s] (353/559) schematic-gen parser::tests::extract_strips_reserved_expansion_marker
+        PASS [   0.018s] (354/559) schematic-gen parser::tests::substitute_missing_param_unchanged
+        PASS [   0.017s] (355/559) schematic-gen parser::tests::substitute_multiple_params
+        PASS [   0.021s] (356/559) schematic-gen parser::tests::substitute_no_params
+        PASS [   0.023s] (357/559) schematic-gen parser::tests::substitute_single_param
+        PASS [   0.024s] (358/559) schematic-gen test_utils::tests::make_api_creates_valid_api
+        PASS [   0.026s] (359/559) schematic-gen test_utils::tests::make_complex_api_has_multiple_endpoints
+        PASS [   0.028s] (360/559) schematic-gen test_utils::tests::make_endpoint_creates_valid_endpoint
+        PASS [   0.028s] (361/559) schematic-gen test_utils::tests::make_simple_api_has_one_endpoint
+        PASS [   0.027s] (362/559) schematic-gen validation::tests::api_with_no_body_types_passes
+        PASS [   0.027s] (363/559) schematic-gen validation::tests::body_type_collision_is_detected_with_helpful_error
+        PASS [   0.027s] (364/559) schematic-gen validation::tests::collision_detected_with_custom_suffix
+        PASS [   0.027s] (365/559) schematic-gen validation::tests::empty_suffix_is_rejected
+        PASS [   0.027s] (366/559) schematic-gen validation::tests::endpoint_id_with_leading_digit_is_rejected
+        PASS [   0.026s] (367/559) schematic-gen validation::tests::endpoint_id_with_punctuation_is_rejected
+        PASS [   0.026s] (368/559) schematic-gen validation::tests::error_display_is_actionable
+        PASS [   0.027s] (369/559) schematic-gen validation::tests::form_data_request_does_not_cause_collision
+        PASS [   0.026s] (370/559) schematic-gen validation::tests::invalid_api_name_is_rejected
+        PASS [   0.027s] (371/559) schematic-gen validation::tests::invalid_request_suffix_is_rejected
+        PASS [   0.027s] (372/559) schematic-gen validation::tests::keyword_endpoint_id_is_rejected
+        PASS [   0.027s] (373/559) schematic-gen validation::tests::multiple_endpoints_with_unique_names_all_pass
+        PASS [   0.027s] (374/559) schematic-gen validation::tests::numeric_suffix_is_valid
+        PASS [   0.027s] (375/559) schematic-gen validation::tests::special_char_param_names_that_sanitize_cleanly_pass
+        PASS [   0.026s] (376/559) schematic-gen validation::tests::suffix_with_spaces_is_rejected
+        PASS [   0.026s] (377/559) schematic-gen validation::tests::suffix_with_underscores_is_rejected
+        PASS [   0.026s] (378/559) schematic-gen validation::tests::unrepresentable_query_param_name_is_rejected
+        PASS [   0.026s] (379/559) schematic-gen validation::tests::valid_alphanumeric_suffix_passes
+        PASS [   0.014s] (380/559) schematic-gen ws_codegen::host::tests::generate_host_for_bidirectional_endpoint
+        PASS [   0.027s] (381/559) schematic-gen ws_codegen::client::tests::correlated_endpoint_has_request_method
+        PASS [   0.027s] (382/559) schematic-gen ws_codegen::client::tests::generate_client_module_produces_tokens
+        PASS [   0.040s] (383/559) schematic-gen validation::tests::valid_api_passes_validation
+        PASS [   0.028s] (384/559) schematic-gen ws_codegen::host::tests::host_with_header_auth_uses_accept_hdr_async
+        PASS [   0.027s] (385/559) schematic-gen ws_codegen::host::tests::no_host_code_for_client_only
+        PASS [   0.462s] (386/559) schematic-gen output::tests::full_pipeline_with_all_auth_strategies
+        PASS [   0.026s] (387/559) schematic-gen ws_codegen::plan::tests::lower_all_known_ws_apis
+        PASS [   0.026s] (388/559) schematic-gen ws_codegen::plan::tests::lower_bidirectional_role
+        PASS [   0.026s] (389/559) schematic-gen ws_codegen::plan::tests::lower_categorizes_messages_by_direction
+        PASS [   0.026s] (390/559) schematic-gen ws_codegen::plan::tests::lower_classifies_path_and_query_connection_params
+        PASS [   0.025s] (391/559) schematic-gen ws_codegen::plan::tests::lower_infers_correlation_from_envelope_pattern
+        PASS [   0.026s] (392/559) schematic-gen ws_codegen::plan::tests::lower_minimal_api
+        PASS [   0.028s] (393/559) schematic-gen ws_codegen::plan::tests::lower_resolves_header_auth
+        PASS [   0.030s] (394/559) schematic-gen ws_codegen::plan::tests::lower_uses_explicit_correlation_hints
+        PASS [   0.029s] (395/559) schematic-gen ws_codegen::plan::tests::lower_with_runtime_hints
+        PASS [   0.030s] (396/559) schematic-gen ws_codegen::plan::tests::validate_rejects_empty_base_url
+        PASS [   0.030s] (397/559) schematic-gen ws_codegen::plan::tests::validate_rejects_empty_correlation_fields
+        PASS [   0.029s] (398/559) schematic-gen ws_codegen::plan::tests::validate_rejects_empty_endpoint_id
+        PASS [   0.029s] (399/559) schematic-gen ws_codegen::plan::tests::validate_rejects_empty_name
+        PASS [   0.029s] (400/559) schematic-gen ws_codegen::plan::tests::validate_warns_on_empty_endpoints
+        PASS [   0.030s] (401/559) schematic-gen ws_codegen::shared::tests::generate_ws_shared_produces_tokens
+        PASS [   0.034s] (402/559) schematic-gen ws_codegen::shared::tests::generated_ws_shared_parses_as_valid_rust
+        PASS [   0.030s] (403/559) schematic-gen ws_codegen::shared::tests::host_common_auth_helpers_produces_tokens
+        PASS [   0.029s] (404/559) schematic-gen ws_codegen::shared::tests::host_validate_bearer_header_produces_tokens
+        PASS [   0.030s] (405/559) schematic-gen ws_codegen::shared::tests::host_validate_raw_header_produces_tokens
+        PASS [   0.030s] (406/559) schematic-gen::l1 artifact_drift::artificial_analysis_attribution_present_in_all_artifacts
+        PASS [   0.024s] (407/559) schematic-gen::l1 artifact_drift::generated_openapi_no_legacy_per_api_files
+        PASS [   0.140s] (408/559) schematic-gen::l1 e2e_generation::binary_response_generates_request_bytes_method
+        PASS [   0.145s] (409/559) schematic-gen::l1 artifact_drift::generated_postman_artifacts_are_up_to_date
+        PASS [   0.141s] (410/559) schematic-gen::l1 e2e_generation::empty_response_generates_request_empty_method
+        PASS [   0.019s] (411/559) schematic-gen::l1 e2e_generation::grouped_export_fails_when_module_registry_missing
+        PASS [   0.211s] (412/559) schematic-gen::l1 artifact_drift::committed_openapi_filenames_match_modules
+        PASS [   0.264s] (413/559) schematic-gen::l1 e2e_generation::elevenlabs_binary_endpoints_generate_correctly
+        PASS [   0.128s] (414/559) schematic-gen::l1 e2e_generation::mixed_response_types_generate_all_methods
+        PASS [   0.342s] (415/559) schematic-gen::l1 e2e_generation::generate_code_for_various_api_configurations
+        PASS [   0.126s] (416/559) schematic-gen::l1 e2e_generation::paginated_endpoints_generate_paginated_trait
+        PASS [   0.029s] (417/559) schematic-gen::l1 http_client::api_key_uses_runtime_auth_matching
+        PASS [   0.460s] (418/559) schematic-gen::l1 artifact_drift::generated_openapi_artifacts_are_up_to_date
+        PASS [   0.040s] (419/559) schematic-gen::l1 http_client::api_struct_has_base_url_field
+        PASS [   0.042s] (420/559) schematic-gen::l1 http_client::api_struct_has_client_field
+        PASS [   0.133s] (421/559) schematic-gen::l1 e2e_generation::text_response_generates_request_text_method
+        PASS [   0.361s] (422/559) schematic-gen::l1 e2e_generation::generated_openapi_filenames_use_module_names
+        PASS [   0.039s] (423/559) schematic-gen::l1 http_client::api_struct_has_new_constructor
+        PASS [   0.032s] (424/559) schematic-gen::l1 http_client::basic_auth_uses_reqwest_basic_auth
+        PASS [   0.035s] (425/559) schematic-gen::l1 http_client::client_adds_body_when_present
+        PASS [   0.044s] (426/559) schematic-gen::l1 http_client::bearer_token_uses_runtime_auth_matching
+        PASS [   0.889s] (427/559) schematic-gen output::tests::split_module_public_api_is_accessible
+        PASS [   0.038s] (428/559) schematic-gen::l1 http_client::bearer_token_with_custom_header
+        PASS [   0.027s] (429/559) schematic-gen::l1 http_client::client_adds_content_type_for_body
+        PASS [   0.939s] (430/559) schematic-gen output::tests::large_api_produces_split_directory
+        PASS [   0.029s] (431/559) schematic-gen::l1 http_client::client_checks_response_status
+        PASS [   0.034s] (432/559) schematic-gen::l1 http_client::client_constructs_url_from_base_and_path
+        PASS [   0.038s] (433/559) schematic-gen::l1 http_client::client_deserializes_json_response
+        PASS [   0.044s] (434/559) schematic-gen::l1 http_client::client_handles_api_error
+        PASS [   0.036s] (435/559) schematic-gen::l1 http_client::client_handles_unsupported_method
+        PASS [   0.030s] (436/559) schematic-gen::l1 http_client::client_matches_delete_method
+        PASS [   0.033s] (437/559) schematic-gen::l1 http_client::client_matches_get_method
+        PASS [   0.032s] (438/559) schematic-gen::l1 http_client::client_matches_head_method
+        PASS [   0.030s] (439/559) schematic-gen::l1 http_client::client_matches_options_method
+        PASS [   0.029s] (440/559) schematic-gen::l1 http_client::client_matches_patch_method
+        PASS [   0.033s] (441/559) schematic-gen::l1 http_client::client_matches_post_method
+        PASS [   0.030s] (442/559) schematic-gen::l1 http_client::client_matches_put_method
+        PASS [   0.029s] (443/559) schematic-gen::l1 http_client::dual_auth_generates_descriptive_authentication_required_error
+        PASS [   0.028s] (444/559) schematic-gen::l1 http_client::dual_auth_generates_explicit_api_key_and_oauth_helpers
+        PASS [   0.033s] (445/559) schematic-gen::l1 http_client::no_auth_generates_no_auth_code
+        PASS [   0.033s] (446/559) schematic-gen::l1 http_client::request_enum_has_into_parts_method
+        PASS [   0.034s] (447/559) schematic-gen::l1 http_client::request_enum_has_variants_for_all_endpoints
+        PASS [   0.014s] (448/559) schematic-gen::l1 openapi_import_test::import_nonexistent_file_returns_error
+        PASS [   0.028s] (449/559) schematic-gen::l1 http_client::text_endpoint_is_rejected_through_generic_request
+        PASS [   0.045s] (450/559) schematic-gen::l1 openapi_import_test::import_complex_auth_json_succeeds
+        PASS [   0.045s] (451/559) schematic-gen::l1 openapi_import_test::import_dry_run_does_not_write_files
+        PASS [   1.037s] (452/559) schematic-gen output::tests::split_to_single_file_transition_cleans_up
+        PASS [   0.014s] (453/559) schematic-gen::l1 openapi_strict_completeness::dangling_json_ref_cannot_be_emitted
+        PASS [   0.047s] (454/559) schematic-gen::l1 openapi_import_test::import_petstore_yaml_succeeds
+        PASS [   0.050s] (455/559) schematic-gen::l1 openapi_import_test::import_with_module_path_override
+        PASS [   0.053s] (456/559) schematic-gen::l1 openapi_import_test::import_with_api_name_override
+        PASS [   0.015s] (457/559) schematic-gen::l1 openapi_strict_completeness::grouped_module_with_missing_schema_in_one_member_fails
+        PASS [   0.019s] (458/559) schematic-gen::l1 openapi_strict_completeness::request_body_types_must_be_registered
+        PASS [   0.016s] (459/559) schematic-gen::l1 openapi_strict_completeness::single_api_with_missing_schema_fails_validation
+        PASS [   0.044s] (460/559) schematic-gen::l1 openapi_import_test::import_with_verbose_includes_diagnostics
+        PASS [   0.075s] (461/559) schematic-gen::l1 openapi_import_test::import_petstore_generates_models_to_disk
+        PASS [   0.022s] (462/559) schematic-gen::l1 path_substitution::all_http_methods_generate_correct_method_string
+        PASS [   0.019s] (463/559) schematic-gen::l1 path_substitution::consecutive_path_params
+        PASS [   0.023s] (464/559) schematic-gen::l1 path_substitution::multiple_path_params_into_parts_format_string
+        PASS [   0.023s] (465/559) schematic-gen::l1 path_substitution::multiple_path_params_struct_has_all_fields
+        PASS [   0.023s] (466/559) schematic-gen::l1 path_substitution::multiple_path_params_with_body
+        PASS [   0.026s] (467/559) schematic-gen::l1 path_substitution::no_path_params_no_fields
+        PASS [   0.028s] (468/559) schematic-gen::l1 path_substitution::path_param_at_start
+        PASS [   0.028s] (469/559) schematic-gen::l1 path_substitution::path_param_values_are_percent_encoded
+        PASS [   0.031s] (470/559) schematic-gen::l1 path_substitution::path_param_with_body_has_both_fields
+        PASS [   0.031s] (471/559) schematic-gen::l1 path_substitution::single_path_param_into_parts_format_string
+        PASS [   0.031s] (472/559) schematic-gen::l1 path_substitution::single_path_param_struct_has_field
+        PASS [   0.032s] (473/559) schematic-gen::l1 path_substitution::special_char_path_params_are_sanitized_with_serde_rename
+        PASS [   0.032s] (474/559) schematic-gen::l1 path_substitution::underscore_in_param_name
+        PASS [   0.020s] (475/559) schematic-gen::l1 postman_golden::golden_auth_variables_openai
+        PASS [   0.050s] (476/559) schematic-gen::l1 path_substitution::three_path_params_into_parts_format_string
+        PASS [   0.037s] (477/559) schematic-gen::l1 postman_golden::golden_api_key_query_auth
+        PASS [   0.051s] (478/559) schematic-gen::l1 postman_artifact_validation::every_committed_postman_artifact_validates_against_schema
+        PASS [   0.041s] (479/559) schematic-gen::l1 postman_golden::golden_file_upload_elevenlabs
+        PASS [   0.039s] (480/559) schematic-gen::l1 postman_golden::golden_grouped_module_ollama
+        PASS [   0.022s] (481/559) schematic-gen::l1 postman_schema::emqx_grouped_collection_validates_against_postman_schema
+        PASS [   0.036s] (482/559) schematic-gen::l1 postman_golden::golden_path_query_params_github
+        PASS [   0.043s] (483/559) schematic-gen::l1 postman_golden::golden_mixed_auth_emqx
+        PASS [   0.033s] (484/559) schematic-gen::l1 postman_schema::invalid_collection_reports_errors
+        PASS [   0.030s] (485/559) schematic-gen::l1 postman_schema::minimal_collection_validates_ok
+        PASS [   0.030s] (486/559) schematic-gen::l1 postman_schema::vendored_schema_compiles_as_json_schema
+        PASS [   0.025s] (487/559) schematic-gen::l1 postman_var_consistency::extract_var_names_ignores_unmatched_braces
+        PASS [   0.027s] (488/559) schematic-gen::l1 postman_var_consistency::extract_var_names_picks_up_typical_postman_references
+        PASS [   0.025s] (489/559) schematic-gen::l1 query_param_detection::classify_gitea_releases_params
+        PASS [   0.041s] (490/559) schematic-gen::l1 postman_var_consistency::every_referenced_variable_is_declared_for_all_apis
+        PASS [   0.027s] (491/559) schematic-gen::l1 query_param_detection::classify_github_pullrequests_params
+        PASS [   0.025s] (492/559) schematic-gen::l1 query_param_detection::classify_gitlab_tree_params
+        PASS [   0.025s] (493/559) schematic-gen::l1 query_param_detection::detect_multiple_hardcoded_query_params
+        PASS [   0.027s] (494/559) schematic-gen::l1 query_param_detection::detect_recursive_flag_query_param
+        PASS [   0.026s] (495/559) schematic-gen::l1 query_param_detection::detect_single_hardcoded_query_param
+        PASS [   0.028s] (496/559) schematic-gen::l1 query_param_detection::empty_path
+        PASS [   0.029s] (497/559) schematic-gen::l1 query_param_detection::gitea_style_pagination_path
+        PASS [   0.030s] (498/559) schematic-gen::l1 query_param_detection::github_style_pagination_path
+        PASS [   0.031s] (499/559) schematic-gen::l1 query_param_detection::gitlab_style_pagination_with_recursive
+        PASS [   0.031s] (500/559) schematic-gen::l1 query_param_detection::no_query_params_in_nested_path
+        PASS [   0.031s] (501/559) schematic-gen::l1 query_param_detection::no_query_params_in_simple_path
+        PASS [   0.031s] (502/559) schematic-gen::l1 query_param_detection::parse_boolean_style_query_params
+        PASS [   0.031s] (503/559) schematic-gen::l1 query_param_detection::parse_empty_query_string
+        PASS [   0.031s] (504/559) schematic-gen::l1 query_param_detection::parse_multiple_query_params
+        PASS [   0.031s] (505/559) schematic-gen::l1 query_param_detection::parse_query_param_without_value
+        PASS [   0.032s] (506/559) schematic-gen::l1 query_param_detection::parse_single_query_param
+        PASS [   0.034s] (507/559) schematic-gen::l1 query_param_detection::path_with_multiple_ampersands
+        PASS [   0.034s] (508/559) schematic-gen::l1 query_param_detection::path_with_only_question_mark
+        PASS [   0.034s] (509/559) schematic-gen::l1 query_param_detection::path_with_query_param_and_path_params
+        PASS [   0.035s] (510/559) schematic-gen::l1 query_params_codegen::array_of_integers_generates_vec_i64
+        PASS [   0.035s] (511/559) schematic-gen::l1 query_params_codegen::array_query_param_generates_loop_for_values
+        PASS [   0.014s] (512/559) schematic-gen::l1 query_params_codegen::integer_query_param_generates_correctly
+        PASS [   0.034s] (513/559) schematic-gen::l1 query_params_codegen::boolean_query_param_generates_correctly
+        PASS [   0.032s] (514/559) schematic-gen::l1 query_params_codegen::enum_query_param_generates_as_string
+        PASS [   0.032s] (515/559) schematic-gen::l1 query_params_codegen::generated_code_uses_urlencoding_for_query_values
+        PASS [   0.052s] (516/559) schematic-gen::l1 query_params_codegen::array_query_param_generates_vec_field
+        PASS [   0.031s] (517/559) schematic-gen::l1 query_params_codegen::into_parts_returns_result_with_query_params
+        PASS [   0.032s] (518/559) schematic-gen::l1 query_params_codegen::multiple_query_params_uses_correct_separators
+        PASS [   0.032s] (519/559) schematic-gen::l1 query_params_codegen::number_query_param_generates_correctly
+        PASS [   0.031s] (520/559) schematic-gen::l1 query_params_codegen::path_immutable_when_no_query_params
+        PASS [   0.031s] (521/559) schematic-gen::l1 query_params_codegen::path_uses_mut_when_query_params_present
+        PASS [   0.031s] (522/559) schematic-gen::l1 query_params_codegen::query_only_endpoint_has_new_method
+        PASS [   0.013s] (523/559) schematic-gen::l1 query_params_codegen::query_params_with_existing_path_query_uses_ampersand
+        PASS [   0.031s] (524/559) schematic-gen::l1 query_params_codegen::query_param_builder_methods_return_self
+        PASS [   0.030s] (525/559) schematic-gen::l1 query_params_codegen::query_params_in_example_use_builder_pattern
+        PASS [   0.030s] (526/559) schematic-gen::l1 query_params_codegen::query_params_initialized_to_none_in_new
+        PASS [   0.049s] (527/559) schematic-gen::l1 query_params_codegen::query_param_builder_for_array_accepts_vec
+        PASS [   0.031s] (528/559) schematic-gen::l1 query_params_codegen::query_params_with_path_params_generates_both
+        PASS [   0.031s] (529/559) schematic-gen::l1 query_params_codegen::single_path_param_with_query_params_has_from_impls
+        PASS [   0.893s] (530/559) schematic-gen::l1 e2e_generation::generated_files_exist_and_have_expected_structure
+        PASS [   0.032s] (531/559) schematic-gen::l1 query_params_codegen::single_query_param_uses_question_mark
+        PASS [   0.031s] (532/559) schematic-gen::l1 query_params_codegen::special_char_query_params_are_sanitized_with_serde_rename
+        PASS [   0.030s] (533/559) schematic-gen::l1 ws_codegen::all_apis_lower_without_errors
+        PASS [   0.040s] (534/559) schematic-gen::l1 ws_codegen::all_clients_have_auth_header_support
+        PASS [   0.055s] (535/559) schematic-gen::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.043s] (536/559) schematic-gen::l1 ws_codegen::all_clients_have_events_stream
+        PASS [   0.042s] (537/559) schematic-gen::l1 ws_codegen::client_connect_uses_transport_config_and_disable_nagle
+        PASS [   0.044s] (538/559) schematic-gen::l1 ws_codegen::correlated_clients_have_request_method
+        PASS [   0.043s] (539/559) schematic-gen::l1 ws_codegen::correlated_clients_use_options_request_timeout
+        PASS [   0.055s] (540/559) schematic-gen::l1 ws_codegen::client_struct_name_avoids_ws_duplication
+        PASS [   0.792s] (541/559) schematic-gen::l1 e2e_generation::shared_module_contains_paginated_trait
+        PASS [   0.074s] (542/559) schematic-gen::l1 ws_codegen::all_client_modules_parse_as_valid_rust
+        PASS [   0.030s] (543/559) schematic-gen::l1 ws_codegen::elevenlabs_client_has_api_key_env_mapping
+        PASS [   0.035s] (544/559) schematic-gen::l1 ws_codegen::dial_surfaces_unparsable_headers_instead_of_dropping_them
+        PASS [   0.027s] (545/559) schematic-gen::l1 ws_codegen::elevenlabs_connect_signature_uses_typed_path_and_query_params
+        PASS [   0.026s] (546/559) schematic-gen::l1 ws_codegen::elevenlabs_has_two_endpoints_no_correlation
+        PASS [   0.026s] (547/559) schematic-gen::l1 ws_codegen::host_module_parses_as_valid_rust
+        PASS [   0.028s] (548/559) schematic-gen::l1 ws_codegen::host_generated_only_for_bidirectional_apis
+        PASS [   0.029s] (549/559) schematic-gen::l1 ws_codegen::host_struct_name_avoids_ws_duplication
+        PASS [   0.031s] (550/559) schematic-gen::l1 ws_codegen::integration_ws_has_both_role
+        PASS [   0.034s] (551/559) schematic-gen::l1 ws_codegen::module_docs_include_api_info
+        PASS [   0.036s] (552/559) schematic-gen::l1 ws_codegen::non_correlated_clients_lack_request_method
+        PASS [   0.944s] (553/559) schematic-gen::l1 e2e_generation::multiple_apis_generate_together
+        PASS [   0.041s] (554/559) schematic-gen::l1 ws_codegen::samsung_remote_connect_has_connection_params
+        PASS [   0.043s] (555/559) schematic-gen::l1 ws_codegen::samsung_remote_has_no_correlation
+        PASS [   0.066s] (556/559) schematic-gen::l1 ws_codegen::full_assembly_produces_valid_rust_for_all_apis
+        PASS [   0.033s] (557/559) schematic-gen::l1 ws_codegen::unfolded_circle_core_has_correlated_endpoints
+        PASS [   0.036s] (558/559) schematic-gen::l1 ws_codegen::ws_shared_exposes_options_builder
+        PASS [   0.041s] (559/559) schematic-gen::l1 ws_codegen::ws_shared_module_parses_as_valid_rust
+────────────
+     Summary [   3.169s] 559 tests run: 559 passed, 8 skipped
+
+✅ [32m all tests passing in [1mschematic-gen[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 98
+
+cross-check summary for schematic-gen:
+  windows  pass

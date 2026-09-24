@@ -1,0 +1,2 @@
+tree-hugger: 1 Cargo test targets, 1 declared, 10 old targets mapped
+PASS

@@ -2,6 +2,7 @@
 name = "sniff"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 license = "AGPL-3.0-only"
 
 [dependencies]
@@ -106,6 +107,13 @@ tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"
+
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[bench]]
 name = "perf"

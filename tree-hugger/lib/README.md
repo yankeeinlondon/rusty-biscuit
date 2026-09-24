@@ -141,7 +141,7 @@ Tree Hugger prioritizes comprehensive cross-language test coverage. When working
 
 3. **Regression tests are mandatory** - Bug fixes must include tests that would fail without the fix.
 
-4. **Diagnostics coverage** - Add regression tests for semantic lint rules and syntax diagnostics in `tests/lint_diagnostics.rs` and `tests/tree_file.rs`.
+4. **Diagnostics coverage** - Add regression tests for semantic lint rules and syntax diagnostics in `tests/l1/lint_diagnostics.rs` and `tests/l1/tree_file.rs`.
 
 ### Running Tests
 
@@ -151,7 +151,11 @@ cargo test -p tree-hugger-lib
 
 ### Test Structure
 
-Tests are in `tests/tree_file.rs` and follow this pattern:
+Integration tests compile into one `l1` test binary. `Cargo.toml` sets
+`autotests = false`, so a new file under `tests/l1/` runs only once
+`tests/l1/main.rs` declares it with `mod`; the `test_layout` gate fails
+otherwise. Language tests are in `tests/l1/tree_file.rs` and follow this
+pattern:
 
 ```rust
 #[test]

@@ -1,0 +1,1554 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "tree-hugger/lib",
+  "dispositions": [],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "tree-hugger/lib/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "adapter_tests",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/adapter_tests.rs",
+      "old_binary_id": "tree-hugger::adapter_tests",
+      "old_path": "tree-hugger/lib/tests/adapter_tests.rs",
+      "old_target": "adapter_tests",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "adapter_tests::test_adapter_config_default",
+          "old": "test_adapter_config_default"
+        },
+        {
+          "new": "adapter_tests::test_adapter_config_serialization",
+          "old": "test_adapter_config_serialization"
+        },
+        {
+          "new": "adapter_tests::test_adapter_config_with_values",
+          "old": "test_adapter_config_with_values"
+        },
+        {
+          "new": "adapter_tests::test_adapter_error_display",
+          "old": "test_adapter_error_display"
+        },
+        {
+          "new": "adapter_tests::test_adapter_error_unsupported_language",
+          "old": "test_adapter_error_unsupported_language"
+        },
+        {
+          "new": "adapter_tests::test_adapter_metadata_default",
+          "old": "test_adapter_metadata_default"
+        },
+        {
+          "new": "adapter_tests::test_adapter_result_serialization",
+          "old": "test_adapter_result_serialization"
+        },
+        {
+          "new": "adapter_tests::test_adapter_result_success",
+          "old": "test_adapter_result_success"
+        },
+        {
+          "new": "adapter_tests::test_external_diagnostic_construction",
+          "old": "test_external_diagnostic_construction"
+        },
+        {
+          "new": "adapter_tests::test_map_category",
+          "old": "test_map_category"
+        },
+        {
+          "new": "adapter_tests::test_map_severity",
+          "old": "test_map_severity"
+        },
+        {
+          "new": "adapter_tests::test_mixed_language_adapter_selection",
+          "old": "test_mixed_language_adapter_selection"
+        },
+        {
+          "new": "adapter_tests::test_oxlint_adapter_metadata",
+          "old": "test_oxlint_adapter_metadata"
+        },
+        {
+          "new": "adapter_tests::test_oxlint_adapter_missing_tool_non_strict",
+          "old": "test_oxlint_adapter_missing_tool_non_strict"
+        },
+        {
+          "new": "adapter_tests::test_oxlint_adapter_missing_tool_strict",
+          "old": "test_oxlint_adapter_missing_tool_strict"
+        },
+        {
+          "new": "adapter_tests::test_oxlint_adapter_unsupported_language",
+          "old": "test_oxlint_adapter_unsupported_language"
+        },
+        {
+          "new": "adapter_tests::test_oxlint_json_normalization",
+          "old": "test_oxlint_json_normalization"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "cache_tests",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/cache_tests.rs",
+      "old_binary_id": "tree-hugger::cache_tests",
+      "old_path": "tree-hugger/lib/tests/cache_tests.rs",
+      "old_target": "cache_tests",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "cache_tests::test_cache_config_default",
+          "old": "test_cache_config_default"
+        },
+        {
+          "new": "cache_tests::test_cache_config_with_config",
+          "old": "test_cache_config_with_config"
+        },
+        {
+          "new": "cache_tests::test_cache_hit_info_hit",
+          "old": "test_cache_hit_info_hit"
+        },
+        {
+          "new": "cache_tests::test_cache_hit_info_miss",
+          "old": "test_cache_hit_info_miss"
+        },
+        {
+          "new": "cache_tests::test_cache_hit_info_serialization",
+          "old": "test_cache_hit_info_serialization"
+        },
+        {
+          "new": "cache_tests::test_cache_invalidates_on_source_edit",
+          "old": "test_cache_invalidates_on_source_edit"
+        },
+        {
+          "new": "cache_tests::test_cache_invalidation_reason_display",
+          "old": "test_cache_invalidation_reason_display"
+        },
+        {
+          "new": "cache_tests::test_cache_unit_enum_variants",
+          "old": "test_cache_unit_enum_variants"
+        },
+        {
+          "new": "cache_tests::test_enabled_rules_fingerprint_deterministic",
+          "old": "test_enabled_rules_fingerprint_deterministic"
+        },
+        {
+          "new": "cache_tests::test_enabled_rules_fingerprint_order_sensitive",
+          "old": "test_enabled_rules_fingerprint_order_sensitive"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_capacity_eviction",
+          "old": "test_in_process_cache_capacity_eviction"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_clear",
+          "old": "test_in_process_cache_clear"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_hit_history",
+          "old": "test_in_process_cache_hit_history"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_parse_tree_hit_miss",
+          "old": "test_in_process_cache_parse_tree_hit_miss"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_stats_tracking",
+          "old": "test_in_process_cache_stats_tracking"
+        },
+        {
+          "new": "cache_tests::test_in_process_cache_symbol_index_hit_miss",
+          "old": "test_in_process_cache_symbol_index_hit_miss"
+        },
+        {
+          "new": "cache_tests::test_pass_fingerprint_changes_with_source",
+          "old": "test_pass_fingerprint_changes_with_source"
+        },
+        {
+          "new": "cache_tests::test_pass_fingerprint_changes_with_tool_version",
+          "old": "test_pass_fingerprint_changes_with_tool_version"
+        },
+        {
+          "new": "cache_tests::test_pass_fingerprint_digest_is_stable",
+          "old": "test_pass_fingerprint_digest_is_stable"
+        },
+        {
+          "new": "cache_tests::test_persistent_cache_disabled_returns_none",
+          "old": "test_persistent_cache_disabled_returns_none"
+        },
+        {
+          "new": "cache_tests::test_persistent_cache_invalidate_all",
+          "old": "test_persistent_cache_invalidate_all"
+        },
+        {
+          "new": "cache_tests::test_persistent_cache_invalidates_entry",
+          "old": "test_persistent_cache_invalidates_entry"
+        },
+        {
+          "new": "cache_tests::test_persistent_cache_recomputes_on_corrupt_entry",
+          "old": "test_persistent_cache_recomputes_on_corrupt_entry"
+        },
+        {
+          "new": "cache_tests::test_persistent_cache_roundtrip",
+          "old": "test_persistent_cache_roundtrip"
+        },
+        {
+          "new": "cache_tests::test_query_fingerprint_deterministic",
+          "old": "test_query_fingerprint_deterministic"
+        },
+        {
+          "new": "cache_tests::test_query_fingerprint_different_queries",
+          "old": "test_query_fingerprint_different_queries"
+        },
+        {
+          "new": "cache_tests::test_tree_file_symbol_index_can_be_cached",
+          "old": "test_tree_file_symbol_index_can_be_cached"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "corpus_tests",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/corpus_tests.rs",
+      "old_binary_id": "tree-hugger::corpus_tests",
+      "old_path": "tree-hugger/lib/tests/corpus_tests.rs",
+      "old_target": "corpus_tests",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "corpus_tests::test_compact_diagnostic_text",
+          "old": "test_compact_diagnostic_text"
+        },
+        {
+          "new": "corpus_tests::test_compact_diagnostic_text_truncates_long_messages",
+          "old": "test_compact_diagnostic_text_truncates_long_messages"
+        },
+        {
+          "new": "corpus_tests::test_corpus_diagnostic_from_diagnostic",
+          "old": "test_corpus_diagnostic_from_diagnostic"
+        },
+        {
+          "new": "corpus_tests::test_corpus_diagnostic_path_redaction",
+          "old": "test_corpus_diagnostic_path_redaction"
+        },
+        {
+          "new": "corpus_tests::test_corpus_result_serialization",
+          "old": "test_corpus_result_serialization"
+        },
+        {
+          "new": "corpus_tests::test_corpus_tier_deserialization",
+          "old": "test_corpus_tier_deserialization"
+        },
+        {
+          "new": "corpus_tests::test_corpus_tier_serialization",
+          "old": "test_corpus_tier_serialization"
+        },
+        {
+          "new": "corpus_tests::test_manifest_builder",
+          "old": "test_manifest_builder"
+        },
+        {
+          "new": "corpus_tests::test_manifest_items_for_tier",
+          "old": "test_manifest_items_for_tier"
+        },
+        {
+          "new": "corpus_tests::test_manifest_new",
+          "old": "test_manifest_new"
+        },
+        {
+          "new": "corpus_tests::test_manifest_yaml_roundtrip",
+          "old": "test_manifest_yaml_roundtrip"
+        },
+        {
+          "new": "corpus_tests::test_normalize_diagnostics_sorts_and_dedupes",
+          "old": "test_normalize_diagnostics_sorts_and_dedupes"
+        },
+        {
+          "new": "corpus_tests::test_oracle_classification_display",
+          "old": "test_oracle_classification_display"
+        },
+        {
+          "new": "corpus_tests::test_oracle_classification_roundtrip",
+          "old": "test_oracle_classification_roundtrip"
+        },
+        {
+          "new": "corpus_tests::test_oracle_config",
+          "old": "test_oracle_config"
+        },
+        {
+          "new": "corpus_tests::test_redact_paths_in_message",
+          "old": "test_redact_paths_in_message"
+        },
+        {
+          "new": "corpus_tests::test_redact_snapshot_text_normalizes_line_endings",
+          "old": "test_redact_snapshot_text_normalizes_line_endings"
+        },
+        {
+          "new": "corpus_tests::test_redact_snapshot_text_redacts_paths",
+          "old": "test_redact_snapshot_text_redacts_paths"
+        },
+        {
+          "new": "corpus_tests::test_redact_snapshot_text_redacts_temp",
+          "old": "test_redact_snapshot_text_redacts_temp"
+        },
+        {
+          "new": "corpus_tests::test_run_benchmark_corpus",
+          "old": "test_run_benchmark_corpus"
+        },
+        {
+          "new": "corpus_tests::test_run_expanded_corpus",
+          "old": "test_run_expanded_corpus"
+        },
+        {
+          "new": "corpus_tests::test_run_smoke_corpus",
+          "old": "test_run_smoke_corpus"
+        },
+        {
+          "new": "corpus_tests::test_sort_lines",
+          "old": "test_sort_lines"
+        },
+        {
+          "new": "corpus_tests::test_strip_ansi_codes",
+          "old": "test_strip_ansi_codes"
+        },
+        {
+          "new": "corpus_tests::test_strip_ansi_codes_no_codes",
+          "old": "test_strip_ansi_codes_no_codes"
+        },
+        {
+          "new": "corpus_tests::test_threshold_deserialization",
+          "old": "test_threshold_deserialization"
+        },
+        {
+          "new": "corpus_tests::test_threshold_report_budget_threshold",
+          "old": "test_threshold_report_budget_threshold"
+        },
+        {
+          "new": "corpus_tests::test_threshold_report_experimental_unlimited",
+          "old": "test_threshold_report_experimental_unlimited"
+        },
+        {
+          "new": "corpus_tests::test_threshold_report_multiple_rules",
+          "old": "test_threshold_report_multiple_rules"
+        },
+        {
+          "new": "corpus_tests::test_threshold_report_new_is_clean",
+          "old": "test_threshold_report_new_is_clean"
+        },
+        {
+          "new": "corpus_tests::test_threshold_report_zero_threshold",
+          "old": "test_threshold_report_zero_threshold"
+        },
+        {
+          "new": "corpus_tests::test_threshold_serialization",
+          "old": "test_threshold_serialization"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "lint_diagnostics",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/lint_diagnostics.rs",
+      "old_binary_id": "tree-hugger::lint_diagnostics",
+      "old_path": "tree-hugger/lib/tests/lint_diagnostics.rs",
+      "old_target": "lint_diagnostics",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_panic_macro",
+          "old": "test_dead_code_after_rust_panic_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_process_exit",
+          "old": "test_dead_code_after_rust_process_exit"
+        },
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_std_process_exit",
+          "old": "test_dead_code_after_rust_std_process_exit"
+        },
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_todo_macro",
+          "old": "test_dead_code_after_rust_todo_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_unimplemented_macro",
+          "old": "test_dead_code_after_rust_unimplemented_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_dead_code_after_rust_unreachable_macro",
+          "old": "test_dead_code_after_rust_unreachable_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_diagnostic_kind_display",
+          "old": "test_diagnostic_kind_display"
+        },
+        {
+          "new": "lint_diagnostics::test_go_fmt_println_detected",
+          "old": "test_go_fmt_println_detected"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_all",
+          "old": "test_ignore_directive_all"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_block_comment_javascript",
+          "old": "test_ignore_directive_block_comment_javascript"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_block_comment_rust",
+          "old": "test_ignore_directive_block_comment_rust"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_file",
+          "old": "test_ignore_directive_file"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_in_string_literal_not_processed",
+          "old": "test_ignore_directive_in_string_literal_not_processed"
+        },
+        {
+          "new": "lint_diagnostics::test_ignore_directive_line",
+          "old": "test_ignore_directive_line"
+        },
+        {
+          "new": "lint_diagnostics::test_import_used_only_in_type_position_not_flagged",
+          "old": "test_import_used_only_in_type_position_not_flagged"
+        },
+        {
+          "new": "lint_diagnostics::test_javascript_console_log_detected",
+          "old": "test_javascript_console_log_detected"
+        },
+        {
+          "new": "lint_diagnostics::test_javascript_destructuring_not_undefined",
+          "old": "test_javascript_destructuring_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_javascript_import_declaration_not_undefined",
+          "old": "test_javascript_import_declaration_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_javascript_lint_debugger_statement",
+          "old": "test_javascript_lint_debugger_statement"
+        },
+        {
+          "new": "lint_diagnostics::test_javascript_lint_eval_call",
+          "old": "test_javascript_lint_eval_call"
+        },
+        {
+          "new": "lint_diagnostics::test_lint_source_context",
+          "old": "test_lint_source_context"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dbg_macro_dead_code",
+          "old": "test_no_false_positive_dbg_macro_dead_code"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_go_defer",
+          "old": "test_no_false_positive_dead_code_go_defer"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_in_closure",
+          "old": "test_no_false_positive_dead_code_in_closure"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_in_conditional",
+          "old": "test_no_false_positive_dead_code_in_conditional"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_in_loop",
+          "old": "test_no_false_positive_dead_code_in_loop"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_javascript_conditional",
+          "old": "test_no_false_positive_dead_code_javascript_conditional"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_python_try_finally",
+          "old": "test_no_false_positive_dead_code_python_try_finally"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_dead_code_rust_match_arm",
+          "old": "test_no_false_positive_dead_code_rust_match_arm"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_eval_identifier",
+          "old": "test_no_false_positive_eval_identifier"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_format_macro",
+          "old": "test_no_false_positive_format_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_println_macro",
+          "old": "test_no_false_positive_println_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_regular_function_call",
+          "old": "test_no_false_positive_regular_function_call"
+        },
+        {
+          "new": "lint_diagnostics::test_no_false_positive_unwrap_or",
+          "old": "test_no_false_positive_unwrap_or"
+        },
+        {
+          "new": "lint_diagnostics::test_php_lint_eval_call",
+          "old": "test_php_lint_eval_call"
+        },
+        {
+          "new": "lint_diagnostics::test_pub_use_reexport_not_flagged_as_unused_import",
+          "old": "test_pub_use_reexport_not_flagged_as_unused_import"
+        },
+        {
+          "new": "lint_diagnostics::test_python_decorator_not_undefined",
+          "old": "test_python_decorator_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_python_import_declaration_not_undefined",
+          "old": "test_python_import_declaration_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_python_keyword_argument_label_not_undefined",
+          "old": "test_python_keyword_argument_label_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_python_lint_breakpoint_call",
+          "old": "test_python_lint_breakpoint_call"
+        },
+        {
+          "new": "lint_diagnostics::test_python_lint_eval_call",
+          "old": "test_python_lint_eval_call"
+        },
+        {
+          "new": "lint_diagnostics::test_python_lint_exec_call",
+          "old": "test_python_lint_exec_call"
+        },
+        {
+          "new": "lint_diagnostics::test_python_print_detected",
+          "old": "test_python_print_detected"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_for_loop_variable_not_undefined",
+          "old": "test_rust_for_loop_variable_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_import_declaration_not_undefined",
+          "old": "test_rust_import_declaration_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_lint_dbg_macro",
+          "old": "test_rust_lint_dbg_macro"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_lint_expect_call",
+          "old": "test_rust_lint_expect_call"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_lint_unwrap_call",
+          "old": "test_rust_lint_unwrap_call"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_pattern_binding_not_undefined",
+          "old": "test_rust_pattern_binding_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_rust_struct_field_not_undefined",
+          "old": "test_rust_struct_field_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_semantic_dead_code_rust",
+          "old": "test_semantic_dead_code_rust"
+        },
+        {
+          "new": "lint_diagnostics::test_semantic_undefined_symbol_rust",
+          "old": "test_semantic_undefined_symbol_rust"
+        },
+        {
+          "new": "lint_diagnostics::test_semantic_unused_import_go",
+          "old": "test_semantic_unused_import_go"
+        },
+        {
+          "new": "lint_diagnostics::test_semantic_unused_symbol_rust",
+          "old": "test_semantic_unused_symbol_rust"
+        },
+        {
+          "new": "lint_diagnostics::test_swift_enum_case_not_undefined",
+          "old": "test_swift_enum_case_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_swift_function_parameter_not_undefined",
+          "old": "test_swift_function_parameter_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_swift_property_not_undefined",
+          "old": "test_swift_property_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_swift_protocol_parameter_not_undefined",
+          "old": "test_swift_protocol_parameter_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_swift_struct_field_not_undefined",
+          "old": "test_swift_struct_field_not_undefined"
+        },
+        {
+          "new": "lint_diagnostics::test_syntax_diagnostic_context_underline_position",
+          "old": "test_syntax_diagnostic_context_underline_position"
+        },
+        {
+          "new": "lint_diagnostics::test_syntax_diagnostic_has_context",
+          "old": "test_syntax_diagnostic_has_context"
+        },
+        {
+          "new": "lint_diagnostics::test_syntax_diagnostics_fast_path_many_languages",
+          "old": "test_syntax_diagnostics_fast_path_many_languages"
+        },
+        {
+          "new": "lint_diagnostics::test_syntax_diagnostics_fast_path_valid_file",
+          "old": "test_syntax_diagnostics_fast_path_valid_file"
+        },
+        {
+          "new": "lint_diagnostics::test_typescript_lint_debugger_statement",
+          "old": "test_typescript_lint_debugger_statement"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_capital_self_not_reported",
+          "old": "test_undefined_module_capital_self_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_defined_import_not_reported",
+          "old": "test_undefined_module_defined_import_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_javascript_this_not_reported",
+          "old": "test_undefined_module_javascript_this_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_rust_reports_warning",
+          "old": "test_undefined_module_rust_reports_warning"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_self_not_reported",
+          "old": "test_undefined_module_self_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_single_letter_not_reported",
+          "old": "test_undefined_module_single_letter_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_undefined_module_super_not_reported",
+          "old": "test_undefined_module_super_not_reported"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_combines_lint_and_syntax",
+          "old": "test_unified_diagnostics_combines_lint_and_syntax"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_empty_file",
+          "old": "test_unified_diagnostics_empty_file"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_lint_kind",
+          "old": "test_unified_diagnostics_lint_kind"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_preserves_context",
+          "old": "test_unified_diagnostics_preserves_context"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_semantic_kind",
+          "old": "test_unified_diagnostics_semantic_kind"
+        },
+        {
+          "new": "lint_diagnostics::test_unified_diagnostics_syntax_kind",
+          "old": "test_unified_diagnostics_syntax_kind"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "phase1_diagnostics",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/phase1_diagnostics.rs",
+      "old_binary_id": "tree-hugger::phase1_diagnostics",
+      "old_path": "tree-hugger/lib/tests/phase1_diagnostics.rs",
+      "old_target": "phase1_diagnostics",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "phase1_diagnostics::test_experimental_semantics_does_not_affect_pattern_rules",
+          "old": "test_experimental_semantics_does_not_affect_pattern_rules"
+        },
+        {
+          "new": "phase1_diagnostics::test_lint_diagnostic_has_metadata_after_policy",
+          "old": "test_lint_diagnostic_has_metadata_after_policy"
+        },
+        {
+          "new": "phase1_diagnostics::test_registry_default_severity",
+          "old": "test_registry_default_severity"
+        },
+        {
+          "new": "phase1_diagnostics::test_registry_experimental_rules_disabled",
+          "old": "test_registry_experimental_rules_disabled"
+        },
+        {
+          "new": "phase1_diagnostics::test_registry_lookup_by_alias",
+          "old": "test_registry_lookup_by_alias"
+        },
+        {
+          "new": "phase1_diagnostics::test_registry_lookup_by_id",
+          "old": "test_registry_lookup_by_id"
+        },
+        {
+          "new": "phase1_diagnostics::test_registry_validation_passes",
+          "old": "test_registry_validation_passes"
+        },
+        {
+          "new": "phase1_diagnostics::test_rule_selector_parse_all",
+          "old": "test_rule_selector_parse_all"
+        },
+        {
+          "new": "phase1_diagnostics::test_rule_selector_parse_category",
+          "old": "test_rule_selector_parse_category"
+        },
+        {
+          "new": "phase1_diagnostics::test_rule_selector_parse_rule_id",
+          "old": "test_rule_selector_parse_rule_id"
+        },
+        {
+          "new": "phase1_diagnostics::test_rule_selector_unknown_category_returns_none",
+          "old": "test_rule_selector_unknown_category_returns_none"
+        },
+        {
+          "new": "phase1_diagnostics::test_undefined_symbol_disabled_by_default",
+          "old": "test_undefined_symbol_disabled_by_default"
+        },
+        {
+          "new": "phase1_diagnostics::test_undefined_symbol_enabled_with_experimental_semantics",
+          "old": "test_undefined_symbol_enabled_with_experimental_semantics"
+        },
+        {
+          "new": "phase1_diagnostics::test_unused_import_detected_by_library_layer_but_off_by_default",
+          "old": "test_unused_import_detected_by_library_layer_but_off_by_default"
+        },
+        {
+          "new": "phase1_diagnostics::test_unused_symbol_disabled_by_default",
+          "old": "test_unused_symbol_disabled_by_default"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "phase6_neovim_query_reuse",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs",
+      "old_binary_id": "tree-hugger::phase6_neovim_query_reuse",
+      "old_path": "tree-hugger/lib/tests/phase6_neovim_query_reuse.rs",
+      "old_target": "phase6_neovim_query_reuse",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "phase6_neovim_query_reuse::actionable_drift_when_revision_differs",
+          "old": "actionable_drift_when_revision_differs"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::all_queries_compile_with_provenance",
+          "old": "all_queries_compile_with_provenance"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::bulk_drift_check_covers_all_vendored",
+          "old": "bulk_drift_check_covers_all_vendored"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::capture_parity_for_javascript",
+          "old": "capture_parity_for_javascript"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::capture_parity_for_python",
+          "old": "capture_parity_for_python"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::capture_parity_for_rust",
+          "old": "capture_parity_for_rust"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::capture_parity_for_typescript",
+          "old": "capture_parity_for_typescript"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::drift_summary_format",
+          "old": "drift_summary_format"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::empty_drift_summary",
+          "old": "empty_drift_summary"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::full_query_audit_workflow",
+          "old": "full_query_audit_workflow"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::hook_predicates_are_found",
+          "old": "hook_predicates_are_found"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::lint_queries_have_local_provenance",
+          "old": "lint_queries_have_local_provenance"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::native_predicates_are_supported",
+          "old": "native_predicates_are_supported"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::no_actionable_drift_when_revision_matches",
+          "old": "no_actionable_drift_when_revision_matches"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::no_unsupported_predicates_in_overlay_queries",
+          "old": "no_unsupported_predicates_in_overlay_queries"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::no_unsupported_predicates_in_vendored_queries",
+          "old": "no_unsupported_predicates_in_vendored_queries"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::original_queries_have_no_drift",
+          "old": "original_queries_have_no_drift"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::provenance_fields_are_populated",
+          "old": "provenance_fields_are_populated"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::references_queries_have_local_provenance",
+          "old": "references_queries_have_local_provenance"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::simple_query_has_no_issues",
+          "old": "simple_query_has_no_issues"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::suite_for_kind_mapping",
+          "old": "suite_for_kind_mapping"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::unsupported_predicates_are_found",
+          "old": "unsupported_predicates_are_found"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::up_to_date_drift_summary",
+          "old": "up_to_date_drift_summary"
+        },
+        {
+          "new": "phase6_neovim_query_reuse::vendor_queries_have_nvim_provenance",
+          "old": "vendor_queries_have_nvim_provenance"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "query_compile",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/query_compile.rs",
+      "old_binary_id": "tree-hugger::query_compile",
+      "old_path": "tree-hugger/lib/tests/query_compile.rs",
+      "old_target": "query_compile",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "query_compile::test_all_queries_compile_for_all_languages",
+          "old": "test_all_queries_compile_for_all_languages"
+        },
+        {
+          "new": "query_compile::test_bash_comments_query_compiles",
+          "old": "test_bash_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_bash_lint_query_compiles",
+          "old": "test_bash_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_c_comments_query_compiles",
+          "old": "test_c_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_c_lint_query_compiles",
+          "old": "test_c_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_cpp_comments_query_compiles",
+          "old": "test_cpp_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_cpp_lint_query_compiles",
+          "old": "test_cpp_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_csharp_comments_query_compiles",
+          "old": "test_csharp_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_csharp_lint_query_compiles",
+          "old": "test_csharp_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_go_comments_query_compiles",
+          "old": "test_go_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_go_lint_query_compiles",
+          "old": "test_go_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_java_comments_query_compiles",
+          "old": "test_java_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_java_lint_query_compiles",
+          "old": "test_java_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_javascript_comments_query_compiles",
+          "old": "test_javascript_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_javascript_lint_query_compiles",
+          "old": "test_javascript_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_lua_comments_query_compiles",
+          "old": "test_lua_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_lua_lint_query_compiles",
+          "old": "test_lua_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_perl_comments_query_compiles",
+          "old": "test_perl_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_perl_lint_query_compiles",
+          "old": "test_perl_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_php_comments_query_compiles",
+          "old": "test_php_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_php_lint_query_compiles",
+          "old": "test_php_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_python_comments_query_compiles",
+          "old": "test_python_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_python_lint_query_compiles",
+          "old": "test_python_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_rust_comments_query_compiles",
+          "old": "test_rust_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_rust_lint_query_compiles",
+          "old": "test_rust_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_scala_comments_query_compiles",
+          "old": "test_scala_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_scala_lint_query_compiles",
+          "old": "test_scala_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_swift_comments_query_compiles",
+          "old": "test_swift_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_swift_lint_query_compiles",
+          "old": "test_swift_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_typescript_comments_query_compiles",
+          "old": "test_typescript_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_typescript_lint_query_compiles",
+          "old": "test_typescript_lint_query_compiles"
+        },
+        {
+          "new": "query_compile::test_zsh_comments_query_compiles",
+          "old": "test_zsh_comments_query_compiles"
+        },
+        {
+          "new": "query_compile::test_zsh_lint_query_compiles",
+          "old": "test_zsh_lint_query_compiles"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "resolver_tests",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/resolver_tests.rs",
+      "old_binary_id": "tree-hugger::resolver_tests",
+      "old_path": "tree-hugger/lib/tests/resolver_tests.rs",
+      "old_target": "resolver_tests",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "resolver_tests::test_diagnostic_confidence_ordering",
+          "old": "test_diagnostic_confidence_ordering"
+        },
+        {
+          "new": "resolver_tests::test_project_context_new",
+          "old": "test_project_context_new"
+        },
+        {
+          "new": "resolver_tests::test_project_context_serialization",
+          "old": "test_project_context_serialization"
+        },
+        {
+          "new": "resolver_tests::test_project_context_with_fields",
+          "old": "test_project_context_with_fields"
+        },
+        {
+          "new": "resolver_tests::test_resolver_error_missing_project_context",
+          "old": "test_resolver_error_missing_project_context"
+        },
+        {
+          "new": "resolver_tests::test_resolver_error_not_available",
+          "old": "test_resolver_error_not_available"
+        },
+        {
+          "new": "resolver_tests::test_resolver_error_resolution_failed",
+          "old": "test_resolver_error_resolution_failed"
+        },
+        {
+          "new": "resolver_tests::test_resolver_error_version_incompatible",
+          "old": "test_resolver_error_version_incompatible"
+        },
+        {
+          "new": "resolver_tests::test_resolver_metadata_defaults",
+          "old": "test_resolver_metadata_defaults"
+        },
+        {
+          "new": "resolver_tests::test_resolver_metadata_serialization",
+          "old": "test_resolver_metadata_serialization"
+        },
+        {
+          "new": "resolver_tests::test_resolver_output_default",
+          "old": "test_resolver_output_default"
+        },
+        {
+          "new": "resolver_tests::test_resolver_output_serialization",
+          "old": "test_resolver_output_serialization"
+        },
+        {
+          "new": "resolver_tests::test_resolver_scope_variants",
+          "old": "test_resolver_scope_variants"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "tree_file",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/tree_file.rs",
+      "old_binary_id": "tree-hugger::tree_file",
+      "old_path": "tree-hugger/lib/tests/tree_file.rs",
+      "old_target": "tree_file",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "tree_file::c_enum_not_duplicated",
+          "old": "c_enum_not_duplicated"
+        },
+        {
+          "new": "tree_file::captures_exports_for_javascript",
+          "old": "captures_exports_for_javascript"
+        },
+        {
+          "new": "tree_file::captures_imports_for_javascript",
+          "old": "captures_imports_for_javascript"
+        },
+        {
+          "new": "tree_file::captures_method_container_context",
+          "old": "captures_method_container_context"
+        },
+        {
+          "new": "tree_file::captures_typescript_class_symbol",
+          "old": "captures_typescript_class_symbol"
+        },
+        {
+          "new": "tree_file::cpp_enum_not_duplicated",
+          "old": "cpp_enum_not_duplicated"
+        },
+        {
+          "new": "tree_file::dead_code_is_empty_for_clean_file",
+          "old": "dead_code_is_empty_for_clean_file"
+        },
+        {
+          "new": "tree_file::dead_code_returns_unreachable_blocks",
+          "old": "dead_code_returns_unreachable_blocks"
+        },
+        {
+          "new": "tree_file::detects_csharp_static_methods",
+          "old": "detects_csharp_static_methods"
+        },
+        {
+          "new": "tree_file::detects_java_static_methods",
+          "old": "detects_java_static_methods"
+        },
+        {
+          "new": "tree_file::detects_tsx_as_typescript",
+          "old": "detects_tsx_as_typescript"
+        },
+        {
+          "new": "tree_file::distinguishes_c_types",
+          "old": "distinguishes_c_types"
+        },
+        {
+          "new": "tree_file::distinguishes_cpp_types",
+          "old": "distinguishes_cpp_types"
+        },
+        {
+          "new": "tree_file::distinguishes_csharp_types",
+          "old": "distinguishes_csharp_types"
+        },
+        {
+          "new": "tree_file::distinguishes_go_types",
+          "old": "distinguishes_go_types"
+        },
+        {
+          "new": "tree_file::distinguishes_java_types",
+          "old": "distinguishes_java_types"
+        },
+        {
+          "new": "tree_file::distinguishes_php_types",
+          "old": "distinguishes_php_types"
+        },
+        {
+          "new": "tree_file::distinguishes_rust_struct_from_enum",
+          "old": "distinguishes_rust_struct_from_enum"
+        },
+        {
+          "new": "tree_file::distinguishes_scala_types",
+          "old": "distinguishes_scala_types"
+        },
+        {
+          "new": "tree_file::distinguishes_swift_types",
+          "old": "distinguishes_swift_types"
+        },
+        {
+          "new": "tree_file::distinguishes_typescript_interface_from_enum",
+          "old": "distinguishes_typescript_interface_from_enum"
+        },
+        {
+          "new": "tree_file::does_not_report_typescript_class_declaration_as_undefined_symbol",
+          "old": "does_not_report_typescript_class_declaration_as_undefined_symbol"
+        },
+        {
+          "new": "tree_file::emits_symbol_index_v2_with_completed_passes",
+          "old": "emits_symbol_index_v2_with_completed_passes"
+        },
+        {
+          "new": "tree_file::emits_symbol_records_v2",
+          "old": "emits_symbol_records_v2"
+        },
+        {
+          "new": "tree_file::extracts_c_function_signature",
+          "old": "extracts_c_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_c_type_metadata",
+          "old": "extracts_c_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_cpp_function_signature",
+          "old": "extracts_cpp_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_cpp_type_metadata",
+          "old": "extracts_cpp_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_csharp_function_signature",
+          "old": "extracts_csharp_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_csharp_type_metadata",
+          "old": "extracts_csharp_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_go_aliased_import",
+          "old": "extracts_go_aliased_import"
+        },
+        {
+          "new": "tree_file::extracts_go_doc_comments",
+          "old": "extracts_go_doc_comments"
+        },
+        {
+          "new": "tree_file::extracts_go_function_signature",
+          "old": "extracts_go_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_go_generic_types",
+          "old": "extracts_go_generic_types"
+        },
+        {
+          "new": "tree_file::extracts_go_import_source",
+          "old": "extracts_go_import_source"
+        },
+        {
+          "new": "tree_file::extracts_java_function_signature",
+          "old": "extracts_java_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_java_import_source",
+          "old": "extracts_java_import_source"
+        },
+        {
+          "new": "tree_file::extracts_java_type_metadata",
+          "old": "extracts_java_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_java_wildcard_import",
+          "old": "extracts_java_wildcard_import"
+        },
+        {
+          "new": "tree_file::extracts_javascript_arrow_function_signatures",
+          "old": "extracts_javascript_arrow_function_signatures"
+        },
+        {
+          "new": "tree_file::extracts_javascript_import_source",
+          "old": "extracts_javascript_import_source"
+        },
+        {
+          "new": "tree_file::extracts_multiple_imports_from_same_source",
+          "old": "extracts_multiple_imports_from_same_source"
+        },
+        {
+          "new": "tree_file::extracts_php_function_signature",
+          "old": "extracts_php_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_php_import_source",
+          "old": "extracts_php_import_source"
+        },
+        {
+          "new": "tree_file::extracts_php_type_metadata",
+          "old": "extracts_php_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_python_aliased_import",
+          "old": "extracts_python_aliased_import"
+        },
+        {
+          "new": "tree_file::extracts_python_function_signature",
+          "old": "extracts_python_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_python_generic_types",
+          "old": "extracts_python_generic_types"
+        },
+        {
+          "new": "tree_file::extracts_python_import_source",
+          "old": "extracts_python_import_source"
+        },
+        {
+          "new": "tree_file::extracts_python_multiple_imports_from_same_source",
+          "old": "extracts_python_multiple_imports_from_same_source"
+        },
+        {
+          "new": "tree_file::extracts_rust_aliased_import",
+          "old": "extracts_rust_aliased_import"
+        },
+        {
+          "new": "tree_file::extracts_rust_doc_comments",
+          "old": "extracts_rust_doc_comments"
+        },
+        {
+          "new": "tree_file::extracts_rust_enum_variants",
+          "old": "extracts_rust_enum_variants"
+        },
+        {
+          "new": "tree_file::extracts_rust_function_return_type",
+          "old": "extracts_rust_function_return_type"
+        },
+        {
+          "new": "tree_file::extracts_rust_generic_type_parameters",
+          "old": "extracts_rust_generic_type_parameters"
+        },
+        {
+          "new": "tree_file::extracts_rust_generic_types",
+          "old": "extracts_rust_generic_types"
+        },
+        {
+          "new": "tree_file::extracts_rust_import_source",
+          "old": "extracts_rust_import_source"
+        },
+        {
+          "new": "tree_file::extracts_rust_struct_fields",
+          "old": "extracts_rust_struct_fields"
+        },
+        {
+          "new": "tree_file::extracts_rust_tuple_struct_fields",
+          "old": "extracts_rust_tuple_struct_fields"
+        },
+        {
+          "new": "tree_file::extracts_scala_default_parameters",
+          "old": "extracts_scala_default_parameters"
+        },
+        {
+          "new": "tree_file::extracts_scala_function_signature",
+          "old": "extracts_scala_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_scala_type_metadata",
+          "old": "extracts_scala_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_swift_function_signature",
+          "old": "extracts_swift_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_swift_import_source",
+          "old": "extracts_swift_import_source"
+        },
+        {
+          "new": "tree_file::extracts_swift_multiple_parameters",
+          "old": "extracts_swift_multiple_parameters"
+        },
+        {
+          "new": "tree_file::extracts_swift_type_metadata",
+          "old": "extracts_swift_type_metadata"
+        },
+        {
+          "new": "tree_file::extracts_typescript_aliased_import",
+          "old": "extracts_typescript_aliased_import"
+        },
+        {
+          "new": "tree_file::extracts_typescript_arrow_function_signatures",
+          "old": "extracts_typescript_arrow_function_signatures"
+        },
+        {
+          "new": "tree_file::extracts_typescript_arrow_function_with_multiple_params",
+          "old": "extracts_typescript_arrow_function_with_multiple_params"
+        },
+        {
+          "new": "tree_file::extracts_typescript_arrow_function_with_rest_params",
+          "old": "extracts_typescript_arrow_function_with_rest_params"
+        },
+        {
+          "new": "tree_file::extracts_typescript_doc_comments_through_export",
+          "old": "extracts_typescript_doc_comments_through_export"
+        },
+        {
+          "new": "tree_file::extracts_typescript_function_signature",
+          "old": "extracts_typescript_function_signature"
+        },
+        {
+          "new": "tree_file::extracts_typescript_generic_types",
+          "old": "extracts_typescript_generic_types"
+        },
+        {
+          "new": "tree_file::extracts_typescript_import_source",
+          "old": "extracts_typescript_import_source"
+        },
+        {
+          "new": "tree_file::extracts_typescript_namespace_import",
+          "old": "extracts_typescript_namespace_import"
+        },
+        {
+          "new": "tree_file::extracts_typescript_visibility_modifiers",
+          "old": "extracts_typescript_visibility_modifiers"
+        },
+        {
+          "new": "tree_file::forced_typescript_preserves_tsx_grammar",
+          "old": "forced_typescript_preserves_tsx_grammar"
+        },
+        {
+          "new": "tree_file::infers_csharp_interface_method_visibility",
+          "old": "infers_csharp_interface_method_visibility"
+        },
+        {
+          "new": "tree_file::infers_java_interface_method_visibility",
+          "old": "infers_java_interface_method_visibility"
+        },
+        {
+          "new": "tree_file::parses_all_fixtures",
+          "old": "parses_all_fixtures"
+        },
+        {
+          "new": "tree_file::reports_javascript_syntax_errors",
+          "old": "reports_javascript_syntax_errors"
+        },
+        {
+          "new": "tree_file::reports_python_syntax_errors",
+          "old": "reports_python_syntax_errors"
+        },
+        {
+          "new": "tree_file::reports_rust_syntax_errors",
+          "old": "reports_rust_syntax_errors"
+        },
+        {
+          "new": "tree_file::rust_enum_is_included_in_types_filter",
+          "old": "rust_enum_is_included_in_types_filter"
+        },
+        {
+          "new": "tree_file::semantic_analysis_runs_for_reference_query_languages",
+          "old": "semantic_analysis_runs_for_reference_query_languages"
+        },
+        {
+          "new": "tree_file::stable_ids_ignore_leading_whitespace_changes",
+          "old": "stable_ids_ignore_leading_whitespace_changes"
+        },
+        {
+          "new": "tree_file::symbol_index_relations_are_scoped_to_owning_symbol",
+          "old": "symbol_index_relations_are_scoped_to_owning_symbol"
+        },
+        {
+          "new": "tree_file::try_diagnostics_succeeds_for_all_languages",
+          "old": "try_diagnostics_succeeds_for_all_languages"
+        },
+        {
+          "new": "tree_file::typescript_exports_exclude_class_members",
+          "old": "typescript_exports_exclude_class_members"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "tree-hugger::l1",
+      "inner_cfg": [],
+      "module": "tree_package",
+      "nested_root": false,
+      "new_path": "tree-hugger/lib/tests/l1/tree_package.rs",
+      "old_binary_id": "tree-hugger::tree_package",
+      "old_path": "tree-hugger/lib/tests/tree_package.rs",
+      "old_target": "tree_package",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "tree_package::collects_all_languages_without_override",
+          "old": "collects_all_languages_without_override"
+        },
+        {
+          "new": "tree_package::discovers_rust_package",
+          "old": "discovers_rust_package"
+        },
+        {
+          "new": "tree_package::find_package_root_returns_subcrate_in_workspace",
+          "old": "find_package_root_returns_subcrate_in_workspace"
+        },
+        {
+          "new": "tree_package::find_package_root_skips_node_workspaces_root",
+          "old": "find_package_root_skips_node_workspaces_root"
+        },
+        {
+          "new": "tree_package::find_package_root_skips_workspace_only_cargo_toml",
+          "old": "find_package_root_skips_workspace_only_cargo_toml"
+        },
+        {
+          "new": "tree_package::find_package_root_uses_git_root_when_it_has_package",
+          "old": "find_package_root_uses_git_root_when_it_has_package"
+        },
+        {
+          "new": "tree_package::language_override_restricts_to_one_language",
+          "old": "language_override_restricts_to_one_language"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "tree-hugger",
+  "ruled_targets": [],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "adapter_tests",
+        "cache_tests",
+        "corpus_tests",
+        "lint_diagnostics",
+        "phase1_diagnostics",
+        "phase6_neovim_query_reuse",
+        "query_compile",
+        "resolver_tests",
+        "tree_file",
+        "tree_package"
+      ],
+      "name": "l1",
+      "path": "tree-hugger/lib/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    }
+  ],
+  "version": 1
+}

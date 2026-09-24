@@ -1,0 +1,2013 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "biscuit-terminal/cli",
+  "dispositions": [],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "biscuit-terminal/cli/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::l1",
+      "inner_cfg": [],
+      "module": "about",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/l1/about.rs",
+      "old_binary_id": "biscuit-terminal-cli::about",
+      "old_path": "biscuit-terminal/cli/tests/about.rs",
+      "old_target": "about",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "about::test_about_alacritty_json_extracts_legacy_yaml_candidate",
+          "old": "test_about_alacritty_json_extracts_legacy_yaml_candidate"
+        },
+        {
+          "new": "about::test_about_alacritty_json_reports_xdg_config_home_location_env",
+          "old": "test_about_alacritty_json_reports_xdg_config_home_location_env"
+        },
+        {
+          "new": "about::test_about_alacritty_plain_includes_config_candidates_per_os_target",
+          "old": "test_about_alacritty_plain_includes_config_candidates_per_os_target"
+        },
+        {
+          "new": "about::test_about_alacritty_plain_reports_xdg_config_home_override",
+          "old": "test_about_alacritty_plain_reports_xdg_config_home_override"
+        },
+        {
+          "new": "about::test_about_alias_match",
+          "old": "test_about_alias_match"
+        },
+        {
+          "new": "about::test_about_current_terminal_json_includes_env_fact_candidates_and_values",
+          "old": "test_about_current_terminal_json_includes_env_fact_candidates_and_values"
+        },
+        {
+          "new": "about::test_about_current_terminal_plain_includes_env_fact_candidates_and_values",
+          "old": "test_about_current_terminal_plain_includes_env_fact_candidates_and_values"
+        },
+        {
+          "new": "about::test_about_defaults_to_current_terminal",
+          "old": "test_about_defaults_to_current_terminal"
+        },
+        {
+          "new": "about::test_about_invalid_app_exits_with_code_2",
+          "old": "test_about_invalid_app_exits_with_code_2"
+        },
+        {
+          "new": "about::test_about_kitty_json_includes_setting_locators_without_config",
+          "old": "test_about_kitty_json_includes_setting_locators_without_config"
+        },
+        {
+          "new": "about::test_about_kitty_json_outputs_valid_report",
+          "old": "test_about_kitty_json_outputs_valid_report"
+        },
+        {
+          "new": "about::test_about_kitty_json_uses_nested_config_contract",
+          "old": "test_about_kitty_json_uses_nested_config_contract"
+        },
+        {
+          "new": "about::test_about_kitty_plain_has_no_ansi_escapes",
+          "old": "test_about_kitty_plain_has_no_ansi_escapes"
+        },
+        {
+          "new": "about::test_about_kitty_plain_includes_setting_locators_without_config",
+          "old": "test_about_kitty_plain_includes_setting_locators_without_config"
+        },
+        {
+          "new": "about::test_about_kitty_plain_renders_report",
+          "old": "test_about_kitty_plain_renders_report"
+        },
+        {
+          "new": "about::test_about_non_current_terminal_json_includes_env_fact_candidates_without_values",
+          "old": "test_about_non_current_terminal_json_includes_env_fact_candidates_without_values"
+        },
+        {
+          "new": "about::test_about_non_current_terminal_plain_includes_env_fact_candidates",
+          "old": "test_about_non_current_terminal_plain_includes_env_fact_candidates"
+        },
+        {
+          "new": "about::test_about_prefix_match",
+          "old": "test_about_prefix_match"
+        },
+        {
+          "new": "about::test_about_warp_json_resolves_directory_without_none_format",
+          "old": "test_about_warp_json_resolves_directory_without_none_format"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::l1",
+      "inner_cfg": [],
+      "module": "dir_targets",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/l1/dir_targets.rs",
+      "old_binary_id": "biscuit-terminal-cli::dir_targets",
+      "old_path": "biscuit-terminal/cli/tests/dir_targets.rs",
+      "old_target": "dir_targets",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "dir_targets::dir_example_terminal_default_still_works",
+          "old": "dir_example_terminal_default_still_works"
+        },
+        {
+          "new": "dir_targets::dir_example_with_md_still_prints_example_command",
+          "old": "dir_example_with_md_still_prints_example_command"
+        },
+        {
+          "new": "dir_targets::dir_help_lists_target_switches",
+          "old": "dir_help_lists_target_switches"
+        },
+        {
+          "new": "dir_targets::dir_html_emits_nested_ul_li_with_fs_classes",
+          "old": "dir_html_emits_nested_ul_li_with_fs_classes"
+        },
+        {
+          "new": "dir_targets::dir_md_and_html_are_mutually_exclusive",
+          "old": "dir_md_and_html_are_mutually_exclusive"
+        },
+        {
+          "new": "dir_targets::dir_md_and_md_plus_are_mutually_exclusive",
+          "old": "dir_md_and_md_plus_are_mutually_exclusive"
+        },
+        {
+          "new": "dir_targets::dir_md_emits_nested_markdown_list_without_box_drawing",
+          "old": "dir_md_emits_nested_markdown_list_without_box_drawing"
+        },
+        {
+          "new": "dir_targets::dir_md_plus_emits_classed_icon_spans",
+          "old": "dir_md_plus_emits_classed_icon_spans"
+        },
+        {
+          "new": "dir_targets::dir_terminal_default_renders_box_drawing",
+          "old": "dir_terminal_default_renders_box_drawing"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::l1",
+      "inner_cfg": [],
+      "module": "integration_test",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/l1/integration_test.rs",
+      "old_binary_id": "biscuit-terminal-cli::integration_test",
+      "old_path": "biscuit-terminal/cli/tests/integration_test.rs",
+      "old_target": "integration_test",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "integration_test::public_docs_do_not_advertise_removed_atomic_tokens",
+          "old": "public_docs_do_not_advertise_removed_atomic_tokens"
+        },
+        {
+          "new": "integration_test::test_actual_terminal_query_integration",
+          "old": "test_actual_terminal_query_integration"
+        },
+        {
+          "new": "integration_test::test_always_shows_font_section",
+          "old": "test_always_shows_font_section"
+        },
+        {
+          "new": "integration_test::test_bar_chart_comma_separated_input",
+          "old": "test_bar_chart_comma_separated_input"
+        },
+        {
+          "new": "integration_test::test_bar_chart_example_flag",
+          "old": "test_bar_chart_example_flag"
+        },
+        {
+          "new": "integration_test::test_bar_chart_help",
+          "old": "test_bar_chart_help"
+        },
+        {
+          "new": "integration_test::test_bar_chart_horizontal_flag",
+          "old": "test_bar_chart_horizontal_flag"
+        },
+        {
+          "new": "integration_test::test_bar_chart_invalid_data_errors_to_stderr",
+          "old": "test_bar_chart_invalid_data_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_bar_chart_json_input_format",
+          "old": "test_bar_chart_json_input_format"
+        },
+        {
+          "new": "integration_test::test_bar_chart_json_with_space_separated_values",
+          "old": "test_bar_chart_json_with_space_separated_values"
+        },
+        {
+          "new": "integration_test::test_bar_chart_requires_data_without_example",
+          "old": "test_bar_chart_requires_data_without_example"
+        },
+        {
+          "new": "integration_test::test_bar_chart_with_line_overlay",
+          "old": "test_bar_chart_with_line_overlay"
+        },
+        {
+          "new": "integration_test::test_bar_chart_with_title",
+          "old": "test_bar_chart_with_title"
+        },
+        {
+          "new": "integration_test::test_bar_chart_with_x_axis_labels",
+          "old": "test_bar_chart_with_x_axis_labels"
+        },
+        {
+          "new": "integration_test::test_bar_chart_with_y_axis_label",
+          "old": "test_bar_chart_with_y_axis_label"
+        },
+        {
+          "new": "integration_test::test_block_plain_overrides_force_color",
+          "old": "test_block_plain_overrides_force_color"
+        },
+        {
+          "new": "integration_test::test_columns_example_with_html_succeeds",
+          "old": "test_columns_example_with_html_succeeds"
+        },
+        {
+          "new": "integration_test::test_columns_example_with_md_plus_succeeds",
+          "old": "test_columns_example_with_md_plus_succeeds"
+        },
+        {
+          "new": "integration_test::test_columns_example_with_md_succeeds",
+          "old": "test_columns_example_with_md_succeeds"
+        },
+        {
+          "new": "integration_test::test_columns_help",
+          "old": "test_columns_help"
+        },
+        {
+          "new": "integration_test::test_columns_html_emits_columns_flex_container",
+          "old": "test_columns_html_emits_columns_flex_container"
+        },
+        {
+          "new": "integration_test::test_columns_md_and_html_are_mutually_exclusive",
+          "old": "test_columns_md_and_html_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_columns_md_and_md_plus_are_mutually_exclusive",
+          "old": "test_columns_md_and_md_plus_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_columns_md_collapses_to_sequential_blocks",
+          "old": "test_columns_md_collapses_to_sequential_blocks"
+        },
+        {
+          "new": "integration_test::test_columns_md_plus_and_html_are_mutually_exclusive",
+          "old": "test_columns_md_plus_and_html_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_columns_md_plus_emits_flex_html_container",
+          "old": "test_columns_md_plus_emits_flex_html_container"
+        },
+        {
+          "new": "integration_test::test_columns_snapshot",
+          "old": "test_columns_snapshot"
+        },
+        {
+          "new": "integration_test::test_completions_bash",
+          "old": "test_completions_bash"
+        },
+        {
+          "new": "integration_test::test_completions_fish",
+          "old": "test_completions_fish"
+        },
+        {
+          "new": "integration_test::test_completions_invalid_shell",
+          "old": "test_completions_invalid_shell"
+        },
+        {
+          "new": "integration_test::test_completions_zsh",
+          "old": "test_completions_zsh"
+        },
+        {
+          "new": "integration_test::test_compose_default_terminal_concatenates_positional_items",
+          "old": "test_compose_default_terminal_concatenates_positional_items"
+        },
+        {
+          "new": "integration_test::test_compose_example_emits_command_line",
+          "old": "test_compose_example_emits_command_line"
+        },
+        {
+          "new": "integration_test::test_compose_help_exposes_md_md_plus_html_and_example_flags",
+          "old": "test_compose_help_exposes_md_md_plus_html_and_example_flags"
+        },
+        {
+          "new": "integration_test::test_compose_html_emits_div_wrapper",
+          "old": "test_compose_html_emits_div_wrapper"
+        },
+        {
+          "new": "integration_test::test_compose_html_example_emits_html_and_command_line",
+          "old": "test_compose_html_example_emits_html_and_command_line"
+        },
+        {
+          "new": "integration_test::test_compose_md_and_html_are_mutually_exclusive",
+          "old": "test_compose_md_and_html_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_compose_md_plus_html_mutual_exclusion",
+          "old": "test_compose_md_plus_html_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_compose_md_plus_md_mutual_exclusion",
+          "old": "test_compose_md_plus_md_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_compose_md_plus_with_text_succeeds",
+          "old": "test_compose_md_plus_with_text_succeeds"
+        },
+        {
+          "new": "integration_test::test_compose_md_renders_heading",
+          "old": "test_compose_md_renders_heading"
+        },
+        {
+          "new": "integration_test::test_compose_md_with_list_emits_dash_marker",
+          "old": "test_compose_md_with_list_emits_dash_marker"
+        },
+        {
+          "new": "integration_test::test_compose_md_with_table_emits_gfm_table",
+          "old": "test_compose_md_with_table_emits_gfm_table"
+        },
+        {
+          "new": "integration_test::test_compose_no_args_errors_to_stderr",
+          "old": "test_compose_no_args_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_compose_positional_items_concatenate",
+          "old": "test_compose_positional_items_concatenate"
+        },
+        {
+          "new": "integration_test::test_compose_prose_terminal_output_contains_bold_sgr",
+          "old": "test_compose_prose_terminal_output_contains_bold_sgr"
+        },
+        {
+          "new": "integration_test::test_content_analysis_detects_color_and_osc8",
+          "old": "test_content_analysis_detects_color_and_osc8"
+        },
+        {
+          "new": "integration_test::test_default_no_environment_section",
+          "old": "test_default_no_environment_section"
+        },
+        {
+          "new": "integration_test::test_default_output_shows_size",
+          "old": "test_default_output_shows_size"
+        },
+        {
+          "new": "integration_test::test_default_output_shows_tty_status",
+          "old": "test_default_output_shows_tty_status"
+        },
+        {
+          "new": "integration_test::test_default_shows_metadata",
+          "old": "test_default_shows_metadata"
+        },
+        {
+          "new": "integration_test::test_erd_basic",
+          "old": "test_erd_basic"
+        },
+        {
+          "new": "integration_test::test_erd_example_flag",
+          "old": "test_erd_example_flag"
+        },
+        {
+          "new": "integration_test::test_erd_help",
+          "old": "test_erd_help"
+        },
+        {
+          "new": "integration_test::test_erd_requires_relationships_without_example",
+          "old": "test_erd_requires_relationships_without_example"
+        },
+        {
+          "new": "integration_test::test_erd_with_entity_definitions",
+          "old": "test_erd_with_entity_definitions"
+        },
+        {
+          "new": "integration_test::test_erd_with_title",
+          "old": "test_erd_with_title"
+        },
+        {
+          "new": "integration_test::test_error_exit_code_is_nonzero",
+          "old": "test_error_exit_code_is_nonzero"
+        },
+        {
+          "new": "integration_test::test_every_subcommand_help_exposes_example_flag",
+          "old": "test_every_subcommand_help_exposes_example_flag"
+        },
+        {
+          "new": "integration_test::test_example_flag_does_not_require_data",
+          "old": "test_example_flag_does_not_require_data"
+        },
+        {
+          "new": "integration_test::test_flowchart_example_flag",
+          "old": "test_flowchart_example_flag"
+        },
+        {
+          "new": "integration_test::test_graph_expression_dot_fallback_uses_dot_info_string",
+          "old": "test_graph_expression_dot_fallback_uses_dot_info_string"
+        },
+        {
+          "new": "integration_test::test_graph_expression_example_plain_overrides_force_color",
+          "old": "test_graph_expression_example_plain_overrides_force_color"
+        },
+        {
+          "new": "integration_test::test_graph_expression_falls_back_to_code_block_on_non_tty",
+          "old": "test_graph_expression_falls_back_to_code_block_on_non_tty"
+        },
+        {
+          "new": "integration_test::test_graph_expression_json_dot_mode",
+          "old": "test_graph_expression_json_dot_mode"
+        },
+        {
+          "new": "integration_test::test_graph_expression_json_example",
+          "old": "test_graph_expression_json_example"
+        },
+        {
+          "new": "integration_test::test_graph_expression_json_reports_inverse_flag",
+          "old": "test_graph_expression_json_reports_inverse_flag"
+        },
+        {
+          "new": "integration_test::test_graph_expression_meta_outputs_render_metadata_in_a_pty",
+          "old": "test_graph_expression_meta_outputs_render_metadata_in_a_pty"
+        },
+        {
+          "new": "integration_test::test_graph_expression_rejects_mixed_edge_kinds",
+          "old": "test_graph_expression_rejects_mixed_edge_kinds"
+        },
+        {
+          "new": "integration_test::test_help_flag",
+          "old": "test_help_flag"
+        },
+        {
+          "new": "integration_test::test_image_nonexistent_file_errors_to_stderr",
+          "old": "test_image_nonexistent_file_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_json_flag_outputs_json",
+          "old": "test_json_flag_outputs_json"
+        },
+        {
+          "new": "integration_test::test_json_font_fields_are_valid_if_present",
+          "old": "test_json_font_fields_are_valid_if_present"
+        },
+        {
+          "new": "integration_test::test_json_includes_content_analysis",
+          "old": "test_json_includes_content_analysis"
+        },
+        {
+          "new": "integration_test::test_json_includes_ligatures_likely",
+          "old": "test_json_includes_ligatures_likely"
+        },
+        {
+          "new": "integration_test::test_json_output_is_valid_json",
+          "old": "test_json_output_is_valid_json"
+        },
+        {
+          "new": "integration_test::test_line_chart_example_flag",
+          "old": "test_line_chart_example_flag"
+        },
+        {
+          "new": "integration_test::test_line_chart_help",
+          "old": "test_line_chart_help"
+        },
+        {
+          "new": "integration_test::test_line_chart_horizontal",
+          "old": "test_line_chart_horizontal"
+        },
+        {
+          "new": "integration_test::test_line_chart_json_with_values",
+          "old": "test_line_chart_json_with_values"
+        },
+        {
+          "new": "integration_test::test_line_chart_requires_data_without_example",
+          "old": "test_line_chart_requires_data_without_example"
+        },
+        {
+          "new": "integration_test::test_line_chart_with_bar_overlay",
+          "old": "test_line_chart_with_bar_overlay"
+        },
+        {
+          "new": "integration_test::test_line_chart_with_title",
+          "old": "test_line_chart_with_title"
+        },
+        {
+          "new": "integration_test::test_list_empty_errors_to_stderr",
+          "old": "test_list_empty_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_list_md_html_mutual_exclusion",
+          "old": "test_list_md_html_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_list_md_md_plus_mutual_exclusion",
+          "old": "test_list_md_md_plus_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_list_ordered_example_renders_and_prints_command",
+          "old": "test_list_ordered_example_renders_and_prints_command"
+        },
+        {
+          "new": "integration_test::test_list_ordered_html_emits_ol_li",
+          "old": "test_list_ordered_html_emits_ol_li"
+        },
+        {
+          "new": "integration_test::test_list_ordered_html_with_alignment_wraps_in_div",
+          "old": "test_list_ordered_html_with_alignment_wraps_in_div"
+        },
+        {
+          "new": "integration_test::test_list_ordered_html_with_layout_emits_margin_on_ol_only",
+          "old": "test_list_ordered_html_with_layout_emits_margin_on_ol_only"
+        },
+        {
+          "new": "integration_test::test_list_ordered_md_emits_commonmark",
+          "old": "test_list_ordered_md_emits_commonmark"
+        },
+        {
+          "new": "integration_test::test_list_ordered_md_plus_matches_md",
+          "old": "test_list_ordered_md_plus_matches_md"
+        },
+        {
+          "new": "integration_test::test_list_ordered_md_with_left_margin_emits_frontmatter",
+          "old": "test_list_ordered_md_with_left_margin_emits_frontmatter"
+        },
+        {
+          "new": "integration_test::test_list_ordered_renders_numbered_items",
+          "old": "test_list_ordered_renders_numbered_items"
+        },
+        {
+          "new": "integration_test::test_list_short_ordered_flag_works",
+          "old": "test_list_short_ordered_flag_works"
+        },
+        {
+          "new": "integration_test::test_list_snapshot",
+          "old": "test_list_snapshot"
+        },
+        {
+          "new": "integration_test::test_list_unordered_example_unchanged",
+          "old": "test_list_unordered_example_unchanged"
+        },
+        {
+          "new": "integration_test::test_list_unordered_html_emits_ul_li",
+          "old": "test_list_unordered_html_emits_ul_li"
+        },
+        {
+          "new": "integration_test::test_list_unordered_html_ignores_custom_bullet",
+          "old": "test_list_unordered_html_ignores_custom_bullet"
+        },
+        {
+          "new": "integration_test::test_list_unordered_html_with_alignment_wraps_in_div",
+          "old": "test_list_unordered_html_with_alignment_wraps_in_div"
+        },
+        {
+          "new": "integration_test::test_list_unordered_html_with_layout_emits_margin_on_ul_only",
+          "old": "test_list_unordered_html_with_layout_emits_margin_on_ul_only"
+        },
+        {
+          "new": "integration_test::test_list_unordered_md_emits_commonmark",
+          "old": "test_list_unordered_md_emits_commonmark"
+        },
+        {
+          "new": "integration_test::test_list_unordered_md_ignores_custom_bullet",
+          "old": "test_list_unordered_md_ignores_custom_bullet"
+        },
+        {
+          "new": "integration_test::test_list_unordered_md_plus_matches_md",
+          "old": "test_list_unordered_md_plus_matches_md"
+        },
+        {
+          "new": "integration_test::test_list_unordered_md_with_left_margin_emits_frontmatter",
+          "old": "test_list_unordered_md_with_left_margin_emits_frontmatter"
+        },
+        {
+          "new": "integration_test::test_list_unordered_terminal_honors_custom_bullet",
+          "old": "test_list_unordered_terminal_honors_custom_bullet"
+        },
+        {
+          "new": "integration_test::test_padleft_missing_args_errors_to_stderr",
+          "old": "test_padleft_missing_args_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_padleft_snapshot",
+          "old": "test_padleft_snapshot"
+        },
+        {
+          "new": "integration_test::test_padright_missing_args_errors_to_stderr",
+          "old": "test_padright_missing_args_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_padright_snapshot",
+          "old": "test_padright_snapshot"
+        },
+        {
+          "new": "integration_test::test_pie_chart_example_flag_uses_example_data",
+          "old": "test_pie_chart_example_flag_uses_example_data"
+        },
+        {
+          "new": "integration_test::test_pie_chart_help",
+          "old": "test_pie_chart_help"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_official_mermaid_format",
+          "old": "test_pie_chart_json_official_mermaid_format"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_semicolon_format",
+          "old": "test_pie_chart_json_semicolon_format"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_simple_format",
+          "old": "test_pie_chart_json_simple_format"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_with_color_prefix",
+          "old": "test_pie_chart_json_with_color_prefix"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_with_custom_colors",
+          "old": "test_pie_chart_json_with_custom_colors"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_with_show_data",
+          "old": "test_pie_chart_json_with_show_data"
+        },
+        {
+          "new": "integration_test::test_pie_chart_json_with_title",
+          "old": "test_pie_chart_json_with_title"
+        },
+        {
+          "new": "integration_test::test_pie_chart_requires_data",
+          "old": "test_pie_chart_requires_data"
+        },
+        {
+          "new": "integration_test::test_pie_chart_semicolon_with_colors",
+          "old": "test_pie_chart_semicolon_with_colors"
+        },
+        {
+          "new": "integration_test::test_progress_color_flags_parse_for_terminal",
+          "old": "test_progress_color_flags_parse_for_terminal"
+        },
+        {
+          "new": "integration_test::test_progress_example_succeeds",
+          "old": "test_progress_example_succeeds"
+        },
+        {
+          "new": "integration_test::test_progress_example_with_html_renders_semantic_widget",
+          "old": "test_progress_example_with_html_renders_semantic_widget"
+        },
+        {
+          "new": "integration_test::test_progress_example_with_md_plus_renders_inline_html",
+          "old": "test_progress_example_with_md_plus_renders_inline_html"
+        },
+        {
+          "new": "integration_test::test_progress_example_with_md_renders_markdown",
+          "old": "test_progress_example_with_md_renders_markdown"
+        },
+        {
+          "new": "integration_test::test_progress_html_color_flags_inline_css",
+          "old": "test_progress_html_color_flags_inline_css"
+        },
+        {
+          "new": "integration_test::test_progress_html_emits_semantic_widget",
+          "old": "test_progress_html_emits_semantic_widget"
+        },
+        {
+          "new": "integration_test::test_progress_html_md_plus_mutually_exclusive",
+          "old": "test_progress_html_md_plus_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_progress_html_unlabeled_omits_label_span",
+          "old": "test_progress_html_unlabeled_omits_label_span"
+        },
+        {
+          "new": "integration_test::test_progress_md_html_mutually_exclusive",
+          "old": "test_progress_md_html_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_progress_md_md_plus_mutually_exclusive",
+          "old": "test_progress_md_md_plus_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_progress_md_outputs_label_and_percentage",
+          "old": "test_progress_md_outputs_label_and_percentage"
+        },
+        {
+          "new": "integration_test::test_progress_md_plus_emits_semantic_html",
+          "old": "test_progress_md_plus_emits_semantic_html"
+        },
+        {
+          "new": "integration_test::test_progress_md_unlabeled_outputs_just_percentage",
+          "old": "test_progress_md_unlabeled_outputs_just_percentage"
+        },
+        {
+          "new": "integration_test::test_progress_rejects_percentage_above_100",
+          "old": "test_progress_rejects_percentage_above_100"
+        },
+        {
+          "new": "integration_test::test_progress_terminal_default",
+          "old": "test_progress_terminal_default"
+        },
+        {
+          "new": "integration_test::test_prose_empty_errors_to_stderr",
+          "old": "test_prose_empty_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_prose_force_color_flag_emits_sgr_to_pipe",
+          "old": "test_prose_force_color_flag_emits_sgr_to_pipe"
+        },
+        {
+          "new": "integration_test::test_prose_html_margin_left_emits_layout_wrapper",
+          "old": "test_prose_html_margin_left_emits_layout_wrapper"
+        },
+        {
+          "new": "integration_test::test_prose_html_without_layout_omits_layout_wrapper",
+          "old": "test_prose_html_without_layout_omits_layout_wrapper"
+        },
+        {
+          "new": "integration_test::test_prose_markdown_margin_left_emits_style_frontmatter",
+          "old": "test_prose_markdown_margin_left_emits_style_frontmatter"
+        },
+        {
+          "new": "integration_test::test_prose_markdown_plus_margin_left_emits_style_frontmatter",
+          "old": "test_prose_markdown_plus_margin_left_emits_style_frontmatter"
+        },
+        {
+          "new": "integration_test::test_prose_markdown_plus_preserves_color_as_inline_html",
+          "old": "test_prose_markdown_plus_preserves_color_as_inline_html"
+        },
+        {
+          "new": "integration_test::test_prose_markdown_without_layout_omits_frontmatter",
+          "old": "test_prose_markdown_without_layout_omits_frontmatter"
+        },
+        {
+          "new": "integration_test::test_prose_print_bytes_flag_dumps_hex_to_stderr",
+          "old": "test_prose_print_bytes_flag_dumps_hex_to_stderr"
+        },
+        {
+          "new": "integration_test::test_prose_snapshot",
+          "old": "test_prose_snapshot"
+        },
+        {
+          "new": "integration_test::test_prose_styled_snapshot",
+          "old": "test_prose_styled_snapshot"
+        },
+        {
+          "new": "integration_test::test_quiet_short_flag",
+          "old": "test_quiet_short_flag"
+        },
+        {
+          "new": "integration_test::test_quiet_suppresses_output",
+          "old": "test_quiet_suppresses_output"
+        },
+        {
+          "new": "integration_test::test_quote_empty_errors_to_stderr",
+          "old": "test_quote_empty_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_quote_example_renders_default_quote",
+          "old": "test_quote_example_renders_default_quote"
+        },
+        {
+          "new": "integration_test::test_quote_html_emits_blockquote_fragment",
+          "old": "test_quote_html_emits_blockquote_fragment"
+        },
+        {
+          "new": "integration_test::test_quote_html_with_attribution_has_two_paragraphs",
+          "old": "test_quote_html_with_attribution_has_two_paragraphs"
+        },
+        {
+          "new": "integration_test::test_quote_md_and_html_are_mutually_exclusive",
+          "old": "test_quote_md_and_html_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_quote_md_emits_canonical_block_quote_syntax",
+          "old": "test_quote_md_emits_canonical_block_quote_syntax"
+        },
+        {
+          "new": "integration_test::test_quote_md_strips_inline_styling_tags",
+          "old": "test_quote_md_strips_inline_styling_tags"
+        },
+        {
+          "new": "integration_test::test_quote_md_with_attribution_renders_separate_paragraph",
+          "old": "test_quote_md_with_attribution_renders_separate_paragraph"
+        },
+        {
+          "new": "integration_test::test_quote_snapshot",
+          "old": "test_quote_snapshot"
+        },
+        {
+          "new": "integration_test::test_respects_no_color",
+          "old": "test_respects_no_color"
+        },
+        {
+          "new": "integration_test::test_section_example_emits_command_line",
+          "old": "test_section_example_emits_command_line"
+        },
+        {
+          "new": "integration_test::test_section_example_with_html_emits_section_element",
+          "old": "test_section_example_with_html_emits_section_element"
+        },
+        {
+          "new": "integration_test::test_section_help_exposes_md_md_plus_html_and_example_flags",
+          "old": "test_section_help_exposes_md_md_plus_html_and_example_flags"
+        },
+        {
+          "new": "integration_test::test_section_html_emits_section_element",
+          "old": "test_section_html_emits_section_element"
+        },
+        {
+          "new": "integration_test::test_section_invalid_level_errors",
+          "old": "test_section_invalid_level_errors"
+        },
+        {
+          "new": "integration_test::test_section_level_flag_changes_heading_prefix",
+          "old": "test_section_level_flag_changes_heading_prefix"
+        },
+        {
+          "new": "integration_test::test_section_md_html_mutual_exclusion",
+          "old": "test_section_md_html_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_section_md_md_plus_mutual_exclusion",
+          "old": "test_section_md_md_plus_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_section_md_plus_matches_md_for_pure_section",
+          "old": "test_section_md_plus_matches_md_for_pure_section"
+        },
+        {
+          "new": "integration_test::test_section_md_renders_heading_and_body",
+          "old": "test_section_md_renders_heading_and_body"
+        },
+        {
+          "new": "integration_test::test_section_requires_title_or_example",
+          "old": "test_section_requires_title_or_example"
+        },
+        {
+          "new": "integration_test::test_section_terminal_default_emits_heading_prefix",
+          "old": "test_section_terminal_default_emits_heading_prefix"
+        },
+        {
+          "new": "integration_test::test_shows_underline_support",
+          "old": "test_shows_underline_support"
+        },
+        {
+          "new": "integration_test::test_silent_suppresses_all_output",
+          "old": "test_silent_suppresses_all_output"
+        },
+        {
+          "new": "integration_test::test_silent_suppresses_json_output",
+          "old": "test_silent_suppresses_json_output"
+        },
+        {
+          "new": "integration_test::test_state_diagram_basic",
+          "old": "test_state_diagram_basic"
+        },
+        {
+          "new": "integration_test::test_state_diagram_example_flag",
+          "old": "test_state_diagram_example_flag"
+        },
+        {
+          "new": "integration_test::test_state_diagram_help",
+          "old": "test_state_diagram_help"
+        },
+        {
+          "new": "integration_test::test_state_diagram_requires_transitions_without_example",
+          "old": "test_state_diagram_requires_transitions_without_example"
+        },
+        {
+          "new": "integration_test::test_state_diagram_with_title",
+          "old": "test_state_diagram_with_title"
+        },
+        {
+          "new": "integration_test::test_status_block_border_color_applies_on_color_terminal",
+          "old": "test_status_block_border_color_applies_on_color_terminal"
+        },
+        {
+          "new": "integration_test::test_status_block_every_non_deprecated_severity_runs",
+          "old": "test_status_block_every_non_deprecated_severity_runs"
+        },
+        {
+          "new": "integration_test::test_status_block_example_succeeds_and_prints_command",
+          "old": "test_status_block_example_succeeds_and_prints_command"
+        },
+        {
+          "new": "integration_test::test_status_block_help_exposes_target_and_layout_flags",
+          "old": "test_status_block_help_exposes_target_and_layout_flags"
+        },
+        {
+          "new": "integration_test::test_status_block_html_emits_div_with_classes",
+          "old": "test_status_block_html_emits_div_with_classes"
+        },
+        {
+          "new": "integration_test::test_status_block_md_emits_block_quote",
+          "old": "test_status_block_md_emits_block_quote"
+        },
+        {
+          "new": "integration_test::test_status_block_md_html_mutual_exclusion",
+          "old": "test_status_block_md_html_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_status_block_requires_severity_and_body",
+          "old": "test_status_block_requires_severity_and_body"
+        },
+        {
+          "new": "integration_test::test_status_block_terminal_default_emits_thick_border",
+          "old": "test_status_block_terminal_default_emits_thick_border"
+        },
+        {
+          "new": "integration_test::test_table_example_emits_command_line",
+          "old": "test_table_example_emits_command_line"
+        },
+        {
+          "new": "integration_test::test_table_header_ending_in_type_word_is_literal",
+          "old": "test_table_header_ending_in_type_word_is_literal"
+        },
+        {
+          "new": "integration_test::test_table_help_exposes_cross_target_and_example_flags",
+          "old": "test_table_help_exposes_cross_target_and_example_flags"
+        },
+        {
+          "new": "integration_test::test_table_html_emits_table_element",
+          "old": "test_table_html_emits_table_element"
+        },
+        {
+          "new": "integration_test::test_table_html_md_plus_mutual_exclusion",
+          "old": "test_table_html_md_plus_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_table_literal_colon_header_is_preserved",
+          "old": "test_table_literal_colon_header_is_preserved"
+        },
+        {
+          "new": "integration_test::test_table_md_cell_pipe_is_escaped",
+          "old": "test_table_md_cell_pipe_is_escaped"
+        },
+        {
+          "new": "integration_test::test_table_md_emits_gfm_pipe_table",
+          "old": "test_table_md_emits_gfm_pipe_table"
+        },
+        {
+          "new": "integration_test::test_table_md_html_mutual_exclusion",
+          "old": "test_table_md_html_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_table_md_md_plus_mutual_exclusion",
+          "old": "test_table_md_md_plus_mutual_exclusion"
+        },
+        {
+          "new": "integration_test::test_table_md_plus_matches_md_for_pure_gfm_table",
+          "old": "test_table_md_plus_matches_md_for_pure_gfm_table"
+        },
+        {
+          "new": "integration_test::test_table_requires_columns_without_example",
+          "old": "test_table_requires_columns_without_example"
+        },
+        {
+          "new": "integration_test::test_table_terminal_default_emits_box_borders",
+          "old": "test_table_terminal_default_emits_box_borders"
+        },
+        {
+          "new": "integration_test::test_table_title_renders_caption_on_every_target",
+          "old": "test_table_title_renders_caption_on_every_target"
+        },
+        {
+          "new": "integration_test::test_table_typed_currency_column_formats_value",
+          "old": "test_table_typed_currency_column_formats_value"
+        },
+        {
+          "new": "integration_test::test_table_unknown_column_type_errors",
+          "old": "test_table_unknown_column_type_errors"
+        },
+        {
+          "new": "integration_test::test_text_block_bold_and_dim_are_mutually_exclusive",
+          "old": "test_text_block_bold_and_dim_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_text_block_bold_emits_bold_sgr",
+          "old": "test_text_block_bold_emits_bold_sgr"
+        },
+        {
+          "new": "integration_test::test_text_block_example_dim_wins_over_implicit_bold",
+          "old": "test_text_block_example_dim_wins_over_implicit_bold"
+        },
+        {
+          "new": "integration_test::test_text_block_example_succeeds_and_prints_command",
+          "old": "test_text_block_example_succeeds_and_prints_command"
+        },
+        {
+          "new": "integration_test::test_text_block_fg_emits_foreground_sgr_on_color_terminal",
+          "old": "test_text_block_fg_emits_foreground_sgr_on_color_terminal"
+        },
+        {
+          "new": "integration_test::test_text_block_fg_lowers_to_css_in_html",
+          "old": "test_text_block_fg_lowers_to_css_in_html"
+        },
+        {
+          "new": "integration_test::test_text_block_html_emits_paragraph_with_style",
+          "old": "test_text_block_html_emits_paragraph_with_style"
+        },
+        {
+          "new": "integration_test::test_text_block_md_emits_plain_text",
+          "old": "test_text_block_md_emits_plain_text"
+        },
+        {
+          "new": "integration_test::test_text_block_md_html_mutually_exclusive",
+          "old": "test_text_block_md_html_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_text_block_md_md_plus_mutually_exclusive",
+          "old": "test_text_block_md_md_plus_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_text_block_md_plus_html_mutually_exclusive",
+          "old": "test_text_block_md_plus_html_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_text_block_md_plus_matches_md_for_styled_text",
+          "old": "test_text_block_md_plus_matches_md_for_styled_text"
+        },
+        {
+          "new": "integration_test::test_text_block_terminal_default_emits_text",
+          "old": "test_text_block_terminal_default_emits_text"
+        },
+        {
+          "new": "integration_test::test_text_block_underline_variants_are_mutually_exclusive",
+          "old": "test_text_block_underline_variants_are_mutually_exclusive"
+        },
+        {
+          "new": "integration_test::test_timeline_bad_format_errors_to_stderr",
+          "old": "test_timeline_bad_format_errors_to_stderr"
+        },
+        {
+          "new": "integration_test::test_timeline_basic",
+          "old": "test_timeline_basic"
+        },
+        {
+          "new": "integration_test::test_timeline_example_flag",
+          "old": "test_timeline_example_flag"
+        },
+        {
+          "new": "integration_test::test_timeline_help",
+          "old": "test_timeline_help"
+        },
+        {
+          "new": "integration_test::test_timeline_requires_events_without_example",
+          "old": "test_timeline_requires_events_without_example"
+        },
+        {
+          "new": "integration_test::test_timeline_with_title",
+          "old": "test_timeline_with_title"
+        },
+        {
+          "new": "integration_test::test_tree_rendered_quote_respects_no_color",
+          "old": "test_tree_rendered_quote_respects_no_color"
+        },
+        {
+          "new": "integration_test::test_verbose_flag_shows_environment_section",
+          "old": "test_verbose_flag_shows_environment_section"
+        },
+        {
+          "new": "integration_test::test_version_flag",
+          "old": "test_version_flag"
+        },
+        {
+          "new": "integration_test::test_very_verbose_shows_raw_detection",
+          "old": "test_very_verbose_shows_raw_detection"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_apple_terminal_prose",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_apple_terminal_prose",
+      "old_path": "biscuit-terminal/cli/tests/level2_apple_terminal_prose.rs",
+      "old_target": "level2_apple_terminal_prose",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_apple_terminal_prose::level2_apple_terminal_double_underline_plain_text_visible",
+          "old": "level2_apple_terminal_double_underline_plain_text_visible"
+        },
+        {
+          "new": "level2_apple_terminal_prose::level2_apple_terminal_harness_lifecycle",
+          "old": "level2_apple_terminal_harness_lifecycle"
+        },
+        {
+          "new": "level2_apple_terminal_prose::level2_apple_terminal_link_fallback_visible",
+          "old": "level2_apple_terminal_link_fallback_visible"
+        },
+        {
+          "new": "level2_apple_terminal_prose::level2_apple_terminal_styled_link_fallback_escapes_bracket",
+          "old": "level2_apple_terminal_styled_link_fallback_escapes_bracket"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_container_fenced_code",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_container_fenced_code.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_container_fenced_code",
+      "old_path": "biscuit-terminal/cli/tests/level2_container_fenced_code.rs",
+      "old_target": "level2_container_fenced_code",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_container_fenced_code::level2_list_fenced_code_prose_renders_in_kitty",
+          "old": "level2_list_fenced_code_prose_renders_in_kitty"
+        },
+        {
+          "new": "level2_container_fenced_code::level2_list_fenced_code_prose_renders_in_wezterm",
+          "old": "level2_list_fenced_code_prose_renders_in_wezterm"
+        },
+        {
+          "new": "level2_container_fenced_code::level2_quote_fenced_code_prose_renders_in_kitty",
+          "old": "level2_quote_fenced_code_prose_renders_in_kitty"
+        },
+        {
+          "new": "level2_container_fenced_code::level2_quote_fenced_code_prose_renders_in_wezterm",
+          "old": "level2_quote_fenced_code_prose_renders_in_wezterm"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_cursor_and_hygiene",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_cursor_and_hygiene.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_cursor_and_hygiene",
+      "old_path": "biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs",
+      "old_target": "level2_cursor_and_hygiene",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_cursor_and_hygiene::level2_cursor_lands_below_rendered_image",
+          "old": "level2_cursor_lands_below_rendered_image"
+        },
+        {
+          "new": "level2_cursor_and_hygiene::level2_dir_command_unicode_widths_in_capture",
+          "old": "level2_dir_command_unicode_widths_in_capture"
+        },
+        {
+          "new": "level2_cursor_and_hygiene::level2_no_orphan_save_restore_sequences",
+          "old": "level2_no_orphan_save_restore_sequences"
+        }
+      ]
+    },
+    {
+      "alias": {
+        "from": "level2_diagrams",
+        "reason": [
+          "L1: helper_tests::cases_table_covers_all_ten_subcommands matches before, mismatches as level2_diagrams::helper_tests::cases_table_covers_all_ten_subcommands",
+          "L1: helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers matches before, mismatches as level2_diagrams::helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers",
+          "L1: helper_tests::extract_kitty_apc_payload_returns_none_without_marker matches before, mismatches as level2_diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_marker",
+          "L1: helper_tests::extract_kitty_apc_payload_returns_none_without_terminator matches before, mismatches as level2_diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_terminator",
+          "L1: helper_tests::sha256_hex_distinguishes_inputs matches before, mismatches as level2_diagrams::helper_tests::sha256_hex_distinguishes_inputs"
+        ]
+      },
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "diagrams",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/diagrams.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_diagrams",
+      "old_path": "biscuit-terminal/cli/tests/level2_diagrams.rs",
+      "old_target": "level2_diagrams",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "diagrams::helper_tests::cases_table_covers_all_ten_subcommands",
+          "old": "helper_tests::cases_table_covers_all_ten_subcommands"
+        },
+        {
+          "new": "diagrams::helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers",
+          "old": "helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers"
+        },
+        {
+          "new": "diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_marker",
+          "old": "helper_tests::extract_kitty_apc_payload_returns_none_without_marker"
+        },
+        {
+          "new": "diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_terminator",
+          "old": "helper_tests::extract_kitty_apc_payload_returns_none_without_terminator"
+        },
+        {
+          "new": "diagrams::helper_tests::sha256_hex_distinguishes_inputs",
+          "old": "helper_tests::sha256_hex_distinguishes_inputs"
+        },
+        {
+          "new": "diagrams::helper_tests::sha256_hex_matches_known_digest",
+          "old": "helper_tests::sha256_hex_matches_known_digest"
+        },
+        {
+          "new": "diagrams::level2_bar_chart_renders_in_kitty",
+          "old": "level2_bar_chart_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_bar_chart_renders_in_wezterm",
+          "old": "level2_bar_chart_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_diagram_fallback_when_no_image_protocol",
+          "old": "level2_diagram_fallback_when_no_image_protocol"
+        },
+        {
+          "new": "diagrams::level2_diagram_width_kitty_apc_columns",
+          "old": "level2_diagram_width_kitty_apc_columns"
+        },
+        {
+          "new": "diagrams::level2_diagram_width_respects_pane_columns",
+          "old": "level2_diagram_width_respects_pane_columns"
+        },
+        {
+          "new": "diagrams::level2_erd_renders_in_kitty",
+          "old": "level2_erd_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_erd_renders_in_wezterm",
+          "old": "level2_erd_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_flowchart_renders_in_kitty",
+          "old": "level2_flowchart_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_flowchart_renders_in_wezterm",
+          "old": "level2_flowchart_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_git_graph_renders_in_kitty",
+          "old": "level2_git_graph_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_git_graph_renders_in_wezterm",
+          "old": "level2_git_graph_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_graph_expression_renders_in_kitty",
+          "old": "level2_graph_expression_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_graph_expression_renders_in_wezterm",
+          "old": "level2_graph_expression_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_inverse_flag_changes_background_in_capture",
+          "old": "level2_inverse_flag_changes_background_in_capture"
+        },
+        {
+          "new": "diagrams::level2_line_chart_renders_in_kitty",
+          "old": "level2_line_chart_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_line_chart_renders_in_wezterm",
+          "old": "level2_line_chart_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_pie_chart_renders_in_kitty",
+          "old": "level2_pie_chart_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_pie_chart_renders_in_wezterm",
+          "old": "level2_pie_chart_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_quadrant_renders_in_kitty",
+          "old": "level2_quadrant_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_quadrant_renders_in_wezterm",
+          "old": "level2_quadrant_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_state_diagram_renders_in_kitty",
+          "old": "level2_state_diagram_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_state_diagram_renders_in_wezterm",
+          "old": "level2_state_diagram_renders_in_wezterm"
+        },
+        {
+          "new": "diagrams::level2_timeline_renders_in_kitty",
+          "old": "level2_timeline_renders_in_kitty"
+        },
+        {
+          "new": "diagrams::level2_timeline_renders_in_wezterm",
+          "old": "level2_timeline_renders_in_wezterm"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_image",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_image.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_image",
+      "old_path": "biscuit-terminal/cli/tests/level2_image.rs",
+      "old_target": "level2_image",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_image::level2_image_default_uses_ceil_rounding",
+          "old": "level2_image_default_uses_ceil_rounding"
+        },
+        {
+          "new": "level2_image::level2_image_kitty_row_advance",
+          "old": "level2_image_kitty_row_advance"
+        },
+        {
+          "new": "level2_image::level2_image_meta_to_stderr",
+          "old": "level2_image_meta_to_stderr"
+        },
+        {
+          "new": "level2_image::level2_image_renders_in_kitty",
+          "old": "level2_image_renders_in_kitty"
+        },
+        {
+          "new": "level2_image::level2_image_renders_in_wezterm",
+          "old": "level2_image_renders_in_wezterm"
+        },
+        {
+          "new": "level2_image::level2_image_scroll_compensation_at_bottom_margin",
+          "old": "level2_image_scroll_compensation_at_bottom_margin"
+        },
+        {
+          "new": "level2_image::level2_warp_uses_floor_rounding",
+          "old": "level2_warp_uses_floor_rounding"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_layout",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_layout.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_layout",
+      "old_path": "biscuit-terminal/cli/tests/level2_layout.rs",
+      "old_target": "level2_layout",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_layout::level2_columns_gap_separates_columns",
+          "old": "level2_columns_gap_separates_columns"
+        },
+        {
+          "new": "level2_layout::level2_columns_left_margin_shifts_block",
+          "old": "level2_columns_left_margin_shifts_block"
+        },
+        {
+          "new": "level2_layout::level2_columns_long_content_wraps_within_columns",
+          "old": "level2_columns_long_content_wraps_within_columns"
+        }
+      ]
+    },
+    {
+      "alias": {
+        "from": "level2_prose_cells",
+        "reason": [
+          "L1: bold_containment::accepts_bold_reset_before_padding_and_border matches before, mismatches as level2_prose_cells::bold_containment::accepts_bold_reset_before_padding_and_border",
+          "L1: bold_containment::accepts_explicit_bold_off_encoding matches before, mismatches as level2_prose_cells::bold_containment::accepts_explicit_bold_off_encoding",
+          "L1: bold_containment::accepts_itu_colon_color_plus_bold matches before, mismatches as level2_prose_cells::bold_containment::accepts_itu_colon_color_plus_bold",
+          "L1: bold_containment::accepts_wezterm_charset_designation_around_reset matches before, mismatches as level2_prose_cells::bold_containment::accepts_wezterm_charset_designation_around_reset",
+          "L1: bold_containment::rejects_bold_bleeding_into_padding_and_border matches before, mismatches as level2_prose_cells::bold_containment::rejects_bold_bleeding_into_padding_and_border"
+        ]
+      },
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "prose_cells",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/prose_cells.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_prose_cells",
+      "old_path": "biscuit-terminal/cli/tests/level2_prose_cells.rs",
+      "old_target": "level2_prose_cells",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "prose_cells::bold_containment::accepts_bold_reset_before_padding_and_border",
+          "old": "bold_containment::accepts_bold_reset_before_padding_and_border"
+        },
+        {
+          "new": "prose_cells::bold_containment::accepts_explicit_bold_off_encoding",
+          "old": "bold_containment::accepts_explicit_bold_off_encoding"
+        },
+        {
+          "new": "prose_cells::bold_containment::accepts_itu_colon_color_plus_bold",
+          "old": "bold_containment::accepts_itu_colon_color_plus_bold"
+        },
+        {
+          "new": "prose_cells::bold_containment::accepts_wezterm_charset_designation_around_reset",
+          "old": "bold_containment::accepts_wezterm_charset_designation_around_reset"
+        },
+        {
+          "new": "prose_cells::bold_containment::rejects_bold_bleeding_into_padding_and_border",
+          "old": "bold_containment::rejects_bold_bleeding_into_padding_and_border"
+        },
+        {
+          "new": "prose_cells::bold_containment::rejects_bold_border_after_reset",
+          "old": "bold_containment::rejects_bold_border_after_reset"
+        },
+        {
+          "new": "prose_cells::bold_containment::rejects_bold_on_leading_border",
+          "old": "bold_containment::rejects_bold_on_leading_border"
+        },
+        {
+          "new": "prose_cells::bold_containment::rejects_bold_on_leading_padding",
+          "old": "bold_containment::rejects_bold_on_leading_padding"
+        },
+        {
+          "new": "prose_cells::bold_containment::rejects_non_bold_content",
+          "old": "bold_containment::rejects_non_bold_content"
+        },
+        {
+          "new": "prose_cells::cell_alignment::equal_slack_is_ambiguous",
+          "old": "cell_alignment::equal_slack_is_ambiguous"
+        },
+        {
+          "new": "prose_cells::cell_alignment::left_alignment_has_fill_on_the_right",
+          "old": "cell_alignment::left_alignment_has_fill_on_the_right"
+        },
+        {
+          "new": "prose_cells::cell_alignment::right_alignment_has_fill_on_the_left",
+          "old": "cell_alignment::right_alignment_has_fill_on_the_left"
+        },
+        {
+          "new": "prose_cells::cell_alignment::splits_inner_cells_dropping_borders_and_pane_padding",
+          "old": "cell_alignment::splits_inner_cells_dropping_borders_and_pane_padding"
+        },
+        {
+          "new": "prose_cells::cell_alignment::too_few_borders_yields_no_cells",
+          "old": "cell_alignment::too_few_borders_yields_no_cells"
+        },
+        {
+          "new": "prose_cells::dim_containment::accepts_dim_reset_before_padding_and_border",
+          "old": "dim_containment::accepts_dim_reset_before_padding_and_border"
+        },
+        {
+          "new": "prose_cells::dim_containment::accepts_normal_intensity_off_encoding",
+          "old": "dim_containment::accepts_normal_intensity_off_encoding"
+        },
+        {
+          "new": "prose_cells::dim_containment::accepts_wezterm_charset_designation_around_reset",
+          "old": "dim_containment::accepts_wezterm_charset_designation_around_reset"
+        },
+        {
+          "new": "prose_cells::dim_containment::rejects_dim_bleeding_into_padding_and_border",
+          "old": "dim_containment::rejects_dim_bleeding_into_padding_and_border"
+        },
+        {
+          "new": "prose_cells::dim_containment::rejects_dim_border_after_reset",
+          "old": "dim_containment::rejects_dim_border_after_reset"
+        },
+        {
+          "new": "prose_cells::dim_containment::rejects_dim_on_leading_border",
+          "old": "dim_containment::rejects_dim_on_leading_border"
+        },
+        {
+          "new": "prose_cells::dim_containment::rejects_dim_on_leading_padding",
+          "old": "dim_containment::rejects_dim_on_leading_padding"
+        },
+        {
+          "new": "prose_cells::dim_containment::rejects_non_dim_content",
+          "old": "dim_containment::rejects_non_dim_content"
+        },
+        {
+          "new": "prose_cells::dim_containment::truecolor_channel_two_is_not_read_as_dim",
+          "old": "dim_containment::truecolor_channel_two_is_not_read_as_dim"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::accepts_basic_red_reset_before_padding_and_border",
+          "old": "fg_red_containment::accepts_basic_red_reset_before_padding_and_border"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::accepts_bright_red",
+          "old": "fg_red_containment::accepts_bright_red"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::accepts_default_foreground_off_encoding",
+          "old": "fg_red_containment::accepts_default_foreground_off_encoding"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::accepts_red_256_color_index",
+          "old": "fg_red_containment::accepts_red_256_color_index"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::accepts_wezterm_maroon_truecolor_capture_form",
+          "old": "fg_red_containment::accepts_wezterm_maroon_truecolor_capture_form"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_blue_foreground",
+          "old": "fg_red_containment::rejects_blue_foreground"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_non_red_content",
+          "old": "fg_red_containment::rejects_non_red_content"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_red_bleeding_from_preceding_cell_across_separator",
+          "old": "fg_red_containment::rejects_red_bleeding_from_preceding_cell_across_separator"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_red_bleeding_into_padding_and_border",
+          "old": "fg_red_containment::rejects_red_bleeding_into_padding_and_border"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_red_border_after_reset",
+          "old": "fg_red_containment::rejects_red_border_after_reset"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_red_on_leading_border",
+          "old": "fg_red_containment::rejects_red_on_leading_border"
+        },
+        {
+          "new": "prose_cells::fg_red_containment::rejects_red_on_leading_padding",
+          "old": "fg_red_containment::rejects_red_on_leading_padding"
+        },
+        {
+          "new": "prose_cells::level2_prose_cells_in_kitty",
+          "old": "level2_prose_cells_in_kitty"
+        },
+        {
+          "new": "prose_cells::level2_prose_cells_in_tmux",
+          "old": "level2_prose_cells_in_tmux"
+        },
+        {
+          "new": "prose_cells::level2_prose_cells_in_wezterm",
+          "old": "level2_prose_cells_in_wezterm"
+        },
+        {
+          "new": "prose_cells::link_containment::accepts_link_closed_before_padding_and_border_bel",
+          "old": "link_containment::accepts_link_closed_before_padding_and_border_bel"
+        },
+        {
+          "new": "prose_cells::link_containment::accepts_link_closed_before_padding_and_border_st",
+          "old": "link_containment::accepts_link_closed_before_padding_and_border_st"
+        },
+        {
+          "new": "prose_cells::link_containment::accepts_link_with_params_in_opener",
+          "old": "link_containment::accepts_link_with_params_in_opener"
+        },
+        {
+          "new": "prose_cells::link_containment::accepts_wezterm_charset_designation_around_link",
+          "old": "link_containment::accepts_wezterm_charset_designation_around_link"
+        },
+        {
+          "new": "prose_cells::link_containment::rejects_link_bleeding_into_padding_and_border",
+          "old": "link_containment::rejects_link_bleeding_into_padding_and_border"
+        },
+        {
+          "new": "prose_cells::link_containment::rejects_link_opened_before_leading_border",
+          "old": "link_containment::rejects_link_opened_before_leading_border"
+        },
+        {
+          "new": "prose_cells::link_containment::rejects_link_reopened_over_border",
+          "old": "link_containment::rejects_link_reopened_over_border"
+        },
+        {
+          "new": "prose_cells::link_containment::rejects_unlinked_label",
+          "old": "link_containment::rejects_unlinked_label"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_prose_styling",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_prose_styling.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_prose_styling",
+      "old_path": "biscuit-terminal/cli/tests/level2_prose_styling.rs",
+      "old_target": "level2_prose_styling",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_prose_styling::level2_columns_word_wrap_in_pane",
+          "old": "level2_columns_word_wrap_in_pane"
+        },
+        {
+          "new": "level2_prose_styling::level2_no_color_strips_sgr_in_real_terminal",
+          "old": "level2_no_color_strips_sgr_in_real_terminal"
+        },
+        {
+          "new": "level2_prose_styling::level2_pad_columns_respect_actual_pane_width",
+          "old": "level2_pad_columns_respect_actual_pane_width"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_code_block_restores_parent_style_in_kitty",
+          "old": "level2_prose_code_block_restores_parent_style_in_kitty"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_code_block_restores_parent_style_in_wezterm",
+          "old": "level2_prose_code_block_restores_parent_style_in_wezterm"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_emits_sgr_in_kitty",
+          "old": "level2_prose_emits_sgr_in_kitty"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_emits_sgr_in_real_terminal",
+          "old": "level2_prose_emits_sgr_in_real_terminal"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_hidden_renders_as_literal_text_in_wezterm",
+          "old": "level2_prose_hidden_renders_as_literal_text_in_wezterm"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_inverse_emits_sgr_in_kitty",
+          "old": "level2_prose_inverse_emits_sgr_in_kitty"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_inverse_emits_sgr_in_wezterm",
+          "old": "level2_prose_inverse_emits_sgr_in_wezterm"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_nested_emphasis_visible_text_in_wezterm",
+          "old": "level2_prose_nested_emphasis_visible_text_in_wezterm"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_osc8_link_renders",
+          "old": "level2_prose_osc8_link_renders"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_osc8_link_renders_in_kitty",
+          "old": "level2_prose_osc8_link_renders_in_kitty"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_rich_styling_emits_sgr_in_kitty",
+          "old": "level2_prose_rich_styling_emits_sgr_in_kitty"
+        },
+        {
+          "new": "level2_prose_styling::level2_prose_rich_styling_emits_sgr_in_wezterm",
+          "old": "level2_prose_rich_styling_emits_sgr_in_wezterm"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_render_tree_style",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_render_tree_style.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_render_tree_style",
+      "old_path": "biscuit-terminal/cli/tests/level2_render_tree_style.rs",
+      "old_target": "level2_render_tree_style",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_render_tree_style::level2_block_quote_style_border_in_kitty",
+          "old": "level2_block_quote_style_border_in_kitty"
+        },
+        {
+          "new": "level2_render_tree_style::level2_block_quote_style_border_in_tmux",
+          "old": "level2_block_quote_style_border_in_tmux"
+        },
+        {
+          "new": "level2_render_tree_style::level2_block_quote_style_border_in_wezterm",
+          "old": "level2_block_quote_style_border_in_wezterm"
+        },
+        {
+          "new": "level2_render_tree_style::level2_block_quote_styled_inline_content_in_kitty",
+          "old": "level2_block_quote_styled_inline_content_in_kitty"
+        },
+        {
+          "new": "level2_render_tree_style::level2_block_quote_styled_inline_content_in_wezterm",
+          "old": "level2_block_quote_styled_inline_content_in_wezterm"
+        },
+        {
+          "new": "level2_render_tree_style::level2_render_tree_style_in_kitty",
+          "old": "level2_render_tree_style_in_kitty"
+        },
+        {
+          "new": "level2_render_tree_style::level2_render_tree_style_in_tmux",
+          "old": "level2_render_tree_style_in_tmux"
+        },
+        {
+          "new": "level2_render_tree_style::level2_render_tree_style_in_wezterm",
+          "old": "level2_render_tree_style_in_wezterm"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_status_block",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_status_block.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_status_block",
+      "old_path": "biscuit-terminal/cli/tests/level2_status_block.rs",
+      "old_target": "level2_status_block",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_status_block::level2_status_block_body_hint_layout_in_tmux",
+          "old": "level2_status_block_body_hint_layout_in_tmux"
+        },
+        {
+          "new": "level2_status_block::level2_status_block_hint_carries_italic_sgr_in_wezterm",
+          "old": "level2_status_block_hint_carries_italic_sgr_in_wezterm"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-terminal-cli::level2",
+      "inner_cfg": [],
+      "module": "level2_style_everywhere_matrix",
+      "nested_root": false,
+      "new_path": "biscuit-terminal/cli/tests/level2/level2_style_everywhere_matrix.rs",
+      "old_binary_id": "biscuit-terminal-cli::level2_style_everywhere_matrix",
+      "old_path": "biscuit-terminal/cli/tests/level2_style_everywhere_matrix.rs",
+      "old_target": "level2_style_everywhere_matrix",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_style_everywhere_matrix::level2_style_everywhere_in_kitty",
+          "old": "level2_style_everywhere_in_kitty"
+        },
+        {
+          "new": "level2_style_everywhere_matrix::level2_style_everywhere_in_tmux",
+          "old": "level2_style_everywhere_in_tmux"
+        },
+        {
+          "new": "level2_style_everywhere_matrix::level2_style_everywhere_in_wezterm",
+          "old": "level2_style_everywhere_in_wezterm"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [
+    {
+      "filter": "test(=level2_render_tree_style_in_wezterm)",
+      "selector": "override-ci-8",
+      "suggested_filter": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+      "tests": [
+        {
+          "new": "biscuit-terminal-cli::level2 level2_render_tree_style::level2_render_tree_style_in_wezterm",
+          "old": "biscuit-terminal-cli::level2_render_tree_style level2_render_tree_style_in_wezterm"
+        }
+      ]
+    },
+    {
+      "filter": "test(=level2_render_tree_style_in_wezterm)",
+      "selector": "override-default-6",
+      "suggested_filter": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+      "tests": [
+        {
+          "new": "biscuit-terminal-cli::level2 level2_render_tree_style::level2_render_tree_style_in_wezterm",
+          "old": "biscuit-terminal-cli::level2_render_tree_style level2_render_tree_style_in_wezterm"
+        }
+      ]
+    }
+  ],
+  "package": "biscuit-terminal-cli",
+  "ruled_targets": [],
+  "shared_tests": [
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::extracts_kitty_apc_c_param"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::extracts_kitty_apc_c_param_first_position"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_for_garbage_value"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_without_param"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::finds_row_of"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::parses_cursor_before_line"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::parses_cursor_rows"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::parses_image_height_line"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::parses_image_width_line"
+    },
+    {
+      "old_binary_ids": [
+        "biscuit-terminal-cli::level2_apple_terminal_prose",
+        "biscuit-terminal-cli::level2_container_fenced_code",
+        "biscuit-terminal-cli::level2_cursor_and_hygiene",
+        "biscuit-terminal-cli::level2_diagrams",
+        "biscuit-terminal-cli::level2_image",
+        "biscuit-terminal-cli::level2_layout",
+        "biscuit-terminal-cli::level2_prose_styling",
+        "biscuit-terminal-cli::level2_status_block",
+        "biscuit-terminal-cli::level2_style_everywhere_matrix"
+      ],
+      "target": "level2",
+      "test": "common::pane_geometry::tests::parses_image_width_returns_none_when_absent"
+    }
+  ],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "about",
+        "dir_targets",
+        "integration_test"
+      ],
+      "name": "l1",
+      "path": "biscuit-terminal/cli/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level2_apple_terminal_prose",
+        "level2_container_fenced_code",
+        "level2_cursor_and_hygiene",
+        "diagrams",
+        "level2_image",
+        "level2_layout",
+        "prose_cells",
+        "level2_prose_styling",
+        "level2_render_tree_style",
+        "level2_status_block",
+        "level2_style_everywhere_matrix"
+      ],
+      "name": "level2",
+      "path": "biscuit-terminal/cli/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}

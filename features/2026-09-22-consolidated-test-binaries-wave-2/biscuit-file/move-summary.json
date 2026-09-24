@@ -1,0 +1,85 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"l1-fetch\"\npath = \"tests/l1-fetch/main.rs\"\nrequired-features = [\"fetch\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "biscuit-file/lib/tests/l1/completion_round_trip.rs",
+      "old": "biscuit-file/lib/tests/completion_round_trip.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/detailed_resolution.rs",
+      "old": "biscuit-file/lib/tests/detailed_resolution.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/finalized_reference_resolution.rs",
+      "old": "biscuit-file/lib/tests/finalized_reference_resolution.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/implicit_relative.rs",
+      "old": "biscuit-file/lib/tests/implicit_relative.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/parse_count.rs",
+      "old": "biscuit-file/lib/tests/parse_count.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/precedence_flip.rs",
+      "old": "biscuit-file/lib/tests/precedence_flip.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/reference_grammar.rs",
+      "old": "biscuit-file/lib/tests/reference_grammar.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/repository_scope_catalog.rs",
+      "old": "biscuit-file/lib/tests/repository_scope_catalog.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/resolution_context.rs",
+      "old": "biscuit-file/lib/tests/resolution_context.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/round_trip.rs",
+      "old": "biscuit-file/lib/tests/round_trip.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/span_compat.rs",
+      "old": "biscuit-file/lib/tests/span_compat.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/yaml_corpus.rs",
+      "old": "biscuit-file/lib/tests/yaml_corpus.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/yaml_mutation.rs",
+      "old": "biscuit-file/lib/tests/yaml_mutation.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1/yaml_safety.rs",
+      "old": "biscuit-file/lib/tests/yaml_safety.rs"
+    },
+    {
+      "new": "biscuit-file/lib/tests/l1-fetch/fetch_integration.rs",
+      "old": "biscuit-file/lib/tests/fetch_integration.rs"
+    }
+  ],
+  "package": "biscuit-file",
+  "path_repairs": {},
+  "proptest_relocated": [
+    {
+      "new": "biscuit-file/lib/tests/proptest-regressions/yaml_mutation.txt",
+      "old": "biscuit-file/lib/tests/yaml_mutation.proptest-regressions"
+    }
+  ],
+  "roots": {
+    "biscuit-file/lib/tests/l1-fetch/main.rs": {
+      "declares_common": false,
+      "modules": 1
+    },
+    "biscuit-file/lib/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 14
+    }
+  },
+  "version": 1
+}

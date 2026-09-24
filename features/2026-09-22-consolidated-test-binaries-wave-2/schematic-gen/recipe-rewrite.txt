@@ -1,0 +1,15 @@
+# R19 recipe rewrites — schematic-gen
+
+## test-e2e before (/tmp/w2-base at 5a396aeb5): cargo test -p schematic-gen --test e2e_generation -- --ignored --list
+generated_code_compiles: test
+generated_code_passes_clippy: test
+multiple_apis_compile: test
+
+## test-e2e after: cargo test -p schematic-gen --test l1 -- --ignored e2e_generation:: --list
+e2e_generation::generated_code_compiles: test
+e2e_generation::generated_code_passes_clippy: test
+e2e_generation::multiple_apis_compile: test
+
+## check-drift before: cargo test -p schematic-gen artifact_drift -- --ignored --list (tests only)
+
+## check-drift after: same command

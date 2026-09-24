@@ -1,0 +1,66 @@
+{
+  "probe": "claudine/docs/research/agent-errors/_schema.yaml",
+  "before_rows": [
+    {
+      "package": "claudine-gen",
+      "path": "claudine/docs/research/agent-errors/_schema.yaml",
+      "source": "claudine/gen/tests/agent_errors_check.rs",
+      "line": 46,
+      "embedded": false,
+      "unit": "binary_id(claudine-gen::agent_errors_check)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "claudine-gen",
+      "path": "claudine/docs/research/agent-errors/_schema.yaml",
+      "source": "claudine/gen/tests/l1/agent_errors_check.rs",
+      "line": 46,
+      "embedded": false,
+      "unit": "binary_id(claudine-gen::l1) & test(/^agent_errors_check::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(claudine-gen::agent_errors_check)": [
+      "claudine-gen::agent_errors_check all_archived_seeds_match_their_post_graduation_research_rows",
+      "claudine-gen::agent_errors_check checker_process_report_write_failure_is_nonzero_and_never_prints_clean",
+      "claudine-gen::agent_errors_check checker_process_schema_failure_emits_gate_error_not_clean_success",
+      "claudine-gen::agent_errors_check clean_document_writes_explicit_clean_outcome",
+      "claudine-gen::agent_errors_check corrected_document_replaces_findings_with_explicit_clean",
+      "claudine-gen::agent_errors_check failing_document_writes_findings_and_persists_across_reruns",
+      "claudine-gen::agent_errors_check fleet_clean_action_requires_explicit_clean_status",
+      "claudine-gen::agent_errors_check invalid_seed_writes_terminal_gate_input_error_scope",
+      "claudine-gen::agent_errors_check schema_invalid_document_writes_gate_error_and_never_reports_clean",
+      "claudine-gen::agent_errors_check workspace_archived_seed_survives_graduation_and_detects_identity_changes"
+    ]
+  },
+  "after_units": {
+    "binary_id(claudine-gen::l1) & test(/^agent_errors_check::/)": [
+      "claudine-gen::l1 agent_errors_check::all_archived_seeds_match_their_post_graduation_research_rows",
+      "claudine-gen::l1 agent_errors_check::checker_process_report_write_failure_is_nonzero_and_never_prints_clean",
+      "claudine-gen::l1 agent_errors_check::checker_process_schema_failure_emits_gate_error_not_clean_success",
+      "claudine-gen::l1 agent_errors_check::clean_document_writes_explicit_clean_outcome",
+      "claudine-gen::l1 agent_errors_check::corrected_document_replaces_findings_with_explicit_clean",
+      "claudine-gen::l1 agent_errors_check::failing_document_writes_findings_and_persists_across_reruns",
+      "claudine-gen::l1 agent_errors_check::fleet_clean_action_requires_explicit_clean_status",
+      "claudine-gen::l1 agent_errors_check::invalid_seed_writes_terminal_gate_input_error_scope",
+      "claudine-gen::l1 agent_errors_check::schema_invalid_document_writes_gate_error_and_never_reports_clean",
+      "claudine-gen::l1 agent_errors_check::workspace_archived_seed_survives_graduation_and_detects_identity_changes"
+    ]
+  },
+  "before_mapped": [
+    "claudine-gen::l1 agent_errors_check::all_archived_seeds_match_their_post_graduation_research_rows",
+    "claudine-gen::l1 agent_errors_check::checker_process_report_write_failure_is_nonzero_and_never_prints_clean",
+    "claudine-gen::l1 agent_errors_check::checker_process_schema_failure_emits_gate_error_not_clean_success",
+    "claudine-gen::l1 agent_errors_check::clean_document_writes_explicit_clean_outcome",
+    "claudine-gen::l1 agent_errors_check::corrected_document_replaces_findings_with_explicit_clean",
+    "claudine-gen::l1 agent_errors_check::failing_document_writes_findings_and_persists_across_reruns",
+    "claudine-gen::l1 agent_errors_check::fleet_clean_action_requires_explicit_clean_status",
+    "claudine-gen::l1 agent_errors_check::invalid_seed_writes_terminal_gate_input_error_scope",
+    "claudine-gen::l1 agent_errors_check::schema_invalid_document_writes_gate_error_and_never_reports_clean",
+    "claudine-gen::l1 agent_errors_check::workspace_archived_seed_survives_graduation_and_detects_identity_changes"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

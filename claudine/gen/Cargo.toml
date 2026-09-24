@@ -3,6 +3,7 @@ name = "claudine-gen"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+autotests = false
 description = "Deterministic provider-catalog generator for Claudine (roster + research + facts + overrides -> data.rs fragments)"
 
 # Bootstrap rule (design/catalog-generation.md F1): this crate MUST NOT
@@ -59,12 +60,24 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 # Level-2 real-terminal report tests. Neither crate is `claudine`/`claudine-cli`,
 # so the bootstrap rule above still holds.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# The Level 1 layout gate (`tests/l1/test_layout.rs`) calls
+# `test_toolkit::test_layout`. The optional normal dependency above only
+# exists under `terminal-tests`.
+test-toolkit = { path = "../../tools/test-toolkit" }
+
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level2_report_terminal"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
-# CI policy: this package owns real L2 tests (`tests/level2_report_terminal.rs`
+# CI policy: this package owns real L2 tests (`tests/level2/level2_report_terminal.rs`
 # — tmux-driven report rendering), so the tier must be declared here or those
 # tests run in NO tier anywhere (AC12).
 [package.metadata.ci.tests]

@@ -1,0 +1,68 @@
+{
+  "kind": "consolidation-snapshot-mapping",
+  "moved": [
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_json.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap",
+      "sha256": "080d0da09cf7685dc10182dbb9540ba8df4236561b89d6b1a76318702a1099f0"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_text.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap",
+      "sha256": "ec34324c6137f44b6fba3ba96ea637c1b164eb19e751de50df49cecc3179c68c"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_json.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap",
+      "sha256": "82e330ce5dd38e18109293c7f6b5a4de9637421a25b5ff32032379b451c9c1be"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_text.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap",
+      "sha256": "a677998e593479b45435279c4b743fdca2a48b3b4e84a8e071a5e96d15973d24"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__completions_help_output.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__completions_help_output.snap",
+      "sha256": "a1172c45327bf18aae56107be4cf561f5a5981f1c3d65da17526143fd8b77004"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__degenerate_cargo_structure_text.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__degenerate_cargo_structure_text.snap",
+      "sha256": "f73f35abba079c7b17b92a9cb109ee1eeef06736714014fb21c1a3bcf34e7152"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__help_output.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__help_output.snap",
+      "sha256": "1ac1d6220bde3b70504e9e9af06cc6d73020131ee7f23ff92257607ec05d95de"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__os_json_summary.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__os_json_summary.snap",
+      "sha256": "f96aea006a800543430b7e7e1ae911f90683a72ad564b46d187cbbc364de4cba"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_json.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap",
+      "sha256": "8a7dd5ce95185674ac02a09e111b7eaf3c351af9b90350ba4179b1fd3cf1dc93"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_text.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap",
+      "sha256": "37d13e5672c2cdc0d28d6d58a590ef09e4cc550716e6796926750e05f9423c59"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__repo_aggregate_json.snap",
+      "sha256": "57907f3070bcbb247b987e8efb866e72104c058cdd43200fba56f27f85f38835"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots/l1__snapshots__topics_table.snap",
+      "old": "sniff/cli/tests/snapshots/snapshots__topics_table.snap",
+      "sha256": "570e9e6c883977ebb286ae69a00f689b6bf93eeb1b176a086f9d50361859ecf7"
+    }
+  ],
+  "package": "sniff-cli",
+  "unaffected": [],
+  "version": 1
+}
