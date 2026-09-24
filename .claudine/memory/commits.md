@@ -769,6 +769,22 @@ belong here.
   `_completed` — `planning(<area>):` is correct, NOT `chore:` or
   `docs(<area>):`. See `5aff59c38` for the
   2026-09-15-initialize-after-proxy Phase 8 example.
+- A **mid-phase close** (Phase N of total_phases M, N < M) bumps ONLY
+  `phase: <N>` in plan.md frontmatter and adds the per-phase
+  `source_files_during_phase_N` / `docs_updated_during_phase_N` /
+  `skills_files_updated_during_phase_N` blocks. It does NOT set
+  `completed_phase: "<N>"` (that field would imply the fix is fully
+  done when it isn't) or `implemented: true` (also a final-close
+  signal) — those land with the LAST phase's close. Spec.md
+  `message_to_agent` is rewritten to point at the next phase's work;
+  spec frontmatter `status:` / `implemented:` stay unchanged. The
+  active fix directory remains in place (no move to `_completed`).
+  Pre-flight `git show :<path> | head -10` against `plan.md` confirms
+  whether the staged bump is just `phase:` or also
+  `completed_phase:` + `implemented:`. See `390294294` (Phase 2 of
+  5) and `51f31dcf8` (Phase 3 of 5) for the
+  2026-09-23-ensuring-kache-support mid-phase precedents, and
+  `d3bbafbc5` (Phase 8 of 8 final) for the contrasting shape.
 - A `planning(<area>):` phase close can land as "Outcome: blocked on
   required human input" rather than "shipped deliverables" when the spec
   gates the next phase on operator-supplied values that have not been
