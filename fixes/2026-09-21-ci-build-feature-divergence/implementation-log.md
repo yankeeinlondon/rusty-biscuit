@@ -53,6 +53,49 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 packages:
     - repo-deps
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/rust-devops/ci-cd.md
+source_code:
+    - scripts/feature-attribution.rs
+    - scripts/feature-attribution-tests.rs
+    - scripts/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.lock
+    - scripts/ci/fixtures/feature-attribution/core/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/core/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/util/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/util/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-own/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-own/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-plain/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-plain/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-third/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-third/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/base/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/base/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/src/lib.rs
+    - fixes/2026-09-21-ci-build-feature-divergence/timed-pass.sh
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-data/render-attribution.py
+documentation:
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+    - .claude/skills/rust-devops/ci-cd.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-09-21-ci-build-feature-divergence (4 phases)
@@ -669,3 +712,131 @@ prerequisite.
 - No cross-OS run: nothing compiled differs from Phase 1.
 - **Still stopped for human review** (spec `human_review: true`). The two items
   stand. Phase 4's content depends on whether option B lands first.
+
+## Phase 4
+
+Base: `fix/ci-build-feature-divergence` at `679c4f510`, macOS host, toolchain
+1.98.1. No CI run was triggered. No source, manifest, or lock file is changed
+by this phase.
+
+**Author ruling status.** Both `human_review_items` are still unanswered, and
+the spec body has no new ruling. Option B was therefore **not** applied. Phase
+4 verifies the tree as Phases 1–3 left it, and its "after" equals its
+"before". The spec's Outcome (fewer workspace recompiles) is **not achieved**
+by this fix as it stands. See "Acceptance criteria status" below.
+
+### Task 4.1 — attribution re-run
+
+Since `6c9ee2e60`, the only manifest change outside the fixture workspace is
+the new `[[bin]]` in `scripts/Cargo.toml`. No workspace dependency edge and no
+`Cargo.lock` entry moved. `feature-attribution` was rebuilt, then run over the
+same ten owners for `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`
+(without `--events`).
+
+- Linux: the JSON report equals `attribution-data/attribution-linux.json` in
+  full. 27 crates, 92 configurations, 65 divergent, 160 causes.
+- macOS: every configuration, cause, and third-party row equals
+  `attribution-macos-timed.json`. 95 / 68 / 170. Only the seconds are
+  absent, because there was no new timed pass.
+- No crate has fewer configurations, and the workspace-own rows are
+  unchanged. The per-crate before/after table is recorded in
+  `attribution-2026-09-21.md` under "Phase 4 re-run". The re-run JSON was not
+  persisted, because it equals the Phase 1 files.
+
+### Task 4.2 — isolated-package fidelity
+
+No package's dependency closure changed in any phase, so no package can have
+come to depend on a feature only another owner provides. The one package with
+a manifest edit is `repo-deps` (a new bin, no new dependency).
+`cargo test -p repo-deps --no-run` builds every test target (exit 0), and the
+isolated `just test repo-deps` below built and ran it alone. If option B lands,
+`schematic-define` and `schematic-definitions` join this list and need the
+same check.
+
+### Task 4.3 — contracts unchanged
+
+- `just test repo-deps` (macOS): **467 passed, 1 skipped** (the skip was
+  already there). It includes
+  `one_owner_tree_shares_a_dependency_compile_without_unifying_features` and
+  the rest of `scripts/ci-build-archive-tests.rs`, unchanged, plus all 18
+  `feature-attribution` tests.
+- Companion suites registered to `repo-deps` in `SUITE_REGISTRY` (run locally
+  on macOS; CI runs them on `ubuntu-latest`): all pass.
+  The 13 Python suites ran 1,097 tests, all OK: `test_affected_scope` 387,
+  `test_build_key` 12, `test_ci_local` 101, `test_completion` 69,
+  `test_constraints` 39, `test_cross_check` 26, `test_evidence_reuse` 82,
+  `test_local_evidence` 23, `test_publish_gaps` 19, `test_resolved_plan` 103,
+  `test_reuse_validation` 21, `test_runner_loss` 50, `test_schema` 165.
+  `artifact-publisher` (`node --test`) passed 4 of 4.
+- `just _lint repo-deps` (clippy `--all-targets -D warnings`): clean.
+
+### Task 4.4 — tooling disposition (ruling 6)
+
+**Decision: `feature-attribution` stays a standalone `local-tools`
+diagnostic.** It is not retired and not promoted to a report beside
+`ci-build`.
+
+- **Why keep it:** the first table was decisive. It overturned the spec's
+  premise (no base flag is a sole cause of more than 1.8 s). It showed the
+  alignment crate saves 0.6 s, and it found and sized option B, the only
+  large lever (≈77 s). The `--align` what-if is the right first step before
+  any future alignment proposal (options C/D).
+- **Why not a `ci-build` report:** its only input the plan would supply is
+  the owner list, which is one flag to type. Emitting it from the owner job
+  would add a `cargo tree` resolution per owner on every run to answer a
+  question that comes up only when owner build time regresses. The fix also
+  forbids CI emission.
+- Recorded in the `rust-devops` skill (`ci-cd.md`, "Divergent base features
+  multiply workspace compiles"). The module doc's "nothing in CI runs it"
+  already matches.
+
+### Task 4.5 — follow-through observation: pending
+
+No remedy is in HEAD, so no later pull request's owner job can show a saving
+caused by this fix. Comparing one now would only measure noise. Recording
+stays **pending** until a remedy lands (option B, or C/D after rulings). Then
+take the next ordinary pull request that selects a comparable package set,
+and record its owner job's sum of Cargo `Finished` times beside the analyzed
+job's **27.9 min** (run `35657985254`, job `106528099555`), with the run
+link. Do not trigger a run for it.
+
+### Task 4.6 — log and spec state
+
+- **Comment-quality pass:** `scripts/feature-attribution.rs` and
+  `scripts/feature-attribution-tests.rs` are the only symbols whose behavior
+  this fix touched (Phase 1). Their `//!`/`///` docs state contracts (the
+  `(name, version, source)` keying, host-side identity, the what-if's
+  understatement, the memo's relabeling), not narration, and still match the
+  code. Nothing needed to change.
+- GitNexus `detect_changes` (scope `all`): 0 changed symbols, 0 affected
+  processes, risk low. The 3 changed files are `plan.md`,
+  `attribution-2026-09-21.md`, and the skill's `ci-cd.md` (plus this log and
+  the spec).
+- The spec is marked `implemented: true`, and `human_review` stays `true`,
+  because the two rulings are still open (see below). The author moves the fix
+  to `_completed` after review.
+
+### Acceptance criteria status
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Attribution table, every configuration explained, seconds split | **Met** (Phase 1: 93% third-party / 7% workspace-own, 277.1 s / 20.8 s) |
+| 2 | Each part 2 flag a separate change; isolation/removal before alignment; no workspace-own alignment; no isolation before the Open Questions ruling | **Met as decisions.** Every row is recorded in the Phase 2 decision table. No change landed, so nothing violates the ordering. No isolation was done. |
+| 3 | Every aligned feature's reason written; crate shape if created | **Vacuously met.** Nothing is aligned, and no crate was created. Task 3.1 proved the dev-only wiring would not block publishing. |
+| 4 | Archive contract tests pass unchanged | **Met** (Task 4.3) |
+| 5 | Re-run shows fewer configurations; next comparable PR shows lower build time | **Recorded, not achieved.** The re-run shows the same counts (no remedy landed). The PR observation is pending. Neither gates. |
+| 6 | `cargo test -p <pkg>` builds for every changed closure | **Met** (Task 4.2: no closure changed; `repo-deps` proven) |
+| 7 | Skill records the finding; `docs/dependencies.md` updated with edge moves | **Met.** The skill was updated in Phase 1 plus the disposition here. No edge moved, so `docs/dependencies.md` is untouched. |
+
+**Requirement-to-test mapping.** Phase 4 changes no behavior, so there is no
+new test. Verification reused the Phase 1 tool (18 L1 tests, including the
+end-to-end `aligning_a_fixture_flag_collapses_the_configurations_it_caused`),
+the unchanged archive contract suite, and the companion suites above. No
+cross-OS run: nothing compiled differs from Phase 1, whose Linux
+cross-check passed and whose Windows rig failures were environmental and in
+untouched code.
+
+**Still open for the author** (spec `human_review_items`): whether to approve
+option B as a follow-on change (the only remedy that achieves the Outcome
+without unifying features), and the amendment to the Open Questions ruling on
+`proc-macro2/span-locations`.

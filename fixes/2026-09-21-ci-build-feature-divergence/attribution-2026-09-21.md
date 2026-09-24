@@ -272,3 +272,57 @@ Third-party `(crate, version, side)` rows the ten-package selection resolves wit
 | `test-toolkit` | 5 | target | claudine-gen | darkmatter, darkmatter-cli, dmls | 2 | `toml_datetime -default` (3p); `toml_parser -default` (3p); `toml_writer -default` (3p); `winnow -alloc -ascii -binary -default -parser -std` (3p) |
 | `test-toolkit` | 6 | target | sniff | – | 5 | `rustix -stdio -termios` (3p); `serde_json -float_roundtrip` (3p) |
 | `test-toolkit` | 7 | target | sniff-cli | – | 5 | `libc +extra_traits` (3p) |
+
+## Phase 4 re-run (before and after)
+
+This section is written by hand and is not produced by
+`render-attribution.py`. A re-render replaces everything above it only.
+
+- **Tree:** `679c4f510` (`fix/ci-build-feature-divergence`, 2026-09-23). Since
+  `6c9ee2e60`, the only manifest change outside this fix's fixture workspace
+  is the new `feature-attribution` `[[bin]]` in `scripts/Cargo.toml`. No
+  workspace dependency edge and no `Cargo.lock` entry moved.
+- **Remedies landed between the runs:** none. Phase 2 executed no removal, and
+  Phase 3 built no alignment crate, because the alignment crate is not
+  warranted (0.6 s). Option B (the `schematic-define` → `biscuit-file` edge,
+  ≈77 s) still waits on the author's ruling.
+- **Commands:** the reproduce block above, without `--events`, for
+  `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`.
+- **Result:** unchanged. The Linux JSON report equals
+  `attribution-data/attribution-linux.json` in full. The macOS report equals
+  `attribution-macos-timed.json` in every configuration, cause, and
+  third-party row. Only the seconds are absent, because it ran without a new
+  timed pass. As expected with no remedy landed, no crate has fewer
+  configurations, and the workspace-own rows are unchanged.
+
+| Measure | Linux before | Linux after | macOS before | macOS after |
+|---|---|---|---|---|
+| Workspace crates built | 27 | 27 | 27 | 27 |
+| Configurations | 92 | 92 | 95 | 95 |
+| Configurations beyond a crate's first | 65 | 65 | 68 | 68 |
+| Distinct causes | 160 | 160 | 170 | 170 |
+
+| Crate | Linux before | Linux after | macOS before | macOS after |
+|---|---|---|---|---|
+| `biscuit-file` | 8 | 8 | 8 | 8 |
+| `biscuit-terminal` | 7 | 7 | 7 | 7 |
+| `biscuit-test-harness` | 7 | 7 | 8 | 8 |
+| `darkmatter` | 7 | 7 | 7 | 7 |
+| `schematic-define` | 7 | 7 | 7 | 7 |
+| `schematic-definitions` | 7 | 7 | 7 | 7 |
+| `sniff` | 7 | 7 | 7 | 7 |
+| `test-toolkit` | 7 | 7 | 7 | 7 |
+| `renderable` | 5 | 5 | 5 | 5 |
+| `biscuit-visualized` | 4 | 4 | 6 | 6 |
+| `biscuit-hash` | 3 | 3 | 3 | 3 |
+| `darkmatter-cli` | 3 | 3 | 3 | 3 |
+| `biscuit-speaks` | 2 | 2 | 2 | 2 |
+| `claudine` | 2 | 2 | 2 | 2 |
+| `claudine-catalog-types` | 2 | 2 | 2 | 2 |
+| `messenger` | 2 | 2 | 2 | 2 |
+| `playa` | 2 | 2 | 2 | 2 |
+| every other crate (10) | 1 | 1 | 1 | 1 |
+
+If option B lands later, re-run the Linux command. The Phase 2 what-if
+predicts 92 → 86, with `schematic-define` and `schematic-definitions` each
+going 7 → 4.

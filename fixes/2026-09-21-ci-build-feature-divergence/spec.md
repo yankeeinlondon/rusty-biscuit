@@ -7,43 +7,39 @@ reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-21
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: claude/opus
 human_review: true
 human_review_items:
     - |-
-      **Which direction should the rest of this fix take? (Still open from Phase 1. Phase 3 has now been recorded as "not built".)**
+      **Approve option B as a follow-on change, or close the fix with measurements only? (Open since Phase 1. All four phases are now done.)**
 
-      *Why this has to be decided before Phase 4:* Phase 4 re-measures and closes the fix, so what it measures depends on whether option B lands first. Phase 3 was meant to build a shared "alignment" crate that switches on the same third-party options for every package. The three options the spec made eligible save only **0.6 s**, because a rebuild disappears only when *every* option in its bundle is aligned, and the options arrive in bundles of 3 to 25. So Phase 3 built nothing and recorded why. It did confirm one thing: if you ever choose C or D, the crate would not block publishing any package (checked with a dry-run publish).
-
-      Phase 2 also measured the one change that does help (option B below) by temporarily making it and re-running the attribution tool. It removes **6 of the 65 extra builds and about 77 s** of the 298 s spent on them on this Mac. That is more than aligning every third-party option outside the spec's "leave alone by default" list (49 s). The temporary change was undone. Nothing has been changed for real.
+      *Why this matters now:* the plan is finished, but the fix has not yet delivered its goal: fewer rebuilds of the repository's own crates in the CI build job. Re-running the measurement at the end (Phase 4) shows exactly the same numbers as at the start (92 crate builds on Linux, 65 of them extra), because no change was approved. What happens next depends on your answer. The planned "alignment" crate (a crate that switches on the same third-party options for every package) was not built: the options the spec allowed it to align save only **0.6 s**.
 
       *Options:*
-      - **A. Close with the measurement.** Leave every option as it is, skip the alignment crate, and record Phases 3–4 as "no-op" decisions.
-        Pro: no risk, nothing to maintain. Con: no speed-up.
-      - **B. Remove one internal link (a new remedy, needs one spec line).** `schematic-define` depends on `biscuit-file` only to reach its re-export of the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly (same version) means `schematic-definitions`, a 55,000-line crate that takes about 24 s per build, is no longer rebuilt for other packages' web-server and terminal options.
-        Pro: about 77 s saved (measured), and no options are unified, so the protection chosen on 2026-09-12 stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: it is a remedy the spec did not list, so it needs your approval and a spec line.
-      - **C. Align nearly all third-party options** (hand-written, or generated with `cargo-hakari`).
-        Pro: about 211 s saved. Con: a package's tests could pass only because another package switched on an option (for example a web server) that its own manifest never asked for, which is exactly what the 2026-09-12 decision guards against. It also means about 80 entries to review and keep current.
-      - **D. Middle ground:** align `libc`, `serde_core`, and `proc-macro2`, plus `mio` and `errno`.
-        Pro: about 37 s saved. Con: `mio` is on the "leave alone by default" list, so it needs its own written ruling. B saves twice as much without unifying anything.
+      - **A. Close with the measurement.** Accept the attribution table, the tool, and the decisions as the result.
+        Pro: nothing to review beyond records, and no risk. Con: no speed-up; the goal stays unmet.
+      - **B. Approve removing one internal link as a small follow-on change.** `schematic-define` depends on `biscuit-file` only to reach the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly (same version) stops the large `schematic-definitions` crate (about 24 s per build) from being rebuilt for other packages' web-server and terminal options.
+        Pro: about **77 s** saved per run (measured), 92 → 86 builds, and nothing is shared between packages, so the 2026-09-12 protection stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: the spec did not list this remedy, so it needs your approval and one spec line.
+      - **C / D. Align many third-party options (C, about 211 s) or a middle set including `mio` (D, about 37 s).**
+        Pro: larger (C) or moderate (D) savings. Con: a package's tests could pass only because another package switched on an option its own manifest never asked for, which the 2026-09-12 decision guards against. Each option needs its own written ruling first, and the alignment-crate tasks reopen.
 
-      *Recommendation: B, with A for every option.* It is the biggest single saving that keeps the protection intact. If you approve it, the next agent applies it as a Task 2.2 change (with the dependency-docs update and `schematic-define`'s tests) before Phase 4. Phase 3 already records the alignment crate as not warranted. If you choose C or D, write the per-option rulings into the spec first, and Phase 3's tasks are reopened.
+      *Recommendation: B.* It is the largest saving that keeps the protection intact. If approved, it runs as a separate change: edit `schematic/define/Cargo.toml` and the three `use` lines, update the dependency docs, run `just test schematic-define` and `cargo test -p schematic-definitions --no-run`, and re-run the attribution tool (expect 86 on Linux). Record the next ordinary pull request's build-time sum once one runs anyway.
     - |-
       **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
 
-      *Why now:* the Open Questions ruling (Option 1) aligns `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". The alignment crate is not warranted (item above), so the fallback has technically fired. But the option affects only 6 crates, is never the sole reason for a rebuild, and was measured at **0 s**. Moving the test would add a new CI-planner mechanism for no gain. Phase 2 did not act on the fallback.
+      *Why now:* this is the last open design question in the spec, and the fix should not be closed with a ruling that says something different from what was done. The Open Questions ruling (Option 1) aligns `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". The alignment crate was not built, so the fallback has technically fired. But this option affects only 6 crates, is never the sole reason for a rebuild, and was measured at **0 s**.
 
       *Options:*
-      - **Leave the option and the test exactly as they are** (amend the ruling in Open Questions). Pro: nothing changes, and the evidence says nothing is lost. Con: none.
+      - **Leave the option and the test exactly as they are** (amend the ruling in Open Questions). Pro: matches what was done, and the evidence says nothing is lost. Con: none.
       - **Follow the recorded fallback (Option 2).** Pro: follows the ruling to the letter. Con: CI-planner work and a new way to miss test coverage, for 0 s saved.
 
       *Recommendation: leave it as it is,* and record the amendment in Open Questions.
 message_to_agent: |-
-    Phase 3 is complete as records only (see "## Phase 3" in implementation-log.md). No source, manifest, or lock file changed, and the author has still not ruled on `human_review_items`.
-    - Tasks 3.2–3.4 are closed "not built": the alignment crate is not warranted (0.6 s), and options C/D need ruling-4 entries in this spec that do not exist.
-    - Task 3.1 was run: a versionless path dev-dependency on a `publish = false` crate does not block `cargo publish --dry-run` for the publishable `biscuit-hash`. Cargo strips it from the published manifest.
-    - Before Phase 4, check whether the author approved option B. If so, apply it first as a Task 2.2 change (exact edit in the Phase 2 log and in the previous message: `schematic/define/Cargo.toml`, three `use serde_yaml_ng;` lines including `tests/openapi_tests.rs`, `schematic/docs/dependencies.md`, `just test schematic-define`, then re-run `feature-attribution` for 86 Linux configurations). Phase 4's before/after then shows that change. If not, Phase 4's re-run should show the Phase 1 counts unchanged (92 Linux / 95 macOS).
-    - If the author chose C or D, Phase 3 must be reopened (the spec rulings come first) before Phase 4.
+    All four phases are complete as records (see "## Phase 4" in implementation-log.md). No source, manifest, or lock file changed after Phase 1, and the author has still not ruled on `human_review_items`.
+    - Phase 4 re-ran `feature-attribution`: identical to Phase 1 (Linux 92/65, macOS 95/68). Acceptance criterion 5 is recorded but not achieved, and the PR build-time observation is pending until a remedy lands.
+    - `feature-attribution` stays a standalone `local-tools` diagnostic (Task 4.4); do not add CI emission.
+    - If the author approves option B, apply it as its own change: `schematic/define/Cargo.toml` (`openapi` → `dep:serde_yaml_ng`, `serde_yaml_ng = { version = "0.10", optional = true }`), `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`, `schematic/docs/dependencies.md` (and the root `docs/dependencies.md` if it lists the edge), `just test schematic-define`, `cargo test -p schematic-definitions --no-run`, then re-run `feature-attribution --target x86_64-unknown-linux-gnu` and update "Phase 4 re-run" in attribution-2026-09-21.md (expect 86).
     - Rebuild `feature-attribution` before trusting it: `cargo build -p repo-deps --bin feature-attribution`.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21
