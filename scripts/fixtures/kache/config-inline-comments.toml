@@ -1,0 +1,10 @@
+# kache configuration (fixture: both targeted keys carry trailing comments,
+# and one quoted value holds a `#` that is part of the string, not a comment).
+
+[cache]
+local_max_size = "100GiB" # sized from `df`, not from `kache stats`
+  local_store = "/old/#1 store"   # retain this placement reason
+ignore_env = false # intentional for old setup
+
+[other]
+keep = "me # not a comment" # but this is

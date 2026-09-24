@@ -1,26 +1,67 @@
-# kache + sweep config (agreed 2026-07-29, ruling revised 2026-09-09)
+# kache + sweep config (agreed 2026-07-29, rulings revised 2026-09-09 and 2026-09-23)
 
-Short reference for the decisions. Full investigation and evidence: `kache-sessions.md`.
+Short reference for the decisions. Full investigation and evidence: `kache-sessions.md`;
+init-ownership design and measurements: `fixes/2026-09-23-ensuring-kache-support`.
 
-## Repo integration (revised 2026-07-30)
+## Repo integration (revised 2026-07-30; kache ownership revised 2026-09-23)
 
-kache is an **optional, per-host** cache. The repository tracks no Cargo wrapper and CI does not
+kache is a **per-host** cache whose setup `just init` owns end to end on hosts
+whose filesystem earns it. The repository tracks no Cargo wrapper and CI does not
 use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.md`.
 
 - **Wiring: none tracked.** The earlier design put `[build] rustc-wrapper = "kache"` in a tracked
   `.cargo/config.toml`. That imposed one answer on every contributor's filesystem, hard-failed
   Cargo for anyone without kache installed, and forced five CI legs plus every other workflow to
-  *neutralize* the wrapper they had just been given. Activation is now a host decision:
-  `RUSTC_WRAPPER=kache` per shell, or `kache init` host-wide with informed consent.
-- **Install:** `just init` runs `_ensure-kache` on macOS and Linux (not Windows, not WSL): it
-  installs the latest release via `cargo binstall` when kache is absent and never reinstalls one
-  that is present. `just install-kache` is the explicit path and also upgrades a below-floor
-  install. Installing and activating remain separate decisions.
-- **Version floor:** `.github/kache-min-version` = **0.15.0**, consumed by the root justfile and
-  the maintenance audit. Hosts track upstream; the repository pins nothing.
+  *neutralize* the wrapper they had just been given. A tracked wrapper stays forbidden; on a
+  qualifying host `just init` writes the activation into `$CARGO_HOME/config.toml` (or the legacy
+  `$CARGO_HOME/config` Cargo reads in its place) as the **last**
+  step of an ordered, verified sequence (the `_ensure-kache` recipe), never into the repository.
+- **The decision is a probe, and `init` runs it.** `_ensure-kache` qualifies the host through
+  `scripts/kache-host.sh` — device ids plus clone probes between the candidate store and the
+  checkout, never the OS name — and `just kache-status` re-runs that clone check from the store
+  `kache doctor` resolves into the checkout and worktree base, failing with the reason when a
+  store no longer clones or the worktree-base setting is one `wt` itself refuses. Qualifying: init installs or upgrades kache, writes the user config,
+  owns the daemon lifecycle, and activates, in that order. Non-qualifying: init never installs
+  kache, names the reason, and reports an existing activation as drift with the undo printed,
+  leaving the change to the human.
+- **Install: latest, always.** `just install-kache` (what init calls) installs **or upgrades** to
+  the latest release via `cargo binstall`; the meets-floor "not reinstalling" skip is gone — the
+  floor is a check, not a pin. On a non-qualifying host with kache below the floor, interactive
+  init offers a confirmed **binary-only** upgrade (`just install-kache true` — the boolean is
+  positional); a non-interactive init stops with an error rather than upgrading or skipping
+  silently.
+- **Version floor:** `.github/kache-min-version` = **0.23.0**, consumed by the root justfile and
+  the maintenance audit. The 0.23 line is the one measured here — the store-resolution precedence
+  stack and the daemon `ignore_env` spike both ran on 0.23.1 (`local_store` and `ignore_env`
+  themselves arrived upstream in v0.7.0). Hosts track upstream; the repository pins nothing.
+- **Store placement: the user config file is the single source of truth** (2026-09-23 ruling).
+  init resolves the store through a placement cascade — `kache doctor`'s already-resolved store
+  when it sits on the serving device (still pinned in the config: deliberate), else a `kache/`
+  directory at the checkout volume's mount point on macOS when writable, else the user cache dir
+  when it is on the serving device, else a user-owned directory on that volume; never a root-owned
+  mount point — then writes `[cache] local_store = "<path>"` plus `ignore_env = true` into
+  `~/.config/kache/config.toml` (`%APPDATA%\kache\config.toml` on Windows) via a targeted,
+  comment-preserving merge (`scripts/kache-config-merge.py`, validated with `tomllib`, dated
+  backup beside the original). The write happens even when the value equals kache's default: the
+  pin is deliberate, so a future release changing its default cannot silently relocate the store,
+  and every process — interactive shells, the daemon, editors, agents, scheduled jobs — resolves
+  the same location. init never moves an existing store's contents; it reports an abandoned
+  store's size and leaves deleting it to the human.
 - **Store cap:** `just install-kache` seeds `local_max_size = "100GiB"` when a host has no kache
   config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
   `%APPDATA%\kache\config.toml` on Windows.
+- **macOS hardened runtime strips `DYLD_*`** (measured 2026-09-23). The `cargo binstall` release
+  ships with the hardened runtime (`codesign -dvv` → `flags=0x10000(runtime)`), and dyld removes
+  every `DYLD_*` variable from a hardened process's environment at launch — kache cannot forward
+  what it never sees. From Rust 1.98 on aarch64 the self-contained `rust-lld` links
+  `libLLVM.dylib` dynamically and finds it via `DYLD_FALLBACK_LIBRARY_PATH` (which rustup
+  exports), so wrapped wasm links died with `dyld: Library not loaded: @rpath/libLLVM.dylib` /
+  `error: failed to invoke LLD: signal: 6 (SIGABRT)`. Remedy: `install-kache` re-signs the
+  installed binary ad hoc (`codesign --force -s -`) and gates on the env-passthrough probe
+  (`scripts/kache-host.sh probe-passthrough`); a source install (`cargo install kache`,
+  ad hoc-signed by construction) is the fallback. The re-sign is probe-first so an
+  already-re-signed binary is never rewritten needlessly (replacing the binary makes the running
+  daemon exit).
 - **Sweep:** version-controlled at `scripts/sweep.sh` (four per-root passes + an orphan pass +
   census below), run via
   `just sweep [roots...]`. Schedule per host: launchd on macOS (done — see below),
@@ -36,55 +77,68 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   `kache-action@v1` fell back to the GitHub Actions cache, whose entries are immutable and
   branch-scoped, so a store shared by all same-platform area jobs could never accumulate.
   Revisit only with an S3/R2 backend and a measured comparison against a no-kache control.
+  No workflow runs `just init` or installs/upgrades kache, and a contract test pins that
+  (`tools/test-toolkit/tests/ci_workflow_contracts.rs`); `_ensure-kache` additionally detects a
+  CI environment and steps aside, so a future workflow running init cannot fight the runner.
 - **Health:** judge with `kache stats`, **not** `kache doctor`.
-- **Probe before activating:** never infer the restore mode from the OS. `kache doctor` reports the
-  store filesystem; confirm cloning **from the store to the target directory** — clones never
-  cross volumes, even between two APFS volumes in one container. On Linux `cp --reflink=always`
-  fails honestly; on macOS `cp -c` silently falls back to a copy and exits 0, so compare
-  `stat -f %d` of the two directories (or measure a `df` delta). A probe inside `target/` alone
-  reports "clone" for a checkout kache actually restores by copy. `just kache-status` does the
-  right probe.
+- **Probe mechanics** (encapsulated in `scripts/kache-host.sh`; both `init` and
+  `kache-status` call it): never infer the restore mode from the OS. Confirm cloning **from the
+  store to the target directory** — clones never cross volumes, even between two APFS volumes in
+  one container. On Linux `cp --reflink=always` fails honestly; on macOS `cp -c` silently falls
+  back to a copy and exits 0, so compare `stat -f %d` of the two directories (or measure a `df`
+  delta). A probe inside `target/` alone reports "clone" for a checkout kache actually restores
+  by copy. On Windows the filesystem type is the answer: **ReFS** clones blocks, **NTFS** restores
+  by copy.
 
-## Ruling (2026-09-09)
+## Ruling (2026-09-09; install/activation superseded 2026-09-23)
 
-Per platform, judged on the host, never inferred from the OS name:
+The filesystem conditions stand — judged on the host by the probe `just init`
+runs (`scripts/kache-host.sh`), never inferred from the OS name. What the
+2026-09-23 revision changed is who acts on them: install, store placement,
+daemon lifecycle, and activation are now **init-owned** on qualifying hosts,
+in that order, with activation last; "activation is the host's to perform by
+hand" is the superseded part.
 
 | Platform | kache | Condition |
 |---|---|---|
-| **macOS** | **on** | kache installed at or above the floor, and the store and `target/` on the **same APFS volume**. Clones never cross volumes: a checkout on a second volume is restored by copy even though both are APFS. |
+| **macOS** | **on when the probe qualifies** | kache installed at or above the floor, and the store and `target/` on the **same APFS volume**, proven by clone probe. Clones never cross volumes: a checkout on a second volume is restored by copy even though both are APFS. |
 | **Linux** | **on only when the clone probe passes** | kache at or above the floor, and `cp --reflink=always` from the store to `target/` succeeds. ZFS with block cloning is the expected way to satisfy this; a kernel flag or pool feature alone does not (build-linux has `zfs_bclone_enabled=1` yet the probe fails there, so kache fell back to hard links). Otherwise off. |
-| **Windows** | **off** | NTFS restores by copy; the hardlink option is unsafe because Cargo rewrites outputs. |
+| **Windows** | **on only on ReFS** (a Dev Drive) | the probe qualifies by filesystem type. NTFS restores by copy, and the hardlink option is unsafe because Cargo rewrites outputs — on NTFS, off. |
 | **WSL** | **off** | ext4 in a VHDX is hardlink mode; the CI guest compiles nothing anyway. |
-| **CI** | off | `Swatinem/rust-cache@v2` on every native leg. |
+| **CI** | off | `Swatinem/rust-cache@v2` on every native leg; no workflow runs `just init` or manages kache. |
 
 Two rules that apply everywhere:
 
 - **A `target/` is always wrapped or never wrapped.** In hardlink mode a restored artifact is a
   read-only link into the store, and the next *unwrapped* rebuild fails with
-  "output file ... is not writeable" (build-linux, 2026-09-09). The standing `cross-check`
-  clones on every build host are never wrapped, because CI is never wrapped; do not export
-  `RUSTC_WRAPPER` in a session that touches them.
+  "output file ... is not writeable" (build-linux, 2026-09-09); in clone mode the failure shape
+  cannot occur (a restored artifact is an ordinary writable file), but the rule still guards
+  against half-wrapped trees. The standing `cross-check` clones on every build host must stay
+  unwrapped, because CI is never wrapped — in the config-file era that means the empty-string
+  form `RUSTC_WRAPPER=""` (which Cargo treats as no-wrapper), not merely unsetting the variable:
+  code that merely unsets now inherits the wrapper on qualifying hosts.
 - **Hosts run the latest kache; the repository states only a floor.** `.github/kache-min-version`
-  (`0.15.0`) is the single authority. `just init` installs the latest release on macOS and Linux
-  when kache is absent and never reinstalls one that is present; `just install-kache` upgrades a
-  below-floor install. Neither activates anything.
+  (`0.23.0`) is the single authority. `just install-kache` — and `just init` on qualifying
+  hosts — always target the **latest** release; the floor is a check the recipes apply
+  (below-floor on a non-qualifying host: interactive confirm or non-interactive error), never a
+  pin.
 
-## Per-host activation decision (background, 2026-07-30)
+## Per-host expectations (background, 2026-07-30)
 
-Activation is a **host** decision and the repository cannot see it — `kache init`
-writes `$CARGO_HOME/config.toml` and affects every Rust repo on that machine. Run
-`just kache-status` to see what is actually active here and whether this
-filesystem earns it.
+`just init` decides from the probe and acts on it — this table is the
+background it acts against, not a substitute for the probe. Run
+`just kache-status` (same probe, report side) to see where a host actually
+stands, including any drift while active.
 
 The restore mode is a property of the **filesystem**, not the OS, so these are
 defaults to start from and not conclusions to skip the probe with:
 
 | Target | Decision | Rationale |
 |---|---|---|
-| **macOS dev** | Opt in after probe | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support. |
-| **Linux dev** | Opt in after probe | ext4 is hardlink mode: store ingestion is a second copy and live `target/` links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
-| **Windows dev** | **Off by default** | NTFS restores by copy. Opt in only after a ReFS Dev Drive — holding the store *and* `target/` — is measured. |
-| **WSL2 dev** | Qualified like Linux | A normal distro root is commonly ext4 in a VHDX; measure storage and restore behavior. |
+| **macOS dev** | On when the probe qualifies | Measured 99.6% warm on the current APFS layout. Other store/target layouts must still prove clone support. |
+| **Linux dev** | On when the probe qualifies | ext4 is hardlink mode: store ingestion is a second copy and live `target/` links limit reclamation. btrfs / XFS-reflink are stronger candidates. |
+| **Windows dev** | On only on ReFS (a Dev Drive) | NTFS restores by copy; the probe reads the filesystem type and does not qualify NTFS. |
+| **WSL2 dev** | Off — ext4 in a VHDX is the canonical negative case | The probe does not qualify; a btrfs/XFS-reflink second VHDX would change that. |
 | **WSL2 CI guest** | No | It executes a prebuilt nextest archive and compiles nothing inside the guest. |
 | **CI** | Off for now | Keep `Swatinem/rust-cache@v2`. Revisit only with an S3/R2 backend. |
 
@@ -105,7 +159,7 @@ Only the third is ours:
 Windows legs currently build wrapper-free (Option A). The candidate upgrades, in order of
 likely value:
 
-**Option B — manual install + store persistence.** Install `kache.exe` in `enable-kache` on
+**Option B — manual install + store persistence.** Install `kache.exe` on
 Windows via `cargo binstall` (kache ships win32 prebuilt binaries; `kache-action@v1` is the only
 piece that rejects Windows), then persist the store across runs with `actions/cache` on
 `%LOCALAPPDATA%\kache`. Watch-points:
@@ -128,11 +182,11 @@ steady-state win, prototype B on one Windows leg and compare wall time against O
 
 | | |
 | --- | --- |
-| Version | latest release (0.19.0 at the 2026-09-09 revision); floor **0.15.0** — never run 0.7.x, it was silently write-only |
-| Wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` |
-| Store | `~/Library/Caches/kache`, `local_max_size = "100GiB"`. It must sit on the **same APFS volume as the checkouts it serves**: on 2026-09-09 the store was on the Data volume, so worktrees under `~/.claudine` cloned from it (4 MiB delta for a 200 MiB blob) while the checkout on `/Volumes/coding` was restored by **copy** (200 MiB delta), and `kache doctor` run there reports `EXDEV: hardlink across mounts refused`. Relocate with `KACHE_CACHE_DIR` (set for the daemon's launchd plist too) or a symlink from the default path; `just kache-status` shows which case a checkout is in |
-| Config | `~/.config/kache/config.toml` |
-| Daemon | launchd agent `ninja.kunobi.kache` |
+| Version | latest release (0.26.3 at the 2026-09-23 revision); floor **0.23.0** — never run 0.7.x, it was silently write-only |
+| Wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` — written by `just init` on qualifying hosts, activation last |
+| Store | wherever `kache doctor` says it is (`kache-status` and init both read it from there, never a reconstruction). The user config file is the single source of truth: this host pins `[cache] local_store = "/Volumes/coding/kache"` + `ignore_env = true` in `~/.config/kache/config.toml` (the placement cascade's mount-point rule — a `kache/` directory at the checkout volume's mount point). Relocate by editing that pair, never with `KACHE_CACHE_DIR`: env does not reach every process (the daemon's plist and kache's raw-env version probes keep dripping into the old location), while the config file binds shells, the daemon, editors, and launchd jobs alike. Store resolution, highest priority first: env `KACHE_CACHE_DIR` → user config `local_store` (wins over env when the same file sets `ignore_env = true`) → cwd `kache.toml` (real, lowest-priority, cannot carry the store path or gate env) → kache's built-in default. Above that stack sits the config-file selector: a non-empty `KACHE_CONFIG` makes kache load that file instead of the user config — `ignore_env = true` does not gate it (measured on 0.26.3) — so init leaves the wrapper off, and `kache-status` reports drift, while the init shell or the daemon (`daemon_config_path`) loads another file. An abandoned store may remain at the built-in default — `~/Library/Caches/kache` held 56 GiB at the 2026-09-23 fix; init reports its size, deleting it stays with the human |
+| Config | `~/.config/kache/config.toml` (hand-tuned caps and GC policy live here; init's writes are targeted merges that preserve them) |
+| Daemon | launchd agent `ninja.kunobi.kache` — installed, started, and restarted by `just init` (strictly after the config write; restart triggers: daemon version ≠ installed binary, or the config file's content changed) |
 | Remote | none configured (local-only; daemon therefore optional) |
 | Health | judge with `kache stats`, **not** `kache doctor` |
 
@@ -330,23 +384,27 @@ Swept artifacts come back as link-restores, not recompiles.
 
 - **build-linux** (ZFS; `zfs_bclone_enabled=1` on the PVE kernel, yet `cp --reflink=always`
   from the store to a target directory fails with "operation not permitted", so kache runs in
-  **hardlink mode** there) — policy under the 2026-09-09 ruling is **off**. Reality on that date:
+  **hardlink mode** there) — the probe does not qualify, so `just init` leaves kache off and
+  never installs it; the below-floor 0.12.0 install found there gets at most the confirmed
+  binary-only upgrade path (2026-09-23 ruling; reality on 2026-09-09:
   kache 0.12.0 installed, a daemon running, a 39 GiB store at kache's 50 GiB default cap, and
   sessions had exported `RUSTC_WRAPPER=kache` inside the standing `ci-verification` clone, whose
-  target then held 89 read-only hard links that broke every unwrapped rebuild. The host's
+  target then held 89 read-only hard links that broke every unwrapped rebuild). The host's
   `~/.cargo/config.toml` also records that activation disables incremental compilation at ~670 ms
   per edit-rebuild. Sweep is scheduled here by **cron, daily 04:00** (`crontab -l`), logging to
   `~/.local/state/rusty-biscuit-sweep.log`, and it sweeps `~/coding/rusty-biscuit`, not
   the standing `cross-check` clones. Two host constraints to know:
   - `~/.config` is a **read-only CIFS mount** (`//192.168.100.97/config`, `uid=0,gid=0`), so
-    `just install-kache` reports (no longer fails on) its config-seeding step and
+    `just install-kache` reports (no longer fails on) its config-seeding step — and on this host
+    init's config write cannot land either, which is one more reason the probe keeps it off — and
     `~/.config/systemd/user` is unavailable — hence cron rather than a systemd user timer. The
     kache store therefore sits at kache's own 50 GiB default cap.
   - The volume is **160 G**, so the 120GB `--maxsize` backstop is not a guard rail on this host:
     120GB of target plus the rest of the system is ~84% full before pass 4 even fires.
 - **build-win** (ext4 in WSL2) — kache deferred. Hardlink mode means the store is a real second copy,
   and there's one worktree so nothing to dedup against. If adopted: `local_max_size` ~30GiB against
-  its 196 G filesystem, or give it a btrfs/XFS-reflink second VHDX.
+  its 196 G filesystem, or give it a btrfs/XFS-reflink second VHDX (the ext4 probe does not
+  qualify, so init leaves kache off there).
   Sweep is scheduled **inside the WSL guest** by a systemd user timer, **daily 04:00** with
   `Persistent=true`, logging to `~/.local/state/rusty-biscuit-sweep.log`. Three things to know:
   - The Windows Task Scheduler policy on the same machine does **not** cover this. It sweeps `C:\`
@@ -358,7 +416,8 @@ Swept artifacts come back as link-restores, not recompiles.
     `~/.config`, a CIFS mount with no symlink support. The units therefore live in
     `~/.local/share/systemd/user` (local disk) and `linux-cargo-sweep.sh` links them into
     `timers.target.wants/` there by hand, which systemd honours identically.
-- Install the latest release (floor **0.15.0**) on both, not a package-repo default. Verify with the two-directory test:
+- Install the latest release (floor **0.23.0**) by hand where wanted, not a package-repo
+  default (`just install-kache`). Verify with the two-directory test:
   build a small crate in dir A, copy to B, `rm B/target`, rebuild — B should hit every entry and
   the store should not grow.
 

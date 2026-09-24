@@ -18,7 +18,7 @@ description: |-
 
 pending_review: |-
     {{ 
-        spec 
+        spec && file_exists(spec)
             ? replace(spec, basename(spec), 'review-' + (frontmatter(spec, 'review_iterations') || 1) + '.md') 
             : null 
     }}

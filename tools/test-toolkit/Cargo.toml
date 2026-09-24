@@ -61,6 +61,13 @@ required-features = ["backend-proof"]
 serial_test = "3"
 tempfile = "3"
 
+# `kache_init_contracts` answers `_ensure-kache`'s below-floor [y/N] prompt,
+# which only appears when stdin is a terminal. The same major version five
+# other workspace test suites already build; unix-only because the kache
+# fixture is.
+[target.'cfg(unix)'.dev-dependencies]
+expectrl = "0.8"
+
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
@@ -83,3 +90,8 @@ companion-suites = ["archive-path-guard", "test-audit-typecheck", "test-audit-vi
 # and not merely a compiled archive. Environments without one render a
 # governed ACCEPTED GAP instead of a red cell.
 requires-toolchain = true
+# The kache contract suites execute these `repo-deps` scripts. Source is
+# otherwise left out of the planner's test-input scan, so without this a
+# script-only change would run none of them; with it, the change adds one
+# narrowed L1 cell naming the tests that spell each path.
+source-inputs = ["scripts/kache-config-merge.py", "scripts/kache-host.sh"]

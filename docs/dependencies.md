@@ -102,6 +102,11 @@
   regular dependency for the same gate, which must recognize identifiers by
   Rust's Unicode (XID) rules so a macro named `café` cannot expose a dormant
   `mod`; `proc-macro2` already builds it, so the graph is unchanged.
+  `expectrl` 0.8 is a unix-only development dependency for
+  `kache_init_contracts`, which answers `_ensure-kache`'s below-floor `[y/N]`
+  prompt through a PTY (the prompt appears only when stdin is a terminal).
+  `claudine-cli`, `sniff-cli`, `biscuit-tui-cli`, and `biscuit-terminal`
+  already build the same version.
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
   executables when cooperative cleanup times out.

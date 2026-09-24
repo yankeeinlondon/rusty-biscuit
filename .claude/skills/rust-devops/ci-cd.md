@@ -93,7 +93,10 @@ local and hosted runs. Its package policy is deliberately narrow:
   — unless compiled code reads the changed file. Then the tests that read it
   run, narrowed, on one environment; see
   [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md) and the
-  lessons under "Scheduling by input, not by suffix" below.
+  lessons under "Scheduling by input, not by suffix" below. Another package's
+  *source* is scanned the same way only for a package that lists it in
+  `[package.metadata.ci.tests] source-inputs` (test-toolkit's kache suites
+  declare the two `repo-deps` kache scripts they execute).
 - CI's own inputs are the exception, because CI's own suites now have owners.
   `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
   canonical recipe, environment, and kind (`cargo` or `companion`);
@@ -254,6 +257,14 @@ Reusable lessons from closing a "docs change ran no test" gap
   list of the files a test reads is a second copy of each path, and a stale
   copy of a path is exactly the failure being prevented. Walking each target's
   `mod` tree from its root also yields exact nextest identities.
+- **Declare a coupling only where deriving it is too broad.** Scanning every
+  source path for cross-package readers (measured 2026-09-24) matched 1,875
+  paths, almost all through guard tests that walk whole directories. So
+  `source-inputs` names the *files* whose readers matter and still derives
+  *which tests* read them. Keep the declaration from going stale by testing
+  it: the planner refuses a missing, non-source, or own-source entry, and a
+  real-workspace test fails when no L1 test of the declarer spells the path
+  (`2026-09-23-ensuring-kache-support`, review 5).
 - **Measure precision against real history before shipping a selector.** The
   first cut here would have scheduled cells on 49 of 62 merges; excluding
   tempdir-relative joins and mock literals brought it to 32, all genuine.

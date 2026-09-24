@@ -76,7 +76,8 @@ enable gets no unit either, because the L1 cell never compiles it.
 ## What gets scheduled
 
 The index runs only for changed, deleted, or renamed-away files that are not
-source. For each reference it finds:
+source, plus any source file a package declares as a `source-inputs` entry
+(next section). For each reference it finds:
 
 - **In shipped code** (an embed outside tests): the file is compiled into the
   product, so it is treated as that package's source and selected normally.
@@ -88,6 +89,34 @@ source. For each reference it finds:
   an unchanged dependent of a changed one, it is not compiled a second time in
   that package's dependents check: its own test build already compiles it
   against the change.
+
+### Another package's source: `source-inputs`
+
+Source is left out of the index on purpose. A source change already selects
+its owning package, and many tests name other packages' source only to scan
+it: guard tests that walk whole package directories. Indexing every source
+path would attach those tests to most source edits. (Measured on 2026-09-24:
+1,875 tracked source paths are named by some other package's test, almost all
+through such directory scans.)
+
+Some of those couplings are contracts, though. `tools/test-toolkit`'s kache
+suites execute `scripts/kache-host.sh` and `scripts/kache-config-merge.py`,
+which belong to `repo-deps`; a change to either script alone selected only
+`repo-deps`, and the tests that prove the scripts' behavior did not run. The
+reading package names such files in its own manifest:
+
+```toml
+[package.metadata.ci.tests]
+source-inputs = ["scripts/kache-config-merge.py", "scripts/kache-host.sh"]
+```
+
+A change to a declared path is scanned like a changed test input, and only the
+declaring package's references count. The declaration says *that* the
+coupling exists; which tests read the file is still derived from source, so
+each test must spell the path in one of the forms above. The planner refuses an
+entry that is not source, does not exist, or is the declarer's own source,
+and `RealWorkspaceTestInputTests` in `scripts/ci/test_affected_scope.py` fails
+when a declared path is spelled by none of the declarer's L1 tests.
 
 The test job intersects the filter with the tier's own selection
 (`BISCUIT_TEST_NARROW` in `just/devops.just`), so it can only narrow, never
@@ -137,6 +166,12 @@ same one the repository already accepts for Windows and WSL2, which are tested
 after merge: the nightly run executes every package's full L1 on Linux,
 Windows, and WSL2, so such a case surfaces within a day.
 
+A declared `source-inputs` file weakens the argument: a script can branch on
+the operating system itself, so a narrowed run on macOS does not show what the
+changed script does on Linux. The same exception applies anyway, and the same
+nightly run is the backstop. The script's owning package is also selected by
+the change, on every environment the event schedules.
+
 ## Cost
 
 Measured on the same history, the rule adds about 49 narrowed cells per 62
@@ -161,8 +196,11 @@ skill.
 ## Limits
 
 - Python and TypeScript test suites are not indexed.
-- A test reading another package's *source* file as text is not selected by
-  this rule.
+- A test reading another package's *source* file is selected only when the
+  reading package declares that file in `source-inputs`.
+- A path named inside a shared helper module (`tests/common/…`) schedules
+  every L1 test in every binary that includes the module. Spell the path in
+  the one binary that needs it, as the kache suites' `repo_inputs()` do.
 - A narrowed cell still compiles the package's whole test archive; only the
   test run is narrowed.
 
@@ -172,6 +210,7 @@ skill.
 |---|---|
 | The index | `scripts/ci/test_inputs.py` |
 | Selection | `select_test_inputs`, `test_input_only_cells`, `cell_evidence` in `scripts/ci/affected_scope.py` |
+| Declared source inputs | `source-inputs` in `[package.metadata.ci.tests]`; `validate_source_inputs`, `test_input_references` in `scripts/ci/affected_scope.py` |
 | Rename sources | `scripts/ci/diff_scope.py` (`--renamed-from`) |
 | Narrowing in the test run | `_tier_filter` and `_test` in `just/devops.just` |
 | Completion check | `without_narrowing` in `scripts/ci/completion.py` |

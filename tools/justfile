@@ -70,9 +70,11 @@ test-l3:
 test-browser:
     @echo "test-browser: not applicable for tools"
 
-# not applicable: test-toolkit has no real-resource tier
-test-real:
-    @echo "test-real: not applicable for tools"
+# Real-resource tests: `real_kache_worktree_restore` builds a fixture with the
+# host's installed kache against a scratch store. Skips without kache or a
+# cloning filesystem; BISCUIT_KACHE_REAL_REQUIRED=1 makes that a failure.
+test-real *args="":
+    @just _test_real {{ LIBRARY }} {{ args }}
 
 # Clippy + fmt check for the library.
 lint:

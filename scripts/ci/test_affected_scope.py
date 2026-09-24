@@ -8217,6 +8217,129 @@ class HistoricalDocumentationBlindSpotReplayTests(unittest.TestCase):
         self.assertEqual("documentation", plan["change_class"])
 
 
+class SourceInputSelectionTests(unittest.TestCase):
+    """`source-inputs`: another package's source a package's tests execute.
+
+    Source is left out of the test-input scan, so a contract suite that runs a
+    script owned by another package ran only when its own package changed
+    (review 5 of `2026-09-23-ensuring-kache-support`).
+    """
+
+    READER_TEST = "(binary_id(reader::host) & test(=tool_contract_holds))"
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+        seed_build_inputs(self.root)
+        reads_tool = (
+            "fn repo_root() -> std::path::PathBuf { todo!() }\n"
+            "#[test]\nfn tool_contract_holds() {\n"
+            "    let _ = repo_root().join(\"scripts/tool.sh\");\n}\n"
+        )
+        write_tree(
+            self.root,
+            {
+                "scripts/src/lib.rs": "",
+                "scripts/tool.sh": "#!/usr/bin/env bash\n",
+                "scripts/other.sh": "#!/usr/bin/env bash\n",
+                "reader/lib/src/lib.rs": "",
+                "reader/lib/tests/host.rs": reads_tool,
+                "bystander/lib/src/lib.rs": "",
+                "bystander/lib/tests/names.rs": reads_tool,
+            },
+        )
+        self.metadata = self.metadata_with(["scripts/tool.sh"])
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def metadata_with(self, declared: object) -> dict[str, object]:
+        packages = [
+            rust_package(self.root, "owner", "scripts", [("lib", "owner", "src/lib.rs")]),
+            rust_package(
+                self.root,
+                "reader",
+                "reader/lib",
+                [("lib", "reader", "src/lib.rs"), ("test", "host", "tests/host.rs")],
+                ci={"tests": {"source-inputs": declared}},
+            ),
+            rust_package(
+                self.root,
+                "bystander",
+                "bystander/lib",
+                [("lib", "bystander", "src/lib.rs"), ("test", "names", "tests/names.rs")],
+            ),
+        ]
+        return {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+        }
+
+    def policy(self, metadata: dict[str, object]) -> dict[str, dict[str, object]]:
+        return package_ci_policy(
+            workspace_packages_from(metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def plan(self, files: list[str]) -> dict:
+        plan = calculate_scope(
+            files, self.root, self.metadata, environments_for_tests(), self.policy(self.metadata)
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    def test_a_declared_script_schedules_the_declarers_narrowed_linux_l1_cell(self) -> None:
+        plan = self.plan(["scripts/tool.sh"])
+        self.assertEqual(["owner"], plan["source_packages"])
+        narrowed = [
+            (cell["package"], cell["environment"], cell["gate"], cell["test_filter"])
+            for cell in plan["cells"]
+            if cell.get("test_filter")
+        ]
+        self.assertEqual([("reader", "ubuntu-latest", "L1", self.READER_TEST)], narrowed)
+        self.assertEqual(
+            {"owner"},
+            {cell["package"] for cell in plan["cells"] if not cell.get("test_filter")},
+        )
+        reader = next(entry for entry in plan["packages"] if entry["package"] == "reader")
+        self.assertIn("scripts/tool.sh", reader["selection_reason"])
+
+    def test_an_undeclared_script_schedules_only_its_owner(self) -> None:
+        # The planner before `source-inputs`: the same references, no cell.
+        self.metadata = self.metadata_with([])
+        plan = self.plan(["scripts/tool.sh"])
+        self.assertEqual({"owner"}, {cell["package"] for cell in plan["cells"]})
+
+    def test_a_script_the_declarer_does_not_name_schedules_only_its_owner(self) -> None:
+        plan = self.plan(["scripts/other.sh"])
+        self.assertEqual({"owner"}, {cell["package"] for cell in plan["cells"]})
+
+    def test_a_declared_script_changed_with_the_declarers_source_adds_no_narrowed_cell(
+        self,
+    ) -> None:
+        plan = self.plan(["scripts/tool.sh", "reader/lib/src/lib.rs"])
+        self.assertFalse(any(cell.get("test_filter") for cell in plan["cells"]))
+
+    def test_malformed_declarations_are_refused(self) -> None:
+        cases = {
+            "not-a-list": "scripts/tool.sh",
+            "duplicate": ["scripts/tool.sh", "scripts/tool.sh"],
+            "dot-spelled": ["./scripts/tool.sh"],
+            "backslash-spelled": ["scripts\\tool.sh"],
+            "non-source": ["scripts/README.md"],
+            "missing": ["scripts/gone.sh"],
+            "own-source": ["reader/lib/src/lib.rs"],
+        }
+        write_tree(self.root, {"scripts/README.md": "# Scripts\n"})
+        for label, declared in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(RuntimeError, "source.inputs|source input"):
+                    self.policy(self.metadata_with(declared))
+
+
 class RealWorkspaceTestInputTests(unittest.TestCase):
     """The shipped tree: the live instance is caught and a typo stays free."""
 
@@ -8269,6 +8392,54 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
                 plan = self.plan(readme)
                 self.assertEqual([], plan["cells"])
                 self.assertEqual([], plan["builds"])
+
+    def narrowed_toolkit_filter(self, changed: str) -> str:
+        plan = self.plan(changed)
+        cells = [
+            cell for cell in plan["cells"]
+            if cell["package"] == "test-toolkit" and cell.get("test_filter")
+        ]
+        self.assertEqual(1, len(cells), f"{changed} scheduled no narrowed test-toolkit cell")
+        self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
+        return cells[0]["test_filter"]
+
+    def test_each_kache_script_selects_the_contract_binaries_that_run_it(self) -> None:
+        # The recipe-level binaries reach both scripts through the fixture
+        # checkout, so each must spell them for its own cell to be scheduled.
+        recipe_level = ("kache_ensure_contracts", "kache_init_contracts", "kache_status_contracts")
+        cases = {
+            "scripts/kache-host.sh": ("kache_host_contracts", *recipe_level),
+            "scripts/kache-config-merge.py": ("kache_config_merge_contracts", *recipe_level),
+        }
+        for script, binaries in cases.items():
+            with self.subTest(script=script):
+                self.assertTrue((ROOT / script).is_file(), f"{script} is no longer tracked")
+                test_filter = self.narrowed_toolkit_filter(script)
+                for binary in binaries:
+                    self.assertIn(f"(binary_id(test-toolkit::{binary}))", test_filter)
+
+    def test_a_justfile_change_selects_the_kache_recipe_text_contracts(self) -> None:
+        self.assertIn(
+            "(binary_id(test-toolkit::kache_recipe_contracts))",
+            self.narrowed_toolkit_filter("justfile"),
+        )
+
+    def test_every_declared_source_input_is_read_by_its_declarer(self) -> None:
+        # A declaration no test of the declarer spells schedules nothing; it
+        # would read as coverage while providing none.
+        declared = affected_scope.declared_source_inputs(self.policy)
+        self.assertTrue(declared, "the workspace declares no source-inputs")
+        for path, declarers in declared.items():
+            for declarer in declarers:
+                with self.subTest(path=path, declarer=declarer):
+                    plan = self.plan(path)
+                    self.assertTrue(
+                        any(
+                            cell["package"] == declarer and cell.get("test_filter")
+                            for cell in plan["cells"]
+                        ),
+                        f"{declarer} declares {path} but no L1 test of it names the path",
+                    )
 
     def test_a_guard_only_owner_gains_the_narrowed_cell_on_its_one_record(self) -> None:
         # `claudine/lib/src/lib.rs` selects `test-toolkit` for the archive-path
