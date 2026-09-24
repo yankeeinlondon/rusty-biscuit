@@ -1,0 +1,9 @@
+# Cargo home config fixture (fixture: [build] present with an unrelated key
+# and a comment; the merge must add rustc-wrapper beside them).
+
+[build]
+# -Z threads was hand-tuned for this host.
+rustflags = ["-Z", "threads=8"]
+
+[alias]
+xtask = "run -p xtask --"

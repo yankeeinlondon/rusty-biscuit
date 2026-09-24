@@ -45,8 +45,10 @@
   non-source change selects no package, except where compiled code names the
   path: embedded into shipped code it is that package's source; read by a
   test it adds one `{package, ubuntu-latest, L1}` cell narrowed to exactly
-  those tests. Spell a test's repository reads in the forms the `rust-testing`
-  skill lists. See `docs/cicd/test-inputs.md`.
+  those tests. Another package's source file gets the same narrowed cell only
+  for a package that declares it in `[package.metadata.ci.tests]
+  source-inputs`. Spell a test's repository reads in the forms the
+  `rust-testing` skill lists. See `docs/cicd/test-inputs.md`.
 - **Producers prove their cells; each area audits its planned coverage.** Each
   executing cell is one dispatch row, and its producer compares its own
   expected-test listing with its reports and uploads a completion record

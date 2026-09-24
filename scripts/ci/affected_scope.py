@@ -515,6 +515,12 @@ CI_TEST_FIELDS = {
     #: Named build sidecars from [`SIDECAR_TABLE`]: another package's binaries,
     #: compiled by the producer and shipped beside the archive.
     "sidecars",
+    #: Another package's source files this package's tests execute or read,
+    #: by exact repository path. A change to one is scanned like a changed test
+    #: input, for this package's references alone: source is otherwise left
+    #: out of that scan, so such a test runs only when its own package changes
+    #: (see `test_input_references`).
+    "source-inputs",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -1514,6 +1520,7 @@ def validate_package_ci(
 
     validate_archive_includes(label, tests.get("archive-includes", []))
     validate_sidecars(label, tests.get("sidecars", []), root)
+    validate_source_inputs(label, tests.get("source-inputs", []), root)
 
     suites = tests.get("companion-suites", [])
     if not isinstance(suites, list) or not all(isinstance(s, str) for s in suites):
@@ -1685,6 +1692,45 @@ def validate_sidecars(label: str, names: Any, root: Path) -> None:
         )
 
 
+def validate_source_inputs(label: str, paths: Any, root: Path) -> None:
+    """Validate a package's declared `source-inputs`.
+
+    Each entry must be a tracked-style repository path (forward slashes, no
+    `.`/`..`) to an existing source file. A non-source path needs no
+    declaration — the test-input scan already covers it — and a missing one is
+    a stale declaration, which would otherwise schedule nothing silently.
+    Whether the path lies outside the declaring package is checked by
+    `package_ci_policy`, which knows the manifest directory.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the malformed, duplicated, non-source, or
+    missing entry.
+    """
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise RuntimeError(
+            f"{label}.tests field 'source-inputs' must be a list of repository paths"
+        )
+    if len(set(paths)) != len(paths):
+        raise RuntimeError(f"{label}.tests field 'source-inputs' has duplicates: {paths}")
+    for path in paths:
+        if test_inputs.normalize(path) != path:
+            raise RuntimeError(
+                f"{label}.tests source input {path!r} must be a repository-relative "
+                "path spelled with '/' and no '.' or '..' components"
+            )
+        if not is_package_source_path(PurePosixPath(path)):
+            raise RuntimeError(
+                f"{label}.tests source input {path!r} is not source; a non-source "
+                "file a test reads is found without a declaration"
+            )
+        if not (root / path).is_file():
+            raise RuntimeError(
+                f"{label}.tests source input {path!r} does not exist; drop or "
+                "rename the stale declaration"
+            )
+
+
 def package_ci_policy(
     packages: dict[str, dict[str, Any]],
     runner_labels: set[str],
@@ -1719,7 +1765,15 @@ def package_ci_policy(
             "native": ci.get("native", {}),
             "archive_includes": tests.get("archive-includes", []),
             "sidecars": tests.get("sidecars", []),
+            "source_inputs": tests.get("source-inputs", []),
         }
+        for path in record["source_inputs"]:
+            own = manifest_directory(root, package).as_posix()
+            if own in (".", "") or path.startswith(own + "/"):
+                raise RuntimeError(
+                    f"package '{name}' [package.metadata.ci].tests source input "
+                    f"{path!r} is its own source, which already selects its tests"
+                )
         record["runner_tools"] = sorted(tests.get("runner-tools", []))
         if not record["gates"]:
             record["exclusion"] = {
@@ -3490,6 +3544,7 @@ def calculate_scope(
             packages,
             input_reader or worktree_reader(root),
             frozenset(name for name, record in policy.items() if record.get("l1_include_slow")),
+            declared_source_inputs(policy),
         )
     )
     # A changed file compiled into a package's shipped code IS that package's
@@ -4342,28 +4397,48 @@ def worktree_reader(root: Path) -> Callable[[str], str | None]:
     return read
 
 
+def declared_source_inputs(policy: dict[str, dict[str, Any]]) -> dict[str, frozenset[str]]:
+    """Each declared `source-inputs` path -> the packages that declared it."""
+    declared: dict[str, set[str]] = {}
+    for name, record in policy.items():
+        for path in record.get("source_inputs", ()):
+            declared.setdefault(path, set()).add(name)
+    return {path: frozenset(names) for path, names in declared.items()}
+
+
 def test_input_references(
     paths: Sequence[str],
     root: Path,
     packages: dict[str, dict[str, Any]],
     reader: Callable[[str], str | None],
     include_slow: frozenset[str],
+    source_inputs: dict[str, frozenset[str]] | None = None,
 ) -> list[test_inputs.Reference]:
-    """Every place compiled code names one of the changed non-source `paths`.
+    """Every place compiled code names one of the changed `paths`.
 
-    Source paths are left out: a source change already selects its owning
-    package, and a test that reads another package's source as text is a
-    separate, rarer coupling this selection does not take on.
+    Source paths are left out unless a package declared the path in its
+    `source-inputs`, and then only that package's references count. A source
+    change already selects its owning package, and scanning every source path
+    for every reader is broad: guard tests walk whole package directories, so a
+    general rule would attach their tests to most source edits. The
+    declaration names the cross-package couplings that are worth a narrowed
+    cell — a contract suite that executes another package's script.
     """
+    source_inputs = source_inputs or {}
     candidates = [
         path
         for path in normalized_paths(paths)
-        if not is_package_source_path(PurePosixPath(path))
+        if not is_package_source_path(PurePosixPath(path)) or path in source_inputs
     ]
     if not candidates:
         return []
     targets = test_inputs.targets_from_metadata(packages.values(), root.resolve().as_posix())
-    return test_inputs.scan(targets, reader, candidates, include_slow)
+    return [
+        reference
+        for reference in test_inputs.scan(targets, reader, candidates, include_slow)
+        if not is_package_source_path(PurePosixPath(reference.path))
+        or reference.package in source_inputs.get(reference.path, ())
+    ]
 
 
 def select_test_inputs(

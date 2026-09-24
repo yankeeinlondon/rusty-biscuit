@@ -68,7 +68,7 @@ now simply a failure. Running
 the binary from the ambient CWD is both a cost (the 35-member workspace walk,
 20–77 s per test on WSL2) and a correctness hazard (the checkout's git state and
 root `system-prompt.md`, the developer's `$HOME`, the host's real provider
-binaries). See the `rust-testing` skill → "Spawning the Binary Under Test (L1)".
+binaries). See the `rust-testing` skill's `spawning-binaries.md`.
 
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 

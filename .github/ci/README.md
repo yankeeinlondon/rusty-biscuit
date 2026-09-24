@@ -562,6 +562,7 @@ would silently exempt a package and miss its first test.
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; the closed vocabulary is `SUITE_REGISTRY`'s companion half in `affected_scope.py` |
 | `archive-includes` | string[] | `[]` | build outputs the producer must add to this package's archive, relative to the profile output directory |
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
+| `source-inputs` | string[] | `[]` | another package's source files this package's tests execute or read, by exact repository path; a change to one adds a narrowed `ubuntu-latest` L1 cell for the tests that spell it. Must exist, be source, and lie outside this package. See [`docs/cicd/test-inputs.md`](../../docs/cicd/test-inputs.md) |
 | `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so its consumer provisions the pinned toolchain where the environment has `cargo_toolchain`, and an environment without it renders a governed `ACCEPTED GAP` rather than a red cell |
 
 `requires-toolchain` is for the minority of suites that test the repository's

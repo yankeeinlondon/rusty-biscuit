@@ -6,6 +6,41 @@ Use this when a crate emits HTML/CSS (Markdown→HTML, component libraries,
 report generators) and you need to verify the browser actually *applies* the
 styles — not merely that a substring appears in the source.
 
+## Headless and focus-isolation invariant
+
+The Browser tier is always headless. A `browser_*` test must not create or
+activate a visible window, request foreground focus, move the host pointer, or
+inject host OS input. Do not use headed-browser flags, application activation,
+`osascript`, `cliclick`, `xdotool`, `SendInput`, or equivalent desktop
+automation in this tier. Browser tests must be safe to run while someone is
+using the same workstation.
+
+Drive keyboard, pointer, media-query, and viewport behavior through the
+browser's automation protocol (for example CDP key/mouse dispatch and media
+emulation), then assert on the live DOM, computed styles, accessibility state,
+or used geometry. Browser-dispatched input is the correct evidence when the
+requirement concerns browser behavior; duplicating it with Level-3 OS input
+usually adds focus races and platform dependence without testing more product
+logic.
+
+Use Level 3 only when the requirement explicitly concerns the OS-to-application
+input path itself. Such a test must live outside Browser-tier binaries, remain
+opt-in through `RUN_LEVEL3=1`, and must not be added merely to strengthen an
+HTML/CSS/DOM interaction test that headless browser automation already covers.
+
+`just test-browser` runs `-j 1`, one Chrome at a time; `.config/nextest.toml`
+holds the effective teardown policy.
+
+Assert on **computed styles**, not source substrings or screenshots:
+
+```rust
+let mut h = ChromeHarness::new();
+h.spawn().await?;
+h.render_html(&wrap_fragment("<div class='x'>hi</div>", "#fff")).await?;
+let bg = h.computed_style(".x", "background-color").await?;
+assert_eq!(bg, "rgb(17, 27, 39)");
+```
+
 ## Principles
 
 - **Assert computed styles, not pixels.** `getComputedStyle(el).<prop>` is

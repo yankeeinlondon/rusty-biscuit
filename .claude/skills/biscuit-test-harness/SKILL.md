@@ -369,4 +369,4 @@ AppleScript state).
   patterns against captured `frame.raw` (SGR re-emission collapses;
   semicolon vs ITU colon form). Load via the Skill tool.
 - `rust-testing` skill, SKILL.md — L1/L2/L3 taxonomy, `require_level!`
-  gating, canonical `just` recipes, `test-l2` mechanics.
+  gating, canonical `just` recipes; `l2-tests.md` for `test-l2` mechanics.

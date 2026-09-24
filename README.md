@@ -90,7 +90,7 @@ Once installed run `just init` from the repo's root which will:
 - ensure you have all necessary build tools for your operating system
 - install some core CLIs from this monorepo to make sure all your `justfile` configurations will work with full fidelity
 
-The [kache](https://github.com/kunobi-ninja/kache) compiler cache is installed by `just init` on macOS and Linux but never activated by the repository: it is on for macOS (store and `target/` on one APFS volume), on for Linux only when a clone probe passes, and off for Windows and WSL. `just kache-status` reports where this host stands; the ruling is in `docs/kache-strategy.md`.
+The [kache](https://github.com/kunobi-ninja/kache) compiler cache is owned end to end by `just init` on hosts whose filesystem earns it — decided by a clone probe (APFS, btrfs/XFS-reflink, and ReFS qualify; ext4 and NTFS do not), never by the OS name: qualifying hosts get install, store placement, daemon, and activation (last); non-qualifying hosts are left alone with the reason named. `just kache-status` reports where this host stands and fails loudly on drift; the rulings are in `docs/kache-strategy.md`.
 
 See [Development Environment Initialization](./docs/initialization.md) for the
 complete process, platform behavior, and troubleshooting guidance.

@@ -2,6 +2,17 @@
 
 Fuzz testing feeds semi-random input to code to find crashes, panics, and security vulnerabilities.
 
+## In this repository
+
+Fuzz targets live in `<crate>/fuzz/` and require nightly Rust. Run locally:
+
+```bash
+cd biscuit-file/lib/fuzz
+cargo +nightly fuzz run pdf_extract -- -runs=1000
+```
+
+Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
+
 ## Setup
 
 Requires nightly Rust:

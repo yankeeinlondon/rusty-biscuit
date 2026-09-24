@@ -130,6 +130,14 @@ directly; use your own worktree for ad hoc sessions.
   for `python3` finds one and then fails on use. A working 3.13 is reachable
   only as `py`. Anything that runs `scripts/ci/*.py` over SSH must spell `py`
   (measured 2026-09-15).
+- **`bash` on `BUILD_WIN`'s `PATH` is Cygwin's** (`C:\cygwin64\bin\bash.exe`,
+  `uname -s` = `CYGWIN_NT`, drives under `/cygdrive/b`), not Git Bash. To run a
+  repo shell script the way a Git Bash user would, call
+  `& "C:\Program Files\Git\bin\bash.exe" /b/<path>` (`MINGW64_NT`, `/b/`).
+  `scripts/kache-host.sh qualify` gave the same verdicts under both
+  (2026-09-23). `B:` is ReFS and `C:` NTFS, so the host covers both kache
+  qualification outcomes; a scratch directory on `B:` plus a scratch
+  `LOCALAPPDATA` keeps a probe off the real `B:\kache` and user cache.
 - **A login shell reports its `~/.bash_logout`'s status, not the script's.**
   Diagnosed 2026-09-22, and the cause of the `wsl FAIL` with a
   `cross-check-exit: 0` marker recorded on 2026-09-15. The WSL guest's

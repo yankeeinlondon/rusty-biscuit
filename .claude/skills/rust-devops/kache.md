@@ -214,11 +214,14 @@ For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses 
 ### In this repo (rusty-biscuit)
 
 The repository tracks **no** rustc wrapper and CI uses none (removed 2026-07-30 after measuring
-0–6% hit rates). Activation is a host decision under the 2026-09-09 ruling: macOS on when the
-store and `target/` share an APFS volume; Linux on only when a clone probe from the store to
-`target/` passes; Windows and WSL off. `just init` installs the latest kache on macOS and Linux
-(never reinstalling), `.github/kache-min-version` is the version floor, `just kache-status`
-reports the host, and a `target/` is always wrapped or never wrapped. See `docs/kache-strategy.md`.
+0–6% hit rates). `just init` owns host setup (2026-09-23 ruling, superseding 2026-09-09):
+a filesystem qualification probe (`scripts/kache-host.sh qualify` — device ids and clone probes,
+never the OS name) decides. On a qualifying host init installs or upgrades to the latest release,
+pins the store in the user config (`local_store` + `ignore_env = true`), owns the daemon, and
+activates last via `$CARGO_HOME/config.toml`. On a non-qualifying host it never installs kache.
+`.github/kache-min-version` (0.23.0) is a floor check, not a pin. `just kache-status` reports the
+host through the same probe, and a `target/` is always wrapped or never wrapped. See
+`docs/kache-strategy.md`.
 
 A restored hardlinked artifact can be read-only in `target/`. If a later Cargo
 invocation changes the build fingerprint and tries to replace that same path,

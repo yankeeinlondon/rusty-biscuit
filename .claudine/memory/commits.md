@@ -804,6 +804,22 @@ belong here.
   `_completed` — `planning(<area>):` is correct, NOT `chore:` or
   `docs(<area>):`. See `5aff59c38` for the
   2026-09-15-initialize-after-proxy Phase 8 example.
+- A **mid-phase close** (Phase N of total_phases M, N < M) bumps ONLY
+  `phase: <N>` in plan.md frontmatter and adds the per-phase
+  `source_files_during_phase_N` / `docs_updated_during_phase_N` /
+  `skills_files_updated_during_phase_N` blocks. It does NOT set
+  `completed_phase: "<N>"` (that field would imply the fix is fully
+  done when it isn't) or `implemented: true` (also a final-close
+  signal) — those land with the LAST phase's close. Spec.md
+  `message_to_agent` is rewritten to point at the next phase's work;
+  spec frontmatter `status:` / `implemented:` stay unchanged. The
+  active fix directory remains in place (no move to `_completed`).
+  Pre-flight `git show :<path> | head -10` against `plan.md` confirms
+  whether the staged bump is just `phase:` or also
+  `completed_phase:` + `implemented:`. See `390294294` (Phase 2 of
+  5) and `51f31dcf8` (Phase 3 of 5) for the
+  2026-09-23-ensuring-kache-support mid-phase precedents, and
+  `d3bbafbc5` (Phase 8 of 8 final) for the contrasting shape.
 - A `planning(<area>):` phase close can land as "Outcome: blocked on
   required human input" rather than "shipped deliverables" when the spec
   gates the next phase on operator-supplied values that have not been
@@ -1161,18 +1177,35 @@ belong here.
   leaves the contract without a reader, and splitting the field
   from the consumer leaves the reader without a contract.
 - A spec.md that lands in the same batch as its implementation is
-  `planning(<area>):` with `status: implemented` already set, NOT a
-  "schedule" event. In `2026-09-22-test-input-blind-spot`, the spec
-  was authored with `status: implemented`, `implemented: true`, and
-  `implemented_by` already populated when the planning commit
-  landed; the commit subject was `planning(repo): record
-  <name> fix design and measurement spikes`, not
-  `planning(repo): schedule <name>`, because no future work was
-  scheduled — the spec and its spike scripts document what the
-  sibling `fix`/`test`/`docs` commits had already done. The
-  spec/spike cross-reference still requires the atomic combine
-  (the planning rule's "spec/plan/spike cross-references must
-  resolve within that one commit" applies), and the body should
-  name which sibling commits the spec's
-  `scripts/ci/test_inputs.py`-style references resolve against.
+    `planning(<area>):` with `status: implemented` already set, NOT a
+    "schedule" event. In `2026-09-22-test-input-blind-spot`, the spec
+    was authored with `status: implemented`, `implemented: true`, and
+    `implemented_by` already populated when the planning commit
+    landed; the commit subject was `planning(repo): record
+    <name> fix design and measurement spikes`, not
+    `planning(repo): schedule <name>`, because no future work was
+    scheduled — the spec and its spike scripts document what the
+    sibling `fix`/`test`/`docs` commits had already done. The
+    spec/spike cross-reference still requires the atomic combine
+    (the planning rule's "spec/plan/spike cross-references must
+    resolve within that one commit" applies), and the body should
+    name which sibling commits the spec's
+    `scripts/ci/test_inputs.py`-style references resolve against.
+- A terminal review (`review-N.md` with `ready: true` and no `next:`
+    field) does NOT require the directory move to `_completed/` in the
+    same planning commit when the spec's `message_to_agent` reserves
+    the move for the author's review. The canonical "close cycle N and
+    move to completed" pattern applies when the orchestrator owns the
+    move decision; when the author has decoupled it ("do not move it to
+    _completed or run `just complete` — that is the author's call"),
+    the planning commit ships the final review, the implementation-log
+    appends the per-cycle records, and the spec frontmatter adds
+    `completed: true`, but the active directory remains in place.
+    Verified with `2026-09-23-ensuring-kache-support` review 7
+    (`ready: true`, `implemented: false`, no `next:`); the planning
+    commit was `planning(repo): record review cycles 1-7 and finalize
+    kache host-setup fix` and the directory stayed in `fixes/`. The
+    "cycle close into _completed/ is valid even when the moved spec
+    still shows `implemented: false`" rule governs the canonical
+    pattern; this entry governs the deferred-move variant.
 

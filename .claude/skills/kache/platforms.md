@@ -47,10 +47,19 @@ Note that APFS `clonefile` **does** succeed between separate volumes in the same
 ## macOS
 
 - APFS → reflink. Best case, and the platform kache is tuned for.
-- The store lives under `~/Library/Caches/kache` (with `index.db` alongside the blobs).
+- The default store is `~/Library/Caches/kache` (with `index.db` alongside the blobs), but the
+  user config can pin it anywhere — `kache doctor` names the store actually in use.
 - kache **automatically excludes its own store from Time Machine and Spotlight** — worth knowing
   before you go hunting for why backups didn't grow.
 - The daemon installs as a **launchd** login agent (`~/Library/LaunchAgents/ninja.kunobi.kache.plist`).
+  Run `kache daemon install` from a clean environment, such as `env -u KACHE_CACHE_DIR`. On the
+  dev Mac the plist carried a hand-set `KACHE_CACHE_DIR` until it was regenerated that way; a
+  clean install writes only `KACHE_LOG`.
+- A running **`kache monitor` starts its own daemon** (a child of the monitor, carrying the
+  monitor's environment) whenever none is reachable. After `kache daemon stop`/`uninstall`, or
+  after the binary is replaced, the daemon may therefore not be launchd's (check its parent PID).
+  `kache daemon restart` hands ownership back to launchd. Stopping the daemon while the monitor
+  runs can leave two daemons serving two stores; in that state `restart` fails (2026-09-23).
 - The docs cite APFS specifically as a reason incremental compilation is disabled: running cargo's
   incremental alongside artifact caching *"can corrupt artifacts on certain filesystems like APFS."*
 

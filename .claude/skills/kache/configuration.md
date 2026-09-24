@@ -39,11 +39,47 @@ Sources: [0.19 config](https://github.com/kunobi-ninja/kache/blob/v0.19.0/src/co
 | --- | --- |
 | Config file (macOS/Linux) | `~/.config/kache/config.toml` |
 | Config file (Windows) | `%APPDATA%\kache\config.toml` |
-| Store (macOS) | `~/Library/Caches/kache` + `index.db` |
-| Store (Linux) | `~/.cache/kache` |
-| Store (Windows) | `%LOCALAPPDATA%\kache` by default — confirm with `kache doctor` |
+| Store | wherever `kache doctor` says it is — the authority, never a reconstruction from defaults |
 | Cargo wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` |
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |
+
+**Do not read the store location from a table.** The built-in defaults are
+`~/Library/Caches/kache` (macOS), `~/.cache/kache` (Linux), and
+`%LOCALAPPDATA%\kache` (Windows), but the store can be pinned anywhere via the
+user config. Store resolution, highest priority first (verified 2026-09-23 on
+kache 0.23.1):
+
+1. env `KACHE_CACHE_DIR`;
+2. `[cache] local_store` in the user config — **wins over env** when the same
+   file sets `[cache] ignore_env = true` (which gates all env overrides,
+   `KACHE_RUNTIME_DIR` included, so the daemon's socket follows the store);
+3. a `kache.toml` in the current working directory — a real but
+   lowest-priority layer: it **cannot** carry the store path (host-specific)
+   and its `ignore_env` has no effect (only the user-level file can gate env);
+4. kache's built-in default.
+
+**The config-file selector sits above that whole stack.** A non-empty
+`KACHE_CONFIG` makes kache load that file *instead of* the user config, and
+`ignore_env = true` in the user config does **not** gate it — the selector is
+read before any file is (measured 2026-09-24 on 0.26.3 with `kache doctor
+--json` against scratch configs). A `KACHE_CONFIG` naming a missing file drops
+kache to its built-in default rather than falling back to the user config; an
+empty one is ignored. `kache doctor --json` names no config path; `kache daemon
+--json` reports the running daemon's as `daemon_config_path` (null when none
+answers), and its `socket` follows the selected config's store, so a shell with
+`KACHE_CONFIG` talks to a different daemon. `scripts/kache-host.sh
+config-source` reports both sides; `just init` leaves the wrapper off and
+`kache-status` reports drift when either loads another file.
+
+`kache doctor --json`'s `Cache dir` detail reads `<path> (will be created on
+first build)` until the store exists (doctor creates it right after); strip
+that note before comparing it with a path.
+
+`KACHE_DISABLED` is ungated — honored whichever layer wins. In rusty-biscuit,
+`just init` writes layer 2 (`local_store` + `ignore_env = true`) on qualifying
+hosts precisely so every process — shells, the daemon, editors, launchd jobs —
+resolves one store; never relocate a store with env exports, which quietly miss
+every process that does not source the shell profile.
 
 `kache doctor` prints the resolved store and Cargo wiring. Use it rather than guessing, especially
 if the home directory or Cargo config is synced across hosts. Before accepting its report that the

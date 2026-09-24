@@ -1,0 +1,8 @@
+# kache configuration (fixture: no [cache] table at all — the merge must
+# append one at the end without disturbing the tables that exist).
+
+[build]
+jobs = 8
+
+[net]
+offline = false
