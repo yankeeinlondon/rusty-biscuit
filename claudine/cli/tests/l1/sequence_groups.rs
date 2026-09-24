@@ -1113,3 +1113,58 @@ Body.
         "both overlapping prompt tasks must retain uncontaminated exact epoch maps: {stderr}"
     );
 }
+
+/// Parallel members run a prompt task's whole compose pipeline in-process, so
+/// each member thread must reserve the main thread's 8 MiB rather than depend
+/// on Rust's spawn default.
+///
+/// `RUST_MIN_STACK` lowers the default for every thread that does not ask for
+/// a size. At 384 KiB a debug-build member proxying into a looping document
+/// overflows (it needs 512–768 KiB); an explicitly sized member is unaffected.
+#[test]
+fn parallel_members_do_not_depend_on_the_default_thread_stack() {
+    let fixture = CliProcessFixture::named("seq-group-member-stack");
+    fake_goose(&fixture);
+
+    fs::create_dir_all(fixture.cwd().join("prompts")).unwrap();
+    fs::write(
+        fixture.cwd().join("prompts/router.md"),
+        "---\ninitialize:\n  stack:\n    - action: {proxy: './loop-target.md'}\n---\nRouter.\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.cwd().join("prompts/loop-target.md"),
+        "---\nphase: 1\nloop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 5\n---\nLOOP {{ phase }}\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.cwd().join("seq.md"),
+        r#"---
+sequence:
+  - name: fanout
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: one
+          prompt: prompts/router.md
+        - name: two
+          prompt: prompts/router.md
+---
+
+Body.
+"#,
+    )
+    .unwrap();
+
+    let output = fixture
+        .command()
+        .env("RUST_MIN_STACK", (384 * 1024).to_string())
+        .args(["sequence", "--goose", "--yolo", "seq.md"])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    assert!(!stderr.contains("overflowed its stack"), "stderr:\n{stderr}");
+}
