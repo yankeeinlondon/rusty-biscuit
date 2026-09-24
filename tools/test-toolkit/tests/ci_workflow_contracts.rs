@@ -284,9 +284,14 @@ fn kache_has_a_single_version_floor() {
     );
 }
 
-// Ruling 2026-09-09: `just init` installs kache on macOS and Linux (never on
-// Windows or WSL) but activation stays a host decision, so no recipe may wire
-// the wrapper.
+// Ruling 2026-09-09, superseded 2026-09-23 by
+// fixes/2026-09-23-ensuring-kache-support: `just init` still runs the
+// `_ensure-kache` step, but that step now owns activation on qualifying
+// hosts through the ordered sequence pinned in `kache_recipe_contracts.rs`.
+// This test remains the structural guard (init wires the step; the installer
+// stays an explicit recipe; no recipe shells out to `kache init` or exports
+// RUSTC_WRAPPER=kache directly) until the D1/D2 block is reworked onto the
+// new contract.
 #[test]
 fn init_installs_the_compiler_cache_without_activating_it() {
     let justfile = read("justfile");
@@ -299,8 +304,8 @@ fn init_installs_the_compiler_cache_without_activating_it() {
         "the `_ensure-kache` step must exist"
     );
     assert!(
-        justfile.contains("install-kache:"),
-        "the installer must remain available as an explicit recipe"
+        justfile.contains("install-kache binary_only="),
+        "the installer must remain available as an explicit recipe (binary_only parameter)"
     );
     let activates = justfile.lines().any(|line| {
         let cmd = line.trim_start();
