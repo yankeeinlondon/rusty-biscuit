@@ -574,6 +574,17 @@ belong here.
   written — `--only` rewrites the index entry to the blob it just committed,
   so a later re-capture returns the previous commit's content, not the
   original staged snapshot.
+- Sub-agent commit dependency on a sibling's commit is orthogonal to
+  index-lock contention. The lock-retry rule (1–3 s × 5) covers
+  `index.lock` failures, not "the parent commit my brief listed isn't in
+  HEAD yet because the sibling agent that owns it hasn't finished." A
+  consumer sub-agent must pre-flight `git log --oneline -N | grep -E
+  '<expected-hash>|<expected-subject>'` and short-sleep retries (×5)
+  until the dependency commits show up. Without this, the consumer
+  either lands a commit whose tree refers to a not-yet-defined symbol
+  (silent intermediate breakage) or returns failure and the
+  orchestrator re-dispatches it as wasted work. The pre-flight is the
+  small cost; the silent breakage is the expensive one to debug later.
 
 ## Verification
 
