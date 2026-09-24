@@ -61,6 +61,18 @@ that must see a `DYLD_*` variable arrive). The probe runs first, so an already r
 not rewritten; replacing the binary makes the running daemon restart itself. Do not work around
 the failure with toolchain `libLLVM.dylib` symlinks or recipe-level `DYLD_*` exports.
 
+Two things hide or fake this symptom when you diagnose it (measured 2026-09-23):
+
+- **`llvm-tools-preview` masks it.** `just init` runs `rustup component add llvm-tools-preview`,
+  which installs a real `libLLVM.dylib` in `<toolchain>/lib/rustlib/<host>/lib/`. That is where
+  `rust-lld`'s `@rpath` looks, so on that toolchain the link succeeds even through a hardened
+  kache. To prove the passthrough, rename that file aside for the test, restore it afterwards, and
+  compare against a pristine binstall release as the control.
+- **Cargo replays old warnings.** If the dyld error appears as a *warning* (`stripping debug info
+  with rust-objcopy failed`) with the same `dyld[<pid>]` on every build, cargo is re-emitting a
+  cached diagnostic for an up-to-date unit, compiled before the fix. It is not a live failure, and
+  it persists under `RUSTC_WRAPPER=""` until that unit rebuilds.
+
 ## macOS
 
 ```bash
