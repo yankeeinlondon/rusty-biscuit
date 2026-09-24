@@ -709,6 +709,8 @@ documentation:
 completed_phase: 6
 implemented: true
 implementation_1: "2026-09-23T16:27:50-07:00"
+implementation_2: "2026-09-23T16:52:16-07:00"
+implementation_3: "2026-09-23T17:17:00-07:00"
 ---
 
 # Implementation Log for 2026-09-22-consolidated-test-binaries-wave-2 (6 phases)
@@ -1768,3 +1770,52 @@ The files changed in this cycle are:
         - live delta over all 8,809 tracked non-source files (9,024 references, old vs new): no reference loses its unit. 5,617 module-scoped units become binary-wide, and 10 `biscuit-terminal-cli` references in `level2_cursor_and_hygiene` go from no unit to `binary_id(biscuit-terminal-cli::level2)`. The widest cells are unit-test helpers in the `darkmatter` (1,059 references, about 6,000 L1 tests) and `claudine` (24, about 4,200) library binaries. The cost is test run time in one Linux cell; the archive build is the same
         - completed: `cargo nextest list` with the L1 tier filter confirms both live widened units select tests: `binary_id(biscuit-terminal-cli::level2)` selects 59 and `binary_id(darkmatter-cli::level2)` selects 4 (`harness_integrity`)
         - completed: updated the unit description in `docs/cicd/test-inputs.md` and the `rust-testing` skill, and added a dated review-2 superseded note to `baseline/test-inputs.md`. The per-package `test-inputs.md` evidence tables and `fixes/2026-09-22-test-input-blind-spot/spec.md` still show `test(/^<module>::/)` units. They are left as historical records
+        - completed: all 14 `scripts/ci/test_*.py` suites pass (1,200 tests; `test_inputs.py` is the module under test, not a suite; `test_affected_scope.py` 387). `just _test repo-deps`: 449 passed, 1 skipped. `test-toolkit::ci_workflow_contracts`: 162 passed
+        - discovery: a concurrent commit, `247aaa24b` (`fix(repo-deps): read tier from test path…`, labeled as iteration 1), picked up this finding's uncommitted edits to `test_inputs.py`, `test_affected_scope.py`, `docs/cicd/test-inputs.md`, the `rust-testing` skill, `baseline/test-inputs.md`, and this log. This agent made no commit. History was not rewritten
+- work completed for 'CI input narrowing drops Level 1 callers of a shared helper' at 17:06:01
+- starting the work on 'The acceptance record still describes a failed local suite' at 17:06:01
+        - the orchestrator made the edit directly, since the change is prose-only in the acceptance record
+        - completed: the opening summary now says every local suite on macOS passes, and that the sweep's only failures were the two baseline `claudine-cli` tests, which review 1 fixed. The native-Windows `claudine` failures in §4 are a separate cross-OS record and are unchanged
+        - completed: §8's damaged sentence, where two lead-ins had run together, is now one lead-in. It describes the failed sweep, then the successful rerun. The orphaned `er the sweep.` line is removed
+        - completed: `git diff --check` is clean; no code changed, so no test or lint run applies
+- work completed for 'The acceptance record still describes a failed local suite' at 17:06:29
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in about 25 minutes (16:52:16 to 17:06:29). During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- note for the author: commit `247aaa24b` (labeled as the review-1 fix) was made while finding 1 was in progress and includes that finding's uncommitted code, tests, and doc edits. The agent made no commit and did not rewrite history. Reword or split that commit if the history should separate the two cycles
+- design trade-off in finding 1: a file read outside a test function now gets a binary-wide unit, `binary_id(<binary>)`, so cells get wider (5,617 references widen, the largest in the `darkmatter` and `claudine` library binaries) rather than silently missing a Level 1 caller. Narrowing again would need a visibility or call-graph check, which was not built
+
+The files changed in this cycle are:
+
+- `scripts/ci/test_inputs.py`
+- `scripts/ci/test_affected_scope.py`
+- `docs/cicd/test-inputs.md`
+- `.claude/skills/rust-testing/SKILL.md`
+- `features/2026-09-22-consolidated-test-binaries-wave-2/baseline/test-inputs.md`
+- `features/2026-09-22-consolidated-test-binaries-wave-2/acceptance.md`
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-23T17:17:00-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/features/2026-09-22-consolidated-test-binaries-wave-2/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- starting the work on 'The test-input scanner still documents the retired helper scope' at 17:17:05
+        - the orchestrator made the edit directly rather than through a subagent: the change is two comments in one file, with no behavior change
+        - completed: the module header in `scripts/ci/test_inputs.py` now says a literal in a helper names the whole binary, because a helper's callers may live in any of its modules. This matches `_unit` and `docs/cicd/test-inputs.md`
+        - completed: the `Reference` docstring now says `unit` selects one test, or a whole binary for a helper. It lists every case where `unit` is `None`: a `product` reference, a non-L1 test, a target whose features CI does not enable, and a helper in a binary with no L1 test (`scan` clears these)
+        - completed: all 14 `scripts/ci/test_*.py` suites pass (`test_inputs.py` is the module under test, not a suite); `git diff --check` is clean. No Rust changed, so no package-area `just test` / `just lint` run applies
+- work completed for 'The test-input scanner still documents the retired helper scope' at 17:23:34
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in about 7 minutes (17:17:00 to 17:23:34). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+
+The files changed in this cycle are:
+
+- `scripts/ci/test_inputs.py`

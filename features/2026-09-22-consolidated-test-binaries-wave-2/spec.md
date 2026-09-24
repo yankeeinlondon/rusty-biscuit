@@ -42,9 +42,10 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-review_iterations: 2
+review_iterations: 4
 implemented: true
 implemented_by: claude/opus
+completed: true
 human_review: false
 message_to_agent: |-
     All six phases are implemented. The tree is at "implementation complete, ready for review". Phase 6 is NOT committed (the phase instructions forbid it); its changes are listed in the Phase 6 section of `implementation-log.md`, with a suggested commit split.

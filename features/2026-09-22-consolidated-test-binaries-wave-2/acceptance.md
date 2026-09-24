@@ -23,9 +23,10 @@ root. `<pkg>/` is the package's evidence directory, next to its
 (CI observations) is pending because no ordinary run has selected these
 packages yet (`ci-observations.md`). Pending is not counted as a pass.
 First-feature criterion 5 is met as far as a tool can show, and it still needs
-the reviewer's reading, as in the first feature. Failures in the local suites
-are the ones `baseline/pre-existing.md` already recorded, and none of them is
-in a migrated package (§8).
+the reviewer's reading, as in the first feature. Every local suite on macOS now passes.
+The sweep's only failures were the two `claudine-cli` tests that
+`baseline/pre-existing.md` already recorded, outside the migrated packages,
+and review 1 fixed them (§8).
 
 | Package | Area | Migration commit | Old targets | New targets |
 |---|---|---|---:|---|
@@ -227,7 +228,7 @@ equals the baseline. `test-l2` ran without taking focus: tmux and WezTerm are
 used on this host, and Kitty has no usable instance (`os` skill, `macos.md`). Level 3 was not run, because it takes
 desktop focus and is opt-in only.
 
-**The one failure is the baseline's.** `claudine`**The baseline's two failures are fixed.** In the sweep, `claudine`'s
+**The sweep's only failures were the baseline's, and they are now fixed.** In the sweep, `claudine`'s
 fail-fast `just test` stopped at 5,088 of 7,320. The `--no-fail-fast` re-run
 (`claudine.test-no-fail-fast.log.gz`) passed 7,318 and failed the same two
 baseline tests, both in `claudine-cli::l1`, a wave-1 package outside the ten:
@@ -249,8 +250,6 @@ After that, the fixture differs from the shipped file only by the documented
 The frontmatter hash is unchanged. The body hash matches `md hash`
 (`624f4bf489101b9f-9086e47509578e0a`). Re-run from `claudine/`, `just test`
 passes all 7,320 tests with 9 skipped, and `just lint` passes.
-
-er the sweep.
 
 ## 9. Replaced by spec §1: met
 
