@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-09-23
-phase: 3
+phase: 4
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 source_files_during_phase_1: []
@@ -37,6 +37,71 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+docs_updated_during_phase_4:
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/lib/README.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/compose-prompt-rules.md
+    - claudine/docs/topics/file-referencing.md
+    - claudine/docs/topics/lifecycle.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/cli/index.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/biscuit-file/references/cli.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/os/macos.md
+source_code:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/tests/magic_local_roots.rs
+    - biscuit-file/lib/tests/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/invocation_context/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/provider.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/cli/src/completion/scopes.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+documentation:
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/lib/README.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/compose-prompt-rules.md
+    - claudine/docs/topics/file-referencing.md
+    - claudine/docs/topics/lifecycle.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/cli/index.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/biscuit-file/references/cli.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/os/macos.md
+completed_phase: 4
+implemented: true
 packages:
     - biscuit-file
     - claudine
@@ -120,20 +185,20 @@ These tasks are sequential because each establishes an API or root chain used by
 
 **Wave 3 — parallel after Wave 2.** The test and documentation tasks own different files and can proceed together; final validation follows both.
 
-- [ ] **4.1 Exercise CLI behavior**
+- [x] **4.1 Exercise CLI behavior**
   - Extend `claudine/cli/tests/l1/compose_prompt_tiers.rs` with both local-wins conflicts, both `@` forms from a plain `$HOME/scratch`, home-overlap cases, and a nested prompt loaded from home or another repository. Assert the nested non-`@` anchors remain source-specific.
   - Verify the `@` miss report's payload count, ordered directories, configured `(*)` markers, and absence of joined paths or provenance labels; separately assert that structured probes remain concrete and a bare or absolute miss retains its current report. Keep the existing five path-shaped tests green.
   - Extend completion coverage so duplicate local and user matches for `@prompts/` offer and execute the local result. Isolate HOME, launch directory, repository discovery, and completion state in fixtures; keep these tests at L1 because they need no focused terminal or browser window.
-- [ ] **4.2 Refresh reference docs**
+- [x] **4.2 Refresh reference docs**
   - Update the biscuit-file file-reference topic, README examples, and biscuit-file skill reference for the local/user tiers, request-directory fallback, overlap override, relative configured-root base, and shared completion order.
   - Update Claudine's documentation and skill copies of `shell-completions.md`, and finish the “Local Wins” section in `compose-prompt-rules.md` with the selected external-prompt policy. Review affected resolver, context, registration, and Darkmatter comments for drift; update public API docs that change behavior.
 
 **Sequential after Wave 3.**
 
-- [ ] **4.3 Validate packages**
+- [x] **4.3 Validate packages**
   - Run `just test` and `just lint` from `biscuit-file/`, `claudine/`, and `darkmatter/`; run focused claudine-cli and cache identity regressions through their area recipes. Resolve failures attributable to the changed root chain, without adding unrelated tests or CI cells.
   - Obtain available macOS, Linux, native Windows, and WSL2 evidence for the affected packages, using existing cross-check hosts or scheduled CI cells as appropriate. Treat cross-compilation as compile evidence only; record any platform still pending. Check Windows path spelling and the no-repository fixture explicitly.
-- [ ] **4.4 Review completion**
+- [x] **4.4 Review completion**
   - Recheck R1–R6 and the spec's test matrix against the final diff, including Defect 1 retention, all affected call sites, and no change to non-`@` ordering. Confirm frontmatter phase count and the Wave 1–3 dependencies. Leave the fix active and report implementation complete, ready for author review; the author handles lifecycle closure.
 
 **Checkpoint:** All required behavior has observable passing evidence, documentation matches the implementation, and any OS evidence gap is stated precisely for review.

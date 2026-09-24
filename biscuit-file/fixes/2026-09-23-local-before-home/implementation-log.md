@@ -36,11 +36,77 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+docs_updated_during_phase_4:
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/lib/README.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/compose-prompt-rules.md
+    - claudine/docs/topics/file-referencing.md
+    - claudine/docs/topics/lifecycle.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/cli/index.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/biscuit-file/references/cli.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/os/macos.md
+source_code:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/tests/magic_local_roots.rs
+    - biscuit-file/lib/tests/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/resolve/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/invocation_context/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/provider.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/cli/src/completion/scopes.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/completion/operation_file/recovery_tests.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/completion_compose.rs
+    - claudine/cli/tests/l1/completion_resolution_round_trip.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+documentation:
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/lib/README.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/compose-prompt-rules.md
+    - claudine/docs/topics/file-referencing.md
+    - claudine/docs/topics/lifecycle.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/cli/index.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/biscuit-file/references/cli.md
+    - .claude/skills/claudine/completions/shell-completions.md
+    - .claude/skills/claudine/lifecycle.md
+    - .claude/skills/os/macos.md
+completed_phase: 4
+implemented: true
 packages:
     - biscuit-file
     - claudine
     - claudine-cli
     - darkmatter
+implementation_1: "2026-09-24T04:16:45-07:00"
 ---
 
 # Implementation Log for 2026-09-23-local-before-home (4 phases)
@@ -615,3 +681,218 @@ corrected, and verified that work and implemented all of 3.2.
 | R2 consumer order (local before user, both Defect 2 rows) | `path_shaped_prompt_reference_keeps_closest_tier_first`, `prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once`, CLI `repository_prompt_wins_over_user_tier_for_both_forms` / `repository_claudine_tier_wins_over_user_tier_for_path_shaped_form` (retained) |
 | Darkmatter identity: scope/tier/package_root | `identities_distinguish_launch_magic_scope`, `identities_distinguish_magic_tier_override`, `identities_distinguish_context_package_root` |
 | Darkmatter chain order change | `compose/tests/schema.rs` `@collision/spec.md` row |
+
+## Phase 4
+
+Regression proof and documentation: CLI regressions (4.1), reference docs
+(4.2), package validation with multi-OS evidence (4.3), and the completion
+review (4.4). Task 4.1 surfaced one real defect in Phase 3's Ruling-1
+wiring, which is fixed here with a failing-first regression.
+
+### Defect found and fixed — split spelling of `$HOME` versus the launch tree
+
+The first run of the new launch-equals-`$HOME` CLI test failed:
+`claudine compose --dry-run @probe.md` launched from `$HOME` (no repository)
+composed `~/.claudine/prompts/probe.md` instead of the local root's
+`~/probe.md`.
+
+- **Cause.** The launch directory comes from `current_dir()` in its
+  *physical* spelling (`/private/var/…/home` on macOS), while `$HOME` keeps
+  the environment's spelling (`/var/…/home`). `with_prompt_magic_roots`
+  skipped the local twin of a `~/.claudine` row only by **lexical** equality,
+  so `<local>/.claudine/prompts` — the same directory as the user row —
+  was registered as a *local* Start root and outranked the local root. This
+  affects any user whose `$HOME` has a symlinked component and who launches
+  from `$HOME` (or has `$HOME` as a repository); Phase 3's unit test built
+  both paths from one `TempDir` spelling and could not see it.
+- **Fix** (`claudine/lib/src/composition/resolve.rs`): the twin check also
+  compares directory identity (`fs::canonicalize`) for an *existing* user
+  row, filtered by file name so it costs one probe per candidate twin. A
+  missing user directory can match no file, so lexical comparison suffices
+  there. This does not change biscuit-file's tier classification, which
+  stays lexical per R2; it only decides whether a Claudine convention row
+  duplicates the user row. Doc comment updated with the reason.
+- **Regression:** `composition::resolve::tests::user_tier_prompt_row_stays_behind_local_files_when_home_is_spelled_through_a_symlink`
+  (`cfg(unix)`, symlinked home). Verified **failing** against the
+  pre-fix `resolve.rs` and passing after; the CLI test
+  `local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home`
+  covers it end to end on macOS through the real `/var` alias.
+- Recorded the general trap in the `os` skill (`macos.md`, Paths).
+
+### Task 4.1 — Exercise CLI behavior
+
+`claudine/cli/tests/l1/compose_prompt_tiers.rs` (existing `l1` binary
+module; `stage` generalized to `stage_at(prefix, segments, repository)`):
+
+| Requirement (spec Tests / plan 4.1) | Test |
+|---|---|
+| Defect 2 row 1: `@x.md`, `<repo>/x.md` vs `~/.claudine/prompts/x.md` | `repository_root_file_wins_over_user_prompt_tier_for_concise_form` |
+| Defect 2 row 2: `@prompts/x.md`, `<repo>/.claudine/prompts/x.md` vs `~/prompts/x.md` | `repository_claudine_tier_wins_over_home_prompts_directory` |
+| Defect 4: plain `$HOME/scratch`, both forms, user copy present | `plain_launch_directory_under_home_wins_for_both_forms` |
+| Ruling 1 overlap: launch == `$HOME` (no repo) and repo == `$HOME` | `local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home` |
+| Ruling 2: nested prompt from `~/.claudine/prompts` — `@` launch; `./`, bare source | `nested_magic_reference_in_a_user_prompt_resolves_from_the_launch_tree` |
+| Ruling 2: nested prompt from another repo — `@` launch; `&`, `^` source repo; `./`, bare source dir | `nested_magic_reference_in_another_repository_resolves_from_the_launch_tree` |
+| R4 exact reported input `@prompts/missing.md`: payload once, no joins/labels/"Tried:", local before home, `(*)` only on configured roots, footnote | `magic_miss_lists_ordered_search_roots_instead_of_joined_candidates` |
+| R4 no-repository: launch dir listed first and unmarked | `magic_miss_outside_any_repository_lists_the_launch_directory_first` |
+| Absolute miss keeps "Cannot resolve … Tried: - absolute:"; bare miss keeps the autocomplete gate | `absolute_and_bare_misses_keep_their_existing_reports` |
+| Completion: duplicate local/user `@prompts/` collapse and execute local | `completion_resolution_round_trip::path_shaped_local_and_user_duplicates_round_trip_to_the_local_prompt` |
+| Structured probes stay concrete (incl. nonmatching `prompts/prompts/missing.md` join, `magic`/`repository`/`home` provenance) | strengthened lib test `magic_no_match_report_lists_search_roots_in_priority_order` |
+| Defect 1's five path-shaped tests + completion test | retained, green |
+
+Nested prompts are exercised through real Darkmatter `::file` transclusions
+(`::file @snippet.md`, `&`, `^`, `./`, bare) in the real `compose
+--dry-run` path; the user-tier case launches the router itself through
+`@router-N.md`, as a user would.
+
+**Windows gating.** Native Windows resolves home through the known-folder
+API and ignores a fixture `HOME`/`USERPROFILE` (D11; `os` skill
+windows.md #2), so a test whose subject is the user tier cannot stage it
+there without writing into the real profile. The seven tier-subject tests in
+`compose_prompt_tiers.rs` and the pre-existing
+`completion_compose::compose_path_shaped_magic_offers_user_tier_from_plain_repo_under_home`
+(red on Windows since Defect 1's fix for the same reason — first observed by
+this phase's cross-check) are `cfg(not(windows))` with the reason stated.
+The local-wins, other-repository, and absolute/bare tests still run on
+Windows; the ordering itself is covered on every OS by the snapshot-home
+unit tests (biscuit-file `magic_local_roots`, claudine
+`composition::resolve`).
+
+### Task 4.2 — Refresh reference docs
+
+Delegated to a documentation sub-agent, then reviewed. Updated: the
+biscuit-file file-reference topic (tiers, local root/`LocalRoot`, tier
+override, `PathPosition` within a tier, relative configured-root base and
+the `resolve_from(base)` change, launch scope, `magic_search_roots`, shared
+completion order; also removed an empty duplicate heading and fixed a broken
+anchor), biscuit-file README bullet, the biscuit-file skill
+(`SKILL.md`, `references/file-references.md`, `references/cli.md`),
+Claudine `shell-completions.md` (docs + skill copies) magic order,
+`compose-prompt-rules.md` "Local Wins" (finished, with the Ruling-2
+nested-prompt policy), `file-referencing.md`, `lifecycle.md` (docs + skill
+copies; stale "convention roots before home" sentence), and Darkmatter
+`docs/topics/magic-paths.md` / `docs/cli/index.md` (both still stated the old
+Start-before-everything order).
+
+Doc-comment drift review (resolver, context, Claudine registration,
+Darkmatter `with_magic_path`): all current; the only comment change is the
+`with_prompt_magic_roots` addition that accompanies this phase's fix.
+
+**Noted, not changed (outside the spec's scope):** Darkmatter's own `md
+compose` CLI rebuilds its context on an input document that lies outside
+the launch repository without seeding `with_launch_magic_scope`, so `@`
+inside such a document searches that document's tree. Ruling 2 and R1's
+integration gap name Claudine only; `magic-paths.md` documents the code as
+it is. Raised for the author in the spec's review items.
+
+### Task 4.3 — Validate packages
+
+**Local (macOS), final tree:** `just test` + `just lint` pass in every
+affected area — biscuit-file 856 passed / clean; claudine area 7352 passed
+(claudine lib + claudine-cli with `test-fixtures`, including all new tests)
+/ clean (re-linted after the Windows gating edit); darkmatter 8497 passed /
+clean (incl. the wasm32-wasip2 zed-dmls check). The only `just lint` output
+is macOS's pre-existing `__eh_frame section too large` linker note on the
+claudine binary.
+
+**Cross-OS (`just cross-check`):**
+
+| Package | Linux (build-linux) | Native Windows (build-win-native) | WSL2 (build-win) |
+|---|---|---|---|
+| claudine-cli | 2788/2791 — 3 `sequence_groups` failures, unrelated (see below); every `compose_prompt_tiers`, completion, and round-trip test passed | **2261/2261 pass** (final tree, with the Windows gating) | **pass** (full suite, pre-gating tree; gating is Windows-only) |
+| claudine | 4350/4354 — 4 `sequence::task::tests::group_framing` failures, unrelated; all `composition::resolve` tests incl. the new symlink regression passed | **pending** — host memory exhausted (`memory allocation … failed`, earlier `paging file is too small`, os error 1455) even when run alone | **pending** — guest disk 100 % full (13 MB free) |
+| darkmatter | 6966/6967 — 1 `horizontal_rule_integration` rendering failure, unrelated | 6933/6938 — the 5 `lazy_roots::ambient_repository` failures are **pre-existing on `main`**: identical names fail in main's own Windows CI at this branch's merge-base (run 35904956347) | **pending** — guest disk full |
+| biscuit-file | source unchanged since Phase 2's passing Linux/Windows/WSL legs | same | same |
+
+- **Unrelated Linux failures.** All seven are parallel sequence-group output
+  framing assertions (`no header for body line …`) in code this spec never
+  touched; the only branch change there is the separate `190711d86`
+  (8 MiB stack for group member threads). They pass on macOS and in the
+  WSL2 `claudine-cli` leg. Not attributable to the `@` chain; left for the
+  author. (A filtered re-run to test flakiness was attempted but its
+  `-E 'test(...)'` argument did not survive the remote shell — not re-tried.)
+- **Windows target repair.** The first Windows `claudine` leg ran
+  concurrently with the WSL leg on the same machine and died of memory
+  (paging file), leaving stub rlibs that made later builds report
+  `can't find crate for claudine`. I cleaned only this worktree's own clone
+  artifacts (`cargo clean -p claudine -p darkmatter` in
+  `B:\coding\shazam--feat-better-static-analysis\rusty-biscuit`, 12.8 GiB)
+  per the storage-strategy rule for self-created artifacts. The solo re-run
+  still ran out of memory, so the evidence stays pending. Lesson: run legs
+  that share the Windows machine (native + WSL2) one at a time.
+- **WSL2 disk.** 186 G / 196 G used; this clone's `target/` is 17 G;
+  `~/ci-verification` (66 G) and other sessions' clones (e.g.
+  `shazam--feat-dark-fixes` 29 G) are not mine and were left untouched
+  (listed, not deleted). The guest's `rusty-biscuit-sweep.timer` was due at
+  04:18 PDT. Nothing deleted.
+- **Windows path spelling / no-repository fixture.** The Windows
+  `claudine-cli` leg exercises the no-repository `$HOME/scratch` layout
+  (`plain_launch_directory_under_home_wins_for_both_forms`), the
+  other-repository nested prompt, and the absolute/bare reports on a real
+  `C:/Users/…/Temp` tree — all pass. The user-tier-subject tests are
+  `cfg(not(windows))` (D11, above). The identity-based twin check uses
+  `fs::canonicalize` on both sides only, so `\\?\` verbatim spellings are
+  compared only with each other and never reach a projected path.
+
+### Task 4.4 — Review completion
+
+- **R1** local root = repository root, else request directory — CLI
+  `plain_launch_directory_under_home_wins_for_both_forms`,
+  `magic_miss_outside_any_repository_lists_the_launch_directory_first`.
+- **R2** local tier exhausted before any user root, in every layout incl.
+  `$HOME` overlap and split spellings — both Defect-2 rows, the overlap test,
+  the new symlink unit test, plus Phase 2's synthetic suite.
+- **R3** completion follows resolution — `path_shaped_local_and_user_duplicates_round_trip_to_the_local_prompt`
+  plus Phase 2 parity tests; Defect 1's completion test retained.
+- **R4** miss report — CLI + lib tests above; structured probes (including
+  the nonmatching `prompts/prompts/missing.md` join) stay concrete.
+- **R5** registration — Phase 3 unit tests plus this phase's twin-identity
+  fix.
+- **R6** docs — task 4.2.
+- **Defect 1 retention** — the five `compose_prompt_tiers` tests and the
+  completion test pass on macOS, Linux, and WSL2 (Windows: known-folder
+  gating).
+- **Non-`@` ordering unchanged** — the other-repository nested test pins
+  `&`, `^`, `./`, and bare to their source anchors; bare and absolute miss
+  reports unchanged.
+- Plan frontmatter `total_phases: 4` matches; Waves 1–3 ran in order. The
+  fix stays active in `fixes/`; implementation complete, ready for author
+  review.
+- Tier placement: every new or renamed test is plain L1 in an existing
+  declared target (`l1` binary modules already declared in `main.rs`;
+  claudine lib `#[cfg(test)]` module); no tier markers; no repository files
+  read by tests.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-24T04:16:45-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-static-analysis/biscuit-file/fixes/2026-09-23-local-before-home/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Repository-local prompt symlinks lose local priority' at 04:17:10
+        - root cause: `with_prompt_magic_roots` (`claudine/lib/src/composition/resolve.rs`) dropped any local `.claudine` row that canonicalized to a user `~/.claudine` row, so a repository `.claudine` symlinked to `~/.claudine` lost both local rows and the intrinsic home root's `~/prompts/<x>` won
+        - fix: physical identity now decides only whether the local root itself is `$HOME` (lexically or canonically); only then are the local root's two `.claudine` rows suppressed as user twins, and every other local row keeps its lexical (inferred local) tier per spec R2; the function's `///` docs were updated to state the narrowed rule
+        - added CLI L1 test `compose_prompt_tiers::repository_claudine_symlinked_to_user_claudine_keeps_local_priority` (`claudine/cli/tests/l1/compose_prompt_tiers.rs`, `#[cfg(unix)]`); confirmed it failed before the fix (selected `Tier=[home]`) and passes after
+        - added unit test `repository_claudine_symlinked_to_user_claudine_stays_local_tier` (`claudine/lib/src/composition/resolve/tests.rs`, `#[cfg(unix)]`) asserting both symlinked rows register with the inferred tier and `@prompts/x.md` resolves through `<repo>/.claudine`
+        - existing regression `user_tier_prompt_row_stays_behind_local_files_when_home_is_spelled_through_a_symlink` stays green
+        - verification: `claudine/` `just test` passed (7354 passed, 9 skipped); `just lint` clean (only the pre-existing macOS `__eh_frame` linker note); `just check-tier-coverage claudine` reported 0 stranded; biscuit-file untouched
+- work completed for 'Repository-local prompt symlinks lose local priority' at 04:28:40
+- starting the work on '`@/` no-match diagnostics show the wrong payload' at 04:28:40
+        - root cause: `render_magic_no_match_body` (`claudine/lib/src/composition/error/render/provider.rs`) derived the payload with `trim_start_matches('%').trim_start_matches('@')`, which kept the optional `/` separator (`@/missing.md` printed `` `/missing.md` ``) and stripped every leading `@` (`@@name.md` printed `` `name.md` ``); it was the only renderer of the `@` miss line (`render/mod.rs` only projects the structured record)
+        - biscuit-file: added `FileReference::payload()`, the authored text after `%`, the sigil, and its optional `/`, backed by a `payload_offset` recorded by the parser, so the grammar stays the single authority; documented in `biscuit-file/docs/topics/file-references.md` and the `biscuit-file` skill's `references/file-references.md`
+        - claudine: the renderer now reparses the reference and names `FileReference::payload()`
+        - tests added:
+            - `payload_strips_only_the_modifier_sigil_and_one_separator` in `biscuit-file/lib/tests/reference_grammar.rs`, plus payload assertions in `one_forward_slash_after_a_defensive_sigil_is_optional`
+            - `magic_no_match_names_the_parsed_payload_for_every_spelling` in `claudine/lib/src/composition/resolve/tests.rs` (compact, separated, recursive `%@`, and `@@name.md` / `@/@name.md` spellings)
+            - `separated_magic_miss_names_the_payload_without_the_separator` in `claudine/cli/tests/l1/compose_prompt_tiers.rs` (`@/absent-payload-probe.md` via the real CLI)
+        - both claudine tests failed against the old trimming (`` `/absent-payload-probe.md` was not found ... ``) and pass with the fix
+        - verification: `biscuit-file/` `just test` passed (857 passed) and `just lint` clean; `claudine/` `just test` passed (7356 passed, 9 skipped) and `just lint` clean (only the pre-existing macOS `__eh_frame` linker note); `just check-tier-coverage claudine` reported 0 stranded
+        - not addressed (outside this finding): `normalize_partial` in `claudine/cli/src/completion/schema_completion/candidates.rs` still trims `@` with `trim_start_matches` for fuzzy completion matching
+        - orchestrator check: `cargo check -p darkmatter -p claudine-cli --all-targets` compiles cleanly against the new `FileReference::payload()` field and method
+- work completed for '`@/` no-match diagnostics show the wrong payload' at 04:41:52
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in about 27 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the review's `human_review_items` (confirming the two rulings and the Windows CLI skips; deciding `md compose` nested-`@` behavior) are author decisions, not implementation findings, and remain open for human review

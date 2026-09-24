@@ -2,7 +2,8 @@
 created: 2026-09-23
 status: draft-spec
 clarified: false
-implemented: false
+implemented: true
+completed: true
 area: biscuit-file
 packages:
     - biscuit-file
@@ -12,98 +13,85 @@ packages:
 human_review: true
 human_review_items:
     - |-
-        **Ruling 1 — how `@` roots are split into local versus user tiers when
-        the launch directory or repository is `$HOME` itself.** Phases 2 and 3
-        implemented the recommended option (infer by containment, with an
-        explicit `MagicPathTier::User` override via
-        `add_magic_path_with_tier`), and Phase 3 wired that override through
-        Claudine's two `~/.claudine` registrations; the consumer tests now
-        depend on it, so confirming or overturning the ruling is cheapest
-        before Phase 4 hardens the CLI regression suite and documentation.
+        **Should Darkmatter's own `md compose` command follow the same
+        "nested `@` searches the launch tree" rule as Claudine?**
 
-        A path-only rule cannot tell Claudine's user-level prompt directory
-        (`~/.claudine/prompts`) apart from a local convention when the launch tree
-        *is* `$HOME` — both would land in the local tier and the user prompt
-        directory could outrank local files, recreating the bug at the home root.
+        Why it needs a decision: the fix is fully implemented for Claudine
+        (every test and document agrees). While updating documentation we
+        found that Darkmatter's standalone `md compose` command, when given a
+        document that lives *outside* the directory tree you launched it from,
+        builds its search context around that document's own tree. So an
+        `@x.md` inside that document looks in the document's tree first, not
+        yours. The spec only named Claudine for this rule, so nothing was
+        changed; `darkmatter/docs/topics/magic-paths.md` describes the current
+        behavior. This must be settled before the fix is closed, because
+        closing it records the rule as fully applied.
 
         Options:
 
-        - **Infer everything from paths.** No new API, but the overlap case has no
-          correct answer: the home prompt directory outranks local files when the
-          launch directory is `$HOME`. Cons: recreates this bug at the home root.
-        - **Require every caller to declare a tier.** Unambiguous everywhere, but
-          forces every client of `add_magic_path` to make a choice even when
-          containment is obvious, churning all call sites for no behavioral gain.
-        - **Infer by default, with an explicit tier override (implemented).**
-          `add_magic_path` keeps its signature and inferred meaning for ordinary
-          roots; Claudine marks its two `~/.claudine` registrations as user-tier.
+        - **Leave `md compose` as it is (source tree for `@`).** No code
+          change. Con: the two tools answer the same `@x.md` differently when
+          the document comes from somewhere else.
+        - **Apply the launch-tree rule to `md compose` too.** A small change:
+          the CLI already captures the launch context and only needs to pass
+          it along (`with_launch_magic_scope`), plus a test. Con: changes
+          `md compose` behavior for that one layout.
+        - **Track it as a separate follow-up fix.** Keeps this fix's scope
+          intact. Con: the inconsistency stays until that fix lands.
 
-        **Recommendation: keep the implemented infer-with-override design.** The
-        caller knows whether a root is a user convention; a path comparison
-        cannot. Please confirm, or pick a different option before Phase 4's
-        CLI regression and documentation work lands.
+        **Recommendation: track it as a separate follow-up fix.** The
+        behavior is documented today, and a separate fix keeps this review
+        focused on what the spec asked for.
     - |-
-        **Ruling 2 — which tree is local for `@` references nested inside a prompt
-        loaded from `~/.claudine` or another repository.** Phases 2 and 3
-        implemented the recommended option: an immutable `LaunchMagicScope` on
-        `FileResolutionContext`, preserved through `for_source`/`for_base`/
-        trusted-external derivations, plus `with_launch_magic_scope` for
-        requests that rebuild their context around an external source; Phase 3
-        carries the snapshot through Claudine's `derive_source` paths and
-        registers conventions against the launch local root. One CLI
-        expectation was deliberately flipped to the new rule (nested `@` now
-        resolves from the launch tree), so confirming the ruling is cheapest
-        before Phase 4 hardens the CLI regression suite and documentation.
+        **Confirm the two design rulings this fix was built on, and the
+        Windows test coverage that follows from them.**
+
+        Both rulings were recorded without a human in the loop and are now
+        implemented and tested end to end: (1) Claudine's `~/.claudine`
+        prompt folders are always treated as *user* locations, even when you
+        launch from your home folder itself; (2) an `@` reference inside a
+        prompt loaded from elsewhere searches the folder you launched from,
+        while `./`, bare, `&`, and `^` references stay relative to the
+        prompt. Overturning either now would mean revising code, tests, and
+        docs, so the author review is the right point to confirm them.
+
+        Related coverage note: on native Windows the home folder always comes
+        from the operating system and ignores test overrides, so the eight
+        command-line tests whose subject is the user prompt folder skip on
+        Windows. The same ordering logic is still tested on Windows by unit
+        tests that pass the home folder in directly.
 
         Options:
 
-        - **Keep source-derived contexts unchanged.** Minimal work, but nested `@`
-          references keep violating the "local tree first" rule this fix exists to
-          establish.
-        - **Use the launch context for every nested reference.** Makes `@`
-          consistent with the launch, but silently changes `./`, bare, `&`, and `^`
-          references in externally loaded documents, breaking their documented
-          source-relative meaning.
-        - **Keep a launch `@` scope separate from source anchors (implemented).**
-          `@` keeps the invocation's local-first search; `./`, bare, `&`, and `^`
-          keep their source semantics.
+        - **Confirm both rulings and the Windows skips (recommended).**
+          Nothing further to do.
+        - **Overturn a ruling.** It needs a follow-up fix covering code,
+          tests, and documentation.
+        - **Make the home folder respect test overrides on Windows** so the
+          skipped tests can run there. Con: changes a deliberate earlier
+          design choice (D11) for every package, not just this fix.
 
-        **Recommendation: keep the implemented separate-scope design.** It meets
-        the user-facing rule without changing the meaning of the other reference
-        kinds. Please confirm, or pick a different option before Phase 4's
-        `derive_source`-dependent CLI tests and docs land.
+        **Recommendation: confirm.** Both rulings match the spec's stated
+        rule and are proven by passing tests on macOS, Linux, and WSL2.
 message_to_agent: |-
-    Phase 3 (consumer integration) is complete; `just test` / `just lint`
-    pass in the claudine (7341), darkmatter (8497), and claudine-cli (2776,
-    `test-fixtures`) areas and `cargo check --workspace --all-targets` is
-    clean. What Phase 4 builds on:
+    Phase 4 (final) is complete: implementation done, ready for author
+    review. Key facts for a review/fix agent:
 
-    - Claudine registers conventions against the launch local root
-      (repo root, else launch dir) everywhere, and the two `~/.claudine`
-      rows are explicit `MagicPathTier::User`. `derive_source` and the
-      compat `derive_request_context_for_source` seed
-      `with_launch_magic_scope(launch.launch_magic_scope().clone())` last.
-    - `CompositionError::from_detailed_no_match(detailed, context)` now
-      takes the resolving context; `ResolutionDetail::magic_search_roots()`
-      carries the ordered chain for direct `@` misses (empty otherwise).
-    - The `@` miss report is live: payload once, ordered search-root
-      directories, `(*)` only on configured roots, footnote
-      "(*) searched in addition to the standard `@` roots, for this
-      context"; bare/absolute misses keep "Cannot resolve … Tried:". For
-      task 4.1's CLI assertions, render through `report_block_error` with
-      a `ColorDepth::None` terminal (see `plain_terminal()` in
-      `claudine/lib/src/composition/resolve/tests.rs`) and note that a
-      100-column terminal word-wraps long root lines — assert on paths,
-      not exact lines, or use a wide terminal.
-    - Ruling 2 flipped one CLI expectation on purpose:
-      `sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anchored`
-      (nested `@` follows the launch tree; `./` stays source-anchored).
-      Task 4.1's nested-prompt cases should follow the same rule.
-    - Darkmatter identity encodes package_root, the launch `@` scope, and
-      tier-aware magic registrations; `LocalRoot` is cache code 8.
-    - Docs/skills are untouched so far — task 4.2 owns them, including the
-      `shell-completions.md` magic-order section and the unfinished
-      "Local Wins" section of `compose-prompt-rules.md`.
+    - Phase 4 found and fixed a real Ruling-1 defect: with `$HOME` spelled
+      through a symlink (macOS `/var` -> `/private/var`), the launch-equals-
+      home layout promoted `~/.claudine/prompts` to the local tier because
+      `with_prompt_magic_roots` matched the user twin lexically. It now also
+      matches by `fs::canonicalize` identity. Regression:
+      `user_tier_prompt_row_stays_behind_local_files_when_home_is_spelled_through_a_symlink`
+      (fails pre-fix).
+    - Eight CLI tests whose subject is the user tier are
+      `cfg(not(windows))` (D11: Windows ignores fixture HOME), including the
+      pre-existing Defect-1 tests, which had never run on Windows CI.
+    - Cross-OS evidence still pending: Windows `claudine` lib tests (host
+      out of memory) and WSL2 `claudine`/`darkmatter` (guest disk full).
+      Windows darkmatter's 5 `lazy_roots::ambient_repository` failures are
+      pre-existing on main. Linux sequence-group framing failures (7) are in
+      code this spec never touched. Details: implementation-log `## Phase 4`.
 $schema:
     status: |-
         enum(
@@ -127,7 +115,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-23
-review_iterations: 0
+review_iterations: 2
 ---
 
 # `@` resolution exhausts local roots before the home directory
