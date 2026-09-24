@@ -20,6 +20,13 @@ conditions that masquerade as repository defects.
   `~/.claudine/worktrees`, not `/tmp`.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
   be green on macOS and read the real home directory on Windows.
+- A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
+  `$TMPDIR` (`/private/var/folders/xx/…/T/`) spends about half of that. A
+  test that starts a socket-binding daemon under a `tempfile` directory can
+  fail with "path must be shorter than SUN_LEN" — `kache daemon run` does,
+  binding `daemon.control.v2.sock` inside its store. Root such a fixture
+  under `/tmp` when `$TMPDIR` is long, as `real_kache_worktree_restore`
+  (`tools/test-toolkit`) does; `/tmp` is on the same APFS volume.
 
 ## Linux and Windows evidence from this host
 
@@ -179,6 +186,11 @@ empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
 cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
 helpers support Python 3.9; `TestCase.enterContext` requires a newer interpreter,
 so temporary resources use `addCleanup` or a context manager.
+
+An L1 fixture that narrows the child `PATH` to `<fixture>/bin:/usr/bin:/bin`
+also narrows `python3` to that 3.9 interpreter, so a script needing `tomllib`
+fails only on macOS. `tools/test-toolkit/tests/common/kache.rs` links the test
+host's `python3` into the fixture `bin/` for this reason (2026-09-23).
 
 System dylibs may exist only in dyld's shared cache. `otool -L` reads an emitted
 binary's dependencies, but an absent `/usr/lib/*.dylib` file does not establish

@@ -166,8 +166,18 @@ shared or synced home directory — check before assuming the setting is host-lo
 ### In this repository
 
 `just init` is the only activator. On a qualifying host it writes `[build] rustc-wrapper = "kache"`
-into `$CARGO_HOME/config.toml` as its last step, after install, store placement, and the daemon
-all succeed. The repo tracks no wrapper, and CI never installs or uses kache. Do not run
+into `$CARGO_HOME/config.toml` (into the legacy `$CARGO_HOME/config` instead when that exists:
+Cargo reads one file per directory, the extensionless one first, and ignores a `config.toml`
+beside it with only a warning) as its last step, after install, store placement, and the daemon
+all succeed — the daemon counts only once it reports the installed binary's version, so a
+restart that leaves the old daemon answering leaves kache off with a WARNING. It then re-checks the effective wrapper: an inherited `RUSTC_WRAPPER` (even `""`),
+`CARGO_BUILD_RUSTC_WRAPPER`, or a repository/parent `.cargo/config.toml` outranks that entry, so
+init reports `activation INCOMPLETE` with a `kache NOT ACTIVE` WARNING naming each override and
+its undo, keeps the host entry, and continues. A kache-*named* winner counts only when it
+resolves (Cargo's rules: bare name on `PATH`, relative paths from the cwd or the config's
+project root) to the `kache` on `PATH` that init verified; a missing path (Cargo fails every
+build) or another executable named kache is also `activation INCOMPLETE`, and `kache-status`
+reports it as `active BROKEN` drift. The repo tracks no wrapper, and CI never installs or uses kache. Do not run
 `kache init` or export `RUSTC_WRAPPER=kache` in shell profiles. Either bypasses the probe and the
 ordered sequence. Rules that are easy to trip over:
 
@@ -180,9 +190,13 @@ ordered sequence. Rules that are easy to trip over:
   object outputs, which that setting forbids) or `storage_layout_advice = false` (silences the
   signal, not the cause).
 
-`just kache-status` re-runs the probe init used. It reports the store `kache doctor` resolves,
-env passthrough, the checkout and worktree-base devices, and the exact undo. It exits non-zero
-on drift while kache is active. Decision table and evidence: `docs/kache-strategy.md`.
+`just kache-status` re-runs the probe init used. It reports the installed version against the
+floor, the daemon (`kache daemon --json`: service installed, running, same version as the
+binary), the user config's `[cache] local_store` pin (it must name the store `kache doctor`
+resolves) and `ignore_env = true`, whether the shell (`KACHE_CONFIG`) and the daemon
+(`daemon_config_path`) load that file at all, env passthrough, the checkout and worktree-base devices and
+clone checks (a worktree-base setting `wt` refuses is drift too), and the exact undo. It exits non-zero on drift while kache is active, naming each
+failing fact; with kache not in use it prints the same facts without judging them. Decision table and evidence: `docs/kache-strategy.md`.
 
 ## Verifying it's actually working
 

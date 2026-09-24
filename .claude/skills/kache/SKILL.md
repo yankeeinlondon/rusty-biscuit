@@ -65,8 +65,13 @@ writes store placement (`[cache] local_store` + `ignore_env = true` into the use
 config via `scripts/kache-config-merge.py` — the config file is the single source
 of truth), owns the daemon lifecycle (installed, running, restarted on binary or
 config change), and **activates last** (`[build] rustc-wrapper = "kache"` in
-`$CARGO_HOME/config.toml`; a tracked wrapper stays forbidden). A pre-activation
-failure leaves kache off with WARNING lines while init completes. Non-qualifying
+`$CARGO_HOME/config.toml`, or the legacy `$CARGO_HOME/config` when it exists, because Cargo
+then ignores `config.toml`; a tracked wrapper stays forbidden), then reports
+`activation INCOMPLETE` — never success — when an env or repository/parent
+wrapper outranks that entry, or when the winning kache-named wrapper does not
+resolve to the verified `kache` on `PATH` (a missing path fails every build). A pre-activation
+failure leaves kache off with WARNING lines while init completes — including a `KACHE_CONFIG`
+in init's shell or the daemon's environment, which bypasses the user config. Non-qualifying
 filesystems (ext4, NTFS, WSL's ext4-in-VHDX): init never installs kache and names
 the reason; a below-floor install there upgrades only after interactive
 confirmation, binary-only (`just install-kache true`). APFS/btrfs/XFS-reflink/ReFS
@@ -76,6 +81,14 @@ the config file). Version floor `.github/kache-min-version` = **0.23.0** (the
 measured line; a check, never a pin). `just kache-status` reports the same probe
 facts init used and exits non-zero on drift while active. Details:
 `docs/kache-strategy.md`, `docs/initialization.md`.
+
+The worktree-restore promise has a real-cache test: `just test-real` in
+`tools/` runs `real_kache_worktree_restore`, which builds a committed fixture
+in two successive `git worktree`s against a scratch store and a test-owned
+`kache daemon run` (scratch `HOME`/`XDG_CONFIG_HOME`, `local_store` +
+`ignore_env`), then asserts B's hits and an unchanged artifact tree. It skips
+without kache or a cloning filesystem (`BISCUIT_KACHE_REAL_REQUIRED=1` fails
+instead). Without a daemon, `kache stats` tries to start one itself.
 
 ## Fast decision checklist — does kache fit this host?
 
@@ -125,7 +138,9 @@ Details and the reasoning in [when-not-to-use.md](when-not-to-use.md).
 - [Installation, per OS](installation.md) — mise, brew, apt, AUR, winget, scoop, choco, cargo;
   the macOS hardened-runtime `DYLD_*` trap and its ad hoc re-sign
 - [Platform & filesystem variance](platforms.md) — reflink vs hardlink, per-OS paths and daemons
-- [Configuration best practices](configuration.md) — store sizing, gc policy, keying speed
+- [Configuration best practices](configuration.md) — store sizing, gc policy, keying speed;
+  the store precedence stack and the `KACHE_CONFIG` trap (`ignore_env` does not gate the
+  config-file selector)
 - [Release-specific behavior](versions.md) — observed defaults, diagnostics, and defects by version
 - [Remote object storage](remote-cache.md) — S3/MinIO/Ceph/R2, warm vs sync, CI
 - [When not to use kache](when-not-to-use.md) — honest limits and the incremental tradeoff

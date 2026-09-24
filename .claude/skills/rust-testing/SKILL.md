@@ -732,7 +732,13 @@ spell yours in one of them or the file's next edit will not run your test:
 
 Paths assembled from `format!`, a value computed at run time, or a helper
 defined in another file are invisible, and a literal joined onto a tempdir is
-correctly treated as a fixture, not a read. The why and the evidence rules are
+correctly treated as a fixture, not a read. A literal inside a shared
+`tests/common` module narrows to that module, which holds no tests, so spell
+the path in the binary that runs them (the kache suites' `repo_inputs()`).
+
+Another package's **source** (a script your tests execute) is not scanned
+unless your package lists it in `[package.metadata.ci.tests] source-inputs`;
+the tests must still spell the path in one of the forms above. The why and the evidence rules are
 in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
 
 ## Environment Contract

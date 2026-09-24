@@ -58,6 +58,23 @@ kache 0.23.1):
    and its `ignore_env` has no effect (only the user-level file can gate env);
 4. kache's built-in default.
 
+**The config-file selector sits above that whole stack.** A non-empty
+`KACHE_CONFIG` makes kache load that file *instead of* the user config, and
+`ignore_env = true` in the user config does **not** gate it — the selector is
+read before any file is (measured 2026-09-24 on 0.26.3 with `kache doctor
+--json` against scratch configs). A `KACHE_CONFIG` naming a missing file drops
+kache to its built-in default rather than falling back to the user config; an
+empty one is ignored. `kache doctor --json` names no config path; `kache daemon
+--json` reports the running daemon's as `daemon_config_path` (null when none
+answers), and its `socket` follows the selected config's store, so a shell with
+`KACHE_CONFIG` talks to a different daemon. `scripts/kache-host.sh
+config-source` reports both sides; `just init` leaves the wrapper off and
+`kache-status` reports drift when either loads another file.
+
+`kache doctor --json`'s `Cache dir` detail reads `<path> (will be created on
+first build)` until the store exists (doctor creates it right after); strip
+that note before comparing it with a path.
+
 `KACHE_DISABLED` is ungated — honored whichever layer wins. In rusty-biscuit,
 `just init` writes layer 2 (`local_store` + `ignore_env = true`) on qualifying
 hosts precisely so every process — shells, the daemon, editors, launchd jobs —
