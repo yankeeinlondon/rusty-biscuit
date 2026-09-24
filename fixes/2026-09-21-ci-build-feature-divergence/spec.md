@@ -1,6 +1,6 @@
 ---
 area: repo
-status: draft-spec
+status: finalized-spec
 created: 2026-09-21
 clarified: false
 reviewed: true
@@ -8,6 +8,46 @@ reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-21
 review_iterations: 0
 implemented: false
+human_review: true
+human_review_items:
+    - |-
+      **The planned fix would save about one second. Which direction should the rest of this fix take?**
+
+      *Why this has to be decided before Phase 2:* Phase 2 writes a decision (fix it or leave it) for every flag, and Phase 3 builds a shared "alignment" crate. The spec assumed three low-level third-party options (`libc/extra_traits`, `proc-macro2/span-locations`, `serde_core/default`) caused most of the rebuilds. Phase 1 measured it (`attribution-2026-09-21.md`). Workspace crates are rebuilt about 65 extra times, costing roughly 300 s on this Mac. 93% of that comes from third-party options, as the spec suspected. But the options always arrive **in bundles of 3 to 25**. Aligning the three planned ones collapses almost nothing: **about 1 s saved**. A rebuild only goes away once *every* option in its bundle is aligned. Most bundle members are options the spec ruled "leave alone by default" (web server, `tower`, `time`, `mio`, `clap`). The remaining phases would be wasted work without a new direction.
+
+      *Options:*
+      - **A. Close with the measurement.** Leave every option as it is, skip the alignment crate, and finish Phases 2–4 as recorded "no-op" decisions.
+        Pro: no risk, and the spec's protection stays whole. Con: no speed-up.
+      - **B. Remove one internal link instead (new remedy).** `schematic-definitions`, 55,000 lines of API definitions, is almost half of the extra cost (146 s): it is rebuilt 7 times at about 24 s each. It depends on the heavy runtime stack only because `schematic-define` pulls in `biscuit-file` just to reach its re-export of the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly should drop most of those rebuilds.
+        Pro: small, local, and it keeps the spec's "don't unify features" protection fully. Con: the saving is estimated, not measured; the upper bound is 146 s and the true figure is lower; the spec does not list it yet, so it needs a line added to the spec.
+      - **C. Align nearly all third-party options** (hand-written, or generated with `cargo-hakari`).
+        Pro: the biggest saving, about 211 s (about 70% of the extra cost). Con: gives up the protection the 2026-09-12 decision relied on. A package's tests could pass only because another package switched on a third-party option (for example a web server) that its own manifest never asked for. It also means reviewing about 80 entries and keeping them current.
+      - **D. A middle ground:** align `libc`, `serde_core`, `proc-macro2`, plus `mio` (and `errno`).
+        Pro: about 36 s saved. Con: `mio` is on the "leave alone by default" list, so it needs its own written ruling, and the gain is modest.
+
+      *Recommendation: B, combined with A for every flag.* It goes after the biggest single cost without weakening the protection this repository chose on purpose, and it is a one-line manifest change that is easy to measure with the new tool. Revisit C only if the author decides that protection is worth trading for about 3.5 minutes of local build time (likely more on CI runners).
+    - |-
+      **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
+
+      *Why now:* the Open Questions ruling (Option 1) says to align `proc-macro2/span-locations` through the alignment crate. Its fallback, Option 2 (move the test to its own crate and teach the CI planner to watch it), applies "if the alignment crate is not warranted". Phase 1 shows the alignment crate is not warranted. It also shows the flag affects only 6 crates and is never the sole reason for a rebuild. So moving the test would save **0 s** while adding a new CI-planner mechanism.
+
+      *Options:*
+      - **Leave the flag and the test exactly as they are** (amend the ruling). Pro: nothing changes, and the evidence says nothing is lost. Con: none.
+      - **Follow the recorded fallback (Option 2).** Pro: it follows the ruling to the letter. Con: CI-planner work and a new way to miss coverage, for no measured gain.
+
+      *Recommendation: leave it as it is,* and record the amendment in Open Questions.
+message_to_agent: |-
+    Phase 1 is complete, but the author must rule on `human_review_items` before any Phase 2 remedy work starts. Measured result: the spec's three eligible flags remove about 1 s if aligned. See the "One-page reading" in implementation-log.md and attribution-2026-09-21.md.
+    Tooling you will want:
+    - `cargo run -p repo-deps --bin feature-attribution -- --owners <pkgs> --target x86_64-unknown-linux-gnu [--align crates] [--json f]` needs no compile.
+    - `--events target/feature-attribution-timing-out/events` joins the macOS timed pass. The target tree `target/feature-attribution-timing` is still warm, and `timed-pass.sh` regenerates both.
+    - The `--align` what-if refuses workspace crates. Use it to size any remedy before editing manifests.
+    - `nextest` rebuilds only the test binary, so run `cargo build -p repo-deps --bin feature-attribution` before using `./target/debug/feature-attribution`. An earlier stale binary produced wrong own/workspace-dependency seconds.
+    Facts that differ from the spec:
+    - `proc-macro2/span-locations` is target-side only (the owner passes `--target`).
+    - `repo-deps` also demands `libc/extra_traits`, via `ctrlc` → `nix 0.31.3`.
+    - The spec's 13 divergence rows reproduce only without `claudine-cli`'s CI features. With them there are 24.
+    If the author picks option B (the `schematic-define` → `serde_yaml_ng` edge), it is a "remove the source" row in Task 2.2. It must update `docs/dependencies.md`, and it can be sized first by re-running the tool after the manifest edit.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21
 related:
@@ -337,6 +377,43 @@ without weakening the ruling at all. The hack crate is for what remains.
   Cohorts would make this problem worse: a configuration shared across cohorts
   compiles once per cohort. They remain the fallback for a *different* finding.
 
+### Rulings (recorded 2026-09-23, before any part 2 work)
+
+These resolve the plan's decision points. The Open Question has its own
+ruling under Open Questions below. The spike evidence behind rulings 3 and 5
+is in this fix's implementation log (Phase 1, Wave 1).
+
+1. **Isolation:** Option 1 (see Open Questions).
+2. **Alignment crate identity.** If created, it is `feature-alignment` at
+   `tools/feature-alignment`: a root workspace member with no bins and no
+   tests, an empty `src/lib.rs`, reviewed `[dependencies]` entries only, and
+   `publish = false`. A rename needs a recorded reason.
+3. **`expectrl` source removal is blocked upstream.** The newest `expectrl`
+   (0.9.0) still depends on `nix ^0.26` and `ptyprocess ^0.5.0`, and 0.5.0
+   is the newest `ptyprocess`. So `libc/extra_traits` is handled by alignment
+   if it is handled at all. Replacing `expectrl` across its five
+   dev-dependency holders is out of scope. The spike also found that
+   `nix 0.29.0` and `0.31.3` enable the same `libc` feature, and that
+   `repo-deps` demands it through `ctrlc` → `nix 0.31.3`, so removing
+   `expectrl` would not retire the flag.
+4. **The "ruled per crate, default no" set stays divergent**
+   (`time/local-offset`, `hyper/server`, `hyper-util/*`, `tower/*`,
+   `crossterm/*`, `mio/*`, `tokio-stream/net`, `clap/*`). One of them may be
+   aligned only if the ranking shows material seconds **and** a per-flag
+   ruling is recorded in this spec first. The same rule covers any flag the
+   ranking surfaces that is not on this spec's eligible list.
+5. **`cache-workspace-crates` stays dismissed.** Verified locally: after a
+   fresh clone and a restored target tree, Cargo reports the workspace crate
+   `Dirty … the file … has changed`, and the third-party crate stays `Fresh`.
+6. **Attribution tooling.** The first-pass tool is the standalone
+   `feature-attribution` binary in `repo-deps`, behind `local-tools`. Whether
+   it becomes a report beside `ci-build` is decided once, in the final phase,
+   from how useful the first table was. This fix adds no CI emission.
+7. **Publishing is checked before the fan-out.** Before any member manifest
+   gains the alignment crate as a dev-dependency, a dry run must show that a
+   path dev-dependency on a `publish = false` crate does not block
+   packaging a publishable member.
+
 ### Out of scope
 
 - `area-drift`'s separate `cargo build -p sniff-cli --release` (about four
@@ -432,3 +509,19 @@ remedy, and it is available whenever the alignment crate exists. Choose
 option 2 only if part 1's ranking shows the alignment crate is not warranted
 at all. Option 3 is a last resort. Record the ruling here before
 implementing.
+
+**Ruling (2026-09-23): option 1.** `proc-macro2/span-locations` is aligned
+through the alignment crate whenever that crate is created. The source-scan
+guard stays in `claudine-cli`, with no new crate and no planner change.
+Option 2 is chosen instead only if part 1's ranking shows the alignment crate
+is not warranted at all. Option 3 is rejected: it re-imports the divergent
+configuration for `claudine`'s whole closure.
+
+Part 1 evidence that changes this question's weight without changing the
+ruling: the owner passes an explicit `--target`, so Cargo resolves
+host-side and target-side `proc-macro2` separately. The dev-dependency's
+`span-locations` reaches only the **target-side** `proc-macro2`. The host
+side, which every derive macro links, stays `default,proc-macro`. So the flag
+re-identifies only workspace crates that link `proc-macro2`/`syn` as normal
+dependencies, not every crate that derives a trait. This fix's attribution
+report ranks it by the seconds it actually causes.

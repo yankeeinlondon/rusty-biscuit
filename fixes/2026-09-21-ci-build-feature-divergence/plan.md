@@ -11,6 +11,40 @@ related:
     - 2026-09-12-single-os-compile
 packages:
     - repo-deps
+source_files_during_phase_1:
+    - scripts/feature-attribution.rs
+    - scripts/feature-attribution-tests.rs
+    - scripts/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/Cargo.lock
+    - scripts/ci/fixtures/feature-attribution/core/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/core/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/util/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/util/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-own/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-own/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-plain/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-plain/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-third/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-third/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/owner-wsdep/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/base/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/base/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-1/src/lib.rs
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/Cargo.toml
+    - scripts/ci/fixtures/feature-attribution/vendor/twin-2/src/lib.rs
+    - fixes/2026-09-21-ci-build-feature-divergence/timed-pass.sh
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-data/render-attribution.py
+docs_updated_during_phase_1:
+    - fixes/2026-09-21-ci-build-feature-divergence/spec.md
+    - fixes/2026-09-21-ci-build-feature-divergence/plan.md
+docs_created_during_phase_1:
+    - fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md
+    - fixes/2026-09-21-ci-build-feature-divergence/implementation-log.md
+skills_files_updated_during_phase_1:
+    - .claude/skills/rust-devops/ci-cd.md
 ---
 
 # Plan: Stop divergent base features from recompiling the workspace per archive
@@ -194,22 +228,22 @@ require, and none triggers CI.
 
 #### Wave 1 (all four spikes in parallel)
 
-- [ ] **Task 1.1 — Re-derive divergence** (Spike S1; no prerequisites).
+- [x] **Task 1.1 — Re-derive divergence** (Spike S1; no prerequisites).
   - Run `cargo tree -e features,normal,build,dev` for each of the ten owner
     packages at the implementing branch's base; diff resolved feature sets
     pairwise against the shared closure, keyed on `(crate, version)`.
   - Record the reproduced table (expected: the spec's thirteen
     `claudine`/`claudine-cli` rows and no others) plus any cross-owner rows
     the ten-package set adds, in `implementation-notes.md`.
-- [ ] **Task 1.2 — Trace nix owners** (Spike S2; parallel with 1.1, 1.3, 1.4).
+- [x] **Task 1.2 — Trace nix owners** (Spike S2; parallel with 1.1, 1.3, 1.4).
   - From the lock and `cargo tree -i libc` per owner, list which owners
     demand `libc/extra_traits` and through which `nix` version/chain.
   - Record the owner list; this seeds the Phase 2 decision table's
     `libc/extra_traits` row.
-- [ ] **Task 1.3 — Re-check expectrl** (Spike S3; parallel; time-boxed).
+- [x] **Task 1.3 — Re-check expectrl** (Spike S3; parallel; time-boxed).
   - Record the newest `expectrl` version and its `ptyprocess`/`nix` chain,
     with a link to the evidence. Feeds ruling 3; no code change.
-- [ ] **Task 1.4 — Verify cache expectation** (Spike S4; parallel;
+- [x] **Task 1.4 — Verify cache expectation** (Spike S4; parallel;
   time-boxed).
   - In a scratch clone under the temp workspace directory, warm a target tree,
     reset workspace-source mtimes the way a fresh checkout does, and observe
@@ -218,7 +252,7 @@ require, and none triggers CI.
 
 #### Wave 2 (after Wave 1 outcomes)
 
-- [ ] **Task 1.5 — Record rulings** (prerequisite: Wave 1 results; edits
+- [x] **Task 1.5 — Record rulings** (prerequisite: Wave 1 results; edits
   `spec.md`, so surgical changes only).
   - Write the seven rulings above into the spec: the Open Question ruling
     (Option 1, with the Option 2 fallback condition and Option 3 rejection)
@@ -232,7 +266,7 @@ require, and none triggers CI.
 
 #### Wave 3 (two tasks in parallel; both depend only on the selection, not on Wave 2)
 
-- [ ] **Task 1.6 — Build attribution script** (complexity: the highest in
+- [x] **Task 1.6 — Build attribution script** (complexity: the highest in
   this plan — reverse-dependency attribution; budget tests accordingly).
   - Add a `feature-attribution` binary to `scripts/` (package `repo-deps`,
     `[[bin]]` behind the existing `local-tools` feature, alongside `drift`
@@ -259,7 +293,7 @@ require, and none triggers CI.
     terminal; the machine output is JSON beside the rendered table. Update
     `scripts/Cargo.toml` features comment block and `docs/dependencies.md`
     in the same change if any dependency is added (none expected).
-- [ ] **Task 1.7 — Run timed pass** (prerequisite: storage headroom check;
+- [x] **Task 1.7 — Run timed pass** (prerequisite: storage headroom check;
     parallel with 1.6; no prerequisites on it).
   - Reproduce the owner's archive builds locally, once per owner package, in
     the producer's deterministic package order (read it from the resolved
@@ -278,7 +312,7 @@ require, and none triggers CI.
 
 #### Wave 4 (after Waves 3)
 
-- [ ] **Task 1.8 — Publish attribution table** (prerequisite: Tasks 1.6 and
+- [x] **Task 1.8 — Publish attribution table** (prerequisite: Tasks 1.6 and
   1.7; this task decides how far Phases 2 and 3 go).
   - Join script output with timed-pass seconds: charge each configuration
     beyond a crate's first the seconds of the crates it re-identifies.
