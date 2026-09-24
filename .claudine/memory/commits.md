@@ -198,7 +198,18 @@ belong here.
   half-batch of paths, and let the orchestrator collapse them if the
   journal rule requires a single atomic commit (each commit re-signs
   with a fresh hash; verify with `git diff` between original and
-  recomposed commit that only the messages differ).
+  recomposed commit that only the messages differ). The "~40 pairs"
+  figure is conservative — a single atomic `--only` invocation
+  succeeded for 499 renames (998 paths = ~103 KB inline pathspec) on
+  a host with `ARG_MAX=1048576` (`getconf ARG_MAX`); the per-path cost
+  is ~200 bytes on the rename pairs seen here, so the practical
+  limit is roughly `ARG_MAX / 250`. Pre-flight `wc -c` on the inline
+  pathspec before dispatch; if it stays well under ARG_MAX, the
+  atomic single-commit shape preserves the journal's "one rename
+  event = one commit" preference. Verify the result with
+  `git ls-tree HEAD <new-dir>/` (count files; the count should equal
+  the rename pair count) and `git ls-tree HEAD <old-dir>/` (should be
+  empty) before reporting success.
 - Splitting a single file's content across two commits (e.g. two
   `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
   commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
