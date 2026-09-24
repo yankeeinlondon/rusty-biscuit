@@ -5,77 +5,61 @@ description: |-
   test design, fixture isolation, `require_level!` / `expect_level!` gating,
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 61d07be7e22c9f45-974174a243c5f3c6
-last_updated: 2026-09-22
+hash: 61d07be7e22c9f45-43ee6f6bd18f4fb0
+last_updated: 2026-09-24
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
-## Test Design Contract
+This page is the index. Read the rules below and the decision tree, then open
+the topic page that matches the task; each rule links to its reasoning and
+evidence.
 
-Before adding or changing a test, identify the observable failure it must
-catch, the boundary needed to prove it, and the state that boundary consumes.
-Reuse or extend existing coverage when it already provides that proof; a new
-test is not required for every implementation edit.
+## Rules that fail silently when broken
 
-- **Assertion quality.** For a regression, retain the original failing input
-  and show that the relevant assertion distinguishes the broken behavior from
-  the fix when feasible. Assert dependent output/state and meaningful error
-  behavior. An exit-success check or a value compared with itself is not proof
-  of a promised result. Review names and comments when behavior changes.
-- **Boundary and cost.** Put exhaustive value/representation combinations at
-  the cheapest boundary that proves them. Keep representative real-CLI,
-  persistence, or protocol coverage where wiring matters. Stub external
-  providers, not the application behavior under test. Extend a shared passive
-  shipped-artifact corpus test rather than rescan the whole corpus in a new
-  process for every regression; keep an end-to-end case through a real shipped
-  artifact when changing its parser, schema, template, or configuration path.
-- **Explicit inputs.** Use the area's command builder and fixture-owned
-  directories, home/config/cache state, environment, and tool lookup. Disable
-  unrelated service connections. A temporary input file alone does not isolate
-  launch CWD or parent repository discovery. Host discovery tests retain the
-  real detector only when that observation is the subject of the test.
-- **Time and ownership.** Synchronize on readiness or the final condition being
-  asserted, with a deadline; do not use a fixed sleep as readiness proof. When
-  elapsed time is the contract, preserve its semantic floor and justify the
-  budget, polling cadence, and shutdown margin under CI contention. Also check
-  whether the *child* is waiting on the harness: a bare PTY answers no terminal
-  query, so a child that probes it — DSR cursor position (`ESC[6n`), OSC 10/11
-  foreground and background colour — pays a full timeout per unanswered probe
-  before it emits anything. Answer each on observation, as
-  `claudine/cli/tests/common/pty.rs` and `biscuit-terminal`'s `ProbeAnswer` do;
-  match the newly-read chunk, not the cumulative transcript, so a late
-  duplicate reply cannot land in a raw-mode prompt as an `ESC` keystroke.
-  Fixtures own and clean up children, threads, sockets, and directories on
-  failure too. Serialize only tests sharing an actual resource, using
-  runner-visible coordination when tests execute in separate processes — and
-  do not label a per-test resource shared: nextest gives every test its own
-  process, so a `#[serial]` group there enforces nothing and misleads.
-- **Reachability.** Confirm that the test's name, `cfg`, required features, and
-  recipe select it on the intended platforms. L1 includes hermetic subprocess
-  and filesystem tests. OS-specific behavior alone does not require L2/L3.
-  Missing tests, skipped tests, and unavailable resources are not passing
-  evidence; terminal/browser tests must preserve focus.
-- **Performance evidence.** Use stable work counters for contracts such as
-  “no repository walk” or “one request per operation”; use timings to measure
-  actual latency. Compare matched tests with the same features, profile,
-  concurrency, platform, and cache conditions. Separate build time from test
-  execution. Do not hide cost by changing tiers, dropping assertions, adding
-  retries, or raising runner limits without diagnosing the cause.
+Every rule here once produced a green run that proved nothing. Violating one
+rarely causes an error. Usually the test just stops running, or runs against
+the wrong thing.
 
-When a test exposes defective shared setup, inspect its siblings even if they
-have never crossed a slow threshold. Repair the shared fixture within the
-authorized scope and record remaining consumers for follow-up. Report which
-behavior the targeted tests prove, relevant broader gates, and evidence still
-pending on CI; distinguish implementation completion from verification.
+1. **Tier is the resource a test needs, never the OS it targets.** An
+   OS-specific test is an ordinary test behind `#[cfg(...)]`. Never give it a
+   `level2_`/`level3_` prefix or an `#[ignore]` naming a platform.
+   → [tiers-and-gating.md](tiers-and-gating.md)
+2. **Gate L1 with `expect_level!`, L2/L3 with `require_level!`, and name the
+   `Backend`.** A skip in L1 reads as a pass; a gate without a backend
+   identity never proves that backend ran. → [tiers-and-gating.md](tiers-and-gating.md)
+3. **A tier marker is a prefix on a name segment**, matched as `(^|::)level2_`.
+   A module named `level2_*` puts all its tests in L2. A marker for a tier
+   whose recipe is a stub strands the test in no tier at all.
+   → [tier-filters.md](tier-filters.md)
+4. **Run `level2_*` tests only through `just test-l2`.** The recipe owns
+   pane spawning, teardown, and serial-versus-parallel mode, and harness
+   spawns never steal focus. → [l2-tests.md](l2-tests.md)
+5. **Never run a consolidated suite with `cargo test`.** Nextest gives every
+   test its own process; `cargo test` shares one across up to a hundred former
+   binaries. → [consolidated-binaries.md](consolidated-binaries.md)
+6. **Never resolve a path at compile time.** CI runs your binary from an
+   archive on another machine: use `biscuit_test_harness::bin_exe!` and
+   `manifest_dir!`, not `env!("CARGO_…")`. → [ci-execution.md](ci-execution.md)
+7. **Spell a repository file read in a form the CI index can resolve**, or the
+   file's next edit will not run your test:
+   - `include_str!("../../docs/x.md")`;
+   - a root joined in the same expression — `manifest_dir!().join("…")`,
+     `repo_root().join("…")`, or a name bound to one in the same file;
+   - a full repository-relative literal, in a file that reads through a root.
 
-For a requested comprehensive test audit or test-performance specification,
-read [test-suite-audits.md](test-suite-audits.md). Ordinary feature work does
-not require a suite-wide audit. The tooling those audits run on (listing
-captures, CI JUnit gates, inventory reconciliation, cost attribution,
-alternating-run measurement, and work-count comparison) is the shared
-`tools/test-audit` package, driven by a per-area `audit.config.json`; see
-[test-audit-tooling.md](test-audit-tooling.md) for install, commands,
-configuration, and how to read its numbers.
+   A read in a helper schedules its whole binary, and a shared `tests/common`
+   module is a helper in every binary that includes it.
+   → [ci-execution.md](ci-execution.md)
+8. **Spawn the crate's own binary through the area's one command builder**
+   (`CliProcessFixture` in claudine and darkmatter), never a raw
+   `Command::cargo_bin`. The ambient checkout, `$HOME`, and `PATH` make a test
+   slow and host-dependent. → [spawning-binaries.md](spawning-binaries.md)
+9. **No retries, no fixed sleeps, no leaked children.** Both nextest profiles
+   use `retries = 0` and fail on `LEAK`. Synchronize on the condition you
+   assert. → [test-design.md](test-design.md), [recipes.md](recipes.md)
+10. **Scope final gates by blast radius**, never by a workspace-wide run, and
+    do not add `--no-fail-fast`: CI already passes it.
+    → [verification-scope.md](verification-scope.md), [recipes.md](recipes.md)
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -97,926 +81,98 @@ If the only meaningful coverage of a public API requires a real resource,
 document the exception in `docs/testing-strategy.md`; do not force it into
 `sanity`.
 
-### OS-specific tests are ordinary tests
+| Level   | Prefix     | Resource                                     | Skip when absent     |
+|---------|------------|----------------------------------------------|----------------------|
+| L1      | (none)     | In-process or hermetic subprocess/filesystem | Never                |
+| L2      | `level2_`  | Real terminal / PTY                          | Harness missing      |
+| L3      | `level3_`  | OS keyboard/mouse                            | `RUN_LEVEL3` unset   |
+| Browser | `browser_` | Chrome/Chromium                              | Browser missing      |
+| Real    | `real_`    | External device/API                          | Resource missing     |
+| Slow    | `slow_`    | None (slow L1)                               | Excluded from sanity |
 
-**Tier is about the resource a test needs, never about the operating system it
-targets.** An OS-specific test is a normal test gated by `#[cfg(...)]`; the
-matrix already runs the suite on each OS, so the `cfg` alone puts it on the right
-leg and nowhere else.
-
-```rust
-#[cfg(unix)]                    // runs on the Linux/macOS legs
-#[test]
-fn sigint_during_prep_exits_130() { … }
-
-#[cfg(windows)]                 // runs on the Windows leg
-#[test]
-fn ctrl_c_terminates_wrapped_child_on_windows() { … }
-```
-
-Both are L1: each synthesizes its signal with a plain API call (`kill`,
-`GenerateConsoleCtrlEvent`) and needs no terminal harness. Do **not** reach for
-`level2_`/`level3_` just because a test only runs on one platform, and do not
-`#[ignore]` it because the dev host cannot run it — that is what CI's other legs
-are for.
-
-Getting this wrong is expensive and silent. Claudine's Windows Ctrl+C tests
-carried `level3_`/`level2_` prefixes plus an `#[ignore]`, which made them
-unreachable by **every** canonical recipe — `just test` filters out `level3_`,
-`just test-l2` selects only `level2_`, `just test-l3` neither runs unattended nor
-runs ignored tests, and CI's L2 job is Linux-only. Someone then wrote a bespoke
-GitHub workflow to invoke one by exact name with `--ignored`. It never passed,
-nobody noticed for months, and the fix was to delete the workflow and drop the
-prefixes. See `features/2026-07-24-devops/ci-failure-inventory.md`.
-
-Symptoms that you have mis-tiered an OS-specific test:
-
-- it needs a bespoke CI workflow, a hand-written `just` recipe, or an exact-name
-  invocation to run at all;
-- it is `#[ignore]`d with a reason that names a *platform* rather than a
-  *resource*;
-- a tier prefix and a `#[cfg]` gate encode the same fact twice.
-
-`biscuit-tui/cli/tests/windows_captured_stdout.rs` had all three at once: an
-`#[ignore = "requires a Windows host"]`, a hand-written recipe, and a whole
-specialized workflow that invoked it by exact name. `biscuit-tui-cli` already
-declared `features = ["terminal-tests"]`, so its CI L1 cell had been *compiling*
-that target all along and only the `#[ignore]` kept it from running. Deleting
-the attribute, the recipe, and the workflow made it ordinary `windows-latest`
-L1 evidence inside the package's own cell; the `#![cfg(windows)]` inner
-attribute is the whole Windows-only declaration.
-
-That test also rewires **process-wide** std handles through `SetStdHandle`.
-That is safe here only because nextest runs one test per process — under
-`cargo test`'s shared-process harness it would corrupt every sibling. Treat
-"nextest gives me a process to myself" as a property worth naming in the test's
-`//!` docs whenever you rely on it.
-
-**Compile the other platform's arms locally.** An area's `just check-windows`
-runs `cargo check -p <crates> --tests --target x86_64-pc-windows-gnu`
-(mingw, with `-Wa,-mbig-obj`; `rustup target add x86_64-pc-windows-gnu`
-first). Use that target, not `x86_64-pc-windows-msvc`: on a macOS host the
-MSVC check dies inside `aws-lc-sys` for want of Windows SDK headers, which is
-how one fix concluded its `#[cfg(windows)]` arms were uncompilable off CI.
-Compiling is not running — `windows-latest` stays the runtime authority — but
-a typo in a Windows arm becomes a local error instead of a CI surprise, and
-an import used only inside `#[cfg(unix)]` cases shows up as
-`unused_imports` here and nowhere else (gate the import too). A warm re-run
-re-emits cached warnings only for what it re-checks; when the warning count
-is the evidence, check into a fresh `CARGO_TARGET_DIR`.
-
-## Test Levels
-
-| Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                                              |
-|---------|------------|---------------------|----------------------|------------------------------------------------------------|
-| L1      | (none)     | In-process or hermetic subprocess/filesystem | Never | — |
-| L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_REQUIRED_BACKENDS` (per-backend, preferred); `BISCUIT_TEST_LEVEL_REQUIRED=2` (all-or-nothing) |
-| L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3`                            |
-| Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`                               |
-| Real    | `real_`    | External device/API | Resource missing     | Per-package env vars; see "Requiring a real resource individually" |
-| Slow    | `slow_`    | None (slow L1)      | Excluded from sanity | —                                                          |
-
-### Requiring L2 backends individually
-
-`BISCUIT_TEST_LEVEL_REQUIRED=2` is all-or-nothing: it panics *every* L2 gate,
-including the GUI-backed ones a headless runner cannot host, which is why CI
-used to check `tmux -V` as a proxy instead of demanding anything.
-
-`BISCUIT_TEST_REQUIRED_BACKENDS` names the backends whose absence must be fatal
-while every other backend still skips cleanly. It is a comma-separated,
-case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
-`apple-terminal` — matched **exactly**, so `wez` and `tmux2` are errors rather
-than near-misses. Unset or all-whitespace means "no backend is required" and
-every gate keeps its skip behavior. The same vocabulary appears in each
-package's `[package.metadata.ci.tests]` `l2-backends` and
-`scripts/ci/affected_scope.py`. CI's per-package L2 legs set it to the cell's
-`backends` — the planner's intersection of the package's declaration with what
-the environment hosts (tmux alone on every hosted runner today) — so an
-installed-but-never-exercised backend fails the `_test_l2` backend-proof
-bracket instead of rendering a green cell with zero executed L2 tests, and
-`backend-proof verify` writes the per-backend verdict `completion.py` certifies
-the cell from (`$STAGE/backend-proofs.json`).
-
-```bash
-BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2        # tmux fatal, GUI backends skip
-```
-
-**Availability is not execution.** A leg can install `tmux`, run a tier that
-happens to select no tmux-backed tests, and exit 0 — a green cell that verified
-nothing, indistinguishable from a real pass. An installed `tmux` plus zero tmux
-tests is not evidence. So when the variable is set, every gate appends one
-`{backend, test, decision}` record to `$STAGE/backend-executions.jsonl`
-(`$STAGE` = `$BISCUIT_JUNIT_STAGE_DIR`, else `target/nextest/ci-reports`), and
-the tier is bracketed by the `backend-proof` binary
-(`tools/test-toolkit`, `--features backend-proof`):
-
-- `backend-proof reset` before the run, discarding the previous run's records —
-  without it, stale evidence satisfies the check and the mechanism silently
-  degrades to a no-op;
-- `backend-proof verify` after it, failing when a required backend produced no
-  `run` record. Exit `0` proved (or nothing required), `1` unproven, `2` bad
-  config / unreadable evidence.
-
-`just/devops.just` wires both in, **once per tier rather than per package**:
-`_test_l2` brackets itself, except when `_test_l2_all` (the multi-package
-`_run_all` path) has claimed ownership via `BISCUIT_BACKEND_PROOF_OWNER`. A
-per-package `reset` would erase earlier packages' evidence. An unproven backend
-fails the tier without masking a genuine test failure, and the whole mechanism
-is inert — no output, no file I/O, no added latency — when the variable is
-unset.
-
-### Requiring a real resource individually
-
-The `real_` tier has the same availability-versus-execution problem as L2, and
-solves it the same way. A `real_*` test skips when its backend is absent, so a
-green `just test-real` can mean "the resource was there and playback completed"
-or "nothing ran". A repository-wide switch (`PLAYA_REAL_AUDIO_REQUIRED=1`,
-honored by `playa` and `biscuit-speaks`) turns *every* such skip into a failure,
-which is right for a fully provisioned host and wrong for a runner that has one
-backend and not another.
-
-The per-resource form names only what must be present. `biscuit-speaks` is the
-reference implementation: `BISCUIT_SPEAKS_REQUIRED_PROVIDERS=echogarden,gtts`
-is comma-separated, case-insensitive, whitespace-trimmed, matched exactly
-against the identifiers in `biscuit-speaks/lib/src/test_support.rs`, and a
-misspelled entry fails rather than silently disabling the requirement. Unset
-means nothing is required. Every skip branch of every `real_*` test routes
-through one shared helper (`skip_or_require`), so a new skip path cannot be
-added that bypasses the switch.
-
-Two rules follow from the same reachability contract as OS-specific tests:
-
-- **Never `#[ignore]` a real-resource test.** `just test` filters `real_` out
-  and `just test-real` does not pass `--ignored`, so an ignored `real_*` test
-  runs in no tier at all. Availability gating belongs in the test body, behind
-  the switch, not in an attribute.
-- **A `real_*` name inside `#[cfg(test)] mod tests` in `src/` is selected**, and
-  intentionally so: the filterset matches `(^|::)real_`, and the module path
-  makes the marker the first segment of the test's final name.
-
-## Gating Tests
-
-Use `test_toolkit::require_level!` at the top of a test body. Pass a `Backend`
-so the gate carries a machine identity, not just a diagnostic label:
+Hard-fail switches, per-backend requirements, the backend-proof bracket, and
+the full environment contract are in [tiers-and-gating.md](tiers-and-gating.md).
 
 ```rust
-use test_toolkit::{require_level, Backend, Level};
+use test_toolkit::{expect_level, require_level, Backend, Level};
 
-#[test]
-#[serial_test::serial]
-fn level2_renders_in_real_terminal() {
-    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
-    // ... test body
-}
-```
-
-A plain string label still works and is the right choice for composite or
-non-backend requirements — `"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"` — where
-no single backend identity applies. Such gates deliberately contribute no
-execution evidence: they can neither satisfy nor block
-`BISCUIT_TEST_REQUIRED_BACKENDS`. A gate that *does* correspond to one backend
-must name it, or its tests run without ever proving that backend.
-
-Where the gate lives in a helper that cannot `return` — an `-> Option<T>`
-fixture builder, say — use `decide_harness!`, which records evidence and yields
-the `LevelDecision`. Calling `evaluate_harness` directly skips the recording and
-leaves the backend unproven even though its tests ran.
-
-**Level 1 gates use `expect_level!`, not `require_level!`.** The clean skip is
-right for L2/L3, where the harness is genuinely optional. L1 is the mandatory
-suite and has no optional-harness contract, so a skip there is
-indistinguishable from a pass: an unprovisioned runner reports green while
-proving nothing. `expect_level!` takes the same arguments and panics — naming
-the missing requirement, so the skip's diagnostic survives as the failure
-message. Keep such a test off a platform with a compile-time exclusion
-(`#![cfg(unix)]` at the top of the binary), never a runtime probe. An
-operator-selected exclusion (`BISCUIT_TEST_LEVEL`, `RUN_LEVEL3`) still skips.
-
-```rust
-expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
-```
-
-Claudine's 32 L1 PTY gates were `require_level!` until review-3 of
-`fixes/2026-09-07-faster-claudine-tests`; a host without `/dev/ptmx` skipped all
-seven binaries and the run stayed green.
-
-For browser tests:
-
-```rust
-#[tokio::test]
-#[serial_test::serial(browser)]
-async fn browser_computed_style_matches() {
-    if !biscuit_browser_harness::require_browser() { return; }
-    // ... test body
-}
+require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm); // L2/L3: skips cleanly
+expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");             // L1: panics
 ```
 
 ## Canonical Just Recipes
 
-Every curated package area defines these 12 recipes:
-
-| Recipe         | Meaning                                                                                                                                                                                                                                                                                                                                      |
-|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`.                                                                                                                                                                                                                                                                    |
-| `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
-| `test-l2`      | Real-terminal tests. **Default (serial):** pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID`, runs nextest `-j 1`, tears panes down in a trap; tests `<Backend>Harness::shared_or_spawn()` attach to that pane. **Parallel self-spawn mode (`BISCUIT_L2_THREADS=N`):** skips the broker, exports no `BISCUIT_SHARED_*`, runs `-j N`; every `shared_or_spawn()` then takes its owned-pane fallback, so there is no shared resource. See "Running L2 Tests" below. |
-| `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
-| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); see `.config/nextest.toml` for the effective teardown policy. |
-| `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
-| `lint`         | Clippy + fmt check.                                                                                                                                                                                                                                                                                                                          |
-| `bench`        | Criterion benchmarks (no-op if opted out).                                                                                                                                                                                                                                                                                                   |
-| `coverage`     | Per-package LCOV.                                                                                                                                                                                                                                                                                                                            |
-| `doctest`      | `cargo test --doc`.                                                                                                                                                                                                                                                                                                                          |
-| `fuzz`         | `cargo +nightly fuzz run` (no-op if no targets).                                                                                                                                                                                                                                                                                             |
-| `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
-
-Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
-
-### Fail-fast is an environment policy, not a flag preference
-
-Locally, fail fast — nextest's default, and the right one. The first failure is
-usually enough to act on, and if more than one test is broken, fixing the first
-surfaces the next. In CI, run to completion instead. The rule keys on **how
-expensive the next run is**, which is what makes it a property of the
-environment rather than a preference between flags: a truncated Windows or WSL2
-report costs a full round-trip measured in hours to learn what the second
-failure was.
-
-**CI already passes `--no-fail-fast`** — in `.github/workflows/_package-ci.yml`,
-`.github/workflows/_wsl-ci.yml`, and `just/ci-local.just`. Do not add it.
-
-Root `just test` keeps the flag by explicit decision (2026-09-15,
-`fixes/2026-09-14-cicd-improvements`). It is the repository's broadest local
-scope and re-running it is expensive enough to sit on the CI side of the
-cost-of-next-run test. **At the repository root** the choice is also not
-reversible from the command line — every argument there is consumed as a
-selector — so selector-narrowed invocations such as `just test claudine` inherit
-the flag by design, not by oversight. Inside a package area the arguments reach
-nextest, so an area `just test` keeps nextest's fail-fast default and you can
-override it per run.
-
-**Consequence for non-vacuous proofs.** Proving a guard fix non-vacuous — neuter
-the guard, confirm the new tests go red, restore — needs the complete failure
-list when the pass runs at CI-shaped or multi-package scope, because a truncated
-list looks exactly like a narrow blast radius, which is the opposite of what the
-proof is for. Against a single package locally, fail-fast is correct and faster.
-
-**Restore corrupted sources with a fresh mtime.** Cargo rebuilds only when a
-source is newer than its build output. A restore that keeps the backup's older
-mtime (`cp -p`, Python's `shutil.copy2`) leaves the *last corruption's* binary
-in place. A byte-exact `cmp` then passes, and every later run silently tests
-broken code. Restore with a plain write or `touch` the files afterward. In
-`fixes/2026-09-12-shadow-home` Phase 11 this turned a passing L2 test red 40
-times out of 40 and made two full `just test-l2` runs unusable as evidence.
-
-## Scope Verification Gates by Blast Radius
-
-Before running any final build, test, or lint gate:
-
-1. Record the changed packages and package areas.
-2. Use GitNexus upstream impact on changed symbols to identify downstream
-   consumers, then use `sniff repo packages`, `sniff repo package-areas`, and
-   `sniff repo package-dependencies` to map that impact to executable scopes.
-3. Run build, test, and lint for every affected package area. Use its local
-   `just build`, `just test`, and `just lint` recipes, or an exact package
-   selector when the repository provides a narrower supported recipe. To run
-   exactly what CI's `lint` and `test` gates run for the branch's affected
-   packages, use `just ci-local` at the root (`--dry-run` prints the scope).
-   The pre-push hook runs `just ci-local --l2`: lint and L1 for source-changed
-   packages, compile-check for their direct reverse dependencies, and every
-   hostable L2 suite using a non-focusing backend (tmux, background WezTerm, or
-   keep-focus Kitty). For a clean outgoing `HEAD`, it
-   publishes exact-tree evidence so CI can omit the detected macOS, Linux,
-   native Windows, or WSL2 environment.
-   A non-comment change to a global path such as `.config/nextest.toml`
-   selects the **whole** workspace in `ci-local` and CI alike (73 packages,
-   ~45 minutes locally on 2026-09-08); budget for it before touching runner
-   configuration.
-4. Report the selected scope and commands with the gate results.
-
-For durable native CI, declare package policy in the package's own
-`[package.metadata.ci]`. The dependency-aware `.github/workflows/ci.yml`
-caller calculates source-changed workspace packages plus check-only direct
-reverse Cargo dependencies, reads that policy, and fans the resulting matrix into
-`.github/workflows/_package-ci.yml` — one result-producing job per package. A
-bootstrap `preflight` job gates that fan-out (`needs: [scope, preflight]`); it
-is **prerequisites only** and runs no test suite of any language.
-
-**CI's own suites are owned by two ordinary gating packages.** `repo-deps`
-(`scripts/`, a root-workspace member since the cicd-redundancies fix) owns the
-`ci-plan`/`ci-rollup` Nextest suites and the `scripts/ci/test_*.py` contracts;
-`test-toolkit` (`tools/test-toolkit/`, whose CI exclusion record is retired)
-owns `ci_workflow_contracts` and the `tools/test-audit` typecheck and
-Vitest pair. Both fan out like any other package, so a test added to either runs
-in that package's own cell — `just _test repo-deps` / `just _test test-toolkit`
-from the repository root — and a change under `scripts/` or
-`tools/test-toolkit/` now schedules real CI work.
-For each package, `check`, `lint` (build + clippy), and `test` (L1) are
-independent gates; only the expensive `l2`/`browser` tiers stage behind
-`test`. Lint does not gate L1 — one clippy hint must not delete a package's
-entire test evidence. Every configured L1 leg blocks: the `soft_os` policy is
-retired, because `continue-on-error` removed a leg from the run's verdict
-rather than merely making it non-blocking. The L2 leg provisions tmux,
-verifies it (`tmux -V`), and sets `BISCUIT_TEST_REQUIRED_BACKENDS` to the
-plan cell's `backends` (declared ∩ hostable), so an installed-but-never-exercised
-backend fails the tier. The shared workflow denies warnings in the `lint` job only
-(`_lint` passes `-D warnings` to clippy directly, so the same bar applies
-locally). `check` is a compile gate and does not promote warnings — dead code
-is not a build failure, and platform-conditional dead code is normal.
-Sharding is removed: no job passes `--partition` (compilation is ~85% of a
-shard and every shard pays it in full, so four shards cost ~3.2× the compute
-to save ~2.4 minutes — see `fixes/2026-08-06-cicd/spec.md` § Sharding). L1
-runs with `--no-fail-fast`, and CI selects the `ci` nextest profile
-explicitly.
-
-Coverage is a local tool, not a CI producer (decided 2026-08-12): run a
-package's `just coverage` recipe for an LCOV report. CI generates none.
-
-Do not use `cargo build --workspace`, `cargo check --workspace`, a bare root
-`cargo build`/`cargo check`/`cargo test`, or an unscoped root `just` lifecycle
-recipe as a generic final safety net. An exposed enum or public API change is a
-reason to include its actual downstream consumers, not all workspace members.
-A workspace-wide run is appropriate only when the user explicitly requests a
-release/CI aggregation task or when a documented repository-wide invariant
-cannot be verified from the dependency-derived scope; record that reason before
-running it.
-
-At the repository root, `just test` delegates to `_test_workspace`. It uses
-Cargo metadata as the package source of truth and runs every selected package
-in one local Nextest invocation with `--no-fail-fast`. Optional selectors may
-be exact package names or package-area paths. Package-area `_test_all` recipes
-use the same one-scheduler path locally, but retain per-package execution under
-the CI profile/environment for JUnit staging and summaries. CI `features` and
-local `local-features` remain separate metadata contracts.
-
-Run `just check-test-interrupts` to verify that every package-area `test`
-recipe also preserves Ctrl+C as exit `130`.
-
-## Running L2 Tests (read before you run)
-
-`level2_*` tests spawn **real terminal windows / panes**. Run them **only** via
-`just test-l2`, never `cargo test` / `cargo nextest run -E 'test(/level2_/)'`
-directly: the recipe owns pane spawning/teardown and the serial-vs-parallel mode
-choice. Bypassing it leaks windows on timeout/panic and produces ambiguous
-`osascript`/PTY failures that look like — but are not — code regressions.
-
-- A wall of single-backend failures (e.g. every `*_in_wezterm`) usually means
-  that emulator is **absent/unscriptable here**, not that the renderer broke —
-  confirm the same test on an available backend (`_in_kitty`, `_apple_terminal`).
-- The Apple Terminal backend is GUI-automated and especially fragile (focus,
-  `do script` window reuse, orphan leaks). Before touching it or debugging an
-  `level2_apple_terminal_*` failure, read **`apple-terminal-harness-pitfalls.md`**.
-- Spawning must **never steal foreground focus** and must **never close a window
-  it did not create** — these are hard harness invariants.
-
-### Serialization is per-*resource*, not per-*tier*
-
-The default `-j 1` is **conservative**, not fundamental. It protects two specific
-hazards, not the tier as a whole:
-
-1. **The single shared broker pane** — every `shared_or_spawn()` test attaches to
-   *one* pane per backend, so two at once would clobber it.
-2. **GUI backends with global OS state** — WezTerm/Kitty window lists and focus,
-   and especially **Apple Terminal's single global AppleScript state**
-   (`AppleTerminalHarness` *must* stay serial).
-
-A test that (a) spawns its **own** uniquely-named session/PTY (e.g.
-`TmuxHarness::new() + spawn_shell()`, or its own `tmux new-session -s
-…_{pid}_{seq}` it kills at the end) and (b) targets a **headless** backend has
-**no shared resource** and is parallel-safe. Most L2 suites are dominated by such
-tests and pay the `-j 1` tax purely as collateral. This is what
-`BISCUIT_L2_THREADS=N` exploits: with no `BISCUIT_SHARED_*` exported,
-`shared_or_spawn()` itself falls back to an **owned, `Drop`-cleaned** pane, so the
-whole tier self-isolates and runs at `-j N`. The
-`l2-parallel-self-spawn` runner marker enables this for isolated suites such as
-claudine-cli. Local runs default to `max(1, logical_cores - 2)` workers. CI uses
-all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
-This leaves capacity for developer work and larger shared hosts without
-crippling small CI runners. Worker count does not set CPU affinity or guarantee
-reserved capacity. Explicit `BISCUIT_L2_THREADS` takes precedence;
-shared-resource suites retain the serial default.
-
-**Backend parallel-safety:** **tmux** = headless, immune to the host gotcha,
-cleanup reaps only dead-pid sessions → fully parallel-safe (validated).
-**WezTerm** = background panes (`biscuit-bg` workspace, off-screen) coexist and
-sidestep the focus/window-list race → parallel-safe (validated), but spawn cost
-is high. **Kitty** = same off-screen background model (likely parallel-safe, not
-yet validated). **Apple Terminal** = **serial-only** (single global AppleScript
-state + focus snapshot/restore). Prefer tmux for any L2 test you want to fan out.
-
-Note the **`available()` bar is runtime reachability, not "installed"**: WezTerm
-needs `WEZTERM_UNIX_SOCKET`, Kitty needs `KITTY_LISTEN_ON` — each exported *only*
-to processes that terminal launches. So GUI-backend tests run only when the suite
-is launched from inside that terminal (or it is cold-started with remote control;
-see the `biscuit-test-harness` skill). A clean SKIP there is the host gotcha, not
-a missing app.
-
-**Parallel-safety prerequisites for a self-isolating L2 test:** unique temp dir
-per test (key on `{pid}-{nanos}-{atomic}`, never a fixed path); cleanup that
-reaps only **dead-pid** resources, never live ones; and no dependence on shared
-pane geometry/state.
-
-**Flakiness under parallel load** concentrates in timing-sensitive tests (signal
-delivery, interactive choosers). Both the `default` and `ci` profiles use
-`retries = 0`, including the L2 and browser overrides: a test that passes only
-on retry is still a failed run. Fix the resource contention or widen a justified,
-scoped timeout instead of masking the failure. Avoid
-the **two-phase capture race**: polling for an *intermediate* marker (a chooser
-hint) and then taking a *separate* `capture()` for the *final* content can grab a
-half-painted frame under load — poll for the content you will assert on, in the
-same loop, before capturing. Check the effective leak policy before diagnosing
-concurrent child teardown; see Leaked Process Detection.
-
-## Nextest Filtersets
-
-The `.config/nextest.toml` does not yet define named filterset aliases (nextest
-feature limitation). `just/devops.just`'s `_tier_filter` is the single source of
-truth; the shared `_sanity`, `_test_l2`, etc. recipes read it:
-
-- `sanity`: `-E '!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))'`
-- `test-l2`: `-E 'test(/(^|::)level2_/)'`
-- `test-l3`: `-E 'test(/(^|::)level3_/)'`
-- `test-browser`: `-E 'test(/(^|::)browser_/)'`
-- `test-real`: `-E 'test(/(^|::)real_/)'`
-
-**A tier marker is a prefix, not a substring.** `test(/…/)` is an unanchored
-regex search over the test *name* (`module::path::test_name`; nextest does not
-match it against the binary id), so the older bare `test(/browser_/)` also
-caught `unresolved_browser_feature_fails_the_render` and
-`image_emits_typed_browser_attributes` — ordinary unit tests. The `(^|::)`
-anchor confines each marker to a path-segment boundary. Name a test so the
-marker is the first segment of its final name or not present at all;
-`render_browser_fragment_carries_same_figures` is L1, `browser_fragment_…`
-is not.
-
-Anchoring alone cannot save a test whose name genuinely *starts* with a marker
-it does not earn. `renderable` had 16 such tests: excluded from L1, and its
-`test-browser` was a stub, so they ran in no tier for as long as they existed.
-`just check-tier-coverage` now fails on exactly that combination — a stub
-`test-<tier>` recipe in an area where tests still match that tier. It builds the
-stubbing areas' test binaries, so it is deliberately not wired into `test`,
-`lint`, or a hook; run it when tier markers or tier recipes change. CI makes
-the same check at no build cost: every L1 producer's expected-test listing
-already holds the tests its filter excluded, and `completion.py` refuses one
-that carries a marker for a stubbed tier (`completion-test-stranded`). A marker
-on a *module* counts too — darkmatter's `real_shells` module stranded seven
-tests until 2026-09-23. `prompts/_test-tiers.md` states these rules for
-implementation and review prompts.
-
-An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
-expressions and must anchor them too — `_tier_filter` cannot reach inside an
-override.
-
-**Narrowing a recipe to one subject** is a positional test-name filter through
-the recipe's `*args`: `just test-cli context_command::` in `claudine/`. The
-recipe keeps the tier's `-E` expression, and nextest runs only tests that match
-**both** the expression and the name (checked on nextest 0.9.136: an L2
-expression plus an L1-only module selects nothing). Keep the trailing `::` so
-the filter names the module, not every test path that contains the word. In a
-package with consolidated binaries (next section), the former per-file target
-is now that module, so this is how you select it. `--test <old-file-stem>`
-names a target that no longer exists. `-E 'binary(x)'` does not survive the
-recipes' two-layer argument interpolation, and `BISCUIT_TEST_FILTER` replaces
-the tier expression outright. Where a public `test-l2` fans out to a second
-package (claudine's also runs `claudine-gen`), narrow by calling the shared
-recipe directly: `just _test_l2 <pkg> --features terminal-tests <module>::`.
-Outside a recipe, `cargo nextest run -p <pkg> --test l1 <module>::` selects the
-consolidated binary and the module. It carries no tier expression, so the
-module's tests from every tier compiled into that binary run.
-
-## Consolidated Integration-Test Binaries
-
-Fourteen packages no longer build one executable per `tests/*.rs` file. Each
-builds **one test binary per execution contract**: `claudine-cli`,
-`darkmatter`, `darkmatter-cli`, and `biscuit-terminal`
-(`2026-09-21-consolidated-test-binaries`), then `tree-hugger`, `claudine`,
-`sniff`, `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`,
-`claudine-gen`, `dmls`, `sniff-cli`, and `biscuit-tui-cli`
-(`2026-09-22-consolidated-test-binaries-wave-2`). A package's `Cargo.toml`
-says which shape it has: `autotests = false` means consolidated. The rest
-still use Cargo's per-file discovery.
-
-```text
-tests/
-  common/mod.rs          # shared helpers, compiled once per binary
-  l1/main.rs             # crate root: `#[path = "../common/mod.rs"] mod common;`, then one `mod` per former target
-  l1/context_command.rs  # a former target, now module `context_command`
-  level2/main.rs         # declared with required-features = ["terminal-tests"]
-```
-
-- **Discovery is explicit.** The package sets `autotests = false` and lists
-  every root as a `[[test]]` with a `path` (Cargo does not discover
-  `tests/l1/main.rs` on its own). A new `tests/foo.rs`, an undeclared
-  `tests/x/main.rs`, or a module file that no `mod` reaches compiles into
-  nothing, so its tests never run. A layout gate inside each package's `l1`
-  binary fails on all three: claudine's `test_placement.rs`, and elsewhere
-  `test_layout.rs`, which calls `test_toolkit::test_layout`.
-- **Adding a test file** means adding `mod <name>;` to the right root, with
-  any OS `cfg` on that declaration (`#[cfg(unix)] mod compose_cli;`). An OS
-  condition never makes a new binary. Modules reach helpers through
-  `crate::common`, not their own `mod common;`.
-- **The module name is the old target name** and is the first segment of every
-  test path: `claudine-cli::l1 context_command::<test>`. Tier markers still apply to
-  the name, so a module named `level2_*` would put all its tests in Level 2.
-  Check the name against `_tier_filter` before choosing it. Where the old name
-  would newly match, or stop matching, a tier or override filter, the module
-  takes a neutral alias with the marker stripped: `biscuit-tui-cli`'s
-  `real_terminal_render` is `terminal_render` (its `level2_*` tests would
-  otherwise also match the stub `real` tier), and `biscuit-terminal-cli`'s
-  `level2_prose_cells` is `prose_cells` (43 of its tests are unmarked L1).
-- **The feature boundary.** Tests share a binary only when tier, the exact
-  `required-features` set, harness mode, and target-wide settings all match.
-  A consolidation never unions features. Darkmatter keeps
-  `level3-terminal` and `level3-browser` separate for this reason, and
-  `harness = false` targets (benches) do not move.
-- **Target names** are the tier: `l1`, `level2`, `level3`. When one tier has
-  two feature contracts, the feature-less target keeps the bare name and the
-  other takes a suffix (`biscuit-file`'s `l1` and `l1-fetch`). An L1-tier test
-  that needs feature F joins the package's existing target for F, whatever its
-  tier name, and the tier filter still selects it at L1: `biscuit-tui-cli`'s
-  `windows_captured_stdout` lives in `level2`. A new target is made only when
-  no target has that feature set.
-- **Snapshots follow `module_path!()`.** An insta assertion in
-  `tests/l1/layout_matrix.rs` reads `tests/l1/snapshots/l1__layout_matrix__*.snap`.
-  Moving a module therefore moves its snapshots. Move them byte-for-byte and
-  run with `INSTA_UPDATE=no`. Never regenerate to go green.
-- **Proptest regressions move to `tests/proptest-regressions/<stem>.txt`.**
-  proptest walks up from the source file to the nearest `main.rs`, which is now
-  the binary root, so a seed file left beside its module is silently no longer
-  replayed. Move it byte-for-byte.
-- **Legacy shape, not a pattern.** biscuit-terminal's
-  `tests/l1/parity_helpers.rs` is compiled once as its own module and again
-  privately inside 18 parity modules (`#[allow(clippy::duplicate_mod)]
-  #[path = "parity_helpers.rs"]`). Each former binary ran its own copy of
-  its unit tests, and the move kept those test identities. New helpers go in
-  `common/` or beside their one user and are declared once.
-
-### Process isolation is a nextest guarantee, not a Rust one
-
-Nextest runs **each test case in its own process**, even when cases share a
-binary. So under the canonical recipes a consolidated binary shares nothing
-between cases that per-file binaries did not share: mutable statics, the
-current directory, environment changes, `SetStdHandle` rewiring, `atexit`
-handlers, and `serial_test` state all stay per-case. One exception: code that
-runs before libtest picks a case (a global constructor or allocator) runs in
-every one of those processes.
-
-**`cargo test` breaks that contract.** Its harness runs every case of a binary
-in one process on parallel threads. Consolidation puts up to a hundred formerly
-separate crates into one such process. A test that sets an env var or changes
-directory then races every sibling it now shares a binary with. Run a migrated
-suite only through the Nextest-backed recipes (or `cargo nextest` directly).
-Never present `cargo test` in docs or recipes as an equivalent way to run one.
-`cargo test --doc` is unaffected: doctests are not integration-test binaries.
-
-## Leaked Process Detection
-
-Two complementary layers catch tests that spawn child processes and fail to
-reap them:
-
-1. **nextest `LEAK` (per test, all platforms).** `.config/nextest.toml` is the
-   authority for the profile and per-test `leak-timeout` values. Both profiles
-   keep `result = "fail"`: a pipe still held after the effective observation
-   window fails the run. The window is not a fixed delay paid by every test.
-   Diagnose resource ownership, child reaping, and inherited handles before
-   changing it; any timing adjustment needs scoped evidence under load and
-   must retain leak failure. Browser and parallel L2 processes may have
-   different teardown costs. `#[serial(browser)]` cannot coordinate separate
-   nextest processes; the browser recipe's runner-level serialization does.
-2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
-   `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
-   process list before/after the whole run and reports survivors whose
-   executable or command line is under the repo (exit code `99`). Catches
-   detached orphans that closed the test's pipes — which `LEAK` cannot see.
-   Attribution is by workspace path, not parent PID (orphan reparenting is
-   OS-specific).
-
-## Your Tests Run From an Archive, Not From This Checkout
-
-Every hosted L1, L2, browser, and WSL2 cell executes binaries a **different
-job** compiled. One native owner per planned build key produces an immutable
-Nextest archive; each consumer verifies its checksums, digest, inventory, and
-runtime ABI, then runs the canonical tier recipe in archive mode. No consumer
-has Cargo, rustc, Clippy, or a linker, and none will compile a replacement for
-anything it is missing — it refuses (`.github/ci/README.md`,
-[nextest.md](nextest.md), and `rust-devops`'s `ci-cd.md` for the CI contract).
-
-What that requires of a test:
-
-- **Never resolve a path at compile time.** `env!("CARGO_BIN_EXE_<name>")` and
-  `env!("CARGO_MANIFEST_DIR")` name the *producer's* directories. Use
-  `biscuit_test_harness::bin_exe!("<name>")` for a binary, which prefers
-  nextest's run-time `NEXTEST_BIN_EXE_*`, and
-  `biscuit_test_harness::manifest_dir!()` for a repository fixture, which
-  prefers the `--workspace-remap`-rewritten run-time variable. This is enforced:
-  `tools/test-toolkit/tests/archive_path_guard.rs` scans the repository and
-  fails on a new site, with a small allow-list for the targets that are never
-  archive-executed. The WSL2 guest no longer recreates the producer's checkout
-  path, so a baked path now fails there rather than being worked around.
-- **Declare anything the archive would not carry.** Test binaries, non-test
-  `bin` targets, build-script output, and linked paths are archived; a `dylib`
-  and an `example` are not. Those are `[package.metadata.ci] archive-includes`.
-  A compile-time *tool* another package's tests spawn is a `sidecars` entry.
-  Nothing is repaired by a consumer-side Cargo command.
-- **Provision runtime facilities, not compile-time ones.** tmux, Chrome, Node,
-  and CLI stubs are the consumer's job; anything that had to be *built* is the
-  producer's.
-- **Run it the same way locally.** `just cross-check <pkg> --os <os>` transfers
-  the immutable archive and manifest, verifies on the destination, hides the
-  producer's target directory, and extracts to a different path — which is what
-  makes a compile-time path assumption fail there rather than only in CI.
-
-A failing cell says which build it ran (planned key, realized digest,
-producer) and what each stage cost. A cell that could not run at all is
-`MISSING — blocked by build <key>`: its archive never arrived, and that is an
-infrastructure failure, never a test result and never baseline-eligible.
-
-## A Test That Reads a Repository File Is Scheduled By It
-
-A change to a Markdown doc, YAML schema, or fixture selects no package, so the
-planner finds the tests that read it from their source
-and runs exactly those — on Linux in CI, or on the pushing host, whose
-exact-tree run satisfies the CI cell. It
-recognizes a read only in forms it can resolve without running anything, so
-spell yours in one of them or the file's next edit will not run your test:
-
-- **Embed it** — `include_str!("../../docs/x.md")` also makes a missing file a
-  compile error rather than a runtime one.
-- **Join it onto a root in the same expression** —
-  `manifest_dir!().join("tests/fixtures/x.json")`,
-  `repo_root().join("darkmatter/docs/x.md")`, or a name the same file binds to
-  one (`let root = repo_root();`, `fn docs() -> PathBuf { manifest_dir!().join("docs") }`).
-  `.parent()` steps are followed. A root-anchored directory counts for every
-  file under it.
-- **Or write the full repository-relative path** as a literal (a table of
-  documents walked later), in a file that reads through a root somewhere.
-
-Paths assembled from `format!`, a value computed at run time, or a helper
-defined in another file are invisible, and a literal joined onto a tempdir is
-correctly treated as a fixture, not a read. Only an L1 test is scheduled.
-Its tier comes from its path, not its binary's name, so an L1 test in a
-`level2` binary counts. A read inside a helper rather than a test function
-schedules every L1 test in the helper's binary, because any of them may call
-it. A shared `tests/common` module is a helper in every binary that includes
-it, so spell the path in the one binary that needs it (the kache suites'
-`repo_inputs()`). A read in a target whose `required-features` the
-package's CI `features` leave off schedules nothing.
-
-Another package's **source** (a script your tests execute) is not scanned
-unless your package lists it in `[package.metadata.ci.tests] source-inputs`;
-the tests must still spell the path in one of the forms above. The why and the evidence rules are
-in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
-
-## Environment Contract
-
-| Variable                             | Purpose                                                                                                        |
-|--------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `BISCUIT_TEST_LEVEL=1\|2\|3`           | Max level to run; higher tiers skip cleanly.                                                                   |
-| `BISCUIT_TEST_LEVEL_REQUIRED=2\|3`    | Missing harness panics instead of skipping. All-or-nothing; for L2 prefer `BISCUIT_TEST_REQUIRED_BACKENDS`.     |
-| `BISCUIT_TEST_REQUIRED_BACKENDS`     | Comma-separated `tmux,wezterm,kitty,apple-terminal`. Named backends hard-fail; others still skip. Also turns on execution recording, which `backend-proof verify` checks. See "Requiring L2 backends individually". |
-| `BISCUIT_BROWSER_REQUIRED=1`         | Missing Chrome panics instead of skipping.                                                                     |
-| `PLAYA_REAL_AUDIO_REQUIRED=1`        | Missing real audio resource panics instead of skipping. All-or-nothing; prefer the per-resource form below.     |
-| `BISCUIT_SPEAKS_REQUIRED_PROVIDERS`  | Comma-separated TTS provider identifiers (`echogarden`, `gtts`). Named providers hard-fail; others still skip. See "Requiring a real resource individually". |
-| `RUN_LEVEL3=1`                       | Opt-in for OS-keyboard-injection tests.                                                                        |
-| `BISCUIT_JUNIT_STAGE_DIR`            | Staging root for JUnit reports and the backend-execution evidence file. Defaults to `target/nextest/ci-reports`.|
-
-## Spawning the Binary Under Test (L1)
-
-An L1 test that runs its crate's own binary must run it against a workspace the
-test built — never against the checkout the suite was compiled from. Make that
-hold **by construction**, through one shared command builder per package area,
-rather than per-test `.env(...)` chains.
-
-Inheriting the runner's environment costs twice:
-
-- **Cost.** The ambient working directory under `cargo nextest` is the package
-  directory inside the monorepo, so anything that discovers a repository walks
-  all 35 members. That is ~220 ms on an idle 16-core Mac and 20–77 s per test in
-  a WSL2 guest reading its workspace over the Windows disk.
-- **Correctness.** The child also sees the checkout's git state and root
-  `system-prompt.md`, the developer's `$HOME`, and — with a full host `PATH` —
-  every real CLI installed on the machine. Assertions then pin a snapshot of
-  whichever machine ran them.
-
-The shape that fixes it, with claudine's `claudine-cli` L1 suite as the
-reference implementation:
-
-| Piece | Where | Contract |
-|---|---|---|
-| Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
-| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
-| Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine, darkmatter, and sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
-
-**Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
-live-child test needs a `std::process::Command` — and hand-building one
-re-derives the isolation at the call site, which is the per-test `.env(…)` chain
-the fixture replaced. Do not give the two surfaces separate builders: compute
-the policy once as data (clear flag, ordered removes, ordered sets,
-`current_dir`) and apply it through a small trait each command type implements.
-Then assert the two produce the **same effective environment** against a
-recording stub, so a policy change that reaches only one of them fails there
-rather than in a platform-only test months later.
-
-**Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`
-on Unix, `%SystemRoot%\System32` on Windows, `PATHEXT` untouched so `.cmd` stubs
-resolve. Fake-only is stricter but breaks every test whose subject shells out
-by bare name (`sh`, `cmd`, `git`, `sleep`), so the opt-out would become the
-norm; the minimal set still excludes the Homebrew, npm, cargo, and
-`~/.local/bin` prefixes real tools install into. Escapes are named methods, and
-each requires a call-site comment naming the tool or the proof it needs:
-`fake_only_path()`, `host_path()`, and `ambient_context(dir)` — the last pins
-the launch CWD to a repository the test built *inside its own workspace* and
-panics on anything outside it.
-
-The tool roster is platform-specific: the Windows system set does not provide
-Git for Windows or Unix utilities. Use native fixture scripts or explicit
-fixture tools and `std::env::join_paths`; do not assume a Unix roster on Windows.
-This PATH convention bounds lookup, not security: tools installed in the
-allowed directories remain visible. Use fake-only lookup when absence is the
-assertion. Reject fixture roots inside the checkout, including through symlinks,
-so ancestor discovery cannot silently undo isolation.
-
-The builder must also control inherited application variables, Git plumbing
-such as `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`, and rendering inputs such as
-width and forced color. That includes selectors for third-party tools the
-application launches (claudine: every provider overlay selector such as
-`CODEX_HOME`, read from provider metadata, plus profile-owned state such as
-`CODEX_SQLITE_HOME`) — a suite run from a wrapped agent session exports them.
-Scrub inherited values before applying intentional test overrides. Keep cache roots and platform home variables inside the
-fixture where the application uses them. Choose a documented deny list or a
-cleared environment based on actual runtime needs; Windows command stubs may
-need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
-
-**Also disable the side effects that outlive the process.** Two of claudine's
-defaults exist only because the child can start work that the child's own exit
-does not end:
-
-- `CLAUDINE_RENDEZVOUS_REPORT=false` — absence means *enabled*, so a test that
-  merely forgets the key reports a live session to the developer's daemon.
-- `PLAYA_DRY_RUN=1` plus a fixture-local `PLAYA_SPOOL_DIR` — a lifecycle audio
-  effect makes the CLI re-exec **itself** as playa's detached spool worker,
-  which deliberately survives the command that enqueued the job. Without the
-  default, an L1 test that composes a prompt carrying such an effect leaves two
-  orphaned binaries per run and plays a sound through the developer's speakers.
-  `just test-leaks` is what surfaces this; no assertion in the test will.
-
-Both live inside namespaces the builder sweeps by prefix, so the *ordering* is
-part of the contract: scrub first, then apply defaults. Assert them against a
-parent that exported the opposite value — a set-equality comparison between two
-command surfaces cannot catch a policy that is identically wrong on both.
-
-Give the guard an **explicit allowlist of `(file, one-line reason)` entries with
-stale-entry failure**: an entry matching no live site fails too, so the list
-burns down instead of becoming a grandfather table. Same mechanics as
-`dispatch_inventory.rs`; sanitize comments and string literals before searching,
-as `test_placement.rs` does, so prose mentions don't false-positive.
-
-## Fixtures and Env Guards
-
-Use `test_toolkit::EnvGuard` for process-env setup/teardown and
-`#[serial_test::serial]` when mutating global state:
-
-```rust
-use test_toolkit::{trace_phase, EnvGuard};
-use rstest::{fixture, rstest};
-
-#[fixture]
-fn dry_run() -> EnvGuard {
-    EnvGuard::set_safe("PLAYA_DRY_RUN", "1")
-}
-
-#[rstest]
-#[tokio::test]
-#[serial_test::serial]
-async fn dispatch_with_dry_run(#[from(dry_run)] _g: EnvGuard) {
-    // ...
-}
-```
-
-## Pending Contracts (fixtures for behavior not built yet)
-
-When a phased plan freezes a contract before implementing it, the fixture must
-fail *now* and keep failing for the right reason. A plain failing test cannot
-do that: it leaves the suite red, and a red suite hides the next real
-regression.
-
-Wrap it instead. The body asserts the **target** behavior; the wrapper runs it
-and demands a failure whose message contains a recorded oracle string:
-
-| Body outcome | Verdict |
-|---|---|
-| fails, message contains the oracle | pass — contract still pending |
-| fails, message does not | **fail** — the fixture's setup broke |
-| passes | **fail** — promote it by deleting the wrapper |
-
-The third row is what makes this safe: a contract cannot be implemented and
-silently leave a pending fixture behind claiming it is not.
-
-The CI-tooling suites carry three implementations, one per language:
-
-- Python — `scripts/ci/pending_contracts.py`, the `@pending(criterion, reason,
-  oracle)` decorator. `BISCUIT_PROMOTE_PENDING=1` runs every body unwrapped, so
-  you can see which contracts now hold at the end of an implementation phase.
-- Rust — `pending_contract(criterion, reason, oracle, body)` in
-  `scripts/ci-rollup-tests.rs`. It swaps the panic hook so a deliberate
-  failure does not spam the output. (`ci_workflow_contracts.rs` carried a twin
-  until its last pending contract, the accepted-gap publisher, landed.)
-- Shell — `pending_contract` in `.githooks/tests/test-pre-push.sh`.
-
-Pair every pending fixture with a non-pending one that pins the *current*
-defect. Otherwise a later change can satisfy the pending contract by altering
-what the fixture builds rather than what the code does.
-
-Choose the oracle from a message the fixture itself controls — a helper that
-raises "the resolved plan has no 'areas' field" — not from a library's wording,
-which drifts.
-
-## Browser Tests
-
-### Headless and focus-isolation invariant
-
-The Browser tier is always headless. A `browser_*` test must not create or
-activate a visible window, request foreground focus, move the host pointer, or
-inject host OS input. Do not use headed-browser flags, application activation,
-`osascript`, `cliclick`, `xdotool`, `SendInput`, or equivalent desktop
-automation in this tier. Browser tests must be safe to run while someone is
-using the same workstation.
-
-Drive keyboard, pointer, media-query, and viewport behavior through the
-browser's automation protocol (for example CDP key/mouse dispatch and media
-emulation), then assert on the live DOM, computed styles, accessibility state,
-or used geometry. Browser-dispatched input is the correct evidence when the
-requirement concerns browser behavior; duplicating it with Level-3 OS input
-usually adds focus races and platform dependence without testing more product
-logic.
-
-Use Level 3 only when the requirement explicitly concerns the OS-to-application
-input path itself. Such a test must live outside Browser-tier binaries, remain
-opt-in through `RUN_LEVEL3=1`, and must not be added merely to strengthen an
-HTML/CSS/DOM interaction test that headless browser automation already covers.
-
-Assert on **computed styles**, not source substrings or screenshots:
-
-```rust
-let mut h = ChromeHarness::new();
-h.spawn().await?;
-h.render_html(&wrap_fragment("<div class='x'>hi</div>", "#fff")).await?;
-let bg = h.computed_style(".x", "background-color").await?;
-assert_eq!(bg, "rgb(17, 27, 39)");
-```
-
-## Fuzzing
-
-Fuzz targets live in `<crate>/fuzz/` and require nightly Rust. Run locally:
-
-```bash
-cd biscuit-file/lib/fuzz
-cargo +nightly fuzz run pdf_extract -- -runs=1000
-```
-
-Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
+Every curated package area defines these recipes, delegating to the shared
+`_*` recipes in `just/devops.just` (e.g. `@just _test my-crate`):
+
+| Recipe         | Meaning                                                                 |
+|----------------|-------------------------------------------------------------------------|
+| `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
+| `test`         | Full L1 suite.                                                          |
+| `test-l2`      | Real-terminal tests; serial with a shared pane by default, parallel with `BISCUIT_L2_THREADS=N` — see [l2-tests.md](l2-tests.md). |
+| `test-l3`      | OS keyboard/mouse tests.                                                |
+| `test-browser` | Headless browser tests, one Chrome at a time (`-j 1`).                  |
+| `test-real`    | External resource tests.                                                |
+| `lint`         | Clippy + fmt check.                                                     |
+| `bench`        | Criterion benchmarks (no-op if opted out).                              |
+| `coverage`     | Per-package LCOV (local only; CI produces none).                        |
+| `doctest`      | `cargo test --doc`.                                                     |
+| `fuzz`         | `cargo +nightly fuzz run` (no-op if no targets).                        |
+| `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.              |
+
+To narrow a recipe to one module, pass a positional filter:
+`just test-cli context_command::` — see [tier-filters.md](tier-filters.md).
 
 ## Key Crates
 
-| Crate                     | Purpose                                                                                                                                                         |
-|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `test_toolkit`            | `require_level!` / `expect_level!`, `EnvGuard`, `trace_phase!`                                                                                                                    |
-| `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2`. For backend selection and API, load the `biscuit-test-harness` skill via the Skill tool. |
-| `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`)                                                                                                    |
-| `criterion`               | Benchmarking                                                                                                                                                    |
-| `rstest`                  | Fixtures and parameterization                                                                                                                                   |
-| `serial_test`             | Serialize env/stateful tests                                                                                                                                    |
-| `pretty_assertions`       | Better diffs                                                                                                                                                    |
-| `insta`                   | Snapshot testing                                                                                                                                                |
+| Crate                     | Purpose |
+|---------------------------|---------|
+| `test_toolkit`            | `require_level!` / `expect_level!`, `EnvGuard`, `trace_phase!` |
+| `biscuit_test_harness`    | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal), `SharedHarness`, `bin_exe!` / `manifest_dir!`. Load the `biscuit-test-harness` skill for backend selection and the harness API. |
+| `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`) |
+| `rstest` / `serial_test`  | Fixtures and parameterization / serializing tests that share a real resource |
+| `insta` / `pretty_assertions` | Snapshots / readable diffs |
+| `criterion`               | Benchmarking |
 
 ## Topic Pages
 
-Open the topic file when the task matches:
+**This repository's contracts:**
 
-| Topic                                                                | File                                    |
-|----------------------------------------------------------------------|-----------------------------------------|
-| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
-| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture, sentinel waits) | `apple-terminal-harness-pitfalls.md`    |
-| CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
-| TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
-| Browser tests (computed-style assertions)                            | `browser-testing.md`                    |
-| Integration tests                                                    | `integration-tests.md`                  |
-| Unit tests                                                           | `unit-tests.md`                         |
-| Snapshots and redaction                                              | `snapshots.md`, `snapshot-redaction.md` |
-| Doc tests                                                            | `doc-tests.md`                          |
-| Mocking                                                              | `mocking.md`                            |
-| Property testing                                                     | `property-testing.md`                   |
-| Fuzzing                                                              | `fuzzing.md`                            |
-| Performance testing tool choice (Criterion vs Divan)                 | `performance-testing.md`                |
-| Criterion benchmarking (getting started → deep dive → Bencher)       | `criterion.md`                          |
-| Nextest details                                                      | `nextest.md`                            |
-| Audit tooling (`tools/test-audit`: capture, fetch, junit, reconcile, attribute, measure, counters) | `test-audit-tooling.md`               |
+| Open when you are…                                                          | File |
+|-----------------------------------------------------------------------------|------|
+| designing or reviewing any test: assertions, boundaries, timing, performance evidence | [test-design.md](test-design.md) |
+| choosing a tier, gating, requiring a backend or real resource, reading env switches | [tiers-and-gating.md](tiers-and-gating.md) |
+| naming a test or module, writing a filterset, narrowing a recipe            | [tier-filters.md](tier-filters.md) |
+| running or writing `level2_*` tests, or making them parallel-safe           | [l2-tests.md](l2-tests.md) |
+| adding a test file to a package with `autotests = false`                    | [consolidated-binaries.md](consolidated-binaries.md) |
+| spawning the crate's own binary from an L1 test                             | [spawning-binaries.md](spawning-binaries.md) |
+| writing fixtures, env guards, or a pending-contract fixture                 | [fixtures.md](fixtures.md) |
+| making a test work from a CI archive, or reading a repository file          | [ci-execution.md](ci-execution.md) |
+| choosing which packages to build, test, and lint before reporting done      | [verification-scope.md](verification-scope.md) |
+| deciding on fail-fast, restoring sources after a proof, hunting leaked processes | [recipes.md](recipes.md) |
+| auditing a whole suite or writing a test-performance spec                   | [test-suite-audits.md](test-suite-audits.md), [test-audit-tooling.md](test-audit-tooling.md) |
+
+**Techniques:**
+
+| Topic | File |
+|---|---|
+| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form) | [wezterm-harness-pitfalls.md](wezterm-harness-pitfalls.md) |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus steal, sentinel waits) | [apple-terminal-harness-pitfalls.md](apple-terminal-harness-pitfalls.md) |
+| Browser tests: the headless invariant and computed-style assertions | [browser-testing.md](browser-testing.md) |
+| CLI output (channels, color modes, completions, snapshots) | [cli-output-testing.md](cli-output-testing.md) |
+| TUI rendering and event/reducer tests | [tui-testing.md](tui-testing.md) |
+| Unit, integration, and doc tests | [unit-tests.md](unit-tests.md), [integration-tests.md](integration-tests.md), [doc-tests.md](doc-tests.md) |
+| Snapshots and redaction | [snapshots.md](snapshots.md), [snapshot-redaction.md](snapshot-redaction.md) |
+| Mocking and property testing | [mocking.md](mocking.md), [property-testing.md](property-testing.md) |
+| Fuzzing (nightly only, never a PR gate) | [fuzzing.md](fuzzing.md) |
+| Benchmarks: tool choice, then Criterion | [performance-testing.md](performance-testing.md), [criterion.md](criterion.md) |
+| Nextest itself | [nextest.md](nextest.md) |
 
 ## Resources
 
 - `docs/testing-strategy.md` — human-facing deep dive
+- `docs/cicd/test-inputs.md` — why and how a repository file read schedules a test
 - `just/devops.just` — shared `_*` lifecycle recipes, `_tier_filter`
-- `.config/nextest.toml` — slow-timeout and retry config
+- `.config/nextest.toml` — timeouts, leak policy, and retries
 - `just check-tier-coverage` — fails when a tier's tests are stranded behind a
   stub `test-<tier>` recipe

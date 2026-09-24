@@ -5724,7 +5724,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (".claude/skills/rust-devops/ci-cd.md", "exactly eight top-level jobs"),
         (".claude/skills/rust-devops/ci-cd.md", "ci-reporting"),
         (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
-        (".claude/skills/rust-testing/SKILL.md", "repo-deps"),
+        (".claude/skills/rust-testing/verification-scope.md", "repo-deps"),
         (
             ".claude/skills/os/windows.md",
             "Attaching a console inside a nextest process",
