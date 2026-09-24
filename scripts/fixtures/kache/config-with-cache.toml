@@ -1,0 +1,23 @@
+# kache configuration (fixture: existing [cache] table with hand-tuned keys
+# and rationale comments, as on the dev Mac — the merge must preserve these).
+#
+# The store path is NOT set here before the merge runs.
+
+[cache]
+# 100 GiB, matching v0.19.0's default. Before changing this number, read free
+# space from `df`, never from the percentage in `kache stats`.
+local_max_size = "100GiB"
+
+# Preserve enough history to compare workloads.
+event_log_max_size = "256MiB"
+event_log_keep_lines = 150000
+
+# Enforce the store budget even when targets retain shared APFS blocks.
+gc_evict_shared = true
+
+# A stale value from an earlier hand edit: the merge must replace this line
+# in place and leave everything else byte-identical.
+local_store = "/old/location"
+
+[other]
+keep = "me"

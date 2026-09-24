@@ -1,0 +1,6 @@
+# Fixture: malformed TOML (unterminated string). The merge must exit
+# non-zero via the tomllib validation gate and leave the original untouched.
+
+[cache]
+local_max_size = "100GiB
+ignore_env = false
