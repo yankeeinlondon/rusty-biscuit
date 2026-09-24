@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-23
-phase: 1
+phase: 2
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
 source_files_during_phase_1:
@@ -18,6 +18,13 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - justfile
+    - tools/test-toolkit/tests/kache_recipe_contracts.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - test-toolkit
 ---
@@ -190,7 +197,7 @@ follows the spec's ownership split: `install-kache` first (it has no
 dependencies on the other two), then `_ensure-kache` (orchestrates it), then
 `kache-status` (independent, serialized only by the shared file).
 
-- [ ] **install-kache rework**
+- [x] **install-kache rework**
     - Always install **or upgrade** to the latest release via `cargo binstall`
       (remove the meets-floor "not reinstalling" skip; the floor is a check,
       not a pin) (spec §3, Changes).
@@ -209,7 +216,7 @@ dependencies on the other two), then `_ensure-kache` (orchestrates it), then
     - Pre-requisites: Phase 1 Wave 2 (probe script). Validation: on the dev
       Mac, `just install-kache` upgrades, re-signs
       (`codesign -dvv` → `flags=0x2(adhoc)`), and passes the passthrough probe.
-- [ ] **_ensure-kache sequence**
+- [x] **_ensure-kache sequence**
     - Replace the OS `case` with `kache-host.sh qualify` (spec §1, §4): a
       non-qualifying verdict ends the sequence — kache absent → never install
       (one-line reason); kache present → floor check, meets-floor → report
@@ -247,7 +254,7 @@ dependencies on the other two), then `_ensure-kache` (orchestrates it), then
       of the plan — the ordering rules and restart triggers are the crux; keep
       each step a small bash function so the failure contract wraps them
       uniformly.
-- [ ] **kache-status rework**
+- [x] **kache-status rework**
     - Store from `kache doctor --json` (kills the `KACHE_DIR`/`~/Library/Caches`
       fallback false verdict); add the env-passthrough line
       (`kache-host.sh probe-passthrough`); add the checkout/worktree-base
@@ -261,7 +268,7 @@ dependencies on the other two), then `_ensure-kache` (orchestrates it), then
     - Pre-requisites: Phase 1 probe script. Validation: on the dev Mac the
       report names `/Volumes/coding/kache` (where `kache doctor` points), not
       the abandoned Data-volume store.
-- [ ] **Recipe checkpoint**
+- [x] **Recipe checkpoint**
     - `just --list` and a `--dry-run` parse of `init` (no execution), `bash -n`
       on `scripts/kache-host.sh`, a manual `kache-config-merge.py` run against
       fixtures, and a live read-only `just kache-status` on the dev Mac.

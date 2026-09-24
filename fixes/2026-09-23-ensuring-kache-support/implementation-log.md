@@ -18,6 +18,13 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - justfile
+    - tools/test-toolkit/tests/kache_recipe_contracts.rs
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - test-toolkit
 
@@ -171,3 +178,172 @@ cascade step); cascade-fail negative (cross-device HOME, exit 1 with the
 cascade reason); report against the real host (store `/Volumes/coding/kache`
 from doctor — the correct store, not the old reconstruction); passthrough
 probe against four binary states as listed above.
+
+## Phase 2
+
+All three recipes reworked in the root `justfile` (serialized waves), plus a
+new contract-test file and a one-assertion bridge edit to keep the existing
+D1/D2 contract green until Phase 3 reworks it.
+
+### Wave 1 — install-kache rework
+
+- Signature is now `install-kache binary_only="false":`. **Deviation from the
+  plan's Necessary Rule 2 spelling**: just 1.56 has no named-argument syntax
+  (`just install-kache binary-only=true` binds the literal string positionally
+  — measured), and dashes are not even parseable in parameter names. The mode
+  is a positional boolean: `just install-kache true` is binary-only. A mistyped
+  value is a usage error (exit 2) that teaches the correct form.
+- Always latest via plain `cargo binstall --no-confirm kache` — **no
+  `--force`**: binstall itself no-ops when the latest is already installed
+  (measured: "already installed, use --force to override"), which keeps a
+  second init download-free; the meets-floor "not reinstalling" skip is gone.
+- macOS gate restructured to **probe-first**: the passthrough probe runs
+  before any re-sign. An already re-signed binary passes and is left
+  untouched; a fresh binstall release is hardened, fails, and is re-signed;
+  if the re-signed binary still fails, the fallback runs
+  `cargo install --locked --force kache` (`--force` measured necessary:
+  without it cargo install no-ops "already installed" and the fallback
+  replaces nothing). Rationale beyond the spec's "the gate is the
+  verification": an unconditional `codesign --force` **rewrites the binary
+  file every init**, and the running daemon exits whenever its executable is
+  replaced (launchd relaunches it, throttled ~10 s) — unconditional re-sign
+  would flap the daemon on every `just init` and break verification check 5.
+  Probe-first keeps same-version inits side-effect-free; no upgrade path can
+  skip the re-sign because a fresh binstall binary always fails the probe.
+- Full mode keeps today's store-cap seed verbatim (read-only config dir stays
+  a WARNING); binary-only mode performs no config writes. No daemon work in
+  either mode.
+
+### Wave 2 — _ensure-kache sequence
+
+- CI guard first (`CI`/`GITHUB_ACTIONS` → one skip line, exit 0), then
+  `scripts/kache-host.sh qualify` replaces the OS `case`. Non-qualifying:
+  reason line, floor check (meets → report only; below → `[ -t 0 ]`
+  interactive confirm runs `just install-kache true`, non-interactive →
+  ERROR + exit 1), active-wrapper drift report with both undos, exit 0.
+- Qualifying path implements spec §4 steps (2)–(7) with `kache_off()`
+  wrapping every step (WARNING lines, exit 0 so init completes). The undo in
+  `kache_off` writes `rustc-wrapper = ""` through the merge helper — measured
+  first: Cargo treats `rustc-wrapper = ""` in a config file as no-wrapper
+  (control with a marker wrapper proved invocation), so the neutralized form
+  is a validated, backed-up write.
+- Placement (step 3) runs `kache-host.sh report` and compares devices:
+  doctor-resolved store on the serving device → that IS the store ("pinned
+  deliberately"); otherwise the qualify candidate. Doctor failure → skip
+  bucket (`error=` reason). Verified fresh-host safety first: doctor's
+  `Cache dir` check passes and carries the resolved path even when the store
+  directory does not exist (scratch `KACHE_CONFIG`/`KACHE_CACHE_DIR`/fresh
+  `HOME` probes), so no probe-script change was needed.
+- Config write (step 4) via `kache-config-merge.py ... cache local_store
+  "$store" ignore_env true`; the daemon-restart trigger compares pre/post
+  file CONTENT (`cmp` against a snapshot), not mtime.
+- Daemon lifecycle (step 6) reads `kache daemon --json` (spike
+  recommendation): `daemon_running`, bare `daemon_version`, `service_installed`,
+  `socket`. Restart when version mismatches OR config changed; install when
+  absent; start + wait otherwise. Waits are 10 s then (after an explicit
+  `kache daemon start`) 20 s — sized for launchd's ~10 s relaunch throttle
+  discovered during the drill below.
+- Activation (step 7) last, via the merge helper into `$CARGO_HOME/config.toml`.
+- Report block (spec §6): verdict+devices, worktree-base line (covered /
+  off-device / unconfigured), version vs floor, passthrough, store + moved,
+  old/abandoned store size (`du -sh` of the built-in default cache dir when
+  it differs and is non-empty — reported, never deleted), daemon state,
+  activation state.
+- **Bash trap fixed during implementation**: an apostrophe inside
+  `${var:-word}` in a double-quoted string is a parse error
+  (`${doctor_store:-kache's default}` → "unexpected EOF while looking for
+  matching quote"); reworded. Embedded python one-liners must be indented to
+  recipe-body level (just strips the common indent; column-0 lines end the
+  recipe body).
+
+### Wave 3 — kache-status rework
+
+- Store/devices/base/passthrough all come from `scripts/kache-host.sh
+  report` (store from `kache doctor`, never the old `KACHE_DIR`→
+  `~/Library/Caches` reconstruction — that string is gone from the justfile).
+- Activation-precedence reporting kept (env / repo config / Cargo home);
+  drift while active now FAILS LOUDLY (exit 1) listing each problem: kache
+  absent but wrapped, doctor undecidable, store off-device, worktree base
+  off-device, passthrough fail/error. The `export RUSTC_WRAPPER=""` undo
+  guidance is restated for the config-file era (the empty value overrides
+  the config file — measured), plus the windows_hardlink/
+  storage_layout_advice warning on the copy-restore drift.
+
+### Live validation on the dev Mac (all read-only unless noted)
+
+- `just kache-status` BEFORE any mutation: named the real store
+  `/Volumes/coding/kache` from doctor (not the abandoned one), devices
+  aligned, and correctly reported **DRIFT exit 1** — passthrough fail on the
+  then-hardened 0.23.1. After install-kache: healthy verdict, exit 0.
+- `just install-kache` (mutating, per the plan's Validation line): upgraded
+  0.23.1 → 0.26.3, re-signed (`codesign -dvv` → `flags=0x2(adhoc),
+  Signature=adhoc`), probe pass. Second run: binstall no-op, probe pass, no
+  writes.
+- `_ensure-kache` non-qualifying paths via a Data-volume worktree with a
+  cross-device HOME (Phase 1's construction): reason named + meets-floor
+  "report only" (exit 0); below-floor shim (`kache --version` → 0.15.0) +
+  non-interactive → ERROR, exit 1; kache-absent PATH → "not installed"
+  line, exit 0. CI=1 → guard line, exit 0.
+- Full qualifying run: config written with dated backup (hand-tuned [cache]
+  preserved), config-change daemon restart fired
+  ("kache: restarting the daemon — config changed."), kache's own log line
+  confirmed `ignore_env` honored ("ignoring set env override(s)
+  [\"KACHE_CACHE_DIR\"] in favor of the config file"), activation no-op
+  ("already holds"), report block complete (old store reported: "56G at
+  /Users/ken/Library/Caches/kache — abandoned; deleting it is left to you").
+- Idempotence (check-5 mechanics): immediate second run — same daemon PID,
+  every write an "already holds" no-op, no restart, rc 0.
+- Failure-contract drill (via `KACHE_HOST_BIN=/nonexistent`): drove
+  install-kache through re-sign → source-fallback attempt → exit 2, then
+  `_ensure-kache` printed WARNING lines, **undid the real activation**
+  (`rustc-wrapper = ""`, backup kept), left kache off, and completed rc 0;
+  one further normal run restored `rustc-wrapper = "kache"`. This drill is
+  what found the daemon-flap-on-resign behavior and the fallback's missing
+  `--force`.
+
+### Host state after Phase 2 (for Phase 4)
+
+kache 0.26.3 ad hoc re-signed at `~/.cargo/bin/kache`; daemon running 0.26.3
+with `daemon_config_path` = the user config; `~/.config/kache/config.toml`
+now carries `local_store = "/Volumes/coding/kache"` + `ignore_env = true`
+(backups `.bak-20260923-1826*`/`183*` beside it); activation restored in
+`~/.cargo/config.toml`. Still pending (Phase 4 by design): toolchain
+libLLVM symlinks, `~/.env` line 51, daemon plist regeneration. Note:
+`daemon --json`'s `daemon_epoch` does not track process restarts reliably —
+use `daemon_version`, as the recipes do.
+
+### Tests
+
+New: `tools/test-toolkit/tests/kache_recipe_contracts.rs` (10 tests,
+text-contract style matching `ci_workflow_contracts.rs` — the recipes are
+host-mutating and cannot run inside a test; each test fails against the old
+justfile text and passes against the new). Bridge edit in
+`ci_workflow_contracts.rs`: the `install-kache:` assertion now accepts the
+`install-kache binary_only=` signature, with a comment noting the 2026-09-23
+spec supersedes the 2026-09-09 ruling and that Phase 3 reworks the block.
+
+Gates: `just test tools` → 376 passed, 2 skipped (the skips are the
+intentional `nextest_config_verification` fixtures, pre-existing); `just
+lint` (tools area) green; `bash -n` on `scripts/kache-host.sh` clean; `just
+--list` and `just --dry-run init` parse. An accidental whole-workspace
+nextest run during debugging showed 2 pre-existing claudine failures
+(`shipped_implement_prompts_have_not_drifted_from_their_fixture`, one leaky
+composition test) — unrelated to this change, outside this phase's gates,
+left as found.
+
+### Requirement → test mapping (Phase 2)
+
+| Behavior | Test(s) |
+|---|---|
+| Installer targets latest, binary-only mode, no reinstall skip | `install_kache_targets_latest_in_a_binary_only_mode` |
+| Re-sign + probe gate + source fallback, probe gates BEFORE re-sign | `install_kache_resigns_and_gates_on_macos_with_source_fallback` |
+| Installer owns the binary only (no daemon; seed is full-mode only) | `install_kache_owns_the_binary_and_nothing_else` |
+| init decides via the shared probe, never OS names | `ensure_kache_decides_through_the_shared_probe` |
+| CI guard before anything that installs/upgrades | `ensure_kache_steps_aside_in_ci_environments` |
+| Spec §4 ordering incl. activation last; ratified config pair | `ensure_kache_runs_the_spec_section_4_order` |
+| Below-floor upgrade: interactive confirm, binary-only; non-interactive errors | `ensure_kache_upgrades_below_floor_only_when_confirmed` |
+| Failure contract: kache_off routing, undo via empty wrapper, init continues | `ensure_kache_failure_contract_leaves_kache_off` |
+| One spec §6 report block incl. abandoned-store reporting | `ensure_kache_ends_with_the_one_report_block` |
+| Status shares the probe, no KACHE_DIR reconstruction, drift fails loudly | `kache_status_shares_the_probe_and_fails_loudly_on_drift` |
+| No stale policy text anywhere in the justfile | `justfile_carries_no_stale_kache_policy_text` |
+| init still wires `_ensure-kache`; installer stays an explicit recipe | `ci_workflow_contracts::init_installs_the_compiler_cache_without_activating_it` (bridged) |

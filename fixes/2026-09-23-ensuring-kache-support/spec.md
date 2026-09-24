@@ -39,39 +39,55 @@ $schema:
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |
-    Phase 1 (foundation) is complete; everything Phase 2 needs is landed:
+    Phase 2 (root justfile recipes) is complete; the three recipes landed and
+    were validated live on the dev Mac. Phase 3 (contract tests, docs, skills)
+    builds on this surface:
 
-    - `scripts/kache-host.sh` is the shared probe. Subcommands: `qualify`
-      (exit 0/1/2; first stdout line `kache-host: verdict=qualify candidate=...`
-      or `kache-host: verdict=no-qualify reason=...`), `report` (store from
-      `kache doctor --json`, devices, base, passthrough), `probe-passthrough`
-      (exit 0 pass / 1 stripped / 2 cannot-run; `KACHE_HOST_BIN` overrides the
-      kache binary probed — use it for the pristine-specimen check).
-    - `scripts/kache-config-merge.py FILE TABLE KEY VALUE [KEY VALUE ...]`
-      performs both config writes (kache `cache local_store <path> ignore_env
-      true`; Cargo `build rustc-wrapper kache`). A no-op write reports
-      "already holds" and changes nothing — compare pre/post file CONTENT for
-      the daemon-restart-on-config-change trigger, not mtime. Backups are
-      `FILE.bak-YYYYMMDD-HHMMSS`.
-    - Spike (fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md):
-      for the restart trigger prefer `kache daemon --json` — `daemon_running`
-      bool, `daemon_version` bare ("0.26.3", directly comparable to
-      `kache --version` and doctor `.version`), `socket`, `daemon_config_path`.
-      Doctor's `Daemon version` detail is v-prefixed with an epoch suffix;
-      store path only exists as doctor `checks[label == "Cache dir"].detail`.
-    - macOS traps discovered while building the passthrough probe (Phase 4's
-      drills run through them): bash expunges DYLD_* from its own environment
-      at startup, so no bash-based observer can ever see the variable; a
-      plain copy of a platform binary (/usr/bin/env, printenv) is killed by
-      AMFI outside the system volume, so any copied-binary specimen must be
-      ad hoc re-signed; and `kache rustc` with no compiler arguments is
-      rejected, so probes must pass an argument. The shipped probe handles
-      all three.
-    - `.github/kache-min-version` is now 0.23.0; the maintenance audit needed
-      no change. Contract tests live in
-      tools/test-toolkit/tests/kache_host_contracts.rs and
-      kache_config_merge_contracts.rs — Phase 3's contract-test task should
-      extend ci_workflow_contracts.rs and leave these two as they are.
+    - `install-kache binary_only="false":` — the mode is a POSITIONAL boolean
+      (`just install-kache true`), not the plan's `binary-only=true` spelling:
+      just 1.56 has no named-argument syntax (measured) and rejects dashes in
+      parameter names. Document the positional form wherever the recipe is
+      described.
+    - install-kache is probe-first on macOS: `kache-host.sh
+      probe-passthrough` runs BEFORE any re-sign, because an unconditional
+      `codesign --force` rewrites the binary every init and the running daemon
+      exits whenever its executable is replaced (launchd relaunch, ~10s
+      throttle) — unconditional re-sign would break check 5's idempotence.
+      binstall runs WITHOUT `--force` (same-version no-op); the source-install
+      fallback carries `cargo install --locked --force kache` (without --force
+      it replaces nothing).
+    - `_ensure-kache` implements spec §4 steps (1)-(7) with a `kache_off()`
+      failure-contract helper whose undo writes `rustc-wrapper = ""` through
+      `scripts/kache-config-merge.py` — measured: Cargo treats the empty value
+      in a config file as no-wrapper. The daemon-restart trigger compares
+      pre/post config CONTENT; daemon state comes from `kache daemon --json`
+      (`daemon_version`, bare; do not trust `daemon_epoch` — it does not track
+      process restarts).
+    - `kache-status` now exits 1 on drift while active (that is the "fails
+      loudly" reading — flag it in the docs), reads everything from
+      `kache-host.sh report`, and the `KACHE_DIR` reconstruction is gone from
+      the justfile entirely (docs/skills may still carry it).
+    - Tests: new `tools/test-toolkit/tests/kache_recipe_contracts.rs` (10
+      tests) pins the recipe contract — read it before rewording recipe
+      comments, several assertions are literal. `ci_workflow_contracts.rs`
+      got a bridge edit only (the `install-kache binary_only=` signature
+      assertion); Phase 3's contract-test task still owns the full D1/D2
+      rework there, including the workflow-side CI assertions (no workflow
+      runs `just init`, none installs/upgrades kache) — those do not exist
+      yet.
+    - Host state left behind: kache 0.26.3 ad hoc re-signed, config carries
+      `local_store = "/Volumes/coding/kache"` + `ignore_env = true`
+      (dated backups beside it), activation present, daemon 0.26.3 running
+      on the ratified config. Phase 4's first init will therefore be the
+      idempotent one (check 5); the config-change restart already fired and
+      is logged in the implementation log (Phase 2 section) — treat that as
+      check 8's trigger evidence and verify the outcome (daemon store ==
+      CLI store) as planned. The 56 GiB abandoned store at
+      ~/Library/Caches/kache is now reported by every init run; deletion
+      stays with Ken.
+    - Two pre-existing claudine test failures exist on a full-workspace run
+      (prompt-fixture drift + one leaky test) — unrelated to this fix, left
+      as found.
 ---
 
 # Make kache a host setup that `just init` owns end to end
