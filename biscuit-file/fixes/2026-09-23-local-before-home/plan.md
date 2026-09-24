@@ -1,13 +1,24 @@
 ---
 total_phases: 4
 created: 2026-09-23
-phase: 1
+phase: 2
 agent: "codex/gpt-6-sol"
 yolo: "true"
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/tests/magic_local_roots.rs
+    - biscuit-file/lib/tests/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - biscuit-file
 ---
@@ -55,13 +66,13 @@ Success means local `@` matches win over every home or other fallback match in r
 
 These tasks are sequential because each establishes an API or root chain used by the next.
 
-- [ ] **2.1 Capture launch scope**
+- [x] **2.1 Capture launch scope**
   - In `biscuit-file/lib/src/file_reference/context.rs`, capture the request directory and its selected launch repository, package, and package-area roots for `@` independently of the authoring base and source-specific anchors. Preserve that snapshot through `for_source`, `for_base`, and trusted external derivations; let `&`, `^`, bare, and explicit-relative references retain their current anchors.
   - Add an explicit configured-root tier override while retaining inferred `add_magic_path`. Interpret relative configured roots against the captured request directory, including ambient `resolve_from(base)`. Document this behavior change and expose the inputs needed by cache identity.
-- [ ] **2.2 Unify root ordering**
+- [x] **2.2 Unify root ordering**
   - Add `RootProvenance::LocalRoot` for the request directory when no launch repository exists. Build the `@` chain once in the specified order: local prepends; package, package area, local root; local appends; user prepends; home; user appends. Classify by normalized lexical containment in the launch local root unless explicitly overridden; keep registration order within each position.
   - Normalize and deduplicate roots after ordering, retaining the first provenance. Use the same chain for direct `candidate_plan`, actual resolution, `%@` traversal, and completion; append a completion path segment only after root selection. Expose ordered roots with path and provenance for diagnostics. Keep non-`@` ordering unchanged.
-- [ ] **2.3 Prove resolver parity**
+- [x] **2.3 Prove resolver parity**
   - Add synthetic L1 context tests for all R1–R3 cases: repo under home, no repo under home, launch equal to home, repo equal to home, external fallback root, relative configured root and `resolve_from(base)`, trusted external source, recursive search, and first-seen deduplication.
   - Compare completion roots for partial tokens with normalized `candidate_plan` paths for corresponding complete tokens across every supported completion entry form. Assert ordered root provenance, `LocalRoot` versus `Source`, and a real first-match result where duplicate files exist. Use host-absolute temporary paths or platform-specific literals; never depend on ambient CWD or HOME.
 

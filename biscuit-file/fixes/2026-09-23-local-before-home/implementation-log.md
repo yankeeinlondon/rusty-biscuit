@@ -7,6 +7,17 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/tests/magic_local_roots.rs
+    - biscuit-file/lib/tests/finalized_reference_resolution.rs
+    - biscuit-file/lib/tests/implicit_relative.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - biscuit-file
 ---
@@ -242,3 +253,166 @@ the review contract):
 - No source files changed in Phase 1 (read-only spikes plus documentation of
   the rulings), so no package test/lint cycles were required beyond the
   evidence runs above.
+
+## Phase 2
+
+Biscuit-file resolution foundation: launch `@` scope capture (2.1), unified
+tier-ordered `@` chain with `RootProvenance::LocalRoot` (2.2), and the R1–R3
+parity/regression suite (2.3). All three tasks implemented; `just test`
+(856 tests) and `just lint` pass in the biscuit-file package area, and
+cross-check legs pass on Linux, native Windows, and WSL2 (macOS = local
+host). No Phase 3 consumer files were touched.
+
+### Task 2.1 — Capture launch scope
+
+**New public API on `biscuit_file::FileResolutionContext`
+(`biscuit-file/lib/src/file_reference/context.rs`):**
+
+- `LaunchMagicScope` — the immutable, request-scoped snapshot: `request_dir`
+  plus the repository/package/package-area roots selected for it, with
+  accessors (`request_dir`, `repository_root`, `package_root`,
+  `package_area`, `local_root`). `local_root()` is the repository root when
+  one exists, else the request directory.
+- `launch_magic_scope()` accessor and `with_launch_magic_scope(scope)`
+  builder. The builder is the seeding API a request uses when it *rebuilds*
+  its context around an external or other-repository source (ruling 2's
+  cross-repository half): current anchors may follow the source while `@`
+  keeps the launch tree. Proven by
+  `seeded_launch_scope_keeps_at_local_while_sigils_follow_the_source`.
+- `MagicPathTier { Inferred, User }` (mod.rs) with
+  `add_magic_path_with_tier(path, position, tier)`; `add_magic_path` keeps
+  its signature and means `Inferred`.
+- `MagicPathRegistration` + `magic_path_registrations()` — the tier-aware
+  registration view (path/position/tier) for Darkmatter's cache identity.
+- `magic_search_roots() -> Vec<MagicSearchRoot>` — the R4 diagnostics
+  exposure (ordered, deduplicated roots with provenance).
+
+**Snapshot lifecycle:** initialized from the construction directory by
+`new`/`from_snapshot`; synced by the direct builders `with_repository_root`,
+`with_repository_scope_catalog` (post-recompute), `with_package_root`,
+`with_package_area`; *never* touched by `for_source`/`for_base`/
+`for_trusted_external_*` (they clone it verbatim). `recompute_repository_scopes`
+no longer implicitly moves launch state — `with_repository_scope_catalog`
+explicitly syncs afterward. Internal `ResolutionContext` carries
+`launch_magic_scope: Option<LaunchMagicScope>` (`Some` via `from_context`,
+`None` for ambient).
+
+**Relative configured roots** resolve against the snapshot's `request_dir`
+lazily at chain-build time (ambient: the context CWD, which for
+`resolve_from(base)` is `base`). Behavior change documented on
+`add_magic_path` (context + `FileReference`), matching R2.
+
+### Task 2.2 — Unify root ordering
+
+- `RootProvenance::LocalRoot` added (mod.rs) for the request-directory local
+  root when no launch repository exists; documented as distinct from
+  `Source` so `AuthoringBaseFirst` cannot boost it (asserted by
+  `authoring_base_first_does_not_boost_the_local_root`).
+- `build_magic_chain(&MagicChainInputs)` in resolve.rs is the single `@`
+  ordering authority: local prepends → package root → package-area root →
+  local root → local appends → user prepends → home → user appends. Tier =
+  explicit `User` override, else normalized lexical containment
+  (`normalize_components`, so Windows verbatim/legacy spellings collapse) in
+  the local root. All roots normalized before ordering; dedup after ordering
+  keeps first-seen provenance (a configured root equal to an intrinsic root
+  keeps `Magic`).
+- One chain, four consumers: `collect_roots`'s Magic arm (direct candidates
+  and `%@` traversal via `build_candidates`/`build_search_roots`),
+  `candidate_plan`, actual resolution, and completion —
+  `completion_roots`' Magic arm now appends the typed scope segment only
+  after the prebuilt chain is selected (R3). `complete_partial` (ambient)
+  builds the same chain from live anchors; without a repository its local
+  root is the base (Defect 4's completion side).
+- `resolve_core`/`candidate_plan`: for Magic with a captured launch scope,
+  the resolution's `repository_root` is the snapshot's root (or its
+  absence) — the source-derived anchor never re-anchors `@`, and
+  `DetailedResolution::repository_root` reports what `@` actually used.
+- Non-`@` kinds (`&`, `^`, bare, `./`, `!`, `~`, `vault:`, absolute) keep
+  their exact prior root construction; only the Magic arm changed.
+
+### Task 2.3 — Prove resolver parity
+
+**New test binary `biscuit-file/lib/tests/magic_local_roots.rs` (17 L1
+tests; auto-discovered target, run by `just test`; no tier markers needed).
+Requirement-to-test mapping:**
+
+| Requirement (spec/plan) | Test |
+|---|---|
+| R2 headline tier order, every anchor + local/user root at each position | `tier_order_with_every_anchor_present` |
+| Repo nested under `$HOME` | `repository_nested_in_home_precedes_home` |
+| Defect 4 / no repo under home, `LocalRoot` provenance | `no_repository_local_root_is_the_request_directory` |
+| Containment classification incl. external `/opt/configs` fallback | `tier_is_decided_by_containment_in_the_local_root` |
+| Ruling 1: launch == `$HOME`, no repo (override beats inference) | `launch_equals_home_user_override_wins_over_inference` |
+| Ruling 1: repository == `$HOME` | `repository_equals_home_user_override_wins_over_inference` |
+| Ruling 2: trusted external source keeps launch scope; `./`/bare keep `Source` | `trusted_external_source_keeps_the_launch_scope` |
+| Ruling 2: seeded scope, `&`/bare follow source repo | `seeded_launch_scope_keeps_at_local_while_sigils_follow_the_source` |
+| Relative configured root vs captured request dir, across derivation | `relative_configured_root_anchors_to_the_captured_request_directory` |
+| Ambient `resolve_from(base)` relative-root base change | `ambient_resolve_from_interprets_relative_roots_against_base` |
+| Recursive `%@` walks local-before-user once, first-seen provenance | `recursive_magic_walks_local_roots_once_in_tier_order` |
+| R3 parity, all four completion forms, configured tiers | `completion_roots_match_the_chain_for_every_entry_form` |
+| R3 parity, no-repository layout (completion vs `LocalRoot` plan) | `completion_without_repository_enumerates_the_launch_directory_first` |
+| R4 ordered root-list exposure | `magic_search_roots_exposes_the_ordered_chain` |
+| `LocalRoot` not boosted by `AuthoringBaseFirst` | `authoring_base_first_does_not_boost_the_local_root` |
+| Defect 2 row 1 + Defect 4 first-match with real duplicate files | `local_first_match_wins_over_user_tier_with_duplicate_files` |
+| Defect 2 row 2 (local append beats home, path-shaped) | `local_append_root_beats_home_for_path_shaped_magic` |
+
+Synthetic cases use `from_snapshot` with per-OS absolute literals (`abs()`
+helper) — no ambient CWD/HOME dependence; first-match cases stage real files
+under `TempDir`. The `&`/`^` parity case uses real (empty) directories
+because completion validates repository containment through real
+canonicalization.
+
+**Existing tests updated to the governing rule (both previously encoded the
+old ordering):**
+
+- `finalized_reference_resolution.rs`:
+  `magic_intrinsic_chain_is_between_registered_roots` →
+  `magic_chain_orders_local_tiers_before_user_tiers` (outside-repo Start
+  root now correctly follows the local tier; adds local-tier Start/End
+  coverage).
+- `implicit_relative.rs`: `magic_without_repo_only_returns_home_root` →
+  `magic_without_repo_returns_base_then_home_roots` (Defect 4 completion
+  side).
+
+### Verification
+
+- `just test` (biscuit-file area): 856 passed, 0 failed (includes the 17
+  new tests, the `--no-default-features` `test-minimal` gate, and
+  biscuit-file-cli's 62).
+- `just lint`: clean for both packages. `just doctest`: clean. New
+  rustdoc intra-doc links verified with `RUSTDOCFLAGS="-D warnings" cargo
+  doc` (the two remaining doc errors — `analyze_yaml`, `PolicyClient` —
+  predate this change).
+- Cross-check: `just cross-check biscuit-file --os linux|windows|wsl` —
+  all pass (WSL note: no receipt published, patched-tree run; tests green).
+- Tier placement: all new tests are plain L1 `#[test]`s in auto-discovered
+  targets; no stranded tier markers.
+
+### Expected consumer breakage (Phase 3 scope, verified by `cargo check`)
+
+Adding `RootProvenance::LocalRoot` and the accessor signature change break
+exactly three sites, all owned by Wave 2 tasks:
+
+1. `claudine/lib/src/composition/error/render/provider.rs` — 8-arm
+   exhaustive match (task 3.2 rewrites the `@` branch anyway).
+2. `claudine/lib/src/composition/error/render/mod.rs` — provenance slug
+   match (task 3.2).
+3. `darkmatter/lib/src/markdown/compose/context/options.rs` — the provenance
+   cache-code match (task 3.3; `LocalRoot` appends as code 8) **and** an
+   `E0308` at the `encode_file_resolution_context` call site because
+   `prepended_magic_paths()`/`appended_magic_paths()` now return owned
+   `Vec<PathBuf>` instead of `&[PathBuf]`. The owned return is what lets
+   the encoder consume `magic_path_registrations()` (tier-aware) in the
+   same pass; claudine-cli inherits the claudine breakage transitively.
+   All other biscuit-file dependents in the workspace (sniff, messenger,
+   …) still compile.
+
+### Environment note (build-linux)
+
+The first `cross-check --os linux` failed compiling dependencies with
+`output file … is not writeable` — the documented kache-hardlink poisoning
+of the standing clone's `target/` (docs/kache-strategy.md, 2026-09-09
+incident; 372 read-only files present). Repaired by deleting only the
+non-writable files in the standing clone's `target/` (regenerable build
+artifacts) over `ssh -o BatchMode=yes build-linux`; the leg then passed in
+35 s. No source or repository files were touched on the host.
