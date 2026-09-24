@@ -13,12 +13,14 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   `.cargo/config.toml`. That imposed one answer on every contributor's filesystem, hard-failed
   Cargo for anyone without kache installed, and forced five CI legs plus every other workflow to
   *neutralize* the wrapper they had just been given. A tracked wrapper stays forbidden; on a
-  qualifying host `just init` writes the activation into `$CARGO_HOME/config.toml` as the **last**
+  qualifying host `just init` writes the activation into `$CARGO_HOME/config.toml` (or the legacy
+  `$CARGO_HOME/config` Cargo reads in its place) as the **last**
   step of an ordered, verified sequence (the `_ensure-kache` recipe), never into the repository.
 - **The decision is a probe, and `init` runs it.** `_ensure-kache` qualifies the host through
   `scripts/kache-host.sh` — device ids plus clone probes between the candidate store and the
-  checkout, never the OS name — and the same script feeds `just kache-status`, so the verdict and
-  the report cannot disagree. Qualifying: init installs or upgrades kache, writes the user config,
+  checkout, never the OS name — and `just kache-status` re-runs that clone check from the store
+  `kache doctor` resolves into the checkout and worktree base, failing with the reason when a
+  store no longer clones or the worktree-base setting is one `wt` itself refuses. Qualifying: init installs or upgrades kache, writes the user config,
   owns the daemon lifecycle, and activates, in that order. Non-qualifying: init never installs
   kache, names the reason, and reports an existing activation as drift with the undo printed,
   leaving the change to the human.
@@ -182,7 +184,7 @@ steady-state win, prototype B on one Windows leg and compare wall time against O
 | --- | --- |
 | Version | latest release (0.26.3 at the 2026-09-23 revision); floor **0.23.0** — never run 0.7.x, it was silently write-only |
 | Wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` — written by `just init` on qualifying hosts, activation last |
-| Store | wherever `kache doctor` says it is (`kache-status` and init both read it from there, never a reconstruction). The user config file is the single source of truth: this host pins `[cache] local_store = "/Volumes/coding/kache"` + `ignore_env = true` in `~/.config/kache/config.toml` (the placement cascade's mount-point rule — a `kache/` directory at the checkout volume's mount point). Relocate by editing that pair, never with `KACHE_CACHE_DIR`: env does not reach every process (the daemon's plist and kache's raw-env version probes keep dripping into the old location), while the config file binds shells, the daemon, editors, and launchd jobs alike. Store resolution, highest priority first: env `KACHE_CACHE_DIR` → user config `local_store` (wins over env when the same file sets `ignore_env = true`) → cwd `kache.toml` (real, lowest-priority, cannot carry the store path or gate env) → kache's built-in default. An abandoned store may remain at the built-in default — `~/Library/Caches/kache` held 56 GiB at the 2026-09-23 fix; init reports its size, deleting it stays with the human |
+| Store | wherever `kache doctor` says it is (`kache-status` and init both read it from there, never a reconstruction). The user config file is the single source of truth: this host pins `[cache] local_store = "/Volumes/coding/kache"` + `ignore_env = true` in `~/.config/kache/config.toml` (the placement cascade's mount-point rule — a `kache/` directory at the checkout volume's mount point). Relocate by editing that pair, never with `KACHE_CACHE_DIR`: env does not reach every process (the daemon's plist and kache's raw-env version probes keep dripping into the old location), while the config file binds shells, the daemon, editors, and launchd jobs alike. Store resolution, highest priority first: env `KACHE_CACHE_DIR` → user config `local_store` (wins over env when the same file sets `ignore_env = true`) → cwd `kache.toml` (real, lowest-priority, cannot carry the store path or gate env) → kache's built-in default. Above that stack sits the config-file selector: a non-empty `KACHE_CONFIG` makes kache load that file instead of the user config — `ignore_env = true` does not gate it (measured on 0.26.3) — so init leaves the wrapper off, and `kache-status` reports drift, while the init shell or the daemon (`daemon_config_path`) loads another file. An abandoned store may remain at the built-in default — `~/Library/Caches/kache` held 56 GiB at the 2026-09-23 fix; init reports its size, deleting it stays with the human |
 | Config | `~/.config/kache/config.toml` (hand-tuned caps and GC policy live here; init's writes are targeted merges that preserve them) |
 | Daemon | launchd agent `ninja.kunobi.kache` — installed, started, and restarted by `just init` (strictly after the config write; restart triggers: daemon version ≠ installed binary, or the config file's content changed) |
 | Remote | none configured (local-only; daemon therefore optional) |
