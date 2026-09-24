@@ -39,11 +39,30 @@ Sources: [0.19 config](https://github.com/kunobi-ninja/kache/blob/v0.19.0/src/co
 | --- | --- |
 | Config file (macOS/Linux) | `~/.config/kache/config.toml` |
 | Config file (Windows) | `%APPDATA%\kache\config.toml` |
-| Store (macOS) | `~/Library/Caches/kache` + `index.db` |
-| Store (Linux) | `~/.cache/kache` |
-| Store (Windows) | `%LOCALAPPDATA%\kache` by default — confirm with `kache doctor` |
+| Store | wherever `kache doctor` says it is — the authority, never a reconstruction from defaults |
 | Cargo wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` |
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |
+
+**Do not read the store location from a table.** The built-in defaults are
+`~/Library/Caches/kache` (macOS), `~/.cache/kache` (Linux), and
+`%LOCALAPPDATA%\kache` (Windows), but the store can be pinned anywhere via the
+user config. Store resolution, highest priority first (verified 2026-09-23 on
+kache 0.23.1):
+
+1. env `KACHE_CACHE_DIR`;
+2. `[cache] local_store` in the user config — **wins over env** when the same
+   file sets `[cache] ignore_env = true` (which gates all env overrides,
+   `KACHE_RUNTIME_DIR` included, so the daemon's socket follows the store);
+3. a `kache.toml` in the current working directory — a real but
+   lowest-priority layer: it **cannot** carry the store path (host-specific)
+   and its `ignore_env` has no effect (only the user-level file can gate env);
+4. kache's built-in default.
+
+`KACHE_DISABLED` is ungated — honored whichever layer wins. In rusty-biscuit,
+`just init` writes layer 2 (`local_store` + `ignore_env = true`) on qualifying
+hosts precisely so every process — shells, the daemon, editors, launchd jobs —
+resolves one store; never relocate a store with env exports, which quietly miss
+every process that does not source the shell profile.
 
 `kache doctor` prints the resolved store and Cargo wiring. Use it rather than guessing, especially
 if the home directory or Cargo config is synced across hosts. Before accepting its report that the

@@ -16,17 +16,50 @@ cargo binstall --no-confirm --version <pinned> kache
 Prefer it over the per-OS package managers below, which are fallbacks: each resolves its own
 version, so a team using several of them drifts apart.
 
-In **rusty-biscuit**, do not run this by hand. `just init` installs the latest release on macOS
-and Linux when kache is absent (never on Windows or WSL, never reinstalling); the explicit recipe
-below also upgrades an install below the floor in `.github/kache-min-version`:
+In **rusty-biscuit**, do not run this by hand. `just init` decides from a filesystem
+qualification probe (`scripts/kache-host.sh qualify`), never from the OS name. On a qualifying
+host it installs or upgrades to the latest release, then writes placement, owns the daemon, and
+activates last. On a non-qualifying host it never installs kache. The explicit recipe installs or
+upgrades on any host and stops there; `true` is binary-only (no config writes):
 
 ```bash
-just install-kache
+just install-kache        # binary + default store-cap seed on a config-less host
+just install-kache true   # binary only
 ```
 
-That installs and stops. Activation is a separate, deliberate step
-(`RUSTC_WRAPPER=kache` for one shell, or `kache init` host-wide), because whether kache pays off
-depends on the store's filesystem. See `docs/initialization.md` and `docs/kache-strategy.md`.
+**Version floor: 0.23.0** (`.github/kache-min-version`). It is the measured line: the store
+precedence stack (`local_store` + `ignore_env`) and the daemon's socket-follows-store behavior were
+verified on 0.23.1. The floor is a check, never a pin — installs always target the latest release.
+Neither recipe touches the daemon; only `just init` does. See `docs/initialization.md` and
+`docs/kache-strategy.md`.
+
+## macOS: the hardened runtime strips `DYLD_*` — re-sign ad hoc
+
+The prebuilt release (`cargo binstall`, the 0.19.0 build too) is signed with the **hardened
+runtime** (`codesign -dvv` → `flags=0x10000(runtime)`). dyld removes every `DYLD_*` variable from
+a hardened process's environment at launch, so kache cannot pass them on to rustc. Rust's bundled
+`rust-lld` loads `libLLVM.dylib` through `DYLD_FALLBACK_LIBRARY_PATH`, which rustup exports.
+The symptom is a wrapped link, typically wasm, dying with:
+
+```text
+dyld: Library not loaded: @rpath/libLLVM.dylib
+error: failed to invoke LLD: signal: 6 (SIGABRT)
+```
+
+Remedy: re-sign the installed binary ad hoc, which drops the hardened flag:
+
+```bash
+codesign --force -s - "$(command -v kache)"
+codesign -dvv "$(command -v kache)"   # expect flags=0x2(adhoc)
+```
+
+A source install (`cargo install kache`) is ad hoc-signed by construction and is the fallback.
+Every upgrade replaces the binary with a hardened one again, so the re-sign must follow every
+install. In rusty-biscuit, `install-kache` does it and gates on
+`scripts/kache-host.sh probe-passthrough` (a stub `rustc` run through `RUSTC_WRAPPER=kache`
+that must see a `DYLD_*` variable arrive). The probe runs first, so an already re-signed binary is
+not rewritten; replacing the binary makes the running daemon restart itself. Do not work around
+the failure with toolchain `libLLVM.dylib` symlinks or recipe-level `DYLD_*` exports.
 
 ## macOS
 
@@ -120,18 +153,24 @@ shared or synced home directory — check before assuming the setting is host-lo
 
 ### In this repository
 
-Activation is host policy; the repo tracks no wrapper and CI does not use kache. Two rules that
-are easy to trip over, because a machine-wide `kache init` is invisible from inside a clone:
+`just init` is the only activator. On a qualifying host it writes `[build] rustc-wrapper = "kache"`
+into `$CARGO_HOME/config.toml` as its last step, after install, store placement, and the daemon
+all succeed. The repo tracks no wrapper, and CI never installs or uses kache. Do not run
+`kache init` or export `RUSTC_WRAPPER=kache` in shell profiles. Either bypasses the probe and the
+ordered sequence. Rules that are easy to trip over:
 
-- **Windows dev hosts: leave it off.** NTFS restores by copy, so the store becomes a real second
-  copy of every cached artifact. Opt in only after a ReFS Dev Drive holding the store *and*
-  `target/` is measured.
+- **Windows NTFS dev hosts do not qualify.** NTFS restores by copy, so the store becomes a real
+  second copy of every cached artifact. A ReFS Dev Drive that holds the store *and* the checkout
+  qualifies when the probe passes.
+- **Opting one command out:** `RUSTC_WRAPPER=""` wins over the Cargo config file. The standing
+  `cross-check` clones build this way.
 - **Never** answer kache's storage-layout advisory with `windows_hardlink = true` (Cargo rewrites
   object outputs, which that setting forbids) or `storage_layout_advice = false` (silences the
   signal, not the cause).
 
-`just kache-status` reports what is active on the current host, whether the volume clones blocks,
-and the exact undo. Decision table and evidence: `docs/kache-strategy.md`.
+`just kache-status` re-runs the probe init used. It reports the store `kache doctor` resolves,
+env passthrough, the checkout and worktree-base devices, and the exact undo. It exits non-zero
+on drift while kache is active. Decision table and evidence: `docs/kache-strategy.md`.
 
 ## Verifying it's actually working
 
@@ -163,7 +202,7 @@ kache purge                 # drop the store contents
 ```
 
 Then remove `rustc-wrapper` from `~/.cargo/config.toml` (or unset `RUSTC_WRAPPER`) and delete the
-store directory — see [platforms.md](platforms.md) for its location on each OS. Removing the wrapper
+store directory — the one `kache doctor` reports (run it before uninstalling). Removing the wrapper
 re-enables cargo's incremental compilation on the next build.
 
 `KACHE_DISABLED=1` is not a full rollback: current kache still strips Cargo's incremental flags

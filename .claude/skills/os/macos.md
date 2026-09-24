@@ -118,6 +118,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   Homebrew first on PATH and fails for everyone else. Write
   `${arr[@]+"${arr[@]}"}` and avoid `mapfile`, `declare -A`, and `${v,,}` in
   any shell script that is `#!/usr/bin/env bash`.
+- **`dyld: Library not loaded: @rpath/libLLVM.dylib` / `failed to invoke LLD:
+  signal: 6 (SIGABRT)` on a kache-wrapped link** (typically wasm, e.g.
+  `just zed-wasm`). The prebuilt kache binary carries the hardened runtime,
+  and dyld strips every `DYLD_*` variable from a hardened process. rustup's
+  `DYLD_FALLBACK_LIBRARY_PATH` never reaches `rust-lld`. The toolchain is not
+  broken: do not symlink `libLLVM.dylib` into it or export `DYLD_*` in
+  recipes. Re-sign kache ad hoc (`just install-kache` does this and gates on
+  `scripts/kache-host.sh probe-passthrough`). Measured 2026-09-23; details in
+  the `kache` skill's `installation.md`.
 
 ## Diagnosing a slow host
 

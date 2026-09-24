@@ -172,7 +172,8 @@ push mode.
   backslash escapes.
 - [macos.md](macos.md) — `/var` symlink, Docker for Linux evidence, L2
   capture wedges, subprocess forks from terminal detection, perf triage,
-  lldb work counters, shell-init and `cd` traps.
+  lldb work counters, shell-init and `cd` traps, the kache hardened-runtime
+  `DYLD_*` link failure.
 
 When you learn a new OS-specific fact the hard way, add it to the matching
 file in the same change that fixes it. That is what keeps this skill portable

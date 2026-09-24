@@ -47,7 +47,8 @@ Note that APFS `clonefile` **does** succeed between separate volumes in the same
 ## macOS
 
 - APFS → reflink. Best case, and the platform kache is tuned for.
-- The store lives under `~/Library/Caches/kache` (with `index.db` alongside the blobs).
+- The default store is `~/Library/Caches/kache` (with `index.db` alongside the blobs), but the
+  user config can pin it anywhere — `kache doctor` names the store actually in use.
 - kache **automatically excludes its own store from Time Machine and Spotlight** — worth knowing
   before you go hunting for why backups didn't grow.
 - The daemon installs as a **launchd** login agent (`~/Library/LaunchAgents/ninja.kunobi.kache.plist`).
