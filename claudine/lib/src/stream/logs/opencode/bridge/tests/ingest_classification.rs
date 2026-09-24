@@ -404,3 +404,50 @@ fn boot_banner_is_parsed_and_consumed_without_emitting_event() {
 // Phase-4 cross-stream dedup and summary enrichment
 // ------------------------------------------------------------------
 
+
+/// OpenCode 1.18.32's shape for an unknown model: stdout carries only the
+/// generic server error plus a `ref`, and the stderr `failed` record with the
+/// same `ref` names the cause.
+const MODEL_NOT_FOUND_RECORD: &str = r#"timestamp=2026-09-24T03:25:44.917Z level=ERROR run=94066166 message=failed ref=err_4b99b962 error="ProviderModelNotFoundError: Model not found: kimi-for-coding/k3." cause="ProviderModelNotFoundError: Model not found: kimi-for-coding/k3.\n    at <anonymous> (src/provider/provider.ts:12:5)""#;
+
+fn generic_server_error_summary(reference: &str) -> crate::stream::summary::StreamExecutionSummary {
+    crate::stream::summary::StreamExecutionSummary {
+        provider: crate::provider_id::Provider::OpenCode,
+        is_error: true,
+        exit_code: 1,
+        error_kind: Some("UnknownError".into()),
+        error_message: Some("Unexpected server error. Check server logs for details.".into()),
+        error_reference: Some(reference.into()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_generic_stdout_error_takes_the_cause_from_the_stderr_record_with_its_ref() {
+    let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
+    assert_eq!(bridge.ingest(MODEL_NOT_FOUND_RECORD), StderrIngestOutcome::Consumed);
+    let mut summary = generic_server_error_summary("err_4b99b962");
+
+    merge_stderr_state_into_summary(&bridge.state, &mut summary);
+
+    assert_eq!(
+        summary.error_message.as_deref(),
+        Some("ProviderModelNotFoundError: Model not found: kimi-for-coding/k3.")
+    );
+    assert_eq!(summary.error_kind.as_deref(), Some("ProviderModelNotFoundError"));
+}
+
+#[test]
+fn a_generic_stdout_error_keeps_its_message_when_no_stderr_record_shares_its_ref() {
+    let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None, None);
+    bridge.ingest(MODEL_NOT_FOUND_RECORD);
+    let mut summary = generic_server_error_summary("err_unrelated");
+
+    merge_stderr_state_into_summary(&bridge.state, &mut summary);
+
+    assert_eq!(
+        summary.error_message.as_deref(),
+        Some("Unexpected server error. Check server logs for details.")
+    );
+    assert_eq!(summary.error_kind.as_deref(), Some("UnknownError"));
+}

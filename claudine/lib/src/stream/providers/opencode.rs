@@ -39,7 +39,7 @@ use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 
-const GENERIC_SERVER_ERROR: &str =
+pub(crate) const GENERIC_SERVER_ERROR: &str =
     "Unexpected server error. Check server logs for details.";
 
 /// An unsupported runtime identity was supplied to the shared OpenCode parser.
@@ -71,6 +71,7 @@ pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     is_error: bool,
     error_kind: Option<String>,
     error_message: Option<String>,
+    error_reference: Option<String>,
     tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
 }
 
@@ -112,6 +113,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             is_error: false,
             error_kind: None,
             error_message: None,
+            error_reference: None,
             tool_uses: HashMap::new(),
         })
     }
@@ -311,6 +313,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
         self.error_kind = error_kind;
         self.error_message = error_message;
+        self.error_reference = event.resolved_reference();
 
         let mut extra = self.base_extra(raw_kind);
         if let Some(kind) = &self.error_kind {
@@ -586,6 +589,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                 is_error: self.is_error,
                 error_kind: self.error_kind,
                 error_message: self.error_message,
+                error_reference: self.error_reference,
                 duration_ms: self.duration_ms,
                 num_turns: (self.num_turns > 0).then_some(self.num_turns),
                 token_usage: has_usage.then_some(self.token_usage),

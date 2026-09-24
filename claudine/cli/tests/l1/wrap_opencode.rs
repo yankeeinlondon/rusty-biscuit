@@ -1034,3 +1034,53 @@ exit 0
 // ============================================================================
 // Performance flag tests
 // ============================================================================
+
+/// OpenCode 1.18.32 reports an unknown model on stdout only as the generic
+/// server error plus a `ref`; the stderr `failed` record with that `ref` names
+/// the cause. The document's `failure` event must see the cause as `err.*`.
+#[cfg(unix)]
+#[test]
+fn opencode_unknown_model_surfaces_its_cause_as_the_failure_error() {
+    let fixture = CliProcessFixture::named("opencode-unknown-model");
+    fixture.seed_user_config();
+    write_executable(
+        &fixture.bin_dir().join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' 'timestamp=2026-09-24T03:25:44.917Z level=ERROR run=94066166 message=failed ref=err_4b99b962 error="ProviderModelNotFoundError: Model not found: kimi-for-coding/k3." cause="ProviderModelNotFoundError: Model not found: kimi-for-coding/k3.\n    at <anonymous>"' >&2
+printf '%s\n' '{"type":"error","timestamp":1790220344918,"sessionID":"ses_x","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_4b99b962"}}}'
+exit 1
+"#,
+    );
+    let md_file = fixture.cwd().join("unknown-model.md");
+    write(
+        &md_file,
+        r#"---
+title: unknown model
+model: llamacpp/test-model
+failure:
+  stack:
+    - action: {append_line: ["events.log", "{{err.variant}} | {{err.msg}}"]}
+---
+Prompt body
+"#,
+    );
+
+    let output = fixture
+        .command()
+        .args(["compose", "--opencode", "-y", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success(), "stderr:\n{stderr}");
+    let events = fs::read_to_string(fixture.cwd().join("events.log")).unwrap_or_default();
+    assert_eq!(
+        events.trim(),
+        "ProviderModelNotFoundError | ProviderModelNotFoundError: Model not found: kimi-for-coding/k3.",
+        "stderr:\n{stderr}"
+    );
+}

@@ -132,6 +132,17 @@ fn error_event_emits_error() {
 }
 
 #[test]
+fn a_generic_error_records_its_opencode_ref() {
+    let (_events, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"error","timestamp":1790220344918,"sessionID":"ses_x","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_4b99b962"}}}"#,
+    );
+
+    let summary = parser.finish(1);
+    assert_eq!(summary.error_reference.as_deref(), Some("err_4b99b962"));
+}
+
+#[test]
 fn current_opencode_error_shape_preserves_provider_message() {
     let (events, mut parser) = new_parser();
     parser.feed_line(
