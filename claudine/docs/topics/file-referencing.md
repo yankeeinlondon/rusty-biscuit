@@ -53,8 +53,9 @@ Authors will also **encounter** the following forms in the wild. They are docume
     - the base paths -- _in order of precedence_ -- which will be used are:
         - repo's package root (if **CWD** is inside a monorepo and inside a package of that monorepo)
         - repo's package-area root (if CWD is inside a monorepo and inside a package area of that monorepo)
-        - repo's root directory (if CWD is inside a repo)
+        - repo's root directory (if CWD is inside a repo), otherwise the launch directory (CWD) itself
         - the user's home directory
+    - every location in the local tree (the first three, plus Claudine's local prompt conventions such as `prompts/` and `.claudine/prompts/`) is tried before anything home-based (`~/.claudine/prompts`, `~`, `~/.claudine`), so a local file always beats a same-named one in your home configuration
     - a pattern many developers will be familiar with is referencing an Agent Skill such as: `@.claude/skills/do-me-like-that/SKILL.md`
         - this will TRY to use the repo's skill definition first, but if it doesn't exist then
         - it falls back to `~/.claude/skills/do-me-like-that/SKILL.md`
