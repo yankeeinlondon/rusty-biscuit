@@ -25,7 +25,7 @@ Parse compact file descriptors and resolve them lazily against runtime context (
 Supported reference types:
 
 - **Relative** (`./foo.md`) and **Absolute** (`/path/to/file`)
-- **Magic** (`@docs/spec.md`) -- searches custom, package, package-area, repository, and HOME roots
+- **Magic** (`@docs/spec.md`) -- searches the local tree (package, package area, then the repository root or launch directory, plus custom roots inside it) before HOME and custom roots outside it
 - **Repository root** (`&README.md`) -- resolves exactly from the repository root
 - **Repository scoped** (`^README.md`) -- searches package, package-area, then repository roots
 - **Vault** (`vault:notes/today.md`) -- searches Obsidian vault roots
