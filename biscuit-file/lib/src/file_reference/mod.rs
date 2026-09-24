@@ -10,7 +10,8 @@
 //! ```rust,no_run
 //! use biscuit_file::FileReference;
 //!
-//! // Magic reference -- searches captured package, repository, and home scopes
+//! // Magic reference -- searches the local tree (package, package area,
+//! // repository root or launch directory) before home-based roots
 //! let file_ref = FileReference::new("@docs/spec.md")?;
 //! let resolved = file_ref.resolve()?;
 //! if let Some(path) = resolved {
@@ -37,8 +38,9 @@ pub use error::FetchError;
 /// callers can register convention magic search roots (e.g. a tool's
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
-    FileResolutionContext, PackageAreaFallback, RepositoryScope, RepositoryScopeCatalog,
-    RepositoryScopeCatalogError, find_git_root, home_dir,
+    FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
+    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, find_git_root,
+    home_dir,
 };
 
 /// The classified kind of a file reference.
@@ -105,6 +107,66 @@ pub enum RootProvenance {
     Vault,
     /// The authored absolute path (no joined root).
     Absolute,
+    /// The request directory serving as the local root for an `@` chain that
+    /// has no repository.
+    ///
+    /// Distinct from [`RootProvenance::Source`], which remains the authoring
+    /// base for bare and explicit-relative references: reusing `Source` here
+    /// would let `CandidatePlanOrder::AuthoringBaseFirst` boost the wrong
+    /// `@` candidate.
+    LocalRoot,
+}
+
+/// Tier policy for a configured magic (`@`) root.
+///
+/// The tier decides where a configured root sits in the `@` chain relative to
+/// the intrinsic local roots (package, package area, local root) and the home
+/// directory. By default it is inferred from normalized lexical containment
+/// in the local root; a caller that knows a root is a user convention (for
+/// example a tool's `~/.config-tool` prompt directory) overrides it with
+/// [`User`](Self::User) so the root stays in the user tier even when the
+/// local tree *is* `$HOME` and containment alone cannot tell the two apart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MagicPathTier {
+    /// Infer the tier: local when the root lexically lies inside the local
+    /// root (after `.`/`..` and Windows verbatim normalization), user
+    /// otherwise.
+    #[default]
+    Inferred,
+    /// Force the user tier; wins over containment inference in every layout.
+    User,
+}
+
+/// One ordered `@` search root, with the provenance of where it came from.
+///
+/// Exposed by [`FileResolutionContext::magic_search_roots`] so diagnostics
+/// can render the directories an `@` reference searches in priority order
+/// without re-deriving the chain. A configured root carries
+/// [`RootProvenance::Magic`]; the intrinsic roots carry their kind
+/// provenances.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MagicSearchRoot {
+    path: PathBuf,
+    provenance: RootProvenance,
+}
+
+impl MagicSearchRoot {
+    /// The normalized, absolute root directory.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The provenance of this root.
+    pub fn provenance(&self) -> RootProvenance {
+        self.provenance
+    }
+}
+
+pub(crate) fn make_magic_search_root(
+    path: PathBuf,
+    provenance: RootProvenance,
+) -> MagicSearchRoot {
+    MagicSearchRoot { path, provenance }
 }
 
 /// Ordering policy for an unprobed candidate plan.
@@ -335,9 +397,11 @@ impl DetailedResolution {
 /// [`FileReference::complete_partial`] supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionEntryForm {
-    /// `@`-prefixed magic path. Roots are the configured prepends, the package
-    /// root, the package-area root, the repository root, the user's home
-    /// directory, then the configured appends.
+    /// `@`-prefixed magic path. Roots follow the `@` chain's tier order:
+    /// local configured prepends, the package root, the package-area root,
+    /// the local root (repository root, or the request directory when there
+    /// is none), local configured appends, user configured prepends, the
+    /// user's home directory, then user configured appends.
     Magic,
     /// `&`-prefixed path rooted at the repository.
     RepositoryRoot,
@@ -426,6 +490,12 @@ pub enum Resolved {
 
 /// Position for magic path insertion.
 ///
+/// Positions are resolved within a tier: a `Start` root precedes and an
+/// `End` root follows that tier's intrinsic roots. Which tier a root lands
+/// in — local (before all home-based roots) or user (after the local tier) —
+/// follows from [`MagicPathTier`] and the launch local root, not from this
+/// position.
+///
 /// ## Examples
 ///
 /// ```rust,no_run
@@ -438,9 +508,9 @@ pub enum Resolved {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathPosition {
-    /// Insert before the default search roots.
+    /// Insert before that tier's default search roots.
     Start,
-    /// Insert after the default search roots.
+    /// Insert after that tier's default search roots.
     End,
 }
 
@@ -505,11 +575,19 @@ impl FileReference {
         }
     }
 
-    /// Add a custom search path for magic (`@`) references.
+    /// Add a custom search path for magic (`@`) references, with its tier
+    /// inferred from containment in the local root.
+    ///
+    /// For the ambient [`resolve`](Self::resolve) form a relative root is
+    /// interpreted against the process working directory; for
+    /// [`resolve_from`](Self::resolve_from) it is interpreted against `base`
+    /// rather than the process working directory. See
+    /// [`FileResolutionContext::add_magic_path`] for the full tier contract.
     pub fn add_magic_path(mut self, path: impl Into<PathBuf>, position: PathPosition) -> Self {
+        let entry = (path.into(), MagicPathTier::Inferred);
         match position {
-            PathPosition::Start => self.magic_paths.prepend.push(path.into()),
-            PathPosition::End => self.magic_paths.append.push(path.into()),
+            PathPosition::Start => self.magic_paths.prepend.push(entry),
+            PathPosition::End => self.magic_paths.append.push(entry),
         }
         self
     }
@@ -754,8 +832,10 @@ impl FileReference {
     /// - Path-separator reset: the active segment is the portion after the
     ///   last `/`. Everything up to and including that `/` is the
     ///   "scope", which is appended to each implied root.
-    /// - Magic form: configured prepends, package root, package-area root,
-    ///   repository root, home, then configured appends.
+    /// - Magic form: local configured prepends, package root, package-area
+    ///   root, local root (repository root, or the base directory when there
+    ///   is no repository), local configured appends, user configured
+    ///   prepends, home, then user configured appends.
     /// - Repository root: the repository root only.
     /// - Repository scoped: package root, package-area root, then repository
     ///   root.
@@ -949,6 +1029,18 @@ pub(crate) enum TemplateSegment {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct MagicPathList {
-    pub prepend: Vec<PathBuf>,
-    pub append: Vec<PathBuf>,
+    pub prepend: Vec<(PathBuf, MagicPathTier)>,
+    pub append: Vec<(PathBuf, MagicPathTier)>,
+}
+
+impl MagicPathList {
+    /// Registered paths at the Start position, in registration order.
+    pub(crate) fn prepend_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.prepend.iter().map(|(path, _tier)| path.clone())
+    }
+
+    /// Registered paths at the End position, in registration order.
+    pub(crate) fn append_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.append.iter().map(|(path, _tier)| path.clone())
+    }
 }

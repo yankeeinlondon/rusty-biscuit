@@ -441,8 +441,10 @@ mod partial_completion {
 
     #[test]
     #[serial]
-    fn magic_without_repo_only_returns_home_root() {
-        // Use a temp dir that is not a git repo as the base.
+    fn magic_without_repo_returns_base_then_home_roots() {
+        // Use a temp dir that is not a git repo as the base. The launch
+        // directory itself is the local root for `@` (Defect 4): it must be
+        // enumerated before the home leg.
         let base = TempDir::new().unwrap();
         let base_canon = canonical(base.path());
 
@@ -459,8 +461,8 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "pr");
         assert_eq!(
             completion.roots(),
-            &[expected_home(&home_canon)],
-            "only the home leg contributes when base is not inside a git repo",
+            &[base_canon, expected_home(&home_canon)],
+            "the launch directory is the local root, enumerated before home",
         );
     }
 

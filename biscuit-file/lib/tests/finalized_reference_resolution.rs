@@ -117,30 +117,40 @@ fn repository_scoped_reference_orders_package_area_and_repository() {
 }
 
 #[test]
-fn magic_intrinsic_chain_is_between_registered_roots() {
+fn magic_chain_orders_local_tiers_before_user_tiers() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path().join("repo");
     let area = repo.join("claudine");
     let package = area.join("lib");
     let base = package.join("src");
     let home = temp.path().join("home");
-    let prepend = temp.path().join("prepend");
-    let append = temp.path().join("append");
+    let outside = temp.path().join("outside");
+    // A configured root inside the repository is local-tier whatever its
+    // registration position; one outside the local tree is user-tier.
+    let local_prepend = repo.join("local-pre");
+    let local_append = repo.join("local-app");
+    let user_prepend = outside.join("user-pre");
+    let user_append = outside.join("user-app");
     let ctx = scoped_context(&repo, &base, &area, &package, &home)
-        .add_magic_path(&prepend, PathPosition::Start)
-        .add_magic_path(&append, PathPosition::End);
+        .add_magic_path(&local_prepend, PathPosition::Start)
+        .add_magic_path(&user_prepend, PathPosition::Start)
+        .add_magic_path(&local_append, PathPosition::End)
+        .add_magic_path(&user_append, PathPosition::End);
 
     let plan = FileReference::new("@config.md").unwrap().candidate_plan(&ctx).unwrap();
     assert_eq!(
         paths(&plan),
         vec![
-            prepend.join("config.md"),
+            local_prepend.join("config.md"),
             package.join("config.md"),
             area.join("config.md"),
             repo.join("config.md"),
+            local_append.join("config.md"),
+            user_prepend.join("config.md"),
             home.join("config.md"),
-            append.join("config.md"),
-        ]
+            user_append.join("config.md"),
+        ],
+        "no user-tier candidate may precede any local-tier candidate",
     );
 }
 
