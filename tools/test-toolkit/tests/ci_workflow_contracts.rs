@@ -2,8 +2,9 @@
 //!
 //! These guard the invariants of the package-keyed CI grid
 //! (`fixes/2026-08-06-cicd`): the package is the unit of selection, execution,
-//! and result identity; the repository tracks no rustc wrapper while the
-//! pinned compiler cache stays a host opt-in with a single authority; the
+//! and result identity; the repository tracks no rustc wrapper while `just
+//! init` owns the compiler-cache host setup through one ordered sequence
+//! (2026-09-23) that CI never enters; the
 //! primary workflow runs a bootstrap preflight that gates the package fan-out;
 //! declared test tiers are non-vacuous; and release automation follows
 //! successful CI instead of racing it. They inspect workflow/action and
@@ -126,7 +127,7 @@ fn gating_packages() -> Vec<serde_json::Value> {
         .collect()
 }
 
-// --- D1/D2: no tracked rustc wrapper; kache is a host opt-in -----------------
+// --- D1/D2: no tracked rustc wrapper; init owns the kache host setup ---------
 
 #[test]
 fn repository_tracks_no_rustc_wrapper() {
@@ -284,16 +285,36 @@ fn kache_has_a_single_version_floor() {
     );
 }
 
-// Ruling 2026-09-09, superseded 2026-09-23 by
-// fixes/2026-09-23-ensuring-kache-support: `just init` still runs the
-// `_ensure-kache` step, but that step now owns activation on qualifying
-// hosts through the ordered sequence pinned in `kache_recipe_contracts.rs`.
-// This test remains the structural guard (init wires the step; the installer
-// stays an explicit recipe; no recipe shells out to `kache init` or exports
-// RUSTC_WRAPPER=kache directly) until the D1/D2 block is reworked onto the
-// new contract.
+/// The root justfile plus every file it `import`s — the full recipe surface a
+/// recipe could activate from.
+fn justfile_corpus() -> Vec<String> {
+    let root = read("justfile");
+    let mut corpus = vec![root.clone()];
+    for line in root.lines() {
+        if let Some(rest) = line.strip_prefix("import \"")
+            && let Some(path) = rest.strip_suffix('"')
+        {
+            corpus.push(read(path));
+        }
+    }
+    corpus
+}
+
+/// Ruling 2026-09-23 (`fixes/2026-09-23-ensuring-kache-support`), superseding
+/// the 2026-09-09 activation-is-host-policy ruling this test used to pin:
+/// `just init` owns the kache host setup end to end through `_ensure-kache`'s
+/// ordered sequence — probe, install, store placement, user config write,
+/// daemon lifecycle, activation LAST — under the failure contract pinned in
+/// `kache_recipe_contracts.rs`. What stays structural here: the repository
+/// tracks no rustc wrapper (a qualifying host's activation lives in its own
+/// `$CARGO_HOME/config.toml`, written only by that sequence), the installer
+/// stays an explicit recipe targeting latest (the floor is a check, not a
+/// pin), and no recipe may activate outside the sequence — a bare `kache
+/// init` or `export RUSTC_WRAPPER=kache` line, or an activation write from
+/// any other recipe, is the ungated activation whose wrapped-but-broken
+/// builds this fix exists to prevent.
 #[test]
-fn init_installs_the_compiler_cache_without_activating_it() {
+fn init_owns_the_kache_host_setup_through_the_ensure_step() {
     let justfile = read("justfile");
     assert!(
         justfile.contains("    just _ensure-kache\n"),
@@ -307,14 +328,89 @@ fn init_installs_the_compiler_cache_without_activating_it() {
         justfile.contains("install-kache binary_only="),
         "the installer must remain available as an explicit recipe (binary_only parameter)"
     );
-    let activates = justfile.lines().any(|line| {
-        let cmd = line.trim_start();
-        cmd.starts_with("kache init") || cmd.starts_with("export RUSTC_WRAPPER=kache")
-    });
-    assert!(
-        !activates,
-        "no recipe may activate kache; that is host policy (docs/kache-strategy.md)"
+
+    // No recipe — in the root justfile or any file it imports — may activate
+    // kache by hand.
+    for source in justfile_corpus() {
+        for line in source.lines() {
+            let cmd = line.trim_start();
+            assert!(
+                !(cmd.starts_with("kache init")
+                    || cmd.starts_with("export RUSTC_WRAPPER=kache")),
+                "no recipe may activate kache by hand; activation is the last step of \
+                 _ensure-kache's ordered sequence (docs/kache-strategy.md)"
+            );
+        }
+    }
+
+    // The activation write itself — the merge helper carrying a NON-EMPTY
+    // rustc-wrapper value — may appear only inside `_ensure-kache`. (The
+    // empty-value write is the failure contract's undo and travels with it.)
+    let mut activators: Vec<String> = Vec::new();
+    let mut recipe = String::new();
+    for line in justfile.lines() {
+        let is_header = !line.is_empty()
+            && !line.starts_with(' ')
+            && !line.starts_with('\t')
+            && !line.starts_with('#')
+            && !line.starts_with("import")
+            && line.contains(':')
+            && !line.contains(":=");
+        if is_header {
+            recipe = line.split(':').next().unwrap_or("").trim().to_owned();
+        }
+        if line.contains("rustc-wrapper kache") {
+            activators.push(recipe.clone());
+        }
+    }
+    assert_eq!(
+        activators,
+        vec!["_ensure-kache".to_owned()],
+        "the activation write belongs to _ensure-kache's ordered sequence alone — \
+         no other recipe may write a non-empty rustc-wrapper"
     );
+}
+
+/// The 2026-09-23 CI rule: CI never installs or upgrades kache — runners have
+/// no clone-capable store of their own, and `Swatinem/rust-cache` serves the
+/// legs that compile. `_ensure-kache` carries an in-recipe CI guard as a
+/// backstop, but the contract is stronger than the guard: no workflow may run
+/// `just init` (which owns the host setup) or reach for kache's installer at
+/// all, so a workflow that starts fighting the runner's own cache setup fails
+/// here before it ships.
+#[test]
+fn ci_never_runs_init_nor_installs_or_upgrades_kache() {
+    let workflows = repo_root().join(".github/workflows");
+    for entry in fs::read_dir(&workflows).expect("read .github/workflows") {
+        let path = entry.expect("workflow entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let source = read(&format!(".github/workflows/{name}"));
+        for line in source.lines() {
+            // Comments and prose cannot execute; a marker inside them must
+            // not fail the contract the way an executable step would.
+            let executable = line.split('#').next().unwrap_or("").trim();
+            if executable.is_empty() {
+                continue;
+            }
+            assert!(
+                !executable.contains("just init"),
+                "{name}: CI must not run `just init` — init owns the kache host setup, \
+                 and a runner's filesystem is not ours to qualify"
+            );
+            let manages_kache = executable.contains("kache")
+                && (executable.contains("install-kache")
+                    || executable.contains("binstall")
+                    || executable.contains("cargo install")
+                    || executable.contains("kache init"));
+            assert!(
+                !manages_kache,
+                "{name}: CI must not install or upgrade kache (`{executable}`)"
+            );
+        }
+    }
 }
 
 #[test]
