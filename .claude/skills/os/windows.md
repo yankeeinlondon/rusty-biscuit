@@ -213,6 +213,17 @@ Compare against that, never against `to_string_lossy()`.
   cross-platform Ctrl+C acceptance criterion as met until a
   `SetConsoleCtrlHandler` path exists; see the claudine skill's
   `signal-handling.md`, "Windows parity".
+- **The main thread gets a 1 MiB stack, not 8 MiB.** Symptom: a test's
+  spawned binary dies with `code=-1073741571` (`0xC00000FD`,
+  `STATUS_STACK_OVERFLOW`) and empty stderr on Windows only. Debug-build frames
+  are large (claudine's harness loop frames run to 50–100 KiB each), so a
+  finite call chain that fits Unix's 8 MiB can overflow here. Reproduce on
+  macOS with `(ulimit -s 768; <binary> …)` and size the frames with an lldb
+  script over `frame.GetSP()` deltas. The fix is the binary's `build.rs`
+  reserving 8 MiB (`/STACK:8388608` for msvc, `-Wl,--stack,8388608` for gnu,
+  via `cargo:rustc-link-arg-bin=<bin>=…`), as `darkmatter/cli`,
+  `claudine/cli`, and `sniff/cli` do. It covers the main thread only; spawned
+  threads keep Rust's 2 MiB default.
 
 ## Attaching a console inside a nextest process
 
