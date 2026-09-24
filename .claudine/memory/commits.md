@@ -822,6 +822,28 @@ belong here.
   Phase 3 example (Task 3.1 executed as a biscuit-hash publish-interaction
   check; Tasks 3.2–3.4 closed "not built" because Task 2.1 measured 0.6 s
   and the alignment crate would never pay).
+- A terminal "closed-with-rationale" phase that closes the
+  investigation can flip spec.md `implemented: false` to `implemented:
+  true` while leaving `human_review_items` open, when "implementation"
+  in this fix means "investigation complete" rather than "remediation
+  complete". The author's remaining rulings then gate BOTH the
+  follow-on change (e.g. option B applied as its own commit) AND the
+  eventual move to `_completed/`; the close itself neither blocks on
+  those rulings nor pretends the spec's Outcome was achieved. The
+  acceptance-criteria status table records the per-criterion
+  resolution (criteria met; criterion 5 as "recorded, not achieved"
+  because no remedy landed; the goal stays unmet but the fix is done
+  recording it). The spec's `implemented_by:` field names the agent
+  that closed the investigation, which may differ from
+  `agent:` / `reviewed_by:` (the spec's author and reviewer) when
+  multiple agents cycle through a long-running fix; recording each
+  role separately is the audit trail. See `9e2140a32` for the
+  2026-09-21-ci-build-feature-divergence Phase 4 example (the same fix
+  as the prior entry's Phase 3 — Phase 4 is measurement-only with
+  `source_files_during_phase_4: []`, the re-run is identical to
+  Phase 1's numbers, `implemented: true` is now accurate, and the
+  two `human_review_items` still gate the option B follow-on and the
+  move to `_completed/`).
 - Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
   `git ls-files -s <old> <new>` — the rename is a single index fact
   but the index holds independent `D` + `A` entries, and the
