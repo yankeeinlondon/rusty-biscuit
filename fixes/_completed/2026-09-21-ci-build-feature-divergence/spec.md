@@ -6,7 +6,7 @@ clarified: false
 reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-21
-review_iterations: 0
+review_iterations: 3
 implemented: true
 implemented_by: claude/opus
 human_review: true
@@ -14,17 +14,17 @@ human_review_items:
     - |-
       **Approve option B as a follow-on change, or close the fix with measurements only? (Open since Phase 1. All four phases are now done.)**
 
-      *Why this matters now:* the plan is finished, but the fix has not yet delivered its goal: fewer rebuilds of the repository's own crates in the CI build job. Re-running the measurement at the end (Phase 4) shows exactly the same numbers as at the start (92 crate builds on Linux, 65 of them extra), because no change was approved. What happens next depends on your answer. The planned "alignment" crate (a crate that switches on the same third-party options for every package) was not built: the options the spec allowed it to align save only **0.6 s**.
+      *Why this matters now:* the plan is finished, but the fix has not yet delivered its goal: fewer rebuilds of the repository's own crates in the CI build job. Re-running the measurement at the end (Phase 4) shows exactly the same numbers as at the start (90 crate builds on Linux, 65 of them extra), because no change was approved. What happens next depends on your answer. The planned "alignment" crate (a crate that switches on the same third-party options for every package) was not built: the options the spec allowed it to align save only **0.9 s**.
 
       *Options:*
       - **A. Close with the measurement.** Accept the attribution table, the tool, and the decisions as the result.
         Pro: nothing to review beyond records, and no risk. Con: no speed-up; the goal stays unmet.
       - **B. Approve removing one internal link as a small follow-on change.** `schematic-define` depends on `biscuit-file` only to reach the YAML library `serde_yaml_ng`. Depending on `serde_yaml_ng` directly (same version) stops the large `schematic-definitions` crate (about 24 s per build) from being rebuilt for other packages' web-server and terminal options.
-        Pro: about **77 s** saved per run (measured), 92 → 86 builds, and nothing is shared between packages, so the 2026-09-12 protection stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: the spec did not list this remedy, so it needs your approval and one spec line.
+        Pro: about **77 s** saved per run (measured), 90 → 84 builds, and nothing is shared between packages, so the 2026-09-12 protection stays whole. The change is small: one manifest, three `use` lines, and the dependency docs. Con: the spec did not list this remedy, so it needs your approval and one spec line.
       - **C / D. Align many third-party options (C, about 211 s) or a middle set including `mio` (D, about 37 s).**
         Pro: larger (C) or moderate (D) savings. Con: a package's tests could pass only because another package switched on an option its own manifest never asked for, which the 2026-09-12 decision guards against. Each option needs its own written ruling first, and the alignment-crate tasks reopen.
 
-      *Recommendation: B.* It is the largest saving that keeps the protection intact. If approved, it runs as a separate change: edit `schematic/define/Cargo.toml` and the three `use` lines, update the dependency docs, run `just test schematic-define` and `cargo test -p schematic-definitions --no-run`, and re-run the attribution tool (expect 86 on Linux). Record the next ordinary pull request's build-time sum once one runs anyway.
+      *Recommendation: B.* It is the largest saving that keeps the protection intact. If approved, it runs as a separate change: edit `schematic/define/Cargo.toml` and the three `use` lines, update the dependency docs, run `just test schematic-define` and `cargo test -p schematic-definitions --no-run`, and re-run the attribution tool (expect 84 on Linux). Record the next ordinary pull request's build-time sum once one runs anyway.
     - |-
       **The recorded ruling on the `claudine-cli` guard test no longer fits the evidence.**
 
@@ -37,9 +37,9 @@ human_review_items:
       *Recommendation: leave it as it is,* and record the amendment in Open Questions.
 message_to_agent: |-
     All four phases are complete as records (see "## Phase 4" in implementation-log.md). No source, manifest, or lock file changed after Phase 1, and the author has still not ruled on `human_review_items`.
-    - Phase 4 re-ran `feature-attribution`: identical to Phase 1 (Linux 92/65, macOS 95/68). Acceptance criterion 5 is recorded but not achieved, and the PR build-time observation is pending until a remedy lands.
+    - Phase 4 re-ran `feature-attribution`: identical to Phase 1 (Linux 90/65, macOS 93/68, after review 1's bin-only correction). Acceptance criterion 5 is recorded but not achieved, and the PR build-time observation is pending until a remedy lands.
     - `feature-attribution` stays a standalone `local-tools` diagnostic (Task 4.4); do not add CI emission.
-    - If the author approves option B, apply it as its own change: `schematic/define/Cargo.toml` (`openapi` → `dep:serde_yaml_ng`, `serde_yaml_ng = { version = "0.10", optional = true }`), `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`, `schematic/docs/dependencies.md` (and the root `docs/dependencies.md` if it lists the edge), `just test schematic-define`, `cargo test -p schematic-definitions --no-run`, then re-run `feature-attribution --target x86_64-unknown-linux-gnu` and update "Phase 4 re-run" in attribution-2026-09-21.md (expect 86).
+    - If the author approves option B, apply it as its own change: `schematic/define/Cargo.toml` (`openapi` → `dep:serde_yaml_ng`, `serde_yaml_ng = { version = "0.10", optional = true }`), `use serde_yaml_ng;` in `src/openapi/options.rs`, `src/openapi/import/builder.rs`, and `tests/openapi_tests.rs`, `schematic/docs/dependencies.md` (and the root `docs/dependencies.md` if it lists the edge), `just test schematic-define`, `cargo test -p schematic-definitions --no-run`, then re-run `feature-attribution --target x86_64-unknown-linux-gnu` and update "Phase 4 re-run" in attribution-2026-09-21.md (expect 84).
     - Rebuild `feature-attribution` before trusting it: `cargo build -p repo-deps --bin feature-attribution`.
 owner: Ken Snyder <ken@ken.net>
 origin: review of pull request 92's `build (ubuntu-latest)` producer job, 2026-09-21

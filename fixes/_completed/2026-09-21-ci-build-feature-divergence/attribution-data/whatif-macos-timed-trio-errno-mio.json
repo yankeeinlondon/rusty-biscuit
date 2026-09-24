@@ -1,7 +1,13 @@
 {
   "schema_version": 1,
   "target": "aarch64-apple-darwin",
-  "aligned": [],
+  "aligned": [
+    "errno",
+    "libc",
+    "mio",
+    "proc-macro2",
+    "serde_core"
+  ],
   "owners": [
     {
       "owner": "biscuit-file",
@@ -34,7 +40,7 @@
         "sidecar darkmatter-md-fixture",
         "sidecar harness-broker"
       ],
-      "new_configurations": 34
+      "new_configurations": 32
     },
     {
       "owner": "claudine-gen",
@@ -46,7 +52,7 @@
         "sidecar backend-proof",
         "sidecar harness-broker"
       ],
-      "new_configurations": 6
+      "new_configurations": 4
     },
     {
       "owner": "darkmatter",
@@ -58,7 +64,7 @@
       "invocations": [
         "archive"
       ],
-      "new_configurations": 11
+      "new_configurations": 8
     },
     {
       "owner": "darkmatter-cli",
@@ -91,7 +97,7 @@
       "invocations": [
         "archive"
       ],
-      "new_configurations": 7
+      "new_configurations": 6
     },
     {
       "owner": "sniff",
@@ -113,140 +119,28 @@
         "sidecar backend-proof",
         "sidecar harness-broker"
       ],
-      "new_configurations": 8
+      "new_configurations": 3
     }
   ],
   "totals": {
-    "workspace_crates": 27,
-    "configurations": 95,
-    "divergent_configurations": 68,
+    "workspace_crates": 25,
+    "configurations": 82,
+    "divergent_configurations": 57,
     "divergent_by_origin": {
       "mixed": 15,
-      "third-party": 49,
+      "third-party": 38,
       "workspace-own": 4
     },
-    "seconds_first": 86.81299999999999,
-    "seconds_divergent": 297.918,
-    "seconds_removed": null,
+    "seconds_first": 86.89,
+    "seconds_divergent": 260.595,
+    "seconds_removed": 37.245999999999995,
     "seconds_by_category": {
-      "own": 12.157361082630821,
-      "workspace-dependency": 8.692590249297487,
-      "third-party": 277.0680486680716
+      "own": 12.602659126984127,
+      "workspace-dependency": 11.385967961570593,
+      "third-party": 236.60637291144525
     }
   },
   "causes": [
-    {
-      "category": "third-party",
-      "crate": "libc",
-      "version": "0.2.186",
-      "host": false,
-      "added": [
-        "extra_traits"
-      ],
-      "removed": [],
-      "configurations": 34,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
-        "claudine",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 31.859308665072884,
-      "sole_seconds": 0.567,
-      "involved_seconds": 182.87550000000002
-    },
-    {
-      "category": "third-party",
-      "crate": "errno",
-      "version": "0.3.14",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 17,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
-        "darkmatter",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 23.144299483204136,
-      "sole_seconds": 0.0,
-      "involved_seconds": 94.835
-    },
-    {
-      "category": "third-party",
-      "crate": "mio",
-      "version": "1.2.0",
-      "host": false,
-      "added": [
-        "default",
-        "log"
-      ],
-      "removed": [],
-      "configurations": 16,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "claudine",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 18.192739249108737,
-      "sole_seconds": 0.0,
-      "involved_seconds": 102.916
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 21,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
-        "claudine",
-        "claudine-catalog-types",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "renderable",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 10.322197553961777,
-      "sole_seconds": 0.0,
-      "involved_seconds": 94.91600000000001
-    },
     {
       "category": "third-party",
       "crate": "hyper",
@@ -257,7 +151,7 @@
         "server"
       ],
       "removed": [],
-      "configurations": 7,
+      "configurations": 6,
       "crates": [
         "biscuit-file",
         "biscuit-terminal",
@@ -266,9 +160,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 8.898881944444444,
+      "seconds": 13.50615476190476,
       "sole_seconds": 0.0,
-      "involved_seconds": 54.465999999999994
+      "involved_seconds": 45.458999999999996
     },
     {
       "category": "third-party",
@@ -279,7 +173,7 @@
         "server"
       ],
       "removed": [],
-      "configurations": 7,
+      "configurations": 6,
       "crates": [
         "biscuit-file",
         "biscuit-terminal",
@@ -288,9 +182,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 8.898881944444444,
+      "seconds": 13.50615476190476,
       "sole_seconds": 0.0,
-      "involved_seconds": 54.465999999999994
+      "involved_seconds": 45.458999999999996
     },
     {
       "category": "third-party",
@@ -317,9 +211,85 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 8.335944444444443,
+      "seconds": 13.50615476190476,
       "sole_seconds": 0.0,
       "involved_seconds": 45.458999999999996
+    },
+    {
+      "category": "third-party",
+      "crate": "crossterm",
+      "version": "0.29.0",
+      "host": false,
+      "added": [
+        "bracketed-paste",
+        "default",
+        "derive-more",
+        "events",
+        "windows"
+      ],
+      "removed": [],
+      "configurations": 5,
+      "crates": [
+        "biscuit-terminal",
+        "claudine",
+        "darkmatter"
+      ],
+      "seconds": 10.943619047619048,
+      "sole_seconds": 9.999,
+      "involved_seconds": 28.653
+    },
+    {
+      "category": "third-party",
+      "crate": "smallvec",
+      "version": "1.15.1",
+      "host": false,
+      "added": [
+        "serde"
+      ],
+      "removed": [],
+      "configurations": 13,
+      "crates": [
+        "biscuit-file",
+        "biscuit-speaks",
+        "biscuit-terminal",
+        "biscuit-visualized",
+        "claudine",
+        "darkmatter",
+        "messenger",
+        "playa",
+        "renderable",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff",
+        "test-toolkit"
+      ],
+      "seconds": 7.626418498168499,
+      "sole_seconds": 2.186,
+      "involved_seconds": 61.493
+    },
+    {
+      "category": "third-party",
+      "crate": "serde_json",
+      "version": "1.0.149",
+      "host": false,
+      "added": [
+        "unbounded_depth"
+      ],
+      "removed": [
+        "float_roundtrip"
+      ],
+      "configurations": 6,
+      "crates": [
+        "biscuit-file",
+        "biscuit-terminal",
+        "renderable",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 7.383222222222222,
+      "sole_seconds": 1.707,
+      "involved_seconds": 34.061
     },
     {
       "category": "own",
@@ -338,6 +308,70 @@
       "seconds": 6.995,
       "sole_seconds": 6.995,
       "involved_seconds": 6.995
+    },
+    {
+      "category": "third-party",
+      "crate": "bytecount",
+      "version": "0.6.9",
+      "host": false,
+      "added": [],
+      "removed": [
+        "runtime-dispatch-simd"
+      ],
+      "configurations": 6,
+      "crates": [
+        "biscuit-file",
+        "biscuit-terminal",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 6.319579365079365,
+      "sole_seconds": 0.0,
+      "involved_seconds": 41.361
+    },
+    {
+      "category": "third-party",
+      "crate": "either",
+      "version": "1.15.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "default"
+      ],
+      "configurations": 6,
+      "crates": [
+        "biscuit-file",
+        "biscuit-terminal",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 6.319579365079365,
+      "sole_seconds": 0.0,
+      "involved_seconds": 41.361
+    },
+    {
+      "category": "third-party",
+      "crate": "ttf-parser",
+      "version": "0.25.1",
+      "host": false,
+      "added": [],
+      "removed": [
+        "core_maths",
+        "no-std-float"
+      ],
+      "configurations": 6,
+      "crates": [
+        "biscuit-file",
+        "biscuit-terminal",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 6.319579365079365,
+      "sole_seconds": 0.0,
+      "involved_seconds": 41.361
     },
     {
       "category": "third-party",
@@ -379,147 +413,6 @@
     },
     {
       "category": "third-party",
-      "crate": "smallvec",
-      "version": "1.15.1",
-      "host": false,
-      "added": [
-        "serde"
-      ],
-      "removed": [],
-      "configurations": 13,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "biscuit-visualized",
-        "claudine",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "renderable",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 5.075239249108734,
-      "sole_seconds": 0.0,
-      "involved_seconds": 60.318000000000005
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_json",
-      "version": "1.0.149",
-      "host": false,
-      "added": [
-        "unbounded_depth"
-      ],
-      "removed": [
-        "float_roundtrip"
-      ],
-      "configurations": 6,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "renderable",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 4.978458304853042,
-      "sole_seconds": 0.0,
-      "involved_seconds": 34.061
-    },
-    {
-      "category": "third-party",
-      "crate": "url",
-      "version": "2.5.8",
-      "host": false,
-      "added": [],
-      "removed": [
-        "serde"
-      ],
-      "configurations": 8,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "darkmatter",
-        "darkmatter-cli",
-        "renderable",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 4.799632905982906,
-      "sole_seconds": 1.7655,
-      "involved_seconds": 47.694500000000005
-    },
-    {
-      "category": "third-party",
-      "crate": "bytecount",
-      "version": "0.6.9",
-      "host": false,
-      "added": [],
-      "removed": [
-        "runtime-dispatch-simd"
-      ],
-      "configurations": 6,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 4.687895804853042,
-      "sole_seconds": 0.0,
-      "involved_seconds": 41.361
-    },
-    {
-      "category": "third-party",
-      "crate": "either",
-      "version": "1.15.0",
-      "host": false,
-      "added": [],
-      "removed": [
-        "default"
-      ],
-      "configurations": 6,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 4.687895804853042,
-      "sole_seconds": 0.0,
-      "involved_seconds": 41.361
-    },
-    {
-      "category": "third-party",
-      "crate": "ttf-parser",
-      "version": "0.25.1",
-      "host": false,
-      "added": [],
-      "removed": [
-        "core_maths",
-        "no-std-float"
-      ],
-      "configurations": 6,
-      "crates": [
-        "biscuit-file",
-        "biscuit-terminal",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 4.687895804853042,
-      "sole_seconds": 0.0,
-      "involved_seconds": 41.361
-    },
-    {
-      "category": "third-party",
       "crate": "num-traits",
       "version": "0.2.19",
       "host": false,
@@ -541,9 +434,29 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.132822582442067,
+      "seconds": 5.577168498168498,
+      "sole_seconds": 0.211,
+      "involved_seconds": 59.221000000000004
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "biscuit-file",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "fetch"
+      ],
+      "configurations": 4,
+      "crates": [
+        "biscuit-terminal",
+        "schematic-define",
+        "schematic-definitions",
+        "sniff"
+      ],
+      "seconds": 5.498422222222222,
       "sole_seconds": 0.0,
-      "involved_seconds": 58.131
+      "involved_seconds": 31.465000000000003
     },
     {
       "category": "third-party",
@@ -571,9 +484,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
@@ -597,9 +510,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
@@ -625,9 +538,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
@@ -651,9 +564,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
@@ -677,9 +590,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
@@ -714,54 +627,33 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 4.027322582442067,
+      "seconds": 5.366168498168498,
       "sole_seconds": 0.0,
-      "involved_seconds": 57.92
-    },
-    {
-      "category": "workspace-dependency",
-      "crate": "biscuit-file",
-      "version": "0.1.0",
-      "host": false,
-      "added": [],
-      "removed": [
-        "fetch"
-      ],
-      "configurations": 4,
-      "crates": [
-        "biscuit-terminal",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff"
-      ],
-      "seconds": 3.997958304853042,
-      "sole_seconds": 0.0,
-      "involved_seconds": 31.465000000000003
+      "involved_seconds": 59.010000000000005
     },
     {
       "category": "third-party",
-      "crate": "errno",
-      "version": "0.3.14",
+      "crate": "url",
+      "version": "2.5.8",
       "host": false,
       "added": [],
       "removed": [
-        "default"
+        "serde"
       ],
-      "configurations": 10,
+      "configurations": 8,
       "crates": [
         "biscuit-file",
         "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
         "darkmatter",
         "darkmatter-cli",
+        "renderable",
         "schematic-define",
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.851466239316239,
-      "sole_seconds": 0.726,
-      "involved_seconds": 46.929
+      "seconds": 4.897362966239127,
+      "sole_seconds": 1.721,
+      "involved_seconds": 46.483
     },
     {
       "category": "third-party",
@@ -781,32 +673,9 @@
         "sniff",
         "test-toolkit"
       ],
-      "seconds": 3.3334374999999996,
+      "seconds": 4.064732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.376000000000005
-    },
-    {
-      "category": "third-party",
-      "crate": "crossterm",
-      "version": "0.29.0",
-      "host": false,
-      "added": [
-        "bracketed-paste",
-        "default",
-        "derive-more",
-        "events",
-        "windows"
-      ],
-      "removed": [],
-      "configurations": 5,
-      "crates": [
-        "biscuit-terminal",
-        "claudine",
-        "darkmatter"
-      ],
-      "seconds": 3.310350490196078,
-      "sole_seconds": 0.0,
-      "involved_seconds": 28.4905
     },
     {
       "category": "third-party",
@@ -824,7 +693,7 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.1664375,
+      "seconds": 3.897732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.042
     },
@@ -844,7 +713,7 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.1664375,
+      "seconds": 3.897732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.042
     },
@@ -866,7 +735,7 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.1664375,
+      "seconds": 3.897732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.042
     },
@@ -887,7 +756,7 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.1664375,
+      "seconds": 3.897732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.042
     },
@@ -907,9 +776,28 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.1664375,
+      "seconds": 3.897732142857143,
       "sole_seconds": 0.0,
       "involved_seconds": 35.042
+    },
+    {
+      "category": "third-party",
+      "crate": "serde_json",
+      "version": "1.0.149",
+      "host": false,
+      "added": [],
+      "removed": [
+        "unbounded_depth"
+      ],
+      "configurations": 3,
+      "crates": [
+        "biscuit-file",
+        "schematic-define",
+        "schematic-definitions"
+      ],
+      "seconds": 3.254375,
+      "sole_seconds": 0.0,
+      "involved_seconds": 26.035
     },
     {
       "category": "third-party",
@@ -931,9 +819,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -954,9 +842,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -977,9 +865,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1000,9 +888,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1024,9 +912,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1047,9 +935,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1070,9 +958,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1093,9 +981,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1117,9 +1005,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1145,9 +1033,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.034132905982906,
+      "seconds": 3.176362966239127,
       "sole_seconds": 0.0,
-      "involved_seconds": 45.929
+      "involved_seconds": 44.762
     },
     {
       "category": "third-party",
@@ -1169,68 +1057,9 @@
         "schematic-definitions",
         "sniff"
       ],
-      "seconds": 3.0027995726495726,
+      "seconds": 3.1437577030812323,
       "sole_seconds": 0.0,
-      "involved_seconds": 44.613
-    },
-    {
-      "category": "third-party",
-      "crate": "libc",
-      "version": "0.2.186",
-      "host": false,
-      "added": [],
-      "removed": [
-        "extra_traits"
-      ],
-      "configurations": 4,
-      "crates": [
-        "biscuit-file",
-        "darkmatter-cli",
-        "schematic-define",
-        "schematic-definitions"
-      ],
-      "seconds": 2.6348333333333334,
-      "sole_seconds": 0.0,
-      "involved_seconds": 27.351
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "default"
-      ],
-      "configurations": 4,
-      "crates": [
-        "biscuit-file",
-        "darkmatter-cli",
-        "schematic-define",
-        "schematic-definitions"
-      ],
-      "seconds": 2.6348333333333334,
-      "sole_seconds": 0.0,
-      "involved_seconds": 27.351
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_json",
-      "version": "1.0.149",
-      "host": false,
-      "added": [],
-      "removed": [
-        "unbounded_depth"
-      ],
-      "configurations": 3,
-      "crates": [
-        "biscuit-file",
-        "schematic-define",
-        "schematic-definitions"
-      ],
-      "seconds": 2.6035,
-      "sole_seconds": 0.0,
-      "involved_seconds": 26.035
+      "involved_seconds": 43.523
     },
     {
       "category": "workspace-dependency",
@@ -1246,26 +1075,9 @@
         "schematic-define",
         "schematic-definitions"
       ],
-      "seconds": 2.504,
+      "seconds": 3.13,
       "sole_seconds": 0.0,
       "involved_seconds": 25.04
-    },
-    {
-      "category": "own",
-      "crate": "renderable",
-      "version": "0.1.0",
-      "host": false,
-      "added": [
-        "hint-access-counter"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "renderable"
-      ],
-      "seconds": 1.944,
-      "sole_seconds": 1.944,
-      "involved_seconds": 1.944
     },
     {
       "category": "third-party",
@@ -1288,9 +1100,26 @@
         "playa",
         "sniff"
       ],
-      "seconds": 1.725625612745098,
+      "seconds": 2.0699184981684984,
       "sole_seconds": 0.089,
-      "involved_seconds": 31.483
+      "involved_seconds": 31.72
+    },
+    {
+      "category": "own",
+      "crate": "renderable",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "hint-access-counter"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "renderable"
+      ],
+      "seconds": 1.944,
+      "sole_seconds": 1.944,
+      "involved_seconds": 1.944
     },
     {
       "category": "third-party",
@@ -1310,9 +1139,9 @@
         "playa",
         "sniff"
       ],
-      "seconds": 1.4534001225490196,
+      "seconds": 1.7376684981684982,
       "sole_seconds": 0.0,
-      "involved_seconds": 28.7815
+      "involved_seconds": 28.967999999999996
     },
     {
       "category": "third-party",
@@ -1333,9 +1162,9 @@
         "playa",
         "sniff"
       ],
-      "seconds": 1.4534001225490196,
+      "seconds": 1.7376684981684982,
       "sole_seconds": 0.0,
-      "involved_seconds": 28.7815
+      "involved_seconds": 28.967999999999996
     },
     {
       "category": "third-party",
@@ -1355,9 +1184,9 @@
         "playa",
         "sniff"
       ],
-      "seconds": 1.4534001225490196,
+      "seconds": 1.7376684981684982,
       "sole_seconds": 0.0,
-      "involved_seconds": 28.7815
+      "involved_seconds": 28.967999999999996
     },
     {
       "category": "third-party",
@@ -1377,9 +1206,27 @@
         "playa",
         "sniff"
       ],
-      "seconds": 1.4534001225490196,
+      "seconds": 1.7376684981684982,
       "sole_seconds": 0.0,
-      "involved_seconds": 28.7815
+      "involved_seconds": 28.967999999999996
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "renderable",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "hint-access-counter"
+      ],
+      "removed": [],
+      "configurations": 2,
+      "crates": [
+        "biscuit-terminal",
+        "darkmatter"
+      ],
+      "seconds": 1.6628214285714287,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.929
     },
     {
       "category": "own",
@@ -1399,24 +1246,6 @@
       "involved_seconds": 1.279
     },
     {
-      "category": "workspace-dependency",
-      "crate": "renderable",
-      "version": "0.1.0",
-      "host": false,
-      "added": [
-        "hint-access-counter"
-      ],
-      "removed": [],
-      "configurations": 2,
-      "crates": [
-        "biscuit-terminal",
-        "darkmatter"
-      ],
-      "seconds": 1.2299444444444445,
-      "sole_seconds": 0.0,
-      "involved_seconds": 9.929
-    },
-    {
       "category": "third-party",
       "crate": "num-integer",
       "version": "0.1.46",
@@ -1433,9 +1262,62 @@
         "darkmatter",
         "playa"
       ],
-      "seconds": 0.9533651960784314,
+      "seconds": 1.1179761904761905,
       "sole_seconds": 0.0,
-      "involved_seconds": 20.9185
+      "involved_seconds": 21.081
+    },
+    {
+      "category": "own",
+      "crate": "darkmatter",
+      "version": "0.1.0",
+      "host": false,
+      "added": [
+        "browser-tests",
+        "effects-instrumentation",
+        "terminal-tests"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 1.0925714285714285,
+      "sole_seconds": 0.0,
+      "involved_seconds": 7.648
+    },
+    {
+      "category": "third-party",
+      "crate": "bit-set",
+      "version": "0.8.0",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 1.0925714285714285,
+      "sole_seconds": 0.0,
+      "involved_seconds": 7.648
+    },
+    {
+      "category": "third-party",
+      "crate": "bit-vec",
+      "version": "0.8.0",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "darkmatter"
+      ],
+      "seconds": 1.0925714285714285,
+      "sole_seconds": 0.0,
+      "involved_seconds": 7.648
     },
     {
       "category": "third-party",
@@ -1455,9 +1337,9 @@
         "claudine",
         "darkmatter"
       ],
-      "seconds": 0.8562671568627451,
+      "seconds": 1.0188690476190478,
       "sole_seconds": 0.0,
-      "involved_seconds": 18.765500000000003
+      "involved_seconds": 18.951
     },
     {
       "category": "third-party",
@@ -1477,62 +1359,49 @@
         "claudine",
         "darkmatter"
       ],
-      "seconds": 0.8562671568627451,
+      "seconds": 1.0188690476190478,
       "sole_seconds": 0.0,
-      "involved_seconds": 18.765500000000003
-    },
-    {
-      "category": "own",
-      "crate": "darkmatter",
-      "version": "0.1.0",
-      "host": false,
-      "added": [
-        "browser-tests",
-        "effects-instrumentation",
-        "terminal-tests"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "darkmatter"
-      ],
-      "seconds": 0.8497777777777777,
-      "sole_seconds": 0.0,
-      "involved_seconds": 7.648
+      "involved_seconds": 18.951
     },
     {
       "category": "third-party",
-      "crate": "bit-set",
-      "version": "0.8.0",
+      "crate": "half",
+      "version": "2.7.1",
       "host": false,
       "added": [
-        "default"
+        "num-traits"
       ],
       "removed": [],
-      "configurations": 1,
+      "configurations": 3,
       "crates": [
+        "biscuit-terminal",
+        "claudine",
         "darkmatter"
       ],
-      "seconds": 0.8497777777777777,
+      "seconds": 0.9446190476190477,
       "sole_seconds": 0.0,
-      "involved_seconds": 7.648
+      "involved_seconds": 18.654
     },
     {
       "category": "third-party",
-      "crate": "bit-vec",
-      "version": "0.8.0",
+      "crate": "tower-http",
+      "version": "0.6.8",
       "host": false,
-      "added": [
-        "default"
+      "added": [],
+      "removed": [
+        "async-compression",
+        "decompression-gzip",
+        "futures-core",
+        "tokio",
+        "tokio-util"
       ],
-      "removed": [],
-      "configurations": 1,
+      "configurations": 2,
       "crates": [
-        "darkmatter"
+        "sniff"
       ],
-      "seconds": 0.8497777777777777,
+      "seconds": 0.8923571428571428,
       "sole_seconds": 0.0,
-      "involved_seconds": 7.648
+      "involved_seconds": 13.239999999999998
     },
     {
       "category": "third-party",
@@ -1588,9 +1457,9 @@
         "darkmatter-cli",
         "sniff"
       ],
-      "seconds": 0.8166944444444445,
+      "seconds": 0.8509582043343653,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.7905
+      "involved_seconds": 16.527
     },
     {
       "category": "third-party",
@@ -1621,9 +1490,9 @@
         "darkmatter-cli",
         "sniff"
       ],
-      "seconds": 0.8166944444444445,
+      "seconds": 0.8509582043343653,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.7905
+      "involved_seconds": 16.527
     },
     {
       "category": "third-party",
@@ -1653,9 +1522,9 @@
         "darkmatter-cli",
         "sniff"
       ],
-      "seconds": 0.8166944444444445,
+      "seconds": 0.8509582043343653,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.7905
+      "involved_seconds": 16.527
     },
     {
       "category": "third-party",
@@ -1679,9 +1548,9 @@
         "darkmatter-cli",
         "sniff"
       ],
-      "seconds": 0.8166944444444445,
+      "seconds": 0.8509582043343653,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.7905
+      "involved_seconds": 16.527
     },
     {
       "category": "third-party",
@@ -1698,66 +1567,9 @@
         "darkmatter-cli",
         "sniff"
       ],
-      "seconds": 0.8166944444444445,
+      "seconds": 0.8509582043343653,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.7905
-    },
-    {
-      "category": "third-party",
-      "crate": "half",
-      "version": "2.7.1",
-      "host": false,
-      "added": [
-        "num-traits"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-terminal",
-        "claudine",
-        "darkmatter"
-      ],
-      "seconds": 0.8106004901960784,
-      "sole_seconds": 0.0,
-      "involved_seconds": 18.491500000000002
-    },
-    {
-      "category": "third-party",
-      "crate": "tokio",
-      "version": "1.52.1",
-      "host": false,
-      "added": [],
-      "removed": [
-        "rt-multi-thread"
-      ],
-      "configurations": 2,
-      "crates": [
-        "sniff"
-      ],
-      "seconds": 0.7857269736842105,
-      "sole_seconds": 0.0,
-      "involved_seconds": 13.239999999999998
-    },
-    {
-      "category": "third-party",
-      "crate": "tower-http",
-      "version": "0.6.8",
-      "host": false,
-      "added": [],
-      "removed": [
-        "async-compression",
-        "decompression-gzip",
-        "futures-core",
-        "tokio",
-        "tokio-util"
-      ],
-      "configurations": 2,
-      "crates": [
-        "sniff"
-      ],
-      "seconds": 0.7857269736842105,
-      "sole_seconds": 0.0,
-      "involved_seconds": 13.239999999999998
+      "involved_seconds": 16.527
     },
     {
       "category": "third-party",
@@ -1773,7 +1585,7 @@
         "sniff",
         "test-toolkit"
       ],
-      "seconds": 0.7299375,
+      "seconds": 0.8103571428571429,
       "sole_seconds": 0.0,
       "involved_seconds": 9.341
     },
@@ -1793,9 +1605,9 @@
         "claudine",
         "darkmatter"
       ],
-      "seconds": 0.6730416666666666,
+      "seconds": 0.7756190476190477,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.153
+      "involved_seconds": 16.288
     },
     {
       "category": "third-party",
@@ -1811,102 +1623,9 @@
         "claudine",
         "darkmatter"
       ],
-      "seconds": 0.6730416666666666,
+      "seconds": 0.7756190476190477,
       "sole_seconds": 0.0,
-      "involved_seconds": 16.153
-    },
-    {
-      "category": "third-party",
-      "crate": "clap",
-      "version": "4.6.1",
-      "host": false,
-      "added": [
-        "unstable-ext",
-        "wrap_help"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-terminal",
-        "biscuit-visualized",
-        "darkmatter"
-      ],
-      "seconds": 0.5817333333333333,
-      "sole_seconds": 0.0,
-      "involved_seconds": 9.971499999999999
-    },
-    {
-      "category": "third-party",
-      "crate": "clap_builder",
-      "version": "4.6.0",
-      "host": false,
-      "added": [
-        "unstable-ext",
-        "wrap_help"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-terminal",
-        "biscuit-visualized",
-        "darkmatter"
-      ],
-      "seconds": 0.5817333333333333,
-      "sole_seconds": 0.0,
-      "involved_seconds": 9.971499999999999
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [
-        "rc"
-      ],
-      "removed": [],
-      "configurations": 5,
-      "crates": [
-        "biscuit-file",
-        "biscuit-test-harness",
-        "test-toolkit"
-      ],
-      "seconds": 0.5758383720930232,
-      "sole_seconds": 0.0,
-      "involved_seconds": 4.535
-    },
-    {
-      "category": "workspace-dependency",
-      "crate": "biscuit-hash",
-      "version": "0.1.0",
-      "host": false,
-      "added": [],
-      "removed": [
-        "blake3"
-      ],
-      "configurations": 1,
-      "crates": [
-        "sniff"
-      ],
-      "seconds": 0.5629375,
-      "sole_seconds": 0.0,
-      "involved_seconds": 9.007
-    },
-    {
-      "category": "third-party",
-      "crate": "reqwest",
-      "version": "0.13.2",
-      "host": false,
-      "added": [],
-      "removed": [
-        "gzip"
-      ],
-      "configurations": 1,
-      "crates": [
-        "sniff"
-      ],
-      "seconds": 0.5629375,
-      "sole_seconds": 0.0,
-      "involved_seconds": 9.007
+      "involved_seconds": 16.288
     },
     {
       "category": "third-party",
@@ -1924,7 +1643,7 @@
         "biscuit-test-harness",
         "test-toolkit"
       ],
-      "seconds": 0.4288383720930233,
+      "seconds": 0.6876737804878048,
       "sole_seconds": 0.0,
       "involved_seconds": 4.241
     },
@@ -1945,9 +1664,108 @@
         "biscuit-test-harness",
         "test-toolkit"
       ],
-      "seconds": 0.4288383720930233,
+      "seconds": 0.6876737804878048,
       "sole_seconds": 0.0,
       "involved_seconds": 4.241
+    },
+    {
+      "category": "workspace-dependency",
+      "crate": "biscuit-hash",
+      "version": "0.1.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "blake3"
+      ],
+      "configurations": 1,
+      "crates": [
+        "sniff"
+      ],
+      "seconds": 0.6433571428571428,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.007
+    },
+    {
+      "category": "third-party",
+      "crate": "reqwest",
+      "version": "0.13.2",
+      "host": false,
+      "added": [],
+      "removed": [
+        "gzip"
+      ],
+      "configurations": 1,
+      "crates": [
+        "sniff"
+      ],
+      "seconds": 0.6433571428571428,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.007
+    },
+    {
+      "category": "third-party",
+      "crate": "tokio",
+      "version": "1.52.1",
+      "host": false,
+      "added": [],
+      "removed": [
+        "fs",
+        "full",
+        "io-std",
+        "parking_lot",
+        "process",
+        "rt-multi-thread",
+        "signal",
+        "signal-hook-registry",
+        "test-util"
+      ],
+      "configurations": 1,
+      "crates": [
+        "sniff"
+      ],
+      "seconds": 0.6433571428571428,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.007
+    },
+    {
+      "category": "third-party",
+      "crate": "clap",
+      "version": "4.6.1",
+      "host": false,
+      "added": [
+        "unstable-ext",
+        "wrap_help"
+      ],
+      "removed": [],
+      "configurations": 3,
+      "crates": [
+        "biscuit-terminal",
+        "biscuit-visualized",
+        "darkmatter"
+      ],
+      "seconds": 0.6345714285714286,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.786
+    },
+    {
+      "category": "third-party",
+      "crate": "clap_builder",
+      "version": "4.6.0",
+      "host": false,
+      "added": [
+        "unstable-ext",
+        "wrap_help"
+      ],
+      "removed": [],
+      "configurations": 3,
+      "crates": [
+        "biscuit-terminal",
+        "biscuit-visualized",
+        "darkmatter"
+      ],
+      "seconds": 0.6345714285714286,
+      "sole_seconds": 0.0,
+      "involved_seconds": 9.786
     },
     {
       "category": "workspace-dependency",
@@ -1962,7 +1780,7 @@
       "crates": [
         "claudine"
       ],
-      "seconds": 0.36641666666666667,
+      "seconds": 0.4187619047619048,
       "sole_seconds": 0.0,
       "involved_seconds": 8.794
     },
@@ -1980,9 +1798,9 @@
         "darkmatter",
         "darkmatter-cli"
       ],
-      "seconds": 0.36583333333333334,
+      "seconds": 0.3766052631578948,
       "sole_seconds": 0.0,
-      "involved_seconds": 8.675
+      "involved_seconds": 8.463000000000001
     },
     {
       "category": "third-party",
@@ -1998,9 +1816,9 @@
         "darkmatter",
         "darkmatter-cli"
       ],
-      "seconds": 0.36583333333333334,
+      "seconds": 0.3766052631578948,
       "sole_seconds": 0.0,
-      "involved_seconds": 8.675
+      "involved_seconds": 8.463000000000001
     },
     {
       "category": "own",
@@ -2015,9 +1833,100 @@
       "crates": [
         "darkmatter"
       ],
-      "seconds": 0.306625,
+      "seconds": 0.3568571428571429,
       "sole_seconds": 0.0,
-      "involved_seconds": 7.359
+      "involved_seconds": 7.494
+    },
+    {
+      "category": "third-party",
+      "crate": "once_cell",
+      "version": "1.21.4",
+      "host": false,
+      "added": [],
+      "removed": [
+        "default"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-test-harness"
+      ],
+      "seconds": 0.353,
+      "sole_seconds": 0.353,
+      "involved_seconds": 0.353
+    },
+    {
+      "category": "third-party",
+      "crate": "memchr",
+      "version": "2.8.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "default",
+        "use_std"
+      ],
+      "configurations": 2,
+      "crates": [
+        "biscuit-test-harness",
+        "test-toolkit"
+      ],
+      "seconds": 0.3468333333333333,
+      "sole_seconds": 0.29,
+      "involved_seconds": 0.631
+    },
+    {
+      "category": "third-party",
+      "crate": "serde_json",
+      "version": "1.0.149",
+      "host": false,
+      "added": [
+        "alloc",
+        "raw_value"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-test-harness"
+      ],
+      "seconds": 0.294,
+      "sole_seconds": 0.294,
+      "involved_seconds": 0.294
+    },
+    {
+      "category": "third-party",
+      "crate": "aho-corasick",
+      "version": "1.1.4",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 3,
+      "crates": [
+        "biscuit-file",
+        "test-toolkit"
+      ],
+      "seconds": 0.25517378048780487,
+      "sole_seconds": 0.0,
+      "involved_seconds": 3.3760000000000003
+    },
+    {
+      "category": "third-party",
+      "crate": "regex-automata",
+      "version": "0.4.18",
+      "host": false,
+      "added": [
+        "nfa",
+        "perf"
+      ],
+      "removed": [],
+      "configurations": 3,
+      "crates": [
+        "biscuit-file",
+        "test-toolkit"
+      ],
+      "seconds": 0.25517378048780487,
+      "sole_seconds": 0.0,
+      "involved_seconds": 3.3760000000000003
     },
     {
       "category": "own",
@@ -2033,7 +1942,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2050,7 +1959,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2067,7 +1976,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2084,7 +1993,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2101,7 +2010,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2132,7 +2041,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2162,7 +2071,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2186,7 +2095,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2207,7 +2116,7 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
@@ -2224,83 +2133,26 @@
       "crates": [
         "sniff"
       ],
-      "seconds": 0.2227894736842105,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
       "involved_seconds": 4.233
     },
     {
       "category": "third-party",
-      "crate": "memchr",
-      "version": "2.8.0",
+      "crate": "tokio",
+      "version": "1.52.1",
       "host": false,
       "added": [],
       "removed": [
-        "default",
-        "use_std"
+        "rt-multi-thread"
       ],
-      "configurations": 2,
+      "configurations": 1,
       "crates": [
-        "biscuit-test-harness",
-        "test-toolkit"
+        "sniff"
       ],
-      "seconds": 0.21421428571428572,
+      "seconds": 0.24899999999999997,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.6845000000000001
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "result"
-      ],
-      "configurations": 2,
-      "crates": [
-        "biscuit-test-harness",
-        "test-toolkit"
-      ],
-      "seconds": 0.21421428571428572,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.6845000000000001
-    },
-    {
-      "category": "third-party",
-      "crate": "aho-corasick",
-      "version": "1.1.4",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-file",
-        "test-toolkit"
-      ],
-      "seconds": 0.21258837209302328,
-      "sole_seconds": 0.0,
-      "involved_seconds": 3.3760000000000003
-    },
-    {
-      "category": "third-party",
-      "crate": "regex-automata",
-      "version": "0.4.18",
-      "host": false,
-      "added": [
-        "nfa",
-        "perf"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-file",
-        "test-toolkit"
-      ],
-      "seconds": 0.21258837209302328,
-      "sole_seconds": 0.0,
-      "involved_seconds": 3.3760000000000003
+      "involved_seconds": 4.233
     },
     {
       "category": "own",
@@ -2315,7 +2167,7 @@
       "crates": [
         "biscuit-terminal"
       ],
-      "seconds": 0.20145454545454547,
+      "seconds": 0.24622222222222223,
       "sole_seconds": 0.0,
       "involved_seconds": 2.216
     },
@@ -2332,7 +2184,7 @@
       "crates": [
         "biscuit-terminal"
       ],
-      "seconds": 0.20145454545454547,
+      "seconds": 0.24622222222222223,
       "sole_seconds": 0.0,
       "involved_seconds": 2.216
     },
@@ -2349,7 +2201,7 @@
       "crates": [
         "biscuit-terminal"
       ],
-      "seconds": 0.20145454545454547,
+      "seconds": 0.24622222222222223,
       "sole_seconds": 0.0,
       "involved_seconds": 2.216
     },
@@ -2366,61 +2218,9 @@
       "crates": [
         "biscuit-terminal"
       ],
-      "seconds": 0.20145454545454547,
+      "seconds": 0.24622222222222223,
       "sole_seconds": 0.0,
       "involved_seconds": 2.216
-    },
-    {
-      "category": "third-party",
-      "crate": "once_cell",
-      "version": "1.21.4",
-      "host": false,
-      "added": [],
-      "removed": [
-        "default"
-      ],
-      "configurations": 1,
-      "crates": [
-        "biscuit-test-harness"
-      ],
-      "seconds": 0.163,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.326
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "alloc"
-      ],
-      "configurations": 1,
-      "crates": [
-        "biscuit-test-harness"
-      ],
-      "seconds": 0.163,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.326
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_json",
-      "version": "1.0.149",
-      "host": false,
-      "added": [
-        "alloc",
-        "raw_value"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-test-harness"
-      ],
-      "seconds": 0.147,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.294
     },
     {
       "category": "own",
@@ -2435,7 +2235,7 @@
       "crates": [
         "biscuit-file"
       ],
-      "seconds": 0.127,
+      "seconds": 0.1778,
       "sole_seconds": 0.0,
       "involved_seconds": 0.889
     },
@@ -2453,7 +2253,7 @@
         "biscuit-file",
         "test-toolkit"
       ],
-      "seconds": 0.11618837209302327,
+      "seconds": 0.13467378048780487,
       "sole_seconds": 0.0,
       "involved_seconds": 2.894
     },
@@ -2471,7 +2271,7 @@
         "biscuit-file",
         "test-toolkit"
       ],
-      "seconds": 0.11618837209302327,
+      "seconds": 0.13467378048780487,
       "sole_seconds": 0.0,
       "involved_seconds": 2.894
     },
@@ -2489,7 +2289,7 @@
         "biscuit-file",
         "test-toolkit"
       ],
-      "seconds": 0.11618837209302327,
+      "seconds": 0.13467378048780487,
       "sole_seconds": 0.0,
       "involved_seconds": 2.894
     },
@@ -2512,7 +2312,7 @@
         "biscuit-file",
         "test-toolkit"
       ],
-      "seconds": 0.11618837209302327,
+      "seconds": 0.13467378048780487,
       "sole_seconds": 0.0,
       "involved_seconds": 2.894
     },
@@ -2529,7 +2329,7 @@
       "crates": [
         "biscuit-file"
       ],
-      "seconds": 0.0995,
+      "seconds": 0.124375,
       "sole_seconds": 0.0,
       "involved_seconds": 0.995
     },
@@ -2551,607 +2351,6 @@
       "involved_seconds": 0.081
     },
     {
-      "category": "third-party",
-      "crate": "bytecount",
-      "version": "0.6.9",
-      "host": false,
-      "added": [
-        "runtime-dispatch-simd"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "chrono",
-      "version": "0.4.44",
-      "host": false,
-      "added": [
-        "default",
-        "js-sys",
-        "oldtime",
-        "serde",
-        "wasm-bindgen",
-        "wasmbind"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "either",
-      "version": "1.15.0",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "form_urlencoded",
-      "version": "1.2.2",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "futures-util",
-      "version": "0.3.32",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix",
-      "version": "0.84.0",
-      "host": false,
-      "added": [
-        "attributes",
-        "blob-diff",
-        "command",
-        "dirwalk",
-        "excludes",
-        "gix-status",
-        "index",
-        "merge",
-        "parallel",
-        "revision",
-        "status",
-        "tree-editor"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-diff",
-      "version": "0.64.0",
-      "host": false,
-      "added": [
-        "blob",
-        "index"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-features",
-      "version": "0.48.1",
-      "host": false,
-      "added": [
-        "parallel"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-packetline",
-      "version": "0.21.4",
-      "host": false,
-      "added": [
-        "blocking-io"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-revision",
-      "version": "0.46.0",
-      "host": false,
-      "added": [
-        "describe",
-        "merge_base"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-tempfile",
-      "version": "23.0.1",
-      "host": false,
-      "added": [
-        "default",
-        "hp-hashmap"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "gix-utils",
-      "version": "0.3.3",
-      "host": false,
-      "added": [
-        "bstr"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "hashbrown",
-      "version": "0.17.0",
-      "host": false,
-      "added": [
-        "allocator-api2",
-        "default",
-        "default-hasher",
-        "equivalent",
-        "raw-entry"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "hyper",
-      "version": "1.9.0",
-      "host": false,
-      "added": [],
-      "removed": [
-        "full",
-        "server"
-      ],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "hyper-rustls",
-      "version": "0.27.9",
-      "host": false,
-      "added": [
-        "rustls-platform-verifier"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "hyper-util",
-      "version": "0.1.20",
-      "host": false,
-      "added": [],
-      "removed": [
-        "server"
-      ],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "indexmap",
-      "version": "2.14.0",
-      "host": false,
-      "added": [
-        "serde"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "miniz_oxide",
-      "version": "0.8.9",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "num-traits",
-      "version": "0.2.19",
-      "host": false,
-      "added": [
-        "i128"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "reqwest",
-      "version": "0.13.2",
-      "host": false,
-      "added": [
-        "blocking",
-        "form",
-        "gzip",
-        "multipart"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "rustls",
-      "version": "0.23.38",
-      "host": false,
-      "added": [
-        "ring"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "rustls-webpki",
-      "version": "0.103.13",
-      "host": false,
-      "added": [
-        "ring"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "serde",
-      "version": "1.0.228",
-      "host": false,
-      "added": [
-        "rc"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "sha1",
-      "version": "0.10.6",
-      "host": false,
-      "added": [
-        "default",
-        "std"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "simd-adler32",
-      "version": "0.3.9",
-      "host": false,
-      "added": [
-        "const-generics",
-        "default",
-        "std"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "tinystr",
-      "version": "0.8.3",
-      "host": false,
-      "added": [
-        "alloc",
-        "default"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "tokio",
-      "version": "1.52.1",
-      "host": false,
-      "added": [
-        "fs",
-        "process",
-        "signal-hook-registry"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "tokio-util",
-      "version": "0.7.18",
-      "host": false,
-      "added": [
-        "slab",
-        "time"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "tower-http",
-      "version": "0.6.8",
-      "host": false,
-      "added": [
-        "async-compression",
-        "decompression-gzip",
-        "futures-core",
-        "tokio",
-        "tokio-util"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "ttf-parser",
-      "version": "0.25.1",
-      "host": false,
-      "added": [
-        "core_maths",
-        "no-std-float"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "url",
-      "version": "2.5.8",
-      "host": false,
-      "added": [
-        "serde"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "uuid",
-      "version": "1.23.1",
-      "host": false,
-      "added": [
-        "rng",
-        "v4"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
-      "category": "third-party",
-      "crate": "zerovec",
-      "version": "0.11.6",
-      "host": false,
-      "added": [
-        "alloc"
-      ],
-      "removed": [],
-      "configurations": 1,
-      "crates": [
-        "biscuit-file"
-      ],
-      "seconds": 0.05248837209302326,
-      "sole_seconds": 0.0,
-      "involved_seconds": 2.257
-    },
-    {
       "category": "own",
       "crate": "test-toolkit",
       "version": "0.1.0",
@@ -3164,9 +2363,9 @@
       "crates": [
         "test-toolkit"
       ],
-      "seconds": 0.05121428571428572,
+      "seconds": 0.05683333333333334,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.35850000000000004
+      "involved_seconds": 0.341
     },
     {
       "category": "third-party",
@@ -3198,9 +2397,9 @@
       "crates": [
         "test-toolkit"
       ],
-      "seconds": 0.05121428571428572,
+      "seconds": 0.05683333333333334,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.35850000000000004
+      "involved_seconds": 0.341
     },
     {
       "category": "third-party",
@@ -3223,9 +2422,9 @@
       "crates": [
         "test-toolkit"
       ],
-      "seconds": 0.05121428571428572,
+      "seconds": 0.05683333333333334,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.35850000000000004
+      "involved_seconds": 0.341
     },
     {
       "category": "third-party",
@@ -3242,9 +2441,9 @@
       "crates": [
         "test-toolkit"
       ],
-      "seconds": 0.05121428571428572,
+      "seconds": 0.05683333333333334,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.35850000000000004
+      "involved_seconds": 0.341
     },
     {
       "category": "third-party",
@@ -3260,9 +2459,610 @@
       "crates": [
         "test-toolkit"
       ],
-      "seconds": 0.05121428571428572,
+      "seconds": 0.05683333333333334,
       "sole_seconds": 0.0,
-      "involved_seconds": 0.35850000000000004
+      "involved_seconds": 0.341
+    },
+    {
+      "category": "third-party",
+      "crate": "bytecount",
+      "version": "0.6.9",
+      "host": false,
+      "added": [
+        "runtime-dispatch-simd"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "chrono",
+      "version": "0.4.44",
+      "host": false,
+      "added": [
+        "default",
+        "js-sys",
+        "oldtime",
+        "serde",
+        "wasm-bindgen",
+        "wasmbind"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "either",
+      "version": "1.15.0",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "form_urlencoded",
+      "version": "1.2.2",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "futures-util",
+      "version": "0.3.32",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix",
+      "version": "0.84.0",
+      "host": false,
+      "added": [
+        "attributes",
+        "blob-diff",
+        "command",
+        "dirwalk",
+        "excludes",
+        "gix-status",
+        "index",
+        "merge",
+        "parallel",
+        "revision",
+        "status",
+        "tree-editor"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-diff",
+      "version": "0.64.0",
+      "host": false,
+      "added": [
+        "blob",
+        "index"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-features",
+      "version": "0.48.1",
+      "host": false,
+      "added": [
+        "parallel"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-packetline",
+      "version": "0.21.4",
+      "host": false,
+      "added": [
+        "blocking-io"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-revision",
+      "version": "0.46.0",
+      "host": false,
+      "added": [
+        "describe",
+        "merge_base"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-tempfile",
+      "version": "23.0.1",
+      "host": false,
+      "added": [
+        "default",
+        "hp-hashmap"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "gix-utils",
+      "version": "0.3.3",
+      "host": false,
+      "added": [
+        "bstr"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "hashbrown",
+      "version": "0.17.0",
+      "host": false,
+      "added": [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "raw-entry"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "hyper",
+      "version": "1.9.0",
+      "host": false,
+      "added": [],
+      "removed": [
+        "full",
+        "server"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "hyper-rustls",
+      "version": "0.27.9",
+      "host": false,
+      "added": [
+        "rustls-platform-verifier"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "hyper-util",
+      "version": "0.1.20",
+      "host": false,
+      "added": [],
+      "removed": [
+        "server"
+      ],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "indexmap",
+      "version": "2.14.0",
+      "host": false,
+      "added": [
+        "serde"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "miniz_oxide",
+      "version": "0.8.9",
+      "host": false,
+      "added": [
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "num-traits",
+      "version": "0.2.19",
+      "host": false,
+      "added": [
+        "i128"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "reqwest",
+      "version": "0.13.2",
+      "host": false,
+      "added": [
+        "blocking",
+        "form",
+        "gzip",
+        "multipart"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "rustls",
+      "version": "0.23.38",
+      "host": false,
+      "added": [
+        "ring"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "rustls-webpki",
+      "version": "0.103.13",
+      "host": false,
+      "added": [
+        "ring"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "serde",
+      "version": "1.0.228",
+      "host": false,
+      "added": [
+        "rc"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "sha1",
+      "version": "0.10.6",
+      "host": false,
+      "added": [
+        "default",
+        "std"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "simd-adler32",
+      "version": "0.3.9",
+      "host": false,
+      "added": [
+        "const-generics",
+        "default",
+        "std"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "tinystr",
+      "version": "0.8.3",
+      "host": false,
+      "added": [
+        "alloc",
+        "default"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "tokio",
+      "version": "1.52.1",
+      "host": false,
+      "added": [
+        "fs",
+        "process",
+        "signal-hook-registry"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "tokio-util",
+      "version": "0.7.18",
+      "host": false,
+      "added": [
+        "slab",
+        "time"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "tower-http",
+      "version": "0.6.8",
+      "host": false,
+      "added": [
+        "async-compression",
+        "decompression-gzip",
+        "futures-core",
+        "tokio",
+        "tokio-util"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "ttf-parser",
+      "version": "0.25.1",
+      "host": false,
+      "added": [
+        "core_maths",
+        "no-std-float"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "url",
+      "version": "2.5.8",
+      "host": false,
+      "added": [
+        "serde"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "uuid",
+      "version": "1.23.1",
+      "host": false,
+      "added": [
+        "rng",
+        "v4"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
+    },
+    {
+      "category": "third-party",
+      "crate": "zerovec",
+      "version": "0.11.6",
+      "host": false,
+      "added": [
+        "alloc"
+      ],
+      "removed": [],
+      "configurations": 1,
+      "crates": [
+        "biscuit-file"
+      ],
+      "seconds": 0.05504878048780488,
+      "sole_seconds": 0.0,
+      "involved_seconds": 2.257
     },
     {
       "category": "workspace-dependency",
@@ -3277,9 +3077,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3294,9 +3094,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3311,9 +3111,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3328,9 +3128,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3349,9 +3149,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3367,9 +3167,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3386,9 +3186,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3403,9 +3203,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3420,9 +3220,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3439,9 +3239,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3456,27 +3256,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
-    },
-    {
-      "category": "third-party",
-      "crate": "mio",
-      "version": "1.2.0",
-      "host": false,
-      "added": [],
-      "removed": [
-        "default",
-        "log"
-      ],
-      "configurations": 1,
-      "crates": [
-        "darkmatter-cli"
-      ],
-      "seconds": 0.03133333333333334,
-      "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3491,9 +3273,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3508,9 +3290,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3525,9 +3307,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3542,9 +3324,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3559,9 +3341,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3579,9 +3361,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3596,9 +3378,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3624,9 +3406,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     },
     {
       "category": "third-party",
@@ -3641,9 +3423,9 @@
       "crates": [
         "darkmatter-cli"
       ],
-      "seconds": 0.03133333333333334,
+      "seconds": 0.03260526315789474,
       "sole_seconds": 0.0,
-      "involved_seconds": 1.316
+      "involved_seconds": 1.239
     }
   ],
   "crates": [
@@ -3747,16 +3529,6 @@
               "category": "third-party",
               "crate": "either",
               "version": "1.15.0",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
               "host": false,
               "added": [
                 "default"
@@ -4009,16 +3781,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -4247,42 +4009,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-traits",
               "version": "0.2.19",
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -4338,7 +4069,7 @@
               "removed": []
             }
           ],
-          "seconds": 1.044
+          "seconds": 1.137
         },
         {
           "features": [
@@ -4358,20 +4089,11 @@
             "claudine-cli",
             "claudine-gen",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 1,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
             {
               "category": "third-party",
               "crate": "hashbrown",
@@ -4503,7 +4225,7 @@
               ]
             }
           ],
-          "seconds": 1.044
+          "seconds": 0.951
         },
         {
           "features": [
@@ -4526,16 +4248,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "hyper",
               "version": "1.9.0",
               "host": false,
@@ -4552,16 +4264,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -4635,26 +4337,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -4710,16 +4392,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -4747,16 +4419,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -4804,59 +4466,6 @@
             }
           ],
           "seconds": 0.995
-        },
-        {
-          "features": [
-            "default",
-            "extract",
-            "fetch",
-            "file-reference",
-            "json5",
-            "lopdf",
-            "toml",
-            "url",
-            "yaml"
-          ],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 3,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.95
         }
       ]
     },
@@ -5028,32 +4637,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
               "added": [
                 "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
               ],
               "removed": []
             },
@@ -5074,16 +4662,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -5277,27 +4855,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-integer",
               "version": "0.1.46",
               "host": false,
@@ -5313,16 +4870,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -5388,7 +4935,7 @@
               "removed": []
             }
           ],
-          "seconds": 2.3385
+          "seconds": 2.366
         },
         {
           "features": [
@@ -5423,16 +4970,6 @@
                 "wrap_help"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
             },
             {
               "category": "third-party",
@@ -5565,7 +5102,7 @@
               ]
             }
           ],
-          "seconds": 2.3385
+          "seconds": 2.311
         },
         {
           "features": [
@@ -5627,16 +5164,6 @@
             },
             {
               "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "hyper",
               "version": "1.9.0",
               "host": false,
@@ -5653,16 +5180,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -5747,16 +5264,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-bigint",
               "version": "0.4.8",
               "host": false,
@@ -5774,16 +5281,6 @@
               "removed": [
                 "num-bigint-std"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
             },
             {
               "category": "third-party",
@@ -5835,37 +5332,6 @@
                 "windows"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
             }
           ],
           "seconds": 2.36
@@ -5892,20 +5358,16 @@
           "host": false,
           "first_owner": "claudine",
           "owners": [
-            "claudine"
+            "claudine",
+            "claudine-cli",
+            "claudine-gen",
+            "darkmatter",
+            "darkmatter-cli",
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "rustix",
@@ -5914,16 +5376,6 @@
               "added": [
                 "stdio",
                 "termios"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
               ],
               "removed": []
             },
@@ -5941,38 +5393,6 @@
             }
           ],
           "seconds": 0.865
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "claudine-cli",
-          "owners": [
-            "claudine-cli"
-          ],
-          "compared_with": 1,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.326
         },
         {
           "features": [],
@@ -5997,19 +5417,9 @@
                 "default",
                 "use_std"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "result"
-              ]
             }
           ],
-          "seconds": 0.326
+          "seconds": 0.29
         },
         {
           "features": [],
@@ -6022,7 +5432,7 @@
             "dmls",
             "sniff-cli"
           ],
-          "compared_with": 3,
+          "compared_with": 2,
           "causes": [
             {
               "category": "third-party",
@@ -6033,66 +5443,9 @@
               "removed": [
                 "default"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "alloc"
-              ]
             }
           ],
-          "seconds": 0.326
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "claudine-gen",
-          "owners": [
-            "claudine-gen",
-            "darkmatter-cli",
-            "dmls"
-          ],
-          "compared_with": 1,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            }
-          ],
-          "seconds": 0.412
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "darkmatter",
-          "owners": [
-            "darkmatter",
-            "sniff-cli"
-          ],
-          "compared_with": 1,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.313
+          "seconds": 0.353
         },
         {
           "features": [],
@@ -6103,16 +5456,6 @@
           ],
           "compared_with": 0,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "serde_json",
@@ -6158,7 +5501,10 @@
           "host": false,
           "first_owner": "claudine",
           "owners": [
-            "claudine"
+            "claudine",
+            "claudine-gen",
+            "darkmatter",
+            "dmls"
           ],
           "compared_with": null,
           "causes": [],
@@ -6202,26 +5548,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -6241,7 +5567,7 @@
               "removed": []
             }
           ],
-          "seconds": 0.274
+          "seconds": 0.297
         },
         {
           "features": [
@@ -6252,7 +5578,8 @@
           "first_owner": "claudine-cli",
           "owners": [
             "claudine-cli",
-            "darkmatter-cli"
+            "darkmatter-cli",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
@@ -6277,105 +5604,9 @@
                 "wrap_help"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
             }
           ],
-          "seconds": 0.274
-        },
-        {
-          "features": [
-            "clap",
-            "image"
-          ],
-          "host": false,
-          "first_owner": "claudine-gen",
-          "owners": [
-            "claudine-gen",
-            "dmls"
-          ],
-          "compared_with": 0,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            }
-          ],
-          "seconds": 0.314
-        },
-        {
-          "features": [
-            "clap",
-            "image"
-          ],
-          "host": false,
-          "first_owner": "darkmatter",
-          "owners": [
-            "darkmatter"
-          ],
-          "compared_with": 0,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.254
-        },
-        {
-          "features": [
-            "clap",
-            "image"
-          ],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 2,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.252
+          "seconds": 0.251
         }
       ]
     },
@@ -6532,32 +5763,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
               "added": [
                 "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
               ],
               "removed": []
             },
@@ -6588,16 +5798,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -6711,40 +5911,9 @@
                 "libm"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
             }
           ],
           "seconds": 0.211
-        }
-      ]
-    },
-    {
-      "crate": "claudine-cli",
-      "version": "0.1.0",
-      "configurations": [
-        {
-          "features": [
-            "daemon-tests",
-            "terminal-tests",
-            "test-fixtures"
-          ],
-          "host": false,
-          "first_owner": "claudine-cli",
-          "owners": [
-            "claudine-cli"
-          ],
-          "compared_with": null,
-          "causes": [],
-          "seconds": 0.0
         }
       ]
     },
@@ -6925,32 +6094,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
               "added": [
                 "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
               ],
               "removed": []
             },
@@ -6981,16 +6129,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -7066,7 +6204,7 @@
               "removed": []
             }
           ],
-          "seconds": 7.359
+          "seconds": 7.494
         },
         {
           "features": [
@@ -7121,16 +6259,6 @@
                 "wrap_help"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
             },
             {
               "category": "third-party",
@@ -7386,7 +6514,7 @@
               ]
             }
           ],
-          "seconds": 7.359
+          "seconds": 7.224
         },
         {
           "features": [
@@ -7482,16 +6610,6 @@
             },
             {
               "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "hyper",
               "version": "1.9.0",
               "host": false,
@@ -7508,16 +6626,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -7592,37 +6700,6 @@
                 "windows"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
             }
           ],
           "seconds": 7.639
@@ -7642,7 +6719,7 @@
           ],
           "compared_with": null,
           "causes": [],
-          "seconds": 1.316
+          "seconds": 1.393
         },
         {
           "features": [],
@@ -7740,16 +6817,6 @@
             },
             {
               "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "fastrand",
               "version": "2.4.1",
               "host": true,
@@ -7815,33 +6882,12 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
               "added": [],
               "removed": [
                 "default"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default",
-                "log"
               ]
             },
             {
@@ -8009,16 +7055,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -8179,7 +7215,7 @@
               ]
             }
           ],
-          "seconds": 1.316
+          "seconds": 1.239
         },
         {
           "features": [
@@ -8322,16 +7358,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
@@ -8342,32 +7368,11 @@
             },
             {
               "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-traits",
               "version": "0.2.19",
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -8558,32 +7563,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
               "added": [
                 "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
               ],
               "removed": []
             },
@@ -8604,16 +7588,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -8719,16 +7693,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -8738,7 +7702,7 @@
               "removed": []
             }
           ],
-          "seconds": 1.7655
+          "seconds": 1.81
         },
         {
           "features": [],
@@ -8764,7 +7728,7 @@
               ]
             }
           ],
-          "seconds": 1.7655
+          "seconds": 1.721
         },
         {
           "features": [
@@ -8799,16 +7763,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "serde_json",
@@ -8876,27 +7830,6 @@
           "compared_with": null,
           "causes": [],
           "seconds": 7.061
-        }
-      ]
-    },
-    {
-      "crate": "repo-deps",
-      "version": "0.1.0",
-      "configurations": [
-        {
-          "features": [
-            "build-tools",
-            "default",
-            "local-tools"
-          ],
-          "host": false,
-          "first_owner": "repo-deps",
-          "owners": [
-            "repo-deps"
-          ],
-          "compared_with": null,
-          "causes": [],
-          "seconds": 0.0
         }
       ]
     },
@@ -8970,42 +7903,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-traits",
               "version": "0.2.19",
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -9061,7 +7963,7 @@
               "removed": []
             }
           ],
-          "seconds": 1.259
+          "seconds": 1.271
         },
         {
           "features": [
@@ -9075,20 +7977,11 @@
             "claudine-cli",
             "claudine-gen",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
             {
               "category": "third-party",
               "crate": "hashbrown",
@@ -9220,7 +8113,7 @@
               ]
             }
           ],
-          "seconds": 1.259
+          "seconds": 1.247
         },
         {
           "features": [
@@ -9235,16 +8128,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "hyper",
@@ -9263,16 +8146,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -9341,26 +8214,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -9410,16 +8263,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -9447,16 +8290,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -9504,53 +8337,6 @@
             }
           ],
           "seconds": 1.22
-        },
-        {
-          "features": [
-            "biscuit-file",
-            "default",
-            "openapi"
-          ],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 2,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 1.283
         }
       ]
     },
@@ -9616,42 +8402,11 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-traits",
               "version": "0.2.19",
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -9707,7 +8462,7 @@
               "removed": []
             }
           ],
-          "seconds": 24.497
+          "seconds": 25.268
         },
         {
           "features": [],
@@ -9717,20 +8472,11 @@
             "claudine-cli",
             "claudine-gen",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
             {
               "category": "third-party",
               "crate": "hashbrown",
@@ -9862,7 +8608,7 @@
               ]
             }
           ],
-          "seconds": 24.497
+          "seconds": 23.726
         },
         {
           "features": [],
@@ -9873,16 +8619,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "hyper",
@@ -9901,16 +8637,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -9975,26 +8701,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -10040,16 +8746,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -10077,16 +8773,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -10134,49 +8820,6 @@
             }
           ],
           "seconds": 23.82
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 2,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 24.686
         }
       ]
     },
@@ -10271,16 +8914,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "memchr",
               "version": "2.8.0",
               "host": true,
@@ -10291,32 +8924,11 @@
             },
             {
               "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-traits",
               "version": "0.2.19",
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -10392,7 +9004,7 @@
               "removed": []
             }
           ],
-          "seconds": 8.1155
+          "seconds": 8.167
         },
         {
           "features": [
@@ -10406,20 +9018,11 @@
             "claudine-cli",
             "claudine-gen",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
-              ]
-            },
             {
               "category": "third-party",
               "crate": "hashbrown",
@@ -10674,7 +9277,7 @@
               ]
             }
           ],
-          "seconds": 8.1155
+          "seconds": 8.064
         },
         {
           "features": [
@@ -10689,16 +9292,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "hyper",
@@ -10717,16 +9310,6 @@
               "host": false,
               "added": [
                 "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             },
@@ -10844,16 +9427,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "regex",
               "version": "1.12.3",
               "host": true,
@@ -10932,16 +9505,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -11011,7 +9574,7 @@
           "owners": [
             "sniff"
           ],
-          "compared_with": 2,
+          "compared_with": 3,
           "causes": [
             {
               "category": "workspace-dependency",
@@ -11042,27 +9605,6 @@
               "removed": [
                 "default"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "hyper",
-              "version": "1.9.0",
-              "host": false,
-              "added": [
-                "full",
-                "server"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "hyper-util",
-              "version": "0.1.20",
-              "host": false,
-              "added": [
-                "server"
-              ],
-              "removed": []
             },
             {
               "category": "third-party",
@@ -11145,7 +9687,15 @@
               "host": false,
               "added": [],
               "removed": [
-                "rt-multi-thread"
+                "fs",
+                "full",
+                "io-std",
+                "parking_lot",
+                "process",
+                "rt-multi-thread",
+                "signal",
+                "signal-hook-registry",
+                "test-util"
               ]
             },
             {
@@ -11185,53 +9735,6 @@
             }
           ],
           "seconds": 9.007
-        },
-        {
-          "features": [
-            "default",
-            "network",
-            "remote"
-          ],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 2,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "mio",
-              "version": "1.2.0",
-              "host": false,
-              "added": [
-                "default",
-                "log"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 8.078
         }
       ]
     },
@@ -11290,16 +9793,6 @@
             },
             {
               "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "regex-automata",
               "version": "0.4.18",
               "host": false,
@@ -11317,16 +9810,6 @@
               "added": [
                 "stdio",
                 "termios"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
               ],
               "removed": []
             },
@@ -11401,26 +9884,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -11430,7 +9893,7 @@
               "removed": []
             }
           ],
-          "seconds": 0.35850000000000004
+          "seconds": 0.376
         },
         {
           "features": [
@@ -11515,16 +9978,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "result"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -11547,7 +10000,7 @@
               ]
             }
           ],
-          "seconds": 0.35850000000000004
+          "seconds": 0.341
         },
         {
           "features": [],
@@ -11555,8 +10008,10 @@
           "first_owner": "claudine-gen",
           "owners": [
             "claudine-gen",
+            "darkmatter",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
@@ -11594,16 +10049,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -11616,39 +10061,6 @@
             }
           ],
           "seconds": 0.482
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "darkmatter",
-          "owners": [
-            "darkmatter",
-            "sniff-cli"
-          ],
-          "compared_with": 4,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "errno",
-              "version": "0.3.14",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": 0.369
         },
         {
           "features": [],

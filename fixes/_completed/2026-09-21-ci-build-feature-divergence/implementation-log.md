@@ -96,6 +96,8 @@ documentation:
     - .claude/skills/rust-devops/ci-cd.md
 completed_phase: 4
 implemented: true
+implementation_1: "2026-09-23T20:59:12-07:00"
+implementation_2: "2026-09-23T21:45:18-07:00"
 ---
 
 # Implementation Log for 2026-09-21-ci-build-feature-divergence (4 phases)
@@ -840,3 +842,104 @@ untouched code.
 option B as a follow-on change (the only remedy that achieves the Outcome
 without unifying features), and the amendment to the Open Questions ruling on
 `proc-macro2/span-locations`.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-23T20:59:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/fixes/2026-09-21-ci-build-feature-divergence/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the orchestrator triaged the four findings before dispatching work:
+        - findings 2 ("The attribution table counts packages with no library compile") and 3 ("The alignment what-if misses configurations collapsed within one owner") are code changes to `scripts/feature-attribution.rs` in `repo-deps`; each goes to its own subagent, serially
+        - findings 1 ("No change reduces the workspace rebuilds the fix targets") and 4 ("The guard-test fallback ruling remains unresolved") each require an author ruling that both the review (`human_review_items`) and the spec (`human_review_items`) reserve for the author; this session is non-interactive, so an agent cannot record either ruling
+- starting the work on 'The attribution table counts packages with no library compile' at 20:59:34
+        - discovered: a real wrapped build (`cargo test --no-run` per owner under the `ci-build` wrapper) of the fixture plus a bin-only owner (`fa-owner-bin`) compiles only that owner's test harness; the unfixed model predicted a `fa-owner-bin` configuration no compile produced, which the new test reproduced as a failing map diff before the fix
+        - completed: `read_workspace` (`scripts/feature-attribution.rs`) now keeps only workspace packages with a library-kind target (`LIBRARY_KINDS`, now shared with the timed join's crate-type filter) or a `custom-build` target; bin- and test-only packages remain valid owners but are never configurations; module, `read_workspace`, and `Selection::members` docs updated
+        - completed: fixture `scripts/ci/fixtures/feature-attribution/` gained `owner-bin` (bin-only, depends on `fa-core`); `Cargo.toml` members/comment and `Cargo.lock` updated
+        - completed: L1 test `a_wrapped_fixture_build_compiles_exactly_the_predicted_configurations` builds every fixture owner in producer order in one scratch target dir under a freshly built `ci-build` wrapper and asserts predicted `(first owner, crate) -> configurations` equals observed library/build-script compiles (both directions), plus that the bin-only owner was built and is absent from the report
+        - completed: regenerated all 11 JSON reports in `attribution-data/` (macOS reports re-joined with the persisted `timed-pass-events.json`, so no new timed pass was needed); the only difference from the published reports is the removal of `claudine-cli` and `repo-deps` (one zero-second configuration each); crates 27 -> 25, configurations Linux 92 -> 90 and macOS 95 -> 93, divergent counts, causes, third-party rows, and all seconds unchanged; every what-if drops by 2 configurations
+        - completed: re-rendered `attribution-2026-09-21.md` (render script intro, tree note, and model-count sentence updated; the hand-written "Phase 4 re-run" section preserved and corrected, including option B's prediction 92 -> 86 now 90 -> 84); `.claude/skills/rust-devops/ci-cd.md` count updated to 25 crates / 90 configurations
+        - not changed: `spec.md` line 17 still quotes "92 crate builds on Linux" (now 90); left for the orchestrator because `spec.md` carries an uncommitted edit
+        - verified: `just test repo-deps` 468 passed, 1 skipped; `cargo clippy -p repo-deps --all-targets --all-features -D warnings` clean; `check-comments.sh` no findings; `just check-tier-coverage scripts` nothing stranded; `test-toolkit` archive path guard 2/2 passed; nextest lists the new test under `repo-deps::bin/feature-attribution`
+- work completed for 'The attribution table counts packages with no library compile' at 21:07:42
+- starting the work on 'The alignment what-if misses configurations collapsed within one owner' at 21:07:42
+        - discovered: `ci-build` events carry no features or `-C metadata`, only an `argv_digest` hash, so a compile cannot be matched to a configuration by content; but an owner's Cargo invocations run one after another and each compiles a `(package, side)` at most once, so the k-th library compile an owner records for a `(package, side)` (by `started_ms`; side from rustc's `--target`) is the k-th configuration of it the as-is model has that owner build first; this is exact per-invocation identity from the saved `timed-pass-events.json`, so the lower-bound fallback was not needed
+        - completed: `scripts/feature-attribution.rs` now joins per compile (`read_compiles`, `join`); each configuration carries its own measured seconds (build-script compiles go with the package's next library compile by the same owner); `attribute` resolves each invocation under both the as-is and the `--align` model, and a measured as-is compile the aligned model no longer needs is added to `seconds_removed`, including one of two configurations a single owner built; unexplained compiles are always judged against the as-is model
+        - completed: `Interner::with_alignment` now models forwarded features: the union of an aligned crate's features is expanded through its `[features]` table (from full `cargo metadata --locked`, keyed on `(name, version)`, rename-aware) and `dep/x` / `dep?/x` entries add `x` and everything it implies to a dependency already in the graph, recursively; an optional dependency the union newly enables is still not modeled, and the what-if prose and docs say so (it can overstate collapses)
+        - completed: fixture gained `fa-fwd-user`, `fa-owner-fwd`, vendor `fa-fwd` (`feat = ["leaf/deep"]`, renamed dep) and `fa-leaf` (`deep = ["deeper"]`), and `sidecars.json`; `fa-fwd-user`'s sidecar builds `fa-owner-fwd`, so one owner first-builds two configurations of `fa-fwd-user`
+        - completed: L1 tests `one_owner_two_configurations_keep_their_own_seconds_and_merge_under_alignment` (distinct 9.5 s / 1.5 s per configuration where the equal split gave 5.5 s each; aligning `fa-fwd` removes 1.5 s where the old join removed 0), `a_build_script_is_charged_with_its_packages_next_library_compile`, and `a_forwarded_feature_what_if_matches_a_build_with_the_alignment_declared` (real `ci-build`-wrapped builds of the fixture as-is and of a scratch copy declaring the alignment; the what-if equals the aligned build, the model without forwarding does not, and `seconds_removed` equals the sidecar compile's measured seconds); the wrapped-build machinery is now a shared `wrapped_build` helper that also runs sidecar builds; `co_causes_split_seconds_and_bound_what_each_removes` kept its contract (one configuration per owner), only its input type changed
+        - completed: regenerated all 11 reports and re-rendered `attribution-2026-09-21.md` (render script prose updated; hand-written "Phase 4 re-run" section preserved with one correction bullet); configuration counts unchanged everywhere; macOS first/divergent 86.8/297.9 s -> 86.9/297.8 s; macOS `seconds_removed`: trio 0.6 -> 0.9 s, trio + errno + mio 36.9 -> 37.2 s, all but "default no" 49.4 -> 83.8 s, all third-party 210.8 -> 218.4 s; forwarding fires on the real graph only in the "all but default no" scenario (`hyper`/`hyper-util` gain `http2`), which changes that report's causes but no count
+        - discovered: "Sizing option B"'s manual +25 s is now produced by the tool: re-running with the temporary `schematic/define` edit (reverted; `Cargo.lock` restored) and the saved events reports 77.06 s of unexplained compiles, including `claudine-cli`'s 1.247 s + 23.726 s sidecar compiles
+        - not changed: `spec.md` still quotes the trio at 0.6 s (now 0.9 s); the `rust-devops` `ci-cd.md` "about 1 s" / "about 70%" (now 73%) statements still hold
+        - verified: `just test repo-deps` 471 passed, 1 skipped; `cargo clippy -p repo-deps --all-targets --all-features -- -D warnings` clean; `scripts` `just lint` clean; `just check-tier-coverage scripts` nothing stranded; `check-comments.sh` no findings on both changed Rust files; nextest lists the three new tests under `repo-deps::bin/feature-attribution`
+- work completed for 'The alignment what-if misses configurations collapsed within one owner' at 21:37:51
+- starting the work on 'No change reduces the workspace rebuilds the fix targets' at 21:37:51
+        - blocked: the review asks to "record a ruling that permits this remedy" (option B, dropping the `schematic-define` → `biscuit-file` edge) or to revise the spec's Outcome; either choice belongs to the author, and both the review and the spec list it under `human_review_items`
+        - this session is non-interactive, so it cannot obtain the ruling, and recording one on the author's behalf would fabricate a decision
+        - after findings 2 and 3, the tool's option B prediction is now 90 → 84 Linux configurations, and the tool itself produces the ~77 s saving that "Sizing option B" previously adjusted by hand
+- work completed for 'No change reduces the workspace rebuilds the fix targets' at 21:37:51
+- starting the work on 'The guard-test fallback ruling remains unresolved' at 21:37:51
+        - blocked: amending the Open Questions ruling (keep the guard in `claudine-cli`) or requiring option 2 is an author decision, listed in both `human_review_items`; not recorded by the agent for the same reason as finding 1
+- work completed for 'The guard-test fallback ruling remains unresolved' at 21:37:51
+- orchestrator verification:
+        - `just test repo-deps`: 471 passed, 1 skipped
+        - `schematic/` and the root `Cargo.lock` are unchanged (finding 3's temporary option B edit was reverted)
+        - `just cross-check repo-deps --os linux` FAILED for an environmental reason: on `build-linux`, the rig's release tooling build could not write `target/release/deps/*.rmeta` ("not writeable -- check its permissions") before `repo-deps` was reached; no remote change was made, and the pull request's Linux cell still proves the new wrapped-build tests
+        - stale figures left in `spec.md`'s `human_review_items` (author-edited, uncommitted): "92 crate builds on Linux" is now 90, "92 → 86" is now 90 → 84, and the trio's "0.6 s" is now 0.9 s
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 39 minutes. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 2 were deferred (see reasons below):
+
+- **No change reduces the workspace rebuilds the fix targets** (high): deferred. It requires the author to approve option B or revise the spec's Outcome and acceptance criterion 5. Both are `human_review_items` in the review and the spec, and a non-interactive agent cannot make or record that decision. Once option B is approved, the spec's `message_to_agent` already lists the steps; the expected re-run result is now 90 → 84 on Linux.
+- **The guard-test fallback ruling remains unresolved** (medium): deferred. It requires the author's ruling on the Open Questions fallback (amend it to keep the guard in `claudine-cli`, or require option 2), which is also a `human_review_items` entry.
+
+The files changed in this cycle are `scripts/feature-attribution.rs`, `scripts/feature-attribution-tests.rs`, the `scripts/ci/fixtures/feature-attribution/` fixture workspace (new `owner-bin`, `owner-fwd`, `fwd-user`, `vendor/fwd`, `vendor/leaf`, and `sidecars.json`), the regenerated `attribution-data/` reports and `render-attribution.py`, `attribution-2026-09-21.md`, and `.claude/skills/rust-devops/ci-cd.md`.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-23T21:45:18-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-dark-fixes/fixes/2026-09-21-ci-build-feature-divergence/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- the orchestrator triaged the four findings before dispatching work:
+        - finding 3 ("The wrapped-build reconciliation conflates configurations with build-script units") is a Level 1 test-quality change in `repo-deps` (`scripts/feature-attribution-tests.rs` plus a fixture package with a real build script); it goes to a subagent
+        - finding 4 ("Decision records still quote superseded attribution figures") is a factual correction of figures in `spec.md` and `attribution-2026-09-21.md`; it changes no ruling, so the orchestrator applies it after finding 3 in case finding 3 moves any figure
+        - findings 1 ("No remedy has reduced the workspace rebuilds") and 2 ("The guard-test fallback ruling still contradicts the implementation") each ask for the author's ruling, which both review 2's and the spec's `human_review_items` reserve for the author; this session is non-interactive, and no ruling has been recorded since iteration 1
+- starting the work on 'The wrapped-build reconciliation conflates configurations with build-script units' at 21:45:42
+        - discovered: Cargo compiles a build script once per feature set of its own package; in the fixture, `fa-core` (default) and `fa-owner-wsdep` (`+wide`) each compiled `fa-util`'s build script, while `fa-owner-third` reused it because its difference is in `fa-base`, below `fa-util`
+        - verified: with only `fa-util/build.rs` added, the old combined count failed (observed `(fa-core, fa-util): 2` and `(fa-owner-wsdep, fa-util): 2` against a prediction of 1 each), reproducing the mismatch the review found in the saved macOS events
+        - completed: fixture member `fa-util` gained an empty `build.rs` (it already has three configurations with different first owners); `cargo tree` output, `Cargo.lock`, and every other test's configuration counts are unchanged; the fixture `Cargo.toml` comment notes the build script
+        - completed: `wrapped_build` (`scripts/feature-attribution-tests.rs`) now returns `Observed { libraries, build_scripts }`, each counted per `(owner, package)`; its doc states that a build script's seconds belong to a configuration but the build script is never a configuration
+        - completed: `a_wrapped_fixture_build_compiles_exactly_the_predicted_configurations` asserts predicted configurations equal observed library compiles (both directions), that `fa-core` compiled `fa-util`'s build script, and that every build-script compile belongs to an owner that also compiled that package's library; it then re-attributes with the build's own events and asserts no `unexplained_compiles` and that each `fa-util` configuration's seconds equal its first owner's `fa-util` compiles, build script included
+        - completed: `a_forwarded_feature_what_if_matches_a_build_with_the_alignment_declared` now compares against `observed.libraries`
+        - verified: temporarily charging build scripts to the first configuration in `join` made the new seconds assertion fail; `scripts/feature-attribution.rs` was restored and confirmed identical with `cmp`
+        - verified: test-only change; tool behavior is unchanged and no `attribution-data/` figure moved
+        - verified: `just test repo-deps` 471 passed, 1 skipped; `cargo clippy -p repo-deps --all-targets --all-features -- -D warnings` clean; `just lint` (from `scripts/`) 27 passed, 0 failed; `just check-tier-coverage scripts` nothing stranded; nextest lists 22 `feature-attribution` tests, and the orchestrator re-ran all 22 (all passed)
+- work completed for 'The wrapped-build reconciliation conflates configurations with build-script units' at 21:50:14
+- starting the work on 'Decision records still quote superseded attribution figures' at 21:50:14
+        - completed: `spec.md` `human_review_items` now quote 90 Linux crate builds (65 extra), the trio's **0.9 s**, and option B's 90 → 84 builds with "expect 84 on Linux"; `message_to_agent` now quotes Linux 90/65 and macOS 93/68 (noting review 1's bin-only correction) and "expect 84"; no ruling, option, or recommendation was changed
+        - completed: `attribution-2026-09-21.md` "Phase 4 re-run" now gives the alignment crate's saving as 0.9 s, matching the correction bullet in the same section; the generated table's `libc +extra_traits` 0.6 s cell is a different measure (sole-cause seconds for one flag) and was left as rendered
+        - not changed: the Phase 1–4 sections of this log keep the figures they recorded at the time; they are history, and review 1's section already records the correction
+- work completed for 'Decision records still quote superseded attribution figures' at 21:50:35
+- starting the work on 'No remedy has reduced the workspace rebuilds' at 21:50:35
+        - blocked: the review asks the author to either approve option B (drop the `schematic-define` → `biscuit-file` edge) and require its verification, or revise the spec's Outcome and acceptance criterion 5 to a measurement-only result; review 2 lists this as its first `human_review_items` entry, and the spec lists the same choice
+        - neither `spec.md` nor review 2 records an author ruling, and this session is non-interactive; applying option B or rewriting the Outcome would fabricate that decision
+        - the decision-facing figures the author reads are now current (finding 4): 90 → 84 Linux configurations and ≈77 s
+- work completed for 'No remedy has reduced the workspace rebuilds' at 21:50:35
+- starting the work on 'The guard-test fallback ruling still contradicts the implementation' at 21:50:35
+        - blocked: the review asks for the author's ruling (amend the Open Questions fallback to keep the guard in `claudine-cli`, or require the isolation plus planner scheduling); it is review 2's second `human_review_items` entry and has no recorded ruling
+- work completed for 'The guard-test fallback ruling still contradicts the implementation' at 21:50:35
+- orchestrator verification:
+        - `cargo nextest run -p repo-deps --bin feature-attribution`: 22 passed
+        - `git diff --check` over the changed files: clean
+        - no cross-OS run: the change is one Level 1 test and a fixture `build.rs` with no platform-specific code; CI's Linux and macOS cells run it on the pull request
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 6 minutes. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 2 were deferred (see reasons below):
+
+- **No remedy has reduced the workspace rebuilds** (high): deferred. It needs the author to approve option B or to revise the spec's Outcome and acceptance criterion 5 into a measurement-only result. Review 2 and the spec both list this as a `human_review_items` entry, and a non-interactive agent cannot make or record that decision. If option B is approved, the spec's `message_to_agent` lists the steps, and the expected re-run result is 90 → 84 on Linux.
+- **The guard-test fallback ruling still contradicts the implementation** (medium): deferred. It needs the author to rule on the Open Questions fallback: either keep the guard in `claudine-cli` and amend the rule, or require the isolation and planner scheduling. This is also a `human_review_items` entry.
+
+The files changed in this cycle are `scripts/feature-attribution-tests.rs`, `scripts/ci/fixtures/feature-attribution/util/build.rs` (new), the comment in `scripts/ci/fixtures/feature-attribution/Cargo.toml`, `spec.md` (figures in `human_review_items` and `message_to_agent` only), and `attribution-2026-09-21.md` (one figure in "Phase 4 re-run").

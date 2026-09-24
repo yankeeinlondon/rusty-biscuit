@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
   "target": "x86_64-unknown-linux-gnu",
-  "aligned": [],
+  "aligned": [
+    "libc",
+    "proc-macro2",
+    "serde_core"
+  ],
   "owners": [
     {
       "owner": "biscuit-file",
@@ -34,7 +38,7 @@
         "sidecar darkmatter-md-fixture",
         "sidecar harness-broker"
       ],
-      "new_configurations": 34
+      "new_configurations": 32
     },
     {
       "owner": "claudine-gen",
@@ -91,7 +95,7 @@
       "invocations": [
         "archive"
       ],
-      "new_configurations": 7
+      "new_configurations": 6
     },
     {
       "owner": "sniff",
@@ -113,16 +117,16 @@
         "sidecar backend-proof",
         "sidecar harness-broker"
       ],
-      "new_configurations": 10
+      "new_configurations": 7
     }
   ],
   "totals": {
-    "workspace_crates": 27,
-    "configurations": 92,
-    "divergent_configurations": 65,
+    "workspace_crates": 25,
+    "configurations": 86,
+    "divergent_configurations": 61,
     "divergent_by_origin": {
       "mixed": 15,
-      "third-party": 46,
+      "third-party": 42,
       "workspace-own": 4
     },
     "seconds_first": null,
@@ -135,66 +139,6 @@
     }
   },
   "causes": [
-    {
-      "category": "third-party",
-      "crate": "libc",
-      "version": "0.2.186",
-      "host": false,
-      "added": [
-        "extra_traits"
-      ],
-      "removed": [],
-      "configurations": 27,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
-        "claudine",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [
-        "default"
-      ],
-      "removed": [],
-      "configurations": 21,
-      "crates": [
-        "biscuit-file",
-        "biscuit-speaks",
-        "biscuit-terminal",
-        "biscuit-test-harness",
-        "biscuit-visualized",
-        "claudine",
-        "claudine-catalog-types",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "renderable",
-        "schematic-define",
-        "schematic-definitions",
-        "sniff",
-        "test-toolkit"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
     {
       "category": "third-party",
       "crate": "mio",
@@ -831,28 +775,6 @@
     },
     {
       "category": "third-party",
-      "crate": "proc-macro2",
-      "version": "1.0.106",
-      "host": false,
-      "added": [
-        "span-locations"
-      ],
-      "removed": [],
-      "configurations": 6,
-      "crates": [
-        "biscuit-speaks",
-        "claudine",
-        "darkmatter",
-        "messenger",
-        "playa",
-        "sniff"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
       "crate": "rustix",
       "version": "1.1.4",
       "host": false,
@@ -1127,26 +1049,6 @@
     },
     {
       "category": "third-party",
-      "crate": "libc",
-      "version": "0.2.186",
-      "host": false,
-      "added": [],
-      "removed": [
-        "extra_traits"
-      ],
-      "configurations": 4,
-      "crates": [
-        "biscuit-file",
-        "darkmatter-cli",
-        "schematic-define",
-        "schematic-definitions"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
       "crate": "miniz_oxide",
       "version": "0.8.9",
       "host": false,
@@ -1180,26 +1082,6 @@
         "schematic-define",
         "schematic-definitions",
         "sniff"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "default"
-      ],
-      "configurations": 4,
-      "crates": [
-        "biscuit-file",
-        "darkmatter-cli",
-        "schematic-define",
-        "schematic-definitions"
       ],
       "seconds": 0.0,
       "sole_seconds": 0.0,
@@ -1363,25 +1245,6 @@
         "stdio",
         "termios",
         "time"
-      ],
-      "removed": [],
-      "configurations": 3,
-      "crates": [
-        "biscuit-file",
-        "biscuit-test-harness",
-        "test-toolkit"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [
-        "rc"
       ],
       "removed": [],
       "configurations": 3,
@@ -1670,24 +1533,6 @@
       "configurations": 2,
       "crates": [
         "biscuit-file",
-        "test-toolkit"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "result"
-      ],
-      "configurations": 2,
-      "crates": [
-        "biscuit-test-harness",
         "test-toolkit"
       ],
       "seconds": 0.0,
@@ -2766,23 +2611,6 @@
     },
     {
       "category": "third-party",
-      "crate": "proc-macro2",
-      "version": "1.0.106",
-      "host": false,
-      "added": [],
-      "removed": [
-        "span-locations"
-      ],
-      "configurations": 1,
-      "crates": [
-        "darkmatter-cli"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
       "crate": "regex-automata",
       "version": "0.4.18",
       "host": false,
@@ -2944,23 +2772,6 @@
       "configurations": 1,
       "crates": [
         "biscuit-file"
-      ],
-      "seconds": 0.0,
-      "sole_seconds": 0.0,
-      "involved_seconds": 0.0
-    },
-    {
-      "category": "third-party",
-      "crate": "serde_core",
-      "version": "1.0.228",
-      "host": false,
-      "added": [],
-      "removed": [
-        "alloc"
-      ],
-      "configurations": 1,
-      "crates": [
-        "biscuit-test-harness"
       ],
       "seconds": 0.0,
       "sole_seconds": 0.0,
@@ -3745,16 +3556,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -3984,16 +3785,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -4010,16 +3801,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -4342,26 +4123,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -4417,16 +4178,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -4454,16 +4205,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -4531,16 +4272,6 @@
           ],
           "compared_with": 3,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "mio",
@@ -4704,16 +4435,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -4740,26 +4461,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -4963,16 +4664,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -4999,16 +4690,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -5403,16 +5084,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "num-bigint",
               "version": "0.4.8",
               "host": false,
@@ -5430,16 +5101,6 @@
               "removed": [
                 "num-bigint-std"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
             },
             {
               "category": "third-party",
@@ -5494,16 +5155,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -5539,10 +5190,12 @@
           "first_owner": "claudine",
           "owners": [
             "claudine",
+            "claudine-cli",
             "claudine-gen",
             "darkmatter",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
@@ -5578,16 +5231,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -5595,38 +5238,6 @@
                 "alloc",
                 "float_roundtrip",
                 "raw_value"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": null
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "claudine-cli",
-          "owners": [
-            "claudine-cli"
-          ],
-          "compared_with": 1,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             }
@@ -5656,16 +5267,6 @@
                 "default",
                 "use_std"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "result"
-              ]
             }
           ],
           "seconds": null
@@ -5681,7 +5282,7 @@
             "dmls",
             "sniff-cli"
           ],
-          "compared_with": 3,
+          "compared_with": 2,
           "causes": [
             {
               "category": "third-party",
@@ -5691,16 +5292,6 @@
               "added": [],
               "removed": [
                 "default"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "alloc"
               ]
             }
           ],
@@ -5735,28 +5326,6 @@
               "removed": [
                 "float_roundtrip"
               ]
-            }
-          ],
-          "seconds": null
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 1,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
             }
           ],
           "seconds": null
@@ -5839,26 +5408,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -5889,7 +5438,8 @@
           "first_owner": "claudine-cli",
           "owners": [
             "claudine-cli",
-            "darkmatter-cli"
+            "darkmatter-cli",
+            "sniff-cli"
           ],
           "compared_with": 0,
           "causes": [
@@ -5912,31 +5462,6 @@
               "added": [
                 "unstable-ext",
                 "wrap_help"
-              ],
-              "removed": []
-            }
-          ],
-          "seconds": null
-        },
-        {
-          "features": [
-            "clap",
-            "image"
-          ],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 2,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
               ],
               "removed": []
             }
@@ -6077,16 +5602,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -6123,26 +5638,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -6266,39 +5761,8 @@
                 "libm"
               ],
               "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
             }
           ],
-          "seconds": null
-        }
-      ]
-    },
-    {
-      "crate": "claudine-cli",
-      "version": "0.1.0",
-      "configurations": [
-        {
-          "features": [
-            "daemon-tests",
-            "terminal-tests",
-            "test-fixtures"
-          ],
-          "host": false,
-          "first_owner": "claudine-cli",
-          "owners": [
-            "claudine-cli"
-          ],
-          "compared_with": null,
-          "causes": [],
           "seconds": null
         }
       ]
@@ -6459,16 +5923,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -6505,26 +5959,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -6996,16 +6430,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -7175,16 +6599,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -7226,16 +6640,6 @@
             },
             {
               "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [],
-              "removed": [
-                "span-locations"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "rustls",
               "version": "0.23.38",
               "host": false,
@@ -7252,16 +6656,6 @@
               "added": [],
               "removed": [
                 "ring"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -7558,16 +6952,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -7584,26 +6968,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -7783,16 +7147,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -7819,26 +7173,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -7954,16 +7288,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -8036,16 +7360,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -8107,27 +7421,6 @@
           "first_owner": "claudine-cli",
           "owners": [
             "claudine-cli"
-          ],
-          "compared_with": null,
-          "causes": [],
-          "seconds": null
-        }
-      ]
-    },
-    {
-      "crate": "repo-deps",
-      "version": "0.1.0",
-      "configurations": [
-        {
-          "features": [
-            "build-tools",
-            "default",
-            "local-tools"
-          ],
-          "host": false,
-          "first_owner": "repo-deps",
-          "owners": [
-            "repo-deps"
           ],
           "compared_with": null,
           "causes": [],
@@ -8205,16 +7498,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -8231,16 +7514,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -8546,26 +7819,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -8615,16 +7868,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -8652,16 +7895,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -8723,16 +7956,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "mio",
@@ -8811,16 +8034,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -8837,16 +8050,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -9140,26 +8343,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -9205,16 +8388,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [],
-              "removed": [
-                "extra_traits"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "miniz_oxide",
               "version": "0.8.9",
               "host": false,
@@ -9242,16 +8415,6 @@
               "removed": [
                 "stdio",
                 "termios"
-              ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "default"
               ]
             },
             {
@@ -9309,16 +8472,6 @@
           ],
           "compared_with": 2,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "mio",
@@ -9405,16 +8558,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -9431,26 +8574,6 @@
               "host": false,
               "added": [
                 "libm"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "proc-macro2",
-              "version": "1.0.106",
-              "host": false,
-              "added": [
-                "span-locations"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
               ],
               "removed": []
             },
@@ -9845,16 +8968,6 @@
             },
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "reqwest",
               "version": "0.13.2",
               "host": false,
@@ -9866,16 +8979,6 @@
                 "gzip",
                 "http2"
               ]
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
             },
             {
               "category": "third-party",
@@ -10115,16 +9218,6 @@
           "causes": [
             {
               "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "mio",
               "version": "1.2.0",
               "host": false,
@@ -10235,16 +9328,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "rc"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
               "crate": "serde_json",
               "version": "1.0.149",
               "host": false,
@@ -10312,26 +9395,6 @@
           ],
           "compared_with": 1,
           "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
-            },
-            {
-              "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [
-                "default"
-              ],
-              "removed": []
-            },
             {
               "category": "third-party",
               "crate": "smallvec",
@@ -10428,16 +9491,6 @@
             },
             {
               "category": "third-party",
-              "crate": "serde_core",
-              "version": "1.0.228",
-              "host": false,
-              "added": [],
-              "removed": [
-                "result"
-              ]
-            },
-            {
-              "category": "third-party",
               "crate": "smallvec",
               "version": "1.15.1",
               "host": false,
@@ -10470,7 +9523,8 @@
             "claudine-gen",
             "darkmatter",
             "darkmatter-cli",
-            "dmls"
+            "dmls",
+            "sniff-cli"
           ],
           "compared_with": 1,
           "causes": [
@@ -10551,28 +9605,6 @@
               "removed": [
                 "float_roundtrip"
               ]
-            }
-          ],
-          "seconds": null
-        },
-        {
-          "features": [],
-          "host": false,
-          "first_owner": "sniff-cli",
-          "owners": [
-            "sniff-cli"
-          ],
-          "compared_with": 4,
-          "causes": [
-            {
-              "category": "third-party",
-              "crate": "libc",
-              "version": "0.2.186",
-              "host": false,
-              "added": [
-                "extra_traits"
-              ],
-              "removed": []
             }
           ],
           "seconds": null
