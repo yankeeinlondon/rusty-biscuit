@@ -1,0 +1,663 @@
+cross-check: tree-hugger @ origin/fix/ci-build-feature-divergence (1879dd880) + 130 changed file(s) as 006349ccb
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  d69fee6ec3708d03 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\shazam--feat-dark-fixes
+
+== windows (build-win-native, archive d69fee6ec3708d03 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: 9cc65df1359b58237f06aecf827959b36d2b1e45
+cross-check-dirty: 0
+   Compiling repo-deps v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\scripts)
+    Finished `release` profile [optimized] target(s) in 13.48s
+   Compiling regex-syntax v0.8.10
+   Compiling tree-sitter-language v0.1.7
+   Compiling smallvec v1.15.1
+   Compiling cc v1.2.60
+   Compiling windows-sys v0.61.2
+   Compiling unicode-normalization v0.1.25
+   Compiling crypto-common v0.1.7
+   Compiling hashbrown v0.17.0
+   Compiling zerovec v0.11.6
+   Compiling serde_core v1.0.228
+   Compiling serde_json v1.0.149
+   Compiling memchr v2.8.0
+   Compiling digest v0.10.7
+   Compiling parking_lot_core v0.9.12
+   Compiling sha1 v0.10.6
+   Compiling either v1.15.0
+   Compiling gix-utils v0.3.3
+   Compiling num-traits v0.2.19
+   Compiling parking_lot v0.12.5
+   Compiling tinystr v0.8.3
+   Compiling sha1-checked v0.10.0
+   Compiling potential_utf v0.1.5
+   Compiling half v2.7.1
+   Compiling form_urlencoded v1.2.2
+   Compiling icu_collections v2.2.0
+   Compiling streaming-iterator v0.1.9
+   Compiling prodash v31.0.0
+   Compiling icu_locale_core v2.2.0
+   Compiling arrayvec v0.7.6
+   Compiling clap_builder v4.6.0
+   Compiling rayon v1.12.0
+   Compiling blake3 v1.8.4
+   Compiling tree-sitter-perl v1.1.2
+   Compiling tree-sitter-go v0.25.0
+   Compiling tree-sitter-typescript v0.23.2
+   Compiling tree-sitter-swift v0.7.3
+   Compiling tree-sitter-cpp v0.23.4
+   Compiling tree-sitter-python v0.25.0
+   Compiling tree-sitter-bash v0.25.1
+   Compiling regex-automata v0.4.18
+   Compiling tree-sitter-php v0.24.2
+   Compiling tree-sitter-lua v0.5.0
+   Compiling tree-sitter-scala v0.24.1
+   Compiling tree-sitter-rust v0.24.2
+   Compiling tree-sitter-c v0.24.2
+   Compiling winapi-util v0.1.11
+   Compiling tempfile v3.27.0
+   Compiling icu_provider v2.2.0
+   Compiling dirs-sys v0.5.0
+   Compiling tree-sitter-zsh v0.56.0
+   Compiling tree-sitter-java v0.23.5
+   Compiling same-file v1.0.6
+   Compiling tree-sitter-javascript v0.25.0
+   Compiling tree-sitter-c-sharp v0.23.5
+   Compiling icu_properties v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling walkdir v2.5.0
+   Compiling dirs v6.0.0
+   Compiling tree-sitter v0.26.9
+   Compiling nu-ansi-term v0.50.3
+   Compiling bstr v1.12.1
+   Compiling regex v1.12.3
+   Compiling idna_adapter v1.2.1
+   Compiling matchers v0.2.0
+   Compiling ciborium-ll v0.2.2
+   Compiling idna v1.1.0
+   Compiling itertools v0.10.5
+   Compiling biscuit-test-harness v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\biscuit-test-harness)
+   Compiling biscuit-hash v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\biscuit-hash\lib)
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.4
+   Compiling gix-path v0.12.1
+   Compiling gix-packetline v0.21.4
+   Compiling gix-date v0.15.4
+   Compiling gix-chunk v0.7.2
+   Compiling gix-features v0.48.1
+   Compiling gix-sec v0.14.1
+   Compiling gix-quote v0.7.2
+   Compiling gix-url v0.36.1
+   Compiling gix-config-value v0.18.1
+   Compiling url v2.5.8
+   Compiling gix-command v0.9.1
+   Compiling globset v0.4.18
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling gix-glob v0.26.1
+   Compiling gix-transport v0.57.1
+   Compiling criterion-plot v0.5.0
+   Compiling gix-actor v0.41.1
+   Compiling gix-hashtable v0.15.1
+   Compiling gix-tempfile v23.0.1
+   Compiling gix-commitgraph v0.37.1
+   Compiling ignore v0.4.25
+   Compiling gix-object v0.61.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling gix-lock v23.0.1
+   Compiling ciborium v0.2.2
+   Compiling gix-shallow v0.12.1
+   Compiling clap v4.6.1
+   Compiling is-terminal v0.4.17
+   Compiling plotters v0.3.7
+   Compiling indexmap v2.14.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-pack v0.71.0
+   Compiling gix-diff v0.64.0
+   Compiling gix-revision v0.46.0
+   Compiling gix-traverse v0.58.0
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling gix-refspec v0.42.0
+   Compiling test-toolkit v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\tools\test-toolkit)
+   Compiling criterion v0.5.1
+   Compiling gix-protocol v0.62.0
+   Compiling gix-config v0.57.0
+   Compiling gix-discover v0.52.0
+   Compiling gix-odb v0.81.0
+   Compiling gix v0.84.0
+   Compiling biscuit-file v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+   Compiling tree-hugger v0.1.0 (B:\coding\shazam--feat-dark-fixes\rusty-biscuit\tree-hugger\lib)
+warning: linker stdout:    Creating library B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\examples\probe_queries.lib and object B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\examples\probe_queries.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `tree-hugger` (example "probe_queries") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\tree_hugger-b88b93be844c0694.lib and object B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\tree_hugger-b88b93be844c0694.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `tree-hugger` (lib test) generated 1 warning
+warning: linker stdout:    Creating library B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-913060b4cd430f5a.lib and object B:\coding\shazam--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-913060b4cd430f5a.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `tree-hugger` (test "l1") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.23s
+   Archiving 2 binaries, 18 linked paths, and 2 standard libraries to B:\coding\shazam--feat-dark-fixes\cross-check-Shazam-47451-1790193607-build\build-tree-hugger-windows-latest-d69fee6ec3708d03.tar.zst
+    Archived 94 files to B:\coding\shazam--feat-dark-fixes\cross-check-Shazam-47451-1790193607-build\build-tree-hugger-windows-latest-d69fee6ec3708d03.tar.zst in 0.17s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 62 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `d69fee6ec3708d03` for `windows-latest` — digest `dc9cbb175db38def`, produced on `windows-latest`.
+cross-check-key: d69fee6ec3708d03
+cross-check-digest: dc9cbb175db38def
+
+Testing [1mtree-hugger[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 2 binaries and 18 linked paths to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-JDWXxL
+   Extracted 94 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-JDWXxL in 0.83s
+────────────
+ Nextest run ID 9c6ed1ee-bc26-41be-a915-903d67a8a2d8 with nextest profile: ci
+    Starting 484 tests across 2 binaries
+        PASS [   0.019s] (  1/484) tree-hugger builtins::tests::go_builtins_detected
+        PASS [   0.025s] (  2/484) tree-hugger analysis::tests::owner_symbol_index_picks_smallest_containing_span_with_equal_starts
+        PASS [   0.030s] (  3/484) tree-hugger builtins::tests::all_languages_have_builtins
+        PASS [   0.035s] (  4/484) tree-hugger builtins::tests::js_builtins_detected
+        PASS [   0.049s] (  5/484) tree-hugger cache::tests::cache_hit_info_serialization
+        PASS [   0.054s] (  6/484) tree-hugger builtins::tests::python_builtins_detected
+        PASS [   0.060s] (  7/484) tree-hugger cache::tests::cache_invalidation_reason_display
+        PASS [   0.068s] (  8/484) tree-hugger cache::tests::cache_key_changes_with_fingerprint_mutation
+        PASS [   0.076s] (  9/484) tree-hugger builtins::tests::rust_builtins_detected
+        PASS [   0.064s] ( 10/484) tree-hugger cache::tests::cache_key_is_deterministic
+        PASS [   0.066s] ( 11/484) tree-hugger cache::tests::enabled_rules_fingerprint_changes_with_order
+        PASS [   0.067s] ( 12/484) tree-hugger cache::tests::enabled_rules_fingerprint_is_deterministic
+        PASS [   0.069s] ( 13/484) tree-hugger cache::tests::in_memory_cache_hit_miss_tracking
+        PASS [   0.062s] ( 14/484) tree-hugger cache::tests::in_process_cache_tracks_hits
+        PASS [   0.117s] ( 15/484) tree-hugger analysis::tests::pipeline_marks_completed_passes
+        PASS [   0.064s] ( 16/484) tree-hugger cache::tests::pass_fingerprint_changes_with_tool_version
+        PASS [   0.064s] ( 17/484) tree-hugger cache::tests::pass_fingerprint_digest_is_deterministic
+        PASS [   0.062s] ( 18/484) tree-hugger cache::tests::persistent_cache_disabled_returns_none
+        PASS [   0.061s] ( 19/484) tree-hugger cache::tests::query_fingerprint_is_deterministic
+        PASS [   0.061s] ( 20/484) tree-hugger dead_code::tests::is_block_like_pattern
+        PASS [   0.061s] ( 21/484) tree-hugger dead_code::tests::language_terminal_detection_compiles
+        PASS [   0.059s] ( 22/484) tree-hugger dead_code::tests::rust_terminal_functions_list
+        PASS [   0.058s] ( 23/484) tree-hugger dead_code::tests::rust_terminal_macros_list
+        PASS [   0.058s] ( 24/484) tree-hugger dead_code::tests::test_find_dead_code_after_javascript_return
+        PASS [   0.058s] ( 25/484) tree-hugger dead_code::tests::test_find_dead_code_after_panic
+        PASS [   0.063s] ( 26/484) tree-hugger dead_code::tests::test_rust_panic_macro_detected_as_terminal
+        PASS [   0.064s] ( 27/484) tree-hugger dead_code::tests::test_rust_println_macro_not_terminal
+        PASS [   0.063s] ( 28/484) tree-hugger dead_code::tests::test_rust_process_exit_detected_as_terminal
+        PASS [   0.223s] ( 29/484) tree-hugger god_files::analysis::tests::analysis_unparseable_fallback_uses_physical_lines
+        PASS [   0.358s] ( 30/484) tree-hugger god_files::analysis::tests::analysis_classifies_400_as_moderate
+        PASS [   0.355s] ( 31/484) tree-hugger god_files::analysis::tests::analysis_drops_physical_moderate_effective_sub_400
+        PASS [   0.394s] ( 32/484) tree-hugger god_files::analysis::tests::analysis_drops_sub_400_effective_sloc
+        PASS [   0.161s] ( 33/484) tree-hugger god_files::analysis::tests::block_cap_truncates_at_max_blocks
+        PASS [   0.118s] ( 34/484) tree-hugger god_files::analysis::tests::block_floor_excludes_tiny_symbols
+        PASS [   0.103s] ( 35/484) tree-hugger god_files::analysis::tests::block_includes_declaration_line_at_floor
+        PASS [   0.449s] ( 36/484) tree-hugger god_files::analysis::tests::analysis_returns_stable_cached_reference_and_populates_candidates
+        PASS [   0.041s] ( 37/484) tree-hugger god_files::analysis::tests::candidate_discovery_empty_directory
+        PASS [   0.049s] ( 38/484) tree-hugger god_files::analysis::tests::candidate_discovery_excludes_sub_400_lines
+        PASS [   0.109s] ( 39/484) tree-hugger god_files::analysis::tests::block_sloc_excludes_comment_only_lines
+        PASS [   0.127s] ( 40/484) tree-hugger god_files::analysis::tests::block_ranking_sorts_descending_by_sloc
+        PASS [   0.078s] ( 41/484) tree-hugger god_files::analysis::tests::candidate_discovery_filters_non_programming_files
+        PASS [   0.050s] ( 42/484) tree-hugger god_files::analysis::tests::candidate_discovery_includes_400_lines
+        PASS [   0.048s] ( 43/484) tree-hugger god_files::analysis::tests::candidate_discovery_is_deterministic
+        PASS [   0.564s] ( 44/484) tree-hugger god_files::analysis::tests::analysis_demotes_physical_high_to_effective_moderate
+        PASS [   0.545s] ( 45/484) tree-hugger god_files::analysis::tests::analysis_sorts_by_descending_sloc_within_band
+        PASS [   0.044s] ( 46/484) tree-hugger god_files::analysis::tests::candidate_discovery_no_parse_required
+        PASS [   0.024s] ( 47/484) tree-hugger god_files::analysis::tests::comment_density_clamped
+        PASS [   0.053s] ( 48/484) tree-hugger god_files::analysis::tests::candidate_discovery_no_trailing_newline
+        PASS [   0.042s] ( 49/484) tree-hugger god_files::analysis::tests::candidates_returns_stable_cached_reference
+        PASS [   0.029s] ( 50/484) tree-hugger god_files::analysis::tests::dominated_share_uses_file_sloc_not_overlapping_blocks
+        PASS [   0.103s] ( 51/484) tree-hugger god_files::analysis::tests::enclosure_stays_near_linear_on_flat_symbols
+        PASS [   0.149s] ( 52/484) tree-hugger god_files::analysis::tests::candidate_discovery_screens_on_physical_not_effective_lines
+        PASS [   0.097s] ( 53/484) tree-hugger god_files::analysis::tests::many_members_binds_duplicate_container_names_independently
+        PASS [   0.099s] ( 54/484) tree-hugger god_files::analysis::tests::many_members_counts_direct_members_not_descendants
+        PASS [   0.085s] ( 55/484) tree-hugger god_files::analysis::tests::many_members_excludes_variables_fields_parameters
+        PASS [   0.085s] ( 56/484) tree-hugger god_files::analysis::tests::multiline_declaration_without_body_uses_declaration_span
+        PASS [   0.097s] ( 57/484) tree-hugger god_files::analysis::tests::perl_comment_only_file_is_dropped
+        PASS [   0.049s] ( 58/484) tree-hugger god_files::analysis::tests::perl_pod_excluded_from_effective_sloc
+        PASS [   0.056s] ( 59/484) tree-hugger god_files::analysis::tests::perl_pod_todo_markers_are_counted
+        PASS [   0.023s] ( 60/484) tree-hugger god_files::analysis::tests::refactor_hint_deeply_nested
+        PASS [   0.064s] ( 61/484) tree-hugger god_files::analysis::tests::physical_line_counter_counts_correctly
+        PASS [   0.305s] ( 62/484) tree-hugger god_files::analysis::tests::histogram_is_deterministic
+        PASS [   0.118s] ( 63/484) tree-hugger god_files::analysis::tests::perl_pod_only_file_is_dropped
+        PASS [   0.334s] ( 64/484) tree-hugger god_files::analysis::tests::deeply_nested_control_flow_emits_hint
+        PASS [   0.025s] ( 65/484) tree-hugger god_files::analysis::tests::refactor_hint_dominated_by_single_symbol
+        PASS [   0.029s] ( 66/484) tree-hugger god_files::analysis::tests::refactor_hint_high_coupling
+        PASS [   0.026s] ( 67/484) tree-hugger god_files::analysis::tests::refactor_hint_low_code_density
+        PASS [   0.030s] ( 68/484) tree-hugger god_files::analysis::tests::refactor_hint_many_unrelated_top_level
+        PASS [   0.042s] ( 69/484) tree-hugger god_files::analysis::tests::todo_fixme_count_in_comments
+        PASS [   0.047s] ( 70/484) tree-hugger god_files::analysis::tests::todo_fixme_counts_every_marker_in_one_comment
+        PASS [   0.064s] ( 71/484) tree-hugger god_files::analysis::tests::sloc_counts_blank_lines
+        PASS [   0.404s] ( 72/484) tree-hugger god_files::analysis::tests::comment_only_lines_excluded_for_every_language
+        PASS [   0.065s] ( 73/484) tree-hugger god_files::analysis::tests::sloc_mixed_code_comment_counts_as_code
+        PASS [   0.022s] ( 74/484) tree-hugger ignore_directives::tests::extract_comment_content_handles_various_styles
+        PASS [   0.029s] ( 75/484) tree-hugger ignore_directives::tests::lua_comment_style
+        PASS [   0.034s] ( 76/484) tree-hugger ignore_directives::tests::no_directives
+        PASS [   0.039s] ( 77/484) tree-hugger ignore_directives::tests::parse_file_ignore
+        PASS [   0.030s] ( 78/484) tree-hugger ignore_directives::tests::parse_file_ignore_all
+        PASS [   0.031s] ( 79/484) tree-hugger ignore_directives::tests::parse_line_ignore_all
+        PASS [   0.032s] ( 80/484) tree-hugger ignore_directives::tests::parse_line_ignore_specific_rules
+        PASS [   0.086s] ( 81/484) tree-hugger god_files::analysis::tests::top_level_keeps_file_scope_variables
+        PASS [   0.032s] ( 82/484) tree-hugger ignore_directives::tests::python_comment_style
+        PASS [   0.040s] ( 83/484) tree-hugger ignore_directives::tests::tree_sitter_block_comment_rust
+        PASS [   0.044s] ( 84/484) tree-hugger ignore_directives::tests::tree_sitter_file_ignore_rust
+        PASS [   0.040s] ( 85/484) tree-hugger ignore_directives::tests::tree_sitter_javascript_block_comment
+        PASS [   1.094s] ( 86/484) tree-hugger god_files::analysis::tests::analysis_classifies_1000_as_high
+        PASS [   0.045s] ( 87/484) tree-hugger ignore_directives::tests::tree_sitter_javascript_line_comment
+        PASS [   0.055s] ( 88/484) tree-hugger ignore_directives::tests::tree_sitter_line_ignore_rust
+        PASS [   0.049s] ( 89/484) tree-hugger ignore_directives::tests::tree_sitter_multiline_block_comment_rust
+        PASS [   0.040s] ( 90/484) tree-hugger ignore_directives::tests::tree_sitter_no_false_positive_string_javascript
+        PASS [   0.045s] ( 91/484) tree-hugger ignore_directives::tests::tree_sitter_no_false_positive_string_python
+        PASS [   1.096s] ( 92/484) tree-hugger god_files::analysis::tests::analysis_sorts_high_before_moderate
+        PASS [   0.055s] ( 93/484) tree-hugger ignore_directives::tests::tree_sitter_no_false_positive_string_rust
+        PASS [   0.047s] ( 94/484) tree-hugger ignore_directives::tests::tree_sitter_python_comment
+        PASS [   0.040s] ( 95/484) tree-hugger queries::compatibility::tests::eq_is_native
+        PASS [   0.039s] ( 96/484) tree-hugger queries::compatibility::tests::finds_hook_predicates_in_query_text
+        PASS [   0.225s] ( 97/484) tree-hugger god_files::analysis::tests::top_level_excludes_locals_and_parameters
+        PASS [   0.044s] ( 98/484) tree-hugger queries::compatibility::tests::finds_unsupported_in_query_text
+        PASS [   0.461s] ( 99/484) tree-hugger god_files::analysis::tests::nesting_depth_counts_control_flow_not_symbols
+        PASS [   0.041s] (100/484) tree-hugger queries::compatibility::tests::has_parent_requires_hook
+        PASS [   0.044s] (101/484) tree-hugger queries::compatibility::tests::make_range_is_unsupported
+        PASS [   1.181s] (102/484) tree-hugger god_files::analysis::tests::analysis_classifies_999_as_moderate
+        PASS [   0.047s] (103/484) tree-hugger queries::compatibility::tests::no_unsupported_in_simple_query
+        PASS [   0.052s] (104/484) tree-hugger queries::compatibility::tests::requires_hook_list_is_nonempty
+        PASS [   0.057s] (105/484) tree-hugger queries::compatibility::tests::status_display
+        PASS [   0.055s] (106/484) tree-hugger queries::compatibility::tests::unsupported_list_is_nonempty
+        PASS [   0.058s] (107/484) tree-hugger queries::drift::tests::all_drift_includes_locals
+        PASS [   0.063s] (108/484) tree-hugger queries::drift::tests::drift_when_revision_differs
+        PASS [   0.067s] (109/484) tree-hugger queries::drift::tests::drift_item_display
+        PASS [   0.072s] (110/484) tree-hugger queries::drift::tests::expected_revisions_include_nvim
+        PASS [   0.064s] (111/484) tree-hugger queries::drift::tests::no_drift_when_revision_matches
+        PASS [   0.070s] (112/484) tree-hugger queries::drift::tests::original_queries_have_no_drift
+        PASS [   0.075s] (113/484) tree-hugger queries::drift::tests::summarize_empty_reports
+        PASS [   0.072s] (114/484) tree-hugger queries::drift::tests::summarize_no_actionable
+        PASS [   0.069s] (115/484) tree-hugger queries::drift::tests::summarize_with_actionable
+        PASS [   0.069s] (116/484) tree-hugger queries::inventory::tests::highlights_suite_is_not_reused
+        PASS [   0.072s] (117/484) tree-hugger queries::inventory::tests::inventory_has_all_languages
+        PASS [   0.068s] (118/484) tree-hugger queries::inventory::tests::language_inventory_counts
+        PASS [   0.071s] (119/484) tree-hugger queries::inventory::tests::locals_suite_has_reused_captures
+        PASS [   0.071s] (120/484) tree-hugger queries::inventory::tests::reused_captures_list_is_non_empty
+        PASS [   0.075s] (121/484) tree-hugger queries::inventory::tests::suite_for_kind_lint_is_none
+        PASS [   0.074s] (122/484) tree-hugger queries::inventory::tests::suite_for_kind_locals
+        PASS [   0.074s] (123/484) tree-hugger queries::provenance::tests::all_provenance_includes_rust_locals
+        PASS [   0.072s] (124/484) tree-hugger queries::provenance::tests::non_local_kinds_return_none_for_vendor
+        PASS [   0.020s] (125/484) tree-hugger queries::tests::is_query_empty_detects_empty_string
+        PASS [   0.074s] (126/484) tree-hugger queries::provenance::tests::translation_status_display
+        PASS [   0.071s] (127/484) tree-hugger queries::provenance::tests::vendor_provenance_has_expected_fields
+        PASS [   0.068s] (128/484) tree-hugger queries::tests::is_query_empty_detects_comment_only
+        PASS [   0.099s] (129/484) tree-hugger queries::tests::compiles_javascript_locals_query_with_overlay
+        PASS [   0.126s] (130/484) tree-hugger queries::provenance::tests::overlay_provenance_is_original
+        PASS [   0.092s] (131/484) tree-hugger queries::tests::compiles_typescript_references_query
+        PASS [   0.070s] (132/484) tree-hugger queries::tests::is_query_empty_detects_mixed_comments_and_whitespace
+        PASS [   0.070s] (133/484) tree-hugger queries::tests::is_query_empty_detects_whitespace_only
+        PASS [   0.108s] (134/484) tree-hugger queries::tests::compiles_typescript_locals_query_with_overlay
+        PASS [   0.069s] (135/484) tree-hugger queries::tests::is_query_empty_rejects_actual_query
+        PASS [   0.068s] (136/484) tree-hugger queries::tests::is_query_empty_rejects_query_with_leading_comments
+        PASS [   0.068s] (137/484) tree-hugger queries::tests::split_query_modelines_supports_inherits_and_extends
+        PASS [   0.047s] (138/484) tree-hugger rule_registry::tests::allow_demotes_to_info
+        PASS [   0.050s] (139/484) tree-hugger rule_registry::tests::category_selector_matches
+        PASS [   0.050s] (140/484) tree-hugger rule_registry::tests::deny_promotes_to_error
+        PASS [   0.053s] (141/484) tree-hugger rule_registry::tests::registry_has_builtin_rules
+        PASS [   0.061s] (142/484) tree-hugger rule_registry::tests::experimental_rules_disabled_by_default
+        PASS [   0.063s] (143/484) tree-hugger rule_registry::tests::registry_lookup_by_alias
+        PASS [   0.070s] (144/484) tree-hugger rule_registry::tests::rule_selector_parses
+        PASS [   0.073s] (145/484) tree-hugger rule_registry::tests::strict_promotes_warning_to_error
+        PASS [   0.075s] (146/484) tree-hugger rule_registry::tests::syntax_rule_is_error
+        PASS [   0.075s] (147/484) tree-hugger shared::schema_v2::tests::stable_key_and_id_are_deterministic
+        PASS [   0.081s] (148/484) tree-hugger shared::schema_v2::tests::symbol_record_round_trip_via_adapter
+        PASS [   0.082s] (149/484) tree-hugger shared::schema_v2::tests::symbol_record_serialization_round_trip
+        PASS [   0.078s] (150/484) tree-hugger::l1 adapter_tests::test_adapter_config_default
+        PASS [   0.074s] (151/484) tree-hugger::l1 adapter_tests::test_adapter_config_serialization
+        PASS [   0.071s] (152/484) tree-hugger::l1 adapter_tests::test_adapter_config_with_values
+        PASS [   0.016s] (153/484) tree-hugger::l1 adapter_tests::test_map_severity
+        PASS [   0.068s] (154/484) tree-hugger::l1 adapter_tests::test_adapter_error_unsupported_language
+        PASS [   0.064s] (155/484) tree-hugger::l1 adapter_tests::test_adapter_metadata_default
+        PASS [   0.065s] (156/484) tree-hugger::l1 adapter_tests::test_adapter_result_serialization
+        PASS [   0.064s] (157/484) tree-hugger::l1 adapter_tests::test_adapter_result_success
+        PASS [   0.059s] (158/484) tree-hugger::l1 adapter_tests::test_external_diagnostic_construction
+        PASS [   0.055s] (159/484) tree-hugger::l1 adapter_tests::test_map_category
+        PASS [   0.114s] (160/484) tree-hugger::l1 adapter_tests::test_adapter_error_display
+        PASS [   0.060s] (161/484) tree-hugger::l1 adapter_tests::test_mixed_language_adapter_selection
+        PASS [   0.063s] (162/484) tree-hugger::l1 adapter_tests::test_oxlint_adapter_metadata
+        PASS [   0.066s] (163/484) tree-hugger::l1 adapter_tests::test_oxlint_adapter_missing_tool_non_strict
+        PASS [   0.067s] (164/484) tree-hugger::l1 adapter_tests::test_oxlint_adapter_missing_tool_strict
+        PASS [   0.064s] (165/484) tree-hugger::l1 adapter_tests::test_oxlint_adapter_unsupported_language
+        PASS [   0.060s] (166/484) tree-hugger::l1 adapter_tests::test_oxlint_json_normalization
+        PASS [   0.059s] (167/484) tree-hugger::l1 cache_tests::test_cache_config_default
+        PASS [   0.059s] (168/484) tree-hugger::l1 cache_tests::test_cache_config_with_config
+        PASS [   0.061s] (169/484) tree-hugger::l1 cache_tests::test_cache_hit_info_hit
+        PASS [   0.062s] (170/484) tree-hugger::l1 cache_tests::test_cache_hit_info_miss
+        PASS [   0.065s] (171/484) tree-hugger::l1 cache_tests::test_cache_hit_info_serialization
+        PASS [   0.062s] (172/484) tree-hugger::l1 cache_tests::test_cache_invalidation_reason_display
+        PASS [   0.066s] (173/484) tree-hugger::l1 cache_tests::test_cache_unit_enum_variants
+        PASS [   0.068s] (174/484) tree-hugger::l1 cache_tests::test_enabled_rules_fingerprint_deterministic
+        PASS [   0.075s] (175/484) tree-hugger::l1 cache_tests::test_enabled_rules_fingerprint_order_sensitive
+        PASS [   0.076s] (176/484) tree-hugger::l1 cache_tests::test_in_process_cache_capacity_eviction
+        PASS [   0.078s] (177/484) tree-hugger::l1 cache_tests::test_in_process_cache_clear
+        PASS [   0.073s] (178/484) tree-hugger::l1 cache_tests::test_in_process_cache_hit_history
+        PASS [   0.072s] (179/484) tree-hugger::l1 cache_tests::test_in_process_cache_parse_tree_hit_miss
+        PASS [   0.071s] (180/484) tree-hugger::l1 cache_tests::test_in_process_cache_stats_tracking
+        PASS [   0.065s] (181/484) tree-hugger::l1 cache_tests::test_in_process_cache_symbol_index_hit_miss
+        PASS [   0.061s] (182/484) tree-hugger::l1 cache_tests::test_pass_fingerprint_changes_with_source
+        PASS [   0.063s] (183/484) tree-hugger::l1 cache_tests::test_pass_fingerprint_changes_with_tool_version
+        PASS [   0.059s] (184/484) tree-hugger::l1 cache_tests::test_pass_fingerprint_digest_is_stable
+        PASS [   0.159s] (185/484) tree-hugger::l1 cache_tests::test_cache_invalidates_on_source_edit
+        PASS [   0.060s] (186/484) tree-hugger::l1 cache_tests::test_persistent_cache_disabled_returns_none
+        PASS [   0.062s] (187/484) tree-hugger::l1 cache_tests::test_persistent_cache_invalidate_all
+        PASS [   0.062s] (188/484) tree-hugger::l1 cache_tests::test_persistent_cache_invalidates_entry
+        PASS [   0.070s] (189/484) tree-hugger::l1 cache_tests::test_persistent_cache_recomputes_on_corrupt_entry
+        PASS [   0.058s] (190/484) tree-hugger::l1 cache_tests::test_query_fingerprint_deterministic
+        PASS [   0.070s] (191/484) tree-hugger::l1 cache_tests::test_persistent_cache_roundtrip
+        PASS [   0.059s] (192/484) tree-hugger::l1 cache_tests::test_query_fingerprint_different_queries
+        PASS [   0.057s] (193/484) tree-hugger::l1 corpus_tests::test_compact_diagnostic_text
+        PASS [   0.061s] (194/484) tree-hugger::l1 corpus_tests::test_compact_diagnostic_text_truncates_long_messages
+        PASS [   0.061s] (195/484) tree-hugger::l1 corpus_tests::test_corpus_diagnostic_from_diagnostic
+        PASS [   0.060s] (196/484) tree-hugger::l1 corpus_tests::test_corpus_diagnostic_path_redaction
+        PASS [   0.063s] (197/484) tree-hugger::l1 corpus_tests::test_corpus_result_serialization
+        PASS [   0.055s] (198/484) tree-hugger::l1 corpus_tests::test_corpus_tier_deserialization
+        PASS [   0.057s] (199/484) tree-hugger::l1 corpus_tests::test_corpus_tier_serialization
+        PASS [   0.060s] (200/484) tree-hugger::l1 corpus_tests::test_manifest_builder
+        PASS [   0.127s] (201/484) tree-hugger::l1 cache_tests::test_tree_file_symbol_index_can_be_cached
+        PASS [   0.083s] (202/484) tree-hugger::l1 corpus_tests::test_manifest_items_for_tier
+        PASS [   0.078s] (203/484) tree-hugger::l1 corpus_tests::test_manifest_new
+        PASS [   0.079s] (204/484) tree-hugger::l1 corpus_tests::test_manifest_yaml_roundtrip
+        PASS [   0.076s] (205/484) tree-hugger::l1 corpus_tests::test_normalize_diagnostics_sorts_and_dedupes
+        PASS [   0.078s] (206/484) tree-hugger::l1 corpus_tests::test_oracle_classification_display
+        PASS [   0.077s] (207/484) tree-hugger::l1 corpus_tests::test_oracle_classification_roundtrip
+        PASS [   0.074s] (208/484) tree-hugger::l1 corpus_tests::test_oracle_config
+        PASS [   0.077s] (209/484) tree-hugger::l1 corpus_tests::test_redact_paths_in_message
+        PASS [   0.078s] (210/484) tree-hugger::l1 corpus_tests::test_redact_snapshot_text_normalizes_line_endings
+        PASS [   0.065s] (211/484) tree-hugger::l1 corpus_tests::test_redact_snapshot_text_redacts_paths
+        PASS [   0.066s] (212/484) tree-hugger::l1 corpus_tests::test_redact_snapshot_text_redacts_temp
+        PASS [   0.066s] (213/484) tree-hugger::l1 corpus_tests::test_run_benchmark_corpus
+        PASS [   0.066s] (214/484) tree-hugger::l1 corpus_tests::test_run_expanded_corpus
+        PASS [   0.071s] (215/484) tree-hugger::l1 corpus_tests::test_run_smoke_corpus
+        PASS [   0.067s] (216/484) tree-hugger::l1 corpus_tests::test_sort_lines
+        PASS [   0.070s] (217/484) tree-hugger::l1 corpus_tests::test_strip_ansi_codes
+        PASS [   0.070s] (218/484) tree-hugger::l1 corpus_tests::test_strip_ansi_codes_no_codes
+        PASS [   0.072s] (219/484) tree-hugger::l1 corpus_tests::test_threshold_deserialization
+        PASS [   0.067s] (220/484) tree-hugger::l1 corpus_tests::test_threshold_report_budget_threshold
+        PASS [   0.067s] (221/484) tree-hugger::l1 corpus_tests::test_threshold_report_experimental_unlimited
+        PASS [   0.064s] (222/484) tree-hugger::l1 corpus_tests::test_threshold_report_multiple_rules
+        PASS [   0.064s] (223/484) tree-hugger::l1 corpus_tests::test_threshold_report_new_is_clean
+        PASS [   0.065s] (224/484) tree-hugger::l1 corpus_tests::test_threshold_report_zero_threshold
+        PASS [   0.064s] (225/484) tree-hugger::l1 corpus_tests::test_threshold_serialization
+        PASS [   0.068s] (226/484) tree-hugger::l1 lint_diagnostics::test_diagnostic_kind_display
+        PASS [   0.109s] (227/484) tree-hugger::l1 lint_diagnostics::test_go_fmt_println_detected
+        PASS [   0.156s] (228/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_panic_macro
+        PASS [   0.160s] (229/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_process_exit
+        PASS [   0.168s] (230/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_std_process_exit
+        PASS [   0.161s] (231/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_unimplemented_macro
+        PASS [   0.174s] (232/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_todo_macro
+        PASS [   0.165s] (233/484) tree-hugger::l1 lint_diagnostics::test_dead_code_after_rust_unreachable_macro
+        PASS [   0.166s] (234/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_all
+        PASS [   0.166s] (235/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_block_comment_javascript
+        PASS [   0.128s] (236/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_block_comment_rust
+        PASS [   0.107s] (237/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_file
+        PASS [   0.124s] (238/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_in_string_literal_not_processed
+        PASS [   0.115s] (239/484) tree-hugger::l1 lint_diagnostics::test_ignore_directive_line
+        PASS [   0.113s] (240/484) tree-hugger::l1 lint_diagnostics::test_import_used_only_in_type_position_not_flagged
+        PASS [   0.120s] (241/484) tree-hugger::l1 lint_diagnostics::test_javascript_console_log_detected
+        PASS [   0.119s] (242/484) tree-hugger::l1 lint_diagnostics::test_javascript_destructuring_not_undefined
+        PASS [   0.136s] (243/484) tree-hugger::l1 lint_diagnostics::test_javascript_import_declaration_not_undefined
+        PASS [   0.117s] (244/484) tree-hugger::l1 lint_diagnostics::test_javascript_lint_debugger_statement
+        PASS [   0.111s] (245/484) tree-hugger::l1 lint_diagnostics::test_lint_source_context
+        PASS [   0.126s] (246/484) tree-hugger::l1 lint_diagnostics::test_javascript_lint_eval_call
+        PASS [   0.071s] (247/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_go_defer
+        PASS [   0.108s] (248/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dbg_macro_dead_code
+        PASS [   0.125s] (249/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_in_closure
+        PASS [   0.115s] (250/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_in_conditional
+        PASS [   0.108s] (251/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_in_loop
+        PASS [   0.121s] (252/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_javascript_conditional
+        PASS [   0.111s] (253/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_rust_match_arm
+        PASS [   0.111s] (254/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_format_macro
+        PASS [   0.125s] (255/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_eval_identifier
+        PASS [   0.126s] (256/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_println_macro
+        PASS [   0.121s] (257/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_regular_function_call
+        PASS [   0.164s] (258/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_dead_code_python_try_finally
+        PASS [   0.167s] (259/484) tree-hugger::l1 lint_diagnostics::test_no_false_positive_unwrap_or
+        PASS [   0.162s] (260/484) tree-hugger::l1 lint_diagnostics::test_pub_use_reexport_not_flagged_as_unused_import
+        PASS [   0.185s] (261/484) tree-hugger::l1 lint_diagnostics::test_python_decorator_not_undefined
+        PASS [   0.166s] (262/484) tree-hugger::l1 lint_diagnostics::test_python_keyword_argument_label_not_undefined
+        PASS [   0.175s] (263/484) tree-hugger::l1 lint_diagnostics::test_python_lint_breakpoint_call
+        PASS [   0.202s] (264/484) tree-hugger::l1 lint_diagnostics::test_python_import_declaration_not_undefined
+        PASS [   0.263s] (265/484) tree-hugger::l1 lint_diagnostics::test_php_lint_eval_call
+        PASS [   0.195s] (266/484) tree-hugger::l1 lint_diagnostics::test_python_lint_eval_call
+        PASS [   0.186s] (267/484) tree-hugger::l1 lint_diagnostics::test_python_print_detected
+        PASS [   0.197s] (268/484) tree-hugger::l1 lint_diagnostics::test_python_lint_exec_call
+        PASS [   0.118s] (269/484) tree-hugger::l1 lint_diagnostics::test_rust_import_declaration_not_undefined
+        PASS [   0.123s] (270/484) tree-hugger::l1 lint_diagnostics::test_rust_for_loop_variable_not_undefined
+        PASS [   0.105s] (271/484) tree-hugger::l1 lint_diagnostics::test_rust_lint_dbg_macro
+        PASS [   0.111s] (272/484) tree-hugger::l1 lint_diagnostics::test_rust_lint_expect_call
+        PASS [   0.107s] (273/484) tree-hugger::l1 lint_diagnostics::test_rust_lint_unwrap_call
+        PASS [   0.110s] (274/484) tree-hugger::l1 lint_diagnostics::test_rust_pattern_binding_not_undefined
+        PASS [   0.107s] (275/484) tree-hugger::l1 lint_diagnostics::test_rust_struct_field_not_undefined
+        PASS [   0.117s] (276/484) tree-hugger::l1 lint_diagnostics::test_semantic_unused_import_go
+        PASS [   0.128s] (277/484) tree-hugger::l1 lint_diagnostics::test_semantic_unused_symbol_rust
+        PASS [   0.140s] (278/484) tree-hugger::l1 lint_diagnostics::test_semantic_undefined_symbol_rust
+        PASS [   0.161s] (279/484) tree-hugger::l1 lint_diagnostics::test_semantic_dead_code_rust
+        PASS [   0.063s] (280/484) tree-hugger::l1 lint_diagnostics::test_syntax_diagnostic_has_context
+        PASS [   0.090s] (281/484) tree-hugger::l1 lint_diagnostics::test_syntax_diagnostic_context_underline_position
+        PASS [   0.069s] (282/484) tree-hugger::l1 lint_diagnostics::test_syntax_diagnostics_fast_path_many_languages
+        PASS [   0.075s] (283/484) tree-hugger::l1 lint_diagnostics::test_syntax_diagnostics_fast_path_valid_file
+        PASS [   0.135s] (284/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_defined_import_not_reported
+        PASS [   0.137s] (285/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_capital_self_not_reported
+        PASS [   0.108s] (286/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_rust_reports_warning
+        PASS [   0.120s] (287/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_javascript_this_not_reported
+        PASS [   0.245s] (288/484) tree-hugger::l1 lint_diagnostics::test_typescript_lint_debugger_statement
+        PASS [   0.409s] (289/484) tree-hugger::l1 lint_diagnostics::test_swift_enum_case_not_undefined
+        PASS [   0.114s] (290/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_single_letter_not_reported
+        PASS [   0.128s] (291/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_self_not_reported
+        PASS [   0.406s] (292/484) tree-hugger::l1 lint_diagnostics::test_swift_function_parameter_not_undefined
+        PASS [   0.397s] (293/484) tree-hugger::l1 lint_diagnostics::test_swift_property_not_undefined
+        PASS [   0.128s] (294/484) tree-hugger::l1 lint_diagnostics::test_undefined_module_super_not_reported
+        PASS [   0.384s] (295/484) tree-hugger::l1 lint_diagnostics::test_swift_struct_field_not_undefined
+        PASS [   0.129s] (296/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_combines_lint_and_syntax
+        PASS [   0.403s] (297/484) tree-hugger::l1 lint_diagnostics::test_swift_protocol_parameter_not_undefined
+        PASS [   0.036s] (298/484) tree-hugger::l1 phase1_diagnostics::test_registry_default_severity
+        PASS [   0.104s] (299/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_empty_file
+        PASS [   0.047s] (300/484) tree-hugger::l1 phase1_diagnostics::test_registry_experimental_rules_disabled
+        PASS [   0.084s] (301/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_lint_kind
+        PASS [   0.037s] (302/484) tree-hugger::l1 phase1_diagnostics::test_registry_lookup_by_alias
+        PASS [   0.023s] (303/484) tree-hugger::l1 phase1_diagnostics::test_registry_lookup_by_id
+        PASS [   0.018s] (304/484) tree-hugger::l1 phase1_diagnostics::test_rule_selector_parse_all
+        PASS [   0.093s] (305/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_preserves_context
+        PASS [   0.032s] (306/484) tree-hugger::l1 phase1_diagnostics::test_registry_validation_passes
+        PASS [   0.031s] (307/484) tree-hugger::l1 phase1_diagnostics::test_rule_selector_parse_category
+        PASS [   0.035s] (308/484) tree-hugger::l1 phase1_diagnostics::test_rule_selector_parse_rule_id
+        PASS [   0.101s] (309/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_syntax_kind
+        PASS [   0.035s] (310/484) tree-hugger::l1 phase1_diagnostics::test_rule_selector_unknown_category_returns_none
+        PASS [   0.110s] (311/484) tree-hugger::l1 lint_diagnostics::test_unified_diagnostics_semantic_kind
+        PASS [   0.109s] (312/484) tree-hugger::l1 phase1_diagnostics::test_lint_diagnostic_has_metadata_after_policy
+        PASS [   0.110s] (313/484) tree-hugger::l1 phase1_diagnostics::test_experimental_semantics_does_not_affect_pattern_rules
+        PASS [   0.040s] (314/484) tree-hugger::l1 phase6_neovim_query_reuse::actionable_drift_when_revision_differs
+        PASS [   0.046s] (315/484) tree-hugger::l1 phase6_neovim_query_reuse::bulk_drift_check_covers_all_vendored
+        PASS [   0.075s] (316/484) tree-hugger::l1 phase1_diagnostics::test_unused_import_detected_by_library_layer_but_off_by_default
+        PASS [   0.049s] (317/484) tree-hugger::l1 phase6_neovim_query_reuse::capture_parity_for_javascript
+        PASS [   0.053s] (318/484) tree-hugger::l1 phase6_neovim_query_reuse::capture_parity_for_python
+        PASS [   0.060s] (319/484) tree-hugger::l1 phase6_neovim_query_reuse::capture_parity_for_rust
+        PASS [   0.103s] (320/484) tree-hugger::l1 phase1_diagnostics::test_undefined_symbol_disabled_by_default
+        PASS [   0.044s] (321/484) tree-hugger::l1 phase6_neovim_query_reuse::capture_parity_for_typescript
+        PASS [   0.106s] (322/484) tree-hugger::l1 phase1_diagnostics::test_undefined_symbol_enabled_with_experimental_semantics
+        PASS [   0.038s] (323/484) tree-hugger::l1 phase6_neovim_query_reuse::drift_summary_format
+        PASS [   0.033s] (324/484) tree-hugger::l1 phase6_neovim_query_reuse::full_query_audit_workflow
+        PASS [   0.040s] (325/484) tree-hugger::l1 phase6_neovim_query_reuse::empty_drift_summary
+        PASS [   0.116s] (326/484) tree-hugger::l1 phase1_diagnostics::test_unused_symbol_disabled_by_default
+        PASS [   0.041s] (327/484) tree-hugger::l1 phase6_neovim_query_reuse::hook_predicates_are_found
+        PASS [   0.041s] (328/484) tree-hugger::l1 phase6_neovim_query_reuse::lint_queries_have_local_provenance
+        PASS [   0.043s] (329/484) tree-hugger::l1 phase6_neovim_query_reuse::native_predicates_are_supported
+        PASS [   0.044s] (330/484) tree-hugger::l1 phase6_neovim_query_reuse::no_actionable_drift_when_revision_matches
+        PASS [   0.045s] (331/484) tree-hugger::l1 phase6_neovim_query_reuse::no_unsupported_predicates_in_overlay_queries
+        PASS [   0.050s] (332/484) tree-hugger::l1 phase6_neovim_query_reuse::no_unsupported_predicates_in_vendored_queries
+        PASS [   0.051s] (333/484) tree-hugger::l1 phase6_neovim_query_reuse::original_queries_have_no_drift
+        PASS [   0.051s] (334/484) tree-hugger::l1 phase6_neovim_query_reuse::provenance_fields_are_populated
+        PASS [   0.049s] (335/484) tree-hugger::l1 phase6_neovim_query_reuse::references_queries_have_local_provenance
+        PASS [   0.056s] (336/484) tree-hugger::l1 phase6_neovim_query_reuse::simple_query_has_no_issues
+        PASS [   0.055s] (337/484) tree-hugger::l1 phase6_neovim_query_reuse::suite_for_kind_mapping
+        PASS [   0.056s] (338/484) tree-hugger::l1 phase6_neovim_query_reuse::unsupported_predicates_are_found
+        PASS [   0.056s] (339/484) tree-hugger::l1 phase6_neovim_query_reuse::up_to_date_drift_summary
+        PASS [   0.055s] (340/484) tree-hugger::l1 phase6_neovim_query_reuse::vendor_queries_have_nvim_provenance
+        PASS [   0.066s] (341/484) tree-hugger::l1 query_compile::test_bash_comments_query_compiles
+        PASS [   0.068s] (342/484) tree-hugger::l1 query_compile::test_bash_lint_query_compiles
+        PASS [   0.063s] (343/484) tree-hugger::l1 query_compile::test_c_comments_query_compiles
+        PASS [   0.063s] (344/484) tree-hugger::l1 query_compile::test_c_lint_query_compiles
+        PASS [   0.076s] (345/484) tree-hugger::l1 query_compile::test_cpp_comments_query_compiles
+        PASS [   0.077s] (346/484) tree-hugger::l1 query_compile::test_cpp_lint_query_compiles
+        PASS [   0.046s] (347/484) tree-hugger::l1 query_compile::test_go_comments_query_compiles
+        PASS [   0.047s] (348/484) tree-hugger::l1 query_compile::test_java_comments_query_compiles
+        PASS [   0.086s] (349/484) tree-hugger::l1 query_compile::test_csharp_comments_query_compiles
+        PASS [   0.087s] (350/484) tree-hugger::l1 query_compile::test_csharp_lint_query_compiles
+        PASS [   0.054s] (351/484) tree-hugger::l1 query_compile::test_go_lint_query_compiles
+        PASS [   0.056s] (352/484) tree-hugger::l1 query_compile::test_java_lint_query_compiles
+        PASS [   0.044s] (353/484) tree-hugger::l1 query_compile::test_javascript_comments_query_compiles
+        PASS [   0.046s] (354/484) tree-hugger::l1 query_compile::test_lua_comments_query_compiles
+        PASS [   0.054s] (355/484) tree-hugger::l1 query_compile::test_javascript_lint_query_compiles
+        PASS [   0.044s] (356/484) tree-hugger::l1 query_compile::test_lua_lint_query_compiles
+        PASS [   0.067s] (357/484) tree-hugger::l1 query_compile::test_perl_comments_query_compiles
+        PASS [   0.063s] (358/484) tree-hugger::l1 query_compile::test_php_comments_query_compiles
+        PASS [   0.066s] (359/484) tree-hugger::l1 query_compile::test_perl_lint_query_compiles
+        PASS [   0.069s] (360/484) tree-hugger::l1 query_compile::test_php_lint_query_compiles
+        PASS [   0.062s] (361/484) tree-hugger::l1 query_compile::test_python_comments_query_compiles
+        PASS [   0.061s] (362/484) tree-hugger::l1 query_compile::test_python_lint_query_compiles
+        PASS [   0.060s] (363/484) tree-hugger::l1 query_compile::test_rust_comments_query_compiles
+        PASS [   0.074s] (364/484) tree-hugger::l1 query_compile::test_rust_lint_query_compiles
+        PASS [   0.072s] (365/484) tree-hugger::l1 query_compile::test_scala_comments_query_compiles
+        PASS [   0.077s] (366/484) tree-hugger::l1 query_compile::test_scala_lint_query_compiles
+        PASS [   0.064s] (367/484) tree-hugger::l1 query_compile::test_typescript_comments_query_compiles
+        PASS [   0.078s] (368/484) tree-hugger::l1 query_compile::test_swift_comments_query_compiles
+        PASS [   0.071s] (369/484) tree-hugger::l1 query_compile::test_swift_lint_query_compiles
+        PASS [   0.027s] (370/484) tree-hugger::l1 resolver_tests::test_diagnostic_confidence_ordering
+        PASS [   0.024s] (371/484) tree-hugger::l1 resolver_tests::test_project_context_new
+        PASS [   0.077s] (372/484) tree-hugger::l1 query_compile::test_typescript_lint_query_compiles
+        PASS [   0.032s] (373/484) tree-hugger::l1 resolver_tests::test_project_context_serialization
+        PASS [   0.037s] (374/484) tree-hugger::l1 resolver_tests::test_project_context_with_fields
+        PASS [   0.039s] (375/484) tree-hugger::l1 resolver_tests::test_resolver_error_missing_project_context
+        PASS [   0.095s] (376/484) tree-hugger::l1 query_compile::test_zsh_comments_query_compiles
+        PASS [   0.082s] (377/484) tree-hugger::l1 query_compile::test_zsh_lint_query_compiles
+        PASS [   0.036s] (378/484) tree-hugger::l1 resolver_tests::test_resolver_error_not_available
+        PASS [   0.037s] (379/484) tree-hugger::l1 resolver_tests::test_resolver_error_resolution_failed
+        PASS [   0.044s] (380/484) tree-hugger::l1 resolver_tests::test_resolver_error_version_incompatible
+        PASS [   0.043s] (381/484) tree-hugger::l1 resolver_tests::test_resolver_metadata_defaults
+        PASS [   0.045s] (382/484) tree-hugger::l1 resolver_tests::test_resolver_metadata_serialization
+        PASS [   0.045s] (383/484) tree-hugger::l1 resolver_tests::test_resolver_output_default
+        PASS [   0.050s] (384/484) tree-hugger::l1 resolver_tests::test_resolver_output_serialization
+        PASS [   0.055s] (385/484) tree-hugger::l1 resolver_tests::test_resolver_scope_variants
+        PASS [   0.079s] (386/484) tree-hugger::l1 tree_file::c_enum_not_duplicated
+        PASS [   0.106s] (387/484) tree-hugger::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.094s] (388/484) tree-hugger::l1 tree_file::captures_exports_for_javascript
+        PASS [   0.092s] (389/484) tree-hugger::l1 tree_file::captures_imports_for_javascript
+        PASS [   0.087s] (390/484) tree-hugger::l1 tree_file::captures_method_container_context
+        PASS [   0.080s] (391/484) tree-hugger::l1 tree_file::dead_code_is_empty_for_clean_file
+        PASS [   0.059s] (392/484) tree-hugger::l1 tree_file::dead_code_returns_unreachable_blocks
+        PASS [   0.115s] (393/484) tree-hugger::l1 tree_file::captures_typescript_class_symbol
+        PASS [   0.040s] (394/484) tree-hugger::l1 tree_file::detects_tsx_as_typescript
+        PASS [   0.056s] (395/484) tree-hugger::l1 tree_file::detects_java_static_methods
+        PASS [   0.079s] (396/484) tree-hugger::l1 tree_file::detects_csharp_static_methods
+        PASS [   0.068s] (397/484) tree-hugger::l1 tree_file::distinguishes_c_types
+        PASS [   0.042s] (398/484) tree-hugger::l1 tree_file::distinguishes_go_types
+        PASS [   0.049s] (399/484) tree-hugger::l1 tree_file::distinguishes_java_types
+        PASS [   0.076s] (400/484) tree-hugger::l1 tree_file::distinguishes_csharp_types
+        PASS [   0.039s] (401/484) tree-hugger::l1 tree_file::distinguishes_rust_struct_from_enum
+        PASS [   0.201s] (402/484) tree-hugger::l1 tree_file::cpp_enum_not_duplicated
+        PASS [   0.052s] (403/484) tree-hugger::l1 tree_file::distinguishes_typescript_interface_from_enum
+        PASS [   0.098s] (404/484) tree-hugger::l1 tree_file::distinguishes_php_types
+        PASS [   0.088s] (405/484) tree-hugger::l1 tree_file::distinguishes_scala_types
+        PASS [   0.090s] (406/484) tree-hugger::l1 tree_file::distinguishes_swift_types
+        PASS [   0.159s] (407/484) tree-hugger::l1 tree_file::distinguishes_cpp_types
+        PASS [   0.056s] (408/484) tree-hugger::l1 tree_file::emits_symbol_records_v2
+        PASS [   0.049s] (409/484) tree-hugger::l1 tree_file::extracts_c_function_signature
+        PASS [   0.050s] (410/484) tree-hugger::l1 tree_file::extracts_c_type_metadata
+        PASS [   0.090s] (411/484) tree-hugger::l1 tree_file::emits_symbol_index_v2_with_completed_passes
+        PASS [   0.027s] (412/484) tree-hugger::l1 tree_file::extracts_go_aliased_import
+        PASS [   0.026s] (413/484) tree-hugger::l1 tree_file::extracts_go_function_signature
+        PASS [   0.033s] (414/484) tree-hugger::l1 tree_file::extracts_go_doc_comments
+        PASS [   0.059s] (415/484) tree-hugger::l1 tree_file::extracts_csharp_function_signature
+        PASS [   0.050s] (416/484) tree-hugger::l1 tree_file::extracts_csharp_type_metadata
+        PASS [   0.024s] (417/484) tree-hugger::l1 tree_file::extracts_go_generic_types
+        PASS [   0.024s] (418/484) tree-hugger::l1 tree_file::extracts_go_import_source
+        PASS [   0.142s] (419/484) tree-hugger::l1 tree_file::does_not_report_typescript_class_declaration_as_undefined_symbol
+        PASS [   0.030s] (420/484) tree-hugger::l1 tree_file::extracts_java_function_signature
+        PASS [   0.035s] (421/484) tree-hugger::l1 tree_file::extracts_java_import_source
+        PASS [   0.042s] (422/484) tree-hugger::l1 tree_file::extracts_java_type_metadata
+        PASS [   0.044s] (423/484) tree-hugger::l1 tree_file::extracts_java_wildcard_import
+        PASS [   0.142s] (424/484) tree-hugger::l1 tree_file::extracts_cpp_type_metadata
+        PASS [   0.067s] (425/484) tree-hugger::l1 tree_file::extracts_javascript_import_source
+        PASS [   0.068s] (426/484) tree-hugger::l1 tree_file::extracts_javascript_arrow_function_signatures
+        PASS [   0.159s] (427/484) tree-hugger::l1 tree_file::extracts_cpp_function_signature
+        PASS [   0.089s] (428/484) tree-hugger::l1 tree_file::extracts_multiple_imports_from_same_source
+        PASS [   0.080s] (429/484) tree-hugger::l1 tree_file::extracts_php_function_signature
+        PASS [   0.059s] (430/484) tree-hugger::l1 tree_file::extracts_python_aliased_import
+        PASS [   0.093s] (431/484) tree-hugger::l1 tree_file::extracts_php_import_source
+        PASS [   0.036s] (432/484) tree-hugger::l1 tree_file::extracts_rust_aliased_import
+        PASS [   0.106s] (433/484) tree-hugger::l1 tree_file::extracts_php_type_metadata
+        PASS [   0.078s] (434/484) tree-hugger::l1 tree_file::extracts_python_generic_types
+        PASS [   0.081s] (435/484) tree-hugger::l1 tree_file::extracts_python_function_signature
+        PASS [   0.080s] (436/484) tree-hugger::l1 tree_file::extracts_python_import_source
+        PASS [   0.041s] (437/484) tree-hugger::l1 tree_file::extracts_rust_doc_comments
+        PASS [   0.049s] (438/484) tree-hugger::l1 tree_file::extracts_rust_enum_variants
+        PASS [   0.038s] (439/484) tree-hugger::l1 tree_file::extracts_rust_function_return_type
+        PASS [   0.075s] (440/484) tree-hugger::l1 tree_file::extracts_python_multiple_imports_from_same_source
+        PASS [   0.043s] (441/484) tree-hugger::l1 tree_file::extracts_rust_generic_type_parameters
+        PASS [   0.046s] (442/484) tree-hugger::l1 tree_file::extracts_rust_generic_types
+        PASS [   0.051s] (443/484) tree-hugger::l1 tree_file::extracts_rust_import_source
+        PASS [   0.054s] (444/484) tree-hugger::l1 tree_file::extracts_rust_struct_fields
+        PASS [   0.048s] (445/484) tree-hugger::l1 tree_file::extracts_rust_tuple_struct_fields
+        PASS [   0.079s] (446/484) tree-hugger::l1 tree_file::extracts_scala_default_parameters
+        PASS [   0.081s] (447/484) tree-hugger::l1 tree_file::extracts_scala_function_signature
+        PASS [   0.098s] (448/484) tree-hugger::l1 tree_file::extracts_scala_type_metadata
+        PASS [   0.073s] (449/484) tree-hugger::l1 tree_file::extracts_typescript_aliased_import
+        PASS [   0.088s] (450/484) tree-hugger::l1 tree_file::extracts_swift_multiple_parameters
+        PASS [   0.110s] (451/484) tree-hugger::l1 tree_file::extracts_swift_function_signature
+        PASS [   0.107s] (452/484) tree-hugger::l1 tree_file::extracts_swift_import_source
+        PASS [   0.108s] (453/484) tree-hugger::l1 tree_file::extracts_swift_type_metadata
+        PASS [   0.062s] (454/484) tree-hugger::l1 tree_file::extracts_typescript_arrow_function_signatures
+        PASS [   0.066s] (455/484) tree-hugger::l1 tree_file::extracts_typescript_arrow_function_with_multiple_params
+        PASS [   0.069s] (456/484) tree-hugger::l1 tree_file::extracts_typescript_arrow_function_with_rest_params
+        PASS [   0.064s] (457/484) tree-hugger::l1 tree_file::extracts_typescript_doc_comments_through_export
+        PASS [   0.064s] (458/484) tree-hugger::l1 tree_file::extracts_typescript_function_signature
+        PASS [   0.064s] (459/484) tree-hugger::l1 tree_file::extracts_typescript_generic_types
+        PASS [   0.069s] (460/484) tree-hugger::l1 tree_file::extracts_typescript_import_source
+        PASS [   0.061s] (461/484) tree-hugger::l1 tree_file::extracts_typescript_namespace_import
+        PASS [   0.068s] (462/484) tree-hugger::l1 tree_file::extracts_typescript_visibility_modifiers
+        PASS [   0.043s] (463/484) tree-hugger::l1 tree_file::infers_java_interface_method_visibility
+        PASS [   0.071s] (464/484) tree-hugger::l1 tree_file::forced_typescript_preserves_tsx_grammar
+        PASS [   0.039s] (465/484) tree-hugger::l1 tree_file::reports_javascript_syntax_errors
+        PASS [   0.032s] (466/484) tree-hugger::l1 tree_file::reports_python_syntax_errors
+        PASS [   0.063s] (467/484) tree-hugger::l1 tree_file::infers_csharp_interface_method_visibility
+        PASS [   0.036s] (468/484) tree-hugger::l1 tree_file::reports_rust_syntax_errors
+        PASS [   0.037s] (469/484) tree-hugger::l1 tree_file::rust_enum_is_included_in_types_filter
+        PASS [   0.052s] (470/484) tree-hugger::l1 tree_package::collects_all_languages_without_override
+        PASS [   0.042s] (471/484) tree-hugger::l1 tree_package::discovers_rust_package
+        PASS [   0.068s] (472/484) tree-hugger::l1 tree_file::stable_ids_ignore_leading_whitespace_changes
+        PASS [   0.062s] (473/484) tree-hugger::l1 tree_file::typescript_exports_exclude_class_members
+        PASS [   0.037s] (474/484) tree-hugger::l1 tree_package::find_package_root_returns_subcrate_in_workspace
+        PASS [   0.045s] (475/484) tree-hugger::l1 tree_package::find_package_root_skips_node_workspaces_root
+        PASS [   0.045s] (476/484) tree-hugger::l1 tree_package::find_package_root_skips_workspace_only_cargo_toml
+        PASS [   0.042s] (477/484) tree-hugger::l1 tree_package::find_package_root_uses_git_root_when_it_has_package
+        PASS [   0.030s] (478/484) tree-hugger::l1 tree_package::language_override_restricts_to_one_language
+        PASS [   0.135s] (479/484) tree-hugger::l1 tree_file::symbol_index_relations_are_scoped_to_owning_symbol
+        PASS [   1.379s] (480/484) tree-hugger::l1 phase6_neovim_query_reuse::all_queries_compile_with_provenance
+        PASS [   0.400s] (481/484) tree-hugger::l1 tree_file::semantic_analysis_runs_for_reference_query_languages
+        PASS [   0.501s] (482/484) tree-hugger::l1 tree_file::parses_all_fixtures
+        PASS [   2.230s] (483/484) tree-hugger::l1 query_compile::test_all_queries_compile_for_all_languages
+        PASS [   1.559s] (484/484) tree-hugger::l1 tree_file::try_diagnostics_succeeds_for_all_languages
+────────────
+     Summary [   6.163s] 484 tests run: 484 passed, 0 skipped
+
+✅ [32m all tests passing in [1mtree-hugger[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 74
+
+cross-check summary for tree-hugger:
+  windows  pass

@@ -388,7 +388,7 @@ matching env var before `cargo test`.
 
 ```bash
 export WEZTERM_UNIX_SOCKET="$(ls "$HOME/.local/share/wezterm/gui-sock-"* | head -1)"
-cargo test -p biscuit-terminal-cli --test level2_prose_styling
+cargo test -p biscuit-terminal-cli --features terminal-tests --test level2 level2_prose_styling::
 ```
 
 **Kitty** (no daemon — you must start an instance with remote control):
@@ -397,7 +397,7 @@ cargo test -p biscuit-terminal-cli --test level2_prose_styling
 # `--start-as=minimized` keeps the bootstrap window out of the way.
 kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty-l2 --start-as=minimized &
 sleep 2
-KITTY_LISTEN_ON=unix:/tmp/kitty-l2 cargo test -p biscuit-terminal-cli --test level2_prose_styling
+KITTY_LISTEN_ON=unix:/tmp/kitty-l2 cargo test -p biscuit-terminal-cli --features terminal-tests --test level2 level2_prose_styling::
 ```
 
 Once the instance exists, the harness's `SpawnVisibility::Background`

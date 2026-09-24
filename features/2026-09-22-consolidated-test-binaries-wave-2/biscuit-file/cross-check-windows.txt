@@ -1,0 +1,1379 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: biscuit-file @ origin/fix/ci-build-feature-divergence (1879dd880) + 489 changed file(s) as 126fc2018
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  3d55fa5537ed37ce produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\mac--feat-dark-fixes
+
+== windows (build-win-native, archive 3d55fa5537ed37ce from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: 38ad6368073f462d7b7a78f148072b024727d3ee
+cross-check-dirty: 0
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling stable_deref_trait v1.2.1
+   Compiling memchr v2.8.0
+   Compiling cfg-if v1.0.4
+   Compiling windows-link v0.2.1
+   Compiling autocfg v1.5.0
+   Compiling crossbeam-utils v0.8.21
+   Compiling serde_core v1.0.228
+   Compiling smallvec v1.15.1
+   Compiling log v0.4.29
+   Compiling windows-sys v0.61.2
+   Compiling rayon-core v1.13.0
+   Compiling arrayvec v0.7.6
+   Compiling simd-adler32 v0.3.9
+   Compiling thiserror v2.0.18
+   Compiling either v1.15.0
+   Compiling litemap v0.8.2
+   Compiling num-traits v0.2.19
+   Compiling serde v1.0.228
+   Compiling anyhow v1.0.102
+   Compiling once_cell v1.21.4
+   Compiling writeable v0.6.3
+   Compiling icu_normalizer_data v2.2.0
+   Compiling libc v0.2.186
+   Compiling icu_properties_data v2.2.0
+   Compiling utf8_iter v1.0.4
+   Compiling crc32fast v1.5.0
+   Compiling adler2 v2.0.1
+   Compiling zerocopy v0.8.48
+   Compiling miniz_oxide v0.8.9
+   Compiling aho-corasick v1.1.4
+   Compiling crossbeam-epoch v0.9.18
+   Compiling as-slice v0.2.1
+   Compiling num-integer v0.1.46
+   Compiling av-scenechange v0.14.1
+   Compiling syn v2.0.117
+   Compiling regex-syntax v0.8.10
+   Compiling crossbeam-deque v0.8.6
+   Compiling itoa v1.0.18
+   Compiling paste v1.0.15
+   Compiling built v0.8.0
+   Compiling num-bigint v0.4.8
+   Compiling bytemuck v1.25.0
+   Compiling aligned v0.4.3
+   Compiling winapi-util v0.1.11
+   Compiling rav1e v0.8.1
+   Compiling rayon v1.12.0
+   Compiling tracing-core v0.1.36
+   Compiling no_std_io2 v0.9.3
+   Compiling nom v8.0.0
+   Compiling y4m v0.8.0
+   Compiling pastey v0.1.1
+   Compiling zmij v1.0.23
+   Compiling quick-error v2.0.1
+   Compiling num-rational v0.4.2
+   Compiling winapi v0.3.9
+   Compiling parking_lot_core v0.9.12
+   Compiling regex-automata v0.4.18
+   Compiling bitstream-io v4.10.0
+   Compiling flate2 v1.1.9
+   Compiling rgb v0.8.53
+   Compiling simd_helpers v0.1.0
+   Compiling itertools v0.14.0
+   Compiling bitflags v2.11.1
+   Compiling weezl v0.1.12
+   Compiling imgref v1.12.0
+   Compiling find-msvc-tools v0.1.12
+   Compiling new_debug_unreachable v1.0.6
+   Compiling synstructure v0.13.2
+   Compiling scopeguard v1.2.0
+   Compiling maybe-rayon v0.1.1
+   Compiling shlex v1.3.0
+   Compiling getrandom v0.4.2
+   Compiling pin-project-lite v0.2.17
+   Compiling equivalent v1.0.2
+   Compiling serde_json v1.0.149
+   Compiling zune-core v0.5.1
+   Compiling unicode-general-category v1.1.0
+   Compiling noop_proc_macro v0.3.0
+   Compiling hashbrown v0.17.0
+   Compiling zune-jpeg v0.5.15
+   Compiling cc v1.2.60
+   Compiling lock_api v0.4.14
+   Compiling loop9 v0.1.5
+   Compiling indexmap v2.14.0
+   Compiling avif-serialize v0.8.8
+   Compiling fdeflate v0.3.7
+   Compiling zune-inflate v0.2.54
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.5
+   Compiling equator-macro v0.4.2
+   Compiling thiserror-impl v2.0.18
+   Compiling serde_derive v1.0.228
+   Compiling zerocopy-derive v0.8.48
+   Compiling zerofrom v0.1.7
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling profiling-procmacros v1.0.17
+   Compiling equator v0.4.2
+   Compiling tracing-attributes v0.1.31
+   Compiling yoke v0.8.2
+   Compiling aligned-vec v0.6.4
+   Compiling fax_derive v0.2.0
+   Compiling profiling v1.0.17
+   Compiling v_frame v0.3.9
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling num-derive v0.4.2
+   Compiling av1-grain v0.2.5
+   Compiling fax v0.2.6
+   Compiling byteorder-lite v0.1.0
+   Compiling lebe v0.5.3
+   Compiling bit_field v0.10.3
+   Compiling percent-encoding v2.3.2
+   Compiling uuid v1.23.1
+   Compiling tracing v0.1.44
+   Compiling litrs v1.0.0
+   Compiling fnv v1.0.7
+   Compiling byteorder v1.5.0
+   Compiling winnow v1.0.2
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_locale_core v2.2.0
+   Compiling icu_collections v2.2.0
+   Compiling color_quant v1.1.0
+   Compiling pxfm v0.1.29
+   Compiling powerfmt v0.2.0
+   Compiling gif v0.14.2
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling deranged v0.5.8
+   Compiling document-features v0.2.12
+   Compiling icu_provider v2.2.0
+   Compiling cfb v0.7.3
+   Compiling form_urlencoded v1.2.2
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling image-webp v0.2.4
+   Compiling crossterm_winapi v0.9.1
+   Compiling blake3 v1.8.4
+   Compiling png v0.18.1
+   Compiling idna_adapter v1.2.1
+   Compiling parking_lot v0.12.5
+   Compiling idna v1.1.0
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling half v2.7.1
+   Compiling moxcms v0.8.1
+   Compiling same-file v1.0.6
+   Compiling qoi v0.4.1
+   Compiling tiff v0.11.3
+   Compiling exr v1.74.0
+   Compiling bstr v1.12.1
+   Compiling unsafe-libyaml v0.2.11
+   Compiling ravif v0.13.0
+   Compiling time-core v0.1.8
+   Compiling lazy_static v1.5.0
+   Compiling ryu v1.0.23
+   Compiling toml_writer v1.1.1+spec-1.1.0
+   Compiling fastrand v2.4.1
+   Compiling base64 v0.22.1
+   Compiling encode_unicode v1.0.0
+   Compiling renderable v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\renderable)
+   Compiling num-conv v0.2.1
+   Compiling time v0.3.47
+   Compiling console v0.16.3
+   Compiling tempfile v3.27.0
+   Compiling toml v1.1.2+spec-1.1.0
+   Compiling serde_yaml_ng v0.10.0
+   Compiling image v0.25.10
+   Compiling sharded-slab v0.1.7
+   Compiling globset v0.4.18
+   Compiling walkdir v2.5.0
+   Compiling url v2.5.8
+   Compiling crossterm v0.29.0
+   Compiling json-five v0.3.1
+   Compiling infer v0.19.0
+   Compiling unic-langid-impl v0.9.6
+   Compiling matchers v0.2.0
+   Compiling ansi_colours v1.2.3
+   Compiling tracing-log v0.2.0
+   Compiling termcolor v1.4.1
+   Compiling home v0.5.12
+   Compiling nu-ansi-term v0.50.3
+   Compiling quick-xml v0.38.4
+   Compiling thread_local v1.1.9
+   Compiling dunce v1.0.5
+   Compiling object v0.37.3
+   Compiling cpufeatures v0.3.0
+   Compiling arrayref v0.3.9
+   Compiling constant_time_eq v0.4.2
+   Compiling tracing-subscriber v0.3.23
+   Compiling biscuit-file v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+   Compiling viuer v0.11.0
+   Compiling plist v1.8.0
+   Compiling termini v1.0.0
+   Compiling unic-langid v0.9.6
+   Compiling ignore v0.4.25
+   Compiling chrono v0.4.44
+   Compiling regex v1.12.3
+   Compiling terminal_size v0.4.4
+   Compiling xxhash-rust v0.8.15
+   Compiling unicode-width v0.2.2
+   Compiling biscuit-hash v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-hash\lib)
+   Compiling biscuit-terminal v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-terminal\lib)
+   Compiling repo-deps v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\scripts)
+    Finished `release` profile [optimized] target(s) in 50.76s
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.45
+   Compiling windows-link v0.2.1
+   Compiling memchr v2.8.0
+   Compiling cfg-if v1.0.4
+   Compiling regex-syntax v0.8.10
+   Compiling once_cell v1.21.4
+   Compiling smallvec v1.15.1
+   Compiling itoa v1.0.18
+   Compiling stable_deref_trait v1.2.1
+   Compiling version_check v0.9.5
+   Compiling windows-sys v0.61.2
+   Compiling typenum v1.20.0
+   Compiling thiserror v2.0.18
+   Compiling tinyvec_macros v0.1.1
+   Compiling tinyvec v1.11.0
+   Compiling fastrand v2.4.1
+   Compiling gix-trace v0.1.20
+   Compiling crc32fast v1.5.0
+   Compiling generic-array v0.14.7
+   Compiling parking_lot_core v0.9.12
+   Compiling aho-corasick v1.1.4
+   Compiling getrandom v0.3.4
+   Compiling unicode-normalization v0.1.25
+   Compiling scopeguard v1.2.0
+   Compiling lock_api v0.4.14
+   Compiling hashbrown v0.17.0
+   Compiling byteorder v1.5.0
+   Compiling cpufeatures v0.2.17
+   Compiling zlib-rs v0.6.3
+   Compiling heapless v0.8.0
+   Compiling parking_lot v0.12.5
+   Compiling gix-utils v0.3.3
+   Compiling hash32 v0.3.1
+   Compiling syn v2.0.117
+   Compiling prodash v31.0.0
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling regex-automata v0.4.18
+   Compiling pin-project-lite v0.2.17
+   Compiling jiff-tzdb v0.1.6
+   Compiling jiff-tzdb-platform v0.1.3
+   Compiling serde_core v1.0.228
+   Compiling digest v0.10.7
+   Compiling jiff v0.2.28
+   Compiling equivalent v1.0.2
+   Compiling sha1 v0.10.6
+   Compiling faster-hex v0.10.0
+   Compiling bitflags v2.11.1
+   Compiling getrandom v0.4.2
+   Compiling sha1-checked v0.10.0
+   Compiling futures-core v0.3.32
+   Compiling bytes v1.11.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling futures-sink v0.3.32
+   Compiling shlex v1.3.0
+   Compiling jobserver v0.1.34
+   Compiling zerocopy v0.8.48
+   Compiling fs_extra v1.3.0
+   Compiling cc v1.2.60
+   Compiling dunce v1.0.5
+   Compiling memmap2 v0.9.10
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.32
+   Compiling indexmap v2.14.0
+   Compiling tracing-core v0.1.36
+   Compiling serde v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling cmake v0.1.58
+   Compiling futures-io v0.3.32
+   Compiling fnv v1.0.7
+   Compiling zmij v1.0.23
+   Compiling percent-encoding v2.3.2
+   Compiling futures-task v0.3.32
+   Compiling log v0.4.29
+   Compiling num-traits v0.2.19
+   Compiling bstr v1.12.1
+   Compiling http v1.4.0
+   Compiling writeable v0.6.3
+   Compiling aws-lc-rs v1.16.3
+   Compiling litemap v0.8.2
+   Compiling serde_json v1.0.149
+   Compiling aws-lc-sys v0.40.0
+   Compiling synstructure v0.13.2
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.4
+   Compiling block-padding v0.3.3
+   Compiling icu_normalizer_data v2.2.0
+   Compiling zeroize v1.8.2
+   Compiling icu_properties_data v2.2.0
+   Compiling gix-chunk v0.7.2
+   Compiling nonempty v0.12.0
+   Compiling utf8_iter v1.0.4
+   Compiling crossbeam-utils v0.8.21
+   Compiling libc v0.2.186
+   Compiling http-body v1.0.1
+   Compiling rand_core v0.9.5
+   Compiling gix-date v0.15.4
+   Compiling inout v0.1.4
+   Compiling httparse v1.10.1
+   Compiling cipher v0.4.4
+   Compiling winapi-util v0.1.11
+   Compiling tempfile v3.27.0
+   Compiling gix-actor v0.41.1
+   Compiling same-file v1.0.6
+   Compiling mio v1.2.0
+   Compiling socket2 v0.6.3
+   Compiling walkdir v2.5.0
+   Compiling thiserror-impl v2.0.18
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling zerocopy-derive v0.8.48
+   Compiling tokio-macros v2.7.0
+   Compiling displaydoc v0.2.5
+   Compiling futures-macro v0.3.32
+   Compiling tracing-attributes v0.1.31
+   Compiling serde_derive v1.0.228
+   Compiling tokio v1.52.1
+   Compiling rustls-pki-types v1.14.0
+   Compiling atomic-waker v1.1.2
+   Compiling futures-util v0.3.32
+   Compiling try-lock v0.2.5
+   Compiling tower-service v0.3.3
+   Compiling rustls v0.23.38
+   Compiling untrusted v0.9.0
+   Compiling zerofrom v0.1.7
+   Compiling want v0.3.1
+   Compiling gix-path v0.12.1
+   Compiling yoke v0.8.2
+   Compiling crossbeam-epoch v0.9.18
+   Compiling gix-quote v0.7.2
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling tracing v0.1.44
+   Compiling gix-features v0.48.1
+   Compiling gix-sec v0.14.1
+   Compiling rustversion v1.0.22
+   Compiling simd-adler32 v0.3.9
+   Compiling rayon-core v1.13.0
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling allocator-api2 v0.2.21
+   Compiling either v1.15.0
+   Compiling icu_locale_core v2.2.0
+   Compiling gix-hashtable v0.15.1
+   Compiling icu_collections v2.2.0
+   Compiling gix-tempfile v23.0.1
+   Compiling gix-commitgraph v0.37.1
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling gix-object v0.61.0
+   Compiling gix-lock v23.0.1
+   Compiling httpdate v1.0.3
+   Compiling foldhash v0.2.0
+   Compiling adler2 v2.0.1
+   Compiling subtle v2.6.1
+   Compiling miniz_oxide v0.8.9
+   Compiling hashbrown v0.16.1
+   Compiling icu_provider v2.2.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-revwalk v0.32.0
+   Compiling crossbeam-deque v0.8.6
+   Compiling icu_properties v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling nom v8.0.0
+   Compiling encoding_rs v0.8.35
+   Compiling shell-words v1.1.1
+   Compiling unicode-properties v0.1.4
+   Compiling unicode-bidi v0.3.18
+   Compiling lazy_static v1.5.0
+   Compiling ipnet v2.12.0
+   Compiling bytecount v0.6.9
+   Compiling tokio-util v0.7.18
+   Compiling base64 v0.22.1
+   Compiling idna_adapter v1.2.1
+   Compiling stringprep v0.1.5
+   Compiling h2 v0.4.13
+   Compiling gix-command v0.9.1
+   Compiling idna v1.1.0
+   Compiling clru v0.6.3
+   Compiling flate2 v1.1.9
+   Compiling ppv-lite86 v0.2.21
+   Compiling gix-glob v0.26.1
+   Compiling gix-url v0.36.1
+   Compiling rand_chacha v0.9.0
+   Compiling gix-packetline v0.21.4
+   Compiling cbc v0.1.2
+   Compiling ecb v0.1.2
+   Compiling aes v0.8.4
+   Compiling form_urlencoded v1.2.2
+   Compiling sync_wrapper v1.0.2
+   Compiling rand v0.9.4
+   Compiling md-5 v0.10.6
+   Compiling sha2 v0.10.9
+   Compiling ttf-parser v0.25.1
+   Compiling rangemap v1.7.1
+   Compiling unicode-general-category v1.1.0
+   Compiling winnow v1.0.2
+   Compiling powerfmt v0.2.0
+   Compiling weezl v0.1.12
+   Compiling nom_locate v5.0.0
+   Compiling pom v1.1.0
+   Compiling tower-layer v0.3.3
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling deranged v0.5.8
+   Compiling arc-swap v1.9.1
+   Compiling gix-transport v0.57.1
+   Compiling tower v0.5.3
+   Compiling url v2.5.8
+   Compiling rayon v1.12.0
+   Compiling windows-targets v0.52.6
+   Compiling gix-pack v0.71.0
+   Compiling half v2.7.1
+   Compiling futures-executor v0.3.32
+   Compiling gix-revision v0.46.0
+   Compiling gix-shallow v0.12.1
+   Compiling gix-config-value v0.18.1
+   Compiling maybe-async v0.2.11
+   Compiling hyper v1.9.0
+   Compiling http-body-util v0.1.3
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling anstyle v1.0.14
+   Compiling time-core v0.1.8
+   Compiling iri-string v0.7.12
+   Compiling ciborium-io v0.2.2
+   Compiling option-ext v0.2.0
+   Compiling clap_lex v1.1.0
+   Compiling uuid v1.23.1
+   Compiling num-conv v0.2.1
+   Compiling plotters-backend v0.3.7
+   Compiling unicode-bom v2.0.3
+   Compiling toml_writer v1.1.1+spec-1.1.0
+   Compiling gix-protocol v0.62.0
+   Compiling plotters-svg v0.3.7
+   Compiling gix-config v0.57.0
+   Compiling cfb v0.7.3
+   Compiling clap_builder v4.6.0
+   Compiling toml v1.1.2+spec-1.1.0
+   Compiling time v0.3.47
+   Compiling lopdf v0.38.0
+   Compiling dirs-sys v0.5.0
+   Compiling hyper-util v0.1.20
+   Compiling ciborium-ll v0.2.2
+   Compiling gix-odb v0.81.0
+   Compiling gix-discover v0.52.0
+   Compiling gix-refspec v0.42.0
+   Compiling tower-http v0.6.8
+   Compiling windows-sys v0.59.0
+   Compiling type1-encoding-parser v0.1.1
+   Compiling adobe-cmap-parser v0.4.1
+   Compiling sharded-slab v0.1.7
+   Compiling gix-traverse v0.58.0
+   Compiling gix-diff v0.64.0
+   Compiling itertools v0.10.5
+   Compiling chrono v0.4.44
+   Compiling euclid v0.20.14
+   Compiling nu-ansi-term v0.50.3
+   Compiling tracing-log v0.2.0
+   Compiling matchers v0.2.0
+   Compiling regex v1.12.3
+   Compiling thread_local v1.1.9
+   Compiling unsafe-libyaml v0.2.11
+   Compiling quick-error v1.2.3
+   Compiling num_cpus v1.17.0
+   Compiling postscript v0.14.1
+   Compiling deadpool-runtime v0.1.4
+   Compiling ryu v1.0.23
+   Compiling mime v0.3.17
+   Compiling cast v0.3.0
+   Compiling sdd v3.0.10
+   Compiling bit-vec v0.8.0
+   Compiling unicode-width v0.2.2
+   Compiling wait-timeout v0.2.1
+   Compiling cff-parser v0.1.0
+   Compiling deadpool v0.12.3
+   Compiling bit-set v0.8.0
+   Compiling rusty-fork v0.3.1
+   Compiling scc v2.4.0
+   Compiling biscuit-test-harness v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-test-harness)
+   Compiling serde_yaml_ng v0.10.0
+   Compiling lopdf v0.39.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling criterion-plot v0.5.0
+   Compiling fs4 v0.13.1
+   Compiling pdf-extract v0.10.0
+   Compiling gix v0.84.0
+   Compiling clap v4.6.1
+   Compiling json-five v0.3.1
+   Compiling ciborium v0.2.2
+   Compiling infer v0.19.0
+   Compiling dirs v6.0.0
+   Compiling plotters v0.3.7
+   Compiling futures v0.3.32
+   Compiling tinytemplate v1.2.1
+   Compiling assert-json-diff v2.0.2
+   Compiling serial_test_derive v3.4.0
+   Compiling is-terminal v0.4.17
+   Compiling rand_xorshift v0.4.0
+   Compiling unarray v0.1.4
+   Compiling anes v0.1.6
+   Compiling oorandom v11.1.5
+   Compiling test-toolkit v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\tools\test-toolkit)
+   Compiling proptest v1.11.0
+   Compiling wiremock v0.6.5
+   Compiling serial_test v3.4.0
+   Compiling criterion v0.5.1
+   Compiling rustls-webpki v0.103.13
+   Compiling tokio-rustls v0.26.4
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.2
+   Compiling biscuit-file v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+warning: unused variable: `ctx`
+   --> biscuit-file\lib\tests\l1\finalized_reference_resolution.rs:308:9
+    |
+308 |     let ctx = FileResolutionContext::new(&repo).with_repository_root(&repo);
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1_fetch-25c29b49f2e7dea3.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1_fetch-25c29b49f2e7dea3.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `biscuit-file` (test "l1-fetch") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-b5979a7c3083d8bc.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-b5979a7c3083d8bc.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `biscuit-file` (test "l1") generated 2 warnings (run `cargo fix --test "l1" -p biscuit-file` to apply 1 suggestion)
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\biscuit_file-c74f3bf3d53d81bb.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\biscuit_file-c74f3bf3d53d81bb.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `biscuit-file` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 50.60s
+   Archiving 3 binaries, 1 linked path, and 2 standard libraries to B:\coding\mac--feat-dark-fixes\cross-check-Mac-40859-1790198864-build\build-biscuit-file-windows-latest-3d55fa5537ed37ce.tar.zst
+    Archived 288 files to B:\coding\mac--feat-dark-fixes\cross-check-Mac-40859-1790198864-build\build-biscuit-file-windows-latest-3d55fa5537ed37ce.tar.zst in 0.12s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 63 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `3d55fa5537ed37ce` for `windows-latest` — digest `6f91b0f369f2d195`, produced on `windows-latest`.
+cross-check-key: 3d55fa5537ed37ce
+cross-check-digest: 6f91b0f369f2d195
+
+Testing [1mbiscuit-file[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 3 binaries and 1 linked path to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-zRMjC6
+   Extracted 288 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-zRMjC6 in 0.50s
+────────────
+ Nextest run ID 81670faf-7d76-49dd-8799-c42a9b9dae98 with nextest profile: ci
+    Starting 784 tests across 3 binaries
+        PASS [   0.021s] (  1/784) biscuit-file detect::tests::all_known_variants_have_data_format
+        PASS [   0.026s] (  2/784) biscuit-file detect::tests::test_detect_file_type_no_extension
+        PASS [   0.027s] (  3/784) biscuit-file detect::tests::test_file_type_extension
+        PASS [   0.034s] (  4/784) biscuit-file detect::tests::test_detect_file_type_from_filesystem
+        PASS [   0.035s] (  5/784) biscuit-file detect::tests::all_known_variants_have_mime_type
+        PASS [   0.038s] (  6/784) biscuit-file detect::tests::all_known_variants_have_extension
+        PASS [   0.049s] (  7/784) biscuit-file detect::tests::test_extension_detection
+        PASS [   0.054s] (  8/784) biscuit-file detect::tests::test_file_type_mime
+        PASS [   0.057s] (  9/784) biscuit-file detect::tests::test_detect_pdf_by_magic_bytes_wrong_extension
+        PASS [   0.060s] ( 10/784) biscuit-file detect::tests::test_pdf_magic_bytes
+        PASS [   0.043s] ( 11/784) biscuit-file detect::tests::test_unknown_from_text
+        PASS [   0.046s] ( 12/784) biscuit-file file_reference::context::tests::find_git_root_outside_repo
+        PASS [   0.045s] ( 13/784) biscuit-file file_reference::context::tests::from_ambient_succeeds
+        PASS [   0.016s] ( 14/784) biscuit-file file_reference::fetch::tests::combined_cache_control_keeps_a_non_ascii_line_readable
+        PASS [   0.052s] ( 15/784) biscuit-file file_reference::context::tests::from_base_relative_path_is_joined_to_ambient_cwd
+        PASS [   0.045s] ( 16/784) biscuit-file file_reference::fetch::tests::allow_host_permits_exact_match
+        PASS [   0.043s] ( 17/784) biscuit-file file_reference::fetch::tests::allow_wildcard_permits_subdomain
+        PASS [   0.045s] ( 18/784) biscuit-file file_reference::fetch::tests::combined_cache_control_is_none_without_the_field
+        PASS [   0.046s] ( 19/784) biscuit-file file_reference::fetch::tests::combined_cache_control_joins_every_field_line_in_order
+        PASS [   0.079s] ( 20/784) biscuit-file file_reference::context::tests::from_base_absolute_path_is_preserved
+        PASS [   0.042s] ( 21/784) biscuit-file file_reference::fetch::tests::default_is_deny_all
+        PASS [   0.040s] ( 22/784) biscuit-file file_reference::fetch::tests::deny_all_rejects_everything
+        PASS [   0.043s] ( 23/784) biscuit-file file_reference::fetch::tests::fetch_response_is_not_modified
+        PASS [   0.038s] ( 24/784) biscuit-file file_reference::fetch::tests::fetch_response_is_success
+        PASS [   0.106s] ( 25/784) biscuit-file file_reference::context::tests::find_git_root_inside_repo
+        PASS [   0.040s] ( 26/784) biscuit-file file_reference::fetch::tests::host_pattern_exact_matches_case_insensitive
+        PASS [   0.042s] ( 27/784) biscuit-file file_reference::fetch::tests::host_pattern_wildcard_matches_subdomains
+        PASS [   0.042s] ( 28/784) biscuit-file file_reference::fetch::tests::multiple_patterns_stack
+        PASS [   0.041s] ( 29/784) biscuit-file file_reference::parse::tests::absolute_path
+        PASS [   0.038s] ( 30/784) biscuit-file file_reference::parse::tests::backslash_explicit_relative
+        PASS [   0.042s] ( 31/784) biscuit-file file_reference::parse::tests::bare_filename_is_implicit_relative
+        PASS [   0.041s] ( 32/784) biscuit-file file_reference::parse::tests::bare_subdir_path_is_implicit_relative
+        PASS [   0.043s] ( 33/784) biscuit-file file_reference::parse::tests::defensive_sigil_separator_is_part_of_the_shared_grammar
+        PASS [   0.041s] ( 34/784) biscuit-file file_reference::parse::tests::empty_string_rejected
+        PASS [   0.042s] ( 35/784) biscuit-file file_reference::parse::tests::explicit_dot_slash_is_relative
+        PASS [   0.043s] ( 36/784) biscuit-file file_reference::parse::tests::explicit_dotdot_slash_is_relative
+        PASS [   0.043s] ( 37/784) biscuit-file file_reference::parse::tests::http_url_detected_as_url_kind
+        PASS [   0.042s] ( 38/784) biscuit-file file_reference::parse::tests::https_url_detected_as_url_kind
+        PASS [   0.044s] ( 39/784) biscuit-file file_reference::parse::tests::interpolation_empty_var_rejected
+        PASS [   0.043s] ( 40/784) biscuit-file file_reference::parse::tests::interpolation_invalid_name_rejected
+        PASS [   0.042s] ( 41/784) biscuit-file file_reference::parse::tests::interpolation_multiple_vars
+        PASS [   0.042s] ( 42/784) biscuit-file file_reference::parse::tests::interpolation_single_var
+        PASS [   0.041s] ( 43/784) biscuit-file file_reference::parse::tests::lone_recursive_prefix_rejected
+        PASS [   0.042s] ( 44/784) biscuit-file file_reference::parse::tests::magic_path
+        PASS [   0.041s] ( 45/784) biscuit-file file_reference::parse::tests::magic_recursive
+        PASS [   0.042s] ( 46/784) biscuit-file file_reference::parse::tests::recursive_home_reference
+        PASS [   0.041s] ( 47/784) biscuit-file file_reference::parse::tests::recursive_vault_with_interpolation
+        PASS [   0.041s] ( 48/784) biscuit-file file_reference::parse::tests::relative_path
+        PASS [   0.042s] ( 49/784) biscuit-file file_reference::parse::tests::relative_recursive
+        PASS [   0.041s] ( 50/784) biscuit-file file_reference::parse::tests::repository_reference_kinds
+        PASS [   0.041s] ( 51/784) biscuit-file file_reference::parse::tests::rooted_magic_payloads_are_rejected_portably
+        PASS [   0.042s] ( 52/784) biscuit-file file_reference::parse::tests::tilde_backslash_is_home
+        PASS [   0.044s] ( 53/784) biscuit-file file_reference::parse::tests::tilde_bare_is_home_with_empty_path
+        PASS [   0.044s] ( 54/784) biscuit-file file_reference::parse::tests::tilde_slash_is_home_and_strips_sigil
+        PASS [   0.043s] ( 55/784) biscuit-file file_reference::parse::tests::tilde_user_bare_is_rejected_typed
+        PASS [   0.043s] ( 56/784) biscuit-file file_reference::parse::tests::tilde_user_is_rejected_typed
+        PASS [   0.043s] ( 57/784) biscuit-file file_reference::parse::tests::url_scheme_is_ascii_case_insensitive
+        PASS [   0.043s] ( 58/784) biscuit-file file_reference::parse::tests::url_with_path_segments
+        PASS [   0.042s] ( 59/784) biscuit-file file_reference::parse::tests::vault_double_colon
+        PASS [   0.043s] ( 60/784) biscuit-file file_reference::parse::tests::vault_single_colon
+        PASS [   0.044s] ( 61/784) biscuit-file file_reference::parse::tests::windows_drive_absolute_backslash
+        PASS [   0.042s] ( 62/784) biscuit-file file_reference::parse::tests::windows_drive_absolute_forward_slash
+        PASS [   0.043s] ( 63/784) biscuit-file file_reference::parse::tests::windows_drive_relative_is_rejected_as_scheme_shaped
+        PASS [   0.041s] ( 64/784) biscuit-file file_reference::parse::tests::windows_unc_is_absolute
+        PASS [   0.044s] ( 65/784) biscuit-file file_reference::resolve::tests::append_scope_trims_trailing_slash
+        PASS [   0.044s] ( 66/784) biscuit-file file_reference::resolve::tests::caller_supplied_repository_root_is_tried_after_base
+        PASS [   0.044s] ( 67/784) biscuit-file file_reference::resolve::tests::classify_token_bare_subdir_is_implicit_relative
+        PASS [   0.044s] ( 68/784) biscuit-file file_reference::resolve::tests::classify_token_empty_string_is_implicit_relative
+        PASS [   0.043s] ( 69/784) biscuit-file file_reference::resolve::tests::classify_token_magic_optional_separator_matches_parser
+        PASS [   0.044s] ( 70/784) biscuit-file file_reference::resolve::tests::classify_token_magic_with_partial_name
+        PASS [   0.043s] ( 71/784) biscuit-file file_reference::resolve::tests::classify_token_magic_with_scope_and_partial
+        PASS [   0.043s] ( 72/784) biscuit-file file_reference::resolve::tests::classify_token_rejects_empty_magic_payload
+        PASS [   0.042s] ( 73/784) biscuit-file file_reference::resolve::tests::classify_token_rejects_recursive
+        PASS [   0.043s] ( 74/784) biscuit-file file_reference::resolve::tests::classify_token_rejects_unsupported_forms
+        PASS [   0.044s] ( 75/784) biscuit-file file_reference::resolve::tests::complete_partial_implicit_relative_outside_repo
+        PASS [   0.042s] ( 76/784) biscuit-file file_reference::resolve::tests::complete_partial_rejects_empty_magic_payload
+        PASS [   0.042s] ( 77/784) biscuit-file file_reference::resolve::tests::complete_partial_rejects_unsupported_forms
+        PASS [   0.042s] ( 78/784) biscuit-file file_reference::resolve::tests::diff_paths_bridges_verbatim_and_legacy_spellings
+        PASS [   0.044s] ( 79/784) biscuit-file file_reference::resolve::tests::diff_paths_parent
+        PASS [   0.042s] ( 80/784) biscuit-file file_reference::resolve::tests::diff_paths_same_dir
+        PASS [   0.042s] ( 81/784) biscuit-file file_reference::resolve::tests::diff_paths_same_path
+        PASS [   0.043s] ( 82/784) biscuit-file file_reference::resolve::tests::diff_paths_sibling_dir
+        PASS [   0.015s] ( 83/784) biscuit-file file_reference::resolve::tests::normalize_absolute_already_absolute
+        PASS [   0.043s] ( 84/784) biscuit-file file_reference::resolve::tests::home_kind_without_home_is_typed_missing_context
+        PASS [   0.038s] ( 85/784) biscuit-file file_reference::resolve::tests::implicit_relative_without_repo_is_base_only
+        PASS [   0.042s] ( 86/784) biscuit-file file_reference::resolve::tests::interpolate_literal_only
+        PASS [   0.043s] ( 87/784) biscuit-file file_reference::resolve::tests::interpolate_missing_env_var
+        PASS [   0.042s] ( 88/784) biscuit-file file_reference::resolve::tests::interpolate_with_env_var
+        PASS [   0.067s] ( 89/784) biscuit-file file_reference::resolve::tests::home_kind_uses_context_home_dir
+        PASS [   0.042s] ( 90/784) biscuit-file file_reference::resolve::tests::normalize_absolute_relative_path
+        PASS [   0.043s] ( 91/784) biscuit-file file_reference::resolve::tests::normalize_components_reduces_verbatim_paths
+        PASS [   0.041s] ( 92/784) biscuit-file file_reference::resolve::tests::normalize_dotdot
+        PASS [   0.042s] ( 93/784) biscuit-file file_reference::resolve::tests::split_scope_and_active_no_separator
+        PASS [   0.040s] ( 94/784) biscuit-file file_reference::resolve::tests::split_scope_and_active_with_separator
+        PASS [   0.042s] ( 95/784) biscuit-file format::tests::display_impl
+        PASS [   0.041s] ( 96/784) biscuit-file format::tests::extension_covers_all_variants
+        PASS [   0.040s] ( 97/784) biscuit-file format::tests::mime_type_covers_all_variants
+        PASS [   0.041s] ( 98/784) biscuit-file format::tests::structured_formats
+        PASS [   0.041s] ( 99/784) biscuit-file format::tests::utf8_formats
+        PASS [   0.041s] (100/784) biscuit-file json5::format::tests::array_values
+        PASS [   0.040s] (101/784) biscuit-file json5::format::tests::compact_array
+        PASS [   0.041s] (102/784) biscuit-file json5::format::tests::compact_empty_containers
+        PASS [   0.041s] (103/784) biscuit-file json5::format::tests::compact_nested
+        PASS [   0.041s] (104/784) biscuit-file json5::format::tests::compact_no_trailing_commas
+        PASS [   0.041s] (105/784) biscuit-file json5::format::tests::compact_simple_object
+        PASS [   0.041s] (106/784) biscuit-file json5::format::tests::compact_single_line
+        PASS [   0.041s] (107/784) biscuit-file json5::format::tests::compact_special_keys_quoted
+        PASS [   0.042s] (108/784) biscuit-file json5::format::tests::deeply_nested_structure
+        PASS [   0.041s] (109/784) biscuit-file json5::format::tests::empty_array
+        PASS [   0.041s] (110/784) biscuit-file json5::format::tests::empty_object
+        PASS [   0.041s] (111/784) biscuit-file json5::format::tests::empty_string_value
+        PASS [   0.041s] (112/784) biscuit-file json5::format::tests::identifier_validation
+        PASS [   0.041s] (113/784) biscuit-file json5::format::tests::nested_object
+        PASS [   0.040s] (114/784) biscuit-file json5::format::tests::null_and_bool
+        PASS [   0.041s] (115/784) biscuit-file json5::format::tests::numeric_key_gets_quoted
+        PASS [   0.041s] (116/784) biscuit-file json5::format::tests::simple_object
+        PASS [   0.040s] (117/784) biscuit-file json5::format::tests::single_quote_in_string_escaped
+        PASS [   0.053s] (118/784) biscuit-file json5::format::tests::special_key_needs_quoting
+        PASS [   0.054s] (119/784) biscuit-file json5::format::tests::string_with_null_byte
+        PASS [   0.054s] (120/784) biscuit-file json5::format::tests::trailing_commas
+        PASS [   0.054s] (121/784) biscuit-file json5::format::tests::underscore_and_dollar_keys
+        PASS [   0.054s] (122/784) biscuit-file json5::format::tests::unicode_beyond_bmp
+        PASS [   0.054s] (123/784) biscuit-file json5::format::tests::very_large_number
+        PASS [   0.055s] (124/784) biscuit-file json5::format::tests::very_small_float
+        PASS [   0.055s] (125/784) biscuit-file json5::types::tests::as_json5_roundtrip
+        PASS [   0.055s] (126/784) biscuit-file json5::types::tests::as_json5_unquoted_keys
+        PASS [   0.056s] (127/784) biscuit-file json5::types::tests::as_json_nested
+        PASS [   0.042s] (128/784) biscuit-file json5::types::tests::as_json_pretty
+        PASS [   0.042s] (129/784) biscuit-file json5::types::tests::as_json_value_ref
+        PASS [   0.041s] (130/784) biscuit-file json5::types::tests::as_toml_basic
+        PASS [   0.041s] (131/784) biscuit-file json5::types::tests::as_toml_with_null_fails
+        PASS [   0.041s] (132/784) biscuit-file json5::types::tests::as_yaml_basic
+        PASS [   0.041s] (133/784) biscuit-file json5::types::tests::deserialize_raw_reads_the_source_text_in_authored_order
+        PASS [   0.041s] (134/784) biscuit-file json5::types::tests::empty_input_errors
+        PASS [   0.041s] (135/784) biscuit-file json5::types::tests::from_bytes_invalid_utf8
+        PASS [   0.041s] (136/784) biscuit-file json5::types::tests::from_bytes_valid
+        PASS [   0.040s] (137/784) biscuit-file json5::types::tests::invalid_json5_errors
+        PASS [   0.040s] (138/784) biscuit-file json5::types::tests::is_valid_accepts_json5
+        PASS [   0.040s] (139/784) biscuit-file json5::types::tests::is_valid_accepts_strict_json
+        PASS [   0.041s] (140/784) biscuit-file json5::types::tests::is_valid_json_accepts_strict
+        PASS [   0.041s] (141/784) biscuit-file json5::types::tests::is_valid_json_rejects_json5_extensions
+        PASS [   0.041s] (142/784) biscuit-file json5::types::tests::is_valid_rejects_invalid
+        PASS [   0.041s] (143/784) biscuit-file json5::types::tests::parse_basic_json5
+        PASS [   0.041s] (144/784) biscuit-file json5::types::tests::parse_hex_numbers
+        PASS [   0.041s] (145/784) biscuit-file json5::types::tests::parse_multiline_comment
+        PASS [   0.041s] (146/784) biscuit-file json5::types::tests::parse_single_quoted_strings
+        PASS [   0.041s] (147/784) biscuit-file json5::types::tests::parse_standard_json_is_valid
+        PASS [   0.041s] (148/784) biscuit-file json5::types::tests::parse_trailing_commas
+        PASS [   0.041s] (149/784) biscuit-file json5::types::tests::parse_unquoted_keys
+        PASS [   0.041s] (150/784) biscuit-file json5::types::tests::raw_preserved
+        PASS [   0.041s] (151/784) biscuit-file json5::types::tests::source_inline
+        PASS [   0.041s] (152/784) biscuit-file json5::types::tests::try_from_nonexistent_path
+        PASS [   0.041s] (153/784) biscuit-file list_format::tests::classifies_line_separated
+        PASS [   0.041s] (154/784) biscuit-file list_format::tests::classifies_markdown_ordered
+        PASS [   0.041s] (155/784) biscuit-file list_format::tests::classifies_markdown_unordered
+        PASS [   0.041s] (156/784) biscuit-file list_format::tests::classifies_scalar
+        PASS [   0.042s] (157/784) biscuit-file list_format::tests::classify_list_pairs_format_and_entries
+        PASS [   0.041s] (158/784) biscuit-file list_format::tests::dash_without_space_is_not_a_bullet
+        PASS [   0.041s] (159/784) biscuit-file list_format::tests::drops_whitespace_only_entries
+        PASS [   0.041s] (160/784) biscuit-file list_format::tests::normalizes_crlf
+        PASS [   0.041s] (161/784) biscuit-file list_format::tests::precedence_line_before_delimiters
+        PASS [   0.041s] (162/784) biscuit-file list_format::tests::precedence_tsv_before_csv_before_space
+        PASS [   0.041s] (163/784) biscuit-file list_format::tests::preserves_interior_whitespace_line_separated
+        PASS [   0.040s] (164/784) biscuit-file list_format::tests::preserves_unicode
+        PASS [   0.041s] (165/784) biscuit-file list_format::tests::quoted_field_preserves_interior_whitespace
+        PASS [   0.041s] (166/784) biscuit-file list_format::tests::round_trips_darkmatter_csv_form
+        PASS [   0.041s] (167/784) biscuit-file list_format::tests::splits_csv_escaped_quotes
+        PASS [   0.041s] (168/784) biscuit-file list_format::tests::splits_csv_quoted_delimiters
+        PASS [   0.042s] (169/784) biscuit-file list_format::tests::splits_csv_with_spaces
+        PASS [   0.042s] (170/784) biscuit-file list_format::tests::splits_markdown_ordered_strips_markers
+        PASS [   0.042s] (171/784) biscuit-file list_format::tests::splits_markdown_unordered_strips_markers_and_indent
+        PASS [   0.042s] (172/784) biscuit-file list_format::tests::splits_scalar_unwraps_quotes
+        PASS [   0.042s] (173/784) biscuit-file list_format::tests::splits_space_separated
+        PASS [   0.043s] (174/784) biscuit-file list_format::tests::splits_tsv_quote_aware
+        PASS [   0.041s] (175/784) biscuit-file path_text::tests::relative_backslash_path_becomes_forward_slashes
+        PASS [   0.042s] (176/784) biscuit-file path_text::tests::relative_forward_slash_path_is_unchanged
+        PASS [   0.042s] (177/784) biscuit-file path_text::tests::rooted_path_is_unchanged
+        PASS [   0.044s] (178/784) biscuit-file path_text::tests::try_and_lossy_renderers_agree
+        PASS [   0.042s] (179/784) biscuit-file path_text::tests::windows_disk_path_becomes_forward_slashes
+        PASS [   0.043s] (180/784) biscuit-file path_text::tests::windows_non_unicode_input_matches_lossy_conversion
+        PASS [   0.043s] (181/784) biscuit-file path_text::tests::windows_safe_verbatim_disk_path_is_reduced
+        PASS [   0.042s] (182/784) biscuit-file path_text::tests::windows_unc_and_device_paths_stay_native
+        PASS [   0.043s] (183/784) biscuit-file path_text::tests::windows_unreducible_verbatim_disk_paths_stay_native
+        PASS [   0.043s] (184/784) biscuit-file path_text::tests::windows_verbatim_dot_component_stays_native
+        PASS [   0.042s] (185/784) biscuit-file pdf::backends::tests::test_normalize_text_collapses_whitespace
+        PASS [   0.042s] (186/784) biscuit-file pdf::backends::tests::test_normalize_text_complex
+        PASS [   0.041s] (187/784) biscuit-file pdf::backends::tests::test_normalize_text_crlf_dehyphenation
+        PASS [   0.041s] (188/784) biscuit-file pdf::backends::tests::test_normalize_text_dehyphenates
+        PASS [   0.040s] (189/784) biscuit-file pdf::backends::tests::test_normalize_text_dehyphenates_line_breaks_only
+        PASS [   0.041s] (190/784) biscuit-file pdf::backends::tests::test_normalize_text_empty
+        PASS [   0.040s] (191/784) biscuit-file pdf::backends::tests::test_normalize_text_preserves_content
+        PASS [   0.041s] (192/784) biscuit-file pdf::backends::tests::test_normalize_text_preserves_dash_space_in_prose
+        PASS [   0.040s] (193/784) biscuit-file pdf::backends::tests::test_normalize_text_preserves_non_breaking_hyphens
+        PASS [   0.040s] (194/784) biscuit-file pdf::backends::tests::test_normalize_text_trailing_whitespace_after_dehyphenation
+        PASS [   0.040s] (195/784) biscuit-file pdf::backends::tests::test_normalize_text_unicode
+        PASS [   0.040s] (196/784) biscuit-file pdf::backends::tests::test_normalize_text_whitespace_only
+        PASS [   0.041s] (197/784) biscuit-file pdf::types::tests::markdown_options_builder_methods
+        PASS [   0.040s] (198/784) biscuit-file pdf::types::tests::page_range_accepts_valid_range
+        PASS [   0.041s] (199/784) biscuit-file pdf::types::tests::page_range_rejects_end_before_start
+        PASS [   0.040s] (200/784) biscuit-file pdf::types::tests::page_range_rejects_zero_start
+        PASS [   0.041s] (201/784) biscuit-file pdf::types::tests::pdf_config_builder_methods
+        PASS [   0.042s] (202/784) biscuit-file pdf::types::tests::test_backend_preference_default
+        PASS [   0.041s] (203/784) biscuit-file pdf::types::tests::test_backend_preference_variants
+        PASS [   0.041s] (204/784) biscuit-file pdf::types::tests::test_heading_strategy_default
+        PASS [   0.041s] (205/784) biscuit-file pdf::types::tests::test_image_mode_default
+        PASS [   0.042s] (206/784) biscuit-file pdf::types::tests::test_image_mode_variants
+        PASS [   0.042s] (207/784) biscuit-file pdf::types::tests::test_invalid_pdf_bytes
+        PASS [   0.043s] (208/784) biscuit-file pdf::types::tests::test_markdown_options_defaults_match_design
+        PASS [   0.042s] (209/784) biscuit-file pdf::types::tests::test_page_range_all
+        PASS [   0.042s] (210/784) biscuit-file pdf::types::tests::test_page_range_default
+        PASS [   0.043s] (211/784) biscuit-file pdf::types::tests::test_page_range_from
+        PASS [   0.043s] (212/784) biscuit-file pdf::types::tests::test_page_range_new
+        PASS [   0.043s] (213/784) biscuit-file pdf::types::tests::test_page_range_single
+        PASS [   0.042s] (214/784) biscuit-file pdf::types::tests::test_pdf_accessors
+        PASS [   0.043s] (215/784) biscuit-file pdf::types::tests::test_pdf_config_defaults_match_design
+        PASS [   0.042s] (216/784) biscuit-file pdf::types::tests::test_pdf_error_display
+        PASS [   0.042s] (217/784) biscuit-file pdf::types::tests::test_pdf_file_not_found
+        PASS [   0.042s] (218/784) biscuit-file pdf::types::tests::test_pdf_markdown_new
+        PASS [   0.042s] (219/784) biscuit-file pdf::types::tests::test_pdf_markdown_with_assets
+        PASS [   0.043s] (220/784) biscuit-file pdf::types::tests::test_pdf_markdown_with_warnings
+        PASS [   0.041s] (221/784) biscuit-file pdf::types::tests::test_pdf_source_bytes
+        PASS [   0.042s] (222/784) biscuit-file pdf::types::tests::test_pdf_source_path
+        PASS [   0.042s] (223/784) biscuit-file pdf::types::tests::test_pdf_toc_deeply_nested
+        PASS [   0.042s] (224/784) biscuit-file pdf::types::tests::test_pdf_toc_empty
+        PASS [   0.042s] (225/784) biscuit-file pdf::types::tests::test_pdf_toc_nested
+        PASS [   0.043s] (226/784) biscuit-file pdf::types::tests::test_pdf_with_custom_config
+        PASS [   0.042s] (227/784) biscuit-file pdf::types::tests::test_table_strategy_default
+        PASS [   0.042s] (228/784) biscuit-file pdf::types::tests::test_text_options_defaults
+        PASS [   0.042s] (229/784) biscuit-file pdf::types::tests::test_valid_pdf_magic_bytes
+        PASS [   0.042s] (230/784) biscuit-file pdf::types::tests::text_options_builder_methods
+        PASS [   0.042s] (231/784) biscuit-file span::tests::test_span_crlf_byte_offsets
+        PASS [   0.042s] (232/784) biscuit-file span::tests::test_span_is_byte_offsets_not_chars
+        PASS [   0.043s] (233/784) biscuit-file span::tests::test_span_multibyte_tail
+        PASS [   0.042s] (234/784) biscuit-file span::tests::test_span_serde_deserializes_object
+        PASS [   0.043s] (235/784) biscuit-file span::tests::test_span_serde_rejects_inverted_range
+        PASS [   0.043s] (236/784) biscuit-file span::tests::test_span_serde_round_trip
+        PASS [   0.042s] (237/784) biscuit-file span::tests::test_span_serde_serializes_start_end_object
+        PASS [   0.042s] (238/784) biscuit-file span::tests::test_span_zero_length_is_valid_insertion_point
+        PASS [   0.043s] (239/784) biscuit-file toml_impl::types::tests::as_yaml_value_returns_yaml_value_type
+        PASS [   0.042s] (240/784) biscuit-file toml_impl::types::tests::test_as_json_array_of_tables
+        PASS [   0.042s] (241/784) biscuit-file toml_impl::types::tests::test_as_json_arrays
+        PASS [   0.043s] (242/784) biscuit-file toml_impl::types::tests::test_as_json_basic_types
+        PASS [   0.042s] (243/784) biscuit-file toml_impl::types::tests::test_as_json_empty_structures
+        PASS [   0.043s] (244/784) biscuit-file toml_impl::types::tests::test_as_json_inline_tables
+        PASS [   0.043s] (245/784) biscuit-file toml_impl::types::tests::test_as_json_negative_numbers
+        PASS [   0.044s] (246/784) biscuit-file toml_impl::types::tests::test_as_json_nested_tables
+        PASS [   0.043s] (247/784) biscuit-file toml_impl::types::tests::test_as_json_special_floats
+        PASS [   0.046s] (248/784) biscuit-file toml_impl::types::tests::test_as_yaml_arrays
+        PASS [   0.042s] (249/784) biscuit-file toml_impl::types::tests::test_as_yaml_basic
+        PASS [   0.043s] (250/784) biscuit-file toml_impl::types::tests::test_as_yaml_nested
+        PASS [   0.043s] (251/784) biscuit-file toml_impl::types::tests::test_as_yaml_value
+        PASS [   0.044s] (252/784) biscuit-file toml_impl::types::tests::test_datetime_local_date
+        PASS [   0.044s] (253/784) biscuit-file toml_impl::types::tests::test_datetime_local_datetime
+        PASS [   0.044s] (254/784) biscuit-file toml_impl::types::tests::test_datetime_local_time
+        PASS [   0.044s] (255/784) biscuit-file toml_impl::types::tests::test_datetime_offset_datetime
+        PASS [   0.042s] (256/784) biscuit-file toml_impl::types::tests::test_datetime_with_subseconds
+        PASS [   0.045s] (257/784) biscuit-file toml_impl::types::tests::test_deeply_nested_structure
+        PASS [   0.042s] (258/784) biscuit-file toml_impl::types::tests::test_dotted_keys
+        PASS [   0.044s] (259/784) biscuit-file toml_impl::types::tests::test_hex_octal_binary_integers
+        PASS [   0.043s] (260/784) biscuit-file toml_impl::types::tests::test_invalid_toml_bad_datetime
+        PASS [   0.044s] (261/784) biscuit-file toml_impl::types::tests::test_invalid_toml_duplicate_keys
+        PASS [   0.042s] (262/784) biscuit-file toml_impl::types::tests::test_invalid_toml_missing_value
+        PASS [   0.043s] (263/784) biscuit-file toml_impl::types::tests::test_invalid_toml_unclosed_bracket
+        PASS [   0.043s] (264/784) biscuit-file toml_impl::types::tests::test_invalid_toml_unclosed_string
+        PASS [   0.043s] (265/784) biscuit-file toml_impl::types::tests::test_is_valid_accepts_valid_toml
+        PASS [   0.043s] (266/784) biscuit-file toml_impl::types::tests::test_is_valid_rejects_invalid_toml
+        PASS [   0.042s] (267/784) biscuit-file toml_impl::types::tests::test_literal_strings
+        PASS [   0.049s] (268/784) biscuit-file toml_impl::types::tests::test_multiline_strings
+        PASS [   0.047s] (269/784) biscuit-file toml_impl::types::tests::test_parse_from_reader
+        PASS [   0.048s] (270/784) biscuit-file toml_impl::types::tests::test_parse_simple_toml
+        PASS [   0.056s] (271/784) biscuit-file toml_impl::types::tests::test_raw_content_preserved
+        PASS [   0.053s] (272/784) biscuit-file toml_impl::types::tests::test_try_from_osstr_nonexistent
+        PASS [   0.060s] (273/784) biscuit-file toml_impl::types::tests::test_source_path_tracking
+        PASS [   0.054s] (274/784) biscuit-file toml_impl::types::tests::test_try_from_osstring_nonexistent
+        PASS [   0.053s] (275/784) biscuit-file toml_impl::types::tests::test_try_from_path_nonexistent
+        PASS [   0.060s] (276/784) biscuit-file toml_impl::types::tests::test_try_from_osstring_real_file
+        PASS [   0.048s] (277/784) biscuit-file toml_impl::types::tests::test_try_from_pathbuf_nonexistent
+        PASS [   0.061s] (278/784) biscuit-file toml_impl::types::tests::test_try_from_path_real_file
+        PASS [   0.053s] (279/784) biscuit-file toml_impl::types::tests::test_try_from_str_nonexistent_file
+        PASS [   0.057s] (280/784) biscuit-file toml_impl::types::tests::test_try_from_pathbuf_real_file
+        PASS [   0.044s] (281/784) biscuit-file toml_impl::types::tests::test_try_from_string_nonexistent_file
+        PASS [   0.051s] (282/784) biscuit-file toml_impl::types::tests::test_try_from_str_real_file
+        PASS [   0.044s] (283/784) biscuit-file toml_impl::types::tests::test_underscore_in_numbers
+        PASS [   0.046s] (284/784) biscuit-file toml_impl::types::tests::test_unicode_strings
+        PASS [   0.043s] (285/784) biscuit-file toml_impl::types::tests::test_validate_valid_toml
+        PASS [   0.046s] (286/784) biscuit-file toml_impl::types::tests::test_validation_report_default
+        PASS [   0.045s] (287/784) biscuit-file toml_impl::types::tests::test_validation_with_issues
+        PASS [   0.047s] (288/784) biscuit-file yaml::analyze::tests::analysis::test_apply_gathers_only_deterministic_repairs
+        PASS [   0.043s] (289/784) biscuit-file yaml::analyze::tests::analysis::test_apply_non_deterministic_only_changes_nothing
+        PASS [   0.048s] (290/784) biscuit-file yaml::analyze::tests::analysis::test_apply_with_no_repairs_is_byte_identical
+        PASS [   0.043s] (291/784) biscuit-file yaml::analyze::tests::analysis::test_diagnostics_are_returned_in_order
+        PASS [   0.046s] (292/784) biscuit-file yaml::analyze::tests::analysis::test_parseable_outcome_retains_value
+        PASS [   0.048s] (293/784) biscuit-file yaml::analyze::tests::analysis::test_unparseable_outcome_retains_failure
+        PASS [   0.049s] (294/784) biscuit-file yaml::analyze::tests::anchors::test_alias_in_sequence_entry
+        PASS [   0.049s] (295/784) biscuit-file yaml::analyze::tests::anchors::test_anchor_findings_sorted_in_source_order
+        PASS [   0.047s] (296/784) biscuit-file yaml::analyze::tests::anchors::test_anchors_do_not_cross_document_boundaries
+        PASS [   0.054s] (297/784) biscuit-file yaml::analyze::tests::anchors::test_comments_around_anchors_are_preserved
+        PASS [   0.058s] (298/784) biscuit-file yaml::analyze::tests::anchors::test_declared_and_used_anchor_is_quiet
+        PASS [   0.057s] (299/784) biscuit-file yaml::analyze::tests::anchors::test_deterministic_across_runs
+        PASS [   0.057s] (300/784) biscuit-file yaml::analyze::tests::anchors::test_duplicate_anchor
+        PASS [   0.056s] (301/784) biscuit-file yaml::analyze::tests::anchors::test_far_misspelling_stays_undeclared
+        PASS [   0.056s] (302/784) biscuit-file yaml::analyze::tests::anchors::test_forward_alias
+        PASS [   0.057s] (303/784) biscuit-file yaml::analyze::tests::anchors::test_forward_alias_in_flow_is_untouched
+        PASS [   0.056s] (304/784) biscuit-file yaml::analyze::tests::anchors::test_merge_key_alias_counts_as_a_use
+        PASS [   0.057s] (305/784) biscuit-file yaml::analyze::tests::anchors::test_misspelled_alias_suggests_nearby_anchor
+        PASS [   0.058s] (306/784) biscuit-file yaml::analyze::tests::anchors::test_undeclared_alias
+        PASS [   0.050s] (307/784) biscuit-file yaml::analyze::tests::anchors::test_undeclared_alias_in_flow_is_untouched
+        PASS [   0.048s] (308/784) biscuit-file yaml::analyze::tests::anchors::test_unused_anchor
+        PASS [   0.049s] (309/784) biscuit-file yaml::analyze::tests::classification_gate::test_engine_report_only_findings_never_mutate_source
+        PASS [   0.046s] (310/784) biscuit-file yaml::analyze::tests::classification_gate::test_gate_is_exhaustive_over_classification
+        PASS [   0.048s] (311/784) biscuit-file yaml::analyze::tests::classification_gate::test_mixed_document_applies_only_deterministic_repairs
+        PASS [   0.048s] (312/784) biscuit-file yaml::analyze::tests::classification_gate::test_report_only_classifications_never_apply_even_with_repairs
+        PASS [   0.049s] (313/784) biscuit-file yaml::analyze::tests::classification_gate::test_report_only_ordering_is_deterministic_across_runs
+        PASS [   0.047s] (314/784) biscuit-file yaml::analyze::tests::diagnostic::test_certainty_auto_apply_gate
+        PASS [   0.047s] (315/784) biscuit-file yaml::analyze::tests::diagnostic::test_certainty_deserializes_every_spelling
+        PASS [   0.047s] (316/784) biscuit-file yaml::analyze::tests::diagnostic::test_certainty_rejects_unknown_spelling
+        PASS [   0.049s] (317/784) biscuit-file yaml::analyze::tests::diagnostic::test_certainty_serializes_snake_case
+        PASS [   0.045s] (318/784) biscuit-file yaml::analyze::tests::diagnostic::test_code_from_str_round_trip
+        PASS [   0.044s] (319/784) biscuit-file yaml::analyze::tests::diagnostic::test_code_spellings_are_dotted_lowercase_families
+        PASS [   0.047s] (320/784) biscuit-file yaml::analyze::tests::diagnostic::test_code_spellings_pinned
+        PASS [   0.046s] (321/784) biscuit-file yaml::analyze::tests::diagnostic::test_diagnostic_deserializes_with_missing_repairs_as_empty
+        PASS [   0.047s] (322/784) biscuit-file yaml::analyze::tests::diagnostic::test_diagnostic_round_trip
+        PASS [   0.047s] (323/784) biscuit-file yaml::analyze::tests::diagnostic::test_diagnostic_serializes_contract_shape
+        PASS [   0.048s] (324/784) biscuit-file yaml::analyze::tests::diagnostic::test_diagnostic_with_no_repairs_serializes_empty_array
+        PASS [   0.048s] (325/784) biscuit-file yaml::analyze::tests::diagnostic::test_every_code_deserializes_from_its_spelling
+        PASS [   0.047s] (326/784) biscuit-file yaml::analyze::tests::diagnostic::test_every_code_serializes_to_its_dotted_spelling
+        PASS [   0.047s] (327/784) biscuit-file yaml::analyze::tests::diagnostic::test_multiple_diagnostics_keep_serialized_order
+        PASS [   0.047s] (328/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_comments_around_duplicates_are_preserved
+        PASS [   0.048s] (329/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_deeply_nested_duplicate
+        PASS [   0.047s] (330/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_deterministic_across_runs
+        PASS [   0.047s] (331/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_diagnostics_sorted_in_source_order
+        PASS [   0.047s] (332/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_duplicate_inside_flow_mapping
+        PASS [   0.046s] (333/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_duplicate_inside_nested_flow_mapping
+        PASS [   0.047s] (334/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_duplicate_keys_across_documents_are_not_conflicts
+        PASS [   0.047s] (335/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_nested_duplicate
+        PASS [   0.049s] (336/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_no_duplicate_is_quiet
+        PASS [   0.048s] (337/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_quoted_and_plain_spellings_of_one_key_conflict
+        PASS [   0.050s] (338/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_root_level_duplicate_reports_both_spans
+        PASS [   0.048s] (339/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_same_key_in_sequence_items_is_not_a_duplicate
+        PASS [   0.049s] (340/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_same_key_in_sibling_scopes_is_not_a_duplicate
+        PASS [   0.050s] (341/784) biscuit-file yaml::analyze::tests::duplicate_keys::test_three_occurrences_report_three_spans
+        PASS [   0.061s] (342/784) biscuit-file yaml::analyze::tests::edit_set::test_adjacent_spans_do_not_overlap
+        PASS [   0.061s] (343/784) biscuit-file yaml::analyze::tests::edit_set::test_argument_order_does_not_change_result
+        PASS [   0.059s] (344/784) biscuit-file yaml::analyze::tests::edit_set::test_audit_is_in_stable_source_order
+        PASS [   0.058s] (345/784) biscuit-file yaml::analyze::tests::edit_set::test_crlf_spans_apply_byte_accurately
+        PASS [   0.058s] (346/784) biscuit-file yaml::analyze::tests::edit_set::test_identical_span_rejected_as_overlap
+        PASS [   0.057s] (347/784) biscuit-file yaml::analyze::tests::edit_set::test_insertion_at_span_edge_is_not_overlap
+        PASS [   0.057s] (348/784) biscuit-file yaml::analyze::tests::edit_set::test_inverted_span_rejected
+        PASS [   0.057s] (349/784) biscuit-file yaml::analyze::tests::edit_set::test_multibyte_aligned_span_applies
+        PASS [   0.057s] (350/784) biscuit-file yaml::analyze::tests::edit_set::test_multiple_edits_apply_end_to_beginning
+        PASS [   0.055s] (351/784) biscuit-file yaml::analyze::tests::edit_set::test_nested_span_rejected
+        PASS [   0.043s] (352/784) biscuit-file yaml::analyze::tests::edit_set::test_no_edits_returns_source_unchanged
+        PASS [   0.044s] (353/784) biscuit-file yaml::analyze::tests::edit_set::test_non_utf8_boundary_rejected
+        PASS [   0.044s] (354/784) biscuit-file yaml::analyze::tests::edit_set::test_out_of_range_end_rejected
+        PASS [   0.044s] (355/784) biscuit-file yaml::analyze::tests::edit_set::test_overlapping_edit_rejected_first_wins
+        PASS [   0.043s] (356/784) biscuit-file yaml::analyze::tests::edit_set::test_single_edit_applies
+        PASS [   0.047s] (357/784) biscuit-file yaml::analyze::tests::edit_set::test_span_past_end_of_empty_source_rejected
+        PASS [   0.043s] (358/784) biscuit-file yaml::analyze::tests::edit_set::test_two_insertions_same_offset_deterministic
+        PASS [   0.043s] (359/784) biscuit-file yaml::analyze::tests::edit_set::test_untouched_bytes_preserved
+        PASS [   0.044s] (360/784) biscuit-file yaml::analyze::tests::edit_set::test_zero_length_insertion_applies
+        PASS [   0.044s] (361/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_inside_block_scalar_normalized_value_equal
+        PASS [   0.044s] (362/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_inside_flow_collection
+        PASS [   0.043s] (363/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_multibyte_offsets
+        PASS [   0.043s] (364/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_normalized
+        PASS [   0.042s] (365/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_preserved_on_parse_recovery_path
+        PASS [   0.043s] (366/784) biscuit-file yaml::analyze::tests::line_endings::test_crlf_spans_account_for_carriage_return
+        PASS [   0.041s] (367/784) biscuit-file yaml::analyze::tests::line_endings::test_lone_cr_normalized
+        PASS [   0.042s] (368/784) biscuit-file yaml::analyze::tests::lints::test_ambiguous_trailing_dot_float
+        PASS [   0.042s] (369/784) biscuit-file yaml::analyze::tests::lints::test_ambiguous_version_like_float
+        PASS [   0.042s] (370/784) biscuit-file yaml::analyze::tests::lints::test_anchored_value_is_not_misflagged
+        PASS [   0.042s] (371/784) biscuit-file yaml::analyze::tests::lints::test_block_scalar_content_is_not_comment_truncation
+        PASS [   0.041s] (372/784) biscuit-file yaml::analyze::tests::lints::test_boolean_spelling_tie_resolves_to_canonical
+        PASS [   0.041s] (373/784) biscuit-file yaml::analyze::tests::lints::test_canonical_bool_spellings_are_quiet
+        PASS [   0.043s] (374/784) biscuit-file yaml::analyze::tests::lints::test_canonical_float_is_quiet
+        PASS [   0.041s] (375/784) biscuit-file yaml::analyze::tests::lints::test_canonical_null_is_quiet
+        PASS [   0.042s] (376/784) biscuit-file yaml::analyze::tests::lints::test_case_variants_are_similar
+        PASS [   0.042s] (377/784) biscuit-file yaml::analyze::tests::lints::test_comment_after_ambiguous_value_is_preserved
+        PASS [   0.042s] (378/784) biscuit-file yaml::analyze::tests::lints::test_comment_in_value_position
+        PASS [   0.041s] (379/784) biscuit-file yaml::analyze::tests::lints::test_consistent_indentation_is_quiet
+        PASS [   0.042s] (380/784) biscuit-file yaml::analyze::tests::lints::test_container_keys_are_quiet
+        PASS [   0.042s] (381/784) biscuit-file yaml::analyze::tests::lints::test_dialect_trap_mapping_key
+        PASS [   0.042s] (382/784) biscuit-file yaml::analyze::tests::lints::test_distant_keys_are_quiet
+        PASS [   0.042s] (383/784) biscuit-file yaml::analyze::tests::lints::test_double_hash_comments_are_quiet
+        PASS [   0.040s] (384/784) biscuit-file yaml::analyze::tests::lints::test_double_quoted_windows_path_escape_smell
+        PASS [   0.042s] (385/784) biscuit-file yaml::analyze::tests::lints::test_empty_mapping_value
+        PASS [   0.041s] (386/784) biscuit-file yaml::analyze::tests::lints::test_empty_sequence_entry
+        PASS [   0.041s] (387/784) biscuit-file yaml::analyze::tests::lints::test_empty_value_with_prose_comment
+        PASS [   0.041s] (388/784) biscuit-file yaml::analyze::tests::lints::test_escaped_backslash_windows_path_is_quiet
+        PASS [   0.041s] (389/784) biscuit-file yaml::analyze::tests::lints::test_explicit_null_is_not_an_empty_value
+        PASS [   0.041s] (390/784) biscuit-file yaml::analyze::tests::lints::test_flow_scalars_are_out_of_scope
+        PASS [   0.040s] (391/784) biscuit-file yaml::analyze::tests::lints::test_fold_with_chomping_modifier
+        PASS [   0.042s] (392/784) biscuit-file yaml::analyze::tests::lints::test_fold_with_pem_material
+        PASS [   0.041s] (393/784) biscuit-file yaml::analyze::tests::lints::test_fold_with_shell_operators
+        PASS [   0.042s] (394/784) biscuit-file yaml::analyze::tests::lints::test_fold_with_shell_prompts
+        PASS [   0.042s] (395/784) biscuit-file yaml::analyze::tests::lints::test_fold_with_template_markers
+        PASS [   0.042s] (396/784) biscuit-file yaml::analyze::tests::lints::test_fold_without_structural_signal_is_quiet
+        PASS [   0.042s] (397/784) biscuit-file yaml::analyze::tests::lints::test_folded_prose_is_quiet
+        PASS [   0.042s] (398/784) biscuit-file yaml::analyze::tests::lints::test_folded_scalar_with_shell_commands
+        PASS [   0.042s] (399/784) biscuit-file yaml::analyze::tests::lints::test_identical_keys_across_sibling_scopes_are_quiet
+        PASS [   0.042s] (400/784) biscuit-file yaml::analyze::tests::lints::test_infinity_and_nan_forms
+        PASS [   0.043s] (401/784) biscuit-file yaml::analyze::tests::lints::test_leading_zero_digit_strings
+        PASS [   0.042s] (402/784) biscuit-file yaml::analyze::tests::lints::test_lint_findings_sorted_in_source_order
+        PASS [   0.042s] (403/784) biscuit-file yaml::analyze::tests::lints::test_lints_deterministic_across_runs
+        PASS [   0.043s] (404/784) biscuit-file yaml::analyze::tests::lints::test_literal_scalar_is_never_flagged
+        PASS [   0.041s] (405/784) biscuit-file yaml::analyze::tests::lints::test_mixed_boolean_spellings
+        PASS [   0.042s] (406/784) biscuit-file yaml::analyze::tests::lints::test_mixed_deterministic_and_report_only_findings
+        PASS [   0.042s] (407/784) biscuit-file yaml::analyze::tests::lints::test_mixed_indentation_widths
+        PASS [   0.041s] (408/784) biscuit-file yaml::analyze::tests::lints::test_mixed_quote_styles_are_deliberately_quiet
+        PASS [   0.042s] (409/784) biscuit-file yaml::analyze::tests::lints::test_multiline_plain_scalar_is_not_misflagged
+        PASS [   0.042s] (410/784) biscuit-file yaml::analyze::tests::lints::test_nested_ambiguous_scalar
+        PASS [   0.041s] (411/784) biscuit-file yaml::analyze::tests::lints::test_nested_empty_value
+        PASS [   0.042s] (412/784) biscuit-file yaml::analyze::tests::lints::test_non_canonical_bool_spellings
+        PASS [   0.041s] (413/784) biscuit-file yaml::analyze::tests::lints::test_non_canonical_null_spellings
+        PASS [   0.041s] (414/784) biscuit-file yaml::analyze::tests::lints::test_non_decimal_integers
+        PASS [   0.042s] (415/784) biscuit-file yaml::analyze::tests::lints::test_non_string_mapping_keys
+        PASS [   0.041s] (416/784) biscuit-file yaml::analyze::tests::lints::test_plain_integer_is_quiet
+        PASS [   0.040s] (417/784) biscuit-file yaml::analyze::tests::lints::test_quoted_value_with_comment_is_quiet
+        PASS [   0.042s] (418/784) biscuit-file yaml::analyze::tests::lints::test_quoted_variants_are_quiet
+        PASS [   0.043s] (419/784) biscuit-file yaml::analyze::tests::lints::test_resolver_cross_checked_against_parser
+        PASS [   0.042s] (420/784) biscuit-file yaml::analyze::tests::lints::test_scientific_notation
+        PASS [   0.042s] (421/784) biscuit-file yaml::analyze::tests::lints::test_semver_and_prefixed_versions_are_quiet
+        PASS [   0.042s] (422/784) biscuit-file yaml::analyze::tests::lints::test_separator_variants_are_similar
+        PASS [   0.043s] (423/784) biscuit-file yaml::analyze::tests::lints::test_sequence_entry_ambiguous_scalar
+        PASS [   0.043s] (424/784) biscuit-file yaml::analyze::tests::lints::test_sequence_entry_comment_truncation
+        PASS [   0.042s] (425/784) biscuit-file yaml::analyze::tests::lints::test_short_keys_are_quiet
+        PASS [   0.043s] (426/784) biscuit-file yaml::analyze::tests::lints::test_similar_keys_across_sibling_scopes
+        PASS [   0.043s] (427/784) biscuit-file yaml::analyze::tests::lints::test_similar_keys_within_one_scope
+        PASS [   0.043s] (428/784) biscuit-file yaml::analyze::tests::lints::test_single_line_fold_is_quiet
+        PASS [   0.042s] (429/784) biscuit-file yaml::analyze::tests::lints::test_single_quoted_and_plain_windows_paths_are_quiet
+        PASS [   0.044s] (430/784) biscuit-file yaml::analyze::tests::lints::test_spaced_comments_are_quiet
+        PASS [   0.043s] (431/784) biscuit-file yaml::analyze::tests::lints::test_tight_trailing_comment_truncates_value
+        PASS [   0.042s] (432/784) biscuit-file yaml::analyze::tests::lints::test_timestamp_shaped_scalars
+        PASS [   0.044s] (433/784) biscuit-file yaml::analyze::tests::lints::test_uniform_boolean_spellings_are_quiet
+        PASS [   0.042s] (434/784) biscuit-file yaml::analyze::tests::lints::test_windows_paths_and_urls_are_quiet
+        PASS [   0.044s] (435/784) biscuit-file yaml::analyze::tests::lints::test_yaml_1_1_bool_spellings_are_dialect_traps
+        PASS [   0.043s] (436/784) biscuit-file yaml::analyze::tests::locate::test_locate_anchored_value_still_locates
+        PASS [   0.043s] (437/784) biscuit-file yaml::analyze::tests::locate::test_locate_block_scalar_header_is_value_text
+        PASS [   0.044s] (438/784) biscuit-file yaml::analyze::tests::locate::test_locate_crlf_spans
+        PASS [   0.044s] (439/784) biscuit-file yaml::analyze::tests::locate::test_locate_deeply_nested_sequence_index
+        PASS [   0.043s] (440/784) biscuit-file yaml::analyze::tests::locate::test_locate_empty_value_returns_none
+        PASS [   0.045s] (441/784) biscuit-file yaml::analyze::tests::locate::test_locate_flow_value_is_not_plain
+        PASS [   0.045s] (442/784) biscuit-file yaml::analyze::tests::locate::test_locate_inside_flow_collection_returns_none
+        PASS [   0.044s] (443/784) biscuit-file yaml::analyze::tests::locate::test_locate_key_in_sequence_mapping
+        PASS [   0.045s] (444/784) biscuit-file yaml::analyze::tests::locate::test_locate_key_nested
+        PASS [   0.044s] (445/784) biscuit-file yaml::analyze::tests::locate::test_locate_key_top_level
+        PASS [   0.045s] (446/784) biscuit-file yaml::analyze::tests::locate::test_locate_key_unknown_returns_none
+        PASS [   0.045s] (447/784) biscuit-file yaml::analyze::tests::locate::test_locate_multibyte_spans
+        PASS [   0.044s] (448/784) biscuit-file yaml::analyze::tests::locate::test_locate_nested_mapping_value
+        PASS [   0.044s] (449/784) biscuit-file yaml::analyze::tests::locate::test_locate_quoted_value_is_not_plain
+        PASS [   0.045s] (450/784) biscuit-file yaml::analyze::tests::locate::test_locate_sequence_entry
+        PASS [   0.043s] (451/784) biscuit-file yaml::analyze::tests::locate::test_locate_sequence_of_mappings
+        PASS [   0.044s] (452/784) biscuit-file yaml::analyze::tests::locate::test_locate_top_level_mapping_value
+        PASS [   0.043s] (453/784) biscuit-file yaml::analyze::tests::locate::test_locate_unknown_path_returns_none
+        PASS [   0.045s] (454/784) biscuit-file yaml::analyze::tests::locate::test_locate_value_with_trailing_comment_excludes_comment
+        PASS [   0.044s] (455/784) biscuit-file yaml::analyze::tests::multi_document::test_comment_only_source_is_quiet
+        PASS [   0.044s] (456/784) biscuit-file yaml::analyze::tests::multi_document::test_content_after_end_marker_without_a_start_marker
+        PASS [   0.044s] (457/784) biscuit-file yaml::analyze::tests::multi_document::test_deterministic_across_runs
+        PASS [   0.043s] (458/784) biscuit-file yaml::analyze::tests::multi_document::test_documents_with_comments_between_markers
+        PASS [   0.043s] (459/784) biscuit-file yaml::analyze::tests::multi_document::test_empty_source_is_quiet
+        PASS [   0.042s] (460/784) biscuit-file yaml::analyze::tests::multi_document::test_implicit_first_document_plus_marker
+        PASS [   0.043s] (461/784) biscuit-file yaml::analyze::tests::multi_document::test_indented_marker_inside_block_scalar_is_not_a_document
+        PASS [   0.045s] (462/784) biscuit-file yaml::analyze::tests::multi_document::test_single_document_with_both_markers_is_quiet
+        PASS [   0.044s] (463/784) biscuit-file yaml::analyze::tests::multi_document::test_single_document_with_end_marker_is_quiet
+        PASS [   0.042s] (464/784) biscuit-file yaml::analyze::tests::multi_document::test_single_document_with_start_marker_is_quiet
+        PASS [   0.042s] (465/784) biscuit-file yaml::analyze::tests::multi_document::test_single_empty_document_is_quiet
+        PASS [   0.043s] (466/784) biscuit-file yaml::analyze::tests::multi_document::test_three_documents_report_each_extra_document
+        PASS [   0.042s] (467/784) biscuit-file yaml::analyze::tests::multi_document::test_trailing_comment_after_end_marker_is_quiet
+        PASS [   0.043s] (468/784) biscuit-file yaml::analyze::tests::multi_document::test_two_documents
+        PASS [   0.044s] (469/784) biscuit-file yaml::analyze::tests::multi_document::test_zero_indent_marker_ends_a_block_scalar
+        PASS [   0.043s] (470/784) biscuit-file yaml::analyze::tests::normalization::test_already_clean_document_has_no_candidates
+        PASS [   0.043s] (471/784) biscuit-file yaml::analyze::tests::normalization::test_blank_line_whitespace_removed
+        PASS [   0.041s] (472/784) biscuit-file yaml::analyze::tests::normalization::test_bom_at_stream_start_removed
+        PASS [   0.044s] (473/784) biscuit-file yaml::analyze::tests::normalization::test_bom_crlf_and_trailing_whitespace_combine
+        PASS [   0.044s] (474/784) biscuit-file yaml::analyze::tests::normalization::test_crlf_normalized_to_lf
+        PASS [   0.044s] (475/784) biscuit-file yaml::analyze::tests::normalization::test_crlf_spans_are_byte_accurate
+        PASS [   0.043s] (476/784) biscuit-file yaml::analyze::tests::normalization::test_empty_source_is_clean
+        PASS [   0.044s] (477/784) biscuit-file yaml::analyze::tests::normalization::test_lone_cr_normalized_to_lf
+        PASS [   0.042s] (478/784) biscuit-file yaml::analyze::tests::normalization::test_missing_final_newline_added
+        PASS [   0.044s] (479/784) biscuit-file yaml::analyze::tests::normalization::test_mixed_line_endings_normalized
+        PASS [   0.044s] (480/784) biscuit-file yaml::analyze::tests::normalization::test_present_final_newline_is_clean
+        PASS [   0.045s] (481/784) biscuit-file yaml::analyze::tests::normalization::test_superfluous_trailing_blank_lines_collapsed
+        PASS [   0.044s] (482/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_spaces_removed
+        PASS [   0.042s] (483/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_tab_removed
+        PASS [   0.042s] (484/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_whitespace_after_quoted_scalar_removed_but_content_kept
+        PASS [   0.043s] (485/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_whitespace_and_missing_final_newline_combine
+        PASS [   0.042s] (486/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_whitespace_inside_block_scalar_untouched
+        PASS [   0.043s] (487/784) biscuit-file yaml::analyze::tests::normalization::test_trailing_whitespace_inside_multiline_quoted_scalar_untouched
+        PASS [   0.043s] (488/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_alias_indicator
+        PASS [   0.041s] (489/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_ampersand_indicator
+        PASS [   0.043s] (490/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_backslash_in_lexeme_is_report_only
+        PASS [   0.041s] (491/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_backtick_indicator
+        PASS [   0.044s] (492/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_block_scalar_indicator
+        PASS [   0.042s] (493/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_comment_after_scalar_is_report_only
+        PASS [   0.043s] (494/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_document_marker_context
+        PASS [   0.043s] (495/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_failure_location_is_structured
+        PASS [   0.044s] (496/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_flagship_reserved_indicator
+        PASS [   0.043s] (497/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_flagship_with_final_newline
+        PASS [   0.045s] (498/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_flow_context_is_report_only
+        PASS [   0.044s] (499/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_flow_indicator_scalars
+        PASS [   0.043s] (500/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_lexeme_byte_equality_proof
+        PASS [   0.045s] (501/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_multibyte_lexeme
+        PASS [   0.043s] (502/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_multiline_scalar_is_report_only
+        PASS [   0.045s] (503/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_nested_mapping_context
+        PASS [   0.043s] (504/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_parseable_inputs_never_trigger_quoting
+        PASS [   0.043s] (505/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_percent_indicator
+        PASS [   0.043s] (506/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_quote_inside_lexeme_is_report_only
+        PASS [   0.045s] (507/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_round_cap_leaves_original_bytes
+        PASS [   0.042s] (508/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_sequence_context
+        PASS [   0.042s] (509/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_sequence_context_second_entry
+        PASS [   0.043s] (510/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_sequence_entry_inline_mapping_context
+        PASS [   0.041s] (511/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_two_error_chain_repairs_both
+        PASS [   0.042s] (512/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_unrepairable_yaml_reports_parse_diagnostic
+        PASS [   0.043s] (513/784) biscuit-file yaml::analyze::tests::reserved_indicator::test_unterminated_quote_is_report_only
+        PASS [   0.042s] (514/784) biscuit-file yaml::analyze::tests::scan::test_anchor_and_alias_recording
+        PASS [   0.044s] (515/784) biscuit-file yaml::analyze::tests::scan::test_apostrophe_inside_plain_scalar_is_not_a_quote
+        PASS [   0.044s] (516/784) biscuit-file yaml::analyze::tests::scan::test_block_scalar_detection_and_content_reclassification
+        PASS [   0.043s] (517/784) biscuit-file yaml::analyze::tests::scan::test_block_scalar_folded_with_modifiers
+        PASS [   0.044s] (518/784) biscuit-file yaml::analyze::tests::scan::test_block_value_context_inline_mapping_in_sequence
+        PASS [   0.043s] (519/784) biscuit-file yaml::analyze::tests::scan::test_block_value_context_lexeme_includes_comment
+        PASS [   0.043s] (520/784) biscuit-file yaml::analyze::tests::scan::test_block_value_context_mapping
+        PASS [   0.044s] (521/784) biscuit-file yaml::analyze::tests::scan::test_block_value_context_sequence_index
+        PASS [   0.043s] (522/784) biscuit-file yaml::analyze::tests::scan::test_brackets_inside_quotes_are_not_flow
+        PASS [   0.041s] (523/784) biscuit-file yaml::analyze::tests::scan::test_comment_trimmed_from_value_region
+        PASS [   0.043s] (524/784) biscuit-file yaml::analyze::tests::scan::test_flow_regions_nested_and_unclosed
+        PASS [   0.041s] (525/784) biscuit-file yaml::analyze::tests::scan::test_line_at_byte
+        PASS [   0.040s] (526/784) biscuit-file yaml::analyze::tests::scan::test_line_classification
+        PASS [   0.041s] (527/784) biscuit-file yaml::analyze::tests::scan::test_line_splitting_crlf_and_lone_cr
+        PASS [   0.040s] (528/784) biscuit-file yaml::analyze::tests::scan::test_line_splitting_lf
+        PASS [   0.041s] (529/784) biscuit-file yaml::analyze::tests::scan::test_mapping_colon_requires_following_whitespace
+        PASS [   0.040s] (530/784) biscuit-file yaml::analyze::tests::scan::test_mapping_entry_extraction
+        PASS [   0.041s] (531/784) biscuit-file yaml::analyze::tests::scan::test_multibyte_spans
+        PASS [   0.041s] (532/784) biscuit-file yaml::analyze::tests::scan::test_quoted_scalar_styles
+        PASS [   0.042s] (533/784) biscuit-file yaml::analyze::tests::scan::test_root_level_block_scalar
+        PASS [   0.041s] (534/784) biscuit-file yaml::analyze::tests::scan::test_sequence_entry_extraction
+        PASS [   0.043s] (535/784) biscuit-file yaml::analyze::tests::scan::test_sequence_entry_with_inline_mapping
+        PASS [   0.042s] (536/784) biscuit-file yaml::analyze::tests::whitespace::test_already_canonical_flow_is_clean
+        PASS [   0.041s] (537/784) biscuit-file yaml::analyze::tests::whitespace::test_comment_inside_flow_preserved
+        PASS [   0.043s] (538/784) biscuit-file yaml::analyze::tests::whitespace::test_flow_mapping_colon_spacing
+        PASS [   0.042s] (539/784) biscuit-file yaml::analyze::tests::whitespace::test_flow_mapping_whitespace
+        PASS [   0.042s] (540/784) biscuit-file yaml::analyze::tests::whitespace::test_flow_sequence_whitespace
+        PASS [   0.042s] (541/784) biscuit-file yaml::analyze::tests::whitespace::test_host_localhost_untouched
+        PASS [   0.042s] (542/784) biscuit-file yaml::analyze::tests::whitespace::test_json_style_quoted_key_colon
+        PASS [   0.040s] (543/784) biscuit-file yaml::analyze::tests::whitespace::test_missing_space_after_colon_in_block_untouched
+        PASS [   0.041s] (544/784) biscuit-file yaml::analyze::tests::whitespace::test_multiline_flow_whitespace_runs_left_alone
+        PASS [   0.041s] (545/784) biscuit-file yaml::analyze::tests::whitespace::test_multiple_mapping_colon_sites
+        PASS [   0.041s] (546/784) biscuit-file yaml::analyze::tests::whitespace::test_negative_number_not_a_sequence_marker
+        PASS [   0.041s] (547/784) biscuit-file yaml::analyze::tests::whitespace::test_nested_flow_collections
+        PASS [   0.041s] (548/784) biscuit-file yaml::analyze::tests::whitespace::test_quoted_strings_in_flow_preserved
+        PASS [   0.041s] (549/784) biscuit-file yaml::analyze::tests::whitespace::test_sequence_entry_with_inline_mapping
+        PASS [   0.042s] (550/784) biscuit-file yaml::analyze::tests::whitespace::test_spaces_after_sequence_marker
+        PASS [   0.041s] (551/784) biscuit-file yaml::analyze::tests::whitespace::test_spaces_before_mapping_colon
+        PASS [   0.041s] (552/784) biscuit-file yaml::analyze::tests::whitespace::test_tab_after_mapping_colon
+        PASS [   0.041s] (553/784) biscuit-file yaml::analyze::tests::whitespace::test_url_in_flow_not_mistaken_for_mapping_colon
+        PASS [   0.043s] (554/784) biscuit-file yaml::analyze::tests::whitespace::test_whitespace_diagnostics_are_deterministic_and_sorted
+        PASS [   0.042s] (555/784) biscuit-file yaml::location::tests::test_projection_from_parser_error
+        PASS [   0.042s] (556/784) biscuit-file yaml::tests::diagnose::test_analysis_retains_source_for_apply
+        PASS [   0.042s] (557/784) biscuit-file yaml::tests::diagnose::test_diagnose_clean_input_returns_nothing
+        PASS [   0.042s] (558/784) biscuit-file yaml::tests::diagnose::test_diagnose_delegates_for_source_backed_values
+        PASS [   0.041s] (559/784) biscuit-file yaml::tests::diagnose::test_from_value_returns_empty_results
+        PASS [   0.042s] (560/784) biscuit-file yaml::tests::diagnose::test_repair_candidates_returns_proven_candidates
+        PASS [   0.049s] (561/784) biscuit-file yaml::tests::diagnose::test_path_backed_values_diagnose_retained_source
+        PASS [   0.043s] (562/784) biscuit-file yaml::tests::diagnose::test_single_analysis_matches_both_shorthands
+        PASS [   0.043s] (563/784) biscuit-file yaml::tests::location::test_crlf_offsets_count_cr_and_lf_bytes
+        PASS [   0.042s] (564/784) biscuit-file yaml::tests::location::test_display_flagship_parse_error_unchanged
+        PASS [   0.042s] (565/784) biscuit-file yaml::tests::location::test_display_flow_sequence_error_unchanged
+        PASS [   0.043s] (566/784) biscuit-file yaml::tests::location::test_display_non_parse_variants_unchanged
+        PASS [   0.042s] (567/784) biscuit-file yaml::tests::location::test_flagship_reserved_indicator_location
+        PASS [   0.043s] (568/784) biscuit-file yaml::tests::location::test_flow_sequence_location_points_into_source
+        PASS [   0.043s] (569/784) biscuit-file yaml::tests::location::test_from_serde_error_conversion_preserved
+        PASS [   0.038s] (570/784) biscuit-file yaml::tests::location::test_location_is_none_for_non_parse_variants
+        PASS [   0.040s] (571/784) biscuit-file yaml::tests::location::test_location_matches_underlying_parser_location
+        PASS [   0.042s] (572/784) biscuit-file yaml::tests::location::test_multibyte_key_location
+        PASS [   0.043s] (573/784) biscuit-file yaml::tests::location::test_multibyte_location_byte_index_is_a_byte_offset
+        PASS [   0.043s] (574/784) biscuit-file yaml::tests::location::test_parse_location_is_some_through_yaml_error
+        PASS [   0.044s] (575/784) biscuit-file yaml::tests::retained_source::test_clone_preserves_retained_source
+        PASS [   0.042s] (576/784) biscuit-file yaml::tests::retained_source::test_from_bytes_retains_input_text
+        PASS [   0.042s] (577/784) biscuit-file yaml::tests::retained_source::test_from_bytes_retains_multibyte_text
+        PASS [   0.052s] (578/784) biscuit-file yaml::tests::retained_source::test_from_str_retains_input_text
+        PASS [   0.053s] (579/784) biscuit-file yaml::tests::retained_source::test_from_value_has_no_source
+        PASS [   0.052s] (580/784) biscuit-file yaml::tests::retained_source::test_from_value_via_from_trait_has_no_source
+        PASS [   0.059s] (581/784) biscuit-file yaml::tests::retained_source::test_path_backed_source_survives_file_change_on_disk
+        PASS [   0.052s] (582/784) biscuit-file yaml::tests::retained_source::test_retained_source_of_empty_input
+        PASS [   0.059s] (583/784) biscuit-file yaml::tests::retained_source::test_path_backed_yaml_retains_source
+        PASS [   0.053s] (584/784) biscuit-file yaml::types::tests::test_array_conversion_json
+        PASS [   0.052s] (585/784) biscuit-file yaml::types::tests::test_as_json
+        PASS [   0.053s] (586/784) biscuit-file yaml::types::tests::test_as_toml
+        PASS [   0.054s] (587/784) biscuit-file yaml::types::tests::test_complex_nested_structure
+        PASS [   0.043s] (588/784) biscuit-file yaml::types::tests::test_conversion_output
+        PASS [   0.042s] (589/784) biscuit-file yaml::types::tests::test_empty_array_toml
+        PASS [   0.043s] (590/784) biscuit-file yaml::types::tests::test_empty_mapping
+        PASS [   0.035s] (591/784) biscuit-file yaml::types::tests::test_empty_sequence
+        PASS [   0.039s] (592/784) biscuit-file yaml::types::tests::test_from_serde_value
+        PASS [   0.041s] (593/784) biscuit-file yaml::types::tests::test_hetero_array_policy_error
+        PASS [   0.042s] (594/784) biscuit-file yaml::types::tests::test_hetero_array_policy_stringify
+        PASS [   0.042s] (595/784) biscuit-file yaml::types::tests::test_homogeneous_array_passes
+        PASS [   0.042s] (596/784) biscuit-file yaml::types::tests::test_invalid_yaml_error
+        PASS [   0.043s] (597/784) biscuit-file yaml::types::tests::test_is_valid_accepts_valid_yaml
+        PASS [   0.043s] (598/784) biscuit-file yaml::types::tests::test_is_valid_rejects_invalid_yaml
+        PASS [   0.043s] (599/784) biscuit-file yaml::types::tests::test_json_conversion_options_default
+        PASS [   0.044s] (600/784) biscuit-file yaml::types::tests::test_max_depth_exceeded_json
+        PASS [   0.044s] (601/784) biscuit-file yaml::types::tests::test_max_depth_exceeded_toml
+        PASS [   0.044s] (602/784) biscuit-file yaml::types::tests::test_max_depth_none_allows_deep_nesting
+        PASS [   0.042s] (603/784) biscuit-file yaml::types::tests::test_max_depth_within_limit
+        PASS [   0.044s] (604/784) biscuit-file yaml::types::tests::test_multiple_null_warnings
+        PASS [   0.046s] (605/784) biscuit-file yaml::types::tests::test_multiple_warnings_collected
+        PASS [   0.048s] (606/784) biscuit-file yaml::types::tests::test_nested_arrays_json
+        PASS [   0.048s] (607/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_error_infinity
+        PASS [   0.048s] (608/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_error_nan
+        PASS [   0.047s] (609/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_negative_infinity
+        PASS [   0.048s] (610/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_null_nan
+        PASS [   0.050s] (611/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_stringify_infinity
+        PASS [   0.048s] (612/784) biscuit-file yaml::types::tests::test_non_finite_float_policy_stringify_nan
+        PASS [   0.050s] (613/784) biscuit-file yaml::types::tests::test_non_string_key_policy_drop
+        PASS [   0.051s] (614/784) biscuit-file yaml::types::tests::test_non_string_key_policy_error
+        PASS [   0.048s] (615/784) biscuit-file yaml::types::tests::test_non_string_key_policy_stringify
+        PASS [   0.047s] (616/784) biscuit-file yaml::types::tests::test_null_policy_drop
+        PASS [   0.046s] (617/784) biscuit-file yaml::types::tests::test_null_policy_error
+        PASS [   0.047s] (618/784) biscuit-file yaml::types::tests::test_null_policy_stringify
+        PASS [   0.048s] (619/784) biscuit-file yaml::types::tests::test_parse_simple_yaml
+        PASS [   0.048s] (620/784) biscuit-file yaml::types::tests::test_source_from_bytes
+        PASS [   0.045s] (621/784) biscuit-file yaml::types::tests::test_source_from_str
+        PASS [   0.048s] (622/784) biscuit-file yaml::types::tests::test_source_from_value
+        PASS [   0.046s] (623/784) biscuit-file yaml::types::tests::test_tagged_value_json
+        PASS [   0.045s] (624/784) biscuit-file yaml::types::tests::test_toml_conversion_options_default
+        PASS [   0.045s] (625/784) biscuit-file yaml::types::tests::test_try_from_bytes
+        PASS [   0.045s] (626/784) biscuit-file yaml::types::tests::test_try_from_path_not_found
+        PASS [   0.053s] (627/784) biscuit-file yaml::types::tests::test_try_from_path_ref
+        PASS [   0.044s] (628/784) biscuit-file yaml::types::tests::test_validate_returns_ok
+        PASS [   0.052s] (629/784) biscuit-file yaml::types::tests::test_try_from_pathbuf
+        PASS [   0.044s] (630/784) biscuit-file yaml::types::tests::test_yaml_boolean_variants
+        PASS [   0.046s] (631/784) biscuit-file yaml::types::tests::test_yaml_number_formats
+        PASS [   0.048s] (632/784) biscuit-file::l1 completion_round_trip::completion_rejects_rooted_magic_payloads_before_enumerating_roots
+        PASS [   0.052s] (633/784) biscuit-file::l1 completion_round_trip::context_without_repository_root_stays_base_only
+        PASS [   0.051s] (634/784) biscuit-file::l1 completion_round_trip::implicit_relative_completion_roots_are_base_first
+        PASS [   0.054s] (635/784) biscuit-file::l1 detailed_resolution::explicit_implicit_reference_does_not_discover_repository_root
+        PASS [   0.063s] (636/784) biscuit-file::l1 detailed_resolution::invalid_context_is_a_typed_missing_context_failure
+        PASS [   0.032s] (637/784) biscuit-file::l1 detailed_resolution::rooted_magic_payloads_never_reach_planning_or_resolution
+        PASS [   0.173s] (638/784) biscuit-file::l1 detailed_resolution::detailed_no_match_retains_candidates_and_repository_root
+        PASS [   0.183s] (639/784) biscuit-file::l1 detailed_resolution::candidate_plan_matches_the_probed_order
+        PASS [   0.200s] (640/784) biscuit-file::l1 completion_round_trip::implicit_relative_completion_value_resolves_to_the_displayed_file
+        PASS [   0.199s] (641/784) biscuit-file::l1 completion_round_trip::magic_completion_value_resolves_through_a_shared_configured_root
+        PASS [   0.188s] (642/784) biscuit-file::l1 detailed_resolution::detailed_success_retains_ordered_candidates_and_provenance
+        PASS [   0.185s] (643/784) biscuit-file::l1 detailed_resolution::legacy_projection_agrees_with_detailed_outcome
+        PASS [   0.152s] (644/784) biscuit-file::l1 detailed_resolution::recursive_reference_records_search_roots_with_provenance
+        PASS [   0.184s] (645/784) biscuit-file::l1 detailed_resolution::non_file_candidate_advances_the_search
+        PASS [   0.208s] (646/784) biscuit-file::l1 detailed_resolution::explicit_relative_plan_is_exactly_one_source_candidate
+        PASS [   0.038s] (647/784) biscuit-file::l1 finalized_reference_resolution::magic_intrinsic_chain_is_between_registered_roots
+        PASS [   0.042s] (648/784) biscuit-file::l1 finalized_reference_resolution::implicit_relative_is_cwd_first_and_first_match_wins
+        PASS [   0.038s] (649/784) biscuit-file::l1 finalized_reference_resolution::recursive_completion_stays_unsupported_but_malformed_payloads_still_error
+        PASS [   0.058s] (650/784) biscuit-file::l1 finalized_reference_resolution::completion_roots_match_execution_order_for_supported_forms
+        PASS [   0.034s] (651/784) biscuit-file::l1 finalized_reference_resolution::repository_root_reference_has_one_candidate_match_and_miss
+        PASS [   0.037s] (652/784) biscuit-file::l1 finalized_reference_resolution::repository_sigils_outside_a_repository_are_typed_errors
+        PASS [   0.038s] (653/784) biscuit-file::l1 finalized_reference_resolution::repository_sigils_reject_lexical_escapes_for_direct_recursive_and_completion
+        PASS [   0.045s] (654/784) biscuit-file::l1 finalized_reference_resolution::repository_scoped_reference_orders_package_area_and_repository
+        PASS [   0.152s] (655/784) biscuit-file::l1 detailed_resolution::supplied_repository_root_anchors_and_suppresses_ancestor_discovery
+        PASS [   0.048s] (656/784) biscuit-file::l1 implicit_relative::partial_completion::implicit_relative_without_repo_only_returns_base
+        PASS [   0.132s] (657/784) biscuit-file::l1 finalized_reference_resolution::repository_containment_rejects_an_external_junction
+        PASS [   0.041s] (658/784) biscuit-file::l1 implicit_relative::partial_completion::magic_without_repo_only_returns_home_root
+        PASS [   0.035s] (659/784) biscuit-file::l1 implicit_relative::partial_completion::separator_reset_empties_active_segment
+        PASS [   0.021s] (660/784) biscuit-file::l1 implicit_relative::partial_completion::unsupported_forms_return_none
+        PASS [   0.161s] (661/784) biscuit-file::l1 implicit_relative::partial_completion::implicit_relative_base_is_git_root_dedupes_to_one_root
+        PASS [   0.185s] (662/784) biscuit-file::l1 implicit_relative::ambient_cwd::resolve_relative_with_implicit_relative
+        PASS [   0.184s] (663/784) biscuit-file::l1 implicit_relative::explicit_relative_does_not_fall_back_to_git_root
+        PASS [   0.201s] (664/784) biscuit-file::l1 implicit_relative::ambient_cwd::env_var_interpolation_resolves_via_implicit_relative
+        PASS [   0.172s] (665/784) biscuit-file::l1 implicit_relative::partial_completion::magic_partial_includes_repo_and_home_roots
+        PASS [   0.186s] (666/784) biscuit-file::l1 implicit_relative::partial_completion::implicit_relative_with_scope_inside_repo
+        PASS [   0.183s] (667/784) biscuit-file::l1 implicit_relative::partial_completion::magic_with_scope_appends_scope_to_each_root
+        PASS [   0.175s] (668/784) biscuit-file::l1 implicit_relative::partial_completion::magic_without_home_env_still_discovers_native_home
+        PASS [   0.048s] (669/784) biscuit-file::l1 implicit_relative::resolves_outside_any_git_repo
+        PASS [   0.042s] (670/784) biscuit-file::l1 parse_count::candidate_free_input_reparses_zero_times
+        PASS [   0.028s] (671/784) biscuit-file::l1 parse_count::clean_input_parses_once
+        PASS [   0.057s] (672/784) biscuit-file::l1 parse_count::candidate_bearing_input_reparses_once_for_combined_proof
+        PASS [   0.033s] (673/784) biscuit-file::l1 parse_count::retained_analysis_serves_both_views_from_one_scan
+        PASS [   0.166s] (674/784) biscuit-file::l1 implicit_relative::prefers_cwd_over_git_root_on_name_collision
+        PASS [   0.043s] (675/784) biscuit-file::l1 parse_count::multi_candidate_input_proves_combined_in_one_reparse
+        PASS [   0.029s] (676/784) biscuit-file::l1 parse_count::unparseable_flagship_parses_original_and_candidate
+        PASS [   0.161s] (677/784) biscuit-file::l1 implicit_relative::recursive_implicit_relative_with_subdir_filter
+        PASS [   0.044s] (678/784) biscuit-file::l1 precedence_flip::implicit_when_base_is_repository_root_dedupes_to_one_candidate
+        PASS [   0.052s] (679/784) biscuit-file::l1 precedence_flip::implicit_only_source_exists_falls_back_to_base
+        PASS [   0.059s] (680/784) biscuit-file::l1 precedence_flip::explicit_relative_yields_one_base_candidate_and_never_falls_back
+        PASS [   0.151s] (681/784) biscuit-file::l1 implicit_relative::returns_none_when_neither_cwd_nor_git_root_has_file
+        PASS [   0.054s] (682/784) biscuit-file::l1 precedence_flip::implicit_both_exist_source_candidate_wins
+        PASS [   0.219s] (683/784) biscuit-file::l1 implicit_relative::recursive_implicit_relative_finds_file_under_git_root
+        PASS [   0.176s] (684/784) biscuit-file::l1 implicit_relative::resolves_file_in_git_root_when_absent_from_cwd
+        PASS [   0.035s] (685/784) biscuit-file::l1 precedence_flip::implicit_without_git_root_uses_base_only
+        PASS [   0.174s] (686/784) biscuit-file::l1 implicit_relative::resolves_when_cwd_is_git_root
+        PASS [   0.028s] (687/784) biscuit-file::l1 precedence_flip::interpolation_injecting_a_sigil_is_rejected
+        PASS [   0.028s] (688/784) biscuit-file::l1 precedence_flip::interpolation_staying_implicit_keeps_both_kinds_implicit
+        PASS [   0.033s] (689/784) biscuit-file::l1 precedence_flip::interpolation_to_absolute_reclassifies_anchoring
+        PASS [   0.186s] (690/784) biscuit-file::l1 implicit_relative::subdir_path_resolves_against_git_root
+        PASS [   0.038s] (691/784) biscuit-file::l1 precedence_flip::recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning
+        PASS [   0.048s] (692/784) biscuit-file::l1 precedence_flip::recursive_interpolation_reclassifies_and_resolves_local_paths
+        PASS [   0.048s] (693/784) biscuit-file::l1 precedence_flip::special_kinds_are_unchanged_by_the_flip
+        PASS [   0.049s] (694/784) biscuit-file::l1 precedence_flip::verbatim_anchor_resolves_a_slash_separated_reference
+        PASS [   0.038s] (695/784) biscuit-file::l1 reference_grammar::a_second_recursive_marker_is_invalid
+        PASS [   0.046s] (696/784) biscuit-file::l1 precedence_flip::verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate
+        PASS [   0.039s] (697/784) biscuit-file::l1 reference_grammar::defensive_sigil_payloads_are_portable_and_relative
+        PASS [   0.036s] (698/784) biscuit-file::l1 reference_grammar::explicit_vs_implicit_relative_are_distinguished_without_fs
+        PASS [   0.036s] (699/784) biscuit-file::l1 reference_grammar::home_kind_is_observable
+        PASS [   0.035s] (700/784) biscuit-file::l1 reference_grammar::one_forward_slash_after_a_defensive_sigil_is_optional
+        PASS [   0.039s] (701/784) biscuit-file::l1 reference_grammar::recursive_is_a_modifier_over_a_kind
+        PASS [   0.033s] (702/784) biscuit-file::l1 reference_grammar::removed_package_sigil_has_a_migration_diagnostic
+        PASS [   0.036s] (703/784) biscuit-file::l1 reference_grammar::repository_error_diagnostics_carry_only_the_required_context
+        PASS [   0.036s] (704/784) biscuit-file::l1 reference_grammar::special_kinds_classify
+        PASS [   0.041s] (705/784) biscuit-file::l1 reference_grammar::reserved_schemes_and_windows_device_prefixes_are_rejected
+        PASS [   0.043s] (706/784) biscuit-file::l1 reference_grammar::supported_absolute_and_explicit_filename_escape_hatches_are_preserved
+        PASS [   0.044s] (707/784) biscuit-file::l1 reference_grammar::tilde_user_is_rejected_at_construction
+        PASS [   0.045s] (708/784) biscuit-file::l1 reference_grammar::url_scheme_recognition_is_case_insensitive_and_beats_drive_classifier
+        PASS [   0.044s] (709/784) biscuit-file::l1 reference_grammar::windows_absolute_and_unc_classify_absolute_on_any_host
+        PASS [   0.044s] (710/784) biscuit-file::l1 reference_grammar::windows_backslash_explicit_relative
+        PASS [   0.046s] (711/784) biscuit-file::l1 repository_scope_catalog::constructor_rejects_relative_non_normalized_and_outside_roots
+        PASS [   0.046s] (712/784) biscuit-file::l1 repository_scope_catalog::constructor_validates_roots_without_filesystem_io_and_deduplicates
+        PASS [   0.050s] (713/784) biscuit-file::l1 repository_scope_catalog::context_derivations_recompute_or_clear_repository_scopes
+        PASS [   0.046s] (714/784) biscuit-file::l1 repository_scope_catalog::first_component_fallback_covers_new_monorepo_areas
+        PASS [   0.047s] (715/784) biscuit-file::l1 repository_scope_catalog::replacing_the_catalog_selects_the_second_repository
+        PASS [   0.046s] (716/784) biscuit-file::l1 repository_scope_catalog::repository_root_can_also_be_the_root_package
+        PASS [   0.045s] (717/784) biscuit-file::l1 repository_scope_catalog::scope_selection_is_component_aware_and_most_specific_first
+        PASS [   0.051s] (718/784) biscuit-file::l1 resolution_context::containment_is_component_aware_and_lexically_normalized
+        PASS [   0.049s] (719/784) biscuit-file::l1 resolution_context::context_accessors_reflect_builders
+        PASS [   0.046s] (720/784) biscuit-file::l1 resolution_context::explicit_context_can_clear_the_ambient_home_snapshot
+        PASS [   0.048s] (721/784) biscuit-file::l1 resolution_context::explicit_relative_never_falls_back_to_repo_root
+        PASS [   0.064s] (722/784) biscuit-file::l1 resolution_context::derived_source_preserves_request_snapshot_after_ambient_mutation
+        PASS [   0.048s] (723/784) biscuit-file::l1 resolution_context::external_source_requires_explicit_trust
+        PASS [   0.050s] (724/784) biscuit-file::l1 resolution_context::home_reference_resolves_against_context_home
+        PASS [   0.047s] (725/784) biscuit-file::l1 resolution_context::home_reference_resolves_from_native_profile_without_home_env
+        PASS [   0.051s] (726/784) biscuit-file::l1 resolution_context::implicit_falls_back_to_caller_supplied_repo_root
+        PASS [   0.114s] (727/784) biscuit-file::l1 resolution_context::implicit_is_base_first_with_caller_supplied_repo_root
+        PASS [   0.107s] (728/784) biscuit-file::l1 resolution_context::invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_derivation
+        PASS [   0.109s] (729/784) biscuit-file::l1 resolution_context::invalid_request_root_cannot_be_laundered_via_for_source
+        PASS [   0.106s] (730/784) biscuit-file::l1 resolution_context::magic_roots_come_from_the_context
+        PASS [   0.103s] (731/784) biscuit-file::l1 resolution_context::normal_derivation_reenables_containment_after_trusted_external_derivation
+        PASS [   0.103s] (732/784) biscuit-file::l1 resolution_context::repository_root_containing_base_validates
+        PASS [   0.102s] (733/784) biscuit-file::l1 resolution_context::repository_root_not_containing_base_is_a_typed_error
+        PASS [   0.103s] (734/784) biscuit-file::l1 round_trip::json5_json_round_trip
+        PASS [   0.107s] (735/784) biscuit-file::l1 resolution_context::valid_request_supports_in_repo_and_explicit_trusted_external_derivations
+        PASS [   0.099s] (736/784) biscuit-file::l1 round_trip::json_yaml_json_round_trip
+        PASS [   0.037s] (737/784) biscuit-file::l1 round_trip::toml_json_round_trip_basic
+        PASS [   0.037s] (738/784) biscuit-file::l1 round_trip::toml_json_round_trip_nested
+        PASS [   0.038s] (739/784) biscuit-file::l1 round_trip::toml_json_round_trip_numbers
+        PASS [   0.037s] (740/784) biscuit-file::l1 round_trip::yaml_json_round_trip
+        PASS [   0.037s] (741/784) biscuit-file::l1 span_compat::test_crate_root_span_matches_yaml_diagnostic_field_type
+        PASS [   0.038s] (742/784) biscuit-file::l1 span_compat::test_public_diagnostic_types_reachable_from_crate_root
+        PASS [   0.039s] (743/784) biscuit-file::l1 span_compat::test_source_span_construction_and_access
+        PASS [   0.038s] (744/784) biscuit-file::l1 span_compat::test_source_span_is_range_of_usize
+        PASS [   0.041s] (745/784) biscuit-file::l1 span_compat::test_source_span_slices_multibyte_source
+        PASS [   0.044s] (746/784) biscuit-file::l1 span_compat::test_source_span_zero_length_and_bounds
+        PASS [   0.050s] (747/784) biscuit-file::l1 yaml_corpus::analysis_never_panics_across_corpus
+        PASS [   0.050s] (748/784) biscuit-file::l1 yaml_corpus::bom_does_not_suppress_line_ending_normalization
+        PASS [   0.052s] (749/784) biscuit-file::l1 yaml_corpus::bom_makes_multi_key_documents_unparseable
+        PASS [   0.068s] (750/784) biscuit-file::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.059s] (751/784) biscuit-file::l1 yaml_corpus::corpus_is_populated_and_uniquely_named
+        PASS [   0.061s] (752/784) biscuit-file::l1 yaml_corpus::preserved_cases_are_byte_identical
+        PASS [   0.067s] (753/784) biscuit-file::l1 yaml_corpus::pipeline_is_idempotent_across_corpus
+        PASS [   0.059s] (754/784) biscuit-file::l1 yaml_corpus::preserved_cases_report_their_pinned_codes
+        PASS [   0.070s] (755/784) biscuit-file::l1 yaml_corpus::repair_is_deterministic_across_corpus
+        PASS [   0.067s] (756/784) biscuit-file::l1 yaml_corpus::repaired_cases_match_expected_output
+        PASS [   0.059s] (757/784) biscuit-file::l1 yaml_corpus::repaired_parseable_cases_preserve_their_value
+        PASS [   0.056s] (758/784) biscuit-file::l1 yaml_corpus::untouched_bytes_preserved_across_corpus
+        PASS [   0.062s] (759/784) biscuit-file::l1 yaml_corpus::single_pass_is_a_fixed_point_once_parseable
+        PASS [   0.058s] (760/784) biscuit-file::l1 yaml_corpus::yaml_test_suite_subset_is_release_pinned_and_preserved
+        PASS [   0.054s] (761/784) biscuit-file::l1 yaml_safety::report_only_and_clean_inputs_stay_byte_identical
+        PASS [   0.049s] (762/784) biscuit-file::l1 yaml_safety::s1_accepted_edits_preserve_values
+        PASS [   0.045s] (763/784) biscuit-file::l1 yaml_safety::s3_repairs_satisfy_parse_recovery_proof
+        PASS [   0.049s] (764/784) biscuit-file::l1 yaml_safety::s1_repairs_are_deterministic_across_runs
+        PASS [   0.078s] (765/784) biscuit-file::l1 yaml_mutation::unrepairable_input_is_left_alone
+        PASS [   0.018s] (766/784) biscuit-file::l1 yaml_safety::untouched_bytes_preserved_across_corpus
+        PASS [   0.031s] (767/784) biscuit-file::l1-fetch fetch_integration::fetch_200_returns_body_and_headers
+        PASS [   0.130s] (768/784) biscuit-file::l1 yaml_mutation::arbitrary_input_never_panics
+        PASS [   0.036s] (769/784) biscuit-file::l1-fetch fetch_integration::fetch_304_not_modified_preserves_headers
+        PASS [   0.037s] (770/784) biscuit-file::l1-fetch fetch_integration::fetch_404_returns_http_error
+        PASS [   0.030s] (771/784) biscuit-file::l1-fetch fetch_integration::fetch_500_returns_http_error
+        PASS [   0.030s] (772/784) biscuit-file::l1-fetch fetch_integration::fetch_blocking_works
+        PASS [   0.025s] (773/784) biscuit-file::l1-fetch fetch_integration::fetch_combines_split_cache_control_lines_in_wire_order
+        PASS [   0.021s] (774/784) biscuit-file::l1-fetch fetch_integration::fetch_unsupported_scheme
+        PASS [   0.025s] (775/784) biscuit-file::l1-fetch fetch_integration::fetch_conditional_if_modified_since
+        PASS [   0.023s] (776/784) biscuit-file::l1-fetch fetch_integration::fetch_policy_denied_host
+        PASS [   0.129s] (777/784) biscuit-file::l1 yaml_mutation::valid_documents_are_never_corrupted
+        PASS [   0.152s] (778/784) biscuit-file::l1 yaml_mutation::content_after_the_repair_site_is_preserved
+        PASS [   0.026s] (779/784) biscuit-file::l1-fetch fetch_integration::fetch_wildcard_does_not_match_bare_parent_host
+        PASS [   0.030s] (780/784) biscuit-file::l1-fetch fetch_integration::policy_client_blocks_redirect_to_unallowed_host
+        PASS [   0.024s] (781/784) biscuit-file::l1-fetch fetch_integration::policy_client_blocks_redirect_to_unsupported_scheme
+        PASS [   0.168s] (782/784) biscuit-file::l1 yaml_mutation::mutated_documents_hold_core_invariants
+        PASS [   0.025s] (783/784) biscuit-file::l1-fetch fetch_integration::post_combines_split_cache_control_lines_in_wire_order
+        PASS [   0.188s] (784/784) biscuit-file::l1 yaml_mutation::stacked_mutations_hold_core_invariants
+────────────
+     Summary [   3.959s] 784 tests run: 784 passed, 0 skipped
+
+✅ [32m all tests passing in [1mbiscuit-file[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 127
+
+cross-check summary for biscuit-file:
+  windows  pass

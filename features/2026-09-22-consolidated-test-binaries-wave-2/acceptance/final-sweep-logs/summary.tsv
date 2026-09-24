@@ -1,0 +1,35 @@
+rev	35295e442339eb1cec50424c79c3ffc1ce25ffa0
+tree-hugger	test	0	7s
+tree-hugger	test-l2	0	13s
+tree-hugger	lint	0	3s
+tree-hugger	check-tier-coverage	0	3s
+claudine	test	100	31s
+claudine	test-l2	0	50s
+claudine	lint	0	24s
+claudine	check-tier-coverage	0	8s
+sniff	test	0	33s
+sniff	test-l2	0	31s
+sniff	lint	0	3s
+sniff	check-tier-coverage	0	2s
+biscuit-file	test	0	5s
+biscuit-file	test-l2	0	1s
+biscuit-file	lint	0	1s
+biscuit-file	check-tier-coverage	0	5s
+schematic	test	0	9s
+schematic	test-l2	0	20s
+schematic	lint	0	2s
+schematic	check-tier-coverage	0	2s
+biscuit-terminal	test	0	15s
+biscuit-terminal	test-l2	0	93s
+biscuit-terminal	lint	0	1s
+biscuit-terminal	check-tier-coverage	0	1s
+darkmatter	test	0	90s
+darkmatter	test-l2	0	118s
+darkmatter	lint	0	16s
+darkmatter	check-tier-coverage	0	4s
+biscuit-tui	test	0	1s
+biscuit-tui	test-l2	0	35s
+biscuit-tui	lint	0	2s
+biscuit-tui	check-tier-coverage	0	1s
+all	check-canonical	0
+done

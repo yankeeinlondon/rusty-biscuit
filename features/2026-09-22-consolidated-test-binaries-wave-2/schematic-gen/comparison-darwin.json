@@ -1,0 +1,1468 @@
+{
+  "failures": [],
+  "kind": "consolidation-comparison",
+  "notes": [],
+  "packages": {
+    "schematic-gen": {
+      "cells": [
+        {
+          "feature_set": "none",
+          "host": "darwin",
+          "selectors": {
+            "L1": {
+              "filter_after": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "filter_before": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 2,
+                  "before": 2,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 558,
+                  "before": 558,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "L2": {
+              "filter_after": "test(/(^|::)level2_/)",
+              "filter_before": "test(/(^|::)level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "L3": {
+              "filter_after": "test(/(^|::)level3_/)",
+              "filter_before": "test(/(^|::)level3_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "browser": {
+              "filter_after": "test(/(^|::)browser_/)",
+              "filter_before": "test(/(^|::)browser_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-0": {
+              "filter_after": "test(/level2_/)",
+              "filter_before": "test(/level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-1": {
+              "filter_after": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+              "filter_before": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-2": {
+              "filter_after": "package(sniff) + package(sniff-cli)",
+              "filter_before": "package(sniff) + package(sniff-cli)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-3": {
+              "filter_after": "test(=integration::test_detect_completes_in_reasonable_time)",
+              "filter_before": "test(=integration::test_detect_completes_in_reasonable_time)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-4": {
+              "filter_after": "test(/browser_/)",
+              "filter_before": "test(/browser_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-5": {
+              "filter_after": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "filter_before": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-6": {
+              "filter_after": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "filter_before": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-7": {
+              "filter_after": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "filter_before": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-8": {
+              "filter_after": "test(=level2_render_tree_style_in_wezterm)",
+              "filter_before": "test(=level2_render_tree_style_in_wezterm)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-0": {
+              "filter_after": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "filter_before": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-1": {
+              "filter_after": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+              "filter_before": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-2": {
+              "filter_after": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "filter_before": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-3": {
+              "filter_after": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "filter_before": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-4": {
+              "filter_after": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+              "filter_before": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-5": {
+              "filter_after": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+              "filter_before": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-6": {
+              "filter_after": "test(=level2_render_tree_style_in_wezterm)",
+              "filter_before": "test(=level2_render_tree_style_in_wezterm)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-7": {
+              "filter_after": "package(claudine-cli) & test(/level2_/)",
+              "filter_before": "package(claudine-cli) & test(/level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "real": {
+              "filter_after": "test(/(^|::)real_/)",
+              "filter_before": "test(/(^|::)real_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 558,
+                  "before": 558,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 2,
+                  "before": 2,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "sanity": {
+              "filter_after": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "filter_before": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 2,
+                  "before": 2,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 558,
+                  "before": 558,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            }
+          }
+        },
+        {
+          "feature_set": "terminal-tests",
+          "host": "darwin",
+          "selectors": {
+            "L1": {
+              "filter_after": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "filter_before": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 5,
+                  "before": 5,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 558,
+                  "before": 558,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "L2": {
+              "filter_after": "test(/(^|::)level2_/)",
+              "filter_before": "test(/(^|::)level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "L3": {
+              "filter_after": "test(/(^|::)level3_/)",
+              "filter_before": "test(/(^|::)level3_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "browser": {
+              "filter_after": "test(/(^|::)browser_/)",
+              "filter_before": "test(/(^|::)browser_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-0": {
+              "filter_after": "test(/level2_/)",
+              "filter_before": "test(/level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 560,
+                  "before": 560,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-1": {
+              "filter_after": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+              "filter_before": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-2": {
+              "filter_after": "package(sniff) + package(sniff-cli)",
+              "filter_before": "package(sniff) + package(sniff-cli)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-3": {
+              "filter_after": "test(=integration::test_detect_completes_in_reasonable_time)",
+              "filter_before": "test(=integration::test_detect_completes_in_reasonable_time)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-4": {
+              "filter_after": "test(/browser_/)",
+              "filter_before": "test(/browser_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-5": {
+              "filter_after": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "filter_before": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-6": {
+              "filter_after": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "filter_before": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-7": {
+              "filter_after": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "filter_before": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-ci-8": {
+              "filter_after": "test(=level2_render_tree_style_in_wezterm)",
+              "filter_before": "test(=level2_render_tree_style_in_wezterm)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-0": {
+              "filter_after": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "filter_before": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-1": {
+              "filter_after": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+              "filter_before": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-2": {
+              "filter_after": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "filter_before": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-3": {
+              "filter_after": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "filter_before": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-4": {
+              "filter_after": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+              "filter_before": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-5": {
+              "filter_after": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+              "filter_before": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-6": {
+              "filter_after": "test(=level2_render_tree_style_in_wezterm)",
+              "filter_before": "test(=level2_render_tree_style_in_wezterm)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "override-default-7": {
+              "filter_after": "package(claudine-cli) & test(/level2_/)",
+              "filter_before": "package(claudine-cli) & test(/level2_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 563,
+                  "before": 563,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 0,
+                  "before": 0,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "real": {
+              "filter_after": "test(/(^|::)real_/)",
+              "filter_before": "test(/(^|::)real_/)",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 561,
+                  "before": 561,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 2,
+                  "before": 2,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            },
+            "sanity": {
+              "filter_after": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "filter_before": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+              "listing_digest_identical": false,
+              "sets": {
+                "excluded": {
+                  "after": 5,
+                  "before": 5,
+                  "gained": [],
+                  "lost": []
+                },
+                "ignored": {
+                  "after": 3,
+                  "before": 3,
+                  "gained": [],
+                  "lost": []
+                },
+                "present": {
+                  "after": 566,
+                  "before": 566,
+                  "gained": [],
+                  "lost": []
+                },
+                "selected": {
+                  "after": 558,
+                  "before": 558,
+                  "gained": [],
+                  "lost": []
+                }
+              }
+            }
+          }
+        }
+      ],
+      "manifest": true,
+      "platform_absent": {
+        "none": {
+          "hosts": [
+            "darwin"
+          ],
+          "reason": "captures from one host only; platform-absent needs the other hosts' captures",
+          "status": "not-evaluated"
+        },
+        "terminal-tests": {
+          "hosts": [
+            "darwin"
+          ],
+          "reason": "captures from one host only; platform-absent needs the other hosts' captures",
+          "status": "not-evaluated"
+        }
+      }
+    }
+  },
+  "verdict": "identical",
+  "version": 1
+}

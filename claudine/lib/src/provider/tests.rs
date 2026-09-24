@@ -180,7 +180,7 @@ fn provider_info_serializes_round_trip() {
 }
 
 /// Twin of claudine-gen's registry-covers-all-fields guard
-/// (`gen/tests/registry_coverage.rs`): the serialized `--describe` key
+/// (`gen/tests/l1/registry_coverage.rs`): the serialized `--describe` key
 /// list is checked in on BOTH sides — the generator asserts its mapping
 /// registry against the list, and this test binds the list to the real
 /// serialization. Adding/removing/reordering a serialized `ProviderInfo`
@@ -251,7 +251,7 @@ fn serialized_field_list_matches_catalog() {
         assert_eq!(
             keys, expected,
             "{provider:?}: serialized field list drifted — update the checked-in list \
-             here AND in gen/tests/registry_coverage.rs, and extend the mapping registry"
+             here AND in gen/tests/l1/registry_coverage.rs, and extend the mapping registry"
         );
     }
 }

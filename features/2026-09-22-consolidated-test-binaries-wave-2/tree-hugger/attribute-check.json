@@ -1,0 +1,67 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "tree-hugger",
+  "review": [
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        396,
+        419,
+        423,
+        427,
+        431,
+        435,
+        454,
+        458,
+        462
+      ],
+      "new_dir": "tree-hugger/lib/tests/l1",
+      "old_dir": "tree-hugger/lib/tests",
+      "path": "tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        84,
+        92,
+        100,
+        108,
+        116,
+        124,
+        132,
+        140,
+        148,
+        156,
+        164,
+        172,
+        180,
+        188,
+        196,
+        204,
+        216,
+        224,
+        232,
+        240,
+        248,
+        256,
+        264,
+        272,
+        280,
+        288,
+        296,
+        304,
+        312,
+        320,
+        328,
+        336
+      ],
+      "new_dir": "tree-hugger/lib/tests/l1",
+      "old_dir": "tree-hugger/lib/tests",
+      "path": "tree-hugger/lib/tests/l1/query_compile.rs"
+    }
+  ],
+  "version": 1
+}

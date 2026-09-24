@@ -4,11 +4,11 @@
 //! narrow CI subset. The same list is mirrored in `ci-bench-ids.txt` at
 //! the benches root so shell tooling (`cargo bench --`, GitHub Actions)
 //! can use it without parsing Rust. A unit test in
-//! `sniff/lib/tests/bench_ids_sync.rs` asserts the two stay in sync.
+//! `sniff/lib/tests/l1/bench_ids_sync.rs` asserts the two stay in sync.
 //!
 //! The module is compiled from two places: the bench harness (where it
 //! is only read by tooling and unit tests inside `mod tests`) and the
-//! integration test at `sniff/lib/tests/bench_ids_sync.rs` (where every
+//! integration test at `sniff/lib/tests/l1/bench_ids_sync.rs` (where every
 //! exported item is exercised). `allow(dead_code)` therefore only
 //! silences the bench-harness warnings without masking real regressions.
 #![allow(dead_code)]
@@ -71,7 +71,7 @@ fn regex_escape(input: &str) -> String {
     out
 }
 
-// Unit tests for this module live in `sniff/lib/tests/bench_ids_sync.rs`,
+// Unit tests for this module live in `sniff/lib/tests/l1/bench_ids_sync.rs`,
 // where the whole module is re-included via `#[path]`. That test file is
 // the authoritative consumer — keeping an extra `#[cfg(test)] mod tests`
 // here would just duplicate coverage and triggers spurious

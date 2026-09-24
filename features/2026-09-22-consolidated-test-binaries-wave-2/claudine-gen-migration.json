@@ -1,0 +1,578 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "claudine/gen",
+  "dispositions": [
+    {
+      "detector": "crate_path",
+      "path": "claudine/gen/tests/l1/pipeline.rs",
+      "reason": "R19: inside a string literal naming generated code (:166, `\"pub(in crate::provider) static CLAUDE_EVENT_MAPPING\"`); not a path"
+    },
+    {
+      "detector": "exact_path_string",
+      "path": "claudine/gen/tests/level2/level2_report_terminal.rs",
+      "reason": "R19 identity repair: the self-exec `--exact` string (:158, and its module doc at :16) now names `level2_report_terminal::level2_report_probe`. Load-bearing: with the old string the two tmux tests fail (`claudine-gen/exact-old-string.log`, 1 passed 2 failed); with the new one all three pass (`exact-new-string.log`)"
+    }
+  ],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "claudine/gen/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "agent_errors_check",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/agent_errors_check.rs",
+      "old_binary_id": "claudine-gen::agent_errors_check",
+      "old_path": "claudine/gen/tests/agent_errors_check.rs",
+      "old_target": "agent_errors_check",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "agent_errors_check::all_archived_seeds_match_their_post_graduation_research_rows",
+          "old": "all_archived_seeds_match_their_post_graduation_research_rows"
+        },
+        {
+          "new": "agent_errors_check::checker_process_report_write_failure_is_nonzero_and_never_prints_clean",
+          "old": "checker_process_report_write_failure_is_nonzero_and_never_prints_clean"
+        },
+        {
+          "new": "agent_errors_check::checker_process_schema_failure_emits_gate_error_not_clean_success",
+          "old": "checker_process_schema_failure_emits_gate_error_not_clean_success"
+        },
+        {
+          "new": "agent_errors_check::clean_document_writes_explicit_clean_outcome",
+          "old": "clean_document_writes_explicit_clean_outcome"
+        },
+        {
+          "new": "agent_errors_check::corrected_document_replaces_findings_with_explicit_clean",
+          "old": "corrected_document_replaces_findings_with_explicit_clean"
+        },
+        {
+          "new": "agent_errors_check::failing_document_writes_findings_and_persists_across_reruns",
+          "old": "failing_document_writes_findings_and_persists_across_reruns"
+        },
+        {
+          "new": "agent_errors_check::fleet_clean_action_requires_explicit_clean_status",
+          "old": "fleet_clean_action_requires_explicit_clean_status"
+        },
+        {
+          "new": "agent_errors_check::invalid_seed_writes_terminal_gate_input_error_scope",
+          "old": "invalid_seed_writes_terminal_gate_input_error_scope"
+        },
+        {
+          "new": "agent_errors_check::schema_invalid_document_writes_gate_error_and_never_reports_clean",
+          "old": "schema_invalid_document_writes_gate_error_and_never_reports_clean"
+        },
+        {
+          "new": "agent_errors_check::workspace_archived_seed_survives_graduation_and_detects_identity_changes",
+          "old": "workspace_archived_seed_survives_graduation_and_detects_identity_changes"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "drift",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/drift.rs",
+      "old_binary_id": "claudine-gen::drift",
+      "old_path": "claudine/gen/tests/drift.rs",
+      "old_target": "drift",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "drift::committed_agentic_clis_match_regenerated_roster",
+          "old": "committed_agentic_clis_match_regenerated_roster"
+        },
+        {
+          "new": "drift::committed_catalog_matches_regenerated_inputs",
+          "old": "committed_catalog_matches_regenerated_inputs"
+        },
+        {
+          "new": "drift::committed_data_matches_regenerated_inputs",
+          "old": "committed_data_matches_regenerated_inputs"
+        },
+        {
+          "new": "drift::committed_families_match_regenerated_inputs",
+          "old": "committed_families_match_regenerated_inputs"
+        },
+        {
+          "new": "drift::committed_generated_artifacts_match_phase_1_byte_baseline",
+          "old": "committed_generated_artifacts_match_phase_1_byte_baseline"
+        },
+        {
+          "new": "drift::committed_signals_match_regenerated_inputs",
+          "old": "committed_signals_match_regenerated_inputs"
+        },
+        {
+          "new": "drift::committed_vocabulary_matches_regenerated_inputs",
+          "old": "committed_vocabulary_matches_regenerated_inputs"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "fixtures_provenance",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/fixtures_provenance.rs",
+      "old_binary_id": "claudine-gen::fixtures_provenance",
+      "old_path": "claudine/gen/tests/fixtures_provenance.rs",
+      "old_target": "fixtures_provenance",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "fixtures_provenance::provenance_manifest_matches_fixture_corpus",
+          "old": "provenance_manifest_matches_fixture_corpus"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "generate_ux",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/generate_ux.rs",
+      "old_binary_id": "claudine-gen::generate_ux",
+      "old_path": "claudine/gen/tests/generate_ux.rs",
+      "old_target": "generate_ux",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "generate_ux::clean_area_generates_nothing_and_exits_zero",
+          "old": "clean_area_generates_nothing_and_exits_zero"
+        },
+        {
+          "new": "generate_ux::clean_check_report_summary_matches_phase_1_snapshot",
+          "old": "clean_check_report_summary_matches_phase_1_snapshot"
+        },
+        {
+          "new": "generate_ux::dry_run_reports_and_writes_nothing",
+          "old": "dry_run_reports_and_writes_nothing"
+        },
+        {
+          "new": "generate_ux::force_color_check_output_carries_ansi",
+          "old": "force_color_check_output_carries_ansi"
+        },
+        {
+          "new": "generate_ux::mapping_output_is_raw_parseable_json",
+          "old": "mapping_output_is_raw_parseable_json"
+        },
+        {
+          "new": "generate_ux::no_color_check_output_has_no_ansi",
+          "old": "no_color_check_output_has_no_ansi"
+        },
+        {
+          "new": "generate_ux::non_tty_check_output_has_no_ansi",
+          "old": "non_tty_check_output_has_no_ansi"
+        },
+        {
+          "new": "generate_ux::non_tty_drift_is_report_only_and_exits_nonzero",
+          "old": "non_tty_drift_is_report_only_and_exits_nonzero"
+        },
+        {
+          "new": "generate_ux::roster_alias_rename_drifts_the_darkmatter_name_table_until_regenerated",
+          "old": "roster_alias_rename_drifts_the_darkmatter_name_table_until_regenerated"
+        },
+        {
+          "new": "generate_ux::scaffold_unwired_slug_errors_before_writing",
+          "old": "scaffold_unwired_slug_errors_before_writing"
+        },
+        {
+          "new": "generate_ux::yes_writes_all_drift_and_check_reconverges",
+          "old": "yes_writes_all_drift_and_check_reconverges"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "pipeline",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/pipeline.rs",
+      "old_binary_id": "claudine-gen::pipeline",
+      "old_path": "claudine/gen/tests/pipeline.rs",
+      "old_target": "pipeline",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "pipeline::absent_overlay_capabilities_is_rejected",
+          "old": "absent_overlay_capabilities_is_rejected"
+        },
+        {
+          "new": "pipeline::absolute_source_root_is_rejected",
+          "old": "absolute_source_root_is_rejected"
+        },
+        {
+          "new": "pipeline::bare_shell_command_override_fails_loudly",
+          "old": "bare_shell_command_override_fails_loudly"
+        },
+        {
+          "new": "pipeline::compound_env_var_sites_are_skipped_loudly",
+          "old": "compound_env_var_sites_are_skipped_loudly"
+        },
+        {
+          "new": "pipeline::doctored_sidecar_enum_not_subset_fails_before_value_mapping",
+          "old": "doctored_sidecar_enum_not_subset_fails_before_value_mapping"
+        },
+        {
+          "new": "pipeline::dynamic_listing_true_without_override_fails_loudly",
+          "old": "dynamic_listing_true_without_override_fails_loudly"
+        },
+        {
+          "new": "pipeline::facts_key_with_no_registry_entry_is_rejected",
+          "old": "facts_key_with_no_registry_entry_is_rejected"
+        },
+        {
+          "new": "pipeline::facts_value_for_research_declared_field_is_a_source_collision",
+          "old": "facts_value_for_research_declared_field_is_a_source_collision"
+        },
+        {
+          "new": "pipeline::graduated_acp_server_mode_in_facts_is_a_source_collision",
+          "old": "graduated_acp_server_mode_in_facts_is_a_source_collision"
+        },
+        {
+          "new": "pipeline::graduated_supports_skills_in_facts_is_a_source_collision",
+          "old": "graduated_supports_skills_in_facts_is_a_source_collision"
+        },
+        {
+          "new": "pipeline::missing_capability_reason_is_rejected",
+          "old": "missing_capability_reason_is_rejected"
+        },
+        {
+          "new": "pipeline::missing_or_mismatched_artifact_fails_loudly",
+          "old": "missing_or_mismatched_artifact_fails_loudly"
+        },
+        {
+          "new": "pipeline::multi_segment_child_is_rejected",
+          "old": "multi_segment_child_is_rejected"
+        },
+        {
+          "new": "pipeline::null_overlay_selector_emits_none",
+          "old": "null_overlay_selector_emits_none"
+        },
+        {
+          "new": "pipeline::null_source_root_emits_none",
+          "old": "null_source_root_emits_none"
+        },
+        {
+          "new": "pipeline::overlay_facts_emit_the_selector_and_capability_records",
+          "old": "overlay_facts_emit_the_selector_and_capability_records"
+        },
+        {
+          "new": "pipeline::override_equal_to_source_value_is_flagged_stale",
+          "old": "override_equal_to_source_value_is_flagged_stale"
+        },
+        {
+          "new": "pipeline::override_for_unmapped_field_is_rejected",
+          "old": "override_for_unmapped_field_is_rejected"
+        },
+        {
+          "new": "pipeline::override_wins_and_reports_the_suppressed_source_value",
+          "old": "override_wins_and_reports_the_suppressed_source_value"
+        },
+        {
+          "new": "pipeline::override_without_reason_is_rejected",
+          "old": "override_without_reason_is_rejected"
+        },
+        {
+          "new": "pipeline::parent_of_provider_dir_shape_carries_the_child_segment",
+          "old": "parent_of_provider_dir_shape_carries_the_child_segment"
+        },
+        {
+          "new": "pipeline::parent_of_provider_dir_without_a_child_is_rejected",
+          "old": "parent_of_provider_dir_without_a_child_is_rejected"
+        },
+        {
+          "new": "pipeline::pipeline_generates_from_all_declared_sources",
+          "old": "pipeline_generates_from_all_declared_sources"
+        },
+        {
+          "new": "pipeline::relative_area_inside_a_repository_uses_one_absolute_resolution_boundary",
+          "old": "relative_area_inside_a_repository_uses_one_absolute_resolution_boundary"
+        },
+        {
+          "new": "pipeline::research_frontmatter_violating_its_sidecar_fails_loudly",
+          "old": "research_frontmatter_violating_its_sidecar_fails_loudly"
+        },
+        {
+          "new": "pipeline::shell_command_override_emits_struct_variant",
+          "old": "shell_command_override_emits_struct_variant"
+        },
+        {
+          "new": "pipeline::skip_research_roster_entry_is_rejected_loudly",
+          "old": "skip_research_roster_entry_is_rejected_loudly"
+        },
+        {
+          "new": "pipeline::unknown_capability_verdict_is_rejected",
+          "old": "unknown_capability_verdict_is_rejected"
+        },
+        {
+          "new": "pipeline::unknown_relocated_resource_class_is_rejected",
+          "old": "unknown_relocated_resource_class_is_rejected"
+        },
+        {
+          "new": "pipeline::unknown_selector_shape_is_rejected",
+          "old": "unknown_selector_shape_is_rejected"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "registry_coverage",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/registry_coverage.rs",
+      "old_binary_id": "claudine-gen::registry_coverage",
+      "old_path": "claudine/gen/tests/registry_coverage.rs",
+      "old_target": "registry_coverage",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "registry_coverage::every_serialized_field_is_registered_or_excluded",
+          "old": "every_serialized_field_is_registered_or_excluded"
+        },
+        {
+          "new": "registry_coverage::registry_has_no_entries_outside_the_serialized_field_list",
+          "old": "registry_has_no_entries_outside_the_serialized_field_list"
+        },
+        {
+          "new": "registry_coverage::registry_order_matches_serialization_order",
+          "old": "registry_order_matches_serialization_order"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "signals_sidecar_mirror",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/signals_sidecar_mirror.rs",
+      "old_binary_id": "claudine-gen::signals_sidecar_mirror",
+      "old_path": "claudine/gen/tests/signals_sidecar_mirror.rs",
+      "old_target": "signals_sidecar_mirror",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "signals_sidecar_mirror::signals_sidecar_enums_mirror_rust_variants",
+          "old": "signals_sidecar_enums_mirror_rust_variants"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "signals_validation",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/signals_validation.rs",
+      "old_binary_id": "claudine-gen::signals_validation",
+      "old_path": "claudine/gen/tests/signals_validation.rs",
+      "old_target": "signals_validation",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "signals_validation::dangling_extraction_reference_is_rejected",
+          "old": "dangling_extraction_reference_is_rejected"
+        },
+        {
+          "new": "signals_validation::declarative_record_without_match_op_is_rejected",
+          "old": "declarative_record_without_match_op_is_rejected"
+        },
+        {
+          "new": "signals_validation::duplicate_priority_in_a_source_group_is_rejected",
+          "old": "duplicate_priority_in_a_source_group_is_rejected"
+        },
+        {
+          "new": "signals_validation::exists_with_match_value_is_rejected",
+          "old": "exists_with_match_value_is_rejected"
+        },
+        {
+          "new": "signals_validation::non_compiling_regex_is_rejected",
+          "old": "non_compiling_regex_is_rejected"
+        },
+        {
+          "new": "signals_validation::out_of_range_priority_is_rejected",
+          "old": "out_of_range_priority_is_rejected"
+        },
+        {
+          "new": "signals_validation::shipped_corpus_builds_deterministically",
+          "old": "shipped_corpus_builds_deterministically"
+        },
+        {
+          "new": "signals_validation::unknown_signal_member_is_rejected",
+          "old": "unknown_signal_member_is_rejected"
+        },
+        {
+          "new": "signals_validation::wildcard_match_path_is_rejected",
+          "old": "wildcard_match_path_is_rejected"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "steering_check",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/steering_check.rs",
+      "old_binary_id": "claudine-gen::steering_check",
+      "old_path": "claudine/gen/tests/steering_check.rs",
+      "old_target": "steering_check",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "steering_check::generation_stops_before_writes_when_steering_gate_fails",
+          "old": "generation_stops_before_writes_when_steering_gate_fails"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::l1",
+      "inner_cfg": [],
+      "module": "vocabulary",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/l1/vocabulary.rs",
+      "old_binary_id": "claudine-gen::vocabulary",
+      "old_path": "claudine/gen/tests/vocabulary.rs",
+      "old_target": "vocabulary",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "vocabulary::build_vocabulary_is_deterministic_and_well_formed",
+          "old": "build_vocabulary_is_deterministic_and_well_formed"
+        },
+        {
+          "new": "vocabulary::every_research_vocabulary_projects_to_runtime_strings",
+          "old": "every_research_vocabulary_projects_to_runtime_strings"
+        },
+        {
+          "new": "vocabulary::kilo_research_preserves_shared_seed_order",
+          "old": "kilo_research_preserves_shared_seed_order"
+        },
+        {
+          "new": "vocabulary::kimi_research_projects_the_complete_jsonrpc_code_mapping",
+          "old": "kimi_research_projects_the_complete_jsonrpc_code_mapping"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine-gen::level2",
+      "inner_cfg": [
+        "unix"
+      ],
+      "module": "level2_report_terminal",
+      "nested_root": false,
+      "new_path": "claudine/gen/tests/level2/level2_report_terminal.rs",
+      "old_binary_id": "claudine-gen::level2_report_terminal",
+      "old_path": "claudine/gen/tests/level2_report_terminal.rs",
+      "old_target": "level2_report_terminal",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level2_report_terminal::level2_report_probe",
+          "old": "level2_report_probe"
+        },
+        {
+          "new": "level2_report_terminal::level2_report_provenance_wraps_and_keeps_placeholder_in_tmux",
+          "old": "level2_report_provenance_wraps_and_keeps_placeholder_in_tmux"
+        },
+        {
+          "new": "level2_report_terminal::level2_report_status_styled_in_tmux",
+          "old": "level2_report_status_styled_in_tmux"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "claudine-gen",
+  "ruled_targets": [],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "agent_errors_check",
+        "drift",
+        "fixtures_provenance",
+        "generate_ux",
+        "pipeline",
+        "registry_coverage",
+        "signals_sidecar_mirror",
+        "signals_validation",
+        "steering_check",
+        "vocabulary"
+      ],
+      "name": "l1",
+      "path": "claudine/gen/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level2_report_terminal"
+      ],
+      "name": "level2",
+      "path": "claudine/gen/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    }
+  ],
+  "version": 1
+}

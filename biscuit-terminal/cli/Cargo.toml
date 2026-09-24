@@ -5,6 +5,7 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+autotests = false
 
 [[bin]]
 name = "bt"
@@ -37,49 +38,21 @@ serial_test = "3"
 sha2 = "0.10"
 tempfile = "3"
 unicode-width = "0.2"
+# The Level 1 layout gate (`tests/l1/test_layout.rs`) calls
+# `test_toolkit::test_layout`. The optional normal dependency above only
+# exists under `terminal-tests`.
+test-toolkit = { path = "../../tools/test-toolkit" }
+
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level2_apple_terminal_prose"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_container_fenced_code"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_cursor_and_hygiene"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_diagrams"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_image"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_layout"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_prose_cells"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_prose_styling"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_render_tree_style"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_status_block"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_style_everywhere_matrix"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 # CI policy: biscuit-terminal-cli owns L2 (real-terminal) tier tests.

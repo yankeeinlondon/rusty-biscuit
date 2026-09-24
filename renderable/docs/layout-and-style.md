@@ -402,7 +402,7 @@ flip routed through the tree. `bt dir` terminal default remains the
 bespoke `FileSystem` renderer — Stage 3 deferred that terminal flip
 (Nerd Font icon parity; see [`components.md`](./components.md)). The
 Level-2 real-terminal tests in
-`biscuit-terminal/cli/tests/level2_render_tree_style.rs` continue to
+`biscuit-terminal/cli/tests/level2/level2_render_tree_style.rs` continue to
 back `bt block`, `bt progress`, and `bt table` specifically for
 `Style` coverage.
 

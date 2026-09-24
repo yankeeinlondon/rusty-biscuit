@@ -1,0 +1,2 @@
+claudine-gen L1 on build-linux (scratch clone at 5a396aeb5 + the Phase 4 working-tree patch; RUSTC_WRAPPER='' KACHE_AUTO=0; CI features)
+     Summary [   2.420s] 181 tests run: 181 passed, 3 skipped

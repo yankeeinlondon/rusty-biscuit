@@ -1,0 +1,98 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"test-fixtures\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "sniff/cli/tests/l1/cli.rs",
+      "old": "sniff/cli/tests/cli.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/cli_process_fixture.rs",
+      "old": "sniff/cli/tests/cli_process_fixture.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/install_interview_cli.rs",
+      "old": "sniff/cli/tests/install_interview_cli.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/install_plan.rs",
+      "old": "sniff/cli/tests/install_plan.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/snapshots.rs",
+      "old": "sniff/cli/tests/snapshots.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/spawn_site_guard.rs",
+      "old": "sniff/cli/tests/spawn_site_guard.rs"
+    },
+    {
+      "new": "sniff/cli/tests/l1/tty.rs",
+      "old": "sniff/cli/tests/tty.rs"
+    },
+    {
+      "new": "sniff/cli/tests/level2/level2_cicd_styling.rs",
+      "old": "sniff/cli/tests/level2_cicd_styling.rs"
+    },
+    {
+      "new": "sniff/cli/tests/level2/level2_git_status_styling.rs",
+      "old": "sniff/cli/tests/level2_git_status_styling.rs"
+    },
+    {
+      "new": "sniff/cli/tests/level2/level2_perf_tree_rendering.rs",
+      "old": "sniff/cli/tests/level2_perf_tree_rendering.rs"
+    },
+    {
+      "new": "sniff/cli/tests/level2/level2_recent_commits_rendering.rs",
+      "old": "sniff/cli/tests/level2_recent_commits_rendering.rs"
+    }
+  ],
+  "package": "sniff-cli",
+  "path_repairs": {
+    "sniff/cli/tests/l1/cli.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/l1/cli_process_fixture.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/l1/install_interview_cli.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/l1/install_plan.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/l1/snapshots.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/l1/spawn_site_guard.rs": [
+      "common/source_scan.rs \u2192 ../common/source_scan.rs"
+    ],
+    "sniff/cli/tests/l1/tty.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/level2/level2_cicd_styling.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/level2/level2_git_status_styling.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/level2/level2_perf_tree_rendering.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "sniff/cli/tests/level2/level2_recent_commits_rendering.rs": [
+      "mod common; \u2192 use crate::common;"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "sniff/cli/tests/l1/main.rs": {
+      "declares_common": true,
+      "modules": 7
+    },
+    "sniff/cli/tests/level2/main.rs": {
+      "declares_common": true,
+      "modules": 4
+    }
+  },
+  "version": 1
+}

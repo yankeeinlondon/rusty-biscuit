@@ -1,0 +1,758 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: biscuit-terminal-cli @ origin/fix/ci-build-feature-divergence (1879dd880) + 556 changed file(s) as 384031ea6
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  282f5f80df3fa0e7 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\mac--feat-dark-fixes
+
+== windows (build-win-native, archive 282f5f80df3fa0e7 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: 64066707f341dc19f965c4306aaa07d5b4b02035
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.71s
+   Compiling windows-sys v0.61.2
+   Compiling aho-corasick v1.1.4
+   Compiling crossbeam-channel v0.5.15
+   Compiling serde_core v1.0.228
+   Compiling sha1 v0.10.6
+   Compiling simd-adler32 v0.3.9
+   Compiling serde v1.0.228
+   Compiling hashbrown v0.14.5
+   Compiling libm v0.2.16
+   Compiling zerovec v0.11.6
+   Compiling arrayvec v0.7.6
+   Compiling static_assertions v1.1.0
+   Compiling sha1-checked v0.10.0
+   Compiling miniz_oxide v0.8.9
+   Compiling kstring v2.0.2
+   Compiling bytemuck v1.25.0
+   Compiling serde_json v1.0.149
+   Compiling filetime v0.2.27
+   Compiling winapi v0.3.9
+   Compiling anyhow v1.0.102
+   Compiling dashmap v6.1.0
+   Compiling flate2 v1.1.9
+   Compiling regex-automata v0.4.18
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling slab v0.4.12
+   Compiling futures-sink v0.3.32
+   Compiling icu_collections v2.2.0
+   Compiling futures-util v0.3.32
+   Compiling icu_locale_core v2.2.0
+   Compiling fdeflate v0.3.7
+   Compiling form_urlencoded v1.2.2
+   Compiling equator-macro v0.4.2
+   Compiling slotmap v1.1.1
+   Compiling getrandom v0.1.16
+   Compiling quick-error v2.0.1
+   Compiling bitflags v1.3.2
+   Compiling float-cmp v0.9.0
+   Compiling icu_provider v2.2.0
+   Compiling equator v0.4.2
+   Compiling strict-num v0.1.1
+   Compiling core_maths v0.1.1
+   Compiling indexmap v2.14.0
+   Compiling rgb v0.8.53
+   Compiling ttf-parser v0.25.1
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling siphasher v1.0.2
+   Compiling color_quant v1.1.0
+   Compiling arrayref v0.3.9
+   Compiling num-bigint v0.4.8
+   Compiling tiny-skia-path v0.11.4
+   Compiling aligned-vec v0.6.4
+   Compiling bstr v1.12.1
+   Compiling regex v1.12.3
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling unicode-bidi-mirroring v0.4.0
+   Compiling byteorder-lite v0.1.0
+   Compiling unicode-ccc v0.4.0
+   Compiling idna_adapter v1.2.1
+   Compiling gix-validate v0.11.2
+   Compiling gix-utils v0.3.3
+   Compiling gix-error v0.2.4
+   Compiling gix-packetline v0.21.4
+   Compiling gix-imara-diff v0.2.2
+   Compiling idna v1.1.0
+   Compiling gix-path v0.12.1
+   Compiling gix-date v0.15.4
+   Compiling gix-chunk v0.7.2
+   Compiling gix-quote v0.7.2
+   Compiling gix-bitmap v0.3.2
+   Compiling url v2.5.8
+   Compiling gix-config-value v0.18.1
+   Compiling gix-actor v0.41.1
+   Compiling gix-command v0.9.1
+   Compiling gix-url v0.36.1
+   Compiling zune-core v0.5.1
+   Compiling unicode-script v0.5.8
+   Compiling lopdf v0.38.0
+   Compiling fontdb v0.23.0
+   Compiling num-rational v0.4.2
+   Compiling image-webp v0.2.4
+   Compiling toml v1.1.2+spec-1.1.0
+   Compiling zune-jpeg v0.5.15
+   Compiling v_frame v0.3.9
+   Compiling rustybuzz v0.20.1
+   Compiling rand_core v0.5.1
+   Compiling chrono v0.4.44
+   Compiling windows-interface v0.59.3
+   Compiling windows-implement v0.60.2
+   Compiling simplecss v0.2.2
+   Compiling as-slice v0.2.1
+   Compiling windows-result v0.4.1
+   Compiling windows-strings v0.5.1
+   Compiling built v0.8.0
+   Compiling av-scenechange v0.14.1
+   Compiling pico-args v0.5.0
+   Compiling unicode-vo v0.1.0
+   Compiling paste v1.0.15
+   Compiling data-url v0.3.2
+   Compiling xmlwriter v0.1.0
+   Compiling windows-core v0.62.2
+   Compiling serde_yaml_ng v0.10.0
+   Compiling lopdf v0.39.0
+   Compiling aligned v0.4.3
+   Compiling json-five v0.3.1
+   Compiling rav1e v0.8.1
+   Compiling matchers v0.2.0
+   Compiling gif v0.14.2
+   Compiling png v0.17.16
+   Compiling futures-channel v0.3.32
+   Compiling kurbo v0.13.0
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling profiling-procmacros v1.0.17
+   Compiling no_std_io2 v0.9.3
+   Compiling winapi-util v0.1.11
+   Compiling tempfile v3.27.0
+   Compiling gix-sec v0.14.1
+   Compiling same-file v1.0.6
+   Compiling socket2 v0.6.3
+   Compiling walkdir v2.5.0
+   Compiling mio v1.2.0
+   Compiling anstyle-wincon v3.0.11
+   Compiling gix-features v0.48.1
+   Compiling anstyle-query v1.1.5
+   Compiling dirs-sys v0.5.0
+   Compiling pdf-extract v0.10.0
+   Compiling anstream v1.0.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling tokio v1.52.1
+   Compiling dirs v6.0.0
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling gix-glob v0.26.1
+   Compiling gix-transport v0.57.1
+   Compiling clap_builder v4.6.0
+   Compiling windows_x86_64_msvc v0.53.1
+   Compiling gix-hashtable v0.15.1
+   Compiling gix-tempfile v23.0.1
+   Compiling gix-commitgraph v0.37.1
+   Compiling gix-attributes v0.33.1
+   Compiling gix-ignore v0.21.1
+   Compiling siphasher v0.3.11
+   Compiling y4m v0.8.0
+   Compiling gix-object v0.61.0
+   Compiling gix-lock v23.0.1
+   Compiling pkg-config v0.3.33
+   Compiling unicase v2.9.0
+   Compiling pastey v0.1.1
+   Compiling gix-pathspec v0.18.1
+   Compiling phf_shared v0.8.0
+   Compiling gix-shallow v0.12.1
+   Compiling mime_guess v2.0.5
+   Compiling tracing-subscriber v0.3.23
+   Compiling svgtypes v0.16.1
+   Compiling tiny-skia v0.11.4
+   Compiling pcre2-sys v0.2.10
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-ref v0.64.0
+   Compiling gix-filter v0.31.0
+   Compiling gix-traverse v0.58.0
+   Compiling gix-revision v0.46.0
+   Compiling gix-pack v0.71.0
+   Compiling clap v4.6.1
+   Compiling gix-index v0.52.0
+   Compiling profiling v1.0.17
+   Compiling gix-discover v0.52.0
+   Compiling gix-config v0.57.0
+   Compiling gix-refspec v0.42.0
+   Compiling gix-protocol v0.62.0
+   Compiling gix-odb v0.81.0
+   Compiling hyper v1.9.0
+   Compiling gix-worktree v0.53.0
+   Compiling tokio-rustls v0.26.4
+   Compiling bitstream-io v4.10.0
+   Compiling gix-submodule v0.31.0
+   Compiling gix-diff v0.64.0
+   Compiling gix-dir v0.26.0
+   Compiling windows-sys v0.59.0
+   Compiling rand_pcg v0.2.1
+   Compiling rand_chacha v0.2.2
+   Compiling av1-grain v0.2.5
+   Compiling maybe-rayon v0.1.1
+   Compiling itertools v0.14.0
+   Compiling kurbo v0.11.3
+   Compiling half v2.7.1
+   Compiling indexmap v1.9.3
+   Compiling fax_derive v0.2.0
+   Compiling num-derive v0.4.2
+   Compiling simd_helpers v0.1.0
+   Compiling roxmltree v0.21.1
+   Compiling imgref v1.12.0
+   Compiling new_debug_unreachable v1.0.6
+   Compiling windows_x86_64_msvc v0.42.2
+   Compiling noop_proc_macro v0.3.0
+   Compiling gix-status v0.31.0
+   Compiling gix-merge v0.17.0
+   Compiling imagesize v0.14.0
+   Compiling fax v0.2.6
+   Compiling loop9 v0.1.5
+   Compiling svgtypes v0.15.3
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling usvg v0.46.0
+   Compiling rand v0.7.3
+   Compiling termcolor v1.4.1
+   Compiling schannel v0.1.29
+   Compiling globset v0.4.18
+   Compiling gix v0.84.0
+   Compiling openapiv3 v2.2.0
+   Compiling avif-serialize v0.8.8
+   Compiling zune-inflate v0.2.54
+   Compiling windows-threading v0.2.1
+   Compiling roxmltree v0.20.0
+   Compiling ucd-trie v0.1.7
+   Compiling imagesize v0.13.0
+   Compiling encode_unicode v1.0.0
+   Compiling ntapi v0.4.3
+   Compiling utf-8 v0.7.6
+   Compiling bit_field v0.10.3
+   Compiling lebe v0.5.3
+   Compiling unicode-width v0.1.14
+   Compiling litrs v1.0.0
+   Compiling owo-colors v4.3.0
+   Compiling zune-core v0.4.12
+   Compiling xxhash-rust v0.8.15
+   Compiling linked-hash-map v0.5.6
+   Compiling hashbrown v0.12.3
+   Compiling pxfm v0.1.29
+   Compiling schemars v1.2.1
+   Compiling zune-jpeg v0.4.21
+   Compiling document-features v0.2.12
+   Compiling yaml-rust v0.4.5
+   Compiling textwrap v0.11.0
+   Compiling biscuit-hash v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-hash\lib)
+   Compiling resvg v0.46.0
+   Compiling exr v1.74.0
+   Compiling usvg v0.45.1
+   Compiling tungstenite v0.26.2
+   Compiling console v0.16.3
+   Compiling tower-http v0.6.8
+   Compiling json5 v1.3.1
+   Compiling windows-future v0.3.2
+   Compiling hyper-rustls v0.27.9
+   Compiling phf_generator v0.8.0
+   Compiling ignore v0.4.25
+   Compiling rustls-native-certs v0.8.3
+   Compiling windows-targets v0.53.5
+   Compiling tiff v0.11.3
+   Compiling ravif v0.13.0
+   Compiling moxcms v0.8.1
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling windows-numerics v0.3.1
+   Compiling windows-collections v0.3.2
+   Compiling biscuit-file v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-file\lib)
+   Compiling gif v0.13.3
+   Compiling atty v0.2.14
+   Compiling crossterm_winapi v0.9.1
+   Compiling serde_urlencoded v0.7.1
+   Compiling png v0.18.1
+   Compiling qoi v0.4.1
+   Compiling strsim v0.8.0
+   Compiling renderable v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\renderable)
+   Compiling eyre v0.6.12
+   Compiling color-spantrace v0.3.0
+   Compiling vec_map v0.8.2
+   Compiling clap v2.34.0
+   Compiling reqwest v0.13.2
+   Compiling crossterm v0.29.0
+   Compiling resvg v0.45.1
+   Compiling windows v0.62.2
+   Compiling windows-targets v0.42.2
+   Compiling tokio-tungstenite v0.26.2
+   Compiling windows-sys v0.60.2
+   Compiling pcre2 v0.2.11
+   Compiling schematic-define v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\define)
+   Compiling phf_codegen v0.8.0
+   Compiling image v0.25.10
+   Compiling mermaid-rs-renderer v0.2.1
+   Compiling serde_yaml v0.8.26
+   Compiling tokio-stream v0.1.18
+   Compiling tracing-error v0.2.1
+   Compiling phf v0.8.0
+   Compiling home v0.5.12
+   Compiling ansi_colours v1.2.3
+   Compiling unic-langid-impl v0.9.6
+   Compiling quick-xml v0.38.4
+   Compiling indenter v0.3.4
+   Compiling polyglot_tokenizer v0.2.1
+   Compiling rustc-demangle v0.1.27
+   Compiling urlencoding v2.1.3
+   Compiling layout-rs v0.1.3
+   Compiling predicates-core v1.0.10
+   Compiling hyperpolyglot v0.1.7
+   Compiling backtrace v0.3.76
+   Compiling schematic-definitions v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\definitions)
+   Compiling plist v1.8.0
+   Compiling unic-langid v0.9.6
+   Compiling viuer v0.11.0
+   Compiling termini v1.0.0
+   Compiling is_executable v1.0.5
+   Compiling windows v0.44.0
+   Compiling biscuit-test-harness v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-test-harness)
+   Compiling getifaddrs v0.6.1
+   Compiling fs4 v0.13.1
+   Compiling winreg v0.55.0
+   Compiling terminal_size v0.4.4
+   Compiling float-cmp v0.10.0
+   Compiling async-trait v0.1.89
+   Compiling assert_cmd v2.2.1
+   Compiling difflib v0.4.0
+   Compiling which v8.0.2
+   Compiling shlex v1.3.0
+   Compiling termtree v0.5.1
+   Compiling ec4rs v1.2.0
+   Compiling normalize-line-endings v0.3.0
+   Compiling predicates-tree v1.0.13
+   Compiling predicates v3.1.4
+   Compiling clap_complete v4.6.2
+   Compiling test-toolkit v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\tools\test-toolkit)
+   Compiling color-eyre v0.6.5
+   Compiling futures-executor v0.3.32
+   Compiling similar v2.7.0
+   Compiling serial_test v3.4.0
+   Compiling insta v1.47.2
+   Compiling biscuit-visualized v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-visualized\src)
+   Compiling conpty v0.5.1
+   Compiling biscuit-terminal v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-terminal\lib)
+   Compiling expectrl v0.8.0
+   Compiling sysinfo v0.38.4
+   Compiling schematic-schema v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\schematic\schema)
+   Compiling sniff v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\sniff\lib)
+   Compiling biscuit-terminal-cli v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\biscuit-terminal\cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 29s
+   Archiving 4 binaries (including 1 non-test binary), 2 linked paths, and 2 standard libraries to B:\coding\mac--feat-dark-fixes\cross-check-Mac-7589-1790199404-build\build-biscuit-terminal-cli-windows-latest-282f5f80df3fa0e7.tar.zst
+    Archived 320 files to B:\coding\mac--feat-dark-fixes\cross-check-Mac-7589-1790199404-build\build-biscuit-terminal-cli-windows-latest-282f5f80df3fa0e7.tar.zst in 0.30s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 64 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `282f5f80df3fa0e7` for `windows-latest` — digest `82cfde960048f800`, produced on `windows-latest`.
+cross-check-key: 282f5f80df3fa0e7
+cross-check-digest: 82cfde960048f800
+
+Testing [1mbiscuit-terminal-cli[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 4 binaries (including 1 non-test binary) and 2 linked paths to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-Tul3G9
+   Extracted 320 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-Tul3G9 in 0.59s
+────────────
+ Nextest run ID 3290f763-7dc8-457f-8e69-fb488750c277 with nextest profile: ci
+    Starting 374 tests across 3 binaries (76 tests skipped)
+        PASS [   0.690s] (  1/374) biscuit-terminal-cli::l1 about::test_about_invalid_app_exits_with_code_2
+        PASS [   0.722s] (  2/374) biscuit-terminal-cli::l1 about::test_about_alias_match
+        PASS [   0.975s] (  3/374) biscuit-terminal-cli::l1 about::test_about_kitty_json_includes_setting_locators_without_config
+        PASS [   0.989s] (  4/374) biscuit-terminal-cli::l1 about::test_about_alacritty_json_reports_xdg_config_home_location_env
+        PASS [   1.005s] (  5/374) biscuit-terminal-cli::l1 about::test_about_current_terminal_json_includes_env_fact_candidates_and_values
+        PASS [   1.008s] (  6/374) biscuit-terminal-cli::l1 about::test_about_current_terminal_plain_includes_env_fact_candidates_and_values
+        PASS [   1.008s] (  7/374) biscuit-terminal-cli::l1 about::test_about_alacritty_json_extracts_legacy_yaml_candidate
+        PASS [   1.009s] (  8/374) biscuit-terminal-cli::l1 about::test_about_defaults_to_current_terminal
+        PASS [   0.322s] (  9/374) biscuit-terminal-cli::l1 about::test_about_kitty_json_outputs_valid_report
+        PASS [   1.013s] ( 10/374) biscuit-terminal-cli::l1 about::test_about_alacritty_plain_reports_xdg_config_home_override
+        PASS [   1.016s] ( 11/374) biscuit-terminal-cli::l1 about::test_about_alacritty_plain_includes_config_candidates_per_os_target
+        PASS [   0.306s] ( 12/374) biscuit-terminal-cli::l1 about::test_about_kitty_json_uses_nested_config_contract
+        PASS [   0.065s] ( 13/374) biscuit-terminal-cli::l1 dir_targets::dir_example_terminal_default_still_works
+        PASS [   0.075s] ( 14/374) biscuit-terminal-cli::l1 dir_targets::dir_example_with_md_still_prints_example_command
+        PASS [   0.078s] ( 15/374) biscuit-terminal-cli::l1 dir_targets::dir_help_lists_target_switches
+        PASS [   0.080s] ( 16/374) biscuit-terminal-cli::l1 dir_targets::dir_html_emits_nested_ul_li_with_fs_classes
+        PASS [   0.042s] ( 17/374) biscuit-terminal-cli::l1 dir_targets::dir_md_and_md_plus_are_mutually_exclusive
+        PASS [   0.058s] ( 18/374) biscuit-terminal-cli::l1 dir_targets::dir_md_and_html_are_mutually_exclusive
+        PASS [   0.169s] ( 19/374) biscuit-terminal-cli::l1 about::test_about_kitty_plain_has_no_ansi_escapes
+        PASS [   0.051s] ( 20/374) biscuit-terminal-cli::l1 dir_targets::dir_md_emits_nested_markdown_list_without_box_drawing
+        PASS [   0.021s] ( 21/374) biscuit-terminal-cli::l1 integration_test::public_docs_do_not_advertise_removed_atomic_tokens
+        PASS [   0.058s] ( 22/374) biscuit-terminal-cli::l1 dir_targets::dir_md_plus_emits_classed_icon_spans
+        PASS [   0.176s] ( 23/374) biscuit-terminal-cli::l1 about::test_about_kitty_plain_renders_report
+        PASS [   0.195s] ( 24/374) biscuit-terminal-cli::l1 about::test_about_kitty_plain_includes_setting_locators_without_config
+        PASS [   0.057s] ( 25/374) biscuit-terminal-cli::l1 dir_targets::dir_terminal_default_renders_box_drawing
+        PASS [   0.049s] ( 26/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_comma_separated_input
+        PASS [   0.189s] ( 27/374) biscuit-terminal-cli::l1 about::test_about_non_current_terminal_plain_includes_env_fact_candidates
+        PASS [   0.055s] ( 28/374) biscuit-terminal-cli::l1 integration_test::test_always_shows_font_section
+        PASS [   0.045s] ( 29/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_example_flag
+        PASS [   0.196s] ( 30/374) biscuit-terminal-cli::l1 about::test_about_non_current_terminal_json_includes_env_fact_candidates_without_values
+        PASS [   0.198s] ( 31/374) biscuit-terminal-cli::l1 about::test_about_prefix_match
+        PASS [   0.045s] ( 32/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_help
+        PASS [   0.043s] ( 33/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_horizontal_flag
+        PASS [   0.043s] ( 34/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_json_input_format
+        PASS [   0.047s] ( 35/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_invalid_data_errors_to_stderr
+        PASS [   0.037s] ( 36/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_requires_data_without_example
+        PASS [   0.047s] ( 37/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_json_with_space_separated_values
+        PASS [   0.047s] ( 38/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_with_title
+        PASS [   0.051s] ( 39/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_with_line_overlay
+        PASS [   0.050s] ( 40/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_with_x_axis_labels
+        PASS [   0.050s] ( 41/374) biscuit-terminal-cli::l1 integration_test::test_bar_chart_with_y_axis_label
+        PASS [   0.045s] ( 42/374) biscuit-terminal-cli::l1 integration_test::test_columns_example_with_md_plus_succeeds
+        PASS [   0.063s] ( 43/374) biscuit-terminal-cli::l1 integration_test::test_block_plain_overrides_force_color
+        PASS [   0.053s] ( 44/374) biscuit-terminal-cli::l1 integration_test::test_columns_example_with_html_succeeds
+        PASS [   0.046s] ( 45/374) biscuit-terminal-cli::l1 integration_test::test_columns_help
+        PASS [   0.050s] ( 46/374) biscuit-terminal-cli::l1 integration_test::test_columns_example_with_md_succeeds
+        PASS [   0.048s] ( 47/374) biscuit-terminal-cli::l1 integration_test::test_columns_html_emits_columns_flex_container
+        PASS [   0.042s] ( 48/374) biscuit-terminal-cli::l1 integration_test::test_columns_md_and_html_are_mutually_exclusive
+        PASS [   0.048s] ( 49/374) biscuit-terminal-cli::l1 integration_test::test_columns_md_and_md_plus_are_mutually_exclusive
+        PASS [   0.046s] ( 50/374) biscuit-terminal-cli::l1 integration_test::test_columns_md_plus_and_html_are_mutually_exclusive
+        PASS [   0.055s] ( 51/374) biscuit-terminal-cli::l1 integration_test::test_columns_md_collapses_to_sequential_blocks
+        PASS [   0.040s] ( 52/374) biscuit-terminal-cli::l1 integration_test::test_columns_md_plus_emits_flex_html_container
+        PASS [   0.051s] ( 53/374) biscuit-terminal-cli::l1 integration_test::test_completions_bash
+        PASS [   0.056s] ( 54/374) biscuit-terminal-cli::l1 integration_test::test_columns_snapshot
+        PASS [   0.058s] ( 55/374) biscuit-terminal-cli::l1 integration_test::test_completions_invalid_shell
+        PASS [   0.064s] ( 56/374) biscuit-terminal-cli::l1 integration_test::test_compose_default_terminal_concatenates_positional_items
+        PASS [   0.080s] ( 57/374) biscuit-terminal-cli::l1 integration_test::test_completions_fish
+        PASS [   0.072s] ( 58/374) biscuit-terminal-cli::l1 integration_test::test_completions_zsh
+        PASS [   0.065s] ( 59/374) biscuit-terminal-cli::l1 integration_test::test_compose_example_emits_command_line
+        PASS [   0.054s] ( 60/374) biscuit-terminal-cli::l1 integration_test::test_compose_html_emits_div_wrapper
+        PASS [   0.064s] ( 61/374) biscuit-terminal-cli::l1 integration_test::test_compose_help_exposes_md_md_plus_html_and_example_flags
+        PASS [   0.048s] ( 62/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_plus_html_mutual_exclusion
+        PASS [   0.053s] ( 63/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_and_html_are_mutually_exclusive
+        PASS [   0.070s] ( 64/374) biscuit-terminal-cli::l1 integration_test::test_compose_html_example_emits_html_and_command_line
+        PASS [   0.056s] ( 65/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_plus_md_mutual_exclusion
+        PASS [   0.044s] ( 66/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_plus_with_text_succeeds
+        PASS [   0.048s] ( 67/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_renders_heading
+        PASS [   0.053s] ( 68/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_with_list_emits_dash_marker
+        PASS [   0.057s] ( 69/374) biscuit-terminal-cli::l1 integration_test::test_compose_md_with_table_emits_gfm_table
+        PASS [   0.063s] ( 70/374) biscuit-terminal-cli::l1 integration_test::test_compose_no_args_errors_to_stderr
+        PASS [   0.064s] ( 71/374) biscuit-terminal-cli::l1 integration_test::test_compose_positional_items_concatenate
+        PASS [   0.068s] ( 72/374) biscuit-terminal-cli::l1 integration_test::test_compose_prose_terminal_output_contains_bold_sgr
+        PASS [   0.077s] ( 73/374) biscuit-terminal-cli::l1 integration_test::test_content_analysis_detects_color_and_osc8
+        PASS [   0.074s] ( 74/374) biscuit-terminal-cli::l1 integration_test::test_default_no_environment_section
+        PASS [   0.077s] ( 75/374) biscuit-terminal-cli::l1 integration_test::test_default_output_shows_size
+        PASS [   0.076s] ( 76/374) biscuit-terminal-cli::l1 integration_test::test_default_output_shows_tty_status
+        PASS [   0.076s] ( 77/374) biscuit-terminal-cli::l1 integration_test::test_default_shows_metadata
+        PASS [   0.071s] ( 78/374) biscuit-terminal-cli::l1 integration_test::test_erd_basic
+        PASS [   0.071s] ( 79/374) biscuit-terminal-cli::l1 integration_test::test_erd_example_flag
+        PASS [   0.066s] ( 80/374) biscuit-terminal-cli::l1 integration_test::test_erd_requires_relationships_without_example
+        PASS [   0.075s] ( 81/374) biscuit-terminal-cli::l1 integration_test::test_erd_help
+        PASS [   0.062s] ( 82/374) biscuit-terminal-cli::l1 integration_test::test_erd_with_entity_definitions
+        PASS [   0.058s] ( 83/374) biscuit-terminal-cli::l1 integration_test::test_erd_with_title
+        PASS [   0.065s] ( 84/374) biscuit-terminal-cli::l1 integration_test::test_error_exit_code_is_nonzero
+        PASS [   0.052s] ( 85/374) biscuit-terminal-cli::l1 integration_test::test_flowchart_example_flag
+        PASS [   0.073s] ( 86/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_json_dot_mode
+        PASS [   0.102s] ( 87/374) biscuit-terminal-cli::l1 integration_test::test_example_flag_does_not_require_data
+        PASS [   0.067s] ( 88/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_json_example
+        PASS [   0.072s] ( 89/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_json_reports_inverse_flag
+        PASS [   0.065s] ( 90/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_rejects_mixed_edge_kinds
+        PASS [   0.055s] ( 91/374) biscuit-terminal-cli::l1 integration_test::test_help_flag
+        PASS [   0.034s] ( 92/374) biscuit-terminal-cli::l1 integration_test::test_image_nonexistent_file_errors_to_stderr
+        PASS [   0.039s] ( 93/374) biscuit-terminal-cli::l1 integration_test::test_json_flag_outputs_json
+        PASS [   0.046s] ( 94/374) biscuit-terminal-cli::l1 integration_test::test_json_font_fields_are_valid_if_present
+        PASS [   0.041s] ( 95/374) biscuit-terminal-cli::l1 integration_test::test_json_includes_content_analysis
+        PASS [   0.043s] ( 96/374) biscuit-terminal-cli::l1 integration_test::test_json_includes_ligatures_likely
+        PASS [   0.047s] ( 97/374) biscuit-terminal-cli::l1 integration_test::test_json_output_is_valid_json
+        PASS [   0.037s] ( 98/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_example_flag
+        PASS [   0.037s] ( 99/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_help
+        PASS [   0.039s] (100/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_horizontal
+        PASS [   0.040s] (101/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_json_with_values
+        PASS [   0.044s] (102/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_requires_data_without_example
+        PASS [   0.037s] (103/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_with_bar_overlay
+        PASS [   0.038s] (104/374) biscuit-terminal-cli::l1 integration_test::test_line_chart_with_title
+        PASS [   0.042s] (105/374) biscuit-terminal-cli::l1 integration_test::test_list_empty_errors_to_stderr
+        PASS [   0.043s] (106/374) biscuit-terminal-cli::l1 integration_test::test_list_md_html_mutual_exclusion
+        PASS [   0.038s] (107/374) biscuit-terminal-cli::l1 integration_test::test_list_md_md_plus_mutual_exclusion
+        PASS [   0.040s] (108/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_html_emits_ol_li
+        PASS [   0.042s] (109/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_example_renders_and_prints_command
+        PASS [   0.037s] (110/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_html_with_alignment_wraps_in_div
+        PASS [   0.037s] (111/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_html_with_layout_emits_margin_on_ol_only
+        PASS [   0.033s] (112/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_md_emits_commonmark
+        PASS [   0.033s] (113/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_md_with_left_margin_emits_frontmatter
+        PASS [   0.041s] (114/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_renders_numbered_items
+        PASS [   0.057s] (115/374) biscuit-terminal-cli::l1 integration_test::test_list_ordered_md_plus_matches_md
+        PASS [   0.048s] (116/374) biscuit-terminal-cli::l1 integration_test::test_list_short_ordered_flag_works
+        PASS [   0.039s] (117/374) biscuit-terminal-cli::l1 integration_test::test_list_snapshot
+        PASS [   0.043s] (118/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_example_unchanged
+        PASS [   0.046s] (119/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_html_emits_ul_li
+        PASS [   0.043s] (120/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_html_ignores_custom_bullet
+        PASS [   0.043s] (121/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_html_with_alignment_wraps_in_div
+        PASS [   0.039s] (122/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_html_with_layout_emits_margin_on_ul_only
+        PASS [   0.043s] (123/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_md_emits_commonmark
+        PASS [   0.041s] (124/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_md_ignores_custom_bullet
+        PASS [   0.033s] (125/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_md_with_left_margin_emits_frontmatter
+        PASS [   0.033s] (126/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_terminal_honors_custom_bullet
+        PASS [   0.052s] (127/374) biscuit-terminal-cli::l1 integration_test::test_list_unordered_md_plus_matches_md
+        PASS [   0.043s] (128/374) biscuit-terminal-cli::l1 integration_test::test_padleft_missing_args_errors_to_stderr
+        PASS [   0.032s] (129/374) biscuit-terminal-cli::l1 integration_test::test_padright_missing_args_errors_to_stderr
+        PASS [   0.046s] (130/374) biscuit-terminal-cli::l1 integration_test::test_padleft_snapshot
+        PASS [   0.036s] (131/374) biscuit-terminal-cli::l1 integration_test::test_padright_snapshot
+        PASS [   0.035s] (132/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_example_flag_uses_example_data
+        PASS [   0.039s] (133/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_help
+        PASS [   0.042s] (134/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_official_mermaid_format
+        PASS [   0.042s] (135/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_semicolon_format
+        PASS [   0.036s] (136/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_simple_format
+        PASS [   0.038s] (137/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_with_color_prefix
+        PASS [   0.037s] (138/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_with_custom_colors
+        PASS [   0.035s] (139/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_with_show_data
+        PASS [   0.035s] (140/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_json_with_title
+        PASS [   0.043s] (141/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_requires_data
+        PASS [   0.048s] (142/374) biscuit-terminal-cli::l1 integration_test::test_pie_chart_semicolon_with_colors
+        PASS [   0.042s] (143/374) biscuit-terminal-cli::l1 integration_test::test_progress_color_flags_parse_for_terminal
+        PASS [   0.040s] (144/374) biscuit-terminal-cli::l1 integration_test::test_progress_example_succeeds
+        PASS [   0.035s] (145/374) biscuit-terminal-cli::l1 integration_test::test_progress_example_with_html_renders_semantic_widget
+        PASS [   0.041s] (146/374) biscuit-terminal-cli::l1 integration_test::test_progress_example_with_md_plus_renders_inline_html
+        PASS [   0.043s] (147/374) biscuit-terminal-cli::l1 integration_test::test_progress_example_with_md_renders_markdown
+        PASS [   0.038s] (148/374) biscuit-terminal-cli::l1 integration_test::test_progress_html_color_flags_inline_css
+        PASS [   0.035s] (149/374) biscuit-terminal-cli::l1 integration_test::test_progress_html_emits_semantic_widget
+        PASS [   0.039s] (150/374) biscuit-terminal-cli::l1 integration_test::test_progress_html_md_plus_mutually_exclusive
+        PASS [   0.044s] (151/374) biscuit-terminal-cli::l1 integration_test::test_progress_html_unlabeled_omits_label_span
+        PASS [   0.038s] (152/374) biscuit-terminal-cli::l1 integration_test::test_progress_md_html_mutually_exclusive
+        PASS [   0.537s] (153/374) biscuit-terminal-cli::l1 integration_test::test_every_subcommand_help_exposes_example_flag
+        PASS [   0.036s] (154/374) biscuit-terminal-cli::l1 integration_test::test_progress_md_md_plus_mutually_exclusive
+        PASS [   0.038s] (155/374) biscuit-terminal-cli::l1 integration_test::test_progress_md_outputs_label_and_percentage
+        PASS [   0.042s] (156/374) biscuit-terminal-cli::l1 integration_test::test_progress_md_plus_emits_semantic_html
+        PASS [   0.041s] (157/374) biscuit-terminal-cli::l1 integration_test::test_progress_md_unlabeled_outputs_just_percentage
+        PASS [   0.034s] (158/374) biscuit-terminal-cli::l1 integration_test::test_progress_rejects_percentage_above_100
+        PASS [   0.039s] (159/374) biscuit-terminal-cli::l1 integration_test::test_progress_terminal_default
+        PASS [   0.046s] (160/374) biscuit-terminal-cli::l1 integration_test::test_prose_empty_errors_to_stderr
+        PASS [   0.037s] (161/374) biscuit-terminal-cli::l1 integration_test::test_prose_force_color_flag_emits_sgr_to_pipe
+        PASS [   0.038s] (162/374) biscuit-terminal-cli::l1 integration_test::test_prose_html_margin_left_emits_layout_wrapper
+        PASS [   0.040s] (163/374) biscuit-terminal-cli::l1 integration_test::test_prose_html_without_layout_omits_layout_wrapper
+        PASS [   0.039s] (164/374) biscuit-terminal-cli::l1 integration_test::test_prose_markdown_margin_left_emits_style_frontmatter
+        PASS [   0.039s] (165/374) biscuit-terminal-cli::l1 integration_test::test_prose_markdown_plus_margin_left_emits_style_frontmatter
+        PASS [   0.033s] (166/374) biscuit-terminal-cli::l1 integration_test::test_prose_markdown_plus_preserves_color_as_inline_html
+        PASS [   0.032s] (167/374) biscuit-terminal-cli::l1 integration_test::test_prose_markdown_without_layout_omits_frontmatter
+        PASS [   0.043s] (168/374) biscuit-terminal-cli::l1 integration_test::test_prose_print_bytes_flag_dumps_hex_to_stderr
+        PASS [   0.041s] (169/374) biscuit-terminal-cli::l1 integration_test::test_prose_snapshot
+        PASS [   0.040s] (170/374) biscuit-terminal-cli::l1 integration_test::test_prose_styled_snapshot
+        PASS [   0.042s] (171/374) biscuit-terminal-cli::l1 integration_test::test_quiet_short_flag
+        PASS [   0.043s] (172/374) biscuit-terminal-cli::l1 integration_test::test_quiet_suppresses_output
+        PASS [   0.037s] (173/374) biscuit-terminal-cli::l1 integration_test::test_quote_empty_errors_to_stderr
+        PASS [   0.038s] (174/374) biscuit-terminal-cli::l1 integration_test::test_quote_example_renders_default_quote
+        PASS [   0.034s] (175/374) biscuit-terminal-cli::l1 integration_test::test_quote_html_emits_blockquote_fragment
+        PASS [   0.039s] (176/374) biscuit-terminal-cli::l1 integration_test::test_quote_html_with_attribution_has_two_paragraphs
+        PASS [   0.035s] (177/374) biscuit-terminal-cli::l1 integration_test::test_quote_md_and_html_are_mutually_exclusive
+        PASS [   0.035s] (178/374) biscuit-terminal-cli::l1 integration_test::test_quote_md_emits_canonical_block_quote_syntax
+        PASS [   0.037s] (179/374) biscuit-terminal-cli::l1 integration_test::test_quote_md_strips_inline_styling_tags
+        PASS [   0.040s] (180/374) biscuit-terminal-cli::l1 integration_test::test_quote_md_with_attribution_renders_separate_paragraph
+        PASS [   0.044s] (181/374) biscuit-terminal-cli::l1 integration_test::test_quote_snapshot
+        PASS [   0.041s] (182/374) biscuit-terminal-cli::l1 integration_test::test_respects_no_color
+        PASS [   0.037s] (183/374) biscuit-terminal-cli::l1 integration_test::test_section_example_emits_command_line
+        PASS [   0.034s] (184/374) biscuit-terminal-cli::l1 integration_test::test_section_example_with_html_emits_section_element
+        PASS [   0.036s] (185/374) biscuit-terminal-cli::l1 integration_test::test_section_help_exposes_md_md_plus_html_and_example_flags
+        PASS [   0.034s] (186/374) biscuit-terminal-cli::l1 integration_test::test_section_invalid_level_errors
+        PASS [   0.040s] (187/374) biscuit-terminal-cli::l1 integration_test::test_section_html_emits_section_element
+        PASS [   0.057s] (188/374) biscuit-terminal-cli::l1 integration_test::test_section_level_flag_changes_heading_prefix
+        PASS [   0.055s] (189/374) biscuit-terminal-cli::l1 integration_test::test_section_md_html_mutual_exclusion
+        PASS [   0.057s] (190/374) biscuit-terminal-cli::l1 integration_test::test_section_md_md_plus_mutual_exclusion
+        PASS [   0.057s] (191/374) biscuit-terminal-cli::l1 integration_test::test_section_requires_title_or_example
+        PASS [   0.058s] (192/374) biscuit-terminal-cli::l1 integration_test::test_section_terminal_default_emits_heading_prefix
+        PASS [   0.068s] (193/374) biscuit-terminal-cli::l1 integration_test::test_section_md_renders_heading_and_body
+        PASS [   0.081s] (194/374) biscuit-terminal-cli::l1 integration_test::test_section_md_plus_matches_md_for_pure_section
+        PASS [   0.038s] (195/374) biscuit-terminal-cli::l1 integration_test::test_shows_underline_support
+        PASS [   0.040s] (196/374) biscuit-terminal-cli::l1 integration_test::test_silent_suppresses_all_output
+        PASS [   0.041s] (197/374) biscuit-terminal-cli::l1 integration_test::test_silent_suppresses_json_output
+        PASS [   0.032s] (198/374) biscuit-terminal-cli::l1 integration_test::test_state_diagram_basic
+        PASS [   0.040s] (199/374) biscuit-terminal-cli::l1 integration_test::test_state_diagram_help
+        PASS [   0.041s] (200/374) biscuit-terminal-cli::l1 integration_test::test_state_diagram_example_flag
+        PASS [   0.039s] (201/374) biscuit-terminal-cli::l1 integration_test::test_state_diagram_requires_transitions_without_example
+        PASS [   0.042s] (202/374) biscuit-terminal-cli::l1 integration_test::test_state_diagram_with_title
+        PASS [   0.047s] (203/374) biscuit-terminal-cli::l1 integration_test::test_status_block_border_color_applies_on_color_terminal
+        PASS [   0.040s] (204/374) biscuit-terminal-cli::l1 integration_test::test_status_block_example_succeeds_and_prints_command
+        PASS [   0.035s] (205/374) biscuit-terminal-cli::l1 integration_test::test_status_block_help_exposes_target_and_layout_flags
+        PASS [   0.051s] (206/374) biscuit-terminal-cli::l1 integration_test::test_status_block_html_emits_div_with_classes
+        PASS [   0.038s] (207/374) biscuit-terminal-cli::l1 integration_test::test_status_block_md_html_mutual_exclusion
+        PASS [   0.048s] (208/374) biscuit-terminal-cli::l1 integration_test::test_status_block_md_emits_block_quote
+        PASS [   0.038s] (209/374) biscuit-terminal-cli::l1 integration_test::test_status_block_requires_severity_and_body
+        PASS [   0.042s] (210/374) biscuit-terminal-cli::l1 integration_test::test_status_block_terminal_default_emits_thick_border
+        PASS [   0.044s] (211/374) biscuit-terminal-cli::l1 integration_test::test_table_example_emits_command_line
+        PASS [   0.036s] (212/374) biscuit-terminal-cli::l1 integration_test::test_table_help_exposes_cross_target_and_example_flags
+        PASS [   0.042s] (213/374) biscuit-terminal-cli::l1 integration_test::test_table_html_emits_table_element
+        PASS [   0.043s] (214/374) biscuit-terminal-cli::l1 integration_test::test_table_html_md_plus_mutual_exclusion
+        PASS [   0.049s] (215/374) biscuit-terminal-cli::l1 integration_test::test_table_md_cell_pipe_is_escaped
+        PASS [   0.056s] (216/374) biscuit-terminal-cli::l1 integration_test::test_table_literal_colon_header_is_preserved
+        PASS [   0.050s] (217/374) biscuit-terminal-cli::l1 integration_test::test_table_md_html_mutual_exclusion
+        PASS [   0.063s] (218/374) biscuit-terminal-cli::l1 integration_test::test_table_md_emits_gfm_pipe_table
+        PASS [   0.069s] (219/374) biscuit-terminal-cli::l1 integration_test::test_table_md_md_plus_mutual_exclusion
+        PASS [   0.051s] (220/374) biscuit-terminal-cli::l1 integration_test::test_table_requires_columns_without_example
+        PASS [   0.051s] (221/374) biscuit-terminal-cli::l1 integration_test::test_table_terminal_default_emits_box_borders
+        PASS [   0.078s] (222/374) biscuit-terminal-cli::l1 integration_test::test_table_md_plus_matches_md_for_pure_gfm_table
+        PASS [   0.043s] (223/374) biscuit-terminal-cli::l1 integration_test::test_table_unknown_column_type_errors
+        PASS [   0.052s] (224/374) biscuit-terminal-cli::l1 integration_test::test_table_typed_currency_column_formats_value
+        PASS [   0.043s] (225/374) biscuit-terminal-cli::l1 integration_test::test_text_block_bold_and_dim_are_mutually_exclusive
+        PASS [   0.040s] (226/374) biscuit-terminal-cli::l1 integration_test::test_text_block_bold_emits_bold_sgr
+        PASS [   0.199s] (227/374) biscuit-terminal-cli::l1 integration_test::test_table_header_ending_in_type_word_is_literal
+        PASS [   0.100s] (228/374) biscuit-terminal-cli::l1 integration_test::test_table_title_renders_caption_on_every_target
+        PASS [   0.281s] (229/374) biscuit-terminal-cli::l1 integration_test::test_status_block_every_non_deprecated_severity_runs
+        PASS [   0.044s] (230/374) biscuit-terminal-cli::l1 integration_test::test_text_block_example_succeeds_and_prints_command
+        PASS [   0.047s] (231/374) biscuit-terminal-cli::l1 integration_test::test_text_block_example_dim_wins_over_implicit_bold
+        PASS [   0.058s] (232/374) biscuit-terminal-cli::l1 integration_test::test_text_block_fg_lowers_to_css_in_html
+        PASS [   0.066s] (233/374) biscuit-terminal-cli::l1 integration_test::test_text_block_fg_emits_foreground_sgr_on_color_terminal
+        PASS [   0.058s] (234/374) biscuit-terminal-cli::l1 integration_test::test_text_block_html_emits_paragraph_with_style
+        PASS [   0.064s] (235/374) biscuit-terminal-cli::l1 integration_test::test_text_block_md_emits_plain_text
+        PASS [   0.060s] (236/374) biscuit-terminal-cli::l1 integration_test::test_text_block_md_html_mutually_exclusive
+        PASS [   0.056s] (237/374) biscuit-terminal-cli::l1 integration_test::test_text_block_md_md_plus_mutually_exclusive
+        PASS [   0.059s] (238/374) biscuit-terminal-cli::l1 integration_test::test_text_block_md_plus_html_mutually_exclusive
+        PASS [   0.042s] (239/374) biscuit-terminal-cli::l1 integration_test::test_text_block_terminal_default_emits_text
+        PASS [   0.045s] (240/374) biscuit-terminal-cli::l1 integration_test::test_text_block_underline_variants_are_mutually_exclusive
+        PASS [   0.042s] (241/374) biscuit-terminal-cli::l1 integration_test::test_timeline_bad_format_errors_to_stderr
+        PASS [   0.059s] (242/374) biscuit-terminal-cli::l1 integration_test::test_text_block_md_plus_matches_md_for_styled_text
+        PASS [   0.044s] (243/374) biscuit-terminal-cli::l1 integration_test::test_timeline_basic
+        PASS [   0.045s] (244/374) biscuit-terminal-cli::l1 integration_test::test_timeline_example_flag
+        PASS [   0.044s] (245/374) biscuit-terminal-cli::l1 integration_test::test_timeline_help
+        PASS [   0.039s] (246/374) biscuit-terminal-cli::l1 integration_test::test_timeline_requires_events_without_example
+        PASS [   0.041s] (247/374) biscuit-terminal-cli::l1 integration_test::test_timeline_with_title
+        PASS [   0.042s] (248/374) biscuit-terminal-cli::l1 integration_test::test_tree_rendered_quote_respects_no_color
+        PASS [   0.016s] (249/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_param
+        PASS [   0.050s] (250/374) biscuit-terminal-cli::l1 integration_test::test_version_flag
+        PASS [   0.052s] (251/374) biscuit-terminal-cli::l1 integration_test::test_verbose_flag_shows_environment_section
+        PASS [   0.029s] (252/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_param_first_position
+        PASS [   0.030s] (253/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_for_garbage_value
+        PASS [   0.073s] (254/374) biscuit-terminal-cli::l1 integration_test::test_very_verbose_shows_raw_detection
+        PASS [   0.044s] (255/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::extracts_kitty_apc_c_returns_none_without_param
+        PASS [   0.039s] (256/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::finds_row_of
+        PASS [   1.262s] (257/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_example_plain_overrides_force_color
+        PASS [   0.042s] (258/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_cursor_before_line
+        PASS [   1.270s] (259/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_dot_fallback_uses_dot_info_string
+        PASS [   0.029s] (260/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_height_line
+        PASS [   0.016s] (261/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_width_line
+        PASS [   0.039s] (262/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_cursor_rows
+        PASS [   0.090s] (263/374) biscuit-terminal-cli::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.019s] (264/374) biscuit-terminal-cli::level2 common::pane_geometry::tests::parses_image_width_returns_none_when_absent
+        PASS [   0.015s] (265/374) biscuit-terminal-cli::level2 diagrams::helper_tests::cases_table_covers_all_ten_subcommands
+        PASS [   0.011s] (266/374) biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_pulls_bytes_between_markers
+        PASS [   0.019s] (267/374) biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_marker
+        PASS [   1.280s] (268/374) biscuit-terminal-cli::l1 integration_test::test_graph_expression_falls_back_to_code_block_on_non_tty
+        PASS [   0.023s] (269/374) biscuit-terminal-cli::level2 diagrams::helper_tests::extract_kitty_apc_payload_returns_none_without_terminator
+        PASS [   0.025s] (270/374) biscuit-terminal-cli::level2 diagrams::helper_tests::sha256_hex_distinguishes_inputs
+        PASS [   0.028s] (271/374) biscuit-terminal-cli::level2 diagrams::helper_tests::sha256_hex_matches_known_digest
+        PASS [   0.032s] (272/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_bold_reset_before_padding_and_border
+        PASS [   0.034s] (273/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_explicit_bold_off_encoding
+        PASS [   0.035s] (274/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_itu_colon_color_plus_bold
+        PASS [   0.037s] (275/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::accepts_wezterm_charset_designation_around_reset
+        PASS [   0.040s] (276/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_bleeding_into_padding_and_border
+        PASS [   0.036s] (277/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_border_after_reset
+        PASS [   0.036s] (278/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_on_leading_border
+        PASS [   0.040s] (279/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_bold_on_leading_padding
+        PASS [   0.043s] (280/374) biscuit-terminal-cli::level2 prose_cells::bold_containment::rejects_non_bold_content
+        PASS [   0.042s] (281/374) biscuit-terminal-cli::level2 prose_cells::cell_alignment::equal_slack_is_ambiguous
+        PASS [   0.041s] (282/374) biscuit-terminal-cli::level2 prose_cells::cell_alignment::left_alignment_has_fill_on_the_right
+        PASS [   0.043s] (283/374) biscuit-terminal-cli::level2 prose_cells::cell_alignment::right_alignment_has_fill_on_the_left
+        PASS [   0.042s] (284/374) biscuit-terminal-cli::level2 prose_cells::cell_alignment::splits_inner_cells_dropping_borders_and_pane_padding
+        PASS [   0.042s] (285/374) biscuit-terminal-cli::level2 prose_cells::cell_alignment::too_few_borders_yields_no_cells
+        PASS [   0.043s] (286/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_dim_reset_before_padding_and_border
+        PASS [   0.042s] (287/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_normal_intensity_off_encoding
+        PASS [   0.043s] (288/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::accepts_wezterm_charset_designation_around_reset
+        PASS [   0.043s] (289/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_bleeding_into_padding_and_border
+        PASS [   0.042s] (290/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_border_after_reset
+        PASS [   0.043s] (291/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_on_leading_border
+        PASS [   0.043s] (292/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_dim_on_leading_padding
+        PASS [   0.042s] (293/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::rejects_non_dim_content
+        PASS [   0.042s] (294/374) biscuit-terminal-cli::level2 prose_cells::dim_containment::truecolor_channel_two_is_not_read_as_dim
+        PASS [   0.042s] (295/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_basic_red_reset_before_padding_and_border
+        PASS [   0.041s] (296/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_bright_red
+        PASS [   0.042s] (297/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_default_foreground_off_encoding
+        PASS [   0.041s] (298/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_red_256_color_index
+        PASS [   0.041s] (299/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::accepts_wezterm_maroon_truecolor_capture_form
+        PASS [   0.041s] (300/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_blue_foreground
+        PASS [   0.041s] (301/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_non_red_content
+        PASS [   0.042s] (302/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_bleeding_from_preceding_cell_across_separator
+        PASS [   0.041s] (303/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_bleeding_into_padding_and_border
+        PASS [   0.041s] (304/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_border_after_reset
+        PASS [   0.041s] (305/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_on_leading_border
+        PASS [   0.041s] (306/374) biscuit-terminal-cli::level2 prose_cells::fg_red_containment::rejects_red_on_leading_padding
+        PASS [   0.041s] (307/374) biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_closed_before_padding_and_border_bel
+        PASS [   0.040s] (308/374) biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_closed_before_padding_and_border_st
+        PASS [   0.040s] (309/374) biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_link_with_params_in_opener
+        PASS [   0.041s] (310/374) biscuit-terminal-cli::level2 prose_cells::link_containment::accepts_wezterm_charset_designation_around_link
+        PASS [   0.041s] (311/374) biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_bleeding_into_padding_and_border
+        PASS [   0.040s] (312/374) biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_opened_before_leading_border
+        PASS [   0.041s] (313/374) biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_link_reopened_over_border
+        PASS [   0.040s] (314/374) biscuit-terminal-cli::level2 prose_cells::link_containment::rejects_unlinked_label
+        PASS [   0.045s] (315/374) biscuit-terminal-cli::bin/bt commands::about::tests::alias_match_works
+        PASS [   0.045s] (316/374) biscuit-terminal-cli::bin/bt commands::about::tests::bundle_only_metadata_reports_installed_when_sniff_finder_matches
+        PASS [   0.046s] (317/374) biscuit-terminal-cli::bin/bt commands::about::tests::bundle_only_metadata_reports_not_installed_when_sniff_finder_misses
+        PASS [   0.047s] (318/374) biscuit-terminal-cli::bin/bt commands::about::tests::contains_match_falls_back
+        PASS [   0.047s] (319/374) biscuit-terminal-cli::bin/bt commands::about::tests::exact_match_wins
+        PASS [   0.047s] (320/374) biscuit-terminal-cli::bin/bt commands::about::tests::invalid_app_errors
+        PASS [   0.046s] (321/374) biscuit-terminal-cli::bin/bt commands::about::tests::metadata_without_probe_target_still_reports_unknown
+        PASS [   0.046s] (322/374) biscuit-terminal-cli::bin/bt commands::about::tests::prefix_match_falls_back
+        PASS [   0.048s] (323/374) biscuit-terminal-cli::bin/bt commands::compose::tests::example_compose_renders_html
+        PASS [   0.046s] (324/374) biscuit-terminal-cli::bin/bt commands::compose::tests::example_compose_renders_markdown
+        PASS [   0.043s] (325/374) biscuit-terminal-cli::bin/bt commands::compose::tests::example_compose_renders_terminal_with_heading_and_list
+        PASS [   0.041s] (326/374) biscuit-terminal-cli::bin/bt commands::compose::tests::layout_args_apply_to_compose
+        PASS [   0.042s] (327/374) biscuit-terminal-cli::bin/bt commands::compose::tests::md_and_html_are_mutually_exclusive
+        PASS [   0.041s] (328/374) biscuit-terminal-cli::bin/bt commands::compose::tests::no_parts_returns_error
+        PASS [   0.041s] (329/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_heading_pair
+        PASS [   0.042s] (330/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_heading_rejects_invalid_level
+        PASS [   0.042s] (331/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_heading_rejects_non_numeric_level
+        PASS [   0.043s] (332/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_list_creates_unordered_list
+        PASS [   0.041s] (333/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_ordered_list_creates_ordered_list
+        PASS [   0.043s] (334/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_positional_items_become_text_parts
+        PASS [   0.042s] (335/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_prose_renders_with_styling
+        PASS [   0.043s] (336/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_table_creates_table_with_rows
+        PASS [   0.042s] (337/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_table_rejects_empty_header
+        PASS [   0.042s] (338/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_text_flag_repeats
+        PASS [   0.043s] (339/374) biscuit-terminal-cli::bin/bt commands::compose::tests::parse_with_no_args_only_example_flag_accepts
+        PASS [   0.041s] (340/374) biscuit-terminal-cli::bin/bt commands::pie::tests::test_extract_color
+        PASS [   0.041s] (341/374) biscuit-terminal-cli::bin/bt commands::pie::tests::test_parse_hex_color
+        PASS [   0.040s] (342/374) biscuit-terminal-cli::bin/bt commands::pie::tests::test_parse_single_pie_entry
+        PASS [   0.041s] (343/374) biscuit-terminal-cli::bin/bt commands::xy_chart::tests::test_parse_column_width
+        PASS [   0.043s] (344/374) biscuit-terminal-cli::bin/bt output::tests::render_content_analysis_plain_mode_emits_no_ansi_escapes
+        PASS [   0.044s] (345/374) biscuit-terminal-cli::bin/bt output::tests::render_pretty_non_plain_mode_emits_ansi_escapes
+        PASS [   0.045s] (346/374) biscuit-terminal-cli::bin/bt output::tests::render_pretty_plain_mode_emits_no_ansi_escapes
+        PASS [   0.041s] (347/374) biscuit-terminal-cli::bin/bt output::tests::test_terminal_app_display
+        PASS [   0.049s] (348/374) biscuit-terminal-cli::bin/bt output::tests::test_analyze_content
+        PASS [   0.042s] (349/374) biscuit-terminal-cli::bin/bt output::tests::test_terminal_metadata_serialization
+        PASS [   0.042s] (350/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::display_roundtrip
+        PASS [   0.043s] (351/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rejects_missing_hash
+        PASS [   0.043s] (352/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rejects_non_hex_chars
+        PASS [   0.044s] (353/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rejects_wrong_length
+        PASS [   0.044s] (354/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rgb_shorthand
+        PASS [   0.044s] (355/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rrggbb
+        PASS [   0.045s] (356/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_rrggbbaa
+        PASS [   0.045s] (357/374) biscuit-terminal-cli::bin/bt types::hex_color_tests::parse_trims_whitespace
+        PASS [   0.045s] (358/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::display_roundtrip
+        PASS [   0.048s] (359/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_rejects_infinity
+        PASS [   0.048s] (360/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_rejects_nan
+        PASS [   0.047s] (361/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_rejects_negative
+        PASS [   0.048s] (362/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_rejects_non_numeric
+        PASS [   0.047s] (363/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_rejects_zero
+        PASS [   0.044s] (364/374) biscuit-terminal-cli::bin/bt types::positive_f32_tests::parse_valid_positive
+        PASS [   0.043s] (365/374) biscuit-terminal-cli::bin/bt types::tests::display_roundtrip
+        PASS [   0.042s] (366/374) biscuit-terminal-cli::bin/bt types::tests::parse_chars_plain_number
+        PASS [   0.042s] (367/374) biscuit-terminal-cli::bin/bt types::tests::parse_chars_rejects_zero
+        PASS [   0.043s] (368/374) biscuit-terminal-cli::bin/bt types::tests::parse_chars_with_suffix
+        PASS [   0.044s] (369/374) biscuit-terminal-cli::bin/bt types::tests::parse_fill
+        PASS [   0.043s] (370/374) biscuit-terminal-cli::bin/bt types::tests::parse_percentage
+        PASS [   0.044s] (371/374) biscuit-terminal-cli::bin/bt types::tests::parse_percentage_rejects_over_100
+        PASS [   0.044s] (372/374) biscuit-terminal-cli::bin/bt types::tests::parse_percentage_rejects_zero
+        PASS [   0.044s] (373/374) biscuit-terminal-cli::bin/bt types::tests::parse_rejects_invalid
+        PASS [   0.045s] (374/374) biscuit-terminal-cli::bin/bt types::tests::parse_trims_whitespace
+────────────
+     Summary [   3.233s] 374 tests run: 374 passed, 76 skipped
+
+✅ [32m all tests passing in [1mbiscuit-terminal-cli[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 111
+
+cross-check summary for biscuit-terminal-cli:
+  windows  pass

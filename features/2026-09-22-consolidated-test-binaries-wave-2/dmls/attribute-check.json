@@ -1,0 +1,32 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "dmls",
+  "review": [
+    {
+      "detector": "exact_arg",
+      "kind": "identity-dispositioned",
+      "lines": [
+        85
+      ],
+      "path": "darkmatter/dmls/tests/l1/stdio_subprocess.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "new_dir": "darkmatter/dmls/tests/l1",
+      "old_dir": "darkmatter/dmls/tests",
+      "path": "darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs"
+    }
+  ],
+  "version": 1
+}

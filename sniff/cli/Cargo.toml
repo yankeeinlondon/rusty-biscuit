@@ -3,6 +3,7 @@ name = "sniff-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+autotests = false
 
 [[bin]]
 name = "sniff"
@@ -61,20 +62,20 @@ serial_test = "3"
 tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "level2_cicd_styling"
-required-features = ["test-fixtures"]
+name = "l1"
+path = "tests/l1/main.rs"
 
 [[test]]
-name = "level2_git_status_styling"
-required-features = ["test-fixtures"]
-
-[[test]]
-name = "level2_perf_tree_rendering"
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["test-fixtures"]
 
 # CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
-# owns the area's tmux-driven L2 tests (the `level2_*` targets above).
+# owns the area's tmux-driven L2 tests (the `level2` target above).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]

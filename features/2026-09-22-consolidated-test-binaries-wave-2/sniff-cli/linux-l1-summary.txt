@@ -1,0 +1,3 @@
+Linux L1 on build-linux, private --shared scratch clone at 8255ee228 plus the Phase 5 patch (57 paths), RUSTC_WRAPPER="" KACHE_AUTO=0
+cargo nextest run --locked -p sniff-cli --features test-fixtures -E "$(just _tier_filter L1 sniff-cli)"
+     Summary [   4.004s] 857 tests run: 857 passed, 7 skipped

@@ -1,0 +1,10 @@
+[package]
+name = "fa-owner-own"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own-feature cause: `fa-core` gains `fast`.
+[dependencies]
+fa-core = { path = "../core", features = ["fast"] }
+twin2 = { package = "fa-twin", path = "../vendor/twin-2" }

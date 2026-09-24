@@ -184,7 +184,7 @@ fn spawn_apple_terminal() -> ExitCode {
         return ExitCode::from(2);
     }
     // `preserve_capabilities(true)` matches the only current consumer
-    // (`biscuit-terminal/cli/tests/level2_apple_terminal_prose.rs`),
+    // (`biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs`),
     // which exercises Prose graceful-degradation paths and therefore
     // wants `bt`'s natural capability detection against Terminal.app's
     // unforced colour profile. Image / colour tests that need

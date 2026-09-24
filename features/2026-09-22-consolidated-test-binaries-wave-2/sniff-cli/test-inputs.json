@@ -1,0 +1,61 @@
+{
+  "probe": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap",
+  "after_probe": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_json.snap",
+  "before_rows": [
+    {
+      "package": "sniff-cli",
+      "path": "sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap",
+      "source": "sniff/cli/tests/spawn_site_guard.rs",
+      "line": 38,
+      "embedded": false,
+      "unit": "binary_id(sniff-cli::spawn_site_guard)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "sniff-cli",
+      "path": "sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_json.snap",
+      "source": "sniff/cli/tests/l1/spawn_site_guard.rs",
+      "line": 38,
+      "embedded": false,
+      "unit": "binary_id(sniff-cli::l1) & test(/^spawn_site_guard::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(sniff-cli::spawn_site_guard)": [
+      "sniff-cli::spawn_site_guard detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings",
+      "sniff-cli::spawn_site_guard escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings",
+      "sniff-cli::spawn_site_guard escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes",
+      "sniff-cli::spawn_site_guard l1_path_escapes_carry_a_call_site_reason",
+      "sniff-cli::spawn_site_guard l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry",
+      "sniff-cli::spawn_site_guard reconciliation_rejects_stale_and_unexplained_entries",
+      "sniff-cli::spawn_site_guard restored_detector_rejects_a_violation_that_a_neutered_detector_misses",
+      "sniff-cli::spawn_site_guard restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses"
+    ]
+  },
+  "after_units": {
+    "binary_id(sniff-cli::l1) & test(/^spawn_site_guard::/)": [
+      "sniff-cli::l1 spawn_site_guard::detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings",
+      "sniff-cli::l1 spawn_site_guard::escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings",
+      "sniff-cli::l1 spawn_site_guard::escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes",
+      "sniff-cli::l1 spawn_site_guard::l1_path_escapes_carry_a_call_site_reason",
+      "sniff-cli::l1 spawn_site_guard::l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry",
+      "sniff-cli::l1 spawn_site_guard::reconciliation_rejects_stale_and_unexplained_entries",
+      "sniff-cli::l1 spawn_site_guard::restored_detector_rejects_a_violation_that_a_neutered_detector_misses",
+      "sniff-cli::l1 spawn_site_guard::restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses"
+    ]
+  },
+  "before_mapped": [
+    "sniff-cli::l1 spawn_site_guard::detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings",
+    "sniff-cli::l1 spawn_site_guard::escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings",
+    "sniff-cli::l1 spawn_site_guard::escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes",
+    "sniff-cli::l1 spawn_site_guard::l1_path_escapes_carry_a_call_site_reason",
+    "sniff-cli::l1 spawn_site_guard::l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry",
+    "sniff-cli::l1 spawn_site_guard::reconciliation_rejects_stale_and_unexplained_entries",
+    "sniff-cli::l1 spawn_site_guard::restored_detector_rejects_a_violation_that_a_neutered_detector_misses",
+    "sniff-cli::l1 spawn_site_guard::restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

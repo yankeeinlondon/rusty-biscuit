@@ -1,0 +1,38 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "claudine",
+  "review": [
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        3
+      ],
+      "new_dir": "claudine/lib/tests/l1",
+      "old_dir": "claudine/lib/tests",
+      "path": "claudine/lib/tests/l1/lifecycle_control_flow_spike.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        2
+      ],
+      "new_dir": "claudine/lib/tests/l1",
+      "old_dir": "claudine/lib/tests",
+      "path": "claudine/lib/tests/l1/lifecycle_control_flow_spike.rs"
+    },
+    {
+      "detector": "include_macro",
+      "kind": "path-sensitive",
+      "lines": [
+        33
+      ],
+      "new_dir": "claudine/lib/tests/l1",
+      "old_dir": "claudine/lib/tests",
+      "path": "claudine/lib/tests/l1/opencode_stderr_lifecycle.rs"
+    }
+  ],
+  "version": 1
+}

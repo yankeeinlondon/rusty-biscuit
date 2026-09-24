@@ -61,5 +61,5 @@ should not pay.
   Windows `IcmpSendEcho2`/`Icmp6SendEcho2` (no privilege, no subprocess).
 - A scoped target's zone resolves numerically or via `if_nametoindex`; an
   unknown name fails with `UnknownScope` before any packet is sent.
-- Real round trips live in `lib/tests/network_primitives.rs` as `real_` tests
+- Real round trips live in `lib/tests/l1/network_primitives.rs` as `real_` tests
   (`just test-real`); they fail with the missing capability instead of skipping.

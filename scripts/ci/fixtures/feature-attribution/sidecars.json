@@ -1,0 +1,5 @@
+{
+  "sidecars": {
+    "fa-side": { "package": "fa-owner-fwd", "features": [] }
+  }
+}

@@ -1,0 +1,2 @@
+biscuit-tui-cli: 3 Cargo test targets, 3 declared, 15 old targets mapped
+PASS

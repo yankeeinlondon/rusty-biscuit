@@ -1,0 +1,115 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n\n[[test]]\nname = \"level2\"\npath = \"tests/level2/main.rs\"\nrequired-features = [\"terminal-tests\"]\n\n[[test]]\nname = \"level3\"\npath = \"tests/level3/main.rs\"\nrequired-features = [\"terminal-tests\"]\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "biscuit-tui/cli/tests/l1/boolean_switch_output.rs",
+      "old": "biscuit-tui/cli/tests/boolean_switch_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/choose_cli.rs",
+      "old": "biscuit-tui/cli/tests/choose_cli.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/choose_many_output.rs",
+      "old": "biscuit-tui/cli/tests/choose_many_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/choose_one_output.rs",
+      "old": "biscuit-tui/cli/tests/choose_one_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/completions.rs",
+      "old": "biscuit-tui/cli/tests/completions.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/completions_shell.rs",
+      "old": "biscuit-tui/cli/tests/completions_shell.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/exit_codes.rs",
+      "old": "biscuit-tui/cli/tests/exit_codes.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/help_contract.rs",
+      "old": "biscuit-tui/cli/tests/help_contract.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/input_table_output.rs",
+      "old": "biscuit-tui/cli/tests/input_table_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/keyboard_protocol.rs",
+      "old": "biscuit-tui/cli/tests/keyboard_protocol.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/text_area_input_output.rs",
+      "old": "biscuit-tui/cli/tests/text_area_input_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/l1/text_input_output.rs",
+      "old": "biscuit-tui/cli/tests/text_input_output.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/level2/terminal_render.rs",
+      "old": "biscuit-tui/cli/tests/real_terminal_render.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/level2/windows_captured_stdout.rs",
+      "old": "biscuit-tui/cli/tests/windows_captured_stdout.rs"
+    },
+    {
+      "new": "biscuit-tui/cli/tests/level3/level3_chord_select.rs",
+      "old": "biscuit-tui/cli/tests/level3_chord_select.rs"
+    }
+  ],
+  "package": "biscuit-tui-cli",
+  "path_repairs": {
+    "biscuit-tui/cli/tests/l1/boolean_switch_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/choose_cli.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/choose_many_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/choose_one_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/exit_codes.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/input_table_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/keyboard_protocol.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/text_area_input_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/l1/text_input_output.rs": [
+      "mod common; \u2192 use crate::common;"
+    ],
+    "biscuit-tui/cli/tests/level2/terminal_render.rs": [
+      "mod common; \u2192 use crate::common;"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "biscuit-tui/cli/tests/l1/main.rs": {
+      "declares_common": true,
+      "modules": 12
+    },
+    "biscuit-tui/cli/tests/level2/main.rs": {
+      "declares_common": true,
+      "modules": 2
+    },
+    "biscuit-tui/cli/tests/level3/main.rs": {
+      "declares_common": false,
+      "modules": 1
+    }
+  },
+  "version": 1
+}

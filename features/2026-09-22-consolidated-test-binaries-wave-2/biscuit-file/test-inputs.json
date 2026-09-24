@@ -1,0 +1,107 @@
+{
+  "probe": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+  "before_rows": [
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+      "line": 69,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::yaml_corpus)"
+    },
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+      "line": 70,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::yaml_corpus)"
+    },
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/yaml_corpus.rs",
+      "line": 71,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::yaml_corpus)"
+    }
+  ],
+  "after_rows": [
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/l1/yaml_corpus.rs",
+      "line": 69,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::l1) & test(/^yaml_corpus::/)"
+    },
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/l1/yaml_corpus.rs",
+      "line": 70,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::l1) & test(/^yaml_corpus::/)"
+    },
+    {
+      "package": "biscuit-file",
+      "path": "biscuit-file/lib/tests/corpus/yaml_corpus.json",
+      "source": "biscuit-file/lib/tests/l1/yaml_corpus.rs",
+      "line": 71,
+      "embedded": false,
+      "unit": "binary_id(biscuit-file::l1) & test(/^yaml_corpus::/)"
+    }
+  ],
+  "before_units": {
+    "binary_id(biscuit-file::yaml_corpus)": [
+      "biscuit-file::yaml_corpus analysis_never_panics_across_corpus",
+      "biscuit-file::yaml_corpus bom_does_not_suppress_line_ending_normalization",
+      "biscuit-file::yaml_corpus bom_makes_multi_key_documents_unparseable",
+      "biscuit-file::yaml_corpus corpus_is_populated_and_uniquely_named",
+      "biscuit-file::yaml_corpus pipeline_is_idempotent_across_corpus",
+      "biscuit-file::yaml_corpus preserved_cases_are_byte_identical",
+      "biscuit-file::yaml_corpus preserved_cases_report_their_pinned_codes",
+      "biscuit-file::yaml_corpus repair_is_deterministic_across_corpus",
+      "biscuit-file::yaml_corpus repaired_cases_match_expected_output",
+      "biscuit-file::yaml_corpus repaired_parseable_cases_preserve_their_value",
+      "biscuit-file::yaml_corpus single_pass_is_a_fixed_point_once_parseable",
+      "biscuit-file::yaml_corpus untouched_bytes_preserved_across_corpus",
+      "biscuit-file::yaml_corpus yaml_test_suite_subset_is_release_pinned_and_preserved"
+    ]
+  },
+  "after_units": {
+    "binary_id(biscuit-file::l1) & test(/^yaml_corpus::/)": [
+      "biscuit-file::l1 yaml_corpus::analysis_never_panics_across_corpus",
+      "biscuit-file::l1 yaml_corpus::bom_does_not_suppress_line_ending_normalization",
+      "biscuit-file::l1 yaml_corpus::bom_makes_multi_key_documents_unparseable",
+      "biscuit-file::l1 yaml_corpus::corpus_is_populated_and_uniquely_named",
+      "biscuit-file::l1 yaml_corpus::pipeline_is_idempotent_across_corpus",
+      "biscuit-file::l1 yaml_corpus::preserved_cases_are_byte_identical",
+      "biscuit-file::l1 yaml_corpus::preserved_cases_report_their_pinned_codes",
+      "biscuit-file::l1 yaml_corpus::repair_is_deterministic_across_corpus",
+      "biscuit-file::l1 yaml_corpus::repaired_cases_match_expected_output",
+      "biscuit-file::l1 yaml_corpus::repaired_parseable_cases_preserve_their_value",
+      "biscuit-file::l1 yaml_corpus::single_pass_is_a_fixed_point_once_parseable",
+      "biscuit-file::l1 yaml_corpus::untouched_bytes_preserved_across_corpus",
+      "biscuit-file::l1 yaml_corpus::yaml_test_suite_subset_is_release_pinned_and_preserved"
+    ]
+  },
+  "before_mapped": [
+    "biscuit-file::l1 yaml_corpus::analysis_never_panics_across_corpus",
+    "biscuit-file::l1 yaml_corpus::bom_does_not_suppress_line_ending_normalization",
+    "biscuit-file::l1 yaml_corpus::bom_makes_multi_key_documents_unparseable",
+    "biscuit-file::l1 yaml_corpus::corpus_is_populated_and_uniquely_named",
+    "biscuit-file::l1 yaml_corpus::pipeline_is_idempotent_across_corpus",
+    "biscuit-file::l1 yaml_corpus::preserved_cases_are_byte_identical",
+    "biscuit-file::l1 yaml_corpus::preserved_cases_report_their_pinned_codes",
+    "biscuit-file::l1 yaml_corpus::repair_is_deterministic_across_corpus",
+    "biscuit-file::l1 yaml_corpus::repaired_cases_match_expected_output",
+    "biscuit-file::l1 yaml_corpus::repaired_parseable_cases_preserve_their_value",
+    "biscuit-file::l1 yaml_corpus::single_pass_is_a_fixed_point_once_parseable",
+    "biscuit-file::l1 yaml_corpus::untouched_bytes_preserved_across_corpus",
+    "biscuit-file::l1 yaml_corpus::yaml_test_suite_subset_is_release_pinned_and_preserved"
+  ],
+  "missing": [],
+  "extra": [],
+  "identical": true
+}

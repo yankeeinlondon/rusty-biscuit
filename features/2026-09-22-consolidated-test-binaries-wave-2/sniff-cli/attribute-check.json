@@ -1,0 +1,28 @@
+{
+  "failures": [],
+  "kind": "consolidation-attribute-check",
+  "package": "sniff-cli",
+  "review": [
+    {
+      "detector": "mod_decl",
+      "kind": "path-sensitive",
+      "lines": [
+        5
+      ],
+      "new_dir": "sniff/cli/tests/l1",
+      "old_dir": "sniff/cli/tests",
+      "path": "sniff/cli/tests/l1/spawn_site_guard.rs"
+    },
+    {
+      "detector": "path_attr",
+      "kind": "path-sensitive",
+      "lines": [
+        4
+      ],
+      "new_dir": "sniff/cli/tests/l1",
+      "old_dir": "sniff/cli/tests",
+      "path": "sniff/cli/tests/l1/spawn_site_guard.rs"
+    }
+  ],
+  "version": 1
+}

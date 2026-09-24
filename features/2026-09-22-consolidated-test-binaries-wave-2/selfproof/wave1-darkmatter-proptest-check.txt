@@ -1,0 +1,30 @@
+FAIL: darkmatter/lib/tests/l1/schema_quoting_safety.proptest-regressions: no test source resolves to this seed file, so proptest never replays it (R18: tests/proptest-regressions/<module>.txt)
+FAIL: darkmatter/lib/tests/l1/schemas_grammar_proptest.proptest-regressions: no test source resolves to this seed file, so proptest never replays it (R18: tests/proptest-regressions/<module>.txt)
+{
+  "after": [
+    "darkmatter/lib/tests/l1/schema_quoting_safety.proptest-regressions",
+    "darkmatter/lib/tests/l1/schemas_grammar_proptest.proptest-regressions"
+  ],
+  "before": [
+    "darkmatter/lib/tests/schema_quoting_safety.proptest-regressions",
+    "darkmatter/lib/tests/schemas_grammar_proptest.proptest-regressions"
+  ],
+  "failures": [
+    "darkmatter/lib/tests/l1/schema_quoting_safety.proptest-regressions: no test source resolves to this seed file, so proptest never replays it (R18: tests/proptest-regressions/<module>.txt)",
+    "darkmatter/lib/tests/l1/schemas_grammar_proptest.proptest-regressions: no test source resolves to this seed file, so proptest never replays it (R18: tests/proptest-regressions/<module>.txt)"
+  ],
+  "kind": "consolidation-proptest-check",
+  "package": "darkmatter",
+  "relocated": [
+    {
+      "new": "darkmatter/lib/tests/l1/schema_quoting_safety.proptest-regressions",
+      "old": "darkmatter/lib/tests/schema_quoting_safety.proptest-regressions"
+    },
+    {
+      "new": "darkmatter/lib/tests/l1/schemas_grammar_proptest.proptest-regressions",
+      "old": "darkmatter/lib/tests/schemas_grammar_proptest.proptest-regressions"
+    }
+  ],
+  "version": 1
+}
+exit 1

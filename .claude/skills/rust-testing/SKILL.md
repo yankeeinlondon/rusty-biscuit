@@ -586,10 +586,15 @@ module's tests from every tier compiled into that binary run.
 
 ## Consolidated Integration-Test Binaries
 
-`claudine-cli`, `darkmatter`, `darkmatter-cli`, and `biscuit-terminal` no
-longer build one executable per `tests/*.rs` file. Each builds **one test
-binary per execution contract** (`2026-09-21-consolidated-test-binaries`).
-Other packages still use Cargo's per-file discovery.
+Fourteen packages no longer build one executable per `tests/*.rs` file. Each
+builds **one test binary per execution contract**: `claudine-cli`,
+`darkmatter`, `darkmatter-cli`, and `biscuit-terminal`
+(`2026-09-21-consolidated-test-binaries`), then `tree-hugger`, `claudine`,
+`sniff`, `biscuit-file`, `schematic-gen`, `biscuit-terminal-cli`,
+`claudine-gen`, `dmls`, `sniff-cli`, and `biscuit-tui-cli`
+(`2026-09-22-consolidated-test-binaries-wave-2`). A package's `Cargo.toml`
+says which shape it has: `autotests = false` means consolidated. The rest
+still use Cargo's per-file discovery.
 
 ```text
 tests/
@@ -613,16 +618,32 @@ tests/
 - **The module name is the old target name** and is the first segment of every
   test path: `claudine-cli::l1 context_command::<test>`. Tier markers still apply to
   the name, so a module named `level2_*` would put all its tests in Level 2.
-  Check the name against `_tier_filter` before choosing it.
+  Check the name against `_tier_filter` before choosing it. Where the old name
+  would newly match, or stop matching, a tier or override filter, the module
+  takes a neutral alias with the marker stripped: `biscuit-tui-cli`'s
+  `real_terminal_render` is `terminal_render` (its `level2_*` tests would
+  otherwise also match the stub `real` tier), and `biscuit-terminal-cli`'s
+  `level2_prose_cells` is `prose_cells` (43 of its tests are unmarked L1).
 - **The feature boundary.** Tests share a binary only when tier, the exact
   `required-features` set, harness mode, and target-wide settings all match.
   A consolidation never unions features. Darkmatter keeps
   `level3-terminal` and `level3-browser` separate for this reason, and
   `harness = false` targets (benches) do not move.
+- **Target names** are the tier: `l1`, `level2`, `level3`. When one tier has
+  two feature contracts, the feature-less target keeps the bare name and the
+  other takes a suffix (`biscuit-file`'s `l1` and `l1-fetch`). An L1-tier test
+  that needs feature F joins the package's existing target for F, whatever its
+  tier name, and the tier filter still selects it at L1: `biscuit-tui-cli`'s
+  `windows_captured_stdout` lives in `level2`. A new target is made only when
+  no target has that feature set.
 - **Snapshots follow `module_path!()`.** An insta assertion in
   `tests/l1/layout_matrix.rs` reads `tests/l1/snapshots/l1__layout_matrix__*.snap`.
   Moving a module therefore moves its snapshots. Move them byte-for-byte and
   run with `INSTA_UPDATE=no`. Never regenerate to go green.
+- **Proptest regressions move to `tests/proptest-regressions/<stem>.txt`.**
+  proptest walks up from the source file to the nearest `main.rs`, which is now
+  the binary root, so a seed file left beside its module is silently no longer
+  replayed. Move it byte-for-byte.
 - **Legacy shape, not a pattern.** biscuit-terminal's
   `tests/l1/parity_helpers.rs` is compiled once as its own module and again
   privately inside 18 parity modules (`#[allow(clippy::duplicate_mod)]
@@ -732,7 +753,12 @@ spell yours in one of them or the file's next edit will not run your test:
 
 Paths assembled from `format!`, a value computed at run time, or a helper
 defined in another file are invisible, and a literal joined onto a tempdir is
-correctly treated as a fixture, not a read. The why and the evidence rules are
+correctly treated as a fixture, not a read. Only an L1 test is scheduled.
+Its tier comes from its path, not its binary's name, so an L1 test in a
+`level2` binary counts. A read inside a helper rather than a test function
+schedules every L1 test in the helper's binary, because any of them may call
+it. A read in a target whose `required-features` the
+package's CI `features` leave off schedules nothing. The why and the evidence rules are
 in [`docs/cicd/test-inputs.md`](../../../docs/cicd/test-inputs.md).
 
 ## Environment Contract
@@ -774,7 +800,7 @@ reference implementation:
 | Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
 | Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine and darkmatter, `cli/tests/spawn_site_guard.rs` in sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
+| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine, darkmatter, and sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
 
 **Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
 live-child test needs a `std::process::Command` — and hand-building one

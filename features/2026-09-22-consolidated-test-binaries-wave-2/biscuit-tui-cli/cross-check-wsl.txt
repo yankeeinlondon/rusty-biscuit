@@ -1,0 +1,543 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-tui-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/dmls/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: biscuit-tui-cli @ origin/fix/ci-build-feature-divergence (1879dd880) + 677 changed file(s) as 5b29d93aa
+os: wsl(build-win)   extra nextest args: <none>
+mode: archive — planned keys:
+  wsl      70a845f72e3f3fb8 produced on ubuntu-latest, consumed as wsl2-ubuntu
+
+clone: build-win:/home/ken/coding/mac--feat-dark-fixes
+
+== wsl (build-win, archive 70a845f72e3f3fb8 from ubuntu-latest) ==
+cross-check-tree: 61a1f321ccc775a2c2dfdfad2aedb2fb9851d170
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.62s
+   Compiling rustix v1.1.4
+   Compiling serde_core v1.0.228
+   Compiling memchr v2.8.0
+   Compiling ident_case v1.0.1
+   Compiling strsim v0.11.1
+   Compiling thiserror-impl v2.0.18
+   Compiling strum_macros v0.27.2
+   Compiling castaway v0.2.4
+   Compiling itertools v0.14.0
+   Compiling instability v0.3.12
+   Compiling indoc v2.0.7
+   Compiling parking_lot_core v0.9.12
+   Compiling lru v0.16.4
+   Compiling compact_str v0.9.0
+   Compiling darling_core v0.23.0
+   Compiling serde v1.0.228
+   Compiling parking_lot v0.12.5
+   Compiling derive_more-impl v2.1.1
+   Compiling num_threads v0.1.7
+   Compiling aho-corasick v1.1.4
+   Compiling time v0.3.47
+   Compiling line-clipping v0.3.7
+   Compiling hashbrown v0.17.0
+   Compiling num-traits v0.2.19
+   Compiling rand_chacha v0.9.0
+   Compiling derive_more v2.1.1
+   Compiling toml_write v0.1.2
+   Compiling futures-core v0.3.32
+   Compiling slab v0.4.12
+   Compiling thiserror v2.0.18
+   Compiling unicode-truncate v2.0.1
+   Compiling indexmap v2.14.0
+   Compiling rand v0.9.4
+   Compiling kasuari v0.4.12
+   Compiling nucleo-matcher v0.3.1
+   Compiling regex-automata v0.4.18
+   Compiling futures-util v0.3.32
+   Compiling float-cmp v0.10.0
+   Compiling strum v0.27.2
+   Compiling csv-core v0.1.13
+   Compiling ratatui-core v0.1.0
+   Compiling serial_test_derive v3.4.0
+   Compiling heck v0.5.0
+   Compiling crossterm v0.29.0
+   Compiling terminal_size v0.4.4
+   Compiling tempfile v3.27.0
+   Compiling clap_builder v4.6.0
+   Compiling serde_json v1.0.149
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling csv v1.4.0
+   Compiling fs4 v0.13.1
+   Compiling toml v1.1.2+spec-1.1.0
+   Compiling darling_macro v0.23.0
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling serde_yaml_ng v0.10.0
+   Compiling darling v0.23.0
+   Compiling toml_edit v0.22.27
+   Compiling futures-executor v0.3.32
+   Compiling biscuit-test-harness v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-test-harness)
+   Compiling serial_test v3.4.0
+   Compiling ratatui-widgets v0.3.0
+   Compiling ratatui-crossterm v0.1.0
+   Compiling regex v1.12.3
+   Compiling matchers v0.2.0
+   Compiling bstr v1.12.1
+   Compiling clap v4.6.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling clap_complete v4.6.2
+   Compiling predicates v3.1.4
+   Compiling expectrl v0.8.0
+   Compiling ratatui-macros v0.7.0
+   Compiling ratatui-textarea v0.9.1
+   Compiling ratatui v0.30.0
+   Compiling toml v0.8.23
+   Compiling assert_cmd v2.2.1
+   Compiling tui-input v0.15.3
+   Compiling biscuit-tui v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-tui/lib)
+   Compiling test-toolkit v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/tools/test-toolkit)
+   Compiling biscuit-tui-cli v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-tui/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.17s
+   Archiving 5 binaries (including 1 non-test binary) and 2 standard libraries to /home/ken/coding/mac--feat-dark-fixes/cross-check-Mac-7045-1790202588-build/build-biscuit-tui-cli-ubuntu-latest-70a845f72e3f3fb8.tar.zst
+    Archived 9 files to /home/ken/coding/mac--feat-dark-fixes/cross-check-Mac-7045-1790202588-build/build-biscuit-tui-cli-ubuntu-latest-70a845f72e3f3fb8.tar.zst in 0.13s
+Produced 1 archive(s) on `ubuntu-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 63 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `70a845f72e3f3fb8` for `wsl2-ubuntu` — digest `d44a50515bec01cb`, produced on `ubuntu-latest`.
+cross-check-key: 70a845f72e3f3fb8
+cross-check-digest: d44a50515bec01cb
+
+Testing [1mbiscuit-tui-cli[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 5 binaries (including 1 non-test binary) to /tmp/nextest-archive-aq9qNb
+   Extracted 9 files to /tmp/nextest-archive-aq9qNb in 0.12s
+────────────
+ Nextest run ID 71391288-7fc0-498f-b5f5-c329e0ba85f2 with nextest profile: ci
+    Starting 412 tests across 4 binaries (18 tests skipped)
+        PASS [   0.011s] (  1/412) biscuit-tui-cli::l1 boolean_switch_output::boolean_switch_rejects_unknown_flag
+        PASS [   0.010s] (  2/412) biscuit-tui-cli::l1 choose_cli::choose_many_border_flag_reaches_event_loop
+        PASS [   0.012s] (  3/412) biscuit-tui-cli::l1 boolean_switch_output::boolean_switch_accepts_output_flag_at_global_position
+        PASS [   0.012s] (  4/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_filter_opt_out
+        PASS [   0.015s] (  5/412) biscuit-tui-cli::l1 boolean_switch_output::boolean_switch_help_lists_labels_flag
+        PASS [   0.015s] (  6/412) biscuit-tui-cli::l1 boolean_switch_output::boolean_switch_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.014s] (  7/412) biscuit-tui-cli::l1 choose_cli::choose_many_accepts_positional_args
+        PASS [   0.015s] (  8/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_border_flags
+        PASS [   0.018s] (  9/412) biscuit-tui-cli::l1 choose_cli::choose_many_file_json_object_array_reaches_event_loop
+        PASS [   0.019s] ( 10/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_active_color_values
+        PASS [   0.012s] ( 11/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_height_flag
+        PASS [   0.013s] ( 12/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_margin_flags
+        PASS [   0.014s] ( 13/412) biscuit-tui-cli::l1 choose_cli::choose_many_help_lists_inverse_not_reverse_for_sort
+        PASS [   0.010s] ( 14/412) biscuit-tui-cli::l1 choose_cli::choose_many_one_explicit_plus_three_plain_passes
+        PASS [   0.013s] ( 15/412) biscuit-tui-cli::l1 choose_cli::choose_many_margin_flag_reaches_event_loop
+        PASS [   0.015s] ( 16/412) biscuit-tui-cli::l1 choose_cli::choose_many_initial_flag_is_hidden_from_help
+        PASS [   0.013s] ( 17/412) biscuit-tui-cli::l1 choose_cli::choose_many_per_side_margin_flags_reach_event_loop
+        PASS [   0.012s] ( 18/412) biscuit-tui-cli::l1 choose_cli::choose_many_reads_from_stdin
+        PASS [   0.013s] ( 19/412) biscuit-tui-cli::l1 choose_cli::choose_one_accepts_positional_args
+        PASS [   0.014s] ( 20/412) biscuit-tui-cli::l1 choose_cli::choose_one_border_flag_reaches_event_loop
+        PASS [   0.011s] ( 21/412) biscuit-tui-cli::l1 choose_cli::choose_one_border_label_reaches_event_loop
+        PASS [   0.012s] ( 22/412) biscuit-tui-cli::l1 choose_cli::choose_one_border_style_double_reaches_event_loop
+        PASS [   0.012s] ( 23/412) biscuit-tui-cli::l1 choose_cli::choose_one_empty_stdin_errors_with_no_options_message
+        PASS [   0.014s] ( 24/412) biscuit-tui-cli::l1 choose_cli::choose_one_border_style_rejects_unknown_value
+        PASS [   0.013s] ( 25/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_ndjson_object_lines_reaches_event_loop
+        PASS [   0.013s] ( 26/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_csv_three_columns_reaches_event_loop
+        PASS [   0.013s] ( 27/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_json_object_array_reaches_event_loop
+        PASS [   0.011s] ( 28/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_txt_extension_errors
+        PASS [   0.017s] ( 29/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_jsonl_object_lines_reaches_event_loop
+        PASS [   0.012s] ( 30/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_unknown_extension_errors
+        PASS [   0.011s] ( 31/412) biscuit-tui-cli::l1 choose_cli::choose_one_height_rejects_non_numeric_value
+        PASS [   0.012s] ( 32/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_yaml_object_array_reaches_event_loop
+        PASS [   0.012s] ( 33/412) biscuit-tui-cli::l1 choose_cli::choose_one_height_rejects_percent_above_100
+        PASS [   0.020s] ( 34/412) biscuit-tui-cli::l1 choose_cli::choose_one_file_toml_options_array_reaches_event_loop
+        PASS [   0.014s] ( 35/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_active_color_values
+        PASS [   0.015s] ( 36/412) biscuit-tui-cli::l1 choose_cli::choose_one_height_rejects_zero_percent
+        PASS [   0.013s] ( 37/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_filter_opt_out
+        PASS [   0.014s] ( 38/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_border_flags
+        PASS [   0.019s] ( 39/412) biscuit-tui-cli::l1 choose_cli::choose_one_height_rejects_zero_cells
+        PASS [   0.010s] ( 40/412) biscuit-tui-cli::l1 choose_cli::choose_one_margin_flag_reaches_event_loop
+        PASS [   0.016s] ( 41/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_height_flag
+        PASS [   0.015s] ( 42/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_margin_flags
+        PASS [   0.017s] ( 43/412) biscuit-tui-cli::l1 choose_cli::choose_one_help_lists_inverse_not_reverse_for_sort
+        PASS [   0.010s] ( 44/412) biscuit-tui-cli::l1 choose_cli::choose_one_margin_rejects_non_integer_value
+        PASS [   0.016s] ( 45/412) biscuit-tui-cli::l1 choose_cli::choose_one_initial_flag_is_hidden_from_help
+        PASS [   0.013s] ( 46/412) biscuit-tui-cli::l1 choose_cli::choose_one_margin_with_per_side_overrides_reaches_event_loop
+        PASS [   0.014s] ( 47/412) biscuit-tui-cli::l1 choose_cli::choose_one_md_frontmatter_object_array_reaches_event_loop
+        PASS [   0.013s] ( 48/412) biscuit-tui-cli::l1 choose_cli::choose_one_positional_args
+        PASS [   0.012s] ( 49/412) biscuit-tui-cli::l1 choose_cli::cli_accepts_active_color_green
+        PASS [   0.015s] ( 50/412) biscuit-tui-cli::l1 choose_cli::choose_one_reads_from_stdin
+        PASS [   0.014s] ( 51/412) biscuit-tui-cli::l1 choose_cli::choose_one_selected_and_initial_conflict
+        PASS [   0.010s] ( 52/412) biscuit-tui-cli::l1 choose_cli::cli_active_color_rejects_unknown_value
+        PASS [   0.013s] ( 53/412) biscuit-tui-cli::l1 choose_cli::cli_accepts_active_color_grey
+        PASS [   0.016s] ( 54/412) biscuit-tui-cli::l1 choose_cli::cli_accepts_active_color_red
+        PASS [   0.016s] ( 55/412) biscuit-tui-cli::l1 choose_cli::cli_accepts_active_color_yellow
+        PASS [   0.006s] ( 56/412) biscuit-tui-cli::l1 choose_cli::pty::ctrl_c_exits_with_code_130
+        PASS [   0.014s] ( 57/412) biscuit-tui-cli::l1 choose_cli::delimiter_separates_label_and_value
+        PASS [   0.006s] ( 58/412) biscuit-tui-cli::l1 choose_cli::pty::esc_restores_initial_and_exits_with_code_0
+        PASS [   0.007s] ( 59/412) biscuit-tui-cli::l1 choose_cli::pty::choose_one_height_100_percent_runs_end_to_end
+        PASS [   0.007s] ( 60/412) biscuit-tui-cli::l1 choose_cli::pty::choose_many_ctrl_a_then_submit_writes_all_values
+        PASS [   0.011s] ( 61/412) biscuit-tui-cli::l1 choose_cli::plain_label_with_explicit_hotkey_companion_passes
+        PASS [   0.014s] ( 62/412) biscuit-tui-cli::l1 choose_cli::explicit_explicit_hotkey_collision_errors
+        PASS [   0.017s] ( 63/412) biscuit-tui-cli::l1 choose_cli::one_explicit_plus_three_plain_passes
+        PASS [   0.010s] ( 64/412) biscuit-tui-cli::l1 choose_cli::sort_inverse_is_accepted_and_reaches_event_loop
+        PASS [   0.011s] ( 65/412) biscuit-tui-cli::l1 choose_cli::sort_inverse_is_accepted_for_choose_many
+        PASS [   0.011s] ( 66/412) biscuit-tui-cli::l1 choose_cli::three_plain_labels_pass_normalization
+        PASS [   0.011s] ( 67/412) biscuit-tui-cli::l1 choose_many_output::choose_many_fails_when_no_option_source_provided
+        PASS [   0.013s] ( 68/412) biscuit-tui-cli::l1 choose_cli::sort_rejects_unknown_value
+        PASS [   0.015s] ( 69/412) biscuit-tui-cli::l1 choose_cli::sort_reverse_is_a_hidden_alias_still_accepted
+        PASS [   0.015s] ( 70/412) biscuit-tui-cli::l1 choose_many_output::choose_many_accepts_output_flag_at_global_position
+        PASS [   0.015s] ( 71/412) biscuit-tui-cli::l1 choose_many_output::choose_many_help_lists_options_and_validation_flags
+        PASS [   0.011s] ( 72/412) biscuit-tui-cli::l1 choose_many_output::choose_many_rejects_unknown_flag
+        PASS [   0.017s] ( 73/412) biscuit-tui-cli::l1 choose_many_output::choose_many_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.012s] ( 74/412) biscuit-tui-cli::l1 choose_one_output::choose_one_fails_when_no_option_source_provided
+        PASS [   0.011s] ( 75/412) biscuit-tui-cli::l1 choose_one_output::choose_one_help_lists_options_flags
+        PASS [   0.017s] ( 76/412) biscuit-tui-cli::l1 choose_one_output::choose_one_accepts_output_flag_at_global_position
+        PASS [   0.016s] ( 77/412) biscuit-tui-cli::l1 choose_one_output::choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.015s] ( 78/412) biscuit-tui-cli::l1 choose_one_output::choose_one_rejects_unknown_flag
+        PASS [   0.012s] ( 79/412) biscuit-tui-cli::l1 completions::completions_bash_does_not_present_reverse_as_canonical
+        PASS [   0.013s] ( 80/412) biscuit-tui-cli::l1 completions::completions_bash_contains_inverse_for_sort
+        PASS [   0.014s] ( 81/412) biscuit-tui-cli::l1 completions::completions_bash_emits_non_empty_script
+        PASS [   0.011s] ( 82/412) biscuit-tui-cli::l1 completions::completions_fish_does_not_present_reverse_as_canonical
+        PASS [   0.013s] ( 83/412) biscuit-tui-cli::l1 completions::completions_fish_contains_inverse_for_sort
+        PASS [   0.016s] ( 84/412) biscuit-tui-cli::l1 completions::completions_fish_emits_non_empty_script
+        PASS [   0.019s] ( 85/412) biscuit-tui-cli::l1 completions::completions_only_offer_hotkey_prefixes_after_bracket_prefix
+        PASS [   0.024s] ( 86/412) biscuit-tui-cli::l1 completions::completions_script_mentions_choose_subcommands
+        PASS [   0.016s] ( 87/412) biscuit-tui-cli::l1 completions::completions_zsh_contains_inverse_for_sort
+        PASS [   0.027s] ( 88/412) biscuit-tui-cli::l1 completions::completions_script_mentions_convention_flags
+        PASS [   0.040s] ( 89/412) biscuit-tui-cli::l1 completions::completions_do_not_present_hidden_legacy_flags
+        PASS [   0.026s] ( 90/412) biscuit-tui-cli::l1 completions::completions_script_mentions_padding_flags
+        PASS [   0.029s] ( 91/412) biscuit-tui-cli::l1 completions::completions_include_active_color_values
+        PASS [   0.033s] ( 92/412) biscuit-tui-cli::l1 completions::completions_include_active_color_flag
+        PASS [   0.025s] ( 93/412) biscuit-tui-cli::l1 completions::completions_script_mentions_sort_flags
+        PASS [   0.028s] ( 94/412) biscuit-tui-cli::l1 completions::completions_script_mentions_source_flags
+        PASS [   0.005s] ( 95/412) biscuit-tui-cli::l1 completions_shell::bash::hotkey_prefix_bracket_tab
+        PASS [   0.015s] ( 96/412) biscuit-tui-cli::l1 completions::completions_zsh_does_not_present_reverse_as_canonical
+        PASS [   0.006s] ( 97/412) biscuit-tui-cli::l1 completions_shell::bash::post_positional_flag_completion
+        PASS [   0.007s] ( 98/412) biscuit-tui-cli::l1 completions_shell::bash::enum_value_completion_active_color_after_positionals
+        PASS [   0.009s] ( 99/412) biscuit-tui-cli::l1 completions_shell::bash::empty_option_position_does_not_offer_hotkey_prefixes
+        PASS [   0.006s] (100/412) biscuit-tui-cli::l1 completions_shell::zsh::empty_option_position_does_not_offer_hotkey_prefixes
+        PASS [   0.006s] (101/412) biscuit-tui-cli::l1 completions_shell::tests::make_temp_dir_returns_unique_existing_directories
+        PASS [   0.007s] (102/412) biscuit-tui-cli::l1 completions_shell::bash::root_subcommand_completion
+        PASS [   0.014s] (103/412) biscuit-tui-cli::l1 completions::completions_zsh_emits_non_empty_script
+        PASS [   0.007s] (104/412) biscuit-tui-cli::l1 completions_shell::zsh::enum_value_completion_after_positionals
+        PASS [   0.006s] (105/412) biscuit-tui-cli::l1 completions_shell::zsh::hotkey_prefix_bare_bracket_tab
+        PASS [   0.006s] (106/412) biscuit-tui-cli::l1 completions_shell::zsh::hotkey_prefix_quoted_bracket_tab
+        PASS [   0.009s] (107/412) biscuit-tui-cli::l1 completions_shell::zsh::enum_value_completion_active_color_space_form
+        PASS [   0.006s] (108/412) biscuit-tui-cli::l1 completions_shell::zsh::post_positional_flag_completion
+        PASS [   0.008s] (109/412) biscuit-tui-cli::l1 completions_shell::zsh::enum_value_completion_all_flags_after_positionals
+        PASS [   0.008s] (110/412) biscuit-tui-cli::l1 completions_shell::zsh::enum_value_completion_sort_space_form
+        PASS [   0.007s] (111/412) biscuit-tui-cli::l1 completions_shell::zsh::root_subcommand_completion
+        PASS [   0.010s] (112/412) biscuit-tui-cli::l1 exit_codes::choose_many_exits_nonzero_when_no_option_source
+        PASS [   0.009s] (113/412) biscuit-tui-cli::l1 exit_codes::choose_one_exits_nonzero_when_no_option_source
+        PASS [   0.010s] (114/412) biscuit-tui-cli::l1 help_contract::text_input_help_shows_height_as_inherited_global
+        PASS [   0.011s] (115/412) biscuit-tui-cli::l1 exit_codes::input_table_exits_nonzero_with_malformed_columns
+        PASS [   0.012s] (116/412) biscuit-tui-cli::l1 input_table_output::input_table_accepts_output_flag_at_global_position
+        PASS [   0.012s] (117/412) biscuit-tui-cli::l1 help_contract::top_level_help_shows_height_as_global_option
+        PASS [   0.011s] (118/412) biscuit-tui-cli::l1 help_contract::top_level_help_uses_canonical_public_names
+        PASS [   0.011s] (119/412) biscuit-tui-cli::l1 input_table_output::input_table_fails_with_invalid_json_columns
+        PASS [   0.011s] (120/412) biscuit-tui-cli::l1 input_table_output::input_table_help_lists_columns_and_rows_flags
+        PASS [   0.010s] (121/412) biscuit-tui-cli::l1 input_table_output::input_table_fails_with_unknown_column_type
+        PASS [   0.007s] (122/412) biscuit-tui-cli::l1 keyboard_protocol::degraded_terminal::dumb_terminal_chord_fallback_works
+        PASS [   0.007s] (123/412) biscuit-tui-cli::l1 keyboard_protocol::keyboard_protocol::chord_fallback_still_works
+        PASS [   0.011s] (124/412) biscuit-tui-cli::l1 input_table_output::input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.008s] (125/412) biscuit-tui-cli::l1 keyboard_protocol::keyboard_protocol::bare_ctrl_shows_hotkey_badges
+        PASS [   0.007s] (126/412) biscuit-tui-cli::l1 keyboard_protocol::degraded_terminal::dumb_terminal_does_not_panic
+        PASS [   0.017s] (127/412) biscuit-tui-cli::l1 input_table_output::input_table_rejects_unknown_flag
+        PASS [   0.034s] (128/412) biscuit-tui-cli::l1 exit_codes::every_subcommand_exits_with_code_1_on_non_tty_event_loop_read
+        PASS [   0.010s] (129/412) biscuit-tui-cli::l1 text_area_input_output::text_area_input_rejects_unknown_flag
+        PASS [   0.013s] (130/412) biscuit-tui-cli::l1 text_input_output::text_input_accepts_output_flag_at_global_position
+        PASS [   0.015s] (131/412) biscuit-tui-cli::l1 text_input_output::text_input_help_lists_max_length_flag
+        PASS [   0.011s] (132/412) biscuit-tui-cli::l1 text_input_output::text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.023s] (133/412) biscuit-tui-cli::l1 text_area_input_output::text_area_input_accepts_output_flag_at_global_position
+        PASS [   0.019s] (134/412) biscuit-tui-cli::l1 text_area_input_output::text_area_input_help_lists_width_and_scrollbar_flags
+        PASS [   0.020s] (135/412) biscuit-tui-cli::l1 text_area_input_output::text_area_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty
+        PASS [   0.046s] (136/412) biscuit-tui-cli::l1 help_contract::every_subcommand_accepts_height_before_subcommand_token
+        PASS [   0.013s] (137/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_camel_case
+        PASS [   0.009s] (138/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_kebab_case
+        PASS [   0.009s] (139/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_caps
+        PASS [   0.008s] (140/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_pascal_case
+        PASS [   0.007s] (141/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_snake_case
+        PASS [   0.030s] (142/412) biscuit-tui-cli::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.015s] (143/412) biscuit-tui-cli::l1 text_input_output::text_input_rejects_unknown_flag
+        PASS [   0.008s] (144/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_title_case
+        PASS [   0.006s] (145/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_bracketed_multi_char_ctrl_returns_error
+        PASS [   0.014s] (146/412) biscuit-tui-cli::bin/question choice_normalize::tests::apply_convention_lowercase
+        PASS [   0.007s] (147/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_bracketed_empty_alt_returns_error
+        PASS [   0.009s] (148/412) biscuit-tui-cli::bin/question choice_normalize::tests::delimiter_split_does_not_overwrite_explicit_object_value
+        PASS [   0.008s] (149/412) biscuit-tui-cli::bin/question choice_normalize::tests::hotkey_normalization_lowercases
+        PASS [   0.006s] (150/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_bracketed_multi_char_opt_returns_error
+        PASS [   0.007s] (151/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_object_hotkey_multi_char_opt_returns_error
+        PASS [   0.007s] (152/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_object_hotkey_multi_char_ctrl_returns_error
+        PASS [   0.011s] (153/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_object_hotkey_empty_alt_returns_error
+        PASS [   0.007s] (154/412) biscuit-tui-cli::bin/question choice_normalize::tests::invalid_object_hotkey_returns_error
+        PASS [   0.006s] (155/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_delimited_value_skips_value_convention
+        PASS [   0.007s] (156/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_disabled_implicit_does_not_collide
+        PASS [   0.007s] (157/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_basic
+        PASS [   0.006s] (158/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_explicit_delimiter_takes_precedence
+        PASS [   0.007s] (159/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_detects_duplicate_hotkeys
+        PASS [   0.010s] (160/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_numeric_hotkey_collision_with_explicit_ctrl_one_is_rejected
+        PASS [   0.008s] (161/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_delimited_label_skips_label_convention
+        PASS [   0.011s] (162/412) biscuit-tui-cli::bin/question choice_normalize::tests::non_modifier_bracket_prefix_is_treated_as_label_text
+        PASS [   0.007s] (163/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_legacy_delimiter_skips_conventions
+        PASS [   0.006s] (164/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_preserves_object_disabled
+        PASS [   0.008s] (165/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_preserves_object_hotkey
+        PASS [   0.010s] (166/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_object_value_skips_value_convention
+        PASS [   0.006s] (167/412) biscuit-tui-cli::bin/question choice_normalize::tests::numeric_hotkeys_does_not_override_explicit
+        PASS [   0.008s] (168/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_with_legacy_delimiter
+        PASS [   0.010s] (169/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_preserves_object_value
+        PASS [   0.010s] (170/412) biscuit-tui-cli::bin/question choice_normalize::tests::normalize_options_with_conventions
+        PASS [   0.008s] (171/412) biscuit-tui-cli::bin/question choice_normalize::tests::numeric_hotkeys_eleventh_is_alt_one
+        PASS [   0.009s] (172/412) biscuit-tui-cli::bin/question choice_normalize::tests::numeric_hot_keys_skips_options_with_explicit_hotkey
+        PASS [   0.007s] (173/412) biscuit-tui-cli::bin/question choice_normalize::tests::numeric_hotkeys_first_ten_ctrl
+        PASS [   0.008s] (174/412) biscuit-tui-cli::bin/question choice_normalize::tests::numeric_hotkeys_tenth_is_ctrl_one
+        PASS [   0.006s] (175/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_hotkey_spec_canonical_forms
+        PASS [   0.006s] (176/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_hotkey_spec_rejects_empty_suffix
+        PASS [   0.007s] (177/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_hotkey_spec_rejects_multi_character_suffix
+        PASS [   0.006s] (178/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_option_with_delimiter
+        PASS [   0.007s] (179/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_option_with_ctrl_hotkey
+        PASS [   0.009s] (180/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_option_with_alt_hotkey
+        PASS [   0.009s] (181/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_option_with_opt_alias
+        PASS [   0.008s] (182/412) biscuit-tui-cli::bin/question choice_normalize::tests::prefix_hotkey_does_not_overwrite_explicit_object_hotkey
+        PASS [   0.009s] (183/412) biscuit-tui-cli::bin/question choice_normalize::tests::parse_option_without_hotkey_or_delimiter
+        PASS [   0.006s] (184/412) biscuit-tui-cli::bin/question choice_normalize::tests::user_reported_scenario_one_explicit_three_plain
+        PASS [   0.007s] (185/412) biscuit-tui-cli::bin/question choice_normalize::tests::unassigned_options_have_no_hotkey
+        PASS [   0.009s] (186/412) biscuit-tui-cli::bin/question choice_normalize::tests::three_plain_labels_run_with_no_badges
+        PASS [   0.009s] (187/412) biscuit-tui-cli::bin/question choice_normalize::tests::valid_bracketed_ctrl_still_normalizes
+        PASS [   0.007s] (188/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::parse_labels_rejects_empty_on
+        PASS [   0.007s] (189/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::bool_to_str_maps_true_and_false
+        PASS [   0.006s] (190/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::parse_labels_rejects_missing_off
+        PASS [   0.006s] (191/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_writes_json_boolean_string_from_initial_state
+        PASS [   0.008s] (192/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.008s] (193/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::parse_labels_trims_whitespace
+        PASS [   0.008s] (194/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::parse_labels_splits_on_first_comma
+        PASS [   0.008s] (195/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_writes_null_output_with_nul_terminator
+        PASS [   0.010s] (196/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_returns_1_without_output_on_esc
+        PASS [   0.007s] (197/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_writes_raw_false_with_newline
+        PASS [   0.007s] (198/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_active_color_yellow_propagates_to_input
+        PASS [   0.008s] (199/412) biscuit-tui-cli::bin/question commands::boolean_switch::tests::run_writes_raw_true_with_newline
+        PASS [   0.008s] (200/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_active_color_default_is_grey
+        PASS [   0.007s] (201/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_enables_filter_for_positional_args_by_default
+        PASS [   0.007s] (202/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_applies_sort_inverse_across_positional_source
+        PASS [   0.008s] (203/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_csv_three_columns_preserves_value_and_hotkey
+        PASS [   0.007s] (204/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_positional_uses_multiple_mode
+        PASS [   0.006s] (205/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_yaml_object_array_preserves_value_and_hotkey
+        PASS [   0.007s] (206/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_positional_with_delimiter_splits_label_value
+        PASS [   0.009s] (207/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_csv_uses_multiple_mode
+        PASS [   0.013s] (208/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_enables_filter_for_legacy_csv_by_default
+        PASS [   0.006s] (209/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_without_source_errors
+        PASS [   0.007s] (210/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_respects_no_filter_flag
+        PASS [   0.010s] (211/412) biscuit-tui-cli::bin/question commands::choose_many::tests::build_choice_input_from_json_object_array_preserves_value_and_hotkey
+        PASS [   0.008s] (212/412) biscuit-tui-cli::bin/question commands::choose_many::tests::effective_selected_falls_back_to_initial_when_only_initial_set
+        PASS [   0.008s] (213/412) biscuit-tui-cli::bin/question commands::choose_many::tests::effective_selected_empty_when_neither_set
+        PASS [   0.007s] (214/412) biscuit-tui-cli::bin/question commands::choose_many::tests::initial_still_splits_on_commas_for_backward_compat
+        PASS [   0.007s] (215/412) biscuit-tui-cli::bin/question commands::choose_many::tests::effective_selected_prefers_selected_over_initial
+        PASS [   0.007s] (216/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_builds_filter_enabled_state_by_default
+        PASS [   0.008s] (217/412) biscuit-tui-cli::bin/question commands::choose_many::tests::parse_initial_ids_trims_and_drops_empty
+        PASS [   0.007s] (218/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_emits_object_values_not_labels_for_json_source
+        PASS [   0.007s] (219/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_returns_1_without_output_on_esc
+        PASS [   0.009s] (220/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_deselect_all_outputs_no_values
+        PASS [   0.007s] (221/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_select_all_outputs_all_values
+        PASS [   0.011s] (222/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.006s] (223/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_selected_defaults_match_delimited_values
+        PASS [   0.013s] (224/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_propagates_percent_height_to_prompt
+        PASS [   0.007s] (225/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_writes_nul_separated_selected_values_from_initial_ids
+        PASS [   0.007s] (226/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_writes_delimited_positional_values
+        PASS [   0.008s] (227/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_writes_json_array_of_selected_values
+        PASS [   0.007s] (228/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_writes_raw_newline_separated_values
+        PASS [   0.007s] (229/412) biscuit-tui-cli::bin/question commands::choose_many::tests::selected_repeated_flag_collects_all_values
+        PASS [   0.007s] (230/412) biscuit-tui-cli::bin/question commands::choose_many::tests::run_writes_selected_values_from_positional_args
+        PASS [   0.008s] (231/412) biscuit-tui-cli::bin/question commands::choose_many::tests::selected_value_containing_comma_is_preserved
+        PASS [   0.006s] (232/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_active_color_green_propagates_to_input
+        PASS [   0.007s] (233/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_applies_sort_ascending_across_legacy_csv_source
+        PASS [   0.007s] (234/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_enables_filter_for_legacy_csv_by_default
+        PASS [   0.008s] (235/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_applies_sort_ascending_across_positional_source
+        PASS [   0.011s] (236/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_active_color_default_is_grey
+        PASS [   0.007s] (237/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_csv_returns_options
+        PASS [   0.009s] (238/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_enables_filter_for_positional_args_by_default
+        PASS [   0.008s] (239/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_json_object_array_preserves_value_and_hotkey
+        PASS [   0.007s] (240/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_jsonl_object_lines_preserves_value_and_hotkey
+        PASS [   0.010s] (241/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_csv_three_columns_preserves_value_and_hotkey
+        PASS [   0.007s] (242/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_list_strips_markdown_bullets
+        PASS [   0.009s] (243/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_markdown_frontmatter_object_array_preserves_fields
+        PASS [   0.008s] (244/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_ndjson_object_lines_preserves_value_and_hotkey
+        PASS [   0.007s] (245/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_positional_args
+        PASS [   0.009s] (246/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_positional_with_delimiter_splits_label_value
+        PASS [   0.007s] (247/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_without_source_errors
+        PASS [   0.008s] (248/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_respects_no_filter_flag
+        PASS [   0.009s] (249/412) biscuit-tui-cli::bin/question commands::choose_one::tests::build_choice_input_from_yaml_object_array_preserves_value_and_hotkey
+        PASS [   0.008s] (250/412) biscuit-tui-cli::bin/question commands::choose_one::tests::effective_selected_is_none_when_neither_set
+        PASS [   0.008s] (251/412) biscuit-tui-cli::bin/question commands::choose_one::tests::effective_selected_prefers_selected_over_initial
+        PASS [   0.009s] (252/412) biscuit-tui-cli::bin/question commands::choose_one::tests::effective_selected_falls_back_to_initial_when_only_initial_set
+        PASS [   0.006s] (253/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_builds_filter_enabled_state_by_default
+        PASS [   0.006s] (254/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_emits_object_value_not_label_for_json_source
+        PASS [   0.007s] (255/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_propagates_percent_height_to_prompt
+        PASS [   0.006s] (256/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_writes_delimited_positional_value
+        PASS [   0.006s] (257/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.007s] (258/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_returns_0_on_esc_with_restored_value
+        PASS [   0.009s] (259/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_writes_null_output_with_nul_terminator
+        PASS [   0.012s] (260/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_selected_default_matches_delimited_value
+        PASS [   0.010s] (261/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_writes_hovered_value_from_positional_args
+        PASS [   0.008s] (262/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_writes_raw_selected_value_with_newline
+        PASS [   0.007s] (263/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_all_per_side_padding_overrides_applied
+        PASS [   0.012s] (264/412) biscuit-tui-cli::bin/question commands::choose_one::tests::run_writes_json_selected_value_from_initial_option
+        PASS [   0.007s] (265/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_all_per_side_overrides_applied
+        PASS [   0.009s] (266/412) biscuit-tui-cli::bin/question commands::common_choose::tests::border_style_arg_default_is_none
+        PASS [   0.009s] (267/412) biscuit-tui-cli::bin/question commands::common_choose::tests::border_style_arg_maps_to_library_enum
+        PASS [   0.008s] (268/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_border_flag_defaults_to_rounded
+        PASS [   0.006s] (269/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_border_label_implies_border
+        PASS [   0.007s] (270/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_combines_border_and_margin
+        PASS [   0.007s] (271/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_border_style_alone_implies_border
+        PASS [   0.006s] (272/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_explicit_padding_zero_produces_zero_padding
+        PASS [   0.008s] (273/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_border_style_none_suppresses_border
+        PASS [   0.008s] (274/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_default_margin_is_zero
+        PASS [   0.007s] (275/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_no_padding_flag_uses_library_default_uniform_one
+        PASS [   0.008s] (276/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_explicit_border_style_overrides_default
+        PASS [   0.008s] (277/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_margin_sets_all_sides
+        PASS [   0.008s] (278/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_padding_combined_with_border_and_margin
+        PASS [   0.006s] (279/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_per_side_only_margins_default_other_sides_to_zero
+        PASS [   0.007s] (280/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_per_side_overrides_umbrella_margin
+        PASS [   0.007s] (281/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_returns_default_config_with_padding
+        PASS [   0.006s] (282/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_accepts_percent_suffix
+        PASS [   0.008s] (283/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_per_side_only_padding_defaults_other_sides_to_zero
+        PASS [   0.006s] (284/412) biscuit-tui-cli::bin/question commands::common_choose::tests::hotkey_badges_arg_default_is_auto
+        PASS [   0.009s] (285/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_padding_sets_all_sides
+        PASS [   0.006s] (286/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_rejects_empty_input
+        PASS [   0.007s] (287/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_accepts_bare_integer_as_cells
+        PASS [   0.010s] (288/412) biscuit-tui-cli::bin/question commands::common_choose::tests::build_chrome_per_side_overrides_umbrella_padding
+        PASS [   0.007s] (289/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_rejects_non_numeric_input
+        PASS [   0.006s] (290/412) biscuit-tui-cli::bin/question commands::common_choose::tests::resolve_hotkey_badges_alt_forces_alt_held
+        PASS [   0.007s] (291/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_rejects_out_of_range_percent
+        PASS [   0.006s] (292/412) biscuit-tui-cli::bin/question commands::common_choose::tests::sort_order_arg_default_is_natural
+        PASS [   0.006s] (293/412) biscuit-tui-cli::bin/question commands::common_choose::tests::resolve_hotkey_badges_ctrl_forces_ctrl_held
+        PASS [   0.007s] (294/412) biscuit-tui-cli::bin/question commands::common_choose::tests::parse_height_spec_rejects_zero_cells
+        PASS [   0.007s] (295/412) biscuit-tui-cli::bin/question commands::common_choose::tests::resolve_hotkey_badges_auto_returns_none
+        PASS [   0.007s] (296/412) biscuit-tui-cli::bin/question commands::common_choose::tests::resolve_hotkey_badges_never_forces_hidden
+        PASS [   0.007s] (297/412) biscuit-tui-cli::bin/question commands::common_choose::tests::sort_order_arg_maps_to_library_enum
+        PASS [   0.010s] (298/412) biscuit-tui-cli::bin/question commands::common_choose::tests::resolve_hotkey_badges_always_forces_ctrl_held
+        PASS [   0.007s] (299/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_accepts_minimal_static_text
+        PASS [   0.007s] (300/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_assigns_default_id_from_index
+        PASS [   0.006s] (301/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_choose_one_accepts_string_options
+        PASS [   0.007s] (302/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_choose_many_accepts_object_options_with_id_value
+        PASS [   0.007s] (303/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_oversized_preferred_height
+        PASS [   0.007s] (304/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_oversized_max_length
+        PASS [   0.006s] (305/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_oversized_preferred_width
+        PASS [   0.009s] (306/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_non_array
+        PASS [   0.009s] (307/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_non_string_element_in_text_area_initial
+        PASS [   0.008s] (308/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_preserves_explicit_id
+        PASS [   0.007s] (309/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_string_preferred_width
+        PASS [   0.007s] (310/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_unknown_type
+        PASS [   0.006s] (311/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_wrong_type_initial_on_text_area
+        PASS [   0.006s] (312/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_wrong_type_initial_on_text_input
+        PASS [   0.007s] (313/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_wrong_type_scrollbar_on_text_area
+        PASS [   0.008s] (314/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_rejects_wrong_type_required_on_choice
+        PASS [   0.007s] (315/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_columns_text_input_reads_max_length
+        PASS [   0.007s] (316/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_parses_chosen_many_from_array
+        PASS [   0.007s] (317/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_includes_row_index_in_length_mismatch
+        PASS [   0.008s] (318/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_parses_boolean_truthy
+        PASS [   0.007s] (319/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_parses_chosen_many_from_comma_string
+        PASS [   0.006s] (320/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_non_string_for_text_input_cell
+        PASS [   0.006s] (321/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_number_for_choose_one_cell
+        PASS [   0.007s] (322/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_invalid_boolean_string
+        PASS [   0.006s] (323/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_number_for_text_area_cell
+        PASS [   0.006s] (324/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_object_for_choose_many_cell
+        PASS [   0.007s] (325/412) biscuit-tui-cli::bin/question commands::input_table::tests::parse_rows_typed_rejects_object_for_boolean_cell
+        PASS [   0.007s] (326/412) biscuit-tui-cli::bin/question commands::input_table::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.007s] (327/412) biscuit-tui-cli::bin/question commands::input_table::tests::run_returns_1_without_output_on_esc
+        PASS [   0.007s] (328/412) biscuit-tui-cli::bin/question commands::input_table::tests::run_with_writer_accepts_documented_permissive_paths
+        PASS [   0.007s] (329/412) biscuit-tui-cli::bin/question commands::input_table::tests::run_with_writer_surfaces_try_new_failure_as_invalid_input
+        PASS [   0.007s] (330/412) biscuit-tui-cli::bin/question commands::input_table::tests::write_matrix_boolean_emits_json_bool_not_string
+        PASS [   0.009s] (331/412) biscuit-tui-cli::bin/question commands::input_table::tests::run_writes_typed_row_json_from_initial_rows
+        PASS [   0.008s] (332/412) biscuit-tui-cli::bin/question commands::input_table::tests::write_matrix_chosen_many_emits_json_array
+        PASS [   0.007s] (333/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::default_width_is_sixty
+        PASS [   0.007s] (334/412) biscuit-tui-cli::bin/question commands::input_table::tests::write_matrix_raw_emits_array_of_row_objects
+        PASS [   0.008s] (335/412) biscuit-tui-cli::bin/question commands::input_table::tests::write_matrix_null_emits_key_equals_value_nul_separated
+        PASS [   0.006s] (336/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::run_returns_1_without_output_on_esc
+        PASS [   0.008s] (337/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.008s] (338/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::run_writes_json_output_from_initial_lines
+        PASS [   0.007s] (339/412) biscuit-tui-cli::bin/question commands::text_input::tests::label_position_arg_maps_to_library_enum
+        PASS [   0.009s] (340/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::run_writes_null_output_with_nul_terminator
+        PASS [   0.009s] (341/412) biscuit-tui-cli::bin/question commands::text_area_input::tests::run_writes_raw_output_preserving_newlines
+        PASS [   0.007s] (342/412) biscuit-tui-cli::bin/question commands::text_input::tests::run_returns_130_without_output_on_ctrl_c
+        PASS [   0.006s] (343/412) biscuit-tui-cli::bin/question commands::text_input::tests::run_writes_null_output_with_nul_terminator
+        PASS [   0.007s] (344/412) biscuit-tui-cli::bin/question commands::text_input::tests::run_returns_1_without_output_on_esc
+        PASS [   0.007s] (345/412) biscuit-tui-cli::bin/question commands::text_input::tests::run_writes_json_output_from_initial_value
+        PASS [   0.007s] (346/412) biscuit-tui-cli::bin/question completions::tests::bash_output_contains_hotkey_wrapper
+        PASS [   0.008s] (347/412) biscuit-tui-cli::bin/question commands::text_input::tests::run_writes_raw_output_with_trailing_newline
+        PASS [   0.007s] (348/412) biscuit-tui-cli::bin/question completions::tests::zsh_arguments_options_does_not_contain_dash_s
+        PASS [   0.009s] (349/412) biscuit-tui-cli::bin/question completions::tests::generated_scripts_do_not_present_hidden_legacy_flags
+        PASS [   0.009s] (350/412) biscuit-tui-cli::bin/question completions::tests::fish_output_skips_overlay_but_still_completes
+        PASS [   0.008s] (351/412) biscuit-tui-cli::bin/question completions::tests::zsh_choice_positional_completer_does_not_offer_hotkeys_for_empty_prefix
+        PASS [   0.007s] (352/412) biscuit-tui-cli::bin/question completions::tests::zsh_choose_positional_rules_use_choice_completer
+        PASS [   0.007s] (353/412) biscuit-tui-cli::bin/question completions::tests::zsh_post_separator_flag_overlay_lists_full_choose_flag_set
+        PASS [   0.006s] (354/412) biscuit-tui-cli::bin/question completions::tests::zsh_output_contains_positional_completer
+        PASS [   0.007s] (355/412) biscuit-tui-cli::bin/question completions::tests::zsh_positional_completer_dispatches_enum_value_actions
+        PASS [   0.012s] (356/412) biscuit-tui-cli::bin/question completions::tests::bash_script_passes_syntax_check
+        PASS [   0.008s] (357/412) biscuit-tui-cli::bin/question option_sources::tests::csv_one_column_yields_label_only
+        PASS [   0.006s] (358/412) biscuit-tui-cli::bin/question option_sources::tests::csv_two_columns_preserves_value_no_hotkey
+        PASS [   0.007s] (359/412) biscuit-tui-cli::bin/question option_sources::tests::json_array_of_objects_preserves_label_value_hotkey
+        PASS [   0.009s] (360/412) biscuit-tui-cli::bin/question option_sources::tests::csv_three_columns_preserves_value_and_hotkey
+        PASS [   0.007s] (361/412) biscuit-tui-cli::bin/question option_sources::tests::json_array_of_objects_preserves_disabled_flag
+        PASS [   0.007s] (362/412) biscuit-tui-cli::bin/question option_sources::tests::markdown_frontmatter_object_array_preserves_value_and_hotkey
+        PASS [   0.006s] (363/412) biscuit-tui-cli::bin/question option_sources::tests::ndjson_object_preserves_value_and_hotkey
+        PASS [   0.008s] (364/412) biscuit-tui-cli::bin/question option_sources::tests::json_object_with_only_value_uses_value_as_label
+        PASS [   0.008s] (365/412) biscuit-tui-cli::bin/question option_sources::tests::jsonl_object_preserves_value_and_hotkey
+        PASS [   0.009s] (366/412) biscuit-tui-cli::bin/question option_sources::tests::json_string_array_yields_label_only_options
+        PASS [   0.008s] (367/412) biscuit-tui-cli::bin/question option_sources::tests::non_array_top_level_returns_invalid_source_shape
+        PASS [   0.007s] (368/412) biscuit-tui-cli::bin/question option_sources::tests::parse_csv_drops_empty
+        PASS [   0.007s] (369/412) biscuit-tui-cli::bin/question option_sources::tests::parse_csv_splits_and_trims
+        PASS [   0.007s] (370/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_csv_extension_still_works
+        PASS [   0.007s] (371/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_json_array
+        PASS [   0.006s] (372/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_jsonl_extension_still_works
+        PASS [   0.007s] (373/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_rejects_md_extension
+        PASS [   0.006s] (374/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_rejects_txt_plain_list
+        PASS [   0.008s] (375/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_ndjson_extension_still_works
+        PASS [   0.007s] (376/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_rejects_no_extension
+        PASS [   0.007s] (377/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_rejects_unknown_extension
+        PASS [   0.008s] (378/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_toml_options_inline_table_array_preserves_fields
+        PASS [   0.008s] (379/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_toml_missing_options_key_is_not_array
+        PASS [   0.009s] (380/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_toml_array_of_tables_preserves_fields
+        PASS [   0.007s] (381/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_toml_options_non_array_is_not_array
+        PASS [   0.008s] (382/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_toml_options_string_array
+        PASS [   0.007s] (383/412) biscuit-tui-cli::bin/question option_sources::tests::parse_list_preserves_plain_lines_and_non_marker_hyphens
+        PASS [   0.006s] (384/412) biscuit-tui-cli::bin/question option_sources::tests::parse_list_strips_markdown_ordered_markers_after_indentation
+        PASS [   0.007s] (385/412) biscuit-tui-cli::bin/question option_sources::tests::parse_file_yaml_array
+        PASS [   0.007s] (386/412) biscuit-tui-cli::bin/question option_sources::tests::parse_list_splits_lines
+        PASS [   0.013s] (387/412) biscuit-tui-cli::bin/question option_sources::tests::parse_list_strips_markdown_bullets_after_indentation
+        PASS [   0.009s] (388/412) biscuit-tui-cli::bin/question option_sources::tests::parse_md_frontmatter_string_array
+        PASS [   0.008s] (389/412) biscuit-tui-cli::bin/question option_sources::tests::parse_md_tolerates_bom_and_crlf_line_endings
+        PASS [   0.008s] (390/412) biscuit-tui-cli::bin/question option_sources::tests::parse_md_tolerates_utf8_bom_with_lf_line_endings
+        PASS [   0.009s] (391/412) biscuit-tui-cli::bin/question option_sources::tests::parse_md_tolerates_crlf_line_endings_without_bom
+        PASS [   0.007s] (392/412) biscuit-tui-cli::bin/question option_sources::tests::raw_option_from_string_label_only
+        PASS [   0.007s] (393/412) biscuit-tui-cli::bin/question option_sources::tests::resolve_raw_options_multiple_sources_error
+        PASS [   0.008s] (394/412) biscuit-tui-cli::bin/question option_sources::tests::raw_option_from_str_label_only
+        PASS [   0.008s] (395/412) biscuit-tui-cli::bin/question option_sources::tests::resolve_raw_options_csv_source
+        PASS [   0.009s] (396/412) biscuit-tui-cli::bin/question option_sources::tests::parse_rows_preserves_markdown_like_prefixes_raw
+        PASS [   0.006s] (397/412) biscuit-tui-cli::bin/question option_sources::tests::yaml_array_of_mappings_preserves_value_and_hotkey
+        PASS [   0.007s] (398/412) biscuit-tui-cli::bin/question output::tests::json_mode_quotes_and_escapes
+        PASS [   0.007s] (399/412) biscuit-tui-cli::bin/question output::tests::write_bool_json_emits_unquoted_boolean
+        PASS [   0.009s] (400/412) biscuit-tui-cli::bin/question option_sources::tests::toml_table_preserves_value_and_hotkey
+        PASS [   0.006s] (401/412) biscuit-tui-cli::bin/question output::tests::write_bool_raw_false
+        PASS [   0.007s] (402/412) biscuit-tui-cli::bin/question option_sources::tests::yaml_array_of_mappings_preserves_disabled
+        PASS [   0.007s] (403/412) biscuit-tui-cli::bin/question output::tests::null_mode_terminates_with_nul_byte
+        PASS [   0.006s] (404/412) biscuit-tui-cli::bin/question output::tests::write_bool_null_terminates
+        PASS [   0.007s] (405/412) biscuit-tui-cli::bin/question output::tests::raw_mode_handles_empty_value
+        PASS [   0.008s] (406/412) biscuit-tui-cli::bin/question output::tests::raw_mode_appends_newline
+        PASS [   0.007s] (407/412) biscuit-tui-cli::bin/question output::tests::write_list_empty_in_json_is_empty_array
+        PASS [   0.007s] (408/412) biscuit-tui-cli::bin/question output::tests::write_bool_raw_true
+        PASS [   0.007s] (409/412) biscuit-tui-cli::bin/question output::tests::write_list_json_emits_json_array
+        PASS [   0.007s] (410/412) biscuit-tui-cli::bin/question output::tests::write_list_raw_emits_one_line_per_value
+        PASS [   0.008s] (411/412) biscuit-tui-cli::bin/question output::tests::write_list_empty_in_raw_is_empty
+        PASS [   0.007s] (412/412) biscuit-tui-cli::bin/question output::tests::write_list_null_emits_nul_separated_values
+────────────
+     Summary [   0.425s] 412 tests run: 412 passed, 18 skipped
+
+✅ [32m all tests passing in [1mbiscuit-tui-cli[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 16
+cross-check: publishing no receipt — the remote tested tree 61a1f321c is not this head's tree 74b9298d4; a patched or older tree is not evidence for this head
+
+cross-check summary for biscuit-tui-cli:
+  wsl      pass

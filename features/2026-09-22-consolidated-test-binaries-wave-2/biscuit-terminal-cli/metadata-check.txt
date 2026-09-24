@@ -1,0 +1,2 @@
+biscuit-terminal-cli: 2 Cargo test targets, 2 declared, 14 old targets mapped
+PASS

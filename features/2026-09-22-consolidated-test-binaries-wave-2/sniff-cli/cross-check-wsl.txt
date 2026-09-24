@@ -1,0 +1,962 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/dmls/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: sniff-cli @ origin/fix/ci-build-feature-divergence (1879dd880) + 650 changed file(s) as d46ab4242
+os: wsl(build-win)   extra nextest args: <none>
+mode: archive — planned keys:
+  wsl      723532f820537bd7 produced on ubuntu-latest, consumed as wsl2-ubuntu
+
+clone: build-win:/home/ken/coding/mac--feat-dark-fixes
+
+== wsl (build-win, archive 723532f820537bd7 from ubuntu-latest) ==
+cross-check-tree: 9af1efa4f2bb97401ed5789600334ca43a975c02
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.39s
+   Compiling mio v1.2.0
+   Compiling lopdf v0.38.0
+   Compiling unicode-segmentation v1.13.2
+   Compiling signal-hook v0.3.18
+   Compiling lopdf v0.39.0
+   Compiling clap_builder v4.6.0
+   Compiling rav1e v0.8.1
+   Compiling ahash v0.8.12
+   Compiling vcpkg v0.2.15
+   Compiling fuzzy-matcher v0.3.7
+   Compiling biscuit-test-harness v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-test-harness)
+   Compiling shared_child v1.1.1
+   Compiling tokio v1.52.1
+   Compiling referencing v0.55.0
+   Compiling convert_case v0.10.0
+   Compiling jsonschema-value v0.55.0
+   Compiling derive_more-impl v2.1.1
+   Compiling signal-hook-mio v0.2.5
+   Compiling sniff-cli v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/sniff/cli)
+   Compiling libgit2-sys v0.18.5+1.9.4
+   Compiling libz-sys v1.1.28
+   Compiling serial_test v3.4.0
+   Compiling jsonschema v0.55.0
+   Compiling test-toolkit v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/tools/test-toolkit)
+   Compiling derive_more v2.1.1
+   Compiling insta v1.47.2
+   Compiling crossterm v0.29.0
+   Compiling clap v4.6.1
+   Compiling mermaid-rs-renderer v0.2.1
+   Compiling clap_complete v4.6.2
+   Compiling inquire v0.9.4
+   Compiling pdf-extract v0.10.0
+   Compiling ravif v0.13.0
+   Compiling tokio-util v0.7.18
+   Compiling tokio-rustls v0.26.4
+   Compiling async-compression v0.4.41
+   Compiling tower v0.5.3
+   Compiling tokio-stream v0.1.18
+   Compiling tokio-tungstenite v0.26.2
+   Compiling h2 v0.4.13
+   Compiling tower-http v0.6.8
+   Compiling image v0.25.10
+   Compiling hyper v1.9.0
+   Compiling hyper-util v0.1.20
+   Compiling viuer v0.11.0
+   Compiling biscuit-visualized v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-visualized/src)
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.2
+   Compiling biscuit-file v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-file/lib)
+   Compiling git2 v0.20.4
+   Compiling schematic-define v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/schematic/define)
+   Compiling biscuit-terminal v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/biscuit-terminal/lib)
+   Compiling schematic-definitions v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/schematic/definitions)
+   Compiling schematic-schema v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/schematic/schema)
+   Compiling sniff v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/sniff/lib)
+   Compiling darkmatter v0.1.0 (/home/ken/coding/mac--feat-dark-fixes/rusty-biscuit/darkmatter/lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 07s
+   Archiving 7 binaries (including 1 non-test binary), 1 build script output directory, 4 linked paths, and 2 standard libraries to /home/ken/coding/mac--feat-dark-fixes/cross-check-Mac-57835-1790201788-build/build-sniff-cli-ubuntu-latest-723532f820537bd7.tar.zst
+    Archived 627 files to /home/ken/coding/mac--feat-dark-fixes/cross-check-Mac-57835-1790201788-build/build-sniff-cli-ubuntu-latest-723532f820537bd7.tar.zst in 1.05s
+Produced 1 archive(s) on `ubuntu-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 63 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `723532f820537bd7` for `wsl2-ubuntu` — digest `44d9eb2e92d1cba7`, produced on `ubuntu-latest`.
+cross-check-key: 723532f820537bd7
+cross-check-digest: 44d9eb2e92d1cba7
+
+Testing [1msniff-cli[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 7 binaries (including 1 non-test binary), 1 build script output directory, and 4 linked paths to /tmp/nextest-archive-6o5MSV
+   Extracted 627 files to /tmp/nextest-archive-6o5MSV in 0.84s
+────────────
+ Nextest run ID 8b4d582c-ea87-4e60-aabb-2af3017ca1c1 with nextest profile: ci
+    Starting 857 tests across 6 binaries (7 tests skipped)
+        PASS [   0.020s] (  1/857) sniff-cli args::recent_commits_flag_shadowing::help_advertises_the_new_flags_and_not_the_removed_ones
+        PASS [   0.023s] (  2/857) sniff-cli args::recent_commits_flag_shadowing::global_verbose_with_subcommand_compact_selects_compact
+        PASS [   0.025s] (  3/857) sniff-cli args::recent_commits_flag_shadowing::every_flag_maps_to_its_library_option
+        PASS [   0.025s] (  4/857) sniff-cli args::recent_commits_flag_shadowing::compact_short_and_long_select_compact_report
+        PASS [   0.026s] (  5/857) sniff-cli args::recent_commits_flag_shadowing::period_forms_parse_through_the_library_selection
+        PASS [   0.026s] (  6/857) sniff-cli args::recent_commits_flag_shadowing::preset_projection_is_carried_into_the_options
+        PASS [   0.027s] (  7/857) sniff-cli args::recent_commits_flag_shadowing::compact_and_verbose_conflict_within_the_subcommand_in_either_order
+        PASS [   0.028s] (  8/857) sniff-cli args::recent_commits_flag_shadowing::no_arguments_select_the_last_ten_commits_at_normal_verbosity
+        PASS [   0.013s] (  9/857) sniff-cli args::recent_commits_flag_shadowing::rejected_shapes::distinct_id_flag_loses_verbose_to_the_global_counter
+        PASS [   0.035s] ( 10/857) sniff-cli args::recent_commits_flag_shadowing::operation_completion_suggests_common_values_without_restricting_input
+        PASS [   0.039s] ( 11/857) sniff-cli args::recent_commits_flag_shadowing::each_file_category_flag_selects_only_its_category
+        PASS [   0.021s] ( 12/857) sniff-cli args::recent_commits_flag_shadowing::rejected_shapes::same_id_bool_flag_panics_even_without_verbose_input
+        PASS [   0.018s] ( 13/857) sniff-cli args::tests::accessors::docs_accessors_work
+        PASS [   0.016s] ( 14/857) sniff-cli args::tests::accessors::install_program_name_extracts_name
+        PASS [   0.023s] ( 15/857) sniff-cli args::recent_commits_flag_shadowing::subcommand_verbose_selects_verbose_report_without_enabling_tracing
+        PASS [   0.024s] ( 16/857) sniff-cli args::recent_commits_flag_shadowing::repeated_verbose_across_positions_does_not_sum
+        PASS [   0.017s] ( 17/857) sniff-cli args::tests::accessors::is_install_action_returns_false
+        PASS [   0.013s] ( 18/857) sniff-cli args::tests::accessors::output_filter_mapping_covers_modes
+        PASS [   0.026s] ( 19/857) sniff-cli args::recent_commits_flag_shadowing::verbose_is_position_independent_because_the_flags_unify
+        PASS [   0.018s] ( 20/857) sniff-cli args::tests::accessors::is_install_action_returns_true
+        PASS [   0.034s] ( 21/857) sniff-cli args::recent_commits_flag_shadowing::removed_flags_are_rejected_on_every_commit_family_subcommand
+        PASS [   0.015s] ( 22/857) sniff-cli args::tests::accessors::repo_accessors_work
+        PASS [   0.016s] ( 23/857) sniff-cli args::tests::accessors::programs_mode_accessors_work
+        PASS [   0.021s] ( 24/857) sniff-cli args::tests::accessors::services_state_accessor_works
+        PASS [   0.020s] ( 25/857) sniff-cli args::tests::blast_radius_commands::blast_radius_last_commit_scope
+        PASS [   0.019s] ( 26/857) sniff-cli args::tests::blast_radius_commands::blast_radius_list_csv_conflict
+        PASS [   0.020s] ( 27/857) sniff-cli args::tests::blast_radius_commands::docs_blast_radius_flag_parses
+        PASS [   0.022s] ( 28/857) sniff-cli args::tests::blast_radius_commands::blast_radius_staged_scope
+        PASS [   0.024s] ( 29/857) sniff-cli args::tests::blast_radius_commands::blast_radius_default_scope
+        PASS [   0.020s] ( 30/857) sniff-cli args::tests::blast_radius_commands::blast_radius_with_package
+        PASS [   0.018s] ( 31/857) sniff-cli args::tests::blast_radius_commands::repo_dirty_source_code_parses
+        PASS [   0.019s] ( 32/857) sniff-cli args::tests::blast_radius_commands::repo_dirty_files_parses
+        PASS [   0.020s] ( 33/857) sniff-cli args::tests::blast_radius_commands::no_error_and_on_error_coexist
+        PASS [   0.022s] ( 34/857) sniff-cli args::tests::blast_radius_commands::repo_staged_source_code_parses
+        PASS [   0.017s] ( 35/857) sniff-cli args::tests::blast_radius_commands::repo_unstaged_source_code_parses
+        PASS [   0.020s] ( 36/857) sniff-cli args::tests::blast_radius_commands::repo_worktrees_list_csv_conflict
+        PASS [   0.022s] ( 37/857) sniff-cli args::tests::blast_radius_commands::repo_worktrees_md_format_conflicts
+        PASS [   0.022s] ( 38/857) sniff-cli args::tests::blast_radius_commands::staged_files_list_csv_conflict
+        PASS [   0.025s] ( 39/857) sniff-cli args::tests::global_flags::base_flag_works_before_subcommand
+        PASS [   0.020s] ( 40/857) sniff-cli args::tests::install_command_args::software_editors_install_parses_with_dry_run_and_yes
+        PASS [   0.025s] ( 41/857) sniff-cli args::tests::blast_radius_commands::staged_files_list_flag_parses
+        PASS [   0.024s] ( 42/857) sniff-cli args::tests::global_flags::global_flags_parse_before_or_after_subcommand
+        PASS [   0.025s] ( 43/857) sniff-cli args::tests::global_flags::scoped_flags_parse_for_supported_commands
+        PASS [   0.023s] ( 44/857) sniff-cli args::tests::install_command_args::software_editors_install_plan_parses
+        PASS [   0.020s] ( 45/857) sniff-cli args::tests::new_repo_subcommands::repo_git_status_parses
+        PASS [   0.022s] ( 46/857) sniff-cli args::tests::install_command_args::software_editors_install_via_and_no_sudo_parse
+        PASS [   0.020s] ( 47/857) sniff-cli args::tests::new_repo_subcommands::repo_git_status_with_flags_parses
+        PASS [   0.020s] ( 48/857) sniff-cli args::tests::new_repo_subcommands::repo_hash_parses
+        PASS [   0.018s] ( 49/857) sniff-cli args::tests::new_repo_subcommands::repo_structure_parses
+        PASS [   0.024s] ( 50/857) sniff-cli args::tests::new_repo_subcommands::repo_hash_commit_alias_parses
+        PASS [   0.024s] ( 51/857) sniff-cli args::tests::new_repo_subcommands::repo_staged_files_parses
+        PASS [   0.019s] ( 52/857) sniff-cli args::tests::new_repo_subcommands::repo_structure_with_filter_parses
+        PASS [   0.025s] ( 53/857) sniff-cli args::tests::new_repo_subcommands::repo_remote_parses
+        PASS [   0.015s] ( 54/857) sniff-cli args::tests::new_repo_subcommands::repo_unstaged_files_parses
+        PASS [   0.017s] ( 55/857) sniff-cli args::tests::new_repo_subcommands::repo_structure_with_multiple_filters_parses
+        PASS [   0.018s] ( 56/857) sniff-cli args::tests::new_repo_subcommands::repo_untracked_files_parses
+        PASS [   0.017s] ( 57/857) sniff-cli args::tests::new_repo_subcommands::repo_worktrees_csv_parses
+        PASS [   0.020s] ( 58/857) sniff-cli args::tests::new_repo_subcommands::repo_worktree_on_error_parses
+        PASS [   0.017s] ( 59/857) sniff-cli args::tests::new_repo_subcommands::repo_worktrees_list_parses
+        PASS [   0.023s] ( 60/857) sniff-cli args::tests::new_repo_subcommands::repo_worktree_no_error_parses
+        PASS [   0.016s] ( 61/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_git_status
+        PASS [   0.015s] ( 62/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_is_monorepo
+        PASS [   0.025s] ( 63/857) sniff-cli args::tests::new_repo_subcommands::repo_worktree_parses
+        PASS [   0.021s] ( 64/857) sniff-cli args::tests::new_repo_subcommands::repo_worktrees_parses
+        PASS [   0.023s] ( 65/857) sniff-cli args::tests::new_repo_subcommands::repo_worktrees_md_parses
+        PASS [   0.020s] ( 66/857) sniff-cli args::tests::new_repo_subcommands::repo_worktrees_verbose_global_flag
+        PASS [   0.013s] ( 67/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_name_is_name
+        PASS [   0.014s] ( 68/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_none_is_default
+        PASS [   0.014s] ( 69/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_pr
+        PASS [   0.018s] ( 70/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_package_count
+        PASS [   0.014s] ( 71/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_version
+        PASS [   0.019s] ( 72/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_worktrees
+        PASS [   0.020s] ( 73/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_structure
+        PASS [   0.019s] ( 74/857) sniff-cli args::tests::repo_action_normalization::to_repo_action_worktree
+        PASS [   0.014s] ( 75/857) sniff-cli args::tests::subcommand_parsing::docs_package_area_and_package_flags_parse
+        PASS [   0.023s] ( 76/857) sniff-cli args::tests::subcommand_parsing::commit_family_subcommands_parse_repeated_operations
+        PASS [   0.020s] ( 77/857) sniff-cli args::tests::subcommand_parsing::docs_flags_and_filter_parse
+        PASS [   0.024s] ( 78/857) sniff-cli args::tests::subcommand_parsing::common_subcommands_parse
+        PASS [   0.018s] ( 79/857) sniff-cli args::tests::subcommand_parsing::files_association_filter_parse
+        PASS [   0.017s] ( 80/857) sniff-cli args::tests::subcommand_parsing::old_top_level_agents_command_rejected
+        PASS [   0.018s] ( 81/857) sniff-cli args::tests::subcommand_parsing::no_subcommand_parses
+        PASS [   0.016s] ( 82/857) sniff-cli args::tests::subcommand_parsing::old_top_level_editors_command_rejected
+        PASS [   0.016s] ( 83/857) sniff-cli args::tests::subcommand_parsing::repo_no_subcommand_is_default
+        PASS [   0.021s] ( 84/857) sniff-cli args::tests::subcommand_parsing::old_top_level_programs_command_rejected
+        PASS [   0.019s] ( 85/857) sniff-cli args::tests::subcommand_parsing::repo_pr_default_status_open
+        PASS [   0.018s] ( 86/857) sniff-cli args::tests::subcommand_parsing::repo_pr_invalid_status_shows_valid_values
+        PASS [   0.020s] ( 87/857) sniff-cli args::tests::subcommand_parsing::repo_pr_status_draft_with_json
+        PASS [   0.019s] ( 88/857) sniff-cli args::tests::subcommand_parsing::repo_pr_verbose_global_flag
+        PASS [   0.021s] ( 89/857) sniff-cli args::tests::subcommand_parsing::repo_pr_status_merged
+        PASS [   0.016s] ( 90/857) sniff-cli args::tests::subcommand_parsing::repo_structure_flags_and_filter_parse
+        PASS [   0.017s] ( 91/857) sniff-cli args::tests::subcommand_parsing::runtime_subcommand_parses
+        PASS [   0.018s] ( 92/857) sniff-cli args::tests::subcommand_parsing::repo_unknown_positional_errors
+        PASS [   0.025s] ( 93/857) sniff-cli args::tests::subcommand_parsing::repo_subcommands_parse
+        PASS [   0.015s] ( 94/857) sniff-cli args::tests::subcommand_parsing::software_editors_install_no_name_parses
+        PASS [   0.015s] ( 95/857) sniff-cli args::tests::subcommand_parsing::software_editors_without_action_parses
+        PASS [   0.016s] ( 96/857) sniff-cli args::tests::subcommand_parsing::software_editors_install_with_name_parses
+        PASS [   0.017s] ( 97/857) sniff-cli args::tests::subcommand_parsing::software_install_with_name_parses
+        PASS [   0.020s] ( 98/857) sniff-cli args::tests::subcommand_parsing::software_install_no_name_parses
+        PASS [   0.014s] ( 99/857) sniff-cli commands::tests::aggregate_json_requests_status_and_config_without_worktree_status
+        PASS [   0.014s] (100/857) sniff-cli commands::tests::changes_only_actions_skip_worktree_enumeration
+        PASS [   0.020s] (101/857) sniff-cli commands::tests::full_repo_action_keeps_worktrees
+        PASS [   0.021s] (102/857) sniff-cli commands::tests::completions_help_detection
+        PASS [   0.019s] (103/857) sniff-cli install::tests::install_selected_via_interview_fn_exists
+        PASS [   0.022s] (104/857) sniff-cli install::tests::install_selected_via_interview_accepts_empty_slice
+        PASS [   0.020s] (105/857) sniff-cli install::tests::resolve_agent_by_snake_case
+        PASS [   0.019s] (106/857) sniff-cli install::tests::resolve_editor_by_binary_name
+        PASS [   0.020s] (107/857) sniff-cli install::tests::resolve_editor_by_snake_case
+        PASS [   0.019s] (108/857) sniff-cli install::tests::resolve_editor_by_display_name
+        PASS [   0.047s] (109/857) sniff-cli commands::tests::aggregate_command_path_discovers_and_walks_status_once
+        PASS [   0.015s] (110/857) sniff-cli install::tests::resolve_editor_case_insensitive_binary
+        PASS [   0.014s] (111/857) sniff-cli install::tests::resolve_program_unknown_name_errors
+        PASS [   0.015s] (112/857) sniff-cli install::tests::resolve_program_editor_by_binary
+        PASS [   0.011s] (113/857) sniff-cli install::tests::resolve_program_utility_alternate
+        PASS [   0.015s] (114/857) sniff-cli install::tests::resolve_editor_invalid_name
+        PASS [   0.013s] (115/857) sniff-cli install::tests::resolve_utility_by_binary_name
+        PASS [   0.054s] (116/857) sniff-cli commands::tests::aggregate_command_path_observes_no_markdown_or_formatting
+        PASS [   0.013s] (117/857) sniff-cli install_plan_cmd::tests::apply_via_is_noop_when_manager_already_chosen
+        PASS [   0.015s] (118/857) sniff-cli install_plan_cmd::tests::apply_via_overrides_chosen_with_lower_priority_alternative
+        PASS [   0.013s] (119/857) sniff-cli install_plan_cmd::tests::apply_via_rejects_ineligible_method
+        PASS [   0.014s] (120/857) sniff-cli install_plan_cmd::tests::apply_via_unknown_manager_lists_valid_managers
+        PASS [   0.016s] (121/857) sniff-cli install_plan_cmd::tests::failure_lists_all_options_and_website
+        PASS [   0.015s] (122/857) sniff-cli install_plan_cmd::tests::render_install_plan_with_real_terminal_contains_program_and_manager
+        PASS [   0.016s] (123/857) sniff-cli install_plan_cmd::tests::render_install_plan_default_wrapper_still_works
+        PASS [   0.013s] (124/857) sniff-cli install_plan_cmd::tests::should_require_remote_bash_consent_false_for_brew
+        PASS [   0.020s] (125/857) sniff-cli install_plan_cmd::tests::execute_install_flow_dry_run_delegates_to_interview_runner
+        PASS [   0.014s] (126/857) sniff-cli install_plan_cmd::tests::should_require_remote_bash_consent_returns_true_for_remote_bash
+        PASS [   0.014s] (127/857) sniff-cli install_plan_cmd::tests::success_without_sudo_mentions_brew
+        PASS [   0.017s] (128/857) sniff-cli install_plan_cmd::tests::success_with_sudo_mentions_sudo_warning
+        PASS [   0.018s] (129/857) sniff-cli install_plan_cmd::tests::verbose_success_prints_skipped_options
+        PASS [   0.018s] (130/857) sniff-cli install_ui::tests::announcement_is_rendered_as_prose
+        PASS [   0.013s] (131/857) sniff-cli output::filesystem::path_format::tests::basename_filepath_escapes_underscores
+        PASS [   0.013s] (132/857) sniff-cli output::filesystem::path_format::tests::filepath_without_underscores_unchanged
+        PASS [   0.019s] (133/857) sniff-cli install_ui::tests::blank_line_is_emitted_after_captured_output
+        PASS [   0.019s] (134/857) sniff-cli install_ui::tests::status_success_is_rendered_with_status_component
+        PASS [   0.012s] (135/857) sniff-cli output::filesystem::path_format::tests::git_status_filepath_escapes_underscores_in_filename
+        PASS [   0.019s] (136/857) sniff-cli install_ui::tests::timeout_warning_is_rendered_as_prose
+        PASS [   0.021s] (137/857) sniff-cli install_ui::tests::stdout_captured_output_is_rendered_in_block_quote
+        PASS [   0.017s] (138/857) sniff-cli output::filesystem::path_format::tests::styled_filepath_escapes_underscores_in_filename
+        PASS [   0.014s] (139/857) sniff-cli output::filesystem::tests::area_hierarchy::keeps_area_top_level_when_parent_is_missing
+        PASS [   0.015s] (140/857) sniff-cli output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_some_false_when_clean
+        PASS [   0.016s] (141/857) sniff-cli output::filesystem::tests::area_hierarchy::nests_child_areas_under_present_parents
+        PASS [   0.013s] (142/857) sniff-cli output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_some_true_when_dirty_in_area
+        PASS [   0.017s] (143/857) sniff-cli output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_none_when_outside_repo
+        PASS [   0.014s] (144/857) sniff-cli output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_counts_file_changes_source_files
+        PASS [   0.015s] (145/857) sniff-cli output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_counts_source_files_only
+        PASS [   0.015s] (146/857) sniff-cli output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_false_when_only_docs_dirty
+        PASS [   0.018s] (147/857) sniff-cli output::filesystem::tests::boolean_helpers::identity_only_git_info_yields_indeterminate_not_panic
+        PASS [   0.015s] (148/857) sniff-cli output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_ignores_file_changes_docs
+        PASS [   0.012s] (149/857) sniff-cli output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_none_when_outside_repo
+        PASS [   0.013s] (150/857) sniff-cli output::filesystem::tests::deps_dot::focus_omits_edges_between_external_only
+        PASS [   0.013s] (151/857) sniff-cli output::filesystem::tests::deps_dot::groups_packages_by_area
+        PASS [   0.015s] (152/857) sniff-cli output::filesystem::tests::deps_dot::focus_groups_focus_subgraph_and_floats_external_nodes
+        PASS [   0.015s] (153/857) sniff-cli output::filesystem::tests::deps_dot::generates_digraph_with_edges
+        PASS [   0.014s] (154/857) sniff-cli output::filesystem::tests::deps_dot::returns_none_when_no_edges
+        PASS [   0.018s] (155/857) sniff-cli output::filesystem::tests::deps_dot::cross_area_edges
+        PASS [   0.017s] (156/857) sniff-cli output::filesystem::tests::docs_output_rendering::non_verbose_document_list_on_stdout
+        PASS [   0.016s] (157/857) sniff-cli output::filesystem::tests::docs_output_rendering::non_verbose_output_has_footer_on_stderr
+        PASS [   0.015s] (158/857) sniff-cli output::filesystem::tests::docs_output_rendering::non_verbose_output_has_header_on_stderr
+        PASS [   0.018s] (159/857) sniff-cli output::filesystem::tests::docs_output_rendering::prompt_count_shown_in_header
+        PASS [   0.015s] (160/857) sniff-cli output::filesystem::tests::docs_output_rendering::verbose_includes_frontmatter_properties
+        PASS [   0.015s] (161/857) sniff-cli output::filesystem::tests::docs_output_rendering::verbose_includes_updated_with_provenance
+        PASS [   0.013s] (162/857) sniff-cli output::filesystem::tests::filter_packages_tests::area_filter
+        PASS [   0.018s] (163/857) sniff-cli output::filesystem::tests::docs_output_rendering::verbose_h1_title_provenance
+        PASS [   0.018s] (164/857) sniff-cli output::filesystem::tests::docs_output_rendering::verbose_none_title_has_provenance
+        PASS [   0.016s] (165/857) sniff-cli output::filesystem::tests::docs_output_rendering::verbose_output_includes_title_with_provenance
+        PASS [   0.014s] (166/857) sniff-cli output::filesystem::tests::filter_packages_tests::multiple_filters_with_or_logic
+        PASS [   0.013s] (167/857) sniff-cli output::filesystem::tests::filter_packages_tests::no_filter_returns_all
+        PASS [   0.015s] (168/857) sniff-cli output::filesystem::tests::filter_packages_tests::name_filter
+        PASS [   0.013s] (169/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_collapses_exact_match_to_bare_prefix
+        PASS [   0.013s] (170/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_falls_back_to_home_tilde
+        PASS [   0.012s] (171/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_offsets_against_env_var
+        PASS [   0.013s] (172/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_ignores_non_absolute_and_falls_back_to_absolute
+        PASS [   0.013s] (173/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_picks_longest_prefix_then_name_for_ties
+        PASS [   0.012s] (174/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_windows_does_not_alias_across_drives
+        PASS [   0.014s] (175/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_skips_positional_shell_vars
+        PASS [   0.015s] (176/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_prefers_tilde_over_shorter_env_offset
+        PASS [   0.013s] (177/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_windows_drive_letter_path_uses_home_tilde
+        PASS [   0.013s] (178/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_windows_env_var_names_are_case_insensitive
+        PASS [   0.014s] (179/857) sniff-cli output::filesystem::tests::git_status_rendering::alias_path_windows_skips_userprofile_alias
+        PASS [   0.016s] (180/857) sniff-cli output::filesystem::tests::git_status_rendering::compact_git_status_omits_meta_section
+        PASS [   0.017s] (181/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_case_a_uses_directory_name_and_relative_path
+        PASS [   0.019s] (182/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_case_a_linked_worktree_shows_main_and_current
+        PASS [   0.020s] (183/857) sniff-cli output::filesystem::tests::git_status_rendering::conflicted_files_render_last_and_untracked_is_dimmed
+        PASS [   0.017s] (184/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_headers_use_double_underline_markup
+        PASS [   0.018s] (185/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_case_b_main_branch_shows_current_and_others
+        PASS [   0.018s] (186/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_main_worktree_on_non_main_branch_is_case_b
+        PASS [   0.020s] (187/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_detached_head_in_linked_worktree_renders_case_a
+        PASS [   0.020s] (188/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_master_default_main_worktree_is_case_b
+        PASS [   0.017s] (189/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_no_worktrees_omits_section_and_adds_status_bullets
+        PASS [   0.019s] (190/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_sections_have_single_blank_line_separator
+        PASS [   0.014s] (191/857) sniff-cli output::filesystem::tests::git_status_rendering::relative_path_between_labels_worktree_paths
+        PASS [   0.016s] (192/857) sniff-cli output::filesystem::tests::git_status_rendering::merge_commit_line_includes_time_segment
+        PASS [   0.016s] (193/857) sniff-cli output::filesystem::tests::hash_section::omits_bullet_section_when_no_body
+        PASS [   0.017s] (194/857) sniff-cli output::filesystem::tests::hash_section::renders_body_bullet_points
+        PASS [   0.016s] (195/857) sniff-cli output::filesystem::tests::git_status_rendering::git_status_single_linked_worktree_counts_correctly
+        PASS [   0.014s] (196/857) sniff-cli output::filesystem::tests::monorepo_label::label_is_authority_alone_with_no_orchestrators
+        PASS [   0.013s] (197/857) sniff-cli output::filesystem::tests::monorepo_label::label_joins_every_orchestrator_in_layer_order
+        PASS [   0.013s] (198/857) sniff-cli output::filesystem::tests::monorepo_label::label_wraps_single_orchestrator_with_authority
+        PASS [   0.019s] (199/857) sniff-cli output::filesystem::tests::hash_section::renders_commit_header_with_author
+        PASS [   0.013s] (200/857) sniff-cli output::filesystem::tests::package_area_root::normal_area_returns_package_area
+        PASS [   0.013s] (201/857) sniff-cli output::filesystem::tests::package_area_root::multi_segment_area_returns_full_package_area
+        PASS [   0.014s] (202/857) sniff-cli output::filesystem::tests::package_area_root::mismatched_area_falls_back_to_relative_first_component
+        PASS [   0.016s] (203/857) sniff-cli output::filesystem::tests::path_list_rendering::csv_format_comma_separated
+        PASS [   0.016s] (204/857) sniff-cli output::filesystem::tests::path_list_rendering::empty_paths_produces_empty_output
+        PASS [   0.017s] (205/857) sniff-cli output::filesystem::tests::package_area_root::top_level_area_returns_repo_root
+        PASS [   0.016s] (206/857) sniff-cli output::filesystem::tests::path_list_rendering::lines_format_one_path_per_line
+        PASS [   0.013s] (207/857) sniff-cli output::filesystem::tests::repo_filter_matches::area_match
+        PASS [   0.018s] (208/857) sniff-cli output::filesystem::tests::path_list_rendering::bullet_list_format_has_bullet_prefix
+        PASS [   0.016s] (209/857) sniff-cli output::filesystem::tests::path_list_rendering::no_path_shows_basename_only
+        PASS [   0.013s] (210/857) sniff-cli output::filesystem::tests::repo_filter_matches::area_no_match
+        PASS [   0.014s] (211/857) sniff-cli output::filesystem::tests::repo_filter_matches::case_insensitive
+        PASS [   0.014s] (212/857) sniff-cli output::filesystem::tests::repo_filter_matches::name_substring_match
+        PASS [   0.013s] (213/857) sniff-cli output::filesystem::tests::repo_filter_matches::negated_includes_non_matching
+        PASS [   0.012s] (214/857) sniff-cli output::filesystem::tests::repo_filter_parse::area
+        PASS [   0.014s] (215/857) sniff-cli output::filesystem::tests::repo_filter_matches::negated_excludes
+        PASS [   0.013s] (216/857) sniff-cli output::filesystem::tests::repo_filter_parse::negated
+        PASS [   0.014s] (217/857) sniff-cli output::filesystem::tests::repo_filter_parse::area_negated
+        PASS [   0.015s] (218/857) sniff-cli output::filesystem::tests::repo_filter_matches::name_substring_no_match
+        PASS [   0.014s] (219/857) sniff-cli output::filesystem::tests::repo_filter_parse::negated_area
+        PASS [   0.014s] (220/857) sniff-cli output::filesystem::tests::repo_filter_parse::simple_name
+        PASS [   0.013s] (221/857) sniff-cli output::filesystem::tests::select_package_family::dirty_package_areas_picks_up_modified_files
+        PASS [   0.014s] (222/857) sniff-cli output::filesystem::tests::select_package_family::dirty_packages_honors_filter
+        PASS [   0.014s] (223/857) sniff-cli output::filesystem::tests::select_package_family::dirty_packages_returns_empty_when_not_monorepo
+        PASS [   0.015s] (224/857) sniff-cli output::filesystem::tests::select_package_family::dirty_packages_picks_up_modified_files
+        PASS [   0.013s] (225/857) sniff-cli output::hardware::audio_format_tests::khz_fractional_khz
+        PASS [   0.016s] (226/857) sniff-cli output::filesystem::tests::select_package_family::unstaged_packages_picks_up_modified_changes
+        PASS [   0.013s] (227/857) sniff-cli output::hardware::audio_format_tests::khz_integer_khz
+        PASS [   0.017s] (228/857) sniff-cli output::filesystem::tests::select_package_family::staged_and_unstaged_return_empty_when_not_monorepo
+        PASS [   0.017s] (229/857) sniff-cli output::filesystem::tests::select_package_family::staged_packages_picks_up_staged_changes
+        PASS [   0.012s] (230/857) sniff-cli output::hardware::audio_format_tests::khz_sub_khz_or_weird
+        PASS [   0.013s] (231/857) sniff-cli output::hardware::audio_format_tests::khz_zero_returns_empty
+        PASS [   0.013s] (232/857) sniff-cli output::hardware::audio_kind_tests::bluetooth
+        PASS [   0.013s] (233/857) sniff-cli output::hardware::audio_kind_tests::hdmi
+        PASS [   0.015s] (234/857) sniff-cli output::hardware::audio_kind_tests::built_in
+        PASS [   0.012s] (235/857) sniff-cli output::hardware::audio_kind_tests::unknown_is_plain
+        PASS [   0.015s] (236/857) sniff-cli output::hardware::audio_kind_tests::thunderbolt
+        PASS [   0.013s] (237/857) sniff-cli output::hardware::audio_line_tests::current_rate_not_in_available_list_is_still_rendered_bold
+        PASS [   0.013s] (238/857) sniff-cli output::hardware::audio_kind_tests::virtual_kind
+        PASS [   0.014s] (239/857) sniff-cli output::hardware::audio_line_tests::input_side_omits_default_output_marker
+        PASS [   0.013s] (240/857) sniff-cli output::hardware::audio_line_tests::missing_rates_drops_the_rate_segment
+        PASS [   0.015s] (241/857) sniff-cli output::hardware::audio_kind_tests::usb
+        PASS [   0.013s] (242/857) sniff-cli output::hardware::audio_line_tests::name_suffix_is_appended_before_parens
+        PASS [   0.014s] (243/857) sniff-cli output::hardware::audio_line_tests::output_side_shows_default_marker
+        PASS [   0.013s] (244/857) sniff-cli output::hardware::audio_suffix_tests::collision_leaves_non_colliding_devices_empty
+        PASS [   0.016s] (245/857) sniff-cli output::hardware::audio_section_tests::default_markers_are_side_specific
+        PASS [   0.016s] (246/857) sniff-cli output::hardware::audio_section_tests::empty_input_group_shows_none_placeholder
+        PASS [   0.013s] (247/857) sniff-cli output::hardware::audio_suffix_tests::collision_three_way
+        PASS [   0.016s] (248/857) sniff-cli output::hardware::audio_section_tests::empty_device_list_emits_concise_message
+        PASS [   0.015s] (249/857) sniff-cli output::hardware::audio_section_tests::title_and_footer_appear
+        PASS [   0.015s] (250/857) sniff-cli output::hardware::audio_section_tests::verbose_one_adds_channel_counts
+        PASS [   0.017s] (251/857) sniff-cli output::hardware::audio_section_tests::verbose_two_adds_uid
+        PASS [   0.017s] (252/857) sniff-cli output::hardware::audio_suffix_tests::collision_uses_numeric_suffix_ordered_by_uid
+        PASS [   0.014s] (253/857) sniff-cli output::hardware::audio_suffix_tests::no_collision_no_suffix
+        PASS [   0.013s] (254/857) sniff-cli output::perf_tree::tests::a_domain_stage_reparents_below_an_existing_detect_branch
+        PASS [   0.013s] (255/857) sniff-cli output::perf_tree::tests::a_domain_stage_stays_generic_when_its_detect_branch_is_absent
+        PASS [   0.014s] (256/857) sniff-cli output::perf_tree::tests::a_measured_counter_parent_keeps_its_count_and_a_synthetic_parent_sums_children
+        PASS [   0.014s] (257/857) sniff-cli output::perf_tree::tests::a_malformed_report_projects_without_panicking
+        PASS [   0.014s] (258/857) sniff-cli output::perf_tree::tests::a_measured_parent_keeps_its_own_duration_and_a_synthetic_parent_sums_children
+        PASS [   0.014s] (259/857) sniff-cli output::perf_tree::tests::a_single_segment_stage_is_a_direct_child_of_the_root
+        PASS [   0.015s] (260/857) sniff-cli output::perf_tree::tests::a_total_only_report_yields_a_bare_root_with_no_marker
+        PASS [   0.012s] (261/857) sniff-cli output::perf_tree::tests::an_empty_counter_map_produces_no_tree
+        PASS [   0.016s] (262/857) sniff-cli output::perf_tree::tests::a_zero_duration_report_yields_unknown_shares_and_no_non_finite_values
+        PASS [   0.012s] (263/857) sniff-cli output::perf_tree::tests::an_empty_stage_map_yields_a_bare_root_with_no_marker
+        PASS [   0.013s] (264/857) sniff-cli output::perf_tree::tests::an_equal_duration_tie_breaks_on_the_full_dotted_stage_name
+        PASS [   0.013s] (265/857) sniff-cli output::perf_tree::tests::calls_surface_above_one_and_stay_absent_at_one
+        PASS [   0.015s] (266/857) sniff-cli output::perf_tree::tests::at_most_one_hot_node_exists_for_every_projected_report
+        PASS [   0.013s] (267/857) sniff-cli output::perf_tree::tests::counter_nodes_carry_counts_and_never_a_marker_or_call_count
+        PASS [   0.014s] (268/857) sniff-cli output::perf_tree::tests::counter_names_never_reparent_and_are_never_suppressed
+        PASS [   0.013s] (269/857) sniff-cli output::perf_tree::tests::counter_siblings_sort_by_count_descending_then_label_ascending
+        PASS [   0.013s] (270/857) sniff-cli output::perf_tree::tests::detect_total_is_the_root_and_never_a_child
+        PASS [   0.013s] (271/857) sniff-cli output::perf_tree::tests::extreme_counter_values_saturate_rather_than_overflowing
+        PASS [   0.023s] (272/857) sniff-cli output::perf_tree::tests::connectors_and_the_hot_marker_follow_the_terminal_unicode_capability
+        PASS [   0.018s] (273/857) sniff-cli output::perf_tree::tests::every_counter_share_is_unknown_and_only_the_component_renders_the_root_full
+        PASS [   0.016s] (274/857) sniff-cli output::perf_tree::tests::ms_to_duration_collapses_non_finite_and_negative_input
+        PASS [   0.014s] (275/857) sniff-cli output::perf_tree::tests::nested_counter_names_nest_generically
+        PASS [   0.013s] (276/857) sniff-cli output::perf_tree::tests::synthetic_intermediates_are_never_hot
+        PASS [   0.013s] (277/857) sniff-cli output::perf_tree::tests::only_the_four_detection_domains_reparent
+        PASS [   0.014s] (278/857) sniff-cli output::perf_tree::tests::siblings_sort_by_duration_descending_then_label_ascending
+        PASS [   0.016s] (279/857) sniff-cli output::perf_tree::tests::shares_are_of_wall_clock_and_are_not_clamped
+        PASS [   0.023s] (280/857) sniff-cli output::perf_tree::tests::the_baseline_counter_key_set_projects_to_the_expected_shape
+        PASS [   0.013s] (281/857) sniff-cli output::recent_commits_prose_layout::colorless_terminal_drops_color_and_emphasis_sequences
+        PASS [   0.017s] (282/857) sniff-cli output::perf_tree::tests::the_baseline_key_set_projects_to_the_expected_shape
+        PASS [   0.017s] (283/857) sniff-cli output::perf_tree::tests::the_largest_measured_non_root_stage_is_the_sole_hot_node
+        PASS [   0.016s] (284/857) sniff-cli output::perf_tree::tests::the_overlap_note_reaches_the_rendered_tree
+        PASS [   0.014s] (285/857) sniff-cli output::recent_commits_prose_layout::single_render_emits_styles_and_osc8_links_when_supported
+        PASS [   0.018s] (286/857) sniff-cli output::recent_commits_prose_layout::escaped_markup_in_commit_text_renders_literally
+        PASS [   0.017s] (287/857) sniff-cli output::recent_commits_prose_layout::links_fall_back_to_markdown_without_osc8_support
+        PASS [   0.020s] (288/857) sniff-cli output::recent_commits_prose_layout::colorless_terminal_keeps_every_visible_line
+        PASS [   0.015s] (289/857) sniff-cli output::remote::tests::test_cicd_status_cell_cancelled_dim_circle
+        PASS [   0.015s] (290/857) sniff-cli output::remote::tests::test_cicd_status_cell_failure_red_cross
+        PASS [   0.015s] (291/857) sniff-cli output::remote::tests::test_cicd_status_cell_action_required
+        PASS [   0.011s] (292/857) sniff-cli output::remote::tests::test_cicd_status_cell_in_progress_dim_status_text
+        PASS [   0.012s] (293/857) sniff-cli output::remote::tests::test_cicd_status_cell_neutral
+        PASS [   0.018s] (294/857) sniff-cli output::recent_commits_prose_layout::word_wrap_layout_keeps_source_lines_and_wraps_within_width
+        PASS [   0.020s] (295/857) sniff-cli output::recent_commits_prose_layout::single_render_preserves_every_line_and_blank_line_without_inflation
+        PASS [   0.013s] (296/857) sniff-cli output::remote::tests::test_cicd_status_cell_pending_dim_status_text
+        PASS [   0.014s] (297/857) sniff-cli output::remote::tests::test_cicd_status_cell_no_conclusion_shows_status
+        PASS [   0.015s] (298/857) sniff-cli output::remote::tests::test_cicd_status_cell_renders_green_ansi_on_color_terminal
+        PASS [   0.015s] (299/857) sniff-cli output::remote::tests::test_cicd_status_cell_queued_dim_status_text
+        PASS [   0.015s] (300/857) sniff-cli output::remote::tests::test_cicd_status_cell_renders_red_ansi_on_color_terminal
+        PASS [   0.012s] (301/857) sniff-cli output::remote::tests::test_cicd_status_cell_success_green_check
+        PASS [   0.015s] (302/857) sniff-cli output::remote::tests::test_cicd_status_cell_skipped_dim_circle
+        PASS [   0.013s] (303/857) sniff-cli output::remote::tests::test_cicd_status_cell_unknown_conclusion
+        PASS [   0.014s] (304/857) sniff-cli output::remote::tests::test_cicd_status_cell_timed_out
+        PASS [   0.013s] (305/857) sniff-cli output::remote::tests::test_cicd_status_cell_waiting_dim_status_text
+        PASS [   0.013s] (306/857) sniff-cli output::remote::tests::test_pr_state_display_closed
+        PASS [   0.013s] (307/857) sniff-cli output::remote::tests::test_pr_state_display_open
+        PASS [   0.013s] (308/857) sniff-cli output::remote::tests::test_pr_state_display_unknown
+        PASS [   0.014s] (309/857) sniff-cli output::remote::tests::test_pr_state_display_merged
+        PASS [   0.013s] (310/857) sniff-cli output::remote::tests::test_print_remote_json_succeeds
+        PASS [   0.012s] (311/857) sniff-cli output::remote::tests::test_relative_time_hours_ago
+        PASS [   0.013s] (312/857) sniff-cli output::remote::tests::test_relative_time_days_ago
+        PASS [   0.014s] (313/857) sniff-cli output::remote::tests::test_relative_time_just_now
+        PASS [   0.013s] (314/857) sniff-cli output::remote::tests::test_relative_time_minutes_ago
+        PASS [   0.015s] (315/857) sniff-cli output::remote::tests::test_relative_time_invalid_iso_returns_original
+        PASS [   0.066s] (316/857) sniff-cli output::perf_tree::tests::the_production_key_set_renders_clean_on_narrow_terminals
+        PASS [   0.012s] (317/857) sniff-cli output::remote::tests::test_relative_time_months_ago
+        PASS [   0.013s] (318/857) sniff-cli output::remote::tests::test_relative_time_one_day_ago
+        PASS [   0.014s] (319/857) sniff-cli output::remote::tests::test_relative_time_one_hour_ago
+        PASS [   0.015s] (320/857) sniff-cli output::remote::tests::test_relative_time_one_minute_ago
+        PASS [   0.013s] (321/857) sniff-cli output::remote::tests::test_relative_time_one_week_ago
+        PASS [   0.015s] (322/857) sniff-cli output::remote::tests::test_relative_time_one_month_ago
+        PASS [   0.013s] (323/857) sniff-cli output::remote::tests::test_relative_time_years_ago
+        PASS [   0.013s] (324/857) sniff-cli output::remote::tests::test_relative_time_weeks_ago
+        PASS [   0.015s] (325/857) sniff-cli output::remote::tests::test_relative_time_one_year_ago
+        PASS [   0.013s] (326/857) sniff-cli output::remote::tests::test_render_cicd_empty
+        PASS [   0.014s] (327/857) sniff-cli output::remote::tests::test_render_cicd_mixed_run_and_presence_prefers_table
+        PASS [   0.014s] (328/857) sniff-cli output::remote::tests::test_render_pull_requests_empty_message_all
+        PASS [   0.014s] (329/857) sniff-cli output::remote::tests::test_render_cicd_presence_only_fallback
+        PASS [   0.014s] (330/857) sniff-cli output::remote::tests::test_render_cicd_run_shaped_multiple_runs
+        PASS [   0.013s] (331/857) sniff-cli output::remote::tests::test_render_pull_requests_empty_message_open
+        PASS [   0.016s] (332/857) sniff-cli output::remote::tests::test_render_cicd_run_shaped_table
+        PASS [   0.016s] (333/857) sniff-cli output::remote::tests::test_render_pull_requests_empty_message_merged
+        PASS [   0.014s] (334/857) sniff-cli output::remote::tests::test_render_pull_requests_table_basic
+        PASS [   0.015s] (335/857) sniff-cli output::remote::tests::test_render_pull_requests_table_draft_marker
+        PASS [   0.016s] (336/857) sniff-cli output::remote::tests::test_render_pull_requests_table_closed_state
+        PASS [   0.012s] (337/857) sniff-cli output::remote::tests::test_render_pull_requests_table_empty
+        PASS [   0.014s] (338/857) sniff-cli output::remote::tests::test_render_pull_requests_table_merged_state
+        PASS [   0.015s] (339/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_draft_marker
+        PASS [   0.014s] (340/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_empty
+        PASS [   0.015s] (341/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_basic
+        PASS [   0.015s] (342/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_merged_state
+        PASS [   0.015s] (343/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_omits_labels_when_empty
+        PASS [   0.018s] (344/857) sniff-cli output::remote::tests::test_render_pull_requests_verbose_with_labels_and_body
+        PASS [   0.016s] (345/857) sniff-cli output::remote::tests::test_render_remote_text_issues_relabeled
+        PASS [   0.016s] (346/857) sniff-cli output::remote::tests::test_render_remote_text_shows_pr_count
+        PASS [   0.020s] (347/857) sniff-cli output::remote::tests::test_render_remote_text_includes_cicd_table
+        PASS [   0.014s] (348/857) sniff-cli output::render::tests::test_format_uptime_days
+        PASS [   0.019s] (349/857) sniff-cli output::remote::tests::test_render_remote_text_shows_zero_pr_count_when_empty
+        PASS [   0.015s] (350/857) sniff-cli output::render::tests::test_format_uptime_long
+        PASS [   0.013s] (351/857) sniff-cli output::render::tests::test_format_uptime_minutes
+        PASS [   0.016s] (352/857) sniff-cli output::render::tests::test_format_uptime_hours
+        PASS [   0.012s] (353/857) sniff-cli output::render::tests::test_format_uptime_seconds
+        PASS [   0.021s] (354/857) sniff-cli output::render::tests::a_report_with_no_stages_renders_the_root_alone
+        PASS [   0.021s] (355/857) sniff-cli output::render::tests::a_malformed_report_renders_without_panicking
+        PASS [   0.014s] (356/857) sniff-cli output::render::tests::test_format_uptime_zero
+        PASS [   0.019s] (357/857) sniff-cli output::render::tests::the_counter_tree_follows_the_timing_tree_after_a_blank_line
+        PASS [   0.017s] (358/857) sniff-cli output::render::tests::the_performance_section_keeps_its_heading_and_one_trailing_newline
+        PASS [   0.018s] (359/857) sniff-cli output::render::tests::the_counter_tree_is_omitted_when_the_report_has_no_counters
+        PASS [   0.019s] (360/857) sniff-cli output::render::tests::the_timing_tree_replaces_the_flat_stage_list
+        PASS [   0.012s] (361/857) sniff-cli output::repo_json::tests::aggregate::aggregate_observation_errors_instead_of_yielding_partial_json
+        PASS [   0.015s] (362/857) sniff-cli output::repo_json::tests::aggregate::aggregate_projects_the_observed_repo_version
+        PASS [   0.035s] (363/857) sniff-cli output::repo_json::tests::aggregate::aggregate_commit_family_leaves_are_bare_arrays
+        PASS [   0.035s] (364/857) sniff-cli output::repo_json::tests::aggregate::aggregate_carries_the_default_commit_family_set
+        PASS [   0.031s] (365/857) sniff-cli output::repo_json::tests::aggregate::aggregate_includes_consolidated_keys
+        PASS [   0.035s] (366/857) sniff-cli output::repo_json::tests::aggregate::aggregate_excludes_network_parameterized_and_old_kebab_keys
+        PASS [   0.035s] (367/857) sniff-cli output::repo_json::tests::aggregate::aggregate_does_not_duplicate_full_package_catalogs
+        PASS [   0.038s] (368/857) sniff-cli output::repo_json::tests::aggregate::aggregate_context_groups_cwd_relative_facts
+        PASS [   0.015s] (369/857) sniff-cli output::repo_json::tests::aggregate::file_list_value_returns_stable_shape
+        PASS [   0.015s] (370/857) sniff-cli output::repo_json::tests::aggregate::package_manager_and_test_runner_collapse_to_singular_string
+        PASS [   0.029s] (371/857) sniff-cli output::repo_json::tests::aggregate::aggregate_worktrees_and_branches_are_top_level_arrays
+        PASS [   0.031s] (372/857) sniff-cli output::repo_json::tests::aggregate::aggregate_scope_buckets_have_stable_empty_shape
+        PASS [   0.013s] (373/857) sniff-cli output::repo_json::tests::aggregate::package_manager_and_test_runner_null_without_packages
+        PASS [   0.013s] (374/857) sniff-cli output::repo_json::tests::aggregate::package_manager_collapses_divergent_set_to_list
+        PASS [   0.014s] (375/857) sniff-cli output::repo_json::tests::build_git_status_returns_git_info_shape
+        PASS [   0.014s] (376/857) sniff-cli output::repo_json::tests::build_git_status_without_filesystem_returns_empty_object
+        PASS [   0.016s] (377/857) sniff-cli output::repo_json::tests::aggregate_projection::build_aggregate_value_performs_no_observation
+        PASS [   0.013s] (378/857) sniff-cli output::repo_json::tests::build_git_status_without_git_returns_empty_object
+        PASS [   0.016s] (379/857) sniff-cli output::repo_json::tests::aggregate_projection::aggregate_projects_supplied_facts_verbatim
+        PASS [   0.013s] (380/857) sniff-cli output::repo_json::tests::build_without_filesystem_returns_empty_object
+        PASS [   0.014s] (381/857) sniff-cli output::repo_json::tests::build_with_no_action_returns_full_repo_info
+        PASS [   0.014s] (382/857) sniff-cli output::repo_json::tests::deps::deps_action_dispatches_to_deps_builder
+        PASS [   0.016s] (383/857) sniff-cli output::repo_json::tests::build_with_structure_action_matches_no_action
+        PASS [   0.014s] (384/857) sniff-cli output::repo_json::tests::deps::deps_entries_honor_package_area_prefix
+        PASS [   0.016s] (385/857) sniff-cli output::repo_json::tests::deps::deps_entry_has_required_fields
+        PASS [   0.016s] (386/857) sniff-cli output::repo_json::tests::deps::deps_entries_honor_package_filter
+        PASS [   0.017s] (387/857) sniff-cli output::repo_json::tests::deps::deps_entry_includes_non_empty_peer_and_optional
+        PASS [   0.021s] (388/857) sniff-cli output::repo_json::tests::deps::deps_action_ignores_ui_flag
+        PASS [   0.017s] (389/857) sniff-cli output::repo_json::tests::deps::deps_entry_does_not_leak_unrelated_package_fields
+        PASS [   0.013s] (390/857) sniff-cli output::repo_json::tests::deps::deps_value_without_filesystem_returns_empty_packages
+        PASS [   0.017s] (391/857) sniff-cli output::repo_json::tests::deps::deps_entry_omits_empty_peer_and_optional
+        PASS [   0.014s] (392/857) sniff-cli output::repo_json::tests::deps::deps_value_without_repo_returns_empty_packages
+        PASS [   0.014s] (393/857) sniff-cli output::repo_json::tests::deps::deps_value_wraps_in_packages_object
+        PASS [   0.019s] (394/857) sniff-cli output::repo_json::tests::deps::deps_value_honors_filter
+        PASS [   0.014s] (395/857) sniff-cli output::repo_json::tests::git_info_preserved_contract_has_no_aggregate_evidence
+        PASS [   0.014s] (396/857) sniff-cli output::repo_json::tests::deps::deps_value_wraps_packages_array
+        PASS [   0.014s] (397/857) sniff-cli output::repo_json::tests::locators_and_booleans::has_merge_conflict_outcome_true
+        PASS [   0.015s] (398/857) sniff-cli output::repo_json::tests::locators_and_booleans::has_source_code_changes_false_emits_false_and_exit_1
+        PASS [   0.018s] (399/857) sniff-cli output::repo_json::tests::locators_and_booleans::has_merge_conflict_outcome_false
+        PASS [   0.014s] (400/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_dirty_true_emits_dirty_true_and_exit_0
+        PASS [   0.016s] (401/857) sniff-cli output::repo_json::tests::locators_and_booleans::has_source_code_changes_true_emits_true_and_exit_0
+        PASS [   0.014s] (402/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_dirty_false_emits_dirty_false_and_exit_1
+        PASS [   0.014s] (403/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_false_sets_exit_code
+        PASS [   0.017s] (404/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_false_with_no_error_sets_exit_code_zero
+        PASS [   0.014s] (405/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_omits_empty_orchestrators
+        PASS [   0.015s] (406/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_no_error_still_exits_zero
+        PASS [   0.015s] (407/857) sniff-cli output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_shape
+        PASS [   0.014s] (408/857) sniff-cli output::repo_json::tests::locators_and_booleans::name_outcome_empty_sets_exit_code_one
+        PASS [   0.017s] (409/857) sniff-cli output::repo_json::tests::locators_and_booleans::name_outcome_wraps_string
+        PASS [   0.013s] (410/857) sniff-cli output::repo_json::tests::locators_and_booleans::package_count_outcome_wraps_number
+        PASS [   0.015s] (411/857) sniff-cli output::repo_json::tests::locators_and_booleans::package_area_root_absent_emits_empty_root_and_exit_1
+        PASS [   0.016s] (412/857) sniff-cli output::repo_json::tests::locators_and_booleans::package_area_root_present_emits_root_and_no_exit_code
+        PASS [   0.015s] (413/857) sniff-cli output::repo_json::tests::locators_and_booleans::package_root_absent_emits_empty_root_and_exit_1
+        PASS [   0.014s] (414/857) sniff-cli output::repo_json::tests::locators_and_booleans::package_root_present_emits_root_and_no_exit_code
+        PASS [   0.014s] (415/857) sniff-cli output::repo_json::tests::locators_and_booleans::worktrees_value_shapes_entries
+        PASS [   0.017s] (416/857) sniff-cli output::repo_json::tests::locators_and_booleans::worktrees_value_detached_head_omits_branch
+        PASS [   0.015s] (417/857) sniff-cli output::repo_json::tests::monorepo_topology::structure_value_includes_monorepo_topology_when_present
+        PASS [   0.017s] (418/857) sniff-cli output::repo_json::tests::monorepo_topology::aggregate_structure_child_includes_monorepo_topology
+        PASS [   0.013s] (419/857) sniff-cli output::repo_json::tests::monorepo_topology::structure_value_package_carries_standard_and_provenance
+        PASS [   0.014s] (420/857) sniff-cli output::repo_json::tests::monorepo_topology::structure_value_omits_empty_monorepo_topology
+        PASS [   0.013s] (421/857) sniff-cli output::repo_json::tests::package_family::non_monorepo_returns_empty_names_not_prose_error
+        PASS [   0.015s] (422/857) sniff-cli output::repo_json::tests::package_family::dirty_package_areas_action_returns_scope_kind_names
+        PASS [   0.014s] (423/857) sniff-cli output::repo_json::tests::package_family::staged_package_areas_action_returns_scope_kind_names
+        PASS [   0.014s] (424/857) sniff-cli output::repo_json::tests::package_family::unstaged_package_areas_action_returns_scope_kind_names
+        PASS [   0.016s] (425/857) sniff-cli output::repo_json::tests::package_family::staged_packages_action_returns_scope_kind_names
+        PASS [   0.013s] (426/857) sniff-cli output::repo_json::tests::structure::structure_action_with_filter_returns_filtered_value
+        PASS [   0.014s] (427/857) sniff-cli output::repo_json::tests::package_family::unstaged_packages_action_returns_scope_kind_names
+        PASS [   0.022s] (428/857) sniff-cli output::repo_json::tests::package_family::dirty_packages_action_returns_scope_kind_names
+        PASS [   0.013s] (429/857) sniff-cli output::repo_json::tests::structure::structure_no_filter_matches_fallback
+        PASS [   0.013s] (430/857) sniff-cli output::repo_json::tests::structure::structure_with_filter_preserves_other_repo_fields
+        PASS [   0.013s] (431/857) sniff-cli output::repo_json::tests::structure::structure_with_filter_scopes_packages
+        PASS [   0.014s] (432/857) sniff-cli output::repo_json::tests::structure::structure_without_filesystem_returns_empty_object
+        PASS [   0.014s] (433/857) sniff-cli output::repo_json::tests::structure::structure_without_repo_returns_empty_object
+        PASS [   0.013s] (434/857) sniff-cli output::tests::docs_filter::blast_radius_flag_filters_to_blast_radius_docs
+        PASS [   0.014s] (435/857) sniff-cli output::tests::docs_filter::has_prompt_flag_filters_to_prompted_docs
+        PASS [   0.015s] (436/857) sniff-cli output::tests::docs_filter::combined_flags_intersect
+        PASS [   0.015s] (437/857) sniff-cli output::tests::docs_filter::blast_radius_flag_with_filter_intersects
+        PASS [   0.016s] (438/857) sniff-cli output::tests::attach_performance_wraps_non_object_output
+        PASS [   0.018s] (439/857) sniff-cli output::tests::attach_performance_to_object_filter_output
+        PASS [   0.015s] (440/857) sniff-cli output::tests::docs_filter::has_prompt_with_positional_filter_intersects
+        PASS [   0.013s] (441/857) sniff-cli output::tests::docs_filter::no_flags_returns_all
+        PASS [   0.014s] (442/857) sniff-cli output::tests::docs_filter::package_area_filters_by_path_prefix
+        PASS [   0.012s] (443/857) sniff-cli output::tests::docs_filter::package_area_intersects_with_readme
+        PASS [   0.014s] (444/857) sniff-cli output::tests::docs_filter::package_area_is_case_insensitive
+        PASS [   0.013s] (445/857) sniff-cli output::tests::docs_filter::package_is_case_insensitive
+        PASS [   0.013s] (446/857) sniff-cli output::tests::docs_filter::package_excludes_docs_without_package
+        PASS [   0.014s] (447/857) sniff-cli output::tests::docs_filter::package_filters_by_package_name
+        PASS [   0.013s] (448/857) sniff-cli output::tests::docs_filter::package_or_logic_with_multiple_packages
+        PASS [   0.015s] (449/857) sniff-cli output::tests::docs_filter::package_area_or_logic_with_multiple_areas
+        PASS [   0.014s] (450/857) sniff-cli output::tests::docs_filter::plan_flag_matches_filename_and_path
+        PASS [   0.013s] (451/857) sniff-cli output::tests::docs_filter::positional_filter_is_case_insensitive
+        PASS [   0.013s] (452/857) sniff-cli output::tests::docs_filter::positional_filter_matches_substring
+        PASS [   0.014s] (453/857) sniff-cli output::tests::docs_filter::readme_flag_filters_readme_files
+        PASS [   0.015s] (454/857) sniff-cli output::tests::docs_filter::readme_flag_is_case_insensitive
+        PASS [   0.015s] (455/857) sniff-cli output::tests::docs_filter::src_flag_matches_src_in_path
+        PASS [   0.054s] (456/857) sniff-cli::l1 cli::perf_plain_output_is_ansi_free_and_hierarchical
+        PASS [   0.058s] (457/857) sniff-cli::l1 cli::repo_aggregate_json_does_not_duplicate_full_package_catalogs
+        PASS [   0.060s] (458/857) sniff-cli::l1 cli::json_perf_stdout_is_exactly_one_document
+        PASS [   0.059s] (459/857) sniff-cli::l1 cli::repo_aggregate_json_context_groups_cwd_relative_facts
+        PASS [   0.058s] (460/857) sniff-cli::l1 cli::repo_aggregate_json_excludes_network_and_parameterized_keys
+        PASS [   0.058s] (461/857) sniff-cli::l1 cli::repo_aggregate_json_is_offline
+        PASS [   0.053s] (462/857) sniff-cli::l1 cli::repo_aggregate_json_is_valid_object
+        PASS [   0.079s] (463/857) sniff-cli::l1 cli::perf_on_a_scriptable_text_command_stays_off_stdout
+        PASS [   0.071s] (464/857) sniff-cli::l1 cli::repo_aggregate_json_never_re_embeds_the_full_package_catalog
+        PASS [   0.086s] (465/857) sniff-cli::l1 cli::counter_tree_reaches_the_human_report
+        PASS [   0.050s] (466/857) sniff-cli::l1 cli::repo_aggregate_json_not_partial
+        PASS [   0.052s] (467/857) sniff-cli::l1 cli::repo_aggregate_json_scope_buckets_have_stable_shape
+        PASS [   0.052s] (468/857) sniff-cli::l1 cli::repo_aggregate_json_uses_snake_case_and_drops_old_kebab_keys
+        PASS [   0.053s] (469/857) sniff-cli::l1 cli::repo_default_verbose_is_rich_oneliner
+        PASS [   0.042s] (470/857) sniff-cli::l1 cli::repo_is_monorepo_genuine_failure_exits_nonzero_with_stderr_even_with_no_error
+        PASS [   0.044s] (471/857) sniff-cli::l1 cli::repo_is_monorepo_json_in_non_monorepo_exits_nonzero_with_valid_json
+        PASS [   0.072s] (472/857) sniff-cli::l1 cli::repo_default_and_plain_emit_text_with_clean_stderr
+        PASS [   0.073s] (473/857) sniff-cli::l1 cli::repo_default_is_bare_name
+        PASS [   0.080s] (474/857) sniff-cli::l1 cli::repo_aggregate_perf_covers_complete_command
+        PASS [   0.045s] (475/857) sniff-cli::l1 cli::repo_is_monorepo_no_error_exits_zero_when_false
+        PASS [   0.068s] (476/857) sniff-cli::l1 cli::repo_is_monorepo_json_emits_object
+        PASS [   0.050s] (477/857) sniff-cli::l1 cli::repo_is_monorepo_text_prints_label
+        PASS [   0.055s] (478/857) sniff-cli::l1 cli::repo_is_monorepo_text_in_non_monorepo_exits_nonzero_with_false
+        PASS [   0.057s] (479/857) sniff-cli::l1 cli::repo_is_monorepo_text_in_monorepo_exits_zero_with_label
+        PASS [   0.040s] (480/857) sniff-cli::l1 cli::repo_name_json_is_leaf_only
+        PASS [   0.060s] (481/857) sniff-cli::l1 cli::repo_json_output_is_valid_json_on_stdout_with_clean_stderr
+        PASS [   0.045s] (482/857) sniff-cli::l1 cli::repo_name_json_is_still_leaf_only
+        PASS [   0.055s] (483/857) sniff-cli::l1 cli::repo_json_stdout_is_exactly_one_json_document
+        PASS [   0.043s] (484/857) sniff-cli::l1 cli::repo_package_count_json_is_single_key_number
+        PASS [   0.038s] (485/857) sniff-cli::l1 cli::repo_version_json_no_error_exits_zero
+        PASS [   0.045s] (486/857) sniff-cli::l1 cli::repo_package_count_text_is_integer
+        PASS [   0.069s] (487/857) sniff-cli::l1 cli::repo_name_verbose_is_name_only
+        PASS [   0.037s] (488/857) sniff-cli::l1 cli::repo_version_text_absent_exits_one
+        PASS [   0.059s] (489/857) sniff-cli::l1 cli::repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr
+        PASS [   0.055s] (490/857) sniff-cli::l1 cli::repo_version_json_returns_array_shape_under_real_repo
+        PASS [   0.053s] (491/857) sniff-cli::l1 cli::test_bare_repo_json_version_collapses_workspace_inheritance_from_member
+        PASS [   0.057s] (492/857) sniff-cli::l1 cli::test_base_flag_before_subcommand
+        PASS [   0.072s] (493/857) sniff-cli::l1 cli::test_base_flag_after_subcommand_is_accepted
+        PASS [   0.058s] (494/857) sniff-cli::l1 cli::test_blast_radius_json_output
+        PASS [   0.145s] (495/857) sniff-cli::l1 cli::repo_json_succeeds_in_a_shallow_clone
+        PASS [   0.052s] (496/857) sniff-cli::l1 cli::test_blast_radius_no_error_exits_0
+        PASS [   0.049s] (497/857) sniff-cli::l1 cli::test_blast_radius_no_matches_exits_1
+        PASS [   0.062s] (498/857) sniff-cli::l1 cli::test_blast_radius_list_format
+        PASS [   0.068s] (499/857) sniff-cli::l1 cli::test_blast_radius_last_commit_matches_documents
+        PASS [   0.053s] (500/857) sniff-cli::l1 cli::test_blast_radius_on_error_to_stderr
+        PASS [   0.086s] (501/857) sniff-cli::l1 cli::test_blast_radius_dirty_matches_documents
+        PASS [   0.034s] (502/857) sniff-cli::l1 cli::test_completions_bash_shows_setup
+        PASS [   0.067s] (503/857) sniff-cli::l1 cli::test_blast_radius_staged_matches_documents
+        PASS [   0.035s] (504/857) sniff-cli::l1 cli::test_completions_help_flag_shows_setup
+        PASS [   0.042s] (505/857) sniff-cli::l1 cli::test_completions_fish_shows_setup
+        PASS [   0.047s] (506/857) sniff-cli::l1 cli::test_completions_powershell_shows_setup
+        PASS [   0.045s] (507/857) sniff-cli::l1 cli::test_completions_zsh_shows_setup
+        PASS [   0.044s] (508/857) sniff-cli::l1 cli::test_cpu_subcommand_json_output
+        PASS [   0.040s] (509/857) sniff-cli::l1 cli::test_cpu_subcommand_text_output
+        PASS [   0.057s] (510/857) sniff-cli::l1 cli::test_dirty_package_areas_json_shape
+        PASS [   0.057s] (511/857) sniff-cli::l1 cli::test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo
+        PASS [   0.055s] (512/857) sniff-cli::l1 cli::test_docs_blast_radius_filter
+        PASS [   0.067s] (513/857) sniff-cli::l1 cli::test_dirty_packages_json_shape
+        PASS [   0.051s] (514/857) sniff-cli::l1 cli::test_double_verbose_flag
+        PASS [   0.042s] (515/857) sniff-cli::l1 cli::test_dynamic_completions_bash
+        PASS [   0.064s] (516/857) sniff-cli::l1 cli::test_docs_stdout_stderr_split
+        PASS [   0.043s] (517/857) sniff-cli::l1 cli::test_dynamic_completions_fish
+        PASS [   0.041s] (518/857) sniff-cli::l1 cli::test_dynamic_completions_zsh
+        PASS [   0.031s] (519/857) sniff-cli::l1 cli::test_enrichment_flags_in_help
+        PASS [   0.029s] (520/857) sniff-cli::l1 cli::test_filesystem_help_mentions_scoped_flags
+        PASS [   0.039s] (521/857) sniff-cli::l1 cli::test_filesystem_scoped_flags_parse_in_help
+        PASS [   0.038s] (522/857) sniff-cli::l1 cli::test_git_status_help_mentions_refresh_remotes
+        PASS [   0.066s] (523/857) sniff-cli::l1 cli::test_filesystem_subcommand_json_output
+        PASS [   0.081s] (524/857) sniff-cli::l1 cli::test_filesystem_subcommand_text_output
+        PASS [   0.086s] (525/857) sniff-cli::l1 cli::test_git_status_from_main_worktree_renders_case_b
+        PASS [   0.073s] (526/857) sniff-cli::l1 cli::test_git_status_json_is_git_info
+        PASS [   0.062s] (527/857) sniff-cli::l1 cli::test_git_status_json_perf_attaches_performance_field
+        PASS [   0.108s] (528/857) sniff-cli::l1 cli::test_git_status_from_linked_worktree_renders_case_a
+        PASS [   0.301s] (529/857) sniff-cli::l1 cli::test_commit_family_json_ignores_display_flags
+        PASS [   0.101s] (530/857) sniff-cli::l1 cli::test_git_status_json_with_package_scope
+        PASS [   0.062s] (531/857) sniff-cli::l1 cli::test_git_status_subcommand_compact_output
+        PASS [   0.065s] (532/857) sniff-cli::l1 cli::test_git_status_subcommand_json_output
+        PASS [   0.061s] (533/857) sniff-cli::l1 cli::test_git_status_subcommand_text_output
+        PASS [   0.083s] (534/857) sniff-cli::l1 cli::test_git_status_subcommand_with_history_flag
+        PASS [   0.374s] (535/857) sniff-cli::l1 cli::test_commit_family_empty_results_succeed_with_empty_output
+        PASS [   0.043s] (536/857) sniff-cli::l1 cli::test_gpu_subcommand_json_output
+        PASS [   0.137s] (537/857) sniff-cli::l1 cli::test_git_status_json_worktree_ahead_is_lazy_by_default
+        PASS [   0.058s] (538/857) sniff-cli::l1 cli::test_gpu_subcommand_text_output
+        PASS [   0.065s] (539/857) sniff-cli::l1 cli::test_hardware_subcommand_json_output
+        PASS [   0.034s] (540/857) sniff-cli::l1 cli::test_help_flag
+        PASS [   0.049s] (541/857) sniff-cli::l1 cli::test_has_merge_conflict_json_false
+        PASS [   0.072s] (542/857) sniff-cli::l1 cli::test_hardware_subcommand_text_output
+        PASS [   0.039s] (543/857) sniff-cli::l1 cli::test_help_mentions_completions
+        PASS [   0.407s] (544/857) sniff-cli::l1 cli::test_commit_family_rejects_oversized_duration_scopes
+        PASS [   0.036s] (545/857) sniff-cli::l1 cli::test_help_mentions_software_install
+        PASS [   0.049s] (546/857) sniff-cli::l1 cli::test_help_mentions_remote_via_repo
+        PASS [   0.034s] (547/857) sniff-cli::l1 cli::test_help_mentions_subcommands
+        PASS [   0.125s] (548/857) sniff-cli::l1 cli::test_git_status_text_and_json_agree_on_current_worktree
+        PASS [   0.042s] (549/857) sniff-cli::l1 cli::test_invalid_refresh_remotes_on_remote_subcommand_fails
+        PASS [   0.047s] (550/857) sniff-cli::l1 cli::test_invalid_subcommand_fails
+        PASS [   0.058s] (551/857) sniff-cli::l1 cli::test_is_current_package_area_dirty_json_outside_area_emits_false
+        PASS [   0.043s] (552/857) sniff-cli::l1 cli::test_json_flag_before_subcommand
+        PASS [   0.064s] (553/857) sniff-cli::l1 cli::test_is_current_package_area_dirty_json_clean
+        PASS [   0.054s] (554/857) sniff-cli::l1 cli::test_json_flag_after_subcommand
+        PASS [   0.065s] (555/857) sniff-cli::l1 cli::test_is_current_package_area_dirty_json_true_branch
+        PASS [   0.052s] (556/857) sniff-cli::l1 cli::test_language_subcommand_json_output
+        PASS [   0.078s] (557/857) sniff-cli::l1 cli::test_is_current_package_area_dirty_json_perf_attaches_performance_field
+        PASS [   0.051s] (558/857) sniff-cli::l1 cli::test_memory_subcommand_json_output
+        PASS [   0.042s] (559/857) sniff-cli::l1 cli::test_memory_subcommand_text_output
+        PASS [   0.073s] (560/857) sniff-cli::l1 cli::test_language_subcommand_text_output
+        PASS [   0.039s] (561/857) sniff-cli::l1 cli::test_no_subcommand_shows_help
+        PASS [   0.033s] (562/857) sniff-cli::l1 cli::test_old_agents_command_fails
+        PASS [   0.034s] (563/857) sniff-cli::l1 cli::test_old_audio_players_command_fails
+        PASS [   0.037s] (564/857) sniff-cli::l1 cli::test_old_editors_command_fails
+        PASS [   0.036s] (565/857) sniff-cli::l1 cli::test_old_flag_syntax_fails
+        PASS [   0.035s] (566/857) sniff-cli::l1 cli::test_old_language_package_managers_command_fails
+        PASS [   0.032s] (567/857) sniff-cli::l1 cli::test_old_notification_helpers_command_fails
+        PASS [   0.031s] (568/857) sniff-cli::l1 cli::test_old_programs_command_fails
+        PASS [   0.036s] (569/857) sniff-cli::l1 cli::test_old_os_package_managers_command_fails
+        PASS [   0.039s] (570/857) sniff-cli::l1 cli::test_old_terminal_apps_command_fails
+        PASS [   0.590s] (571/857) sniff-cli::l1 cli::test_commit_family_invalid_inputs_are_typed_failures
+        PASS [   0.035s] (572/857) sniff-cli::l1 cli::test_old_tts_clients_command_fails
+        PASS [   0.033s] (573/857) sniff-cli::l1 cli::test_old_utilities_command_fails
+        PASS [   0.036s] (574/857) sniff-cli::l1 cli::test_os_subcommand_text_output
+        PASS [   0.039s] (575/857) sniff-cli::l1 cli::test_os_subcommand_json_output
+        PASS [   0.062s] (576/857) sniff-cli::l1 cli::test_package_area_has_source_code_changes_json_clean
+        PASS [   0.057s] (577/857) sniff-cli::l1 cli::test_package_area_has_source_code_changes_json_docs_only_is_false
+        PASS [   0.059s] (578/857) sniff-cli::l1 cli::test_package_area_json_empty_name_stable_shape
+        PASS [   0.064s] (579/857) sniff-cli::l1 cli::test_package_area_has_source_code_changes_json_true_branch
+        PASS [   0.065s] (580/857) sniff-cli::l1 cli::test_package_area_root_json_when_present
+        PASS [   0.069s] (581/857) sniff-cli::l1 cli::test_package_area_json_resolves_to_real_area
+        PASS [   0.049s] (582/857) sniff-cli::l1 cli::test_package_json_empty_name_stable_shape
+        PASS [   0.047s] (583/857) sniff-cli::l1 cli::test_plain_flag_strips_escape_codes
+        PASS [   0.063s] (584/857) sniff-cli::l1 cli::test_package_name_json
+        PASS [   0.064s] (585/857) sniff-cli::l1 cli::test_package_root_json_when_present
+        PASS [   0.040s] (586/857) sniff-cli::l1 cli::test_plain_with_json_ignores_plain
+        PASS [   0.042s] (587/857) sniff-cli::l1 cli::test_recent_commits_hash_period_walks_back_to_the_hash
+        PASS [   0.094s] (588/857) sniff-cli::l1 cli::test_recent_commits_branch_is_a_history_base
+        PASS [   0.093s] (589/857) sniff-cli::l1 cli::test_recent_commits_defaults_to_the_last_ten_as_a_bare_json_array
+        PASS [   0.075s] (590/857) sniff-cli::l1 cli::test_recent_commits_no_change_commit_is_reported_with_no_files
+        PASS [   0.081s] (591/857) sniff-cli::l1 cli::test_recent_commits_operation_filter_accepts_breaking_change_commits
+        PASS [   0.085s] (592/857) sniff-cli::l1 cli::test_recent_commits_package_filters_and_attribution_in_a_monorepo
+        PASS [   0.051s] (593/857) sniff-cli::l1 cli::test_recent_commits_terminal_output_renders_library_prose
+        PASS [   0.398s] (594/857) sniff-cli::l1 cli::test_network_subcommand_json_output
+        PASS [   0.097s] (595/857) sniff-cli::l1 cli::test_recent_commits_plain_output_is_the_library_plain_report
+        PASS [   0.094s] (596/857) sniff-cli::l1 cli::test_repo_aggregate_dependencies_are_cwd_invariant
+        PASS [   0.057s] (597/857) sniff-cli::l1 cli::test_repo_area_at_area_dir_returns_area_name
+        PASS [   0.421s] (598/857) sniff-cli::l1 cli::test_no_subcommand_with_json_outputs_json
+        PASS [   0.090s] (599/857) sniff-cli::l1 cli::test_repo_aggregate_embeds_empty_commit_families_as_empty_arrays
+        PASS [   0.063s] (600/857) sniff-cli::l1 cli::test_repo_area_inside_package_returns_package_name
+        PASS [   0.465s] (601/857) sniff-cli::l1 cli::test_network_subcommand_verbose_text_output
+        PASS [   0.239s] (602/857) sniff-cli::l1 cli::test_recent_commits_filters_run_through_the_library
+        PASS [   0.050s] (603/857) sniff-cli::l1 cli::test_repo_area_no_error_zero_exit_when_no_monorepo
+        PASS [   0.488s] (604/857) sniff-cli::l1 cli::test_network_subcommand_text_output
+        PASS [   0.059s] (605/857) sniff-cli::l1 cli::test_repo_area_non_monorepo_repo_silent_failure
+        PASS [   0.073s] (606/857) sniff-cli::l1 cli::test_repo_area_json_emits_name_outcome
+        PASS [   0.046s] (607/857) sniff-cli::l1 cli::test_repo_area_not_in_repo_verbose_message_on_stderr
+        PASS [   0.056s] (608/857) sniff-cli::l1 cli::test_repo_area_non_monorepo_verbose_message_on_stderr
+        PASS [   0.122s] (609/857) sniff-cli::l1 cli::test_repo_area_at_repo_root_prints_an_empty_area
+        PASS [   0.046s] (610/857) sniff-cli::l1 cli::test_repo_branches_json_shape
+        PASS [   0.036s] (611/857) sniff-cli::l1 cli::test_repo_deps_is_not_an_alias
+        PASS [   0.049s] (612/857) sniff-cli::l1 cli::test_repo_dependencies_filters_dev_dependencies
+        PASS [   0.066s] (613/857) sniff-cli::l1 cli::test_repo_area_on_error_prints_message_to_stdout
+        PASS [   0.224s] (614/857) sniff-cli::l1 cli::test_repo_aggregate_commit_families_match_the_focused_commands
+        PASS [   0.051s] (615/857) sniff-cli::l1 cli::test_repo_dirty_files_json_perf_stdout_is_valid_json
+        PASS [   0.067s] (616/857) sniff-cli::l1 cli::test_repo_deps_json_shape
+        PASS [   0.059s] (617/857) sniff-cli::l1 cli::test_repo_dirty_files_returns_all_file_types
+        PASS [   0.049s] (618/857) sniff-cli::l1 cli::test_repo_file_list_no_error_exits_0
+        PASS [   0.055s] (619/857) sniff-cli::l1 cli::test_repo_dirty_source_code_with_list_flag
+        PASS [   0.058s] (620/857) sniff-cli::l1 cli::test_repo_dirty_source_code_returns_source_files
+        PASS [   0.053s] (621/857) sniff-cli::l1 cli::test_repo_file_list_no_results_exits_1
+        PASS [   0.065s] (622/857) sniff-cli::l1 cli::test_repo_file_list_on_error_plus_no_error_to_stdout
+        PASS [   0.057s] (623/857) sniff-cli::l1 cli::test_repo_file_list_on_error_to_stderr
+        PASS [   0.090s] (624/857) sniff-cli::l1 cli::test_repo_dirty_files_short_p_flag_scopes_to_package
+        PASS [   0.041s] (625/857) sniff-cli::l1 cli::test_repo_git_status_branch_surfaces_malformed_remote_ref
+        PASS [   0.072s] (626/857) sniff-cli::l1 cli::test_repo_git_status_branch_absent_ordinary_name_succeeds
+        PASS [   0.054s] (627/857) sniff-cli::l1 cli::test_repo_git_status_outside_git_repo_is_graceful
+        PASS [   0.072s] (628/857) sniff-cli::l1 cli::test_repo_git_status_branch_absent_short_hex_succeeds
+        PASS [   0.064s] (629/857) sniff-cli::l1 cli::test_repo_git_status_package_with_area_name_errors
+        PASS [   0.040s] (630/857) sniff-cli::l1 cli::test_repo_git_status_surfaces_corrupt_history
+        PASS [   0.066s] (631/857) sniff-cli::l1 cli::test_repo_git_status_reports_packed_checkout_branch
+        PASS [   0.050s] (632/857) sniff-cli::l1 cli::test_repo_has_merge_conflict_json_perf_stdout_is_valid_json
+        PASS [   0.044s] (633/857) sniff-cli::l1 cli::test_repo_has_merge_conflict_surfaces_corrupt_index
+        PASS [   0.035s] (634/857) sniff-cli::l1 cli::test_repo_hash_surfaces_corrupt_commit_object
+        PASS [   0.092s] (635/857) sniff-cli::l1 cli::test_repo_git_status_branch_absent_valid_length_hex_succeeds
+        PASS [   0.066s] (636/857) sniff-cli::l1 cli::test_repo_git_status_subcommand
+        PASS [   0.038s] (637/857) sniff-cli::l1 cli::test_repo_help_lists_language_subcommand
+        PASS [   0.042s] (638/857) sniff-cli::l1 cli::test_repo_help_shows_examples
+        PASS [   0.046s] (639/857) sniff-cli::l1 cli::test_repo_help_mentions_latest_versions
+        PASS [   0.041s] (640/857) sniff-cli::l1 cli::test_repo_package_and_area_flags_non_overlap_errors
+        PASS [   0.054s] (641/857) sniff-cli::l1 cli::test_repo_language_json_returns_rust_for_rust_repo
+        PASS [   0.057s] (642/857) sniff-cli::l1 cli::test_repo_language_text_empty_repo_exits_one_with_no_stdout
+        PASS [   0.067s] (643/857) sniff-cli::l1 cli::test_repo_language_json_empty_repo_emits_null_and_exits_one
+        PASS [   0.065s] (644/857) sniff-cli::l1 cli::test_repo_language_text_returns_rust_for_rust_repo
+        PASS [   0.059s] (645/857) sniff-cli::l1 cli::test_repo_package_and_area_flags_overlap_succeeds
+        PASS [   0.054s] (646/857) sniff-cli::l1 cli::test_repo_package_area_flag_uses_prefix_semantics
+        PASS [   0.134s] (647/857) sniff-cli::l1 cli::test_repo_hash_and_git_status_link_only_remote_contained_commits
+        PASS [   0.072s] (648/857) sniff-cli::l1 cli::test_repo_package_areas_csv_default
+        PASS [   0.054s] (649/857) sniff-cli::l1 cli::test_repo_package_areas_json_output
+        PASS [   0.049s] (650/857) sniff-cli::l1 cli::test_repo_package_areas_json_perf_stdout_is_valid_json
+        PASS [   0.044s] (651/857) sniff-cli::l1 cli::test_repo_package_areas_md_and_list_conflict
+        PASS [   0.045s] (652/857) sniff-cli::l1 cli::test_repo_package_areas_no_error_allows_empty_filter
+        PASS [   0.068s] (653/857) sniff-cli::l1 cli::test_repo_package_areas_list_format
+        PASS [   0.058s] (654/857) sniff-cli::l1 cli::test_repo_package_areas_md_format
+        PASS [   0.055s] (655/857) sniff-cli::l1 cli::test_repo_package_areas_no_error_empty_filter
+        PASS [   0.160s] (656/857) sniff-cli::l1 cli::test_repo_language_base_flag_all_three_placements
+        PASS [   0.055s] (657/857) sniff-cli::l1 cli::test_repo_package_areas_no_error_json_empty_filter
+        PASS [   0.051s] (658/857) sniff-cli::l1 cli::test_repo_package_areas_no_error_json_with_flag
+        PASS [   0.051s] (659/857) sniff-cli::l1 cli::test_repo_package_areas_on_error_message
+        PASS [   0.052s] (660/857) sniff-cli::l1 cli::test_repo_package_areas_package_area_filter
+        PASS [   0.048s] (661/857) sniff-cli::l1 cli::test_repo_package_areas_positional_filter
+        PASS [   0.052s] (662/857) sniff-cli::l1 cli::test_repo_package_areas_positional_filter_negation
+        PASS [   0.048s] (663/857) sniff-cli::l1 cli::test_repo_package_areas_verbose_does_not_emit_tracing
+        PASS [   0.034s] (664/857) sniff-cli::l1 cli::test_repo_package_dependencies_help_mentions_ui
+        PASS [   0.052s] (665/857) sniff-cli::l1 cli::test_repo_package_areas_root_area_verbose_renders_dot_slash
+        PASS [   0.043s] (666/857) sniff-cli::l1 cli::test_repo_package_manager_json_uses_shared_collapse
+        PASS [   0.040s] (667/857) sniff-cli::l1 cli::test_repo_package_manager_variant_list_uses_unique_values
+        PASS [   0.045s] (668/857) sniff-cli::l1 cli::test_repo_packages_csv_default
+        PASS [   0.067s] (669/857) sniff-cli::l1 cli::test_repo_package_areas_verbose_shows_root_dir
+        PASS [   0.054s] (670/857) sniff-cli::l1 cli::test_repo_package_flag_returns_single_package
+        PASS [   0.052s] (671/857) sniff-cli::l1 cli::test_repo_packages_json_output
+        PASS [   0.046s] (672/857) sniff-cli::l1 cli::test_repo_packages_md_and_list_conflict
+        PASS [   0.051s] (673/857) sniff-cli::l1 cli::test_repo_packages_md_format
+        PASS [   0.057s] (674/857) sniff-cli::l1 cli::test_repo_packages_list_format
+        PASS [   0.045s] (675/857) sniff-cli::l1 cli::test_repo_packages_no_error_allows_empty_filter
+        PASS [   0.048s] (676/857) sniff-cli::l1 cli::test_repo_packages_no_error_empty_filter
+        PASS [   0.044s] (677/857) sniff-cli::l1 cli::test_repo_packages_no_error_json_empty_filter
+        PASS [   0.044s] (678/857) sniff-cli::l1 cli::test_repo_packages_no_error_json_with_flag
+        PASS [   0.100s] (679/857) sniff-cli::l1 cli::test_repo_package_manager_output_modes
+        PASS [   0.051s] (680/857) sniff-cli::l1 cli::test_repo_packages_on_error_message
+        PASS [   0.042s] (681/857) sniff-cli::l1 cli::test_repo_packages_verbose_does_not_emit_tracing
+        PASS [   0.048s] (682/857) sniff-cli::l1 cli::test_repo_packages_package_area_filter
+        PASS [   0.036s] (683/857) sniff-cli::l1 cli::test_repo_pr_help_documents_bitbucket_draft_limitation
+        PASS [   0.048s] (684/857) sniff-cli::l1 cli::test_repo_packages_verbose_shows_root_dir
+        PASS [   0.051s] (685/857) sniff-cli::l1 cli::test_repo_positional_filter_and_package_flag_combine
+        PASS [   0.049s] (686/857) sniff-cli::l1 cli::test_repo_recent_commits_json_perf_stdout_is_valid_json
+        PASS [   0.041s] (687/857) sniff-cli::l1 cli::test_repo_root_is_absolute_without_base_from_subdir
+        PASS [   0.056s] (688/857) sniff-cli::l1 cli::test_repo_recent_commits_plain_is_the_joined_per_commit_blocks
+        PASS [   0.056s] (689/857) sniff-cli::l1 cli::test_repo_recent_commits_surfaces_corrupt_history
+        PASS [   0.055s] (690/857) sniff-cli::l1 cli::test_repo_remote_help
+        PASS [   0.038s] (691/857) sniff-cli::l1 cli::test_repo_scoped_flags_parse_in_help
+        PASS [   0.040s] (692/857) sniff-cli::l1 cli::test_repo_source_code_changes_surfaces_corrupt_history
+        PASS [   0.051s] (693/857) sniff-cli::l1 cli::test_repo_root_json_perf_stdout_is_valid_json
+        PASS [   0.047s] (694/857) sniff-cli::l1 cli::test_repo_staged_files_json_uses_new_shape
+        PASS [   0.059s] (695/857) sniff-cli::l1 cli::test_repo_staged_files_uses_new_path
+        PASS [   0.045s] (696/857) sniff-cli::l1 cli::test_repo_subcommand_text_output
+        PASS [   0.067s] (697/857) sniff-cli::l1 cli::test_repo_staged_source_code_returns_staged_only
+        PASS [   0.043s] (698/857) sniff-cli::l1 cli::test_repo_test_runner_json_reports_package_usage
+        PASS [   0.073s] (699/857) sniff-cli::l1 cli::test_repo_subcommand_json_output
+        PASS [   0.046s] (700/857) sniff-cli::l1 cli::test_repo_test_runner_list_reports_library_values
+        PASS [   0.074s] (701/857) sniff-cli::l1 cli::test_repo_test_runner_detects_workspace_root_nextest
+        PASS [   0.051s] (702/857) sniff-cli::l1 cli::test_repo_unknown_package_area_errors_with_valid_list
+        PASS [   0.066s] (703/857) sniff-cli::l1 cli::test_repo_unknown_package_errors_with_valid_list
+        PASS [   0.057s] (704/857) sniff-cli::l1 cli::test_repo_unstaged_files_json_uses_new_shape
+        PASS [   0.072s] (705/857) sniff-cli::l1 cli::test_repo_unstaged_source_code_returns_modified_only
+        PASS [   0.057s] (706/857) sniff-cli::l1 cli::test_repo_untracked_files_json_uses_new_shape
+        PASS [   0.155s] (707/857) sniff-cli::l1 cli::test_repo_structure_filter_json_filters_packages
+        PASS [   0.097s] (708/857) sniff-cli::l1 cli::test_repo_test_runner_verbose_machine_formats_keep_evidence
+        PASS [   0.112s] (709/857) sniff-cli::l1 cli::test_repo_test_runner_output_modes
+        PASS [   0.038s] (710/857) sniff-cli::l1 cli::test_repo_version_empty_exits_one_with_no_stdout
+        PASS [   0.060s] (711/857) sniff-cli::l1 cli::test_repo_version_all_override_returns_repo_scope
+        PASS [   0.055s] (712/857) sniff-cli::l1 cli::test_repo_version_csv_output_is_names_only
+        PASS [   0.041s] (713/857) sniff-cli::l1 cli::test_repo_version_empty_json_emits_array_shape
+        PASS [   0.046s] (714/857) sniff-cli::l1 cli::test_repo_version_md_output_uses_dash_prefix
+        PASS [   0.055s] (715/857) sniff-cli::l1 cli::test_repo_version_json_reports_array_shape
+        PASS [   0.064s] (716/857) sniff-cli::l1 cli::test_repo_version_list_output_is_names_only
+        PASS [   0.049s] (717/857) sniff-cli::l1 cli::test_repo_version_monorepo_root_reports_collapsed_versions
+        PASS [   0.052s] (718/857) sniff-cli::l1 cli::test_repo_version_package_area_override_scopes_to_single_area
+        PASS [   0.047s] (719/857) sniff-cli::l1 cli::test_repo_version_package_override_scopes_to_single_package
+        PASS [   0.090s] (720/857) sniff-cli::l1 cli::test_repo_version_empty_with_no_error_exits_zero
+        PASS [   0.059s] (721/857) sniff-cli::l1 cli::test_repo_version_single_package_known_package_resolves
+        PASS [   0.045s] (722/857) sniff-cli::l1 cli::test_repo_version_single_package_unknown_area_errors
+        PASS [   0.047s] (723/857) sniff-cli::l1 cli::test_repo_version_single_package_unknown_package_errors
+        PASS [   0.055s] (724/857) sniff-cli::l1 cli::test_repo_version_text_output_default
+        PASS [   0.053s] (725/857) sniff-cli::l1 cli::test_repo_version_unknown_package_area_errors
+        PASS [   0.055s] (726/857) sniff-cli::l1 cli::test_repo_version_unknown_package_errors
+        PASS [   0.036s] (727/857) sniff-cli::l1 cli::test_repo_worktree_inside_main_worktree_exits_1
+        PASS [   0.046s] (728/857) sniff-cli::l1 cli::test_repo_worktree_help_mentions_subcommand
+        PASS [   0.062s] (729/857) sniff-cli::l1 cli::test_repo_worktree_inside_linked_worktree_returns_name
+        PASS [   0.076s] (730/857) sniff-cli::l1 cli::test_repo_version_verbose_named_workspace_inheritance
+        PASS [   0.047s] (731/857) sniff-cli::l1 cli::test_repo_worktree_json_failure_no_error
+        PASS [   0.045s] (732/857) sniff-cli::l1 cli::test_repo_worktree_json_success
+        PASS [   0.096s] (733/857) sniff-cli::l1 cli::test_repo_version_variance_reports_each_version_separately
+        PASS [   0.058s] (734/857) sniff-cli::l1 cli::test_repo_worktree_no_error_exits_0
+        PASS [   0.049s] (735/857) sniff-cli::l1 cli::test_repo_worktree_on_error_to_stderr
+        PASS [   0.054s] (736/857) sniff-cli::l1 cli::test_repo_worktree_verbose_includes_path
+        PASS [   0.040s] (737/857) sniff-cli::l1 cli::test_repo_worktrees_csv_output
+        PASS [   0.041s] (738/857) sniff-cli::l1 cli::test_repo_worktrees_current_marker_from_linked_worktree
+        PASS [   0.044s] (739/857) sniff-cli::l1 cli::test_repo_worktrees_csv_verbose_single_line_with_metadata
+        PASS [   0.046s] (740/857) sniff-cli::l1 cli::test_repo_worktrees_current_marker_from_main_worktree
+        PASS [   0.049s] (741/857) sniff-cli::l1 cli::test_repo_worktrees_detached_head
+        PASS [   0.052s] (742/857) sniff-cli::l1 cli::test_repo_worktrees_json_output
+        PASS [   0.053s] (743/857) sniff-cli::l1 cli::test_repo_worktrees_list_output
+        PASS [   0.078s] (744/857) sniff-cli::l1 cli::test_repo_worktrees_default_output
+        PASS [   0.051s] (745/857) sniff-cli::l1 cli::test_repo_worktrees_md_verbose_keeps_bullet_and_metadata
+        PASS [   0.054s] (746/857) sniff-cli::l1 cli::test_repo_worktrees_md_output
+        PASS [   0.452s] (747/857) sniff-cli::l1 cli::test_repo_scope_projections_use_the_empty_top_level_area
+        PASS [   0.050s] (748/857) sniff-cli::l1 cli::test_repo_worktrees_plain_verbose_no_escape_codes
+        PASS [   0.045s] (749/857) sniff-cli::l1 cli::test_repo_worktrees_verbose_output
+        PASS [   0.079s] (750/857) sniff-cli::l1 cli::test_repo_worktrees_list_verbose_composes_and_has_no_leading_space
+        PASS [   0.043s] (751/857) sniff-cli::l1 cli::test_root_json_outside_git_repo_stable_shape
+        PASS [   0.041s] (752/857) sniff-cli::l1 cli::test_runtime_subcommand_text_output
+        PASS [   0.043s] (753/857) sniff-cli::l1 cli::test_runtime_subcommand_json_output
+        PASS [   0.055s] (754/857) sniff-cli::l1 cli::test_software_agents_subcommand_json_output
+        PASS [   0.099s] (755/857) sniff-cli::l1 cli::test_single_package_node_reports_root_facts
+        PASS [   0.103s] (756/857) sniff-cli::l1 cli::test_single_package_python_reports_root_facts
+        PASS [   0.053s] (757/857) sniff-cli::l1 cli::test_software_agents_subcommand_text_output
+        PASS [   0.143s] (758/857) sniff-cli::l1 cli::test_single_package_cargo_reports_root_facts
+        PASS [   0.044s] (759/857) sniff-cli::l1 cli::test_software_audio_players_subcommand_json_output
+        PASS [   0.034s] (760/857) sniff-cli::l1 cli::test_software_editors_install_help_works
+        PASS [   0.047s] (761/857) sniff-cli::l1 cli::test_software_audio_players_subcommand_text_output
+        PASS [   0.174s] (762/857) sniff-cli::l1 cli::test_services_subcommand_text_output
+        PASS [   0.042s] (763/857) sniff-cli::l1 cli::test_software_editors_install_invalid_name_fails
+        PASS [   0.214s] (764/857) sniff-cli::l1 cli::test_services_state_all
+        PASS [   0.053s] (765/857) sniff-cli::l1 cli::test_software_editors_shows_table_without_install
+        PASS [   0.227s] (766/857) sniff-cli::l1 cli::test_services_state_stopped
+        PASS [   0.047s] (767/857) sniff-cli::l1 cli::test_software_editors_subcommand_text_output
+        PASS [   0.243s] (768/857) sniff-cli::l1 cli::test_services_state_running
+        PASS [   0.244s] (769/857) sniff-cli::l1 cli::test_services_subcommand_json_output
+        PASS [   0.050s] (770/857) sniff-cli::l1 cli::test_software_install_invalid_name_fails
+        PASS [   0.114s] (771/857) sniff-cli::l1 cli::test_software_editors_subcommand_json_output
+        PASS [   0.141s] (772/857) sniff-cli::l1 cli::test_software_editors_json_still_works_with_install_subcommand
+        PASS [   0.095s] (773/857) sniff-cli::l1 cli::test_software_language_package_managers_subcommand_text_output
+        PASS [   0.101s] (774/857) sniff-cli::l1 cli::test_software_notification_helpers_subcommand_text_output
+        PASS [   0.109s] (775/857) sniff-cli::l1 cli::test_software_notification_helpers_subcommand_json_output
+        PASS [   0.089s] (776/857) sniff-cli::l1 cli::test_software_subcommand_json_output
+        PASS [   0.050s] (777/857) sniff-cli::l1 cli::test_software_subcommand_rejects_json_format_flag
+        PASS [   0.117s] (778/857) sniff-cli::l1 cli::test_software_os_package_managers_subcommand_text_output
+        PASS [   0.056s] (779/857) sniff-cli::l1 cli::test_software_terminal_apps_subcommand_text_output
+        PASS [   0.049s] (780/857) sniff-cli::l1 cli::test_software_test_runners_subcommand_json_output_shape
+        PASS [   0.808s] (781/857) sniff-cli::l1 cli::test_repo_subcommand_json_shapes_are_distinct
+        PASS [   0.067s] (782/857) sniff-cli::l1 cli::test_software_test_runners_json_stdout_is_parseable_without_stderr
+        PASS [   0.102s] (783/857) sniff-cli::l1 cli::test_software_subcommand_text_output
+        PASS [   0.081s] (784/857) sniff-cli::l1 cli::test_software_test_runners_plain_suppresses_hint_and_ansi
+        PASS [   0.076s] (785/857) sniff-cli::l1 cli::test_software_test_runners_subcommand_text_output
+        PASS [   0.131s] (786/857) sniff-cli::l1 cli::test_software_terminal_apps_subcommand_json_output
+        PASS [   0.062s] (787/857) sniff-cli::l1 cli::test_software_tts_clients_subcommand_text_output
+        PASS [   0.069s] (788/857) sniff-cli::l1 cli::test_software_utilities_install_invalid_name_fails
+        PASS [   0.082s] (789/857) sniff-cli::l1 cli::test_software_utilities_subcommand_text_output
+        PASS [   0.050s] (790/857) sniff-cli::l1 cli::test_subcommand_outputs_text_by_default
+        PASS [   0.087s] (791/857) sniff-cli::l1 cli::test_storage_subcommand_json_output
+        PASS [   0.110s] (792/857) sniff-cli::l1 cli::test_staged_package_areas_json_shape
+        PASS [   0.098s] (793/857) sniff-cli::l1 cli::test_storage_subcommand_text_output
+        PASS [   0.133s] (794/857) sniff-cli::l1 cli::test_staged_packages_json_shape
+        PASS [   0.061s] (795/857) sniff-cli::l1 cli::test_topics_subcommand_output
+        PASS [   0.065s] (796/857) sniff-cli::l1 cli::test_subcommand_with_json_flag_outputs_json
+        PASS [   0.234s] (797/857) sniff-cli::l1 cli::test_software_tts_clients_subcommand_json_output
+        PASS [   0.043s] (798/857) sniff-cli::l1 cli::test_verbose_flag_after_subcommand
+        PASS [   0.096s] (799/857) sniff-cli::l1 cli::test_unstaged_package_areas_json_shape
+        PASS [   0.045s] (800/857) sniff-cli::l1 cli::test_verbose_flag_before_subcommand
+        PASS [   0.090s] (801/857) sniff-cli::l1 cli::test_unstaged_packages_json_shape
+        PASS [   0.242s] (802/857) sniff-cli::l1 cli::test_source_and_documentation_changes_project_their_files
+        PASS [   0.014s] (803/857) sniff-cli::l1 cli_process_fixture::ambient_context_accepts_a_disposable_directory_the_test_built
+        PASS [   0.045s] (804/857) sniff-cli::l1 cli::test_version_flag
+        PASS [   0.069s] (805/857) sniff-cli::l1 cli::test_verbose_with_hardware_shows_details
+        PASS [   0.016s] (806/857) sniff-cli::l1 cli_process_fixture::ambient_context_accepts_only_existing_fixture_directories
+        PASS [   0.042s] (807/857) sniff-cli::l1 cli::with_network_global_flag_is_rejected
+        PASS [   0.018s] (808/857) sniff-cli::l1 cli_process_fixture::canonical_checkout_containment_rejects_nested_roots
+        PASS [   0.066s] (809/857) sniff-cli::l1 cli::test_verbose_with_software_adds_columns
+        PASS [   0.046s] (810/857) sniff-cli::l1 cli::with_network_subcommand_flag_is_rejected
+        PASS [   0.020s] (811/857) sniff-cli::l1 cli_process_fixture::canonical_checkout_containment_rejects_symlink_spelling
+        PASS [   0.032s] (812/857) sniff-cli::l1 cli_process_fixture::assert_and_raw_surfaces_produce_the_same_effective_environment
+        PASS [   0.022s] (813/857) sniff-cli::l1 cli_process_fixture::fluent_ambient_context_rejects_a_checkout_directory
+        PASS [   0.020s] (814/857) sniff-cli::l1 cli_process_fixture::fluent_ambient_context_rejects_a_non_disposable_directory
+        PASS [   0.015s] (815/857) sniff-cli::l1 cli_process_fixture::owned_ambient_context_rejects_a_non_disposable_directory
+        PASS [   0.020s] (816/857) sniff-cli::l1 cli_process_fixture::inherited_git_sniff_and_rendering_inputs_are_scrubbed
+        PASS [   0.018s] (817/857) sniff-cli::l1 cli_process_fixture::owned_ambient_context_rejects_a_checkout_directory
+        PASS [   0.024s] (818/857) sniff-cli::l1 cli_process_fixture::intentional_override_after_policy_wins_over_the_scrub
+        PASS [   0.030s] (819/857) sniff-cli::l1 cli_process_fixture::path_modes_are_bounded_and_keep_fixture_stubs_first
+        PASS [   0.045s] (820/857) sniff-cli::l1 cli_process_fixture::owned_command_keeps_its_disposable_launch_directory_alive
+        PASS [   0.041s] (821/857) sniff-cli::l1 install_plan::install_plan_unknown_program_errors
+        PASS [   0.983s] (822/857) sniff-cli::l1 cli::test_software_os_package_managers_subcommand_json_output
+        PASS [   0.836s] (823/857) sniff-cli::l1 cli::test_software_utilities_subcommand_json_output
+        PASS [   1.978s] (824/857) sniff-cli::l1 install_plan::install_plan_via_brew_selects_brew_or_fails_cleanly
+        PASS [   2.037s] (825/857) sniff-cli::l1 install_interview_cli::install_dry_run_plain_emits_announcement_and_success_status
+        PASS [   2.041s] (826/857) sniff-cli::l1 install_plan::install_dry_run_does_not_execute
+        PASS [   2.047s] (827/857) sniff-cli::l1 install_plan::install_plan_force_rebuilds_cache
+        PASS [   1.523s] (828/857) sniff-cli::l1 install_plan::install_via_unknown_manager_errors_with_valid_list
+        PASS [   0.030s] (829/857) sniff-cli::l1 snapshots::completions_help_output_snapshot
+        PASS [   2.026s] (830/857) sniff-cli::l1 install_plan::install_plan_vim_json_returns_program_field
+        PASS [   1.577s] (831/857) sniff-cli::l1 install_plan::install_plan_vim_renders_text_output
+        PASS [   0.078s] (832/857) sniff-cli::l1 snapshots::cargo_monorepo_structure_json_snapshot
+        PASS [   2.087s] (833/857) sniff-cli::l1 install_plan::install_plan_populates_cache_file
+        PASS [   2.104s] (834/857) sniff-cli::l1 install_plan::install_plan_no_sudo_never_selects_sudo_method
+        PASS [   0.077s] (835/857) sniff-cli::l1 snapshots::cargo_monorepo_structure_text_snapshot
+        PASS [   0.012s] (836/857) sniff-cli::l1 snapshots::redact_base_paths_normalizes_windows_separators
+        PASS [   0.082s] (837/857) sniff-cli::l1 snapshots::cargo_pnpm_monorepo_structure_json_snapshot
+        PASS [   0.039s] (838/857) sniff-cli::l1 snapshots::help_output_snapshot
+        PASS [   0.044s] (839/857) sniff-cli::l1 snapshots::os_json_snapshot
+        PASS [   0.015s] (840/857) sniff-cli::l1 spawn_site_guard::detector_finds_all_raw_spawn_forms_and_ignores_prose_and_strings
+        PASS [   0.098s] (841/857) sniff-cli::l1 snapshots::cargo_pnpm_monorepo_structure_text_snapshot
+        PASS [   0.070s] (842/857) sniff-cli::l1 snapshots::degenerate_cargo_structure_json_has_no_topology_keys
+        PASS [   0.065s] (843/857) sniff-cli::l1 snapshots::degenerate_cargo_structure_text_is_empty
+        PASS [   0.025s] (844/857) sniff-cli::l1 spawn_site_guard::escape_detector_finds_both_path_escapes_and_ignores_prose_and_strings
+        PASS [   0.024s] (845/857) sniff-cli::l1 spawn_site_guard::escape_justification_accepts_adjacent_comments_and_rejects_string_lookalikes
+        PASS [   0.020s] (846/857) sniff-cli::l1 spawn_site_guard::reconciliation_rejects_stale_and_unexplained_entries
+        PASS [   0.014s] (847/857) sniff-cli::l1 spawn_site_guard::restored_detector_rejects_a_violation_that_a_neutered_detector_misses
+        PASS [   0.052s] (848/857) sniff-cli::l1 snapshots::topics_table_snapshot
+        PASS [   0.014s] (849/857) sniff-cli::l1 spawn_site_guard::restored_escape_detector_rejects_an_unjustified_site_that_a_neutered_detector_misses
+        PASS [   0.031s] (850/857) sniff-cli::l1 spawn_site_guard::l1_tests_spawn_sniff_through_the_fixture_builder_or_an_explicit_entry
+        PASS [   0.093s] (851/857) sniff-cli::l1 snapshots::pnpm_nx_monorepo_structure_json_snapshot
+        PASS [   0.040s] (852/857) sniff-cli::l1 spawn_site_guard::l1_path_escapes_carry_a_call_site_reason
+        PASS [   0.086s] (853/857) sniff-cli::l1 snapshots::pnpm_nx_monorepo_structure_text_snapshot
+        PASS [   0.038s] (854/857) sniff-cli::l1 tty::os_subcommand_runs_in_pty
+        PASS [   0.095s] (855/857) sniff-cli::l1 snapshots::repo_aggregate_json_snapshot
+        PASS [   0.058s] (856/857) sniff-cli::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   3.111s] (857/857) sniff-cli::l1 cli::test_software_language_package_managers_subcommand_json_output
+────────────
+     Summary [   6.232s] 857 tests run: 857 passed, 7 skipped
+
+✅ [32m all tests passing in [1msniff-cli[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 154
+cross-check: publishing no receipt — the remote tested tree 9af1efa4f is not this head's tree 74b9298d4; a patched or older tree is not evidence for this head
+
+cross-check summary for sniff-cli:
+  wsl      pass

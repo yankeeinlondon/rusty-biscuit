@@ -345,7 +345,7 @@ levels:
 The harness implementations live in the shared
 [`biscuit-test-harness`](../../biscuit-test-harness/README.md) crate and
 include `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`,
-and a `cliclick` helper. Tests in `cli/tests/real_terminal_render.rs` use them.
+and a `cliclick` helper. Tests in `cli/tests/level2/terminal_render.rs` use them.
 Its README documents each harness variant, when to use which, and the
 environment each requires.
 
@@ -364,19 +364,19 @@ just test          # or: cargo test -p biscuit-tui -p biscuit-tui-cli
 cargo test -p biscuit-tui
 
 # Level 1 only — CLI PTY tests (manufactured input bytes via `expectrl`)
-cargo test -p biscuit-tui-cli --test keyboard_protocol
+cargo test -p biscuit-tui-cli --test l1 keyboard_protocol::
 
-# Level 2 (and Level 3 when gated on) — real terminal harness
+# Level 2 — real terminal harness
 # Auto-skips individual tests when tmux / wezterm / kitty / cliclick is missing
-cargo test -p biscuit-tui-cli --test real_terminal_render
+cargo test -p biscuit-tui-cli --features terminal-tests --test level2
 
 # Level 3 — OS-level keyboard injection. Focus must stay on the spawned
 # terminal window during the test (cliclick on macOS, xdotool on Linux).
-RUN_LEVEL3=1 cargo test -p biscuit-tui-cli --test real_terminal_render
+RUN_LEVEL3=1 cargo test -p biscuit-tui-cli --features terminal-tests --test level3
 
 # Run a single test by name (works at any level)
-cargo test -p biscuit-tui-cli --test real_terminal_render \
-    level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr -- --nocapture
+cargo test -p biscuit-tui-cli --features terminal-tests --test level2 \
+    terminal_render::level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr -- --nocapture
 ```
 
 #### Choosing the right level

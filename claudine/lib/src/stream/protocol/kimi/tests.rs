@@ -4,8 +4,8 @@ use super::*;
 // Wire-mode (JSON-RPC 2.0) protocol tests
 // ------------------------------------------------------------------
 //
-// Fixture-corpus replay of the typed envelope model lives in the
-// `protocol_fixture_replay` integration test; the cases below are
+// Fixture-corpus replay of the typed envelope model lives in the `l1`
+// integration binary's `protocol_fixture_replay` module; the cases below are
 // inline-literal deserialization unit tests.
 
 #[test]

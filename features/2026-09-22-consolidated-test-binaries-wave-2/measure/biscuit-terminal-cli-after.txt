@@ -1,0 +1,15 @@
+package: biscuit-terminal-cli
+series: after
+revision: 5a396aeb5 (dirty paths under biscuit-terminal/cli: 24)
+features: terminal-tests
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+nextest: cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)
+wrapper: RUSTC_WRAPPER='' (kache off)
+load at start: 5.77 8.48 10.59
+test executables: 2
+test executable bytes: 12819608
+clean test build wall: 53 s
+edit file: biscuit-terminal/cli/tests/l1/about.rs
+edit command: cargo nextest run --locked -p biscuit-terminal-cli --features terminal-tests --target-dir /var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//w2-measure-biscuit-terminal-cli-after.kidjLb --color=never -E !(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/)) --no-tests=fail test_about_kitty_plain_renders_report
+warm edit-to-one-module wall: 1.55 s
+load at end: 12.98 10.73 11.34

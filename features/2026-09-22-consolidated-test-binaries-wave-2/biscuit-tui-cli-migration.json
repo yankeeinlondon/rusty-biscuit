@@ -1,0 +1,1010 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "biscuit-tui/cli",
+  "dispositions": [
+    {
+      "detector": "crate_path",
+      "path": "biscuit-tui/cli/tests/l1/choose_cli.rs",
+      "reason": "`crate::common::pty::answer_cursor_position_request` (:830): before the move `crate` was this file, whose own `#[path = \"common/mod.rs\"] mod common;` held `pty`; after it, `crate` is the `l1` root, which declares the same `common` (`tests/common/mod.rs`, `pub mod pty` under `cfg(unix)`). The file's own declaration is removed rather than turned into `use crate::common;` (the file names `common` only through `crate::`, so the import would be unused), leaving one copy (S2)"
+    },
+    {
+      "detector": "crate_path",
+      "path": "biscuit-tui/cli/tests/l1/keyboard_protocol.rs",
+      "reason": "`crate::common::pty::answer_cursor_position_request` (:80, :170): same resolution as `choose_cli.rs`. The `l1` root's `common` is the file's former `#[path = \"common/mod.rs\"] mod common;`, which is removed from the file for the same reason (S2)"
+    }
+  ],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=integration::test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "biscuit-tui/cli/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "boolean_switch_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/boolean_switch_output.rs",
+      "old_binary_id": "biscuit-tui-cli::boolean_switch_output",
+      "old_path": "biscuit-tui/cli/tests/boolean_switch_output.rs",
+      "old_target": "boolean_switch_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "boolean_switch_output::boolean_switch_accepts_output_flag_at_global_position",
+          "old": "boolean_switch_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "boolean_switch_output::boolean_switch_help_lists_labels_flag",
+          "old": "boolean_switch_help_lists_labels_flag"
+        },
+        {
+          "new": "boolean_switch_output::boolean_switch_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "boolean_switch_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "boolean_switch_output::boolean_switch_rejects_unknown_flag",
+          "old": "boolean_switch_rejects_unknown_flag"
+        },
+        {
+          "new": "boolean_switch_output::level2_boolean_switch_submits_json_output_via_pty",
+          "old": "level2_boolean_switch_submits_json_output_via_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "choose_cli",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/choose_cli.rs",
+      "old_binary_id": "biscuit-tui-cli::choose_cli",
+      "old_path": "biscuit-tui/cli/tests/choose_cli.rs",
+      "old_target": "choose_cli",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "choose_cli::choose_many_accepts_positional_args",
+          "old": "choose_many_accepts_positional_args"
+        },
+        {
+          "new": "choose_cli::choose_many_border_flag_reaches_event_loop",
+          "old": "choose_many_border_flag_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_many_file_json_object_array_reaches_event_loop",
+          "old": "choose_many_file_json_object_array_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_active_color_values",
+          "old": "choose_many_help_lists_active_color_values"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_border_flags",
+          "old": "choose_many_help_lists_border_flags"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_filter_opt_out",
+          "old": "choose_many_help_lists_filter_opt_out"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_height_flag",
+          "old": "choose_many_help_lists_height_flag"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_inverse_not_reverse_for_sort",
+          "old": "choose_many_help_lists_inverse_not_reverse_for_sort"
+        },
+        {
+          "new": "choose_cli::choose_many_help_lists_margin_flags",
+          "old": "choose_many_help_lists_margin_flags"
+        },
+        {
+          "new": "choose_cli::choose_many_initial_flag_is_hidden_from_help",
+          "old": "choose_many_initial_flag_is_hidden_from_help"
+        },
+        {
+          "new": "choose_cli::choose_many_margin_flag_reaches_event_loop",
+          "old": "choose_many_margin_flag_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_many_one_explicit_plus_three_plain_passes",
+          "old": "choose_many_one_explicit_plus_three_plain_passes"
+        },
+        {
+          "new": "choose_cli::choose_many_per_side_margin_flags_reach_event_loop",
+          "old": "choose_many_per_side_margin_flags_reach_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_many_reads_from_stdin",
+          "old": "choose_many_reads_from_stdin"
+        },
+        {
+          "new": "choose_cli::choose_one_accepts_positional_args",
+          "old": "choose_one_accepts_positional_args"
+        },
+        {
+          "new": "choose_cli::choose_one_border_flag_reaches_event_loop",
+          "old": "choose_one_border_flag_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_border_label_reaches_event_loop",
+          "old": "choose_one_border_label_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_border_style_double_reaches_event_loop",
+          "old": "choose_one_border_style_double_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_border_style_rejects_unknown_value",
+          "old": "choose_one_border_style_rejects_unknown_value"
+        },
+        {
+          "new": "choose_cli::choose_one_empty_stdin_errors_with_no_options_message",
+          "old": "choose_one_empty_stdin_errors_with_no_options_message"
+        },
+        {
+          "new": "choose_cli::choose_one_file_csv_three_columns_reaches_event_loop",
+          "old": "choose_one_file_csv_three_columns_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_file_json_object_array_reaches_event_loop",
+          "old": "choose_one_file_json_object_array_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_file_jsonl_object_lines_reaches_event_loop",
+          "old": "choose_one_file_jsonl_object_lines_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_file_ndjson_object_lines_reaches_event_loop",
+          "old": "choose_one_file_ndjson_object_lines_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_file_toml_options_array_reaches_event_loop",
+          "old": "choose_one_file_toml_options_array_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_file_txt_extension_errors",
+          "old": "choose_one_file_txt_extension_errors"
+        },
+        {
+          "new": "choose_cli::choose_one_file_unknown_extension_errors",
+          "old": "choose_one_file_unknown_extension_errors"
+        },
+        {
+          "new": "choose_cli::choose_one_file_yaml_object_array_reaches_event_loop",
+          "old": "choose_one_file_yaml_object_array_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_height_rejects_non_numeric_value",
+          "old": "choose_one_height_rejects_non_numeric_value"
+        },
+        {
+          "new": "choose_cli::choose_one_height_rejects_percent_above_100",
+          "old": "choose_one_height_rejects_percent_above_100"
+        },
+        {
+          "new": "choose_cli::choose_one_height_rejects_zero_cells",
+          "old": "choose_one_height_rejects_zero_cells"
+        },
+        {
+          "new": "choose_cli::choose_one_height_rejects_zero_percent",
+          "old": "choose_one_height_rejects_zero_percent"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_active_color_values",
+          "old": "choose_one_help_lists_active_color_values"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_border_flags",
+          "old": "choose_one_help_lists_border_flags"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_filter_opt_out",
+          "old": "choose_one_help_lists_filter_opt_out"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_height_flag",
+          "old": "choose_one_help_lists_height_flag"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_inverse_not_reverse_for_sort",
+          "old": "choose_one_help_lists_inverse_not_reverse_for_sort"
+        },
+        {
+          "new": "choose_cli::choose_one_help_lists_margin_flags",
+          "old": "choose_one_help_lists_margin_flags"
+        },
+        {
+          "new": "choose_cli::choose_one_initial_flag_is_hidden_from_help",
+          "old": "choose_one_initial_flag_is_hidden_from_help"
+        },
+        {
+          "new": "choose_cli::choose_one_margin_flag_reaches_event_loop",
+          "old": "choose_one_margin_flag_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_margin_rejects_non_integer_value",
+          "old": "choose_one_margin_rejects_non_integer_value"
+        },
+        {
+          "new": "choose_cli::choose_one_margin_with_per_side_overrides_reaches_event_loop",
+          "old": "choose_one_margin_with_per_side_overrides_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_md_frontmatter_object_array_reaches_event_loop",
+          "old": "choose_one_md_frontmatter_object_array_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::choose_one_positional_args",
+          "old": "choose_one_positional_args"
+        },
+        {
+          "new": "choose_cli::choose_one_reads_from_stdin",
+          "old": "choose_one_reads_from_stdin"
+        },
+        {
+          "new": "choose_cli::choose_one_selected_and_initial_conflict",
+          "old": "choose_one_selected_and_initial_conflict"
+        },
+        {
+          "new": "choose_cli::cli_accepts_active_color_green",
+          "old": "cli_accepts_active_color_green"
+        },
+        {
+          "new": "choose_cli::cli_accepts_active_color_grey",
+          "old": "cli_accepts_active_color_grey"
+        },
+        {
+          "new": "choose_cli::cli_accepts_active_color_red",
+          "old": "cli_accepts_active_color_red"
+        },
+        {
+          "new": "choose_cli::cli_accepts_active_color_yellow",
+          "old": "cli_accepts_active_color_yellow"
+        },
+        {
+          "new": "choose_cli::cli_active_color_rejects_unknown_value",
+          "old": "cli_active_color_rejects_unknown_value"
+        },
+        {
+          "new": "choose_cli::delimiter_separates_label_and_value",
+          "old": "delimiter_separates_label_and_value"
+        },
+        {
+          "new": "choose_cli::explicit_explicit_hotkey_collision_errors",
+          "old": "explicit_explicit_hotkey_collision_errors"
+        },
+        {
+          "new": "choose_cli::one_explicit_plus_three_plain_passes",
+          "old": "one_explicit_plus_three_plain_passes"
+        },
+        {
+          "new": "choose_cli::plain_label_with_explicit_hotkey_companion_passes",
+          "old": "plain_label_with_explicit_hotkey_companion_passes"
+        },
+        {
+          "new": "choose_cli::pty::choose_many_ctrl_a_then_submit_writes_all_values",
+          "old": "pty::choose_many_ctrl_a_then_submit_writes_all_values"
+        },
+        {
+          "new": "choose_cli::pty::choose_one_height_100_percent_runs_end_to_end",
+          "old": "pty::choose_one_height_100_percent_runs_end_to_end"
+        },
+        {
+          "new": "choose_cli::pty::ctrl_c_exits_with_code_130",
+          "old": "pty::ctrl_c_exits_with_code_130"
+        },
+        {
+          "new": "choose_cli::pty::esc_restores_initial_and_exits_with_code_0",
+          "old": "pty::esc_restores_initial_and_exits_with_code_0"
+        },
+        {
+          "new": "choose_cli::sort_inverse_is_accepted_and_reaches_event_loop",
+          "old": "sort_inverse_is_accepted_and_reaches_event_loop"
+        },
+        {
+          "new": "choose_cli::sort_inverse_is_accepted_for_choose_many",
+          "old": "sort_inverse_is_accepted_for_choose_many"
+        },
+        {
+          "new": "choose_cli::sort_rejects_unknown_value",
+          "old": "sort_rejects_unknown_value"
+        },
+        {
+          "new": "choose_cli::sort_reverse_is_a_hidden_alias_still_accepted",
+          "old": "sort_reverse_is_a_hidden_alias_still_accepted"
+        },
+        {
+          "new": "choose_cli::three_plain_labels_pass_normalization",
+          "old": "three_plain_labels_pass_normalization"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "choose_many_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/choose_many_output.rs",
+      "old_binary_id": "biscuit-tui-cli::choose_many_output",
+      "old_path": "biscuit-tui/cli/tests/choose_many_output.rs",
+      "old_target": "choose_many_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "choose_many_output::choose_many_accepts_output_flag_at_global_position",
+          "old": "choose_many_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "choose_many_output::choose_many_fails_when_no_option_source_provided",
+          "old": "choose_many_fails_when_no_option_source_provided"
+        },
+        {
+          "new": "choose_many_output::choose_many_help_lists_options_and_validation_flags",
+          "old": "choose_many_help_lists_options_and_validation_flags"
+        },
+        {
+          "new": "choose_many_output::choose_many_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "choose_many_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "choose_many_output::choose_many_rejects_unknown_flag",
+          "old": "choose_many_rejects_unknown_flag"
+        },
+        {
+          "new": "choose_many_output::level2_choose_many_submits_raw_output_via_pty",
+          "old": "level2_choose_many_submits_raw_output_via_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "choose_one_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/choose_one_output.rs",
+      "old_binary_id": "biscuit-tui-cli::choose_one_output",
+      "old_path": "biscuit-tui/cli/tests/choose_one_output.rs",
+      "old_target": "choose_one_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "choose_one_output::choose_one_accepts_output_flag_at_global_position",
+          "old": "choose_one_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "choose_one_output::choose_one_fails_when_no_option_source_provided",
+          "old": "choose_one_fails_when_no_option_source_provided"
+        },
+        {
+          "new": "choose_one_output::choose_one_help_lists_options_flags",
+          "old": "choose_one_help_lists_options_flags"
+        },
+        {
+          "new": "choose_one_output::choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "choose_one_output::choose_one_rejects_unknown_flag",
+          "old": "choose_one_rejects_unknown_flag"
+        },
+        {
+          "new": "choose_one_output::level2_choose_one_submits_raw_output_via_pty",
+          "old": "level2_choose_one_submits_raw_output_via_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "completions",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/completions.rs",
+      "old_binary_id": "biscuit-tui-cli::completions",
+      "old_path": "biscuit-tui/cli/tests/completions.rs",
+      "old_target": "completions",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "completions::completions_bash_contains_inverse_for_sort",
+          "old": "completions_bash_contains_inverse_for_sort"
+        },
+        {
+          "new": "completions::completions_bash_does_not_present_reverse_as_canonical",
+          "old": "completions_bash_does_not_present_reverse_as_canonical"
+        },
+        {
+          "new": "completions::completions_bash_emits_non_empty_script",
+          "old": "completions_bash_emits_non_empty_script"
+        },
+        {
+          "new": "completions::completions_do_not_present_hidden_legacy_flags",
+          "old": "completions_do_not_present_hidden_legacy_flags"
+        },
+        {
+          "new": "completions::completions_fish_contains_inverse_for_sort",
+          "old": "completions_fish_contains_inverse_for_sort"
+        },
+        {
+          "new": "completions::completions_fish_does_not_present_reverse_as_canonical",
+          "old": "completions_fish_does_not_present_reverse_as_canonical"
+        },
+        {
+          "new": "completions::completions_fish_emits_non_empty_script",
+          "old": "completions_fish_emits_non_empty_script"
+        },
+        {
+          "new": "completions::completions_include_active_color_flag",
+          "old": "completions_include_active_color_flag"
+        },
+        {
+          "new": "completions::completions_include_active_color_values",
+          "old": "completions_include_active_color_values"
+        },
+        {
+          "new": "completions::completions_only_offer_hotkey_prefixes_after_bracket_prefix",
+          "old": "completions_only_offer_hotkey_prefixes_after_bracket_prefix"
+        },
+        {
+          "new": "completions::completions_script_mentions_choose_subcommands",
+          "old": "completions_script_mentions_choose_subcommands"
+        },
+        {
+          "new": "completions::completions_script_mentions_convention_flags",
+          "old": "completions_script_mentions_convention_flags"
+        },
+        {
+          "new": "completions::completions_script_mentions_padding_flags",
+          "old": "completions_script_mentions_padding_flags"
+        },
+        {
+          "new": "completions::completions_script_mentions_sort_flags",
+          "old": "completions_script_mentions_sort_flags"
+        },
+        {
+          "new": "completions::completions_script_mentions_source_flags",
+          "old": "completions_script_mentions_source_flags"
+        },
+        {
+          "new": "completions::completions_zsh_contains_inverse_for_sort",
+          "old": "completions_zsh_contains_inverse_for_sort"
+        },
+        {
+          "new": "completions::completions_zsh_does_not_present_reverse_as_canonical",
+          "old": "completions_zsh_does_not_present_reverse_as_canonical"
+        },
+        {
+          "new": "completions::completions_zsh_emits_non_empty_script",
+          "old": "completions_zsh_emits_non_empty_script"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "completions_shell",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/completions_shell.rs",
+      "old_binary_id": "biscuit-tui-cli::completions_shell",
+      "old_path": "biscuit-tui/cli/tests/completions_shell.rs",
+      "old_target": "completions_shell",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "completions_shell::bash::empty_option_position_does_not_offer_hotkey_prefixes",
+          "old": "bash::empty_option_position_does_not_offer_hotkey_prefixes"
+        },
+        {
+          "new": "completions_shell::bash::enum_value_completion_active_color_after_positionals",
+          "old": "bash::enum_value_completion_active_color_after_positionals"
+        },
+        {
+          "new": "completions_shell::bash::hotkey_prefix_bracket_tab",
+          "old": "bash::hotkey_prefix_bracket_tab"
+        },
+        {
+          "new": "completions_shell::bash::post_positional_flag_completion",
+          "old": "bash::post_positional_flag_completion"
+        },
+        {
+          "new": "completions_shell::bash::root_subcommand_completion",
+          "old": "bash::root_subcommand_completion"
+        },
+        {
+          "new": "completions_shell::tests::make_temp_dir_returns_unique_existing_directories",
+          "old": "tests::make_temp_dir_returns_unique_existing_directories"
+        },
+        {
+          "new": "completions_shell::zsh::empty_option_position_does_not_offer_hotkey_prefixes",
+          "old": "zsh::empty_option_position_does_not_offer_hotkey_prefixes"
+        },
+        {
+          "new": "completions_shell::zsh::enum_value_completion_active_color_space_form",
+          "old": "zsh::enum_value_completion_active_color_space_form"
+        },
+        {
+          "new": "completions_shell::zsh::enum_value_completion_after_positionals",
+          "old": "zsh::enum_value_completion_after_positionals"
+        },
+        {
+          "new": "completions_shell::zsh::enum_value_completion_all_flags_after_positionals",
+          "old": "zsh::enum_value_completion_all_flags_after_positionals"
+        },
+        {
+          "new": "completions_shell::zsh::enum_value_completion_sort_space_form",
+          "old": "zsh::enum_value_completion_sort_space_form"
+        },
+        {
+          "new": "completions_shell::zsh::hotkey_prefix_bare_bracket_tab",
+          "old": "zsh::hotkey_prefix_bare_bracket_tab"
+        },
+        {
+          "new": "completions_shell::zsh::hotkey_prefix_quoted_bracket_tab",
+          "old": "zsh::hotkey_prefix_quoted_bracket_tab"
+        },
+        {
+          "new": "completions_shell::zsh::post_positional_flag_completion",
+          "old": "zsh::post_positional_flag_completion"
+        },
+        {
+          "new": "completions_shell::zsh::root_subcommand_completion",
+          "old": "zsh::root_subcommand_completion"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "exit_codes",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/exit_codes.rs",
+      "old_binary_id": "biscuit-tui-cli::exit_codes",
+      "old_path": "biscuit-tui/cli/tests/exit_codes.rs",
+      "old_target": "exit_codes",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "exit_codes::choose_many_exits_nonzero_when_no_option_source",
+          "old": "choose_many_exits_nonzero_when_no_option_source"
+        },
+        {
+          "new": "exit_codes::choose_one_exits_nonzero_when_no_option_source",
+          "old": "choose_one_exits_nonzero_when_no_option_source"
+        },
+        {
+          "new": "exit_codes::every_subcommand_exits_with_code_1_on_non_tty_event_loop_read",
+          "old": "every_subcommand_exits_with_code_1_on_non_tty_event_loop_read"
+        },
+        {
+          "new": "exit_codes::input_table_exits_nonzero_with_malformed_columns",
+          "old": "input_table_exits_nonzero_with_malformed_columns"
+        },
+        {
+          "new": "exit_codes::level2_text_input_exits_with_code_1_on_escape_in_pty",
+          "old": "level2_text_input_exits_with_code_1_on_escape_in_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "help_contract",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/help_contract.rs",
+      "old_binary_id": "biscuit-tui-cli::help_contract",
+      "old_path": "biscuit-tui/cli/tests/help_contract.rs",
+      "old_target": "help_contract",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "help_contract::every_subcommand_accepts_height_before_subcommand_token",
+          "old": "every_subcommand_accepts_height_before_subcommand_token"
+        },
+        {
+          "new": "help_contract::text_input_help_shows_height_as_inherited_global",
+          "old": "text_input_help_shows_height_as_inherited_global"
+        },
+        {
+          "new": "help_contract::top_level_help_shows_height_as_global_option",
+          "old": "top_level_help_shows_height_as_global_option"
+        },
+        {
+          "new": "help_contract::top_level_help_uses_canonical_public_names",
+          "old": "top_level_help_uses_canonical_public_names"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "input_table_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/input_table_output.rs",
+      "old_binary_id": "biscuit-tui-cli::input_table_output",
+      "old_path": "biscuit-tui/cli/tests/input_table_output.rs",
+      "old_target": "input_table_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "input_table_output::input_table_accepts_output_flag_at_global_position",
+          "old": "input_table_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "input_table_output::input_table_fails_with_invalid_json_columns",
+          "old": "input_table_fails_with_invalid_json_columns"
+        },
+        {
+          "new": "input_table_output::input_table_fails_with_unknown_column_type",
+          "old": "input_table_fails_with_unknown_column_type"
+        },
+        {
+          "new": "input_table_output::input_table_help_lists_columns_and_rows_flags",
+          "old": "input_table_help_lists_columns_and_rows_flags"
+        },
+        {
+          "new": "input_table_output::input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "input_table_output::input_table_rejects_unknown_flag",
+          "old": "input_table_rejects_unknown_flag"
+        },
+        {
+          "new": "input_table_output::level2_input_table_submits_json_output_via_pty",
+          "old": "level2_input_table_submits_json_output_via_pty"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "keyboard_protocol",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/keyboard_protocol.rs",
+      "old_binary_id": "biscuit-tui-cli::keyboard_protocol",
+      "old_path": "biscuit-tui/cli/tests/keyboard_protocol.rs",
+      "old_target": "keyboard_protocol",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "keyboard_protocol::degraded_terminal::dumb_terminal_chord_fallback_works",
+          "old": "degraded_terminal::dumb_terminal_chord_fallback_works"
+        },
+        {
+          "new": "keyboard_protocol::degraded_terminal::dumb_terminal_does_not_panic",
+          "old": "degraded_terminal::dumb_terminal_does_not_panic"
+        },
+        {
+          "new": "keyboard_protocol::keyboard_protocol::bare_ctrl_shows_hotkey_badges",
+          "old": "keyboard_protocol::bare_ctrl_shows_hotkey_badges"
+        },
+        {
+          "new": "keyboard_protocol::keyboard_protocol::chord_fallback_still_works",
+          "old": "keyboard_protocol::chord_fallback_still_works"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "text_area_input_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/text_area_input_output.rs",
+      "old_binary_id": "biscuit-tui-cli::text_area_input_output",
+      "old_path": "biscuit-tui/cli/tests/text_area_input_output.rs",
+      "old_target": "text_area_input_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "text_area_input_output::level2_text_area_input_submits_json_output_via_pty",
+          "old": "level2_text_area_input_submits_json_output_via_pty"
+        },
+        {
+          "new": "text_area_input_output::text_area_input_accepts_output_flag_at_global_position",
+          "old": "text_area_input_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "text_area_input_output::text_area_input_help_lists_width_and_scrollbar_flags",
+          "old": "text_area_input_help_lists_width_and_scrollbar_flags"
+        },
+        {
+          "new": "text_area_input_output::text_area_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "text_area_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "text_area_input_output::text_area_input_rejects_unknown_flag",
+          "old": "text_area_input_rejects_unknown_flag"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::l1",
+      "inner_cfg": [],
+      "module": "text_input_output",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/l1/text_input_output.rs",
+      "old_binary_id": "biscuit-tui-cli::text_input_output",
+      "old_path": "biscuit-tui/cli/tests/text_input_output.rs",
+      "old_target": "text_input_output",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "text_input_output::level2_text_input_submits_raw_output_via_pty",
+          "old": "level2_text_input_submits_raw_output_via_pty"
+        },
+        {
+          "new": "text_input_output::text_input_accepts_output_flag_at_global_position",
+          "old": "text_input_accepts_output_flag_at_global_position"
+        },
+        {
+          "new": "text_input_output::text_input_help_lists_max_length_flag",
+          "old": "text_input_help_lists_max_length_flag"
+        },
+        {
+          "new": "text_input_output::text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty",
+          "old": "text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty"
+        },
+        {
+          "new": "text_input_output::text_input_rejects_unknown_flag",
+          "old": "text_input_rejects_unknown_flag"
+        }
+      ]
+    },
+    {
+      "alias": {
+        "from": "real_terminal_render",
+        "reason": [
+          "real: level2_kitty_renders_option_labels mismatches before, matches as real_terminal_render::level2_kitty_renders_option_labels",
+          "real: level2_tmux_alt_r_chord_selects_red mismatches before, matches as real_terminal_render::level2_tmux_alt_r_chord_selects_red",
+          "real: level2_tmux_alt_shift_r_chord_selects_red mismatches before, matches as real_terminal_render::level2_tmux_alt_shift_r_chord_selects_red",
+          "real: level2_tmux_alt_shift_r_chord_selects_red_choose_many mismatches before, matches as real_terminal_render::level2_tmux_alt_shift_r_chord_selects_red_choose_many",
+          "real: level2_tmux_arrow_down_moves_active_marker mismatches before, matches as real_terminal_render::level2_tmux_arrow_down_moves_active_marker"
+        ]
+      },
+      "binary_id": "biscuit-tui-cli::level2",
+      "inner_cfg": [
+        "unix"
+      ],
+      "module": "terminal_render",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/level2/terminal_render.rs",
+      "old_binary_id": "biscuit-tui-cli::real_terminal_render",
+      "old_path": "biscuit-tui/cli/tests/real_terminal_render.rs",
+      "old_target": "real_terminal_render",
+      "target": "level2",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "terminal_render::level2_kitty_renders_option_labels",
+          "old": "level2_kitty_renders_option_labels"
+        },
+        {
+          "new": "terminal_render::level2_tmux_alt_r_chord_selects_red",
+          "old": "level2_tmux_alt_r_chord_selects_red"
+        },
+        {
+          "new": "terminal_render::level2_tmux_alt_shift_r_chord_selects_red",
+          "old": "level2_tmux_alt_shift_r_chord_selects_red"
+        },
+        {
+          "new": "terminal_render::level2_tmux_alt_shift_r_chord_selects_red_choose_many",
+          "old": "level2_tmux_alt_shift_r_chord_selects_red_choose_many"
+        },
+        {
+          "new": "terminal_render::level2_tmux_arrow_down_moves_active_marker",
+          "old": "level2_tmux_arrow_down_moves_active_marker"
+        },
+        {
+          "new": "terminal_render::level2_tmux_ctrl_c_exits_130",
+          "old": "level2_tmux_ctrl_c_exits_130"
+        },
+        {
+          "new": "terminal_render::level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr",
+          "old": "level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr"
+        },
+        {
+          "new": "terminal_render::level2_tmux_ctrl_r_chord_selects_red",
+          "old": "level2_tmux_ctrl_r_chord_selects_red"
+        },
+        {
+          "new": "terminal_render::level2_tmux_ctrl_space_reveals_badges",
+          "old": "level2_tmux_ctrl_space_reveals_badges"
+        },
+        {
+          "new": "terminal_render::level2_tmux_renders_option_labels",
+          "old": "level2_tmux_renders_option_labels"
+        },
+        {
+          "new": "terminal_render::level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges",
+          "old": "level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges"
+        },
+        {
+          "new": "terminal_render::level2_wezterm_ctrl_shift_r_kitty_bytes_select_red",
+          "old": "level2_wezterm_ctrl_shift_r_kitty_bytes_select_red"
+        },
+        {
+          "new": "terminal_render::level2_wezterm_ctrl_shift_r_kitty_bytes_select_red_choose_many",
+          "old": "level2_wezterm_ctrl_shift_r_kitty_bytes_select_red_choose_many"
+        },
+        {
+          "new": "terminal_render::level2_wezterm_renders_option_labels",
+          "old": "level2_wezterm_renders_option_labels"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::level2",
+      "inner_cfg": [
+        "windows"
+      ],
+      "keep_inner_cfg": true,
+      "module": "windows_captured_stdout",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/level2/windows_captured_stdout.rs",
+      "old_binary_id": "biscuit-tui-cli::windows_captured_stdout",
+      "old_path": "biscuit-tui/cli/tests/windows_captured_stdout.rs",
+      "old_target": "windows_captured_stdout",
+      "target": "level2",
+      "test_basis": "source-scan",
+      "tests": [
+        {
+          "new": "windows_captured_stdout::captured_stdout_receives_only_value_no_tui_bytes",
+          "old": "captured_stdout_receives_only_value_no_tui_bytes"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "biscuit-tui-cli::level3",
+      "inner_cfg": [
+        "target_os = \"macos\""
+      ],
+      "module": "level3_chord_select",
+      "nested_root": false,
+      "new_path": "biscuit-tui/cli/tests/level3/level3_chord_select.rs",
+      "old_binary_id": "biscuit-tui-cli::level3_chord_select",
+      "old_path": "biscuit-tui/cli/tests/level3_chord_select.rs",
+      "old_target": "level3_chord_select",
+      "target": "level3",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "level3_chord_select::level3_alt_shift_chord_selects_choose_many",
+          "old": "level3_alt_shift_chord_selects_choose_many"
+        },
+        {
+          "new": "level3_chord_select::level3_alt_shift_chord_selects_choose_one",
+          "old": "level3_alt_shift_chord_selects_choose_one"
+        },
+        {
+          "new": "level3_chord_select::level3_ctrl_shift_chord_selects_choose_many",
+          "old": "level3_ctrl_shift_chord_selects_choose_many"
+        },
+        {
+          "new": "level3_chord_select::level3_ctrl_shift_chord_selects_choose_one",
+          "old": "level3_ctrl_shift_chord_selects_choose_one"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "biscuit-tui-cli",
+  "ruled_targets": [
+    {
+      "old_target": "real_terminal_render",
+      "ruling": "R4/R5: its tests are level2_; as `real` its target would be stranded (F4)",
+      "target": "level2"
+    },
+    {
+      "old_target": "windows_captured_stdout",
+      "ruling": "R4: an L1 test requiring terminal-tests joins that feature's target (F5)",
+      "target": "level2"
+    }
+  ],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "boolean_switch_output",
+        "choose_cli",
+        "choose_many_output",
+        "choose_one_output",
+        "completions",
+        "completions_shell",
+        "exit_codes",
+        "help_contract",
+        "input_table_output",
+        "keyboard_protocol",
+        "text_area_input_output",
+        "text_input_output"
+      ],
+      "name": "l1",
+      "path": "biscuit-tui/cli/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "terminal_render",
+        "windows_captured_stdout"
+      ],
+      "name": "level2",
+      "path": "biscuit-tui/cli/tests/level2/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L2"
+    },
+    {
+      "harness": true,
+      "modules": [
+        "level3_chord_select"
+      ],
+      "name": "level3",
+      "path": "biscuit-tui/cli/tests/level3/main.rs",
+      "required_features": [
+        "terminal-tests"
+      ],
+      "tier": "L3"
+    }
+  ],
+  "version": 1
+}

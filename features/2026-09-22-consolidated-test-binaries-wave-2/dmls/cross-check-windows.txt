@@ -1,0 +1,824 @@
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-file/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/biscuit-terminal-cli/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows-base.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/claudine/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/schematic-gen/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/sniff/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'features/2026-09-22-consolidated-test-binaries-wave-2/tree-hugger/cross-check-windows.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: dmls @ origin/fix/ci-build-feature-divergence (1879dd880) + 560 changed file(s) as 709e3b39c
+os: windows(build-win-native)   extra nextest args: <none>
+mode: archive — planned keys:
+  windows  5e627edca1ba3b10 produced on windows-latest, consumed as windows-latest
+
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+clone: build-win-native:B:\coding\mac--feat-dark-fixes
+
+== windows (build-win-native, archive 5e627edca1ba3b10 from windows-latest) ==
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+cross-check-tree: d15f20a0525e3d46a9c8ca52fb239266841cc8f1
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 0.74s
+   Compiling fluent-uri v0.1.4
+   Compiling serde_repr v0.1.20
+   Compiling text-size v1.1.1
+   Compiling nohash-hasher v0.2.0
+   Compiling lsp-server v0.8.0
+   Compiling rlsp-yaml-parser v0.11.1
+   Compiling darkmatter v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\darkmatter\lib)
+   Compiling line-index v0.1.2
+   Compiling lsp-types v0.97.0
+   Compiling dmls v0.1.0 (B:\coding\mac--feat-dark-fixes\rusty-biscuit\darkmatter\dmls)
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls-2f6a75e4f88a0e57.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls-2f6a75e4f88a0e57.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `dmls` (bin "dmls" test) generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `dmls` (bin "dmls") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-e7602c08f36009b1.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-e7602c08f36009b1.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `dmls` (test "l1") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls-7614fc3db0270c91.lib and object B:\coding\mac--feat-dark-fixes\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\dmls-7614fc3db0270c91.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `dmls` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.14s
+   Archiving 5 binaries (including 1 non-test binary), 4 linked paths, and 2 standard libraries to B:\coding\mac--feat-dark-fixes\cross-check-Mac-21633-1790199959-build\build-dmls-windows-latest-5e627edca1ba3b10.tar.zst
+    Archived 382 files to B:\coding\mac--feat-dark-fixes\cross-check-Mac-21633-1790199959-build\build-dmls-windows-latest-5e627edca1ba3b10.tar.zst in 0.19s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 62 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `5e627edca1ba3b10` for `windows-latest` — digest `37f28bf5385035f2`, produced on `windows-latest`.
+cross-check-key: 5e627edca1ba3b10
+cross-check-digest: 37f28bf5385035f2
+
+Testing [1mdmls[0m package
+
+ℹ️ using [32mcargo-nextest nextest run[0m
+  Extracting 5 binaries (including 1 non-test binary) and 4 linked paths to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-VvYQIN
+   Extracted 382 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-VvYQIN in 0.74s
+────────────
+ Nextest run ID 5fe1d9ad-9c54-4256-8763-79dc4b3ad4d2 with nextest profile: ci
+    Starting 742 tests across 4 binaries (9 tests skipped)
+        PASS [   0.019s] (  1/742) dmls bench::tests::test_peak_rss_is_positive_where_available
+        PASS [   0.026s] (  2/742) dmls capabilities::tests::test_negotiation_helix_order_utf8_first
+        PASS [   0.027s] (  3/742) dmls bench::tests::test_summary_renders
+        PASS [   0.035s] (  4/742) dmls capabilities::tests::test_negotiation_missing_defaults_to_utf16
+        PASS [   0.039s] (  5/742) dmls capabilities::tests::test_negotiation_utf32_first_selects_next_supported
+        PASS [   0.043s] (  6/742) dmls capabilities::tests::test_folding_omitted_for_helix_profile
+        PASS [   0.046s] (  7/742) dmls bench::tests::test_bench_report_counts_and_json_shape
+        PASS [   0.052s] (  8/742) dmls capabilities::tests::test_negotiation_neovim_prefers_first_supported
+        PASS [   0.057s] (  9/742) dmls capabilities::tests::test_negotiation_unsupported_only_falls_back_to_utf16
+        PASS [   0.044s] ( 10/742) dmls capabilities::tests::test_negotiation_vscode_utf16_only
+        PASS [   0.042s] ( 11/742) dmls capabilities::tests::test_profile_from_capabilities
+        PASS [   0.073s] ( 12/742) dmls bench::tests::test_stage_fields_are_populated_over_a_corpus
+        PASS [   0.048s] ( 13/742) dmls capabilities::tests::test_profile_helix_quirks
+        PASS [   0.043s] ( 14/742) dmls capabilities::tests::test_profile_neovim_keyed_defaults
+        PASS [   0.045s] ( 15/742) dmls capabilities::tests::test_profile_semantic_tokens_without_refresh_support
+        PASS [   0.044s] ( 16/742) dmls capabilities::tests::test_profile_unknown_client_capability_driven_only
+        PASS [   0.045s] ( 17/742) dmls capabilities::tests::test_profile_vscode_rich_hover
+        PASS [   0.044s] ( 18/742) dmls capabilities::tests::test_profile_zed_never_defers_text_edit_to_resolve
+        PASS [   0.043s] ( 19/742) dmls capabilities::tests::test_semantic_tokens_advertised_only_when_supported
+        PASS [   0.042s] ( 20/742) dmls capabilities::tests::test_server_capabilities_advertise_layer0_surface
+        PASS [   0.044s] ( 21/742) dmls capabilities::tests::test_will_rename_files_gated_on_file_operations
+        PASS [   0.043s] ( 22/742) dmls config::tests::test_config_state_bare_section_settings
+        PASS [   0.046s] ( 23/742) dmls config::tests::test_config_state_invalid_overlay_keeps_file_layer
+        PASS [   0.054s] ( 24/742) dmls config::tests::test_config_state_overlay_wins_over_file
+        PASS [   0.048s] ( 25/742) dmls config::tests::test_defaults
+        PASS [   0.059s] ( 26/742) dmls config::tests::test_config_state_reload_picks_up_file_changes
+        PASS [   0.059s] ( 27/742) dmls config::tests::test_discover_finds_first_root
+        PASS [   0.056s] ( 28/742) dmls config::tests::test_discover_malformed_degrades_to_defaults
+        PASS [   0.049s] ( 29/742) dmls config::tests::test_parse_full_toml
+        PASS [   0.055s] ( 30/742) dmls config::tests::test_explicit_config_path_wins_over_discovery
+        PASS [   0.048s] ( 31/742) dmls config::tests::test_partial_toml_keeps_defaults
+        PASS [   0.046s] ( 32/742) dmls config::tests::test_semantic_tokens_defaults_enabled
+        PASS [   0.046s] ( 33/742) dmls config::tests::test_semantic_tokens_explicit_false
+        PASS [   0.038s] ( 34/742) dmls config::tests::test_semantic_tokens_malformed_value_keeps_previous
+        PASS [   0.041s] ( 35/742) dmls config::tests::test_semantic_tokens_partial_overlay_update
+        PASS [   0.037s] ( 36/742) dmls corpus::tests::test_darkmatter_tier_emits_dsl_constructs
+        PASS [   0.035s] ( 37/742) dmls corpus::tests::test_generation_is_deterministic
+        PASS [   0.039s] ( 38/742) dmls corpus::tests::test_pathological_has_duplicate_headings_and_unicode
+        PASS [   0.041s] ( 39/742) dmls corpus::tests::test_tier_parse_round_trip
+        PASS [   0.044s] ( 40/742) dmls diagnostics::frontmatter::severity_tests::existing_malformed_code_action_is_offered_at_error_severity
+        PASS [   0.091s] ( 41/742) dmls diagnostics::frontmatter::severity_tests::foreign_template_syntax_in_a_body_is_at_most_a_warning
+        PASS [   0.083s] ( 42/742) dmls diagnostics::frontmatter::severity_tests::pending_values_are_deferred_before_parsing
+        PASS [   0.086s] ( 43/742) dmls diagnostics::frontmatter::tests::array_item_schema_problem_ranges_the_failing_item
+        PASS [   0.083s] ( 44/742) dmls diagnostics::frontmatter::tests::condition_dialect_and_expression_is_not_malformed
+        PASS [   0.103s] ( 45/742) dmls diagnostics::frontmatter::tests::alternate_valid_enum_arm_suppresses_malformed_expression
+        PASS [   0.114s] ( 46/742) dmls diagnostics::frontmatter::severity_tests::ladder_separates_schema_typed_frontmatter_from_body_inference
+        PASS [   0.090s] ( 47/742) dmls diagnostics::frontmatter::tests::condition_dialect_or_expression_is_not_malformed
+        PASS [   0.113s] ( 48/742) dmls diagnostics::frontmatter::tests::alternate_valid_string_arm_suppresses_malformed_expression
+        PASS [   0.147s] ( 49/742) dmls corpus::tests::test_generate_tiny_writes_files
+        PASS [   0.100s] ( 50/742) dmls diagnostics::frontmatter::tests::discriminated_union_narrows_unknown_key_to_selected_arm
+        PASS [   0.027s] ( 51/742) dmls diagnostics::frontmatter::tests::missing_required_is_off_by_default_and_error_in_strict
+        PASS [   0.071s] ( 52/742) dmls diagnostics::frontmatter::tests::malformed_expression_value_emits_one_frontmatter_diagnostic_and_no_schema_duplicate
+        PASS [   0.018s] ( 53/742) dmls diagnostics::frontmatter::tests::suggestion_message_covers_each_reason
+        PASS [   0.040s] ( 54/742) dmls diagnostics::frontmatter::tests::nested_conversion_error_does_not_anchor_on_a_same_named_top_level_property
+        PASS [   0.039s] ( 55/742) dmls diagnostics::frontmatter::tests::nested_schema_conversion_error_points_to_the_nested_value
+        PASS [   0.067s] ( 56/742) dmls diagnostics::frontmatter::tests::mapping_value_on_expression_property_stays_a_type_mismatch
+        PASS [   0.027s] ( 57/742) dmls diagnostics::frontmatter::tests::suggestion_span_converts_under_both_position_encodings
+        PASS [   0.028s] ( 58/742) dmls diagnostics::frontmatter::tests::suggestion_span_converts_with_crlf
+        PASS [   0.017s] ( 59/742) dmls diagnostics::frontmatter::tests::unknown_key_warns_in_non_strict_and_errors_in_strict
+        PASS [   0.087s] ( 60/742) dmls diagnostics::frontmatter::tests::malformed_selected_arm_expression_value_emits_malformed_diagnostic
+        PASS [   0.076s] ( 61/742) dmls diagnostics::frontmatter::tests::native_scalar_coercion_produces_no_expression_false_diagnostics
+        PASS [   0.093s] ( 62/742) dmls diagnostics::frontmatter::tests::malformed_value_under_non_selected_arm_type_emits_no_expression_diagnostic
+        PASS [   0.020s] ( 63/742) dmls diagnostics::frontmatter::tests::value_problems_are_errors_in_either_mode
+        PASS [   0.128s] ( 64/742) dmls diagnostics::frontmatter::tests::malformed_expression_producer_is_gated_to_exactly_projected_styles
+        PASS [   0.059s] ( 65/742) dmls diagnostics::frontmatter::tests::valid_expression_value_produces_no_diagnostics
+        PASS [   0.075s] ( 66/742) dmls diagnostics::frontmatter::tests::value_invalid_under_every_arm_emits_one_malformed_and_no_duplicate
+        PASS [   0.156s] ( 67/742) dmls diagnostics::frontmatter::tests::meta_schema_diagnostics_replace_generic_keyword_failures
+        PASS [   0.101s] ( 68/742) dmls diagnostics::frontmatter::tests::unknown_expression_root_is_a_warning_frontmatter_diagnostic
+        PASS [   0.106s] ( 69/742) dmls diagnostics::frontmatter::tests::valid_expression_under_mixed_union_is_clean
+        PASS [   0.022s] ( 70/742) dmls diagnostics::nested_span::nested_span_tests::lifecycle_inventory_matches_the_authored_claudine_schema
+        PASS [   0.027s] ( 71/742) dmls diagnostics::nested_span::nested_span_tests::path_matcher_classifies_representative_lifecycle_paths
+        PASS [   0.098s] ( 72/742) dmls diagnostics::nested_span::nested_span_tests::folded_tagged_and_line_spanning_literals_offer_no_action
+        PASS [   0.112s] ( 73/742) dmls diagnostics::nested_span::nested_span_tests::late_binding_roots_are_known_beneath_lifecycle_keys
+        PASS [   0.128s] ( 74/742) dmls diagnostics::nested_span::nested_span_tests::incident_rewrite_is_the_darkmatter_lint_suggestion_verbatim
+        PASS [   0.074s] ( 75/742) dmls diagnostics::nested_span::nested_span_tests::mixed_strings_and_non_lifecycle_whole_values_are_not_flagged
+        PASS [   0.134s] ( 76/742) dmls diagnostics::nested_span::nested_span_tests::incident_yields_one_error_per_say_on_the_inner_span
+        PASS [   0.108s] ( 77/742) dmls diagnostics::nested_span::nested_span_tests::late_binding_roots_are_unknown_outside_lifecycle_keys
+        PASS [   0.016s] ( 78/742) dmls graph::arena::tests::test_broken_link_stays_unresolved
+        PASS [   0.019s] ( 79/742) dmls graph::arena::tests::test_cross_document_path_and_fragment_resolve
+        PASS [   0.071s] ( 80/742) dmls diagnostics::nested_span::nested_span_tests::ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged
+        PASS [   0.021s] ( 81/742) dmls graph::arena::tests::test_deterministic_document_ids_regardless_of_insert_order
+        PASS [   0.181s] ( 82/742) dmls diagnostics::nested_span::nested_span_tests::diagnostics_use_decoded_escape_parity_for_literal_openers
+        PASS [   0.076s] ( 83/742) dmls diagnostics::nested_span::nested_span_tests::stack_operands_proxy_with_values_and_predicates_are_diagnosed
+        PASS [   0.017s] ( 84/742) dmls graph::arena::tests::test_document_and_heading_nodes
+        PASS [   0.019s] ( 85/742) dmls graph::arena::tests::test_interpolation_literal_creates_no_graph_node_or_edge
+        PASS [   0.021s] ( 86/742) dmls graph::arena::tests::test_no_transclusion_cycle_for_acyclic_chain
+        PASS [   0.021s] ( 87/742) dmls graph::arena::tests::test_normalize_join_parent_traversal
+        PASS [   0.027s] ( 88/742) dmls graph::arena::tests::test_same_document_anchor_resolves
+        PASS [   0.071s] ( 89/742) dmls diagnostics::nested_span::nested_span_tests::the_same_defect_in_a_body_produces_no_diagnostic
+        PASS [   0.029s] ( 90/742) dmls graph::arena::tests::test_transclusion_cycle_detected
+        PASS [   0.030s] ( 91/742) dmls graph::arena::tests::test_transclusion_edge_resolves_to_target_document
+        PASS [   0.027s] ( 92/742) dmls graph::arena::tests::test_transclusion_of_non_document_target_carries_no_edge
+        PASS [   0.131s] ( 93/742) dmls diagnostics::nested_span::nested_span_tests::quick_fix_encodes_quoted_replacements_for_their_style
+        PASS [   0.027s] ( 94/742) dmls graph::arena::tests::test_uses_file_edge_for_extensionless_file_value
+        PASS [   0.131s] ( 95/742) dmls diagnostics::nested_span::nested_span_tests::quick_fix_rewrites_the_incident_literal_blocks_and_nothing_else
+        PASS [   0.029s] ( 96/742) dmls graph::arena::tests::test_uses_file_edges_emitted_for_each_source
+        PASS [   0.026s] ( 97/742) dmls graph::arena::tests::test_uses_schema_edge_emitted
+        PASS [   0.030s] ( 98/742) dmls graph::arena::tests::test_uses_file_resolves_to_indexed_document_and_reverse_index
+        PASS [   0.030s] ( 99/742) dmls graph::arena::tests::test_uses_variable_edges_emitted_and_reverse_index
+        PASS [   0.029s] (100/742) dmls graph::edge::tests::test_edge_kind_all_is_exhaustive
+        PASS [   0.029s] (101/742) dmls graph::edge::tests::test_edge_target_node_accessor
+        PASS [   0.031s] (102/742) dmls graph::index::tests::test_absent_node_returns_empty
+        PASS [   0.122s] (103/742) dmls diagnostics::nested_span::nested_span_tests::stale_versions_and_foreign_payloads_are_declined
+        PASS [   0.034s] (104/742) dmls graph::index::tests::test_incoming_only_for_resolved_targets
+        PASS [   0.035s] (105/742) dmls graph::index::tests::test_outgoing_collects_all_kinds
+        PASS [   0.038s] (106/742) dmls graph::invalidate::tests::test_delete_removes_document
+        PASS [   0.039s] (107/742) dmls graph::invalidate::tests::test_edit_bumps_generation_and_reindexes
+        PASS [   0.040s] (108/742) dmls graph::invalidate::tests::test_from_indices_batch_startup
+        PASS [   0.041s] (109/742) dmls graph::invalidate::tests::test_plain_link_change_reports_no_dependents
+        PASS [   0.042s] (110/742) dmls graph::invalidate::tests::test_reconcile_disk_adopts_created_and_changed_drops_deleted
+        PASS [   0.041s] (111/742) dmls graph::invalidate::tests::test_reconcile_disk_never_touches_open_buffers
+        PASS [   0.042s] (112/742) dmls graph::invalidate::tests::test_reconcile_disk_no_change_is_free
+        PASS [   0.044s] (113/742) dmls graph::invalidate::tests::test_rename_matrix_as_delete_then_add
+        PASS [   0.045s] (114/742) dmls graph::invalidate::tests::test_set_wiki_roots_changes_wiki_resolution
+        PASS [   0.045s] (115/742) dmls graph::invalidate::tests::test_transclude_change_reports_dependents
+        PASS [   0.016s] (116/742) dmls graph::node::tests::test_classify_relative_path_with_fragment
+        PASS [   0.044s] (117/742) dmls graph::invalidate::tests::test_uses_file_change_reports_dependents
+        PASS [   0.042s] (118/742) dmls graph::key_index::tests::test_basename_elides_md_extensions
+        PASS [   0.041s] (119/742) dmls graph::key_index::tests::test_basename_is_case_sensitive_in_stem
+        PASS [   0.042s] (120/742) dmls graph::key_index::tests::test_build_and_ambiguity
+        PASS [   0.042s] (121/742) dmls graph::node::tests::test_classify_external
+        PASS [   0.070s] (122/742) dmls graph::invalidate::tests::test_unchanged_content_skips_rebuild
+        PASS [   0.042s] (123/742) dmls graph::node::tests::test_classify_relative_path_without_fragment
+        PASS [   0.043s] (124/742) dmls graph::node::tests::test_classify_same_document_anchor
+        PASS [   0.042s] (125/742) dmls graph::node::tests::test_classify_trailing_empty_fragment_is_none
+        PASS [   0.044s] (126/742) dmls graph::node::tests::test_substrate_kind_classification
+        PASS [   0.044s] (127/742) dmls graph::substrate::tests::test_content_hash_changes_with_content
+        PASS [   0.044s] (128/742) dmls graph::substrate::tests::test_external_links_excluded_from_local_targets
+        PASS [   0.046s] (129/742) dmls graph::substrate::tests::test_file_links_dir_equals_form_is_a_file_use
+        PASS [   0.044s] (130/742) dmls graph::substrate::tests::test_file_links_dir_option_form_is_a_file_use
+        PASS [   0.045s] (131/742) dmls graph::substrate::tests::test_file_links_glob_form_is_a_file_use
+        PASS [   0.044s] (132/742) dmls graph::substrate::tests::test_file_links_remote_dir_option_excluded
+        PASS [   0.046s] (133/742) dmls graph::substrate::tests::test_frontmatter_offsets_spans_to_document_coordinates
+        PASS [   0.045s] (134/742) dmls graph::substrate::tests::test_index_headings_and_slugs
+        PASS [   0.045s] (135/742) dmls graph::substrate::tests::test_index_links_classified
+        PASS [   0.046s] (136/742) dmls graph::substrate::tests::test_inline_schema_extensionless_file_value_is_a_file_use
+        PASS [   0.044s] (137/742) dmls graph::substrate::tests::test_inline_schema_file_value_still_rejects_url_and_inline_object
+        PASS [   0.044s] (138/742) dmls graph::substrate::tests::test_interpolation_literal_produces_no_variable_use_fact
+        PASS [   0.042s] (139/742) dmls graph::substrate::tests::test_is_schema_file_value_accepts_extensionless
+        PASS [   0.044s] (140/742) dmls graph::substrate::tests::test_regular_interpolation_produces_variable_use_fact
+        PASS [   0.042s] (141/742) dmls graph::substrate::tests::test_toc_linking_positional_form_is_a_file_use
+        PASS [   0.043s] (142/742) dmls graph::substrate::tests::test_transclusion_facts_extracted
+        PASS [   0.043s] (143/742) dmls graph::substrate::tests::test_transclusion_path_strips_fragment
+        PASS [   0.043s] (144/742) dmls overlay::directives::tests::test_directive_at_finds_containing_line
+        PASS [   0.041s] (145/742) dmls overlay::directives::tests::test_keyword_token_and_known
+        PASS [   0.042s] (146/742) dmls overlay::directives::tests::test_name_partial
+        PASS [   0.042s] (147/742) dmls overlay::directives::tests::test_option_recognition
+        PASS [   0.051s] (148/742) dmls overlay::doc_links::tests::a_document_inside_the_topic_directory_also_resolves
+        PASS [   0.046s] (149/742) dmls overlay::doc_links::tests::an_unresolvable_topic_doc_drops_the_link_and_keeps_the_label
+        PASS [   0.057s] (150/742) dmls overlay::doc_links::tests::a_resolvable_topic_doc_becomes_an_absolute_file_uri_with_the_fragment_kept
+        PASS [   0.053s] (151/742) dmls overlay::doc_links::tests::an_unterminated_destination_is_left_alone
+        PASS [   0.048s] (152/742) dmls overlay::doc_links::tests::file_uri_percent_encodes_and_normalizes_separators
+        PASS [   0.053s] (153/742) dmls overlay::doc_links::tests::every_occurrence_is_rewritten_not_just_the_first
+        PASS [   0.046s] (154/742) dmls overlay::doc_links::tests::file_uri_rejects_a_relative_path
+        PASS [   0.047s] (155/742) dmls overlay::doc_links::tests::markdown_without_the_authored_target_is_borrowed_unchanged
+        PASS [   0.047s] (156/742) dmls overlay::doc_links::tests::windows_paths_serialize_with_a_drive_letter_and_forward_slashes
+        PASS [   0.053s] (157/742) dmls overlay::doc_links::tests::the_target_outside_a_destination_is_left_alone
+        PASS [   0.040s] (158/742) dmls overlay::expressions::frontmatter_inventory_tests::aliases_items_and_block_comments_are_handled_passively
+        PASS [   0.041s] (159/742) dmls overlay::expressions::frontmatter_inventory_tests::backslash_escaped_spans_are_not_inventoried
+        PASS [   0.039s] (160/742) dmls overlay::expressions::frontmatter_inventory_tests::commit_fixture_literal_with_escaped_newline_is_single_line_and_rewritable
+        PASS [   0.040s] (161/742) dmls overlay::expressions::frontmatter_inventory_tests::folded_tagged_and_multiline_scalars_range_whole_and_offer_no_rewrite
+        PASS [   0.040s] (162/742) dmls overlay::expressions::frontmatter_inventory_tests::incident_literal_blocks_range_each_nested_span_in_authored_coordinates
+        PASS [   0.044s] (163/742) dmls overlay::expressions::frontmatter_inventory_tests::incident_rewrite_preserves_block_indicator_indentation_and_untouched_bytes
+        PASS [   0.046s] (164/742) dmls overlay::expressions::frontmatter_inventory_tests::literal_spanning_a_line_break_keeps_its_range_but_offers_no_rewrite
+        PASS [   0.045s] (165/742) dmls overlay::expressions::frontmatter_inventory_tests::plain_and_quoted_spans_project_exactly
+        PASS [   0.041s] (166/742) dmls overlay::expressions::frontmatter_inventory_tests::quoted_rewrites_are_encoded_for_their_scalar_style
+        PASS [   0.043s] (167/742) dmls overlay::expressions::tests::a_key_no_replacement_can_reference_gets_no_fix
+        PASS [   0.042s] (168/742) dmls overlay::expressions::tests::condition_dialect_lowers_logical_or_where_value_dialect_treats_it_as_fallback
+        PASS [   0.044s] (169/742) dmls overlay::expressions::tests::dasherized_identifiers::completion_partial_does_not_merge_non_joining_dashes
+        PASS [   0.043s] (170/742) dmls overlay::expressions::tests::dasherized_identifiers::completion_partial_joins_a_kebab_name_at_every_cursor_position
+        PASS [   0.045s] (171/742) dmls overlay::expressions::tests::dasherized_identifiers::hover_keeps_double_dash_operands_separate
+        PASS [   0.045s] (172/742) dmls overlay::expressions::tests::dasherized_identifiers::hover_resolves_a_kebab_name_at_every_offset_in_both_dialects
+        PASS [   0.076s] (173/742) dmls overlay::expressions::tests::a_subtraction_spelling_a_key_is_one_finding_with_the_right_replacement
+        PASS [   0.045s] (174/742) dmls overlay::expressions::tests::dasherized_identifiers::root_identifier_keeps_the_whole_kebab_path
+        PASS [   0.077s] (175/742) dmls overlay::expressions::tests::ambiguous_arithmetic_keeps_generic_findings_and_no_fix
+        PASS [   0.045s] (176/742) dmls overlay::expressions::tests::dasherized_identifiers::value_completion_partial_follows_the_same_rule
+        PASS [   0.039s] (177/742) dmls overlay::expressions::tests::embedded_vocabulary_matches_the_topic_doc
+        PASS [   0.078s] (178/742) dmls overlay::expressions::tests::condition_hover_uses_condition_grammar_body_hover_stays_value_grammar
+        PASS [   0.032s] (179/742) dmls overlay::expressions::tests::function_and_expression_lookup_descend_into_collection_literals
+        PASS [   0.031s] (180/742) dmls overlay::expressions::tests::interpolations_inside_fenced_code_are_not_surfaced
+        PASS [   0.038s] (181/742) dmls overlay::expressions::tests::literal_at_matches_cursor_on_braces_and_content
+        PASS [   0.061s] (182/742) dmls overlay::expressions::tests::every_operand_position_is_checked_at_its_own_span
+        PASS [   0.040s] (183/742) dmls overlay::expressions::tests::literal_containing_expression_is_inert
+        PASS [   0.039s] (184/742) dmls overlay::expressions::tests::literals_body_base_filters_frontmatter_region
+        PASS [   0.060s] (185/742) dmls overlay::expressions::tests::handled_absence_and_known_roots_are_silent
+        PASS [   0.042s] (186/742) dmls overlay::expressions::tests::literals_finds_simple_literal_and_excludes_expressions
+        PASS [   0.041s] (187/742) dmls overlay::expressions::tests::literals_inside_fenced_code_are_not_surfaced
+        PASS [   0.037s] (188/742) dmls overlay::expressions::tests::literals_inside_inline_code_are_found
+        PASS [   0.068s] (189/742) dmls overlay::expressions::tests::list_query_functions_link_to_the_vocabulary_in_hover_and_completion
+        PASS [   0.067s] (190/742) dmls overlay::expressions::tests::list_query_hover_embeds_the_vocabulary_and_completion_does_not
+        PASS [   0.032s] (191/742) dmls overlay::expressions::tests::test_body_base_filters_frontmatter_region
+        PASS [   0.034s] (192/742) dmls overlay::expressions::tests::test_completion_partial_inside_open_interpolation
+        PASS [   0.041s] (193/742) dmls overlay::expressions::tests::test_ctx_descriptor_preserves_rendered_array_type
+        PASS [   0.058s] (194/742) dmls overlay::expressions::tests::more_context_names_reach_completion_and_hover_without_evaluation
+        PASS [   0.036s] (195/742) dmls overlay::expressions::tests::test_expression_at_finds_deepest_subexpression
+        PASS [   0.043s] (196/742) dmls overlay::expressions::tests::test_ctx_descriptor_returns_full_catalog_entry
+        PASS [   0.062s] (197/742) dmls overlay::expressions::tests::remote_functions_and_closed_enum_reach_passive_descriptors
+        PASS [   0.061s] (198/742) dmls overlay::expressions::tests::shipped_catalog_descriptors_all_reach_completion
+        PASS [   0.045s] (199/742) dmls overlay::expressions::tests::test_format_ctx_hover_block_carries_name_type_ownership_description
+        PASS [   0.033s] (200/742) dmls overlay::expressions::tests::test_function_call_at_finds_deepest_call
+        PASS [   0.029s] (201/742) dmls overlay::expressions::tests::test_interpolations_found_and_spanned
+        PASS [   0.032s] (202/742) dmls overlay::expressions::tests::test_parse_error_position_is_byte_offset
+        PASS [   0.034s] (203/742) dmls overlay::expressions::tests::test_root_identifier_keeps_dotted_variable
+        PASS [   0.072s] (204/742) dmls overlay::expressions::tests::test_format_function_block_carries_typed_signature_and_description
+        PASS [   0.060s] (205/742) dmls overlay::expressions::tests::test_function_descriptor_fallible_signature_has_error_suffix
+        PASS [   0.052s] (206/742) dmls overlay::expressions::tests::test_function_descriptor_returns_typed_signature
+        PASS [   0.213s] (207/742) dmls overlay::expressions::tests::the_fix_payload_round_trips_through_json
+        PASS [   0.217s] (208/742) dmls overlay::expressions::tests::unclosed_interpolation_yields_no_token
+        PASS [   0.218s] (209/742) dmls overlay::frontmatter::tests::test_an_alias_resolves_to_the_last_scalar_anchor_defined_before_it
+        PASS [   0.216s] (210/742) dmls overlay::frontmatter::tests::test_an_alias_target_start_skips_the_nodes_tag_and_anchor
+        PASS [   0.209s] (211/742) dmls overlay::frontmatter::tests::test_container_at_offset_reaches_nested_item_sequences
+        PASS [   0.209s] (212/742) dmls overlay::frontmatter::tests::test_entry_at_offset_prefers_deepest
+        PASS [   0.208s] (213/742) dmls overlay::frontmatter::tests::test_entry_or_ancestor_is_exact_for_array_item
+        PASS [   0.211s] (214/742) dmls overlay::frontmatter::tests::test_index_and_numeric_key_paths_stay_distinct
+        PASS [   0.208s] (215/742) dmls overlay::frontmatter::tests::test_malformed_yaml_reports_error_no_tree
+        PASS [   0.212s] (216/742) dmls overlay::frontmatter::tests::test_mapping_items_descend_to_their_keys
+        PASS [   0.045s] (217/742) dmls overlay::frontmatter::tests::test_nested_mapping_dotted_and_pointer_paths
+        PASS [   0.046s] (218/742) dmls overlay::frontmatter::tests::test_no_frontmatter_returns_none
+        PASS [   0.047s] (219/742) dmls overlay::frontmatter::tests::test_offsets_are_document_relative
+        PASS [   0.047s] (220/742) dmls overlay::frontmatter::tests::test_parent_mapping_range_root_is_root_span
+        PASS [   0.048s] (221/742) dmls overlay::frontmatter::tests::test_scalar_style_and_tag_are_retained
+        PASS [   0.047s] (222/742) dmls overlay::frontmatter::tests::test_schema_entry_and_key_span_for
+        PASS [   0.049s] (223/742) dmls overlay::frontmatter::tests::test_sequence_items_are_explicit_entries
+        PASS [   0.046s] (224/742) dmls overlay::frontmatter::tests::test_top_level_entries_and_spans
+        PASS [   0.048s] (225/742) dmls overlay::schema::tests::envelope_claim_agrees_with_parser_on_flow_nested_plain_scalar_quote
+        PASS [   0.047s] (226/742) dmls overlay::schema::tests::envelope_claim_agrees_with_parser_on_nested_plain_scalar_quote
+        PASS [   0.048s] (227/742) dmls overlay::schema::tests::envelope_claim_distinguishes_block_plain_scalars_from_flow_collections
+        PASS [   0.046s] (228/742) dmls overlay::schema::tests::envelope_claim_recognizes_block_and_flow_presentation
+        PASS [   0.045s] (229/742) dmls overlay::schema::tests::envelope_claim_tracks_escapes_in_quoted_scalars
+        PASS [   0.045s] (230/742) dmls overlay::schema::tests::semantic_type_regions_project_every_pattern_key_form
+        PASS [   0.044s] (231/742) dmls overlay::schema::tests::semantic_type_regions_project_existing_activation_state
+        PASS [   0.045s] (232/742) dmls overlay::schema::tests::test_extension_matches_respects_globs
+        PASS [   0.043s] (233/742) dmls overlay::schema::tests::test_no_frontmatter_yields_none
+        PASS [   0.044s] (234/742) dmls overlay::schema::tests::test_relative_to_root
+        PASS [   0.043s] (235/742) dmls overlay::shell::tests::test_approved_when_whitelisted
+        PASS [   0.043s] (236/742) dmls overlay::shell::tests::test_builtin_blacklist_denies_dangerous_command
+        PASS [   0.071s] (237/742) dmls overlay::schema::tests::test_base_baseline_applies_without_schema
+        PASS [   0.044s] (238/742) dmls overlay::shell::tests::test_chain_denied_if_any_link_dangerous
+        PASS [   0.071s] (239/742) dmls overlay::schema::tests::test_extension_glob_gates_activation
+        PASS [   0.045s] (240/742) dmls overlay::shell::tests::test_empty_command_has_no_segments
+        PASS [   0.044s] (241/742) dmls overlay::shell::tests::test_quoted_words_preserved
+        PASS [   0.036s] (242/742) dmls overlay::shell::tests::test_unknown_without_whitelist
+        PASS [   0.043s] (243/742) dmls overlay::suggestions::tests::inline_crlf_line_endings_preserve_span_offsets
+        PASS [   0.043s] (244/742) dmls overlay::suggestions::tests::inline_decoy_field_does_not_steal_diagnostic_span
+        PASS [   0.045s] (245/742) dmls overlay::suggestions::tests::inline_double_quoted_scalar_projects_through_escape
+        PASS [   0.043s] (246/742) dmls overlay::suggestions::tests::inline_invalid_candidate_produces_document_relative_span
+        PASS [   0.047s] (247/742) dmls overlay::suggestions::tests::inline_multibyte_utf8_before_candidate_preserves_span
+        PASS [   0.044s] (248/742) dmls overlay::suggestions::tests::inline_no_frontmatter_is_inactive
+        PASS [   0.049s] (249/742) dmls overlay::suggestions::tests::inline_nested_inline_object_resolves_with_exact_candidate_span
+        PASS [   0.044s] (250/742) dmls overlay::suggestions::tests::inline_no_schema_is_inactive
+        PASS [   0.051s] (251/742) dmls overlay::suggestions::tests::inline_number_target_invalid_decimal_syntax_is_linted
+        PASS [   0.056s] (252/742) dmls overlay::suggestions::tests::inline_schema_file_reference_is_inactive
+        PASS [   0.055s] (253/742) dmls overlay::suggestions::tests::inline_schema_with_array_form_produces_item_lints
+        PASS [   0.057s] (254/742) dmls overlay::suggestions::tests::inline_single_quoted_scalar_projects_through_doubled_quote
+        PASS [   0.048s] (255/742) dmls overlay::suggestions::tests::standalone_malformed_tagged_carries_error
+        PASS [   0.055s] (256/742) dmls overlay::suggestions::tests::inline_valid_suggestions_produce_no_problems
+        PASS [   0.048s] (257/742) dmls overlay::suggestions::tests::standalone_malformed_tagged_unsupported_keys_carries_error
+        PASS [   0.052s] (258/742) dmls overlay::suggestions::tests::standalone_ordinary_yaml_is_none
+        PASS [   0.059s] (259/742) dmls overlay::suggestions::tests::standalone_nested_inline_objects_resolve_with_exact_candidate_spans
+        PASS [   0.051s] (260/742) dmls overlay::suggestions::tests::standalone_pure_non_mapping_payload_carries_error
+        PASS [   0.063s] (261/742) dmls overlay::suggestions::tests::standalone_pure_envelope_produces_lints
+        PASS [   0.045s] (262/742) dmls overlay::suggestions::tests::standalone_pure_sequence_envelope_produces_no_lints_without_suggest
+        PASS [   0.045s] (263/742) dmls overlay::suggestions::tests::standalone_tagged_envelope_produces_lints
+        PASS [   0.042s] (264/742) dmls overlay::tests::escaped_quotes_stay_inert_without_panicking
+        PASS [   0.045s] (265/742) dmls overlay::tests::forget_clears_standalone_last_good_state
+        PASS [   0.076s] (266/742) dmls overlay::tests::frontmatter_meta_schema_activation_uses_effective_property_definitions
+        PASS [   0.077s] (267/742) dmls overlay::tests::schema_cache_hit_without_dependencies
+        PASS [   0.017s] (268/742) dmls overlay::tests::standalone_activation_is_content_based_not_path_based
+        PASS [   0.062s] (269/742) dmls overlay::tests::sibling_only_bare_reference_reaches_dmls_schema_diagnostic_state
+        PASS [   0.018s] (270/742) dmls overlay::tests::standalone_last_good_survives_malformed_yaml_and_shape_edits
+        PASS [   0.115s] (271/742) dmls overlay::tests::consecutive_failed_scans_transfer_diagnostic_ownership
+        PASS [   0.019s] (272/742) dmls overlay::tests::standalone_pure_and_tagged_models_carry_schema_and_authored_spans
+        PASS [   0.111s] (273/742) dmls overlay::tests::schema_cache_invalidates_on_dependency_change
+        PASS [   0.110s] (274/742) dmls overlay::tests::schema_cache_invalidates_on_referenced_schema_file_change
+        PASS [   0.026s] (275/742) dmls overlay::tests::test_no_frontmatter_returns_none
+        PASS [   0.116s] (276/742) dmls overlay::tests::schema_cache_invalidates_on_extension_baseline_change
+        PASS [   0.100s] (277/742) dmls overlay::tests::shipped_schema_corpus_uses_content_classification
+        PASS [   0.117s] (278/742) dmls overlay::tests::schema_cache_invalidates_on_terminal_file_in_a_reference_chain
+        PASS [   0.024s] (279/742) dmls providers::code_actions::tests::test_humanize_stem
+        PASS [   0.056s] (280/742) dmls overlay::tests::test_fresh_parse_is_not_stale
+        PASS [   0.028s] (281/742) dmls providers::code_actions::tests::test_is_creatable_filename_rejects_windows_invalid
+        PASS [   0.026s] (282/742) dmls providers::code_actions::tests::test_is_creatable_rejects_trailing_space_or_dot
+        PASS [   0.064s] (283/742) dmls overlay::tests::test_last_good_survives_malformed_edit
+        PASS [   0.022s] (284/742) dmls providers::code_actions::tests::test_line_at_finds_opener
+        PASS [   0.019s] (285/742) dmls providers::code_actions::tests::test_literal_scaffold_inserts_value_with_yaml_quoting
+        PASS [   0.017s] (286/742) dmls providers::code_actions::tests::test_quoted_token_and_backticks
+        PASS [   0.024s] (287/742) dmls providers::code_actions::tests::test_wrap_in_interpolation_literal_offers_quick_fix
+        PASS [   0.024s] (288/742) dmls providers::completion::tests::test_fence_language_partial
+        PASS [   0.197s] (289/742) dmls overlay::tests::dialect_family_matches_cli_parity_corpus
+        PASS [   0.025s] (290/742) dmls providers::completion::tests::test_link_destination_partial
+        PASS [   0.081s] (291/742) dmls overlay::tests::trigger_activation_has_yaml_hysteresis_and_transactional_registry
+        PASS [   0.029s] (292/742) dmls providers::completion::tests::test_relativize
+        PASS [   0.076s] (293/742) dmls overlay::tests::trigger_payload_edit_retains_last_good_registry
+        PASS [   0.084s] (294/742) dmls overlay::tests::trigger_activation_uses_workspace_boundary
+        PASS [   0.026s] (295/742) dmls providers::dsl::tests::bare_identifier_uses_schema_block_when_unset_in_frontmatter
+        PASS [   0.036s] (296/742) dmls providers::dsl::tests::ctx_hover_shares_catalog_block_and_appends_compose_note
+        PASS [   0.036s] (297/742) dmls providers::dsl::tests::ctx_hover_surfaces_through_index_access
+        PASS [   0.058s] (298/742) dmls providers::dsl::tests::bare_identifier_matching_ctx_tail_is_frontmatter_not_context
+        PASS [   0.060s] (299/742) dmls providers::dsl::tests::all_formatting_functions_present_with_fallible_error_detail
+        PASS [   0.040s] (300/742) dmls providers::dsl::tests::ctx_hover_surfaces_through_member_access_chain
+        PASS [   0.057s] (301/742) dmls providers::dsl::tests::completion_matching_is_prefix_based_and_case_sensitive
+        PASS [   0.065s] (302/742) dmls providers::dsl::tests::ctx_completion_derives_detail_and_documentation_from_descriptor
+        PASS [   0.027s] (303/742) dmls providers::dsl::tests::literal_hover_markdown_identifies_span_and_composed_output
+        PASS [   0.034s] (304/742) dmls providers::dsl::tests::literal_hover_markdown_preserves_content_with_inner_expression
+        PASS [   0.063s] (305/742) dmls providers::dsl::tests::frontmatter_variable_inside_function_call_shows_static_value
+        PASS [   0.070s] (306/742) dmls providers::dsl::tests::ctx_variable_inside_function_call_shows_ctx_hover
+        PASS [   0.034s] (307/742) dmls providers::dsl::tests::literal_provider_diagnostics_and_hover_respect_utf16_and_body_boundary
+        PASS [   0.050s] (308/742) dmls providers::dsl::tests::function_call_hover_resolves_deepest_call_under_cursor
+        PASS [   0.028s] (309/742) dmls providers::dsl::tests::literal_provider_hover_safely_preserves_backticks_multiline_and_unicode
+        PASS [   0.075s] (310/742) dmls providers::dsl::tests::function_call_hover_renders_catalog_block
+        PASS [   0.054s] (311/742) dmls providers::dsl::tests::function_completion_derives_all_fields_from_one_descriptor
+        PASS [   0.018s] (312/742) dmls providers::dsl::tests::period_outside_open_interpolation_offers_nothing
+        PASS [   0.022s] (313/742) dmls providers::dsl::tests::shell_block_commands_enumerates_body_lines
+        PASS [   0.024s] (314/742) dmls providers::dsl::tests::shell_block_commands_ignores_page_blocks
+        PASS [   0.067s] (315/742) dmls providers::dsl::tests::function_identifier_hover_shows_catalog_block
+        PASS [   0.026s] (316/742) dmls providers::dsl::tests::shell_block_commands_skips_blank_lines
+        PASS [   0.028s] (317/742) dmls providers::dsl::tests::static_frontmatter_value_wins_over_schema_block
+        PASS [   0.031s] (318/742) dmls providers::dsl::tests::text_edit_item_carries_eager_edit_and_markdown_documentation
+        PASS [   0.052s] (319/742) dmls providers::dsl::tests::parentheses_and_commas_show_no_function_hover
+        PASS [   0.035s] (320/742) dmls providers::dsl::tests::unknown_ctx_name_keeps_generic_hover
+        PASS [   0.033s] (321/742) dmls providers::folding::tests::test_fence_markers
+        PASS [   0.034s] (322/742) dmls providers::folding::tests::test_list_and_table_detection
+        PASS [   0.036s] (323/742) dmls providers::formatting::tests::test_format_text_applies_fixed_width_reflow
+        PASS [   0.036s] (324/742) dmls providers::formatting::tests::test_format_text_honors_compact_variant
+        PASS [   0.038s] (325/742) dmls providers::formatting::tests::test_format_text_idempotent_on_canonical_document
+        PASS [   0.041s] (326/742) dmls providers::formatting::tests::test_format_text_is_byte_equivalent_to_library_cleanup
+        PASS [   0.042s] (327/742) dmls providers::formatting::tests::test_format_text_keeps_reference_definitions_intact
+        PASS [   0.041s] (328/742) dmls providers::formatting::tests::test_format_text_preserves_additional_paragraphs_inside_blockquoted_items
+        PASS [   0.043s] (329/742) dmls providers::formatting::tests::test_format_text_preserves_frontmatter_and_directive_lines
+        PASS [   0.043s] (330/742) dmls providers::formatting::tests::test_format_text_preserves_markers_in_protected_bodies
+        PASS [   0.047s] (331/742) dmls providers::formatting::tests::test_format_text_preserves_nested_lists_inside_blockquotes
+        PASS [   0.047s] (332/742) dmls providers::formatting::tests::test_format_text_preserves_quoted_marker_looking_indented_code
+        PASS [   0.044s] (333/742) dmls providers::formatting::tests::test_format_text_preserves_ten_digit_prose_boundary
+        PASS [   0.044s] (334/742) dmls providers::formatting::tests::test_format_text_reflows_complete_list_paragraph_like_library_cleanup
+        PASS [   0.081s] (335/742) dmls providers::frontmatter::sequence_tests::context_aware_walk_selects_discriminated_arm_inside_array_items
+        PASS [   0.056s] (336/742) dmls providers::frontmatter::sequence_tests::nested_shape_consumes_array_index_against_item_type
+        PASS [   0.077s] (337/742) dmls providers::frontmatter::sequence_tests::hover_on_scalar_list_item_describes_the_item_type
+        PASS [   0.077s] (338/742) dmls providers::frontmatter::sequence_tests::navigation_works_at_list_item_file_values_only
+        PASS [   0.112s] (339/742) dmls providers::frontmatter::sequence_tests::completion_never_offers_synthetic_item_indices
+        PASS [   0.030s] (340/742) dmls providers::frontmatter::sequence_tests::nested_shape_fails_closed_on_mismatched_segments
+        PASS [   0.110s] (341/742) dmls providers::frontmatter::sequence_tests::expression_diagnostics_newly_reach_list_items
+        PASS [   0.108s] (342/742) dmls providers::frontmatter::sequence_tests::expression_pass_materializes_each_distinct_ancestor_shape_once
+        PASS [   0.096s] (343/742) dmls providers::frontmatter::sequence_tests::hover_works_at_list_item_key_and_value
+        PASS [   0.105s] (344/742) dmls providers::frontmatter::sequence_tests::hover_is_silent_on_synthetic_item_positions
+        PASS [   0.035s] (345/742) dmls providers::frontmatter::sequence_tests::shipped_claudine_predicates_are_expression_typed
+        PASS [   0.136s] (346/742) dmls providers::frontmatter::sequence_tests::completion_works_inside_list_items
+        PASS [   0.037s] (347/742) dmls providers::frontmatter::sequence_tests::union_arms_are_chosen_by_array_crossing
+        PASS [   0.078s] (348/742) dmls providers::frontmatter::sequence_tests::predicates_inside_stack_items_reach_expression_values_without_executing
+        PASS [   0.066s] (349/742) dmls providers::frontmatter::sequence_tests::transparent_crossing_serves_key_only_authoring_ancestry
+        PASS [   0.059s] (350/742) dmls providers::frontmatter::tests::duplicate_member_across_two_enum_arms_is_deduplicated
+        PASS [   0.068s] (351/742) dmls providers::frontmatter::tests::condition_dialect_expression_value_completion_offers_catalog
+        PASS [   0.054s] (352/742) dmls providers::frontmatter::tests::eager_hover_prose_is_taken_from_the_darkmatter_descriptor_catalog
+        PASS [   0.076s] (353/742) dmls providers::frontmatter::tests::condition_dialect_expression_value_hover_uses_condition_grammar
+        PASS [   0.055s] (354/742) dmls providers::frontmatter::tests::expression_value_hover_is_byte_identical_to_interpolation
+        PASS [   0.085s] (355/742) dmls providers::frontmatter::tests::both_hover_surfaces_disclose_array_placements_without_claiming_presence
+        PASS [   0.048s] (356/742) dmls providers::frontmatter::tests::hover_on_expression_key_keeps_schema_type_hover
+        PASS [   0.088s] (357/742) dmls providers::frontmatter::tests::expression_value_completion_offers_ctx_functions_and_keys
+        PASS [   0.048s] (358/742) dmls providers::frontmatter::tests::literal_colliding_with_enum_member_keeps_preselected_literal
+        PASS [   0.112s] (359/742) dmls providers::frontmatter::tests::constraint_markers_are_detected_at_item_and_array_level_and_across_union_arms
+        PASS [   0.054s] (360/742) dmls providers::frontmatter::tests::literal_enum_boolean_union_offers_every_arm_candidate
+        PASS [   0.076s] (361/742) dmls providers::frontmatter::tests::file_enum_union_offers_file_paths_and_enum_members
+        PASS [   0.049s] (362/742) dmls providers::frontmatter::tests::literal_hover_shows_type_and_exact_value
+        PASS [   0.020s] (363/742) dmls providers::frontmatter::tests::meta_schema_hover_renders_every_denoted_arm_and_constraints
+        PASS [   0.054s] (364/742) dmls providers::frontmatter::tests::literal_string_value_completion_is_yaml_quoted
+        PASS [   0.073s] (365/742) dmls providers::frontmatter::tests::literal_union_combines_each_value_with_scaffolds
+        PASS [   0.052s] (366/742) dmls providers::frontmatter::tests::literal_value_completion_offers_exact_value_preselected
+        PASS [   0.043s] (367/742) dmls providers::frontmatter::tests::non_expression_value_offers_no_expression_completion
+        PASS [   0.095s] (368/742) dmls providers::frontmatter::tests::literal_expression_union_offers_literal_and_expression_candidates
+        PASS [   0.052s] (369/742) dmls providers::frontmatter::tests::reversed_literal_enum_boolean_union_offers_every_arm_candidate
+        PASS [   0.068s] (370/742) dmls providers::frontmatter::tests::non_selected_arm_expression_type_does_not_leak_to_completion
+        PASS [   0.100s] (371/742) dmls providers::frontmatter::tests::meta_schema_completion_catalog_is_descriptor_driven
+        PASS [   0.086s] (372/742) dmls providers::frontmatter::tests::root_union_key_completion_conflicting_discriminants_keeps_union
+        PASS [   0.101s] (373/742) dmls providers::frontmatter::tests::root_union_key_completion_absent_discriminant_keeps_union
+        PASS [   0.101s] (374/742) dmls providers::frontmatter::tests::root_union_key_completion_duplicate_value_keeps_union
+        PASS [   0.097s] (375/742) dmls providers::frontmatter::tests::root_union_key_completion_narrows_to_matched_arm
+        PASS [   0.098s] (376/742) dmls providers::frontmatter::tests::root_union_key_completion_is_type_sensitive
+        PASS [   0.089s] (377/742) dmls providers::frontmatter::tests::root_union_key_completion_unknown_value_keeps_union
+        PASS [   0.075s] (378/742) dmls providers::frontmatter::tests::schema_bound_instance_hover_separates_eager_timing_from_required_presence
+        PASS [   0.116s] (379/742) dmls providers::frontmatter::tests::root_union_matched_arm_exposes_only_selected_shape
+        PASS [   0.067s] (380/742) dmls providers::frontmatter::tests::schema_definition_hover_separates_eager_timing_from_required_presence
+        PASS [   0.144s] (381/742) dmls providers::frontmatter::tests::root_union_key_completion_sparse_unknown_discriminant_keeps_union
+        PASS [   0.082s] (382/742) dmls providers::frontmatter::tests::schema_hover_on_property_key_resolves_selected_arm
+        PASS [   0.069s] (383/742) dmls providers::frontmatter::tests::selected_arm_expression_value_gets_expression_hover
+        PASS [   0.088s] (384/742) dmls providers::frontmatter::tests::selected_arm_file_value_is_navigable
+        PASS [   0.091s] (385/742) dmls providers::frontmatter::tests::selected_arm_expression_value_offers_catalog_completion
+        PASS [   0.052s] (386/742) dmls providers::frontmatter::tests::sibling_completion_duplicate_discriminant_keeps_union_behavior
+        PASS [   0.064s] (387/742) dmls providers::frontmatter::tests::sibling_completion_conflicting_discriminants_keeps_union_behavior
+        PASS [   0.072s] (388/742) dmls providers::frontmatter::tests::selected_arm_literal_value_completion_is_offered_preselected
+        PASS [   0.048s] (389/742) dmls providers::frontmatter::tests::sibling_completion_narrows_to_discriminated_arm
+        PASS [   0.080s] (390/742) dmls providers::frontmatter::tests::selected_arm_suggest_follows_discriminant_in_both_orders
+        PASS [   0.024s] (391/742) dmls providers::frontmatter::tests::test_base_style_schema_exposes_nested_completion_shapes
+        PASS [   0.021s] (392/742) dmls providers::frontmatter::tests::test_def_at_path_resolves_leaf_atom
+        PASS [   0.024s] (393/742) dmls providers::frontmatter::tests::test_ctx_hover_markdown_is_the_shared_formatter_block
+        PASS [   0.072s] (394/742) dmls providers::frontmatter::tests::sibling_completion_narrows_to_selected_arm_in_both_orders
+        PASS [   0.018s] (395/742) dmls providers::frontmatter::tests::test_enclosing_path_by_indent_builds_full_ancestor_chain
+        PASS [   0.052s] (396/742) dmls providers::frontmatter::tests::sibling_completion_type_mismatched_discriminant_keeps_union_behavior
+        PASS [   0.017s] (397/742) dmls providers::frontmatter::tests::test_file_atom_selects_non_first_arm
+        PASS [   0.018s] (398/742) dmls providers::frontmatter::tests::test_flow_array_element_after_bracket
+        PASS [   0.021s] (399/742) dmls providers::frontmatter::tests::test_flow_array_element_empty_after_comma
+        PASS [   0.021s] (400/742) dmls providers::frontmatter::tests::test_flow_array_element_partial_after_comma
+        PASS [   0.074s] (401/742) dmls providers::frontmatter::tests::sibling_completion_unknown_discriminant_keeps_union_behavior
+        PASS [   0.026s] (402/742) dmls providers::frontmatter::tests::test_flow_array_element_first_element
+        PASS [   0.031s] (403/742) dmls providers::frontmatter::tests::test_flow_array_element_with_spaces
+        PASS [   0.030s] (404/742) dmls providers::frontmatter::tests::test_inline_object_shape_selects_non_first_arm
+        PASS [   0.076s] (405/742) dmls providers::frontmatter::tests::sibling_completion_without_discriminant_keeps_union_behavior
+        PASS [   0.028s] (406/742) dmls providers::frontmatter::tests::test_is_schema_file_value_accepts_extensionless
+        PASS [   0.029s] (407/742) dmls providers::frontmatter::tests::test_key_path_survives_dot_and_colon_in_keys
+        PASS [   0.028s] (408/742) dmls providers::frontmatter::tests::test_line_prefix
+        PASS [   0.030s] (409/742) dmls providers::frontmatter::tests::test_looks_like_path
+        PASS [   0.033s] (410/742) dmls providers::frontmatter::tests::test_nested_shape_descends_through_union_inline_object_arm
+        PASS [   0.033s] (411/742) dmls providers::frontmatter::tests::test_nested_shape_missing_segment_is_none
+        PASS [   0.033s] (412/742) dmls providers::frontmatter::tests::test_nested_shape_non_inline_object_is_none
+        PASS [   0.035s] (413/742) dmls providers::frontmatter::tests::test_nested_shape_walks_inline_objects
+        PASS [   0.038s] (414/742) dmls providers::frontmatter::tests::test_schema_hover_body_applies_style_rules
+        PASS [   0.037s] (415/742) dmls providers::frontmatter::tests::test_schema_hover_body_bare_type_is_bold
+        PASS [   0.038s] (416/742) dmls providers::frontmatter::tests::test_sole_literal_value_is_none_for_multi_literal_union
+        PASS [   0.039s] (417/742) dmls providers::frontmatter::tests::test_yaml_scalar_literal_quotes_when_required
+        PASS [   0.314s] (418/742) dmls providers::frontmatter::tests::root_union_shared_property_merges_for_every_unresolved_state
+        PASS [   0.053s] (419/742) dmls providers::rename::tests::test_posix_relative_parent_traversal
+        PASS [   0.082s] (420/742) dmls providers::frontmatter::tests::unknown_discriminant_suggest_merges_every_arm_candidate
+        PASS [   0.052s] (421/742) dmls providers::rename::tests::test_posix_relative_same_dir
+        PASS [   0.025s] (422/742) dmls providers::rename::tests::test_rename_error_messages
+        PASS [   0.085s] (423/742) dmls providers::frontmatter::tests::unresolved_union_file_arm_makes_value_navigable
+        PASS [   0.091s] (424/742) dmls providers::frontmatter::tests::unresolved_union_expression_value_gets_expression_hover
+        PASS [   0.018s] (425/742) dmls providers::semantic_tokens::tests::adjacent_tokens_do_not_trigger_overlap
+        PASS [   0.022s] (426/742) dmls providers::semantic_tokens::tests::astral_scalar_length_is_encoding_specific
+        PASS [   0.090s] (427/742) dmls providers::frontmatter::tests::unresolved_union_offers_both_arms_literal_values
+        PASS [   0.022s] (428/742) dmls providers::semantic_tokens::tests::combined_duplicate_family_output_is_deduplicated
+        PASS [   0.023s] (429/742) dmls providers::semantic_tokens::tests::combined_full_and_range_stream_stays_ordered_and_nonoverlapping
+        PASS [   0.021s] (430/742) dmls providers::semantic_tokens::tests::combined_interpolation_inside_directive_option_value
+        PASS [   0.026s] (431/742) dmls providers::semantic_tokens::tests::combined_wiki_looking_text_inside_interpolation
+        PASS [   0.026s] (432/742) dmls providers::semantic_tokens::tests::combined_wiki_structural_subtoken_precedence
+        PASS [   0.109s] (433/742) dmls providers::frontmatter::tests::unresolved_union_offers_expression_completion_from_divergent_arm
+        PASS [   0.026s] (434/742) dmls providers::semantic_tokens::tests::containment_higher_priority_fully_absorbs_lower
+        PASS [   0.110s] (435/742) dmls providers::frontmatter::tests::unresolved_union_suggest_merges_every_arm_candidate
+        PASS [   0.031s] (436/742) dmls providers::semantic_tokens::tests::deterministic_tie_break_by_start
+        PASS [   0.030s] (437/742) dmls providers::semantic_tokens::tests::exact_duplicates_are_removed
+        PASS [   0.030s] (438/742) dmls providers::semantic_tokens::tests::f1_body_base_excludes_frontmatter_interpolation
+        PASS [   0.033s] (439/742) dmls providers::semantic_tokens::tests::f1_interpolation_is_whole_span_macro
+        PASS [   0.415s] (440/742) dmls providers::frontmatter::tests::root_union_shared_property_merges_divergent_defs_when_unresolved
+        PASS [   0.030s] (441/742) dmls providers::semantic_tokens::tests::f1_literal_carries_inert_modifier
+        PASS [   0.032s] (442/742) dmls providers::semantic_tokens::tests::f1_malformed_and_fenced_constructs_emit_nothing
+        PASS [   0.033s] (443/742) dmls providers::semantic_tokens::tests::f2_body_base_shifts_spans_and_excludes_frontmatter
+        PASS [   0.036s] (444/742) dmls providers::semantic_tokens::tests::f2_disclosure_style_tokens_split_at_equals
+        PASS [   0.037s] (445/742) dmls providers::semantic_tokens::tests::f2_disclosure_summary_prose_is_not_tokenized
+        PASS [   0.038s] (446/742) dmls providers::semantic_tokens::tests::f2_emits_all_twelve_directive_keywords
+        PASS [   0.040s] (447/742) dmls providers::semantic_tokens::tests::f2_shell_payload_is_not_tokenized
+        PASS [   0.040s] (448/742) dmls providers::semantic_tokens::tests::f2_structured_target_and_options
+        PASS [   0.039s] (449/742) dmls providers::semantic_tokens::tests::f2_unknown_directive_yields_no_token
+        PASS [   0.040s] (450/742) dmls providers::semantic_tokens::tests::f4_empty_segments_produce_no_token
+        PASS [   0.044s] (451/742) dmls providers::semantic_tokens::tests::f4_fenced_wiki_link_is_not_surfaced
+        PASS [   0.044s] (452/742) dmls providers::semantic_tokens::tests::f4_resolved_and_unresolved_have_identical_shapes
+        PASS [   0.047s] (453/742) dmls providers::semantic_tokens::tests::f4_unsupported_form_shares_the_shape
+        PASS [   0.045s] (454/742) dmls providers::semantic_tokens::tests::f4_wiki_brackets_and_segments
+        PASS [   0.045s] (455/742) dmls providers::semantic_tokens::tests::handler_master_switch_toggles_emission
+        PASS [   0.046s] (456/742) dmls providers::semantic_tokens::tests::handler_range_is_full_intersected
+        PASS [   0.045s] (457/742) dmls providers::semantic_tokens::tests::handler_wiki_enable_suppresses_only_f4
+        PASS [   0.045s] (458/742) dmls providers::semantic_tokens::tests::inert_literal_carries_both_modifiers
+        PASS [   0.046s] (459/742) dmls providers::semantic_tokens::tests::interpolation_owns_bytes_and_clips_lower_directive
+        PASS [   0.046s] (460/742) dmls providers::semantic_tokens::tests::legend_is_frozen_in_protocol_order
+        PASS [   0.048s] (461/742) dmls providers::semantic_tokens::tests::modifier_bits_match_legend_indices
+        PASS [   0.048s] (462/742) dmls providers::semantic_tokens::tests::multiline_span_excludes_crlf_terminator
+        PASS [   0.049s] (463/742) dmls providers::semantic_tokens::tests::multiline_span_excludes_lone_cr_terminator
+        PASS [   0.050s] (464/742) dmls providers::semantic_tokens::tests::multiline_span_is_split_per_line_lf
+        PASS [   0.052s] (465/742) dmls providers::semantic_tokens::tests::range_boundary_inside_non_ascii_text
+        PASS [   0.051s] (466/742) dmls providers::semantic_tokens::tests::range_clips_token_crossing_end_edge_and_drops_outside
+        PASS [   0.049s] (467/742) dmls providers::semantic_tokens::tests::range_clips_token_crossing_start_edge
+        PASS [   0.051s] (468/742) dmls providers::semantic_tokens::tests::range_is_exactly_full_intersected
+        PASS [   0.050s] (469/742) dmls providers::semantic_tokens::tests::single_ascii_token_encodes_absolute_first_delta
+        PASS [   0.049s] (470/742) dmls providers::semantic_tokens::tests::structural_subtoken_wins_within_family
+        PASS [   0.048s] (471/742) dmls providers::semantic_tokens::tests::utf8_and_utf16_agree_on_logical_stream_but_differ_in_units
+        PASS [   0.047s] (472/742) dmls providers::semantic_tokens::tests::wiki_beats_directive_but_loses_to_interpolation
+        PASS [   0.046s] (473/742) dmls providers::semantic_tokens::tests::zero_length_fragment_produces_no_token
+        PASS [   0.045s] (474/742) dmls providers::symbols::tests::test_subsequence_match
+        PASS [   0.043s] (475/742) dmls router::tests::test_cancel_ledger_bounded
+        PASS [   0.044s] (476/742) dmls router::tests::test_cancel_ledger_string_and_number_ids_distinct
+        PASS [   0.045s] (477/742) dmls router::tests::test_cancel_ledger_take_removes
+        PASS [   0.045s] (478/742) dmls router::tests::test_refresh_ledger_consumes_error_response
+        PASS [   0.046s] (479/742) dmls router::tests::test_refresh_ledger_consumes_success_response
+        PASS [   0.047s] (480/742) dmls router::tests::test_refresh_ledger_ignores_unrelated_response
+        PASS [   0.049s] (481/742) dmls router::tests::test_refresh_ledger_issues_distinct_tracked_ids
+        PASS [   0.047s] (482/742) dmls router::tests::test_semantic_tokens_refresh_needed_detects_token_knobs
+        PASS [   0.053s] (483/742) dmls router::tests::test_send_refresh_request_isolates_failure
+        PASS [   0.050s] (484/742) dmls router::tests::test_should_request_refresh_gated_on_capability
+        PASS [   0.053s] (485/742) dmls source_map::region::tests::test_code_fence_body_maps_after_opening_fence_line
+        PASS [   0.055s] (486/742) dmls source_map::region::tests::test_diagnostic_on_first_yaml_content_character
+        PASS [   0.057s] (487/742) dmls source_map::region::tests::test_diagnostic_on_last_yaml_content_character
+        PASS [   0.057s] (488/742) dmls source_map::region::tests::test_diagnostic_spanning_multiple_frontmatter_lines
+        PASS [   0.058s] (489/742) dmls source_map::region::tests::test_empty_frontmatter_zero_width_content
+        PASS [   0.059s] (490/742) dmls source_map::region::tests::test_frontmatter_with_crlf_delimiters
+        PASS [   0.056s] (491/742) dmls source_map::region::tests::test_frontmatter_with_one_key
+        PASS [   0.058s] (492/742) dmls source_map::region::tests::test_frontmatter_without_trailing_body_newline
+        PASS [   0.053s] (493/742) dmls source_map::region::tests::test_info_string_diagnostic_on_opening_fence_line
+        PASS [   0.058s] (494/742) dmls source_map::region::tests::test_missing_closing_fence_ends_at_eof_without_fabricated_delimiter
+        PASS [   0.055s] (495/742) dmls source_map::region::tests::test_projection_cannot_land_on_delimiters
+        PASS [   0.053s] (496/742) dmls source_map::region::tests::test_projection_with_multibyte_yaml_content
+        PASS [   0.051s] (497/742) dmls source_map::tests::test_astral_scalar
+        PASS [   0.052s] (498/742) dmls source_map::tests::test_bmp_multibyte_utf16
+        PASS [   0.051s] (499/742) dmls source_map::tests::test_bmp_multibyte_utf8_byte_columns
+        PASS [   0.051s] (500/742) dmls source_map::tests::test_bom_is_ordinary_first_character
+        PASS [   0.049s] (501/742) dmls source_map::tests::test_cjk_extension_b_scalar
+        PASS [   0.051s] (502/742) dmls source_map::tests::test_combining_sequence_counts_code_units
+        PASS [   0.051s] (503/742) dmls source_map::tests::test_crlf_lines
+        PASS [   0.050s] (504/742) dmls source_map::tests::test_empty_document
+        PASS [   0.051s] (505/742) dmls source_map::tests::test_final_empty_line_after_newline
+        PASS [   0.050s] (506/742) dmls source_map::tests::test_final_nonempty_line_without_newline
+        PASS [   0.050s] (507/742) dmls source_map::tests::test_inverted_span_rejected
+        PASS [   0.050s] (508/742) dmls source_map::tests::test_iwes_astral_prefix_positions
+        PASS [   0.049s] (509/742) dmls source_map::tests::test_iwes_greek_text_positions
+        PASS [   0.049s] (510/742) dmls source_map::tests::test_lone_cr_lines
+        PASS [   0.050s] (511/742) dmls source_map::tests::test_mid_codepoint_byte_offsets_rejected
+        PASS [   0.048s] (512/742) dmls source_map::tests::test_mixed_line_endings
+        PASS [   0.049s] (513/742) dmls source_map::tests::test_multiple_lf_lines
+        PASS [   0.047s] (514/742) dmls source_map::tests::test_out_of_bounds_byte_offset_rejected
+        PASS [   0.048s] (515/742) dmls source_map::tests::test_range_ending_at_newline_projects_to_next_line_start
+        PASS [   0.048s] (516/742) dmls source_map::tests::test_range_spanning_multibyte_round_trips
+        PASS [   0.048s] (517/742) dmls source_map::tests::test_single_ascii_line_with_trailing_newline
+        PASS [   0.048s] (518/742) dmls source_map::tests::test_single_ascii_line_without_trailing_newline
+        PASS [   0.048s] (519/742) dmls source_map::tests::test_split_span_blank_middle_line_yields_no_fragment
+        PASS [   0.048s] (520/742) dmls source_map::tests::test_split_span_crlf_excludes_terminator
+        PASS [   0.047s] (521/742) dmls source_map::tests::test_split_span_empty_and_inverted_yield_nothing
+        PASS [   0.049s] (522/742) dmls source_map::tests::test_split_span_lf_excludes_terminator
+        PASS [   0.047s] (523/742) dmls source_map::tests::test_split_span_lone_cr_excludes_terminator
+        PASS [   0.047s] (524/742) dmls source_map::tests::test_split_span_single_line
+        PASS [   0.045s] (525/742) dmls source_map::tests::test_split_span_starting_inside_line_clips_first_fragment
+        PASS [   0.046s] (526/742) dmls source_map::tests::test_stamping_uri_version_encoding
+        PASS [   0.047s] (527/742) dmls wiki::logical_path::tests::test_canonical_segments_relative_to_root
+        PASS [   0.045s] (528/742) dmls wiki::logical_path::tests::test_canonical_segments_without_root_uses_tail
+        PASS [   0.049s] (529/742) dmls wiki::logical_path::tests::test_decode_percent_valid_and_invalid
+        PASS [   0.046s] (530/742) dmls wiki::logical_path::tests::test_elide_only_final_markdown_extension
+        PASS [   0.046s] (531/742) dmls wiki::logical_path::tests::test_portability_key_folds_case
+        PASS [   0.049s] (532/742) dmls wiki::resolve::tests::test_ambiguous_basename_across_roots
+        PASS [   0.047s] (533/742) dmls wiki::resolve::tests::test_case_sensitive
+        PASS [   0.048s] (534/742) dmls wiki::resolve::tests::test_doubled_extension_target
+        PASS [   0.047s] (535/742) dmls wiki::resolve::tests::test_no_space_dash_equivalence
+        PASS [   0.048s] (536/742) dmls wiki::resolve::tests::test_parse_classifies_kinds
+        PASS [   0.046s] (537/742) dmls wiki::resolve::tests::test_parse_percent_decode_before_matching
+        PASS [   0.048s] (538/742) dmls wiki::resolve::tests::test_parse_rejects_dot_segments
+        PASS [   0.044s] (539/742) dmls wiki::resolve::tests::test_root_relative_within_root
+        PASS [   0.047s] (540/742) dmls wiki::resolve::tests::test_same_directory_wins_over_unique_basename
+        PASS [   0.047s] (541/742) dmls wiki::resolve::tests::test_shortest_unique_suffix_escalates
+        PASS [   0.044s] (542/742) dmls wiki::scanner::tests::test_all_six_forms
+        PASS [   0.045s] (543/742) dmls wiki::scanner::tests::test_embed_and_block_ref_flagged_unsupported
+        PASS [   0.044s] (544/742) dmls wiki::scanner::tests::test_embed_spans_are_body_relative
+        PASS [   0.044s] (545/742) dmls wiki::scanner::tests::test_empty_alias_span_is_zero_width
+        PASS [   0.045s] (546/742) dmls wiki::scanner::tests::test_escapes
+        PASS [   0.045s] (547/742) dmls wiki::scanner::tests::test_fenced_and_inline_code_skipped
+        PASS [   0.044s] (548/742) dmls wiki::scanner::tests::test_heading_span_excludes_hash
+        PASS [   0.046s] (549/742) dmls wiki::scanner::tests::test_headings_only_link_spans
+        PASS [   0.046s] (550/742) dmls wiki::scanner::tests::test_line_numbers
+        PASS [   0.046s] (551/742) dmls wiki::scanner::tests::test_plain_target_has_no_separator_or_alias_spans
+        PASS [   0.045s] (552/742) dmls wiki::scanner::tests::test_recognized_but_unsupported_form_keeps_spans
+        PASS [   0.047s] (553/742) dmls wiki::scanner::tests::test_separator_and_alias_spans
+        PASS [   0.045s] (554/742) dmls wiki::scanner::tests::test_span_covers_delimiters
+        PASS [   0.047s] (555/742) dmls wiki::scanner::tests::test_spans_are_source_derived_not_reconstructed_from_unescaped
+        PASS [   0.046s] (556/742) dmls wiki::scanner::tests::test_unterminated_is_ignored
+        PASS [   0.054s] (557/742) dmls workspace::discover::tests::test_config_root_subdirectory
+        PASS [   0.047s] (558/742) dmls workspace::discover::tests::test_symlinked_file_is_not_followed
+        PASS [   0.057s] (559/742) dmls workspace::discover::tests::test_discovers_markdown_and_respects_excludes
+        PASS [   0.049s] (560/742) dmls workspace::documents::tests::test_change_replaces_full_text
+        PASS [   0.061s] (561/742) dmls workspace::discover::tests::test_gitignore_is_honored
+        PASS [   0.049s] (562/742) dmls workspace::documents::tests::test_change_unknown_uri_rejected
+        PASS [   0.048s] (563/742) dmls workspace::documents::tests::test_close_removes_document
+        PASS [   0.049s] (564/742) dmls workspace::documents::tests::test_open_then_get
+        PASS [   0.047s] (565/742) dmls workspace::documents::tests::test_reopen_replaces_snapshot
+        PASS [   0.049s] (566/742) dmls workspace::documents::tests::test_stale_change_rejected
+        PASS [   0.040s] (567/742) dmls workspace::snapshot::tests::test_generation_supersession
+        PASS [   0.038s] (568/742) dmls workspace::snapshot::tests::test_shared_snapshot_store_and_load
+        PASS [   0.046s] (569/742) dmls workspace::startup::tests::test_empty_workspace_indexes_cleanly
+        PASS [   0.042s] (570/742) dmls workspace::startup::tests::test_worker_count_bounds
+        PASS [   0.046s] (571/742) dmls workspace::tests::test_resolve_wiki_roots_defaults_to_folders
+        PASS [   0.050s] (572/742) dmls workspace::startup::tests::test_index_workspace_builds_graph_and_reports_progress
+        PASS [   0.047s] (573/742) dmls workspace::tests::test_resolve_wiki_roots_joins_relative_override
+        PASS [   0.048s] (574/742) dmls workspace::tests::test_uri_to_file_path_decodes_percent_escapes
+        PASS [   0.048s] (575/742) dmls workspace::tests::test_uri_to_file_path_rejects_non_file_scheme
+        PASS [   0.045s] (576/742) dmls workspace::tests::test_uri_to_file_path_windows_drive_letter
+        PASS [   0.047s] (577/742) dmls workspace::tests::test_workspace_roots_empty_when_absent
+        PASS [   0.047s] (578/742) dmls workspace::tests::test_workspace_roots_falls_back_to_root_uri
+        PASS [   0.043s] (579/742) dmls workspace::tests::test_workspace_roots_prefers_folders
+        PASS [   0.040s] (580/742) dmls workspace::watch::tests::test_coalesce_create_then_change_is_create
+        PASS [   0.042s] (581/742) dmls workspace::watch::tests::test_coalesce_create_then_delete_cancels
+        PASS [   0.043s] (582/742) dmls workspace::watch::tests::test_coalesce_dedupes_last_wins
+        PASS [   0.044s] (583/742) dmls workspace::watch::tests::test_registration_covers_include_globs
+        PASS [   0.042s] (584/742) dmls workspace::watch::tests::test_registration_none_without_includes
+        PASS [   0.047s] (585/742) dmls workspace::watch::tests::test_watch_mode_selection
+        PASS [   0.051s] (586/742) dmls::l1 level1_graph_index::invalidation_matrix_edit_delete_rename
+        PASS [   0.074s] (587/742) dmls::l1 level1_graph_index::cross_file_link_edges_resolve_through_discovery
+        PASS [   0.058s] (588/742) dmls::l1 level1_wiki::wiki_alias_preserved
+        PASS [   0.073s] (589/742) dmls::l1 level1_graph_index::wiki_basename_index_flags_ambiguity
+        PASS [   0.067s] (590/742) dmls::l1 level1_wiki::wiki_ambiguous_across_roots
+        PASS [   0.069s] (591/742) dmls::l1 level1_wiki::wiki_backlinks_reach_the_target
+        PASS [   0.067s] (592/742) dmls::l1 level1_wiki::wiki_case_sensitive_and_no_dash_equivalence
+        PASS [   0.065s] (593/742) dmls::l1 level1_wiki::wiki_doubled_extension_and_confusing_info
+        PASS [   0.061s] (594/742) dmls::l1 level1_wiki::wiki_heading_exact_and_slug_fallback
+        PASS [   0.050s] (595/742) dmls::l1 level1_wiki::wiki_percent_decode_and_literal_spaces
+        PASS [   0.043s] (596/742) dmls::l1 level1_wiki::wiki_portability_collision_detected
+        PASS [   0.046s] (597/742) dmls::l1 level1_wiki::wiki_same_directory_wins_over_unique
+        PASS [   0.036s] (598/742) dmls::l1 level1_wiki::wiki_suffix_and_root_relative
+        PASS [   0.041s] (599/742) dmls::l1 level1_wiki::wiki_unresolved_unsupported_empty_and_percent
+        PASS [   0.042s] (600/742) dmls::l1 lsp_session::a_frontmatter_less_document_never_reports_unknown_identifiers
+        PASS [   0.056s] (601/742) dmls::l1 lsp_session::broken_link_diagnostic_updates_on_edit
+        PASS [   0.071s] (602/742) dmls::l1 lsp_session::cancelled_request_answers_request_cancelled
+        PASS [   0.101s] (603/742) dmls::l1 lsp_session::an_unshipped_topic_doc_yields_no_dead_link_on_either_surface
+        PASS [   0.158s] (604/742) dmls::l1 lsp_session::backslash_escaped_foreign_template_examples_have_no_expression_diagnostics
+        PASS [   0.121s] (605/742) dmls::l1 lsp_session::code_action_creates_missing_wiki_note
+        PASS [   0.096s] (606/742) dmls::l1 lsp_session::config_reload_reindexes_wiki_roots
+        PASS [   0.167s] (607/742) dmls::l1 lsp_session::bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes
+        PASS [   0.276s] (608/742) dmls::l1 level1_graph_index::generated_corpus_indexes_without_panic
+        PASS [   0.029s] (609/742) dmls::l1 lsp_session::dsl_directive_name_completion
+        PASS [   0.184s] (610/742) dmls::l1 lsp_session::bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema
+        PASS [   0.031s] (611/742) dmls::l1 lsp_session::default_negotiation_is_utf16
+        PASS [   0.100s] (612/742) dmls::l1 lsp_session::ctx_completion_shape_under_utf16_astral_prefix
+        PASS [   0.175s] (613/742) dmls::l1 lsp_session::claudine_extension_is_pure_config
+        PASS [   0.178s] (614/742) dmls::l1 lsp_session::client_watcher_publishes_and_clears_unopened_trigger_envelope_diagnostic
+        PASS [   0.125s] (615/742) dmls::l1 lsp_session::dash_separated_key_carries_its_replacement_and_quick_fix
+        PASS [   0.082s] (616/742) dmls::l1 lsp_session::dsl_quoted_shell_block_body_disallowed_command_is_diagnosed
+        PASS [   0.090s] (617/742) dmls::l1 lsp_session::dsl_shell_block_benign_body_has_no_security_diagnostic
+        PASS [   0.064s] (618/742) dmls::l1 lsp_session::formatting_is_byte_equivalent_to_library_cleanup
+        PASS [   0.090s] (619/742) dmls::l1 lsp_session::dsl_shell_block_body_disallowed_command_is_diagnosed
+        PASS [   0.091s] (620/742) dmls::l1 lsp_session::dsl_shell_block_body_hover_shows_policy_verdict
+        PASS [   0.107s] (621/742) dmls::l1 lsp_session::eager_schema_fixture_is_clean_and_catalog_driven
+        PASS [   0.128s] (622/742) dmls::l1 lsp_session::dsl_valid_document_has_no_dsl_diagnostics
+        PASS [   0.148s] (623/742) dmls::l1 lsp_session::dsl_overlay_navigation_hover_and_diagnostics
+        PASS [   0.100s] (624/742) dmls::l1 lsp_session::frontmatter_extensionless_file_navigation
+        PASS [   0.070s] (625/742) dmls::l1 lsp_session::frontmatter_nested_file_navigation
+        PASS [   0.067s] (626/742) dmls::l1 lsp_session::frontmatter_schema_intelligence
+        PASS [   0.071s] (627/742) dmls::l1 lsp_session::frontmatter_nested_schema_intelligence
+        PASS [   0.071s] (628/742) dmls::l1 lsp_session::frontmatter_union_file_navigation
+        PASS [   0.074s] (629/742) dmls::l1 lsp_session::frontmatter_union_nested_schema_intelligence
+        PASS [   0.040s] (630/742) dmls::l1 lsp_session::heading_rename_rewrites_references
+        PASS [   0.029s] (631/742) dmls::l1 lsp_session::initialize_advertises_period_completion_trigger
+        PASS [   0.064s] (632/742) dmls::l1 lsp_session::frontmatter_union_value_completion
+        PASS [   0.058s] (633/742) dmls::l1 lsp_session::function_completion_shape
+        PASS [   0.077s] (634/742) dmls::l1 lsp_session::function_call_hover_known_and_unknown
+        PASS [   0.060s] (635/742) dmls::l1 lsp_session::interpolation_ctx_hover_matches_frontmatter_block
+        PASS [   0.091s] (636/742) dmls::l1 lsp_session::git_catalog_descriptors_reach_lsp_completion_and_hover
+        PASS [   0.085s] (637/742) dmls::l1 lsp_session::initialize_open_change_shutdown
+        PASS [   0.058s] (638/742) dmls::l1 lsp_session::interpolation_ctx_hover_surfaces_through_index_access
+        PASS [   0.085s] (639/742) dmls::l1 lsp_session::interpolated_transclusion_target_does_not_report_broken_path
+        PASS [   0.029s] (640/742) dmls::l1 lsp_session::markdown_autolink_hover_survives_standalone_schema_arbitration
+        PASS [   0.040s] (641/742) dmls::l1 lsp_session::meta_schema_compact_explicit_pair_union_keeps_schema_assistance
+        PASS [   0.073s] (642/742) dmls::l1 lsp_session::malformed_buffer_retains_structural_ownership_of_untouched_keys
+        PASS [   0.098s] (643/742) dmls::l1 lsp_session::layer0_provider_round_trips
+        PASS [   0.287s] (644/742) dmls::l1 lsp_session::eager_and_required_hover_independently_on_both_surfaces
+        PASS [   0.036s] (645/742) dmls::l1 lsp_session::meta_schema_explicit_mapping_pairs_retain_last_good_assistance
+        PASS [   0.140s] (646/742) dmls::l1 lsp_session::malformed_buffer_retains_nested_and_escaped_semantic_owners
+        PASS [   0.087s] (647/742) dmls::l1 lsp_session::meta_schema_completion_owner_and_ancestors_come_from_the_ast
+        PASS [   0.053s] (648/742) dmls::l1 lsp_session::meta_schema_phase1_schema_hover_uses_nominal_type
+        PASS [   0.076s] (649/742) dmls::l1 lsp_session::meta_schema_hover_covers_entries_nested_under_semantic_owners
+        PASS [   0.028s] (650/742) dmls::l1 lsp_session::meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic
+        PASS [   0.071s] (651/742) dmls::l1 lsp_session::meta_schema_phase6_shipped_schema_activation_and_current_error
+        PASS [   0.038s] (652/742) dmls::l1 lsp_session::meta_schema_phase7_standalone_pure_and_tagged_completion
+        PASS [   0.189s] (653/742) dmls::l1 lsp_session::kebab_identifier_navigation_resolves_at_every_cursor_position
+        PASS [   0.030s] (654/742) dmls::l1 lsp_session::meta_schema_standalone_block_plain_flow_indicator_retains_last_good
+        PASS [   0.098s] (655/742) dmls::l1 lsp_session::meta_schema_hover_covers_pattern_keys_inline_and_standalone
+        PASS [   0.095s] (656/742) dmls::l1 lsp_session::meta_schema_phase7_inline_hover_completion_and_diagnostics
+        PASS [   0.042s] (657/742) dmls::l1 lsp_session::meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit
+        PASS [   0.056s] (658/742) dmls::l1 lsp_session::meta_schema_standalone_flow_completion_locates_the_cursor_structurally
+        PASS [   0.041s] (659/742) dmls::l1 lsp_session::meta_schema_standalone_flow_types_first_retains_last_good_across_plain_quote_edit
+        PASS [   0.037s] (660/742) dmls::l1 lsp_session::meta_schema_standalone_scalar_reference_completion_survives_malformed_edit
+        PASS [   0.045s] (661/742) dmls::l1 lsp_session::meta_schema_standalone_scalar_reference_completion
+        PASS [   0.089s] (662/742) dmls::l1 lsp_session::meta_schema_phase7_shipped_schema_provider_path
+        PASS [   0.044s] (663/742) dmls::l1 lsp_session::meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
+        PASS [   0.033s] (664/742) dmls::l1 lsp_session::original_voip_schema_definitions_are_clean
+        PASS [   0.037s] (665/742) dmls::l1 lsp_session::period_trigger_outside_interpolation_offers_nothing
+        PASS [   0.043s] (666/742) dmls::l1 lsp_session::rename_refuses_ambiguous_heading
+        PASS [   0.059s] (667/742) dmls::l1 lsp_session::referenced_schema_conversion_error_keeps_origin_and_reference_fallback
+        PASS [   0.093s] (668/742) dmls::l1 lsp_session::mixed_semantic_union_completion_merges_sibling_arm_candidates
+        PASS [   0.030s] (669/742) dmls::l1 lsp_session::semantic_tokens_capability_is_gated_on_client_support
+        PASS [   0.040s] (670/742) dmls::l1 lsp_session::schema_definition_errors_are_independent_and_property_ranged
+        PASS [   0.094s] (671/742) dmls::l1 lsp_session::nullable_transclusion_diagnostic_matrix
+        PASS [   0.031s] (672/742) dmls::l1 lsp_session::semantic_tokens_crlf_multiline_splits_per_line
+        PASS [   0.035s] (673/742) dmls::l1 lsp_session::semantic_tokens_config_applies_without_refresh_capability
+        PASS [   0.278s] (674/742) dmls::l1 lsp_session::meta_schema_completion_reads_parser_state_for_partially_authored_values
+        PASS [   0.038s] (675/742) dmls::l1 lsp_session::semantic_tokens_encoding_utf8_vs_utf16_on_non_ascii
+        PASS [   0.043s] (676/742) dmls::l1 lsp_session::semantic_tokens_family_precedence_full_and_range
+        PASS [   0.117s] (677/742) dmls::l1 lsp_session::repairing_trigger_payload_clears_open_envelope_immediately
+        PASS [   0.098s] (678/742) dmls::l1 lsp_session::schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics
+        PASS [   0.040s] (679/742) dmls::l1 lsp_session::semantic_tokens_full_directive_token_classes
+        PASS [   0.037s] (680/742) dmls::l1 lsp_session::semantic_tokens_full_interpolations_ordinary_inert_and_multiline
+        PASS [   0.040s] (681/742) dmls::l1 lsp_session::semantic_tokens_full_wiki_segments_identical_for_resolved_and_unresolved
+        PASS [   0.033s] (682/742) dmls::l1 lsp_session::semantic_tokens_master_switch_toggles_and_requests_refresh
+        PASS [   0.029s] (683/742) dmls::l1 lsp_session::semantic_tokens_range_is_full_intersected
+        PASS [   0.033s] (684/742) dmls::l1 lsp_session::semantic_tokens_two_configs_issue_distinct_refreshes_routed_through_loop
+        PASS [   0.028s] (685/742) dmls::l1 lsp_session::semantic_tokens_wiki_enable_suppresses_only_f4
+        PASS [   0.051s] (686/742) dmls::l1 lsp_session::server_rescan_fallback_tracks_unopened_files_on_save
+        PASS [   0.047s] (687/742) dmls::l1 lsp_session::standalone_inner_definition_diagnostics_address_punctuated_keys
+        PASS [   0.062s] (688/742) dmls::l1 lsp_session::single_arm_semantic_type_keeps_its_specialized_diagnostic
+        PASS [   0.047s] (689/742) dmls::l1 lsp_session::standalone_reference_declarations_match_the_shared_declaration_parser
+        PASS [   0.060s] (690/742) dmls::l1 lsp_session::standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged
+        PASS [   0.230s] (691/742) dmls::l1 lsp_session::mixed_semantic_union_gates_the_specialized_diagnostic_on_whole_union_failure
+        PASS [   0.067s] (692/742) dmls::l1 lsp_session::strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only
+        PASS [   0.109s] (693/742) dmls::l1 lsp_session::server_rescan_publishes_and_clears_unopened_trigger_envelope_diagnostic
+        PASS [   0.064s] (694/742) dmls::l1 lsp_session::supplied_invalid_eager_values_are_diagnosed_on_the_value_range
+        PASS [   0.076s] (695/742) dmls::l1 lsp_session::structural_paths_survive_quoted_and_punctuated_frontmatter_keys
+        PASS [   0.027s] (696/742) dmls::l1 lsp_session::wiki_link_navigation_diagnostics_and_completion
+        PASS [   0.033s] (697/742) dmls::l1 lsp_session::will_rename_files_updates_and_refuses
+        PASS [   0.107s] (698/742) dmls::l1 lsp_session::trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope
+        PASS [   0.095s] (699/742) dmls::l1 lsp_session::union_arms_and_nested_properties_disclose_eager_without_presence
+        PASS [   0.072s] (700/742) dmls::l1 lsp_session::vocabulary_link_resolves_from_a_document_outside_the_topic_directory
+        PASS [   0.026s] (701/742) dmls::l1 mapping_only_corpus::mapping_only_corpus_contains_no_sequences
+        PASS [   0.105s] (702/742) dmls::l1 lsp_session::unknown_identifier_fires_in_every_operand_position_at_warning_severity
+        PASS [   0.149s] (703/742) dmls::l1 lsp_session::strict_mode_reports_every_absent_required_property_at_any_required_count
+        PASS [   0.021s] (704/742) dmls::l1 packaging_contract::dist_recipe_and_zed_extension_agree_on_archive_names
+        PASS [   0.026s] (705/742) dmls::l1 stdio_subprocess::child_guard_cancellation_probe
+        PASS [   0.147s] (706/742) dmls::l1 lsp_session::trigger_failure_transfer_republishes_open_envelope_for_either_open_order
+        PASS [   0.522s] (707/742) dmls::l1 lsp_session::meta_schema_completion_matches_complete_structural_pointers
+        PASS [   0.016s] (708/742) dmls::l1 strict_mode_recovery_spike::spike_recovery_model_rejects_late_results_and_suppresses_all_dependent_surfaces
+        PASS [   0.031s] (709/742) dmls::l1 strict_mode_recovery_spike::spike_recovery_model_independent_refreshes_do_not_strand_each_other
+        PASS [   0.058s] (710/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_bare_block_array_dash
+        PASS [   0.066s] (711/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_block_array_dash_space
+        PASS [   0.063s] (712/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_block_array_partial_value
+        PASS [   0.072s] (713/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_completion_positions
+        PASS [   0.053s] (714/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_decoy_field_does_not_steal_diagnostic_span
+        PASS [   0.326s] (715/742) dmls::l1 lsp_session::server_worker_finishes_before_workspace_release_during_unwind
+        PASS [   0.049s] (716/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_inline_warning_has_exact_argument_range
+        PASS [   0.067s] (717/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_invalid_sibling_omitted_from_completion
+        PASS [   0.056s] (718/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_numeric_prefix_uses_decoded_text
+        PASS [   0.207s] (719/742) dmls::l1 no_side_effects::dsl_requests_spawn_no_processes_and_open_no_sockets
+        PASS [   0.040s] (720/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_standalone_ranges
+        PASS [   0.083s] (721/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_pure_whole_file_reference_completion
+        PASS [   0.032s] (722/742) dmls::l1 suggest_constraint_phase1::suggest_phase5_close_clears_diagnostics
+        PASS [   0.140s] (723/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_nested_property_from_later_root_arm
+        PASS [   0.061s] (724/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_tagged_whole_file_reference_completion
+        PASS [   0.023s] (725/742) dmls::l1 suggest_constraint_phase1::suggest_phase5_malformed_tagged_envelope_error
+        PASS [   0.129s] (726/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_root_union_filters_invalid_from_later_arm
+        PASS [   0.025s] (727/742) dmls::l1 zed_extension_contract::zed_extension_manifest_and_crate_shape_are_loadable
+        PASS [   0.087s] (728/742) dmls::l1 suggest_constraint_phase1::suggest_phase5_inline_warning_removed_after_correction
+        PASS [   0.068s] (729/742) dmls::l1 test_layout::every_test_source_is_compiled_by_a_declared_target
+        PASS [   0.075s] (730/742) dmls::l1 suggest_constraint_phase1::suggest_phase5_schema_remains_active_alongside_warnings
+        PASS [   0.040s] (731/742) dmls::bin/dmls tests::test_parse_all_flags
+        PASS [   0.037s] (732/742) dmls::bin/dmls tests::test_parse_bench_index_and_json
+        PASS [   0.092s] (733/742) dmls::l1 suggest_constraint_phase1::suggest_phase5_standalone_warning_not_duplicated_on_consumer
+        PASS [   0.024s] (734/742) dmls::bin/dmls tests::test_parse_equals_form
+        PASS [   0.022s] (735/742) dmls::bin/dmls tests::test_parse_gen_corpus_takes_two_values
+        PASS [   0.019s] (736/742) dmls::bin/dmls tests::test_parse_rejects_unknown_and_missing_value
+        PASS [   0.015s] (737/742) dmls::bin/dmls tests::test_parse_version_and_help
+        PASS [   0.346s] (738/742) dmls::l1 strict_mode_recovery_spike::spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
+        PASS [   0.171s] (739/742) dmls::l1 suggest_constraint_phase1::suggest_phase1_union_selection_and_raw_schema_exclusion
+        PASS [   0.398s] (740/742) dmls::l1 stdio_subprocess::child_guard_reaps_process_during_unwind
+        PASS [   0.559s] (741/742) dmls::l1 stdio_subprocess::native_binary_speaks_lsp_over_stdio
+        PASS [   0.704s] (742/742) dmls::l1 mapping_only_corpus::mapping_only_corpus_diagnostics_match_pre_descent_baseline
+────────────
+     Summary [   4.930s] 742 tests run: 742 passed, 9 skipped
+
+✅ [32m all tests passing in [1mdmls[0m[32m package[0m
+
+cross-check-exit: 0
+cross-check-duration: 52
+
+cross-check summary for dmls:
+  windows  pass

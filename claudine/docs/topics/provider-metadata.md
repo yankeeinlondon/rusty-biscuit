@@ -183,7 +183,7 @@ in `WrapperProfile::overlay_strategy`, not in facts.
 `claudine providers generate --check` regenerates every `data.rs` +
 `catalog.json` in memory and byte-compares against the committed files, so any
 hand edit or stale generator fails CI. The registry-covers-all-fields guard
-(`gen/tests/registry_coverage.rs` and its lib twin
+(`gen/tests/l1/registry_coverage.rs` and its lib twin
 `serialized_field_list_matches_catalog`) pins the field list on both sides.
 
 ### Exhaustive invariant tests (`lib/src/provider/tests.rs`)

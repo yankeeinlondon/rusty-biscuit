@@ -1563,7 +1563,7 @@ mod tests {
     ///
     /// This asserts the *authored* spelling, which is what the catalog carries.
     /// [`crate::overlay::doc_links`] rewrites it to a resolvable target at the
-    /// LSP response boundary; `tests/lsp_session.rs` proves that end of it.
+    /// LSP response boundary; `tests/l1/lsp_session.rs` proves that end of it.
     #[test]
     fn list_query_functions_link_to_the_vocabulary_in_hover_and_completion() {
         const LINK: &str = "(darkmatter-expressions.md#provider-query-vocabulary)";

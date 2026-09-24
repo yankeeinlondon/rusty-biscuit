@@ -3,6 +3,7 @@ name = "biscuit-tui-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+autotests = false
 
 [[bin]]
 name = "question"
@@ -25,24 +26,33 @@ biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
+# The Level 1 layout gate (`tests/l1/test_layout.rs`) resolves the crate
+# through `biscuit_test_harness::manifest_dir!`, which holds in an archive run.
+# The optional normal dependency above only exists under `terminal-tests`.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 predicates = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
+# One test binary per execution contract (tier × exact `required-features`),
+# declared explicitly: `autotests = false` above, so a `tests/` file reaches a
+# binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
 [[test]]
-name = "real_terminal_render"
+name = "l1"
+path = "tests/l1/main.rs"
+
+[[test]]
+name = "level2"
+path = "tests/level2/main.rs"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level3_chord_select"
+name = "level3"
+path = "tests/level3/main.rs"
 required-features = ["terminal-tests"]
 
-[[test]]
-name = "windows_captured_stdout"
-required-features = ["terminal-tests"]
-
-# Test-only, target-scoped: in `tests/windows_captured_stdout.rs` the F2
+# Test-only, target-scoped: in `tests/level2/windows_captured_stdout.rs` the F2
 # boundary test self-attaches a console (`AllocConsole`), rewires the process
 # std handles onto `CONOUT$`/`CONIN$` via `CreateFileW` + `SetStdHandle`, proves
 # the attached-console precondition, then injects a deterministic Enter through

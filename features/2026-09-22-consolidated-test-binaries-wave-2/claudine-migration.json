@@ -1,0 +1,766 @@
+{
+  "additions": [
+    {
+      "reason": "acceptance 12 (plan SPP 4): the layout gate inside the l1 binary, calling the shared `test_toolkit::test_layout`; claudine-cli's `test_placement` gate does not walk `claudine/lib/tests`",
+      "target": "l1",
+      "test": "test_layout::every_test_source_is_compiled_by_a_declared_target"
+    }
+  ],
+  "crate_dir": "claudine/lib",
+  "dispositions": [],
+  "dropped_targets": [],
+  "filters": {
+    "L1": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))",
+    "L2": "test(/(^|::)level2_/)",
+    "L3": "test(/(^|::)level3_/)",
+    "browser": "test(/(^|::)browser_/)",
+    "override-ci-0": "test(/level2_/)",
+    "override-ci-1": "package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)",
+    "override-ci-2": "package(sniff) + package(sniff-cli)",
+    "override-ci-3": "test(=test_detect_completes_in_reasonable_time)",
+    "override-ci-4": "test(/browser_/)",
+    "override-ci-5": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-ci-6": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-ci-7": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-ci-8": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-0": "test(=loop_cli::compose_loop_rate_limit_pause_waits_then_continues)",
+    "override-default-1": "binary_id(claudine-cli::l1) & test(/^sequence_budget::/)",
+    "override-default-2": "test(=markdown::compose::preflight::acceptance_tests::execution_subset_of_approval_across_randomized_conditions)",
+    "override-default-3": "test(=ambient_ctx_capture::every_catalog_variable_survives_ambient_options)",
+    "override-default-4": "test(=markdown::compose::tests::rendering::slow_compose_cleanup_preserves_quoted_marker_looking_indented_code)",
+    "override-default-5": "test(=archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout)",
+    "override-default-6": "test(=level2_render_tree_style_in_wezterm)",
+    "override-default-7": "package(claudine-cli) & test(/level2_/)",
+    "real": "test(/(^|::)real_/)",
+    "sanity": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))"
+  },
+  "generator": "scripts/ci/consolidation.py plan",
+  "kind": "consolidation-manifest",
+  "manifest": "claudine/lib/Cargo.toml",
+  "modules": [
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "agent_errors_fleet",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/agent_errors_fleet.rs",
+      "old_binary_id": "claudine::agent_errors_fleet",
+      "old_path": "claudine/lib/tests/agent_errors_fleet.rs",
+      "old_target": "agent_errors_fleet",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "agent_errors_fleet::exhausted_remediation_fails_finalize_and_preserves_findings",
+          "old": "exhausted_remediation_fails_finalize_and_preserves_findings"
+        },
+        {
+          "new": "agent_errors_fleet::fleet_lifecycle_config_parses",
+          "old": "fleet_lifecycle_config_parses"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "boundary_lint",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/boundary_lint.rs",
+      "old_binary_id": "claudine::boundary_lint",
+      "old_path": "claudine/lib/tests/boundary_lint.rs",
+      "old_target": "boundary_lint",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "boundary_lint::closure_does_not_flatten_atomic_write_error",
+          "old": "closure_does_not_flatten_atomic_write_error"
+        },
+        {
+          "new": "boundary_lint::control_dispatch_does_not_bypass_the_existence_check",
+          "old": "control_dispatch_does_not_bypass_the_existence_check"
+        },
+        {
+          "new": "boundary_lint::darkmatter_compose_surfaces_route_through_file_reference",
+          "old": "darkmatter_compose_surfaces_route_through_file_reference"
+        },
+        {
+          "new": "boundary_lint::darkmatter_link_resolve_does_not_source_join_after_a_miss",
+          "old": "darkmatter_link_resolve_does_not_source_join_after_a_miss"
+        },
+        {
+          "new": "boundary_lint::darkmatter_path_shape_functions_do_not_source_join_a_missing_reference",
+          "old": "darkmatter_path_shape_functions_do_not_source_join_a_missing_reference"
+        },
+        {
+          "new": "boundary_lint::every_proxy_route_uses_the_shared_resolver_and_typed_error",
+          "old": "every_proxy_route_uses_the_shared_resolver_and_typed_error"
+        },
+        {
+          "new": "boundary_lint::resolve_proxy_target_does_not_flatten_harness_error",
+          "old": "resolve_proxy_target_does_not_flatten_harness_error"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "canonical_dispatch",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/canonical_dispatch.rs",
+      "old_binary_id": "claudine::canonical_dispatch",
+      "old_path": "claudine/lib/tests/canonical_dispatch.rs",
+      "old_target": "canonical_dispatch",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "canonical_dispatch::default_sound_maps_event_to_category",
+          "old": "default_sound_maps_event_to_category"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_empty_actions_returns_non_blocking_ack",
+          "old": "dispatch_empty_actions_returns_non_blocking_ack"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_logs_event_when_logging_enabled_and_no_binding",
+          "old": "dispatch_logs_event_when_logging_enabled_and_no_binding"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_no_binding_returns_default",
+          "old": "dispatch_no_binding_returns_default"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_protect_post_evaluates_without_binding",
+          "old": "dispatch_protect_post_evaluates_without_binding"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_sound_effect_action",
+          "old": "dispatch_sound_effect_action"
+        },
+        {
+          "new": "canonical_dispatch::dispatch_with_default_config_returns_no_protect_decisions",
+          "old": "dispatch_with_default_config_returns_no_protect_decisions"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "deprecated_compatibility",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/deprecated_compatibility.rs",
+      "old_binary_id": "claudine::deprecated_compatibility",
+      "old_path": "claudine/lib/tests/deprecated_compatibility.rs",
+      "old_target": "deprecated_compatibility",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "deprecated_compatibility::events_event_support_level_re_export_compiles",
+          "old": "events_event_support_level_re_export_compiles"
+        },
+        {
+          "new": "deprecated_compatibility::events_provider_re_export_matches_canonical",
+          "old": "events_provider_re_export_matches_canonical"
+        },
+        {
+          "new": "deprecated_compatibility::events_providers_display_order_re_export_matches",
+          "old": "events_providers_display_order_re_export_matches"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "diagnostic_detail_conformance",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/diagnostic_detail_conformance.rs",
+      "old_binary_id": "claudine::diagnostic_detail_conformance",
+      "old_path": "claudine/lib/tests/diagnostic_detail_conformance.rs",
+      "old_target": "diagnostic_detail_conformance",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "diagnostic_detail_conformance::absent_optional_projects_as_json_null_not_omission",
+          "old": "absent_optional_projects_as_json_null_not_omission"
+        },
+        {
+          "new": "diagnostic_detail_conformance::claudine_error_detail_covers_registry_schema",
+          "old": "claudine_error_detail_covers_registry_schema"
+        },
+        {
+          "new": "diagnostic_detail_conformance::composition_error_detail_covers_registry_schema",
+          "old": "composition_error_detail_covers_registry_schema"
+        },
+        {
+          "new": "diagnostic_detail_conformance::harness_error_detail_covers_registry_schema",
+          "old": "harness_error_detail_covers_registry_schema"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "kimi_wire",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/kimi_wire.rs",
+      "old_binary_id": "claudine::kimi_wire",
+      "old_path": "claudine/lib/tests/kimi_wire.rs",
+      "old_target": "kimi_wire",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "kimi_wire::unknown_event_type_falls_back_to_provider_extension",
+          "old": "unknown_event_type_falls_back_to_provider_extension"
+        },
+        {
+          "new": "kimi_wire::wire_auth_expired_fixture_classifies_configuration",
+          "old": "wire_auth_expired_fixture_classifies_configuration"
+        },
+        {
+          "new": "kimi_wire::wire_cancelled_fixture_classifies_interruption",
+          "old": "wire_cancelled_fixture_classifies_interruption"
+        },
+        {
+          "new": "kimi_wire::wire_greet_fixture_replays_end_to_end",
+          "old": "wire_greet_fixture_replays_end_to_end"
+        },
+        {
+          "new": "kimi_wire::wire_subagent_fixture_renders_subagent_info",
+          "old": "wire_subagent_fixture_renders_subagent_info"
+        },
+        {
+          "new": "kimi_wire::wire_tool_shell_fixture_renders_tool_lifecycle",
+          "old": "wire_tool_shell_fixture_renders_tool_lifecycle"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "lifecycle_control_flow_spike",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/lifecycle_control_flow_spike.rs",
+      "old_binary_id": "claudine::lifecycle_control_flow_spike",
+      "old_path": "claudine/lib/tests/lifecycle_control_flow_spike.rs",
+      "old_target": "lifecycle_control_flow_spike",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "lifecycle_control_flow_spike::catch_cleanup_controls_are_not_normal_finalize_recovery",
+          "old": "catch_cleanup_controls_are_not_normal_finalize_recovery"
+        },
+        {
+          "new": "lifecycle_control_flow_spike::differential_catch_traces_preserve_requests_errors_redesignation_and_control",
+          "old": "differential_catch_traces_preserve_requests_errors_redesignation_and_control"
+        },
+        {
+          "new": "lifecycle_control_flow_spike::differential_retry_resume_admission_preserves_launch_session_and_budget_rules",
+          "old": "differential_retry_resume_admission_preserves_launch_session_and_budget_rules"
+        },
+        {
+          "new": "lifecycle_control_flow_spike::production_guard_records_downgrade_and_distinguishes_retry_from_proxy_reset",
+          "old": "production_guard_records_downgrade_and_distinguishes_retry_from_proxy_reset"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "model_catalog_integration",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/model_catalog_integration.rs",
+      "old_binary_id": "claudine::model_catalog_integration",
+      "old_path": "claudine/lib/tests/model_catalog_integration.rs",
+      "old_target": "model_catalog_integration",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "model_catalog_integration::config_overrides_propagate_to_catalog_validation",
+          "old": "config_overrides_propagate_to_catalog_validation"
+        },
+        {
+          "new": "model_catalog_integration::config_replace_override_replaces_static_catalog",
+          "old": "config_replace_override_replaces_static_catalog"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "opencode_stderr_lifecycle",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/opencode_stderr_lifecycle.rs",
+      "old_binary_id": "claudine::opencode_stderr_lifecycle",
+      "old_path": "claudine/lib/tests/opencode_stderr_lifecycle.rs",
+      "old_target": "opencode_stderr_lifecycle",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "opencode_stderr_lifecycle::fixture_replay_does_not_double_emit_primary_session_start_when_stdout_seen",
+          "old": "fixture_replay_does_not_double_emit_primary_session_start_when_stdout_seen"
+        },
+        {
+          "new": "opencode_stderr_lifecycle::fixture_replay_emits_info_for_llm_calls_and_http_responses",
+          "old": "fixture_replay_emits_info_for_llm_calls_and_http_responses"
+        },
+        {
+          "new": "opencode_stderr_lifecycle::fixture_replay_emits_paired_subagent_lifecycle",
+          "old": "fixture_replay_emits_paired_subagent_lifecycle"
+        },
+        {
+          "new": "opencode_stderr_lifecycle::fixture_replay_filters_bus_lines_from_semantic_stream",
+          "old": "fixture_replay_filters_bus_lines_from_semantic_stream"
+        },
+        {
+          "new": "opencode_stderr_lifecycle::fixture_replay_preserves_subagent_start_then_stop_ordering_per_child",
+          "old": "fixture_replay_preserves_subagent_start_then_stop_ordering_per_child"
+        },
+        {
+          "new": "opencode_stderr_lifecycle::structured_log_records_are_always_consumed_even_when_unclassified_or_bus",
+          "old": "structured_log_records_are_always_consumed_even_when_unclassified_or_bus"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "protocol_fixture_replay",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/protocol_fixture_replay.rs",
+      "old_binary_id": "claudine::protocol_fixture_replay",
+      "old_path": "claudine/lib/tests/protocol_fixture_replay.rs",
+      "old_target": "protocol_fixture_replay",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "protocol_fixture_replay::wire_auth_expired_fixture_classifies_error_response",
+          "old": "wire_auth_expired_fixture_classifies_error_response"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_cancelled_fixture_prompt_status_cancelled",
+          "old": "wire_cancelled_fixture_prompt_status_cancelled"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_greet_fixture_classifies_every_line",
+          "old": "wire_greet_fixture_classifies_every_line"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_greet_fixture_produces_typed_events",
+          "old": "wire_greet_fixture_produces_typed_events"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_greet_fixture_prompt_status_finished",
+          "old": "wire_greet_fixture_prompt_status_finished"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_protocol_110_fixture_decodes_new_event_surface",
+          "old": "wire_protocol_110_fixture_decodes_new_event_surface"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_subagent_fixture_nested_events_decode",
+          "old": "wire_subagent_fixture_nested_events_decode"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_tool_shell_fixture_arguments_decode",
+          "old": "wire_tool_shell_fixture_arguments_decode"
+        },
+        {
+          "new": "protocol_fixture_replay::wire_tool_shell_fixture_covers_tool_lifecycle",
+          "old": "wire_tool_shell_fixture_covers_tool_lifecycle"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "semantic_fidelity",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/semantic_fidelity.rs",
+      "old_binary_id": "claudine::semantic_fidelity",
+      "old_path": "claudine/lib/tests/semantic_fidelity.rs",
+      "old_target": "semantic_fidelity",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "semantic_fidelity::claude_round_trip::all_expected_kinds_present",
+          "old": "claude_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::claude_round_trip::malformed_json_produces_warning_not_error",
+          "old": "claude_round_trip::malformed_json_produces_warning_not_error"
+        },
+        {
+          "new": "semantic_fidelity::claude_round_trip::provider_extension_preserves_deeply_nested_payload",
+          "old": "claude_round_trip::provider_extension_preserves_deeply_nested_payload"
+        },
+        {
+          "new": "semantic_fidelity::claude_round_trip::round_trip_fidelity",
+          "old": "claude_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::claude_round_trip::summary_fields_populated",
+          "old": "claude_round_trip::summary_fields_populated"
+        },
+        {
+          "new": "semantic_fidelity::codex_round_trip::all_expected_kinds_present",
+          "old": "codex_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::codex_round_trip::round_trip_fidelity",
+          "old": "codex_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::codex_round_trip::summary_fields_populated",
+          "old": "codex_round_trip::summary_fields_populated"
+        },
+        {
+          "new": "semantic_fidelity::gemini_round_trip::all_expected_kinds_present",
+          "old": "gemini_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::gemini_round_trip::round_trip_fidelity",
+          "old": "gemini_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::gemini_round_trip::summary_fields_populated",
+          "old": "gemini_round_trip::summary_fields_populated"
+        },
+        {
+          "new": "semantic_fidelity::kimi_round_trip::all_expected_kinds_present",
+          "old": "kimi_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::kimi_round_trip::round_trip_fidelity",
+          "old": "kimi_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::opencode_round_trip::all_expected_kinds_present",
+          "old": "opencode_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::opencode_round_trip::round_trip_fidelity",
+          "old": "opencode_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::opencode_round_trip::summary_fields_populated",
+          "old": "opencode_round_trip::summary_fields_populated"
+        },
+        {
+          "new": "semantic_fidelity::opencode_round_trip::tool_start_input_survives_to_tool_result_display",
+          "old": "opencode_round_trip::tool_start_input_survives_to_tool_result_display"
+        },
+        {
+          "new": "semantic_fidelity::qwen_round_trip::all_expected_kinds_present",
+          "old": "qwen_round_trip::all_expected_kinds_present"
+        },
+        {
+          "new": "semantic_fidelity::qwen_round_trip::round_trip_fidelity",
+          "old": "qwen_round_trip::round_trip_fidelity"
+        },
+        {
+          "new": "semantic_fidelity::qwen_round_trip::summary_fields_populated",
+          "old": "qwen_round_trip::summary_fields_populated"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::context_extra_merges_into_semantic_event_meta",
+          "old": "reporting_fidelity::context_extra_merges_into_semantic_event_meta"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::error_terminal_maps_to_turn_error",
+          "old": "reporting_fidelity::error_terminal_maps_to_turn_error"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::every_semantic_kind_has_correct_tag",
+          "old": "reporting_fidelity::every_semantic_kind_has_correct_tag"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::full_fixture_replay_reporting_chain",
+          "old": "reporting_fidelity::full_fixture_replay_reporting_chain"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::semantic_event_to_event_meta_preserves_provider_extension_payload",
+          "old": "reporting_fidelity::semantic_event_to_event_meta_preserves_provider_extension_payload"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::subagent_start_stop_map_correctly",
+          "old": "reporting_fidelity::subagent_start_stop_map_correctly"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::tool_call_maps_to_before_tool_in_event_meta",
+          "old": "reporting_fidelity::tool_call_maps_to_before_tool_in_event_meta"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::tool_result_maps_to_after_tool_in_event_meta",
+          "old": "reporting_fidelity::tool_result_maps_to_after_tool_in_event_meta"
+        },
+        {
+          "new": "semantic_fidelity::reporting_fidelity::warning_maps_to_notification_with_error_field",
+          "old": "reporting_fidelity::warning_maps_to_notification_with_error_field"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::assistant_text_concatenated_across_multiple_messages",
+          "old": "summary_regression::assistant_text_concatenated_across_multiple_messages"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::codex_permission_counters_tracked",
+          "old": "summary_regression::codex_permission_counters_tracked"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::empty_replay_produces_default_summary",
+          "old": "summary_regression::empty_replay_produces_default_summary"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::error_summary_populated_from_error_event",
+          "old": "summary_regression::error_summary_populated_from_error_event"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::summary_fields_unchanged_by_claude_replay",
+          "old": "summary_regression::summary_fields_unchanged_by_claude_replay"
+        },
+        {
+          "new": "semantic_fidelity::summary_regression::summary_serde_round_trip_after_replay",
+          "old": "summary_regression::summary_serde_round_trip_after_replay"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "strict_mode_provenance_spike",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/strict_mode_provenance_spike.rs",
+      "old_binary_id": "claudine::strict_mode_provenance_spike",
+      "old_path": "claudine/lib/tests/strict_mode_provenance_spike.rs",
+      "old_target": "strict_mode_provenance_spike",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "strict_mode_provenance_spike::spike_provenance_array_moves_preserve_sibling_and_typed_path_identity",
+          "old": "spike_provenance_array_moves_preserve_sibling_and_typed_path_identity"
+        },
+        {
+          "new": "strict_mode_provenance_spike::spike_provenance_batch_failure_and_retry_keep_value_and_policy_together",
+          "old": "spike_provenance_batch_failure_and_retry_keep_value_and_policy_together"
+        },
+        {
+          "new": "strict_mode_provenance_spike::spike_provenance_completed_literals_survive_real_batch_and_retry_without_rescan",
+          "old": "spike_provenance_completed_literals_survive_real_batch_and_retry_without_rescan"
+        },
+        {
+          "new": "strict_mode_provenance_spike::spike_provenance_replacement_drops_origin_but_keeps_destination_policy",
+          "old": "spike_provenance_replacement_drops_origin_but_keeps_destination_policy"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "tts_phase1_contract",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/tts_phase1_contract.rs",
+      "old_binary_id": "claudine::tts_phase1_contract",
+      "old_path": "claudine/lib/tests/tts_phase1_contract.rs",
+      "old_target": "tts_phase1_contract",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "tts_phase1_contract::detached_audio_protocol_decisions_are_ratified_and_versioned",
+          "old": "detached_audio_protocol_decisions_are_ratified_and_versioned"
+        },
+        {
+          "new": "tts_phase1_contract::protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records",
+          "old": "protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records"
+        },
+        {
+          "new": "tts_phase1_contract::regression_matrix_covers_every_phase_one_failure_category",
+          "old": "regression_matrix_covers_every_phase_one_failure_category"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "tts_phase5_contract",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/tts_phase5_contract.rs",
+      "old_binary_id": "claudine::tts_phase5_contract",
+      "old_path": "claudine/lib/tests/tts_phase5_contract.rs",
+      "old_target": "tts_phase5_contract",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "tts_phase5_contract::notification_recipes_keep_their_background_cli_contract",
+          "old": "notification_recipes_keep_their_background_cli_contract"
+        },
+        {
+          "new": "tts_phase5_contract::shipped_claudine_artifacts_enable_native_detached_audio",
+          "old": "shipped_claudine_artifacts_enable_native_detached_audio"
+        }
+      ]
+    },
+    {
+      "alias": null,
+      "binary_id": "claudine::l1",
+      "inner_cfg": [],
+      "module": "typed_stream_protocols",
+      "nested_root": false,
+      "new_path": "claudine/lib/tests/l1/typed_stream_protocols.rs",
+      "old_binary_id": "claudine::typed_stream_protocols",
+      "old_path": "claudine/lib/tests/typed_stream_protocols.rs",
+      "old_target": "typed_stream_protocols",
+      "target": "l1",
+      "test_basis": "listing",
+      "tests": [
+        {
+          "new": "typed_stream_protocols::claude_assistant_accepts_extras",
+          "old": "claude_assistant_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::claude_content_block_delta_accepts_extras",
+          "old": "claude_content_block_delta_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::claude_event_accepts_extras",
+          "old": "claude_event_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::claude_result_accepts_extras",
+          "old": "claude_result_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::claude_tool_use_accepts_extras",
+          "old": "claude_tool_use_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::codex_item_started_accepts_extras",
+          "old": "codex_item_started_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::codex_thread_started_accepts_extras",
+          "old": "codex_thread_started_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::codex_turn_completed_accepts_extras",
+          "old": "codex_turn_completed_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::gemini_event_accepts_extras",
+          "old": "gemini_event_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::gemini_message_accepts_extras",
+          "old": "gemini_message_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::gemini_result_accepts_extras",
+          "old": "gemini_result_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::opencode_event_accepts_extras",
+          "old": "opencode_event_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::opencode_text_accepts_extras",
+          "old": "opencode_text_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::opencode_tool_start_accepts_extras",
+          "old": "opencode_tool_start_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::protocol_named_extras_do_not_shadow_known_fields",
+          "old": "protocol_named_extras_do_not_shadow_known_fields"
+        },
+        {
+          "new": "typed_stream_protocols::qwen_event_accepts_extras",
+          "old": "qwen_event_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::qwen_message_accepts_extras",
+          "old": "qwen_message_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::qwen_tool_call_accepts_extras",
+          "old": "qwen_tool_call_accepts_extras"
+        },
+        {
+          "new": "typed_stream_protocols::unknown_type_fails_typed_claude",
+          "old": "unknown_type_fails_typed_claude"
+        },
+        {
+          "new": "typed_stream_protocols::unknown_type_fails_typed_codex",
+          "old": "unknown_type_fails_typed_codex"
+        },
+        {
+          "new": "typed_stream_protocols::unknown_type_fails_typed_gemini",
+          "old": "unknown_type_fails_typed_gemini"
+        },
+        {
+          "new": "typed_stream_protocols::unknown_type_fails_typed_opencode",
+          "old": "unknown_type_fails_typed_opencode"
+        },
+        {
+          "new": "typed_stream_protocols::unknown_type_fails_typed_qwen",
+          "old": "unknown_type_fails_typed_qwen"
+        }
+      ]
+    }
+  ],
+  "override_rewrites": [],
+  "package": "claudine",
+  "ruled_targets": [],
+  "shared_tests": [],
+  "targets": [
+    {
+      "harness": true,
+      "modules": [
+        "agent_errors_fleet",
+        "boundary_lint",
+        "canonical_dispatch",
+        "deprecated_compatibility",
+        "diagnostic_detail_conformance",
+        "kimi_wire",
+        "lifecycle_control_flow_spike",
+        "model_catalog_integration",
+        "opencode_stderr_lifecycle",
+        "protocol_fixture_replay",
+        "semantic_fidelity",
+        "strict_mode_provenance_spike",
+        "tts_phase1_contract",
+        "tts_phase5_contract",
+        "typed_stream_protocols"
+      ],
+      "name": "l1",
+      "path": "claudine/lib/tests/l1/main.rs",
+      "required_features": [],
+      "tier": "L1"
+    }
+  ],
+  "version": 1
+}

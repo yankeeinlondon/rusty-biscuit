@@ -1,0 +1,437 @@
+## tree-hugger (tree-hugger/lib/tests: 10 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+### detector hits
+- fn_main: lint_diagnostics.rs:273,360,782,1584,1641 (5)
+- fn_main: phase1_diagnostics.rs:77 (1)
+- include_macro: phase6_neovim_query_reuse.rs:396,419,423,427,431,435,454,458,462 (9)
+- include_macro: query_compile.rs:84,92,100,108,116,124,132,140,148,156,164,172 … (32)
+- manifest_dir: tree_file.rs:125 (1)
+### mod declarations
+### string literals naming tests/ paths or ../ paths
+- relative_literal: phase6_neovim_query_reuse.rs:396 "../queries/vendor/rust/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:419 "../queries/vendor/rust/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:423 "../queries/vendor/javascript/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:427 "../queries/vendor/typescript/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:431 "../queries/vendor/go/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:435 "../queries/vendor/python/locals.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:454 "../queries/rust/lint.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:458 "../queries/javascript/lint.scm"
+- relative_literal: phase6_neovim_query_reuse.rs:462 "../queries/typescript/lint.scm"
+- relative_literal: query_compile.rs:84 "../queries/rust/lint.scm"
+- relative_literal: query_compile.rs:92 "../queries/javascript/lint.scm"
+- relative_literal: query_compile.rs:100 "../queries/typescript/lint.scm"
+- relative_literal: query_compile.rs:108 "../queries/go/lint.scm"
+- relative_literal: query_compile.rs:116 "../queries/python/lint.scm"
+- relative_literal: query_compile.rs:124 "../queries/java/lint.scm"
+- relative_literal: query_compile.rs:132 "../queries/php/lint.scm"
+- relative_literal: query_compile.rs:140 "../queries/perl/lint.scm"
+- relative_literal: query_compile.rs:148 "../queries/bash/lint.scm"
+- relative_literal: query_compile.rs:156 "../queries/zsh/lint.scm"
+- relative_literal: query_compile.rs:164 "../queries/c/lint.scm"
+- relative_literal: query_compile.rs:172 "../queries/cpp/lint.scm"
+- relative_literal: query_compile.rs:180 "../queries/c_sharp/lint.scm"
+- relative_literal: query_compile.rs:188 "../queries/swift/lint.scm"
+- relative_literal: query_compile.rs:196 "../queries/scala/lint.scm"
+- relative_literal: query_compile.rs:204 "../queries/lua/lint.scm"
+- relative_literal: query_compile.rs:216 "../queries/rust/comments.scm"
+- relative_literal: query_compile.rs:224 "../queries/javascript/comments.scm"
+- relative_literal: query_compile.rs:232 "../queries/typescript/comments.scm"
+- relative_literal: query_compile.rs:240 "../queries/go/comments.scm"
+- relative_literal: query_compile.rs:248 "../queries/python/comments.scm"
+- relative_literal: query_compile.rs:256 "../queries/java/comments.scm"
+- relative_literal: query_compile.rs:264 "../queries/php/comments.scm"
+- relative_literal: query_compile.rs:272 "../queries/perl/comments.scm"
+- relative_literal: query_compile.rs:280 "../queries/bash/comments.scm"
+- relative_literal: query_compile.rs:288 "../queries/zsh/comments.scm"
+- relative_literal: query_compile.rs:296 "../queries/c/comments.scm"
+- relative_literal: query_compile.rs:304 "../queries/cpp/comments.scm"
+- relative_literal: query_compile.rs:312 "../queries/c_sharp/comments.scm"
+- relative_literal: query_compile.rs:320 "../queries/swift/comments.scm"
+- relative_literal: query_compile.rs:328 "../queries/scala/comments.scm"
+- relative_literal: query_compile.rs:336 "../queries/lua/comments.scm"
+### crate-root item names appearing in more than one target file
+- fn main: 6 files [lint_diagnostics.rs:273, lint_diagnostics.rs:360, lint_diagnostics.rs:782, lint_diagnostics.rs:1584, lint_diagnostics.rs:1641, phase1_diagnostics.rs:77]
+- fn create_temp_file: 4 files [cache_tests.rs:9, lint_diagnostics.rs:8, phase1_diagnostics.rs:8, tree_file.rs:131]
+
+## claudine (claudine/lib/tests: 15 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+- [lint] deprecated_compatibility.rs: #![allow(deprecated)]
+### detector hits
+- manifest_dir: agent_errors_fleet.rs:27 (1)
+- manifest_dir: boundary_lint.rs:37,77,149 (3)
+- non_leading_inner_attr: deprecated_compatibility.rs:14 (1)
+- manifest_dir: kimi_wire.rs:26 (1)
+- mod_decl: lifecycle_control_flow_spike.rs:3 (1)
+- path_attr: lifecycle_control_flow_spike.rs:2 (1)
+- include_macro: opencode_stderr_lifecycle.rs:33 (1)
+- manifest_dir: protocol_fixture_replay.rs:25 (1)
+- manifest_dir: tts_phase1_contract.rs:4,68 (2)
+- manifest_dir: tts_phase5_contract.rs:5 (1)
+### mod declarations
+- lifecycle_control_flow_spike.rs: #[path="../../../darkmatter/features/2026-09-22-lifecycle-events/spike/model.rs"] mod model;
+### string literals naming tests/ paths or ../ paths
+- relative_literal: boundary_lint.rs:78 "../cli"
+- relative_literal: boundary_lint.rs:150 "../../darkmatter/lib"
+- relative_literal: lifecycle_control_flow_spike.rs:2 "../../../darkmatter/features/2026-09-22-lifecycle-events/spike/model.rs"
+- relative_literal: tts_phase1_contract.rs:5 "../fixes/_completed/2026-09-03-tts-not-finishing"
+- relative_literal: tts_phase1_contract.rs:69 "../fixes/_completed/2026-09-03-tts-not-finishing/fixtures"
+### crate-root item names appearing in more than one target file
+- fn fixture_path: 2 files [kimi_wire.rs:25, protocol_fixture_replay.rs:24]
+- struct Recording: 2 files [kimi_wire.rs:15, semantic_fidelity.rs:26]
+
+## sniff (sniff/lib/tests: 20 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+- [cfg] focused_provider.rs: #![cfg(feature="remote")]
+- [cfg] remote_observation.rs: #![cfg(feature="network")]
+- [cfg] remote_providers.rs: #![cfg(feature="remote")]
+- [cfg] windows_app_paths_orphan.rs: #![cfg(target_os="windows")]
+- [cfg] windows_find_program_priority.rs: #![cfg(target_os="windows")]
+### detector hits
+- mod_decl: bench_fixtures.rs:11 (1)
+- path_attr: bench_fixtures.rs:10 (1)
+- manifest_dir: bench_ids_sync.rs:21 (1)
+- mod_decl: bench_ids_sync.rs:12 (1)
+- path_attr: bench_ids_sync.rs:11 (1)
+- mod_decl: bench_plans.rs:7 (1)
+- path_attr: bench_plans.rs:6 (1)
+- mod_decl: benchmark_workloads.rs:4,6 (2)
+- path_attr: benchmark_workloads.rs:3,5 (2)
+- non_leading_inner_attr: focused_provider.rs:1 (1)
+- mod_decl: git_parity.rs:12 (1)
+- path_attr: git_parity.rs:11 (1)
+- manifest_dir: integration.rs:977 (1)
+- mod_decl: integration.rs:9 (1)
+- macro_rules: program_serialization.rs:23 (1)
+- non_leading_inner_attr: remote_observation.rs:1 (1)
+- non_leading_inner_attr: remote_providers.rs:14 (1)
+- non_leading_inner_attr: windows_app_paths_orphan.rs:7 (1)
+- non_leading_inner_attr: windows_find_program_priority.rs:6 (1)
+### mod declarations
+- bench_fixtures.rs: #[path="../benches/support/builder.rs"] mod builder;
+- bench_ids_sync.rs: #[path="../benches/support/bench_ids.rs"] mod bench_ids;
+- bench_plans.rs: #[path="../benches/support/plans.rs"] mod plans;
+- benchmark_workloads.rs: #[path="../benches/support/builder.rs"] mod builder;
+- benchmark_workloads.rs: #[path="../benches/support/fixtures.rs"] mod fixtures;
+- git_parity.rs: #[path="../benches/support/builder.rs"] mod builder;
+- integration.rs: mod fixtures;
+### string literals naming tests/ paths or ../ paths
+- test_path_literal: bench_fixtures.rs:70 "tests/basic.rs"
+- relative_literal: bench_fixtures.rs:10 "../benches/support/builder.rs"
+- relative_literal: bench_ids_sync.rs:11 "../benches/support/bench_ids.rs"
+- relative_literal: bench_plans.rs:6 "../benches/support/plans.rs"
+- relative_literal: benchmark_workloads.rs:3 "../benches/support/builder.rs"
+- relative_literal: benchmark_workloads.rs:5 "../benches/support/fixtures.rs"
+- relative_literal: git_parity.rs:11 "../benches/support/builder.rs"
+### crate-root item names appearing in more than one target file
+- mod builder: 3 files [bench_fixtures.rs:11, benchmark_workloads.rs:4, git_parity.rs:12]
+- fn repository: 2 files [remote_observation.rs:12, remote_resolution.rs:5]
+- mod fixtures: 2 files [benchmark_workloads.rs:6, integration.rs:9]
+- struct Fixture: 2 files [merge_conflict_prediction.rs:21, recent_commits.rs:33]
+
+## biscuit-file (biscuit-file/lib/tests: 15 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+### detector hits
+- manifest_dir: detailed_resolution.rs:378 (1)
+- manifest_dir: yaml_corpus.rs:68 (1)
+- non_leading_inner_attr: yaml_mutation.rs:204 (1)
+### mod declarations
+### string literals naming tests/ paths or ../ paths
+- relative_literal: detailed_resolution.rs:155 "./x.md"
+- relative_literal: detailed_resolution.rs:319 "./link.md"
+- relative_literal: implicit_relative.rs:93 "./file_in_root.md"
+- relative_literal: implicit_relative.rs:100 "./ prefix should pin lookup to CWD only; got {resolved:?}"
+- relative_literal: implicit_relative.rs:272 "../../file_in_root.md"
+- relative_literal: implicit_relative.rs:591 "./rel.md"
+- relative_literal: implicit_relative.rs:592 "../rel.md"
+- relative_literal: precedence_flip.rs:116 "./x.md"
+- relative_literal: precedence_flip.rs:286 "./nested"
+- relative_literal: reference_grammar.rs:20 "./foo.md"
+- relative_literal: reference_grammar.rs:21 "../foo.md"
+- relative_literal: reference_grammar.rs:111 "./!weird-name.md"
+- relative_literal: reference_grammar.rs:147 "./name:part"
+- relative_literal: resolution_context.rs:71 "./root_only.md"
+- relative_literal: resolution_context.rs:319 "./local.md"
+- relative_literal: resolution_context.rs:383 "./local.md"
+### crate-root item names appearing in more than one target file
+- fn canonical: 4 files [completion_round_trip.rs:34, detailed_resolution.rs:44, implicit_relative.rs:24, precedence_flip.rs:34]
+- fn git_init: 3 files [completion_round_trip.rs:25, detailed_resolution.rs:22, implicit_relative.rs:14]
+- fn assert_untouched_bytes_preserved: 2 files [yaml_corpus.rs:114, yaml_safety.rs:15]
+- fn clean_to_fixed_point: 2 files [yaml_corpus.rs:106, yaml_mutation.rs:88]
+- fn ctx_with_repo: 2 files [detailed_resolution.rs:27, precedence_flip.rs:24]
+- fn untouched_bytes_preserved_across_corpus: 2 files [yaml_corpus.rs:382, yaml_safety.rs:144]
+
+## schematic-gen (schematic/gen/tests: 14 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+### detector hits
+- manifest_dir: artifact_drift.rs:35 (1)
+- crate_path: e2e_generation.rs:214 (1)
+- manifest_dir: e2e_generation.rs:73 (1)
+- crate_path: http_client.rs:471 (1)
+- manifest_dir: openapi_import_test.rs:8 (1)
+- include_macro: postman_artifact_validation.rs:20 (1)
+- manifest_dir: postman_artifact_validation.rs:51 (1)
+- include_macro: postman_golden.rs:40 (1)
+- manifest_dir: postman_golden.rs:68 (1)
+- include_macro: postman_schema.rs:28 (1)
+- manifest_dir: postman_schema.rs:115 (1)
+- manifest_dir: postman_var_consistency.rs:89 (1)
+### mod declarations
+### string literals naming tests/ paths or ../ paths
+- test_path_literal: openapi_import_test.rs:9 "tests/fixtures"
+### crate-root item names appearing in more than one target file
+- const POSTMAN_SCHEMA_BYTES: 3 files [postman_artifact_validation.rs:19, postman_golden.rs:39, postman_schema.rs:27]
+- fn format_tokens: 3 files [http_client.rs:17, path_substitution.rs:13, query_params_codegen.rs:20]
+- fn postman_validator: 3 files [postman_artifact_validation.rs:23, postman_golden.rs:42, postman_schema.rs:31]
+- fn validate_postman_json: 3 files [postman_artifact_validation.rs:35, postman_golden.rs:52, postman_schema.rs:63]
+- fn postman_dir: 2 files [postman_artifact_validation.rs:50, postman_var_consistency.rs:88]
+
+## biscuit-terminal-cli (biscuit-terminal/cli/tests: 14 target files, 2 helper files, 7 .snap)
+### leading inner attributes
+- [lint] common/mod.rs: #![allow(dead_code)]
+- [lint] common/pane_geometry.rs: #![allow(dead_code)]
+### detector hits
+- mod_decl: common/mod.rs:23 (1)
+- non_leading_inner_attr: common/mod.rs:16 (1)
+- non_leading_inner_attr: common/pane_geometry.rs:8 (1)
+- insta_assert: integration_test.rs:1482,1498,2130,2148,2163,2177,2191 (7)
+- list_arg: integration_test.rs:2478 (1)
+- manifest_dir: integration_test.rs:2203 (1)
+- mod_decl: level2_apple_terminal_prose.rs:35 (1)
+- mod_decl: level2_container_fenced_code.rs:16 (1)
+- manifest_dir: level2_cursor_and_hygiene.rs:38 (1)
+- mod_decl: level2_cursor_and_hygiene.rs:14 (1)
+- mod_decl: level2_diagrams.rs:37 (1)
+- manifest_dir: level2_image.rs:52 (1)
+- mod_decl: level2_image.rs:27 (1)
+- mod_decl: level2_layout.rs:20 (1)
+- mod_decl: level2_prose_styling.rs:13 (1)
+- mod_decl: level2_status_block.rs:16 (1)
+- mod_decl: level2_style_everywhere_matrix.rs:30 (1)
+### mod declarations
+- common/mod.rs: mod pane_geometry;
+- level2_apple_terminal_prose.rs: mod common;
+- level2_container_fenced_code.rs: mod common;
+- level2_cursor_and_hygiene.rs: mod common;
+- level2_diagrams.rs: mod common;
+- level2_image.rs: mod common;
+- level2_layout.rs: mod common;
+- level2_prose_styling.rs: mod common;
+- level2_status_block.rs: mod common;
+- level2_style_everywhere_matrix.rs: mod common;
+### string literals naming tests/ paths or ../ paths
+- relative_literal: integration_test.rs:2206 "../README.md"
+- relative_literal: integration_test.rs:2207 "../docs/components/compose.md"
+- relative_literal: integration_test.rs:2208 "../docs/components/index.md"
+- relative_literal: integration_test.rs:2209 "../docs/components/prose.md"
+- test_path_literal: level2_cursor_and_hygiene.rs:39 "tests/fixtures"
+- test_path_literal: level2_image.rs:53 "tests/fixtures"
+### crate-root item names appearing in more than one target file
+- static SHARED_WEZTERM: 10 files [level2_container_fenced_code.rs:26, level2_cursor_and_hygiene.rs:34, level2_diagrams.rs:58, level2_image.rs:45, level2_layout.rs:34, level2_prose_cells.rs:24 …]
+- mod common: 9 files [level2_apple_terminal_prose.rs:35, level2_container_fenced_code.rs:16, level2_cursor_and_hygiene.rs:14, level2_diagrams.rs:37, level2_image.rs:27, level2_layout.rs:20 …]
+- static SHARED_KITTY: 7 files [level2_container_fenced_code.rs:29, level2_diagrams.rs:54, level2_image.rs:48, level2_prose_cells.rs:25, level2_prose_styling.rs:30, level2_render_tree_style.rs:35 …]
+- static SHARED_TMUX: 5 files [level2_diagrams.rs:62, level2_prose_cells.rs:26, level2_render_tree_style.rs:39, level2_status_block.rs:25, level2_style_everywhere_matrix.rs:49]
+- const BORDER_GLYPH: 3 files [level2_render_tree_style.rs:50, level2_status_block.rs:30, level2_style_everywhere_matrix.rs:62]
+- fn capture_bt: 3 files [level2_prose_cells.rs:29, level2_render_tree_style.rs:288, level2_style_everywhere_matrix.rs:69]
+- fn fixture_path: 2 files [level2_cursor_and_hygiene.rs:37, level2_image.rs:51]
+- fn has_background: 2 files [level2_render_tree_style.rs:664, level2_style_everywhere_matrix.rs:96]
+- fn output_row: 2 files [level2_render_tree_style.rs:301, level2_style_everywhere_matrix.rs:81]
+- fn position_cursor: 2 files [level2_cursor_and_hygiene.rs:47, level2_image.rs:61]
+- fn sgr_carries_bold: 2 files [level2_prose_cells.rs:85, level2_render_tree_style.rs:366]
+### snapshots
+- biscuit-terminal/cli/tests/snapshots/integration_test__columns_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__list_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__padleft_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__padright_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__prose_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__prose_styled_snapshot.snap
+- biscuit-terminal/cli/tests/snapshots/integration_test__quote_snapshot.snap
+
+## claudine-gen (claudine/gen/tests: 11 target files, 0 helper files, 0 .snap)
+### leading inner attributes
+- [cfg] level2_report_terminal.rs: #![cfg(unix)]
+### detector hits
+- manifest_dir: agent_errors_check.rs:32 (1)
+- manifest_dir: drift.rs:21,37 (2)
+- manifest_dir: fixtures_provenance.rs:24 (1)
+- manifest_dir: generate_ux.rs:15 (1)
+- current_exe: level2_report_terminal.rs:15,158 (2)
+- exact_any: level2_report_terminal.rs:16,160 (2)
+- exact_path_string: level2_report_terminal.rs:16,160 (2)
+- non_leading_inner_attr: level2_report_terminal.rs:45 (1)
+- crate_path: pipeline.rs:166 (1)
+- manifest_dir: pipeline.rs:33 (1)
+- manifest_dir: signals_sidecar_mirror.rs:23 (1)
+- manifest_dir: signals_validation.rs:19 (1)
+- manifest_dir: steering_check.rs:17 (1)
+- manifest_dir: vocabulary.rs:16 (1)
+### mod declarations
+### string literals naming tests/ paths or ../ paths
+- test_path_literal: drift.rs:38 "tests/fixtures/generated-artifact-baseline.json"
+- relative_literal: steering_check.rs:17 "../docs/research/steering/_schema.yaml"
+### crate-root item names appearing in more than one target file
+- fn area: 4 files [drift.rs:18, fixtures_provenance.rs:21, signals_sidecar_mirror.rs:20, vocabulary.rs:13]
+- fn real_area: 4 files [agent_errors_check.rs:31, generate_ux.rs:12, pipeline.rs:30, signals_validation.rs:16]
+- struct Fixture: 3 files [generate_ux.rs:24, pipeline.rs:40, signals_validation.rs:26]
+- fn new: 2 files [pipeline.rs:50, signals_validation.rs:33]
+
+## dmls (darkmatter/dmls/tests: 11 target files, 1 helper files, 0 .snap)
+### leading inner attributes
+- [lint] common/mod.rs: #![allow(dead_code)]
+### detector hits
+- non_leading_inner_attr: common/mod.rs:29 (1)
+- manifest_dir: level2_editor_neovim.rs:80 (1)
+- manifest_dir: lsp_session.rs:5463,5495,6028 (3)
+- mod_decl: lsp_session.rs:8 (1)
+- manifest_dir: mapping_only_corpus.rs:30 (1)
+- mod_decl: no_side_effects.rs:13 (1)
+- manifest_dir: packaging_contract.rs:27 (1)
+- current_exe: stdio_subprocess.rs:84 (1)
+- exact_any: stdio_subprocess.rs:85 (1)
+- exact_arg: stdio_subprocess.rs:85 (1)
+- mod_decl: strict_mode_recovery_spike.rs:4 (1)
+- include_macro: suggest_constraint_phase1.rs:12,13,14,15,16,17,18 (7)
+- mod_decl: suggest_constraint_phase1.rs:7 (1)
+- manifest_dir: zed_extension_contract.rs:13 (1)
+### mod declarations
+- lsp_session.rs: mod common;
+- no_side_effects.rs: mod common;
+- strict_mode_recovery_spike.rs: mod common;
+- suggest_constraint_phase1.rs: mod common;
+### string literals naming tests/ paths or ../ paths
+- test_path_literal: level2_editor_neovim.rs:81 "tests/fixtures/editor_neovim"
+- relative_literal: lsp_session.rs:4778 "./schema.yaml"
+- relative_literal: lsp_session.rs:4866 "./schema.yaml"
+- relative_literal: lsp_session.rs:4931 "./schema.yaml"
+- relative_literal: lsp_session.rs:5463 "../docs/schemas/darkmatter.yaml"
+- relative_literal: lsp_session.rs:5495 "../docs/schemas/darkmatter.yaml"
+- relative_literal: lsp_session.rs:6029 "../docs/topics/darkmatter-expressions.md"
+- relative_literal: lsp_session.rs:6461 "./schema.yaml"
+- relative_literal: lsp_session.rs:6493 "./schema.yaml"
+- test_path_literal: mapping_only_corpus.rs:35 "tests/fixtures"
+- test_path_literal: mapping_only_corpus.rs:121 "tests/fixtures/mapping_only_corpus/baseline.json"
+- relative_literal: mapping_only_corpus.rs:62 "../docs/schemas/claudine.yaml"
+- relative_literal: packaging_contract.rs:33 "../justfile"
+### crate-root item names appearing in more than one target file
+- mod common: 4 files [lsp_session.rs:8, no_side_effects.rs:13, strict_mode_recovery_spike.rs:4, suggest_constraint_phase1.rs:7]
+- fn open: 3 files [lsp_session.rs:150, strict_mode_recovery_spike.rs:20, suggest_constraint_phase1.rs:54]
+- fn completion: 2 files [strict_mode_recovery_spike.rs:46, suggest_constraint_phase1.rs:38]
+- fn manifest_dir: 2 files [mapping_only_corpus.rs:29, packaging_contract.rs:26]
+
+## sniff-cli (sniff/cli/tests: 11 target files, 2 helper files, 12 .snap)
+### leading inner attributes
+- [lint] common/mod.rs: #![allow(dead_code)]
+- [cfg] level2_cicd_styling.rs: #![cfg(feature="test-fixtures")]
+- [cfg] level2_git_status_styling.rs: #![cfg(feature="test-fixtures")]
+- [cfg] level2_perf_tree_rendering.rs: #![cfg(feature="test-fixtures")]
+- [cfg] level2_recent_commits_rendering.rs: #![cfg(feature="test-fixtures")]
+### detector hits
+- list_arg: cli.rs:2682,2721,2736,2748,2770,2957,3272,3520,5110,5187,6093,6112 … (33)
+- mod_decl: cli.rs:6 (1)
+- mod_decl: cli_process_fixture.rs:1 (1)
+- manifest_dir: common/mod.rs:61 (1)
+- non_leading_inner_attr: common/mod.rs:10 (1)
+- mod_decl: install_interview_cli.rs:8 (1)
+- mod_decl: install_plan.rs:6 (1)
+- mod_decl: level2_cicd_styling.rs:27 (1)
+- non_leading_inner_attr: level2_cicd_styling.rs:18 (1)
+- mod_decl: level2_git_status_styling.rs:32 (1)
+- non_leading_inner_attr: level2_git_status_styling.rs:23 (1)
+- mod_decl: level2_perf_tree_rendering.rs:54 (1)
+- non_leading_inner_attr: level2_perf_tree_rendering.rs:45 (1)
+- mod_decl: level2_recent_commits_rendering.rs:31 (1)
+- non_leading_inner_attr: level2_recent_commits_rendering.rs:22 (1)
+- insta_assert: snapshots.rs:153,161,169,178,468,478,485,495,505,515,525,849 (12)
+- mod_decl: snapshots.rs:3 (1)
+- manifest_dir: spawn_site_guard.rs:38 (1)
+- mod_decl: spawn_site_guard.rs:5 (1)
+- path_attr: spawn_site_guard.rs:4 (1)
+- mod_decl: tty.rs:20 (1)
+### mod declarations
+- cli.rs: mod common;
+- cli_process_fixture.rs: mod common;
+- install_interview_cli.rs: mod common;
+- install_plan.rs: mod common;
+- level2_cicd_styling.rs: mod common;
+- level2_git_status_styling.rs: mod common;
+- level2_perf_tree_rendering.rs: mod common;
+- level2_recent_commits_rendering.rs: mod common;
+- snapshots.rs: mod common;
+- spawn_site_guard.rs: #[path="common/source_scan.rs"] mod source_scan;
+- tty.rs: #[cfg(unix)] mod common;
+### string literals naming tests/ paths or ../ paths
+### crate-root item names appearing in more than one target file
+- mod common: 10 files [cli.rs:6, cli_process_fixture.rs:1, install_interview_cli.rs:8, install_plan.rs:6, level2_cicd_styling.rs:27, level2_git_status_styling.rs:32 …]
+- const RENDER_DEADLINE: 4 files [level2_cicd_styling.rs:29, level2_git_status_styling.rs:34, level2_perf_tree_rendering.rs:56, level2_recent_commits_rendering.rs:33]
+- const PANE_ROWS: 2 files [level2_perf_tree_rendering.rs:60, level2_recent_commits_rendering.rs:35]
+- const VISIBLE_EVIDENCE: 2 files [level2_cicd_styling.rs:30, level2_git_status_styling.rs:35]
+- const WIDE_PANE_COLS: 2 files [level2_perf_tree_rendering.rs:65, level2_recent_commits_rendering.rs:125]
+### snapshots
+- sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_json.snap
+- sniff/cli/tests/snapshots/snapshots__cargo_monorepo_structure_text.snap
+- sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_json.snap
+- sniff/cli/tests/snapshots/snapshots__cargo_pnpm_monorepo_structure_text.snap
+- sniff/cli/tests/snapshots/snapshots__completions_help_output.snap
+- sniff/cli/tests/snapshots/snapshots__degenerate_cargo_structure_text.snap
+- sniff/cli/tests/snapshots/snapshots__help_output.snap
+- sniff/cli/tests/snapshots/snapshots__os_json_summary.snap
+- sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_json.snap
+- sniff/cli/tests/snapshots/snapshots__pnpm_nx_monorepo_structure_text.snap
+- sniff/cli/tests/snapshots/snapshots__repo_aggregate_json.snap
+- sniff/cli/tests/snapshots/snapshots__topics_table.snap
+
+## biscuit-tui-cli (biscuit-tui/cli/tests: 15 target files, 3 helper files, 0 .snap)
+### leading inner attributes
+- [lint] common/mod.rs: #![allow(dead_code)]
+- [cfg] common/pty.rs: #![cfg(unix)]
+- [lint] common/pty.rs: #![allow(dead_code)]
+- [lint] common/real_terminal/mod.rs: #![allow(dead_code)]
+- [cfg] level3_chord_select.rs: #![cfg(target_os="macos")]
+- [cfg] real_terminal_render.rs: #![cfg(unix)]
+- [cfg] windows_captured_stdout.rs: #![cfg(windows)]
+### detector hits
+- mod_decl: boolean_switch_output.rs:1 (1)
+- crate_path: choose_cli.rs:831 (1)
+- mod_decl: choose_cli.rs:30 (1)
+- path_attr: choose_cli.rs:29 (1)
+- list_arg: choose_many_output.rs:13 (1)
+- mod_decl: choose_many_output.rs:1 (1)
+- list_arg: choose_one_output.rs:13 (1)
+- mod_decl: choose_one_output.rs:1 (1)
+- mod_decl: common/mod.rs:15,18 (2)
+- non_leading_inner_attr: common/mod.rs:8 (1)
+- non_leading_inner_attr: common/pty.rs:17,21 (2)
+- non_leading_inner_attr: common/real_terminal/mod.rs:7 (1)
+- list_arg: completions_shell.rs:191,506 (2)
+- mod_decl: exit_codes.rs:1 (1)
+- mod_decl: input_table_output.rs:1 (1)
+- crate_path: keyboard_protocol.rs:81,171 (2)
+- mod_decl: keyboard_protocol.rs:22 (1)
+- path_attr: keyboard_protocol.rs:21 (1)
+- non_leading_inner_attr: level3_chord_select.rs:63 (1)
+- mod_decl: real_terminal_render.rs:58 (1)
+- non_leading_inner_attr: real_terminal_render.rs:55 (1)
+- path_attr: real_terminal_render.rs:57 (1)
+- mod_decl: text_area_input_output.rs:1 (1)
+- mod_decl: text_input_output.rs:1 (1)
+- non_leading_inner_attr: windows_captured_stdout.rs:72 (1)
+### mod declarations
+- boolean_switch_output.rs: mod common;
+- choose_cli.rs: #[path="common/mod.rs"] mod common;
+- choose_many_output.rs: mod common;
+- choose_one_output.rs: mod common;
+- common/mod.rs: #[cfg(unix)] mod pty;
+- common/mod.rs: #[cfg(all(unix,feature="terminal-tests"))] mod real_terminal;
+- exit_codes.rs: mod common;
+- input_table_output.rs: mod common;
+- keyboard_protocol.rs: #[path="common/mod.rs"] mod common;
+- real_terminal_render.rs: #[path="common/mod.rs"] mod common;
+- text_area_input_output.rs: mod common;
+- text_input_output.rs: mod common;
+### string literals naming tests/ paths or ../ paths
+### crate-root item names appearing in more than one target file
+- mod common: 10 files [boolean_switch_output.rs:1, choose_cli.rs:30, choose_many_output.rs:1, choose_one_output.rs:1, exit_codes.rs:1, input_table_output.rs:1 …]
+- fn question_binary: 3 files [completions_shell.rs:54, keyboard_protocol.rs:36, real_terminal_render.rs:69]
+- const QUESTION_RENDER_MS: 2 files [level3_chord_select.rs:74, real_terminal_render.rs:108]
+- fn skip_if_not_enabled: 2 files [completions_shell.rs:46, keyboard_protocol.rs:28]
+- mod skip_unix_only: 2 files [completions_shell.rs:593, keyboard_protocol.rs:227]
+

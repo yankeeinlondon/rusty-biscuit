@@ -1,0 +1,24 @@
+# R19 self-exec identity repair — dmls stdio_subprocess
+
+## What each --exact string selects in the consolidated l1 binary
+$ l1 --exact child_guard_cancellation_probe --list
+0 tests, 0 benchmarks
+$ l1 --exact stdio_subprocess::child_guard_cancellation_probe --list
+
+1 test, 0 benchmarks
+
+## Old string, --no-capture (the probe never starts; the assertion panic is swallowed by catch_unwind)
+thread 'stdio_subprocess::child_guard_reaps_process_during_unwind' (12924009) panicked at darkmatter/dmls/tests/l1/stdio_subprocess.rs:98:9:
+cancellation probe did not start
+        PASS [   2.368s] (1/1) dmls::l1 stdio_subprocess::child_guard_reaps_process_during_unwind
+     Summary [   2.368s] 1 test run: 1 passed, 745 skipped
+
+## New string, --no-capture (the probe starts; only the simulated assertion panics)
+thread 'stdio_subprocess::child_guard_reaps_process_during_unwind' (12936290) panicked at darkmatter/dmls/tests/l1/stdio_subprocess.rs:99:9:
+simulate a panicking assertion
+        PASS [   0.369s] (1/1) dmls::l1 stdio_subprocess::child_guard_reaps_process_during_unwind
+     Summary [   0.369s] 1 test run: 1 passed, 745 skipped
+
+With the old string the test passes vacuously: the child runs no test, never writes the ready marker,
+and the resulting "cancellation probe did not start" panic is caught by the same catch_unwind that
+expects the simulated panic. S2 predicted a loud failure; the evidence above shows the miss would be silent.

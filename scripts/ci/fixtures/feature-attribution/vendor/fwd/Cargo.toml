@@ -1,0 +1,13 @@
+[package]
+name = "fa-fwd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# `feat` forwards to a dependency: enabling it re-identifies `fa-leaf`, and
+# with it `fa-leaf`'s implied `deeper`.
+[dependencies]
+leaf = { package = "fa-leaf", path = "../leaf" }
+
+[features]
+feat = ["leaf/deep"]

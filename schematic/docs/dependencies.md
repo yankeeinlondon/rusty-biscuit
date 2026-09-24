@@ -113,7 +113,7 @@
     _Declared twice on purpose: an unconditional `[dev-dependencies]` entry every
     test target can use, plus an optional `[dependencies]` entry behind
     `schematic-gen/terminal-tests` that carries it into the L2 tmux tier.
-    `terminal_capture.rs` uses its `bin_exe!` macro to locate the generator; the
+    `level2/terminal_capture.rs` uses its `bin_exe!` macro to locate the generator; the
     L1 artifact and Postman tests use `manifest_dir!()` to resolve committed
     artifacts through the run-time manifest directory, so an archived run reads
     the executing checkout rather than the builder's._
@@ -122,8 +122,11 @@
 
 - [test-toolkit](../../tools/test-toolkit) _v0.1.0_
 
-    _Optional under the same `terminal-tests` feature; its L2 gate records tmux
-    execution evidence for CI's backend-proof verification._
+    _Declared twice, like `biscuit-test-harness`: optional under the same
+    `terminal-tests` feature, where its L2 gate records tmux execution evidence
+    for CI's backend-proof verification, and an unconditional
+    `[dev-dependencies]` entry for the `test_layout` gate in the consolidated
+    `l1` test binary. The dev entry adds no crate to the workspace._
 
     _Tags: workspace, testing_
 

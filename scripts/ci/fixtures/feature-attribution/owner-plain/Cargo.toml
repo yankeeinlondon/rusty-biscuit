@@ -1,0 +1,9 @@
+[package]
+name = "fa-owner-plain"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fa-core = { path = "../core" }
+twin1 = { package = "fa-twin", path = "../vendor/twin-1", features = ["x"] }

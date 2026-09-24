@@ -231,7 +231,7 @@ fn recent_commits_calls_match_the_eager_capture_format() {
 
 /// The blocks `sniff repo recent-commits --plain` prints for `root`.
 ///
-/// `sniff/cli/tests/cli.rs::test_repo_recent_commits_plain_is_the_concatenated_per_commit_blocks`
+/// `sniff/cli/tests/l1/cli.rs::test_repo_recent_commits_plain_is_the_concatenated_per_commit_blocks`
 /// pins that CLI's stdout to exactly the concatenation of these blocks, so
 /// agreeing with them here closes AC24's parity chain without this crate
 /// spawning the `sniff` binary.

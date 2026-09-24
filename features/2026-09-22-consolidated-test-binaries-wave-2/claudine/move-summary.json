@@ -1,0 +1,83 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "claudine/lib/tests/l1/agent_errors_fleet.rs",
+      "old": "claudine/lib/tests/agent_errors_fleet.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/boundary_lint.rs",
+      "old": "claudine/lib/tests/boundary_lint.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/canonical_dispatch.rs",
+      "old": "claudine/lib/tests/canonical_dispatch.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/deprecated_compatibility.rs",
+      "old": "claudine/lib/tests/deprecated_compatibility.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/diagnostic_detail_conformance.rs",
+      "old": "claudine/lib/tests/diagnostic_detail_conformance.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/kimi_wire.rs",
+      "old": "claudine/lib/tests/kimi_wire.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/lifecycle_control_flow_spike.rs",
+      "old": "claudine/lib/tests/lifecycle_control_flow_spike.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/model_catalog_integration.rs",
+      "old": "claudine/lib/tests/model_catalog_integration.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/opencode_stderr_lifecycle.rs",
+      "old": "claudine/lib/tests/opencode_stderr_lifecycle.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/protocol_fixture_replay.rs",
+      "old": "claudine/lib/tests/protocol_fixture_replay.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/semantic_fidelity.rs",
+      "old": "claudine/lib/tests/semantic_fidelity.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/strict_mode_provenance_spike.rs",
+      "old": "claudine/lib/tests/strict_mode_provenance_spike.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/tts_phase1_contract.rs",
+      "old": "claudine/lib/tests/tts_phase1_contract.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/tts_phase5_contract.rs",
+      "old": "claudine/lib/tests/tts_phase5_contract.rs"
+    },
+    {
+      "new": "claudine/lib/tests/l1/typed_stream_protocols.rs",
+      "old": "claudine/lib/tests/typed_stream_protocols.rs"
+    }
+  ],
+  "package": "claudine",
+  "path_repairs": {
+    "claudine/lib/tests/l1/lifecycle_control_flow_spike.rs": [
+      "../../../darkmatter/features/2026-09-22-lifecycle-events/spike/model.rs \u2192 ../../../../darkmatter/features/2026-09-22-lifecycle-events/spike/model.rs"
+    ],
+    "claudine/lib/tests/l1/opencode_stderr_lifecycle.rs": [
+      "fixtures/logs/opencode-subagent-lifecycle.txt \u2192 ../fixtures/logs/opencode-subagent-lifecycle.txt"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "claudine/lib/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 15
+    }
+  },
+  "version": 1
+}

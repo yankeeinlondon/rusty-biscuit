@@ -1,0 +1,102 @@
+{
+  "cargo_test_entries": "[[test]]\nname = \"l1\"\npath = \"tests/l1/main.rs\"\n",
+  "kind": "consolidation-move",
+  "moved": [
+    {
+      "new": "tree-hugger/lib/tests/l1/adapter_tests.rs",
+      "old": "tree-hugger/lib/tests/adapter_tests.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/cache_tests.rs",
+      "old": "tree-hugger/lib/tests/cache_tests.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/corpus_tests.rs",
+      "old": "tree-hugger/lib/tests/corpus_tests.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/lint_diagnostics.rs",
+      "old": "tree-hugger/lib/tests/lint_diagnostics.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/phase1_diagnostics.rs",
+      "old": "tree-hugger/lib/tests/phase1_diagnostics.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs",
+      "old": "tree-hugger/lib/tests/phase6_neovim_query_reuse.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/query_compile.rs",
+      "old": "tree-hugger/lib/tests/query_compile.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/resolver_tests.rs",
+      "old": "tree-hugger/lib/tests/resolver_tests.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/tree_file.rs",
+      "old": "tree-hugger/lib/tests/tree_file.rs"
+    },
+    {
+      "new": "tree-hugger/lib/tests/l1/tree_package.rs",
+      "old": "tree-hugger/lib/tests/tree_package.rs"
+    }
+  ],
+  "package": "tree-hugger",
+  "path_repairs": {
+    "tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs": [
+      "../queries/vendor/rust/locals.scm \u2192 ../../queries/vendor/rust/locals.scm",
+      "../queries/vendor/rust/locals.scm \u2192 ../../queries/vendor/rust/locals.scm",
+      "../queries/vendor/javascript/locals.scm \u2192 ../../queries/vendor/javascript/locals.scm",
+      "../queries/vendor/typescript/locals.scm \u2192 ../../queries/vendor/typescript/locals.scm",
+      "../queries/vendor/go/locals.scm \u2192 ../../queries/vendor/go/locals.scm",
+      "../queries/vendor/python/locals.scm \u2192 ../../queries/vendor/python/locals.scm",
+      "../queries/rust/lint.scm \u2192 ../../queries/rust/lint.scm",
+      "../queries/javascript/lint.scm \u2192 ../../queries/javascript/lint.scm",
+      "../queries/typescript/lint.scm \u2192 ../../queries/typescript/lint.scm"
+    ],
+    "tree-hugger/lib/tests/l1/query_compile.rs": [
+      "../queries/rust/lint.scm \u2192 ../../queries/rust/lint.scm",
+      "../queries/javascript/lint.scm \u2192 ../../queries/javascript/lint.scm",
+      "../queries/typescript/lint.scm \u2192 ../../queries/typescript/lint.scm",
+      "../queries/go/lint.scm \u2192 ../../queries/go/lint.scm",
+      "../queries/python/lint.scm \u2192 ../../queries/python/lint.scm",
+      "../queries/java/lint.scm \u2192 ../../queries/java/lint.scm",
+      "../queries/php/lint.scm \u2192 ../../queries/php/lint.scm",
+      "../queries/perl/lint.scm \u2192 ../../queries/perl/lint.scm",
+      "../queries/bash/lint.scm \u2192 ../../queries/bash/lint.scm",
+      "../queries/zsh/lint.scm \u2192 ../../queries/zsh/lint.scm",
+      "../queries/c/lint.scm \u2192 ../../queries/c/lint.scm",
+      "../queries/cpp/lint.scm \u2192 ../../queries/cpp/lint.scm",
+      "../queries/c_sharp/lint.scm \u2192 ../../queries/c_sharp/lint.scm",
+      "../queries/swift/lint.scm \u2192 ../../queries/swift/lint.scm",
+      "../queries/scala/lint.scm \u2192 ../../queries/scala/lint.scm",
+      "../queries/lua/lint.scm \u2192 ../../queries/lua/lint.scm",
+      "../queries/rust/comments.scm \u2192 ../../queries/rust/comments.scm",
+      "../queries/javascript/comments.scm \u2192 ../../queries/javascript/comments.scm",
+      "../queries/typescript/comments.scm \u2192 ../../queries/typescript/comments.scm",
+      "../queries/go/comments.scm \u2192 ../../queries/go/comments.scm",
+      "../queries/python/comments.scm \u2192 ../../queries/python/comments.scm",
+      "../queries/java/comments.scm \u2192 ../../queries/java/comments.scm",
+      "../queries/php/comments.scm \u2192 ../../queries/php/comments.scm",
+      "../queries/perl/comments.scm \u2192 ../../queries/perl/comments.scm",
+      "../queries/bash/comments.scm \u2192 ../../queries/bash/comments.scm",
+      "../queries/zsh/comments.scm \u2192 ../../queries/zsh/comments.scm",
+      "../queries/c/comments.scm \u2192 ../../queries/c/comments.scm",
+      "../queries/cpp/comments.scm \u2192 ../../queries/cpp/comments.scm",
+      "../queries/c_sharp/comments.scm \u2192 ../../queries/c_sharp/comments.scm",
+      "../queries/swift/comments.scm \u2192 ../../queries/swift/comments.scm",
+      "../queries/scala/comments.scm \u2192 ../../queries/scala/comments.scm",
+      "../queries/lua/comments.scm \u2192 ../../queries/lua/comments.scm"
+    ]
+  },
+  "proptest_relocated": [],
+  "roots": {
+    "tree-hugger/lib/tests/l1/main.rs": {
+      "declares_common": false,
+      "modules": 10
+    }
+  },
+  "version": 1
+}
