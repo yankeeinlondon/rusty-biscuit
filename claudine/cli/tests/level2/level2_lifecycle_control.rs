@@ -7936,6 +7936,11 @@ fn parse_exit_token(pane: &str, token: &str) -> Option<i32> {
 /// diagnostic itself. Everything a route legitimately renders *before* it — the
 /// execution header, the router's own launch surface, and the proxy provenance
 /// line — is route-specific by design and is asserted separately.
+///
+/// Both spellings of the workspace map to `<WS>`: a path resolved through the
+/// launch directory carries its physical spelling (macOS `/private/var/…`),
+/// while one taken from argv keeps the `/var/…` spelling the test passed. The
+/// physical spelling is replaced first because it contains the other.
 fn diagnostic_tail(
     pane: &str,
     identity: &str,
@@ -7943,12 +7948,36 @@ fn diagnostic_tail(
     staged: &Staged,
 ) -> Vec<String> {
     let workspace = staged.workspace.path().display().to_string();
+    let physical = std::fs::canonicalize(staged.workspace.path())
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| workspace.clone());
     pane.lines()
         .skip_while(|line| !line.contains(identity))
         .take_while(|line| !line.trim().starts_with(exit_token))
-        .map(|line| line.trim().replace(&workspace, "<WS>"))
+        .map(|line| line.trim().replace(&physical, "<WS>").replace(&workspace, "<WS>"))
         .filter(|line| !line.is_empty())
         .collect()
+}
+
+/// The diagnostic block's bordered body as one string, undoing the renderer's
+/// word wrap.
+///
+/// The block is width-capped independently of the pane, so a long path breaks
+/// across lines, hyphenated mid-word (`…/targ-` then `et.md`). Joining the
+/// `┃` lines and dropping a line-final hyphen restores it for substring checks.
+fn diagnostic_body(tail: &[String]) -> String {
+    tail.iter()
+        .filter_map(|line| line.strip_prefix('┃'))
+        .map(str::trim)
+        .fold(String::new(), |mut body, line| {
+            if body.ends_with('-') {
+                body.pop();
+            } else if !body.is_empty() {
+                body.push(' ');
+            }
+            body.push_str(line);
+            body
+        })
 }
 
 /// Assert everything one cell owes on its own, before any cross-route
@@ -7992,15 +8021,18 @@ fn assert_diagnostic_cell(
     // Source attribution: the failure is attributed to the target's own
     // document or reference on every route. A router that put its own name here
     // would send the operator to the wrong file.
+    let body = diagnostic_body(&diag.tail);
     assert!(
-        diag.tail.iter().any(|line| line.contains(fixture.attribution)),
+        diag.tail.iter().any(|line| line.contains(fixture.attribution))
+            || body.contains(fixture.attribution),
         "{route:?}: the diagnostic must attribute the failure to `{}`; \
          tail {:?}; pane:\n{pane}",
         fixture.attribution,
         diag.tail,
     );
     assert!(
-        !diag.tail.iter().any(|line| line.contains("<WS>/doc.md")),
+        !diag.tail.iter().any(|line| line.contains("<WS>/doc.md"))
+            && !body.contains("<WS>/doc.md"),
         "{route:?}: the diagnostic must not attribute the target's failure to the \
          router; tail {:?}; pane:\n{pane}",
         diag.tail,
@@ -8068,10 +8100,20 @@ fn assert_route_equivalent_diagnostic(fixture: &DiagnosticFixture) {
     // Everything route-specific was rendered above the identity header and is
     // excluded by construction, so what is compared here is the diagnostic and
     // nothing else.
+    //
+    // Compared with the word wrap undone: a proxied target resolves through the
+    // launch directory and renders its physical spelling, which normalizes to
+    // the same `<WS>` path but can wrap at a different column than the direct
+    // route's argv spelling.
+    fn reflowed(tail: &[String]) -> (Vec<&String>, String) {
+        let unbordered = tail.iter().filter(|line| !line.starts_with('┃')).collect();
+        (unbordered, diagnostic_body(tail))
+    }
     let (_, direct) = &cells[0];
     for (route, diag) in &cells[1..] {
         assert_eq!(
-            diag.tail, direct.tail,
+            reflowed(&diag.tail),
+            reflowed(&direct.tail),
             "{route:?}: the same target failing the same way must produce the \
              same typed identity and the same actionable rendering as the direct \
              route (acceptance criterion 28); direct pane:\n{}\n\nrouted pane:\n{}",
