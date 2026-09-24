@@ -2,7 +2,6 @@
 created: 2026-09-23
 status: draft-spec
 clarified: false
-reviewed: false
 implemented: false
 area: biscuit-file
 packages:
@@ -10,6 +9,101 @@ packages:
     - claudine
     - claudine-cli
     - darkmatter
+human_review: true
+human_review_items:
+    - |-
+        **Ruling 1 — how `@` roots are split into local versus user tiers when the
+        launch directory or repository is `$HOME` itself.** This decides the shape of
+        the tier API added in Phase 2, so it must be settled before that phase starts.
+
+        A path-only rule cannot tell Claudine's user-level prompt directory
+        (`~/.claudine/prompts`) apart from a local convention when the launch tree
+        *is* `$HOME` — both would land in the local tier and the user prompt
+        directory could outrank local files, recreating the bug at the home root.
+
+        Options:
+
+        - **Infer everything from paths.** No new API, but the overlap case has no
+          correct answer: the home prompt directory outranks local files when the
+          launch directory is `$HOME`. Cons: recreates this bug at the home root.
+        - **Require every caller to declare a tier.** Unambiguous everywhere, but
+          forces every client of `add_magic_path` to make a choice even when
+          containment is obvious, churning all call sites for no behavioral gain.
+        - **Infer by default, with an explicit tier override (recommended).**
+          `add_magic_path` keeps its signature and inferred meaning for ordinary
+          roots; Claudine marks its two `~/.claudine` registrations as user-tier.
+          Costs one builder method plus a cache/serialization representation.
+
+        **Recommendation: infer by default with an explicit override.** The caller
+        knows whether a root is a user convention; a path comparison cannot. Please
+        confirm or pick a different option before Phase 2 begins.
+    - |-
+        **Ruling 2 — which tree is local for `@` references nested inside a prompt
+        loaded from `~/.claudine` or another repository.** This decides the
+        context-capture API Phase 2 builds and Phase 3 wires through Claudine's
+        `derive_source` paths and completion, so it must be settled before Phase 2
+        starts.
+
+        Today the source context is rebuilt from the loaded prompt, so a nested
+        `@x.md` searches the prompt's own repository or the home directory — never
+        the launch tree the user invoked from.
+
+        Options:
+
+        - **Keep source-derived contexts unchanged.** Minimal work, but nested `@`
+          references keep violating the "local tree first" rule this fix exists to
+          establish.
+        - **Use the launch context for every nested reference.** Makes `@`
+          consistent with the launch, but silently changes `./`, bare, `&`, and `^`
+          references in externally loaded documents, breaking their documented
+          source-relative meaning.
+        - **Keep a launch `@` scope separate from source anchors (recommended).**
+          `@` keeps the invocation's local-first search; `./`, bare, `&`, and `^`
+          keep their source semantics. Costs a separate immutable, request-scoped
+          launch `@` snapshot on `FileResolutionContext` that Claudine must carry
+          through `InvocationContext::derive_source`, the composition
+          compatibility path, and completion.
+
+        **Recommendation: separate launch `@` scope.** It meets the user-facing
+        rule without changing the meaning of the other reference kinds. Please
+        confirm or pick a different option before Phase 2 begins.
+message_to_agent: |-
+    Phase 1 recorded both rulings (spec "Rulings" section) using the
+    recommended options, because this session was non-interactive and could
+    not obtain the human review the plan requires; `human_review` is set to
+    `true` and must be resolved before Phase 2 starts. The spike findings the
+    Phase 2 tasks rely on are in implementation-log.md under "Task 1.1" and
+    "Task 1.2" — notably: (1) the three exhaustive `RootProvenance` matches
+    that `LocalRoot` must extend, (2) the darkmatter cache codes table where
+    `LocalRoot` must append as code 8 without renumbering, (3)
+    `encode_file_resolution_context` omitting `package_root` and being shared
+    by both identity domains, (4) `derive_request_context_for_source` having
+    no in-repo callers today, and (5) the launch-`@`-snapshot API sketch for
+    task 2.1.
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: codex/gpt-6-sol
+reviewed_on: 2026-09-23
+review_iterations: 0
 ---
 
 # `@` resolution exhausts local roots before the home directory
@@ -26,13 +120,20 @@ candidates such as `…/prompts/prompts/commit.md` that looked like resolver bug
 The investigation found four defects. Defect 1 (Claudine) is already fixed
 (`259a482e4`). Defects 2 and 4 are in biscuit-file's `@` (magic) root chain,
 and defect 3 is in Claudine's not-found diagnostic; this spec schedules those
-three. The governing rule is:
+three. The intended rule for an invocation's `@` references is:
 
 > The local file tree resolves first. Its root is the repository root when
 > the launch directory is inside a repository, and the launch directory
 > itself when it is not; this holds whether or not that directory is below
 > `$HOME`. Only when the local tree cannot resolve a reference does
 > resolution fall back to home-based paths.
+
+The rule needs two decisions before implementation: how to distinguish local
+and user roots when the local root is `$HOME`, and how to keep the launch tree
+for `@` references in a prompt loaded from another repository. Both are
+recorded as rulings in [Rulings](#rulings); the [open questions](#open-questions) give the options and
+recommendations they were chosen from. The requirements
+below describe the intended behavior in the ordinary, non-overlapping case.
 
 1. **(Claudine, fixed.)** The path-shaped `@prompts/<x>` form could not
    reach the `.claudine` prompt tiers.
@@ -71,7 +172,7 @@ it.
 
 ### How the magic chain is built
 
-`collect_roots` (`biscuit-file/lib/src/file_reference/resolve.rs`) orders
+[`collect_roots`](../../lib/src/file_reference/resolve.rs) in biscuit-file orders
 `ReferenceKind::Magic` roots as follows:
 
 1. configured **prepend** roots (`PathPosition::Start`)
@@ -80,11 +181,11 @@ it.
 4. home directory (intrinsic)
 5. configured **append** roots (`PathPosition::End`)
 
-`completion_roots` in the same file re-implements that order by hand ("Mirrors
+[`completion_roots`](../../lib/src/file_reference/resolve.rs) in biscuit-file re-implements that order by hand ("Mirrors
 the execution candidate builder"). Nothing enforces that the two agree.
 
-Claudine registers its prompt conventions through `with_prompt_magic_roots`
-(`claudine/lib/src/composition/resolve.rs`):
+Claudine registers its prompt conventions through
+[`with_prompt_magic_roots`](../../../claudine/lib/src/composition/resolve.rs):
 
 - prepended (`prompt_magic_roots`): `<pkg>/prompts`, `<area>/prompts`,
   `<repo>/prompts`, `<repo>/.claudine/prompts`, `<repo>/docs`,
@@ -177,20 +278,33 @@ Reproduced on 2026-09-23. With HOME=`<tmp>/home`, a directory
 
 ### R1: the local root
 
-`FileResolutionContext` defines one **local root**:
+By default, biscuit-file's
+[`FileResolutionContext`](../../lib/src/file_reference/context.rs) derives one
+**local root** for its `@` chain:
 
 - the repository root, when one is supplied or selected by the scope
   catalog;
-- otherwise the **launch directory**, meaning the request's
-  `request_base_dir`, which is preserved across `for_source` and `for_base`
-  derivations.
+- otherwise the **request directory**, recorded in `request_base_dir` and
+  preserved by that context's `for_source` and `for_base` derivations. For a
+  top-level Claudine command, this is the launch directory.
 
-The local root is intrinsic to the `@` chain. When there is a repository it
-is the repository root, exactly as today. When there is not, it is the launch
-directory, which resolves Defect 4. It is the launch directory rather than the
-authoring source's directory: a trusted-external document such as
-`~/.claudine/prompts/commit.md` still resolves its own `@` references against
-the tree the user launched from, then home.
+The local root is intrinsic to the `@` chain. With a repository it is the
+repository root, as today. Without one it is the request directory, which
+resolves Defect 4. It is distinct from `base_dir`, the directory of the
+document authoring a reference. A context derived from a launch context for a
+trusted external prompt should therefore still search the launch tree first.
+Open question 2 recommends letting a caller explicitly preserve a launch
+`@` scope when its source-specific repository anchor differs.
+
+**Integration gap:** Claudine does not currently derive every source context
+from its launch context. [`InvocationContext::derive_source`](../../../claudine/lib/src/invocation_context.rs)
+and [`derive_request_context_for_source`](../../../claudine/lib/src/composition/resolve.rs)
+build fresh contexts with the source's parent as `request_base_dir`. Merely
+changing biscuit-file's `for_source` behavior will not make nested prompt
+references launch-local. Implement the selected cross-repository policy in
+[Open question 2](#open-questions) in these paths and in the corresponding
+completion context; keep source-relative references tied to their authoring
+base.
 
 ### R2: tiers follow from the local root
 
@@ -198,7 +312,8 @@ Every `@` chain root belongs to exactly one tier:
 
 - **Local:** the package root, the package-area root, the local root, and
   every configured magic root that lexically lies inside the local root
-  (after `normalize_components`).
+  (after `normalize_components`), subject to the overlapping-root case in
+  [Open question 1](#open-questions).
 - **User:** the home directory and every other configured magic root.
 
 The chain is ordered as follows:
@@ -210,35 +325,58 @@ The chain is ordered as follows:
 5. home directory (intrinsic)
 6. user appends
 
-No user-tier candidate may precede any local-tier candidate, in resolution,
-in `candidate_plan`, or in completion. Within a tier, `PathPosition` keeps
-its current meaning relative to that tier's intrinsic roots.
+No user-tier candidate may precede any local-tier candidate in resolution,
+`candidate_plan`, recursive `%@` search, or completion. Within a tier,
+`PathPosition` keeps its current meaning relative to that tier's intrinsic
+roots. Preserve registration order within each position. Deduplicate
+normalized roots after ordering, keeping the first root and its provenance;
+this also preserves first-match behavior when a configured root equals an
+intrinsic one.
 
 Tier is decided by containment in the **local root**, never by containment
 in home. A local tree nested under `$HOME` (`~/config/sh`) is therefore
 unambiguous: `~/config/sh/.claudine` is local, and `~/.claudine` is user. The
-public API does not change: `add_magic_path(path, position)` keeps its
-signature, and callers do not declare a scope. A configured root outside
-both the local root and home (for example `/opt/configs`) is user-tier. That
-is correct under the governing rule, because it is not part of the local
-tree.
+existing [`add_magic_path`](../../lib/src/file_reference/context.rs) method in
+biscuit-file keeps its signature for ordinary roots. A configured root outside
+the local root and home (for example `/opt/configs`) is in the fallback tier.
+Relative configured roots need a defined base before containment is tested:
+interpret them against the captured request directory, without reading the
+process working directory later. The joined candidate and the tier must use
+that same absolute spelling. Lexical containment is an ordering rule, not a
+security boundary; do not resolve symlinks solely to classify a tier.
+This intentionally changes a relative root supplied to ambient
+`resolve_from(base)`: it follows `base` rather than the process working
+directory. Document that change and test it. On Windows, compare normalized
+components in one captured path spelling; do not assume an 8.3 short path and
+its long spelling compare equal lexically.
+
+**Reader's note:** containment alone cannot distinguish a local prompt root
+from a user prompt root if the launch directory itself is `$HOME` or `$HOME`
+is a repository. The proposed explicit override in Open question 1 addresses
+this without reclassifying a user's home configuration as a local convention.
 
 ### R3: one ordering authority
 
-`collect_roots` and `completion_roots` derive the magic chain from a single
-function, so the ordering in R1 cannot drift between execution and
-completion. A test asserts that both produce the same root sequence for each
-entry form (`Magic`, `RepositoryRoot`, `RepositoryScoped`, `ImplicitRelative`)
-from one synthetic context.
+In biscuit-file, `collect_roots` and `completion_roots` use one ordered root
+builder for `@`; completion appends its typed path segment only **after**
+selecting those roots. The other entry forms (`&` for repository root, `^` for
+package then repository, and bare paths for authoring base then repository)
+retain their own established order. Tests compare completion's roots for a
+partial token with the matching resolver plan for a completed token, including
+the same path segment and root deduplication. This checks the actual behavior,
+not merely two internal functions that could agree on the wrong order.
 
 ### R4: the not-found error lists the search roots
 
-When no candidate matches, Claudine's diagnostic names the reference payload
-once and lists the **search roots** (directories) in priority order. It
-does not list joined candidate paths or provenance labels (`magic:`,
-`repository:`, `home:`, …). A root the calling context added (a configured
-magic root, `RootProvenance::Magic`) is marked `(*)`; the intrinsic roots
-(package, package area, local root, home) are not. Shape:
+For a direct `@` reference with no match, Claudine's human-readable
+diagnostic names the reference payload once, replacing its current
+"Cannot resolve" sentence, and lists the **search roots**
+(directories) in priority order. It does not list joined candidate paths or
+provenance labels (`magic:`, `repository:`, `home:`, …). A configured magic
+root is marked `(*)`; the intrinsic roots (package, package area, local root,
+home) are not. Other reference kinds keep their existing diagnostics, because
+an absolute path or a source-relative path does not have this `@` search
+chain. Shape:
 
 ```text
 `prompts/foobar.md` was not found under any directory an `@` reference
@@ -253,65 +391,91 @@ searches:
 (*) searched in addition to the standard `@` roots, for this context
 ```
 
-Order follows R2: every local root precedes every home root. Anyone who
-knows the rules can read which paths were tried. Resolution itself is
-unchanged: all candidates are still considered, and the most local match
-wins.
+Order follows R2: every local root precedes every home root. Keep Claudine's
+existing structured diagnostic candidate list, with concrete paths, probe
+results, and provenance, for tools that inspect it. Only the human-readable
+list changes. Resolution still considers the same candidates and the first
+regular file in the newly ordered chain wins.
 
-Implementation: the unresolved outcome already carries each candidate's
-provenance. The root is the candidate path minus the authored payload.
-Where that is awkward to recover, biscuit-file exposes the ordered root
-list (path and provenance) from the same chain function as R3, so the
-renderer never re-derives it. Replace both label renderers in Claudine:
-`composition/error/render/mod.rs` (the `RootProvenance` → label mapping)
-and `composition/error/render/provider.rs`. `RootProvenance` itself is
-unchanged, because darkmatter uses it for ordering
-(`compose/context/options.rs`).
+Expose the ordered `@` roots (path and provenance) from the biscuit-file
+context using the R3 builder. On a no-match, Claudine stores that root list
+alongside its existing [`ResolutionDetail`](../../../claudine/lib/src/harness/error.rs)
+probe record; the renderer reads the stored list. Do not subtract the
+authored payload from a candidate: interpolation, normalized paths, and
+duplicate candidates make that reconstruction unreliable. Change the
+`@`-specific branch of [`provider.rs`](../../../claudine/lib/src/composition/error/render/provider.rs)
+and any other renderer of this same error, while leaving labels for other
+reference kinds and the machine-readable candidate record intact.
+
+When there is no repository, give the intrinsic request-directory root a
+distinct `RootProvenance::LocalRoot` value in biscuit-file. `Source` continues
+to mean the authoring base for bare and explicit-relative references. Reusing
+`Source` for the request directory would make Darkmatter's
+`CandidatePlanOrder::AuthoringBaseFirst` move the wrong `@` candidate. Update
+the exhaustive provenance mappings in Claudine and Darkmatter, including
+Darkmatter's cache encoding, while preserving all existing variant codes.
 
 ### R5: Claudine's registration under the tiers
 
-`with_prompt_magic_roots` keeps its current registrations. The tier follows
-from R2:
+For a launch in a repository below `$HOME`, Claudine's
+[`with_prompt_magic_roots`](../../../claudine/lib/src/composition/resolve.rs)
+keeps its registrations. The tier follows from R2:
 
-| Root | Tier (derived) | Position |
+| Root | Tier | Position |
 |---|---|---|
 | `<pkg>/prompts`, `<area>/prompts`, `<repo>/prompts`, `<repo>/.claudine/prompts`, `<repo>/docs`, `<repo>/.<peer>/skills` | Local | Start |
 | `<repo>/.claudine` | Local | End |
 | `~/.claudine/prompts` | User | Start |
 | `~/.claudine` | User | End |
 
-Outside a repository, the `<repo>/…` rows are registered against the launch
-directory instead (`<launch>/prompts`, `<launch>/.claudine/prompts`,
-`<launch>/.claudine`, and so on). The convention prompt directories of the
-local tree then resolve just as they do in a repository.
-`prompt_magic_roots` and `prompt_magic_fallback_roots` take the local root in
-place of `git_root`.
+Outside a repository, register the `<repo>/…` convention rows against the
+launch directory instead (`<launch>/prompts`,
+`<launch>/.claudine/prompts`, `<launch>/.claudine`, and so on). The convention
+prompt directories of the local tree then resolve just as they do in a
+repository. Claudine's [`prompt_magic_roots`](../../../claudine/lib/src/composition/resolve.rs)
+and [`prompt_magic_fallback_roots`](../../../claudine/lib/src/composition/resolve.rs)
+take that local root in place of `git_root`. Their callers include
+[`InvocationContext`](../../../claudine/lib/src/invocation_context.rs),
+composition compatibility paths, and
+[`file_resolution_context`](../../../claudine/cli/src/completion/scopes.rs)
+for shell completion. Apply the same root source to all three; changing the
+helper alone would leave their source-derived contexts inconsistent.
 
-With R1, `@prompts/x.md` resolves in this order:
+With R1, these **matching locations** for `@prompts/x.md` win in this order;
+the complete chain still includes other configured roots that may produce
+nonmatching joined paths:
 
 1. `<pkg>/prompts/x.md`, `<area>/prompts/x.md`, `<repo>/prompts/x.md`
 2. `<repo>/.claudine/prompts/x.md`
-3. `~/.claudine/prompts/x.md`
-4. `~/prompts/x.md`
+3. `~/prompts/x.md`
+4. `~/.claudine/prompts/x.md`
 
 That resolves the second row of the Defect 2 table.
 
 `@x.md` resolves through every local prompt directory and every intrinsic
 local root before `~/.claudine/prompts/x.md`. That resolves the first row.
 
-With the tiers in place, `~/.claudine/prompts` and `~/.claudine` could keep
-any position, because the tier alone puts them after the local tree.
-Claudine keeps `Start`/`End` only to order them relative to home.
+With the tiers in place, `~/.claudine/prompts` and `~/.claudine` use
+`Start`/`End` to order them relative to the intrinsic home root. Their
+intended user-tier classification must also hold in the `$HOME` overlap case
+described in Open question 1.
 
 ### R6: docs follow the code
 
-- Update the magic-order section of `shell-completions.md` (both copies) to
-  the R2 tiers.
-- Update the `biscuit-file` skill and `biscuit-file/README.md` wherever they
-  describe `add_magic_path`, `PathPosition`, or `@` order.
-- Update `claudine/docs/topics/completions/compose-prompt-rules.md` "Local
-  Wins" with the local-before-home rule. The section is currently
-  unfinished.
+- Update the authoritative
+  [file-reference topic](../../docs/topics/file-references.md), the
+  [biscuit-file skill](../../../.claude/skills/biscuit-file/references/file-references.md),
+  and biscuit-file README examples wherever they describe the `@` order or
+  the meaning of `PathPosition`.
+- Update the magic-order section of Claudine's `shell-completions.md` in both
+  its documentation and skill copies to the R2 tiers.
+- Complete Claudine's
+  ["Local Wins" section](../../../claudine/docs/topics/completions/compose-prompt-rules.md)
+  with the launch-local rule, including the chosen policy for prompts loaded
+  from another repository. The section is currently unfinished.
+- Review comments on the changed resolver, context, Claudine registration,
+  and Darkmatter `with_magic_path` symbols so their stated order and anchor
+  still match the code.
 
 ## Tests
 
@@ -330,18 +494,30 @@ literals (see `2026-08-30-path-spelling`) so the tests run on every OS.
 - **Repository nested in home:** repo `/h/config/sh`, home `/h`. The
   repository root and its local roots all precede `/h/x.md`.
 - **No repository, launch directory under home:** launch `/h/scratch`, home
-  `/h`, no repository. `/h/scratch/x.md` is a candidate and precedes every
-  `/h/…` candidate (Defect 4).
+  `/h`, no repository. `/h/scratch/x.md` is a candidate and precedes the
+  home-tier `/h/x.md` candidate (Defect 4).
 - **Tier by containment in the local root:** with repository `/h/config/sh`
   and home `/h`, a configured `/h/config/sh/.claudine` is local, while
   `/h/.claudine` and `/opt/configs` are user.
 - **Derived source keeps the launch local root:** a context derived with
   `for_trusted_external_source(/h/.claudine/prompts/c.md)` from launch
   `/h/scratch` (no repository) still uses `/h/scratch` as its local root.
-- **Execution/completion parity (R3):** for each entry form, the
-  `collect_roots` sequence equals the `completion_roots` sequence.
+- **Relative configured root:** a root registered as `prompts` resolves and
+  classifies against the captured request directory even after deriving a
+  source with a different authoring base. The ambient `resolve_from(base)`
+  form uses `base` for this purpose too.
+- **Recursive magic:** `%@x.md` walks local roots before user roots, and a
+  duplicate configured/intrinsic root is searched once with first-seen
+  provenance.
+- **Execution/completion parity (R3):** for each supported entry form,
+  completing a partial token and resolving the corresponding completed token
+  enumerate the same ordered, normalized candidate paths.
 - **Root list (R4):** the ordered root list for `@prompts/x.md` equals the
   chain from R2, with configured roots distinguishable from intrinsic ones.
+  The no-repository local root has `LocalRoot` provenance; bare paths keep
+  `Source` provenance.
+- **Overlapping roots:** cover launch equal to home and repository equal to
+  home using the selected design from Open question 1.
 
 ### claudine / claudine-cli
 
@@ -362,52 +538,144 @@ under `$HOME/config/sh`):
     provenance labels
   - every local root precedes the first home root
   - configured roots, and only those, carry `(*)`
+  - the structured diagnostic still contains the concrete candidates and
+    probe results
+- A miss on a bare or absolute reference keeps its existing diagnostic.
 - Keep the existing five tests and the completion test green. Add a
   completion test showing that a same-named local and user prompt collapse to
   the local one when the partial is `@prompts/`.
+- With the selected policy from Open question 2, a prompt loaded from
+  `~/.claudine` or another repository resolves nested `@x.md` from the
+  launch tree first; its `./x.md`, bare `x.md`, `&x.md`, and `^x.md` references
+  retain their existing source-relative or source-repository meaning.
 
 Update the unit tests in `claudine/lib/src/composition/resolve/tests.rs` for
 the new registration shape (R5).
 
 ### darkmatter
 
-No signature changes. Tests that register a configured magic root outside
-the repository with `PathPosition::Start` and expect it to win over the
-repository root now see it ordered after the local tier. Each such test is
-reviewed against the governing rule, and its expectation is updated (not the
-rule).
+Tests that register a configured magic root outside the repository with
+`PathPosition::Start` and expect it to win over the repository root now see it
+ordered after the local tier. Review each such test against the governing
+rule and update its expectation. Keep the existing `Source`-first behavior
+of `CandidatePlanOrder::AuthoringBaseFirst` for bare references.
 
 ## Affected call sites
 
-The public API is unchanged, so these are review sites, not edit sites.
-Current `add_magic_path` / `PathPosition` users outside biscuit-file:
+The existing `add_magic_path` signature stays. The selected designs may add
+an explicit tier override and a separate `@` scope, and `LocalRoot` adds a
+public provenance variant. Review and update these callers, not just their
+test expectations:
 
 - `claudine/lib/src/composition/resolve.rs` (`with_prompt_magic_roots`)
+- `claudine/lib/src/invocation_context.rs` and
+  `claudine/cli/src/completion/scopes.rs` (launch versus source roots)
+- `claudine/lib/src/composition/error/render/provider.rs` and
+  `render/mod.rs` (human-readable error and provenance mappings)
 - `claudine/lib/src/composition/sequence/expr.rs`
 - `claudine/lib/src/composition/preflight/tests.rs`,
   `sequence/preflight/tests.rs`, `resolve/tests.rs`
 - `darkmatter/lib/src/markdown/compose/util.rs` and
   `compose/context/options.rs` (`magic_paths: Vec<(PathBuf, PathPosition)>`
   is part of `ComposeOptions`)
-- `darkmatter/lib/src/markdown/compose/cache/hashing.rs`: magic paths feed
-  the compose cache key. The tier is derived from the local root, so check
-  that the key already covers the repository root or launch directory;
-  otherwise the same options from two launch directories could share a
-  stale entry
+- [`encode_file_resolution_context`](../../../darkmatter/lib/src/markdown/compose/context/options.rs)
+  in Darkmatter already includes `request_base_dir`, repository root,
+  package area, and configured magic paths in its graph identity, but omits
+  `package_root`. Include `package_root` and any separately captured `@`
+  scope or explicit tier override: both can change the winning file without
+  changing the other fields. Preserve the existing provenance codes in the
+  same file and assign a new one to `LocalRoot`. Verify the composed cache
+  identity remains distinct when only the launch root or tier changes.
+- `darkmatter/lib/src/markdown/compose/cache/hashing.rs`: check the separate
+  compose cache key still includes the relevant root configuration.
 - `darkmatter/lib/src/markdown/compose/transclusion/resolver.rs`,
   `reference/graph.rs`, `reference/validate.rs`, `compose/type_tests.rs`
 
+## Rulings
+
+Recorded 2026-09-23 (Phase 1, task 1.3). Both rulings adopt the recommended
+option from the [open questions](#open-questions); because the recording
+session was non-interactive, `human_review` remains `true` until the author
+confirms them. If either ruling is overturned, revise the dependent plan tasks
+(2.1, 2.2, and their acceptance checks) before implementation continues.
+
+1. **Overlapping home and local trees — infer by default, with an explicit
+   tier override.** `@` tiers follow from normalized lexical containment in
+   the local root ([R2](#r2-tiers-follow-from-the-local-root)) for every
+   ordinarily registered root; `add_magic_path` keeps its signature and that
+   inferred meaning. A caller that knows a root is a user convention —
+   Claudine's `~/.claudine/prompts` (Start) and `~/.claudine` (End)
+   registrations — may explicitly mark it user-tier, and that override wins
+   over inference in every layout, including launch directory equal to
+   `$HOME` and `$HOME`-as-repository. A path outside the local root and home
+   (for example `/opt/configs`) is a user-tier (fallback) root.
+2. **Nested prompts from another tree — an immutable, request-scoped launch
+   `@` snapshot, separate from source anchors.** The launch context captures
+   the request directory and its selected repository, package, and
+   package-area roots for `@`; that snapshot is preserved through
+   `for_source`, `for_base`, and trusted-external derivations and is never
+   rediscovered by source derivation or completion. A nested `@x.md` searches
+   the launch tree first; `./x.md`, bare `x.md`, `&x.md`, and `^x.md` retain
+   their source-specific meanings. Source derivation and completion must not
+   rediscover the launch scope.
+
 ## Open questions
 
-- **OQ1: declared vs inferred scope. Resolved 2026-09-23:** neither.
-  The tier follows from containment in the local root (the repository root,
-  or else the launch directory), per the governing rule. See R1 and R2.
-- **OQ2: provenance labels. Resolved 2026-09-23:** no tier labels, and the
-  existing labels are removed from `Tried:` (R4).
-- **OQ3: skipping self-nested candidates. Resolved 2026-09-23:** no skip.
-  Resolution considers every candidate and takes the most local match, so a
-  non-matching `{root}/prompts/prompts/x.md` is harmless. The fix is in the
-  diagnostic (R4).
+### 1. How are user roots identified when the local root is also `$HOME`?
+
+If Claudine launches in `$HOME` without a repository, the local root is
+`$HOME`; the same happens when `$HOME` is itself a repository. A containment
+rule places both `<home>/prompts` and `<home>/.claudine/prompts` in the local
+tier, despite the latter being registered as a user fallback. The draft's
+original inferred-only rule cannot express their intended order.
+
+- **Infer everything from paths.** Pros: no new API. Cons: the home prompt
+  directory can outrank local files, recreating this bug at the home root;
+  there is no reliable path-only way to distinguish the two registrations.
+- **Require every caller to declare a tier.** Pros: unambiguous everywhere.
+  Cons: changes an otherwise convenient API and forces all clients to make a
+  choice even when containment is clear.
+- **Infer by default, with an explicit tier override. Recommended.** Pros:
+  existing calls retain their meaning in ordinary layouts; Claudine can mark
+  its known home prompt roots as user roots even when the trees overlap. Cons:
+  adds one builder method or tier argument and its cache/serialization
+  representation. Recommend it because the caller knows whether a root is a
+  user convention while a path comparison cannot know that intent. Keep the
+  existing `add_magic_path` as the inferred form; use the override for
+  Claudine's `~/.claudine` roots.
+
+### 2. Which tree is local for nested references in a prompt loaded elsewhere?
+
+Claudine's source contexts are rebuilt from the loaded prompt, so their
+repository and `request_base_dir` can differ from the launch context. For
+example, a prompt in `~/.claudine` or another repository can contain
+`@x.md`. The top-level rule says to search the launch tree first, while
+existing bare, `&`, and `^` references intentionally use source-specific
+anchors. One context currently carries both meanings in one repository root.
+
+- **Keep source-derived contexts unchanged.** Pros: minimal implementation
+  and preserves all current nested behavior. Cons: nested `@` references can
+  search the prompt's repository or home before the launch tree, violating
+  the stated rule.
+- **Use the launch context for every nested reference.** Pros: makes `@`
+  consistent with the launch. Cons: changes `./`, bare, `&`, and `^` references
+  in externally loaded documents and breaks their documented source meaning.
+- **Keep a launch `@` scope separate from source anchors. Recommended.**
+  Pros: `@` keeps the invocation's local-first search and completion order;
+  `./`, bare, `&`, and `^` keep their source semantics. Cons: requires a
+  separate immutable `@` root snapshot (including launch package and area
+  roots) or equivalent resolver input, and Claudine must carry it through
+  `InvocationContext::derive_source` and the compatibility path. Recommend
+  it because it meets the user-facing rule without changing the meaning of
+  the other reference kinds. The `@` snapshot must remain request-scoped;
+  neither source derivation nor completion may rediscover it.
+
+The two choices above are recorded as rulings (see
+[Rulings](#rulings)), adopting each recommendation pending human confirmation.
+The remaining decisions are settled: the human-readable `@` miss omits
+provenance labels but keeps the structured probe record (R4), and nonmatching
+joined paths such as `prompts/prompts/x.md` remain legitimate probes rather
+than being skipped.
 
 ## Out of scope
 
