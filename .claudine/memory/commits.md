@@ -590,6 +590,20 @@ belong here.
 
 ## Content Patterns
 
+- A cycle-close that updates `acceptance.md` (the spec's pass/fail
+  record against its acceptance criteria) to reflect a finding's
+  outcome belongs with the cycle close, not with the per-finding
+  fix commit. `acceptance.md` is a spec-level planning artifact
+  parallel to `implementation-log.md`; a criterion's pass/fail
+  state is finalized when the cycle closes, not when each finding's
+  code lands. Multiple findings can change a single criterion in
+  one cycle (e.g. finding 1 fixes the underlying defect while
+  finding 2 makes the criterion's gate even reachable), so folding
+  the criterion update into a per-finding commit captures a state
+  that subsequent findings in the same cycle will overrule. Bundle
+  the acceptance.md update with the spec.md `review_iterations`
+  bump and `message_to_agent` outcome text in the same
+  `planning(<area>): close cycle N, open cycle N+1` commit.
 - A new docs subtree frequently lands with several 0-byte placeholder files
   (e.g. `shared-resources/agent-definitions/agent.md`, `mcp/mcp-services.md`,
   `prompts/prompts.md`, `agent-skills/upgrading-skill-props.md`) alongside
