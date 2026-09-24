@@ -11,6 +11,15 @@ conditions that masquerade as repository defects.
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
   ([windows.md](windows.md)).
+- The same split reaches production code: a launch directory from
+  `current_dir()` is physical (`/private/var/…`) while `$HOME` keeps its
+  authored spelling (`/var/…`), so a lexical `launch == home` or
+  "is this local path the user one?" check silently misses when `$HOME` has a
+  symlinked component. An in-process unit test that builds both from one
+  `TempDir` spelling cannot see it; an L1 subprocess launched from the
+  fixture `$HOME` does. Compare by identity (`fs::canonicalize`) where two
+  such spellings meet — Claudine's `with_prompt_magic_roots` does
+  (`2026-09-23-local-before-home`).
 - macOS periodically sweeps files under `/tmp` that have not been accessed
   for a few days while leaving populated directories in place. A git worktree
   created there (the `rb-*-baseline` and `rb-*-review` checkouts) loses its

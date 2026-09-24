@@ -1,11 +1,11 @@
 ---
 name: biscuit-file
 description: >
-  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, PathPosition, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
+  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, FileResolutionContext, PathPosition, MagicPathTier, LaunchMagicScope, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
 ---
 
 - Read [references/format-conversion.md](references/format-conversion.md) when converting between TOML, YAML, JSON, JSON5, or PDF formats
-- Read [references/file-references.md](references/file-references.md) when resolving file references (`@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`)
+- Read [references/file-references.md](references/file-references.md) when resolving file references (`@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`), including the local-before-home `@` tiers and launch `@` scope
 - Read [references/cli.md](references/cli.md) when working with the `bf` CLI tool
 - Read [references/detect.md](references/detect.md) when using file type detection (`detect_file_type`, `detect_file_type_from_bytes`, `FileType`)
 - Read [references/api.md](references/api.md) for full API surface of all types (Toml, Yaml, Json5, Pdf, FileReference, FileType, DataFormat, detect, PdfConfig)
