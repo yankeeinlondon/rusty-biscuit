@@ -630,7 +630,7 @@ enable therefore gives a new identity to every workspace crate above it,
 and that crate is rebuilt. The dependency cache restores the third-party
 variants, so only the workspace crates cost time. Measured for a ten-package
 selection (`fixes/2026-09-21-ci-build-feature-divergence/attribution-2026-09-21.md`):
-27 workspace crates in 92 configurations on Linux, and 93% of the divergent
+25 workspace crates in 90 configurations on Linux, and 93% of the divergent
 compile seconds came from third-party flags.
 
 - **The flags arrive in bundles.** No single flag was the only cause of more
