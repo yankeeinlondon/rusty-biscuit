@@ -243,17 +243,26 @@ pub fn proxy_path_identity(path: &std::path::Path) -> std::path::PathBuf {
 /// chain (a self-proxy or an A→B→A cycle) or when accepting it would exceed
 /// [`MAX_PROXY_HOPS`].
 ///
-/// This is the pure decision used by the harness loop's `Proxy` arm; the
-/// effectful swap (re-materialize, re-parse lifecycle, reset guard) only runs
-/// when this returns `true`.
+/// A chain entry matches by [`proxy_path_identity`], or, when both files
+/// exist, by canonical path: a target resolved through the launch directory
+/// carries its physical spelling (macOS `/private/var/…`) while the entry
+/// document may keep the argv spelling (`/var/…`), and those are one document.
+///
+/// This is the decision used by the harness loop's `Proxy` arm; the effectful
+/// swap (re-materialize, re-parse lifecycle, reset guard) only runs when this
+/// returns `true`.
 pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::Path) -> bool {
     if chain.len() >= MAX_PROXY_HOPS {
         return false;
     }
-    let target = proxy_path_identity(target);
-    !chain
-        .iter()
-        .any(|path| proxy_path_identity(path) == target)
+    let target_identity = proxy_path_identity(target);
+    let target_physical = std::fs::canonicalize(target).ok();
+    !chain.iter().any(|path| {
+        proxy_path_identity(path) == target_identity
+            || target_physical
+                .as_ref()
+                .is_some_and(|physical| std::fs::canonicalize(path).ok().as_ref() == Some(physical))
+    })
 }
 
 /// Resolve a `Proxy` target reference to an existing prompt file.

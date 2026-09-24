@@ -493,3 +493,26 @@ fn resolve_proxy_target_unset_interpolation_variable_is_typed() {
         "unexpected variant: {err:?}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn proxy_handoff_allowed_rejects_the_same_document_under_a_symlinked_spelling() {
+    // The launch directory arrives in its physical spelling while the entry
+    // document keeps the spelling it was invoked with; a self-proxy between the
+    // two must still be a cycle.
+    let fixture = tempfile::TempDir::new().unwrap();
+    let physical = fixture.path().join("physical");
+    std::fs::create_dir_all(&physical).unwrap();
+    std::fs::write(physical.join("doc.md"), "doc").unwrap();
+    let linked = fixture.path().join("linked");
+    std::os::unix::fs::symlink(&physical, &linked).unwrap();
+
+    assert!(!proxy_handoff_allowed(
+        &[linked.join("doc.md")],
+        &physical.join("doc.md")
+    ));
+    assert!(proxy_handoff_allowed(
+        &[linked.join("doc.md")],
+        &physical.join("other.md")
+    ));
+}
