@@ -640,6 +640,10 @@ pub(crate) fn user_interrupt_observed() -> bool {
 /// post-execute lifecycle side effects (TTS, sound) — there is no ladder, so a
 /// repeated press must be able to force-exit a wedged synchronous call.
 ///
+/// The post-exit process-group teardown (`kill_process_group`) holds the same
+/// guard: it owns its own SIGTERM → SIGKILL escalation, and a force-exit there
+/// would skip the run's `failure`/`finalize` events.
+///
 /// A counter (not a bool) keeps the flag correct if wait loops ever nest.
 static WAIT_LOOP_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 

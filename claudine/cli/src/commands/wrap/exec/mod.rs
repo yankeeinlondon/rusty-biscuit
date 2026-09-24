@@ -247,23 +247,40 @@ fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fal
 /// a subagent spawned by the child (e.g. OpenCode Task tool) that inherits
 /// stdout/stderr can keep the pipe open indefinitely, causing the reader
 /// threads to hang on `BufReader::lines()`.
+///
+/// The grace period ends early once the group is empty, and a user
+/// interrupt (Ctrl+C) cuts it short to `SIGKILL`. For its whole duration the
+/// teardown counts as an active wait loop, so a repeated Ctrl+C is deferred
+/// here rather than force-exiting the wrapper past the run's `failure` and
+/// `finalize` lifecycle events.
 #[cfg(unix)]
 fn kill_process_group(child: &mut Child) {
-    let pid = child.id() as i32;
+    // With process_group(0), the pgid == child pid.
+    let pgid = child.id() as i32;
     // Derive the grace period from the same `TimeoutConfig` knob that
     // governs SIGTERM->SIGKILL escalation in the streaming wait loop,
     // so the two termination paths stay consistent.
     let kill_grace = timeouts::TimeoutConfig::resolve(None, None).kill_grace;
-    // Send SIGTERM to the process group first (graceful), then SIGKILL.
-    unsafe {
-        // kill(-pgid, ...) sends to the entire process group.
-        // With process_group(0), the pgid == child pid.
-        if libc::kill(-pid, libc::SIGTERM) == 0 {
-            // Give descendants the configured grace period to exit.
-            std::thread::sleep(kill_grace);
-            // Ensure everything is dead.
-            libc::kill(-pid, libc::SIGKILL);
+    let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
+    // SAFETY: kill(2) with a negative pid signals the whole process group; a
+    // failure (no surviving member) means there is nothing left to reap.
+    if unsafe { libc::kill(-pgid, libc::SIGTERM) } != 0 {
+        return;
+    }
+    let deadline = Instant::now() + kill_grace;
+    while Instant::now() < deadline {
+        // Signal 0 probes for any surviving member without delivering anything.
+        if unsafe { libc::kill(-pgid, 0) } != 0 {
+            return;
         }
+        if crate::output::user_interrupt_observed() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // SAFETY: as above; this is the final, unconditional sweep.
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
     }
 }
 

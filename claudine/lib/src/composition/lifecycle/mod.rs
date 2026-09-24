@@ -663,6 +663,16 @@ impl<'a> LifecycleRunGuard<'a> {
         signal: LifecycleSignal,
         stack_ctx: &super::lifecycle_executor::StackExecutionContext<'_>,
     ) -> super::lifecycle_executor::LifecycleEventOutcome {
+        // A repeat Ctrl+C gives an in-flight terminal event a short grace
+        // window rather than force-exiting through its side effects.
+        let _terminal_scope = matches!(
+            signal,
+            LifecycleSignal::Success
+                | LifecycleSignal::Blocked
+                | LifecycleSignal::Failure
+                | LifecycleSignal::Finalize
+        )
+        .then(crate::interrupt::TerminalLifecycleScope::enter);
         let mut context = stack_ctx.with_signal(signal);
         // `start` follows successful preflight; proxy adoption resets it. Catch
         // events reached before that boundary must not inherit a shell runner.
