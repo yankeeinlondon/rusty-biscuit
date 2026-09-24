@@ -796,6 +796,32 @@ belong here.
   keyed on the relevant `research-contract` / SKILL section so the
   findings survive the wait for operator input. See `58b946717` for the
   2026-09-17-research-metadata-pipeline Phase 7 example.
+- A `planning(<area>):` phase close can also land as "closed-with-rationale"
+  when a *prior* phase's measurement disproved the need for this phase's
+  main work (e.g. Task 2.1 showed the alignment crate is not warranted, so
+  the phase that was going to scaffold it collapses to a no-op). Distinct
+  from "blocked on human input" (no progress, no ticked boxes) and from
+  "deliverables shipped" (code in HEAD): the wave checkboxes ARE ticked
+  in plan.md, but every ticked task except one carries an inline
+  "Closed (Phase N): not built — see Task M" rationale explaining why the
+  prior measurement made it a no-op. The exception is a *technical
+  prerequisite* task that was actually executed as a temporary side-effect
+  check: a `publish = false` candidate crate was wired into one publishable
+  member as a versionless path dev-dependency, `cargo publish --dry-run`
+  was run, the normalized `.crate` Cargo.toml was inspected to confirm
+  Cargo strips the dev-dep from the published manifest, then
+  `git checkout -- Cargo.toml Cargo.lock <member>/Cargo.toml` reverted
+  the change in the same step (`git status` clean afterward, `cargo
+  metadata` verified). That single evidence-gathering task ships as
+  `Closed (Phase N): done — does not block` with the commands and outputs
+  in the log; the rest ship as `Closed (Phase N): not built`. The commit
+  subject still reads `planning(<area>): record Phase N close for <fix>`,
+  the body calls out which tasks delivered and which were no-ops, and the
+  `source_files_during_phase_N: []` block is honest because nothing ships
+  in HEAD. See `d245b8adf` for the 2026-09-21-ci-build-feature-divergence
+  Phase 3 example (Task 3.1 executed as a biscuit-hash publish-interaction
+  check; Tasks 3.2–3.4 closed "not built" because Task 2.1 measured 0.6 s
+  and the alignment crate would never pay).
 - Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
   `git ls-files -s <old> <new>` — the rename is a single index fact
   but the index holds independent `D` + `A` entries, and the
