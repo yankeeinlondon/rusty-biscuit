@@ -1,10 +1,14 @@
 # Deliberately its own workspace, like `shared-deps`: the `feature-attribution`
 # tests resolve it with `cargo tree` and must never join the monorepo's member
-# list or share its lockfile. Nothing here is ever compiled.
+# list or share its lockfile. Two tests also build it, under the `ci-build`
+# rustc wrapper, into a scratch target directory.
 #
 # `vendor/` holds path crates excluded from the workspace, so the tool
 # classifies them as third-party exactly as it does registry crates.
+# `sidecars.json` is the fixture's sidecar table, in the shape of
+# `.github/ci/sidecars.json`. `fa-util` has an empty build script so the
+# wrapped builds record build-script compiles alongside library compiles.
 [workspace]
 resolver = "2"
-members = ["core", "util", "owner-own", "owner-plain", "owner-third", "owner-wsdep"]
+members = ["core", "util", "owner-own", "owner-plain", "owner-third", "owner-wsdep", "owner-bin", "fwd-user", "owner-fwd"]
 exclude = ["vendor"]

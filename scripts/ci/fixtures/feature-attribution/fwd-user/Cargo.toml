@@ -1,0 +1,13 @@
+[package]
+name = "fa-fwd-user"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fa-fwd = { path = "../vendor/fwd" }
+
+# The sidecar builds `fa-owner-fwd`, which turns on `fa-fwd/feat`, so this
+# owner builds two configurations of itself: one per invocation.
+[package.metadata.ci.tests]
+sidecars = ["fa-side"]

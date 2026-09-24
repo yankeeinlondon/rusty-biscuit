@@ -9,20 +9,25 @@
 //! `(workspace crate, configuration)` the selection builds and, for each
 //! configuration beyond a crate's first, names the root of the difference: the
 //! crate's own features, a workspace dependency's features, or a third-party
-//! dependency's features. Design and rationale:
+//! dependency's features. A workspace crate here is a package with a library or
+//! build script; binaries and test harnesses exist once per owner whatever the
+//! features, so a bin- or test-only package is never one. Design and rationale:
 //! `fixes/2026-09-21-ci-build-feature-divergence/spec.md`.
 //!
 //! Configurations come from `cargo tree` alone, so nothing is compiled. Compile
 //! seconds are not derivable that way; `--events` joins the `ci-build` rustc
-//! wrapper's event files from a timed local pass and charges each divergent
-//! configuration the seconds its units took.
+//! wrapper's event files from a timed local pass and charges each
+//! configuration the seconds of the compile that built it (see [`join`]).
+//! Under `--align`, a measured compile the aligned model no longer needs is
+//! counted as removed, including one of two configurations a single owner
+//! built that the alignment merges.
 //!
 //! ## Notes
 //!
 //! A local diagnostic behind `local-tools` (it reads the workspace through
 //! `cargo_metadata`); nothing in CI runs it.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -33,6 +38,11 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped whenever the `--json` report's field set changes.
 const REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Target kinds (and rustc `--crate-type`s) that compile a library. With build
+/// scripts, these are the only units whose identity features can multiply;
+/// both the workspace model and the timed join are restricted to them.
+const LIBRARY_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
 
 const USAGE: &str = "\
 usage:
@@ -237,6 +247,20 @@ struct ConfigKey {
     deps: Vec<usize>,
 }
 
+/// One package's `[features]` table and how its manifest names each
+/// dependency, from `cargo metadata`.
+#[derive(Debug, Clone, Default)]
+struct PackageFeatures {
+    features: BTreeMap<String, Vec<String>>,
+    /// `(package name, name in this manifest)`: the second differs when the
+    /// dependency is renamed, and is what `dep/feature` entries use.
+    deps: Vec<(String, String)>,
+}
+
+/// Feature tables of every package in the resolve, keyed on `(name,
+/// version)`: `cargo tree` and `cargo metadata` spell sources differently.
+type FeatureTables = HashMap<(String, String), PackageFeatures>;
+
 /// Every configuration seen across the selection, interned so that equal
 /// configurations from different owners share one id.
 #[derive(Debug, Default)]
@@ -246,6 +270,9 @@ struct Interner {
     /// The `--align` what-if: for each aligned third-party `(package, host)`,
     /// the dependencies every resolved variant of it shares.
     aligned: HashMap<(PackageKey, bool), BTreeSet<(PackageKey, bool)>>,
+    /// The union of every variant's features, per aligned `(package, host)`.
+    union: HashMap<(PackageKey, bool), BTreeSet<String>>,
+    tables: FeatureTables,
 }
 
 impl Interner {
@@ -255,13 +282,17 @@ impl Interner {
     ///
     /// An aligned crate's identity keeps only the dependencies all of its
     /// variants share: a dependency only some variants pull in is one the
-    /// union would give every owner. Features forwarded from an aligned
-    /// crate to its dependencies (`feat = ["dep/x"]`) are not modeled, so
-    /// the what-if can understate the configurations that remain.
+    /// union would give every owner. Features the union forwards to a
+    /// dependency that is already in the graph (`feat = ["dep/x"]` or
+    /// `"dep?/x"`) are added to that dependency, with everything they imply
+    /// in its own table. An optional dependency the union newly enables is
+    /// not modeled, so when its own configuration differs between owners the
+    /// what-if can overstate the configurations that collapse.
     fn with_alignment(
         aligned: &BTreeSet<String>,
         invocations: &[Invocation],
         workspace: &BTreeSet<PackageKey>,
+        tables: &FeatureTables,
     ) -> Result<Self> {
         if let Some(member) = workspace.iter().find(|package| aligned.contains(&package.name)) {
             bail!(
@@ -270,6 +301,7 @@ impl Interner {
             );
         }
         let mut shared: HashMap<(PackageKey, bool), BTreeSet<(PackageKey, bool)>> = HashMap::new();
+        let mut union: HashMap<(PackageKey, bool), BTreeSet<String>> = HashMap::new();
         for invocation in invocations {
             let nodes = &invocation.tree.nodes;
             for node in nodes.iter().filter(|node| aligned.contains(&node.package.name)) {
@@ -279,16 +311,85 @@ impl Interner {
                     .filter(|(_, kind)| *kind != EdgeKind::Dev)
                     .map(|(dep, _)| (nodes[*dep].package.clone(), nodes[*dep].host))
                     .collect();
+                let key = (node.package.clone(), node.host);
                 shared
-                    .entry((node.package.clone(), node.host))
+                    .entry(key.clone())
                     .and_modify(|common| common.retain(|dep| deps.contains(dep)))
                     .or_insert(deps);
+                union.entry(key).or_default().extend(node.features.iter().cloned());
             }
         }
         Ok(Self {
             aligned: shared,
+            tables: if union.is_empty() { FeatureTables::new() } else { tables.clone() },
+            union,
             ..Self::default()
         })
+    }
+
+    /// Features each node of `tree` gains from the aligned crates' unions,
+    /// forwarded down `dep/feature` entries until nothing new is enabled.
+    fn forwarded(&self, tree: &Tree) -> Vec<BTreeSet<String>> {
+        let mut added = vec![BTreeSet::new(); tree.nodes.len()];
+        let mut pending: Vec<(usize, BTreeSet<String>)> = tree
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(node, current)| {
+                self.union
+                    .get(&(current.package.clone(), current.host))
+                    .map(|union| (node, union.clone()))
+            })
+            .collect();
+        while let Some((node, enabled)) = pending.pop() {
+            let current = &tree.nodes[node];
+            let Some(table) = self.tables.get(&(current.package.name.clone(), current.package.version.clone()))
+            else {
+                continue;
+            };
+            let mut forwards: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+            let mut stack: Vec<&str> = enabled.iter().map(String::as_str).collect();
+            let mut closed: BTreeSet<&str> = stack.iter().copied().collect();
+            while let Some(feature) = stack.pop() {
+                for entry in table.features.get(feature).into_iter().flatten() {
+                    if let Some((dep, dep_feature)) = entry.split_once('/') {
+                        forwards
+                            .entry(dep.trim_end_matches('?'))
+                            .or_default()
+                            .insert(dep_feature.to_owned());
+                    } else if !entry.starts_with("dep:") && closed.insert(entry) {
+                        stack.push(entry);
+                    }
+                }
+            }
+            if !self.union.contains_key(&(current.package.clone(), current.host)) {
+                let fresh: BTreeSet<String> = closed
+                    .iter()
+                    .filter(|feature| !current.features.contains(**feature))
+                    .map(|feature| (*feature).to_owned())
+                    .collect();
+                added[node].extend(fresh);
+            }
+            for &(dep, kind) in &current.deps {
+                let child = &tree.nodes[dep];
+                if kind == EdgeKind::Dev || self.union.contains_key(&(child.package.clone(), child.host)) {
+                    continue;
+                }
+                let gained: BTreeSet<String> = table
+                    .deps
+                    .iter()
+                    .filter(|(package, _)| *package == child.package.name)
+                    .filter_map(|(_, name)| forwards.get(name.as_str()))
+                    .flatten()
+                    .filter(|feature| !child.features.contains(*feature) && !added[dep].contains(*feature))
+                    .cloned()
+                    .collect();
+                if !gained.is_empty() {
+                    pending.push((dep, gained));
+                }
+            }
+        }
+        added
     }
 
     fn intern(&mut self, key: ConfigKey) -> usize {
@@ -306,8 +407,9 @@ impl Interner {
     fn resolve(&mut self, tree: &Tree) -> Result<(Vec<usize>, Vec<usize>)> {
         let mut ids: Vec<Option<usize>> = vec![None; tree.nodes.len()];
         let mut visiting = vec![false; tree.nodes.len()];
+        let added = self.forwarded(tree);
         for node in 0..tree.nodes.len() {
-            self.config_of(tree, node, &mut ids, &mut visiting)?;
+            self.config_of(tree, &added, node, &mut ids, &mut visiting)?;
         }
         let mut reachable = BTreeSet::new();
         let mut pending = vec![0usize];
@@ -325,6 +427,7 @@ impl Interner {
     fn config_of(
         &mut self,
         tree: &Tree,
+        added: &[BTreeSet<String>],
         node: usize,
         ids: &mut Vec<Option<usize>>,
         visiting: &mut Vec<bool>,
@@ -348,7 +451,7 @@ impl Interner {
                 .as_ref()
                 .is_none_or(|shared| shared.contains(&(child.package.clone(), child.host)));
             if kind != EdgeKind::Dev && kept {
-                deps.push(self.config_of(tree, dep, ids, visiting)?);
+                deps.push(self.config_of(tree, added, dep, ids, visiting)?);
             }
         }
         deps.sort_unstable();
@@ -357,7 +460,11 @@ impl Interner {
         let id = self.intern(ConfigKey {
             package: current.package.clone(),
             // Every owner resolves an aligned crate the same way.
-            features: if shared.is_some() { BTreeSet::new() } else { current.features.clone() },
+            features: if shared.is_some() {
+                BTreeSet::new()
+            } else {
+                current.features.union(&added[node]).cloned().collect()
+            },
             host: current.host,
             deps,
         });
@@ -509,7 +616,8 @@ struct ConfigReport {
     compared_with: Option<usize>,
     causes: Vec<Cause>,
     /// Compile seconds of this configuration's library and build-script units,
-    /// when a timed pass was joined.
+    /// when a timed pass was joined. Under `--align`, those of the as-built
+    /// compile that provides it.
     seconds: Option<f64>,
 }
 
@@ -609,26 +717,30 @@ struct Report {
     unexplained_compiles: Vec<Unexplained>,
 }
 
-/// Compile seconds per `(owner, workspace package name)` from a timed pass.
-type Timings = BTreeMap<(String, String), f64>;
-
 fn attribute(
     target: &str,
     owners: &[(String, Vec<String>)],
     invocations: &[Invocation],
     workspace: &BTreeSet<PackageKey>,
-    timings: Option<&Timings>,
+    tables: &FeatureTables,
+    compiles: Option<&[Compile]>,
     aligned: &BTreeSet<String>,
 ) -> Result<Report> {
-    let mut interner = Interner::with_alignment(aligned, invocations, workspace)?;
+    // The timed pass built the as-is graph, so its compiles are matched
+    // against that model; the report itself describes the `--align` one.
+    let mut as_is = Interner::default();
+    let mut interner = Interner::with_alignment(aligned, invocations, workspace, tables)?;
     // Per workspace package: configurations in first-built order, with owners.
     let mut per_crate: BTreeMap<PackageKey, Vec<(usize, String, BTreeSet<String>)>> =
         BTreeMap::new();
     let mut new_by_owner: BTreeMap<(String, PackageKey), Vec<usize>> = BTreeMap::new();
     let mut third_party: BTreeMap<(PackageKey, bool), BTreeMap<BTreeSet<String>, BTreeSet<String>>> =
         BTreeMap::new();
+    let mut compiled: HashSet<usize> = HashSet::new();
+    let mut built: Vec<Built> = Vec::new();
 
     for invocation in invocations {
+        let (as_is_ids, _) = as_is.resolve(&invocation.tree)?;
         let (ids, reachable) = interner.resolve(&invocation.tree)?;
         for node in reachable {
             let tree_node = &invocation.tree.nodes[node];
@@ -647,9 +759,10 @@ fn attribute(
                 continue;
             }
             let seen = per_crate.entry(tree_node.package.clone()).or_default();
-            match seen.iter_mut().find(|(config, _, _)| *config == id) {
+            let provides = match seen.iter_mut().find(|(config, _, _)| *config == id) {
                 Some((_, _, users)) => {
                     users.insert(invocation.owner.clone());
+                    None
                 }
                 None => {
                     let position = seen.len();
@@ -658,43 +771,35 @@ fn attribute(
                         .entry((invocation.owner.clone(), tree_node.package.clone()))
                         .or_default()
                         .push(position);
+                    Some((tree_node.package.clone(), position))
                 }
+            };
+            // Alignment only merges configurations, so a configuration new to
+            // the aligned model is always a new as-is compile too.
+            if compiled.insert(as_is_ids[node]) {
+                built.push(Built {
+                    owner: invocation.owner.clone(),
+                    package: tree_node.package.clone(),
+                    host: tree_node.host,
+                    provides,
+                });
             }
         }
     }
 
-    // Seconds per configuration: an owner's compile time for a crate is split
-    // across the configurations of it that owner built first.
+    // Seconds per configuration: the measured seconds of the as-is compile
+    // that provides it. Under `--align`, a compile that provides nothing is
+    // one the alignment removes.
     let mut seconds: BTreeMap<(PackageKey, usize), f64> = BTreeMap::new();
     let mut unexplained = Vec::new();
     let mut removed = 0.0;
-    if let Some(timings) = timings {
-        for ((owner, name), &spent) in timings {
-            let built: Vec<_> = new_by_owner
-                .iter()
-                .filter(|((built_owner, package), _)| built_owner == owner && &package.name == name)
-                .collect();
-            let count: usize = built.iter().map(|(_, positions)| positions.len()).sum();
-            if count == 0 && !aligned.is_empty() {
-                // The as-is model explains every compile of the timed pass
-                // (see `unexplained_compiles`), so under alignment a compile
-                // with no configuration left is one the alignment removes.
-                removed += spent;
-                continue;
-            }
-            if count == 0 {
-                unexplained.push(Unexplained {
-                    owner: owner.clone(),
-                    krate: name.clone(),
-                    seconds: spent,
-                });
-                continue;
-            }
-            for ((_, package), positions) in built {
-                for &position in positions {
-                    *seconds.entry((package.clone(), position)).or_default() +=
-                        spent / count as f64;
-                }
+    if let Some(compiles) = compiles {
+        let (spent, missing) = join(compiles, &built);
+        unexplained = missing;
+        for (entry, spent) in built.iter().zip(spent) {
+            match &entry.provides {
+                Some(config) => *seconds.entry(config.clone()).or_default() += spent,
+                None => removed += spent,
             }
         }
     }
@@ -712,7 +817,7 @@ fn attribute(
         for (position, (id, first_owner, users)) in configs.iter().enumerate() {
             totals.configurations += 1;
             let key = &interner.configs[*id];
-            let spent = timings.map(|_| seconds.get(&(package.clone(), position)).copied().unwrap_or(0.0));
+            let spent = compiles.map(|_| seconds.get(&(package.clone(), position)).copied().unwrap_or(0.0));
             let (compared_with, causes) = if position == 0 {
                 first_seconds += spent.unwrap_or(0.0);
                 (None, Vec::new())
@@ -783,7 +888,7 @@ fn attribute(
             configurations: reports,
         });
     }
-    if timings.is_some() {
+    if compiles.is_some() {
         totals.seconds_first = Some(first_seconds);
         totals.seconds_divergent = Some(divergent_seconds);
         totals.seconds_removed = (!aligned.is_empty()).then_some(removed);
@@ -860,21 +965,44 @@ struct Event {
     cargo_package: Option<String>,
     #[serde(default)]
     crate_types: Vec<String>,
+    /// rustc's `--target`. The owner passes an explicit `--target`, so Cargo
+    /// passes it to rustc for target-side units and omits it for host-side
+    /// ones (proc-macros, build scripts, build dependencies).
+    #[serde(default)]
+    target: Option<String>,
     probe: bool,
+    started_ms: u64,
     duration_ms: u64,
 }
 
-/// Sum each owner's library and build-script compile time per workspace
-/// package.
+/// One workspace library or build-script compile a timed pass recorded.
+#[derive(Debug, Clone, PartialEq)]
+struct Compile {
+    /// The owner package whose invocation ran it.
+    owner: String,
+    package: String,
+    host: bool,
+    build_script: bool,
+    started_ms: u64,
+    seconds: f64,
+}
+
+/// Every library and build-script compile of a workspace package in a timed
+/// pass, in start order.
 ///
 /// Test harnesses (no `--crate-type`) and binaries belong to the owner package
 /// itself and exist once per owner whatever the features, so they are never
 /// divergence and are left out.
-fn read_timings(dir: &Path, workspace: &BTreeSet<PackageKey>) -> Result<Timings> {
+fn read_compiles(dir: &Path, workspace: &BTreeSet<PackageKey>) -> Result<Vec<Compile>> {
     let names: BTreeSet<&str> = workspace.iter().map(|package| package.name.as_str()).collect();
-    let mut timings = Timings::new();
-    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
-        let path = entry?.path();
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<_>>()?;
+    // Ties on the millisecond keep the directory's own (sorted) order.
+    paths.sort();
+    let mut compiles = Vec::new();
+    for path in paths {
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
@@ -891,16 +1019,87 @@ fn read_timings(dir: &Path, workspace: &BTreeSet<PackageKey>) -> Result<Timings>
             .crate_name
             .as_deref()
             .is_some_and(|name| name.starts_with("build_script_"));
-        let library = event.crate_types.iter().any(|kind| {
-            matches!(kind.as_str(), "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro")
-        });
+        let library = event.crate_types.iter().any(|kind| LIBRARY_KINDS.contains(&kind.as_str()));
         if !(build_script || library) {
             continue;
         }
-        *timings.entry((event.package, package.to_owned())).or_default() +=
-            event.duration_ms as f64 / 1000.0;
+        compiles.push(Compile {
+            owner: event.package,
+            package: package.to_owned(),
+            host: event.target.is_none(),
+            build_script,
+            started_ms: event.started_ms,
+            seconds: event.duration_ms as f64 / 1000.0,
+        });
     }
-    Ok(timings)
+    compiles.sort_by_key(|compile| compile.started_ms);
+    Ok(compiles)
+}
+
+/// A workspace library compile the as-is model says an owner performs.
+#[derive(Debug, Clone)]
+struct Built {
+    owner: String,
+    package: PackageKey,
+    host: bool,
+    /// The reported configuration (crate, position) this compile provides, or
+    /// `None` when the `--align` model no longer needs it.
+    provides: Option<(PackageKey, usize)>,
+}
+
+/// Charge every recorded compile to the modeled compile it performed.
+///
+/// Returns seconds per entry of `built`, and the recorded compiles the model
+/// does not explain. An owner's Cargo invocations run one after another, and
+/// one invocation compiles a `(package, side)` at most once, so the k-th
+/// library compile an owner records for a `(package, side)` is the k-th one
+/// `built` lists for it. A build script is charged with the next library
+/// compile of its package by the same owner, which is the compile that reads
+/// its output.
+fn join(compiles: &[Compile], built: &[Built]) -> (Vec<f64>, Vec<Unexplained>) {
+    let mut slots: HashMap<(&str, &str, bool), VecDeque<usize>> = HashMap::new();
+    for (index, entry) in built.iter().enumerate() {
+        slots
+            .entry((entry.owner.as_str(), entry.package.name.as_str(), entry.host))
+            .or_default()
+            .push_back(index);
+    }
+    let mut spent = vec![0.0; built.len()];
+    let mut unexplained: BTreeMap<(String, String), f64> = BTreeMap::new();
+    // For each library compile, the `built` entry it matched.
+    let mut matched: Vec<Option<usize>> = vec![None; compiles.len()];
+    for (index, compile) in compiles.iter().enumerate().filter(|(_, compile)| !compile.build_script) {
+        matched[index] = slots
+            .get_mut(&(compile.owner.as_str(), compile.package.as_str(), compile.host))
+            .and_then(|queue| queue.pop_front());
+    }
+    for (index, compile) in compiles.iter().enumerate() {
+        let charged = if compile.build_script {
+            compiles
+                .iter()
+                .enumerate()
+                .skip(index + 1)
+                .find(|(_, library)| {
+                    !library.build_script && library.owner == compile.owner && library.package == compile.package
+                })
+                .and_then(|(library, _)| matched[library])
+        } else {
+            matched[index]
+        };
+        match charged {
+            Some(entry) => spent[entry] += compile.seconds,
+            None => {
+                *unexplained
+                    .entry((compile.owner.clone(), compile.package.clone()))
+                    .or_default() += compile.seconds;
+            }
+        }
+    }
+    let unexplained = unexplained
+        .into_iter()
+        .map(|((owner, krate), seconds)| Unexplained { owner, krate, seconds })
+        .collect();
+    (spent, unexplained)
 }
 
 // ---------------------------------------------------------------------------
@@ -933,14 +1132,38 @@ fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The workspace crates the model tracks, every workspace package's owner
+/// spec, and the feature tables of every package in the resolve.
+///
+/// A package with neither a library nor a build script (bin- or test-only)
+/// is left out of the crate set: no other package can depend on it, so it only
+/// ever appears as an owner's graph root, and the root's own display is never
+/// a third-party row either. Its archive compiles only binaries and test
+/// harnesses, which are never divergence, so counting it as a configuration
+/// would report a compile that does not happen.
 fn read_workspace(
     workspace: &Path,
-) -> Result<(BTreeSet<PackageKey>, BTreeMap<String, OwnerSpec>)> {
+) -> Result<(BTreeSet<PackageKey>, BTreeMap<String, OwnerSpec>, FeatureTables)> {
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(workspace.join("Cargo.toml"))
-        .no_deps()
+        .other_options(vec!["--locked".to_owned()])
         .exec()
         .context("running cargo metadata")?;
+    let tables = metadata
+        .packages
+        .iter()
+        .map(|package| {
+            let features = PackageFeatures {
+                features: package.features.clone().into_iter().collect(),
+                deps: package
+                    .dependencies
+                    .iter()
+                    .map(|dep| (dep.name.clone(), dep.rename.clone().unwrap_or_else(|| dep.name.clone())))
+                    .collect(),
+            };
+            ((package.name.to_string(), package.version.to_string()), features)
+        })
+        .collect();
     let mut members = BTreeSet::new();
     let mut specs = BTreeMap::new();
     for package in metadata.workspace_packages() {
@@ -948,11 +1171,16 @@ fn read_workspace(
             .manifest_path
             .parent()
             .context("a manifest path has a directory")?;
-        members.insert(PackageKey {
-            name: package.name.to_string(),
-            version: package.version.to_string(),
-            source: directory.to_string(),
+        let compiles_a_configuration = package.targets.iter().any(|target| {
+            target.is_custom_build() || target.kind.iter().any(|kind| LIBRARY_KINDS.contains(&kind.as_str()))
         });
+        if compiles_a_configuration {
+            members.insert(PackageKey {
+                name: package.name.to_string(),
+                version: package.version.to_string(),
+                source: directory.to_string(),
+            });
+        }
         let tests = package.metadata.pointer("/ci/tests");
         specs.insert(
             package.name.to_string(),
@@ -962,7 +1190,7 @@ fn read_workspace(
             },
         );
     }
-    Ok((members, specs))
+    Ok((members, specs, tables))
 }
 
 fn cargo_tree(workspace: &Path, target: &str, package: &str, features: &[String], dev: bool) -> Result<Tree> {
@@ -997,7 +1225,10 @@ fn host_triple() -> Result<String> {
 
 /// Everything `attribute` needs about one owner selection.
 struct Selection {
+    /// Workspace packages with a library or build script (see
+    /// [`read_workspace`]).
     members: BTreeSet<PackageKey>,
+    tables: FeatureTables,
     /// Each owner and its CI features, in the producer's order.
     owners: Vec<(String, Vec<String>)>,
     invocations: Vec<Invocation>,
@@ -1011,7 +1242,7 @@ fn collect(
     owners: &[String],
     sidecars: Option<&SidecarTable>,
 ) -> Result<Selection> {
-    let (members, specs) = read_workspace(workspace)?;
+    let (members, specs, tables) = read_workspace(workspace)?;
     let mut ordered: Vec<String> = owners.to_vec();
     ordered.sort();
     ordered.dedup();
@@ -1041,6 +1272,7 @@ fn collect(
     }
     Ok(Selection {
         members,
+        tables,
         owners: owner_features,
         invocations,
     })
@@ -1074,7 +1306,9 @@ fn render(report: &Report, term: &Terminal) -> String {
         out.push_str(
             &Prose::new(format!(
                 "_What-if: every owner resolves {} identically; {} of the timed pass's compile \
-                 time would no longer be needed._",
+                 time would no longer be needed. Forwarded features are modeled; an optional \
+                 dependency the alignment newly enables is not, so the collapse can be \
+                 overstated._",
                 report.aligned.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", "),
                 seconds_text(totals.seconds_removed),
             ))
@@ -1269,17 +1503,18 @@ fn run(options: Options, term: &Terminal) -> Result<()> {
     };
 
     let selection = collect(&workspace, &target, &options.owners, sidecars.as_ref())?;
-    let timings = options
+    let compiles = options
         .events
         .as_deref()
-        .map(|dir| read_timings(dir, &selection.members))
+        .map(|dir| read_compiles(dir, &selection.members))
         .transpose()?;
     let report = attribute(
         &target,
         &selection.owners,
         &selection.invocations,
         &selection.members,
-        timings.as_ref(),
+        &selection.tables,
+        compiles.as_deref(),
         &options.align,
     )?;
 

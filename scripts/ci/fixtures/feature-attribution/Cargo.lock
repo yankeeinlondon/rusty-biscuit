@@ -14,6 +14,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "fa-fwd"
+version = "0.1.0"
+dependencies = [
+ "fa-leaf",
+]
+
+[[package]]
+name = "fa-fwd-user"
+version = "0.1.0"
+dependencies = [
+ "fa-fwd",
+]
+
+[[package]]
+name = "fa-leaf"
+version = "0.1.0"
+
+[[package]]
+name = "fa-owner-bin"
+version = "0.1.0"
+dependencies = [
+ "fa-core",
+]
+
+[[package]]
+name = "fa-owner-fwd"
+version = "0.1.0"
+dependencies = [
+ "fa-fwd",
+ "fa-fwd-user",
+]
+
+[[package]]
 name = "fa-owner-own"
 version = "0.1.0"
 dependencies = [

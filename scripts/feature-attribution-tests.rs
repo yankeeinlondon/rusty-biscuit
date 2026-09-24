@@ -10,22 +10,40 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// The feature-attribution fixture workspace.
+fn fixture() -> PathBuf {
+    repo_root().join("scripts/ci/fixtures/feature-attribution")
+}
+
+/// The fixture's sidecar table.
+fn fixture_sidecars() -> SidecarTable {
+    let text = fs::read_to_string(repo_root().join("scripts/ci/fixtures/feature-attribution/sidecars.json"))
+        .expect("the fixture sidecar table is readable");
+    serde_json::from_str(&text).expect("the fixture sidecar table parses")
+}
+
 /// Attribute `owners` over a checked-in fixture workspace, optionally joined
-/// with a timed pass.
-fn fixture_report(workspace: &Path, owners: &[&str], events: Option<&Path>) -> Report {
+/// with a timed pass and modeling an alignment.
+fn fixture_report_aligned(workspace: &Path, owners: &[&str], events: Option<&Path>, aligned: &[&str]) -> Report {
     let owners: Vec<String> = owners.iter().map(|owner| (*owner).to_owned()).collect();
     let target = host_triple().expect("rustc reports a host triple");
-    let selection = collect(workspace, &target, &owners, None).expect("the fixture resolves");
-    let timings = events.map(|dir| read_timings(dir, &selection.members).expect("events parse"));
+    let sidecars = fixture_sidecars();
+    let selection = collect(workspace, &target, &owners, Some(&sidecars)).expect("the fixture resolves");
+    let compiles = events.map(|dir| read_compiles(dir, &selection.members).expect("events parse"));
     attribute(
         &target,
         &selection.owners,
         &selection.invocations,
         &selection.members,
-        timings.as_ref(),
-        &BTreeSet::new(),
+        &selection.tables,
+        compiles.as_deref(),
+        &aligned.iter().map(|name| (*name).to_owned()).collect(),
     )
     .expect("attribution succeeds")
+}
+
+fn fixture_report(workspace: &Path, owners: &[&str], events: Option<&Path>) -> Report {
+    fixture_report_aligned(workspace, owners, events, &[])
 }
 
 fn causes_fixture() -> Report {
@@ -326,6 +344,7 @@ impl Drop for Scratch {
     }
 }
 
+/// Write a target-side compile event that starts at `index` milliseconds.
 fn write_event(dir: &Path, index: usize, owner: &str, package: &str, crate_types: &[&str], ms: u64) {
     let event = serde_json::json!({
         "schema_version": 1,
@@ -335,10 +354,11 @@ fn write_event(dir: &Path, index: usize, owner: &str, package: &str, crate_types
         "cargo_package": package,
         "primary": false,
         "crate_types": crate_types,
+        "target": "t",
         "probe": false,
         "argv_digest": format!("{index:016x}"),
-        "started_ms": 0,
-        "finished_ms": ms,
+        "started_ms": index,
+        "finished_ms": index as u64 + ms,
         "duration_ms": ms,
         "pid": 1,
     });
@@ -426,13 +446,20 @@ fn co_causes_split_seconds_and_bound_what_each_removes() {
             source: format!("/ws/{name}"),
         })
         .collect();
-    let timings = Timings::from([
-        (("o1".to_owned(), "w".to_owned()), 1.0),
-        (("o2".to_owned(), "w".to_owned()), 6.0),
-    ]);
+    let compile = |owner: &str, started_ms: u64, seconds: f64| Compile {
+        owner: owner.to_owned(),
+        package: "w".to_owned(),
+        host: false,
+        build_script: false,
+        started_ms,
+        seconds,
+    };
+    let compiles = [compile("o1", 0, 1.0), compile("o2", 1, 6.0)];
+    let timings = Some(compiles.as_slice());
+    let tables = FeatureTables::new();
     let owners = vec![("o1".to_owned(), Vec::new()), ("o2".to_owned(), Vec::new())];
 
-    let report = attribute("t", &owners, &invocations, &workspace, Some(&timings), &BTreeSet::new())
+    let report = attribute("t", &owners, &invocations, &workspace, &tables, timings, &BTreeSet::new())
         .expect("attributes");
 
     assert_eq!(report.causes.len(), 2, "{:#?}", report.causes);
@@ -448,7 +475,7 @@ fn co_causes_split_seconds_and_bound_what_each_removes() {
 
     // Aligning one co-cause leaves the configuration divergent on the other.
     let one = BTreeSet::from(["a".to_owned()]);
-    let report = attribute("t", &owners, &invocations, &workspace, Some(&timings), &one).expect("attributes");
+    let report = attribute("t", &owners, &invocations, &workspace, &tables, timings, &one).expect("attributes");
     assert_eq!(report.totals.divergent_configurations, 1);
     assert_eq!(report.causes.len(), 1);
     assert_eq!(report.causes[0].cause.krate, "b");
@@ -457,7 +484,7 @@ fn co_causes_split_seconds_and_bound_what_each_removes() {
 
     // Aligning both collapses it: o2 reuses o1's `w`, and its 6s go.
     let both = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
-    let report = attribute("t", &owners, &invocations, &workspace, Some(&timings), &both).expect("attributes");
+    let report = attribute("t", &owners, &invocations, &workspace, &tables, timings, &both).expect("attributes");
     assert_eq!(report.totals.divergent_configurations, 0);
     assert_eq!(report.totals.seconds_removed, Some(6.0));
     assert!(report.unexplained_compiles.is_empty());
@@ -477,7 +504,8 @@ fn a_workspace_crate_is_never_aligned() {
         })
         .collect();
     let owners = vec![("o".to_owned(), Vec::new())];
-    let error = attribute("t", &owners, &invocations, &workspace, None, &BTreeSet::from(["w".to_owned()]))
+    let tables = FeatureTables::new();
+    let error = attribute("t", &owners, &invocations, &workspace, &tables, None, &BTreeSet::from(["w".to_owned()]))
         .expect_err("aligning a workspace crate is refused");
     assert!(error.to_string().contains("never aligned"), "{error}");
 }
@@ -491,7 +519,7 @@ fn aligning_a_fixture_flag_collapses_the_configurations_it_caused() {
     let target = host_triple().expect("host triple");
     let selection = collect(&workspace, &target, &owners, None).expect("resolves");
     let run = |aligned: &BTreeSet<String>| {
-        attribute(&target, &selection.owners, &selection.invocations, &selection.members, None, aligned)
+        attribute(&target, &selection.owners, &selection.invocations, &selection.members, &selection.tables, None, aligned)
             .expect("attributes")
     };
     let as_is = run(&BTreeSet::new());
@@ -500,4 +528,350 @@ fn aligning_a_fixture_flag_collapses_the_configurations_it_caused() {
     assert_eq!(what_if.totals.divergent_configurations, 0);
     assert!(what_if.third_party_divergence.iter().any(|row| row.krate == "fa-base"),
         "the as-resolved feature sets are still reported");
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation against a wrapped build
+// ---------------------------------------------------------------------------
+
+/// A private copy of a freshly built `ci-build`, the wrapper CI's owner and the
+/// timed pass both use.
+///
+/// Mirrors `shipped_wrapper` in `ci-build-tests.rs`, which lives in another
+/// binary's test crate: rebuild unconditionally (a `[[bin]]` test harness does
+/// not build its sibling, so an existing file may be stale), take the path
+/// Cargo reports, and exec a private link so a concurrent rebuild by another
+/// test process cannot swap the file out from under this build.
+fn wrapper_in(scratch: &Path) -> PathBuf {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .args(["build", "--message-format=json-render-diagnostics"])
+        .args(["--no-default-features", "--features", "build-tools", "--bin", "ci-build"])
+        .arg("--manifest-path")
+        .arg(repo_root().join("scripts/Cargo.toml"))
+        .output()
+        .expect("building ci-build");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let built = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-artifact" && message["target"]["name"] == "ci-build")
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .expect("cargo reports the ci-build executable");
+    let private = scratch.join(format!("ci-build{}", std::env::consts::EXE_SUFFIX));
+    if fs::hard_link(&built, &private).is_err() {
+        fs::copy(&built, &private).expect("copying ci-build");
+    }
+    private
+}
+
+/// A wrapped build's compiles of fixture workspace packages (every member, not
+/// only the ones the model keeps), counted per `(owner, package)`.
+///
+/// Build-script compiles are counted apart from library compiles: the model
+/// charges a build script's seconds to a configuration, but a build-script
+/// unit is never a configuration of its own.
+#[derive(Default)]
+struct Observed {
+    libraries: BTreeMap<(String, String), usize>,
+    build_scripts: BTreeMap<(String, String), usize>,
+}
+
+/// Build `selection` in `workspace` as the owner does — every owner's archive
+/// compile, then its sidecar builds, in producer order, in one target
+/// directory — with every rustc timed by the `ci-build` wrapper.
+///
+/// Returns the event directory, what the wrapper observed, and the owners whose
+/// own test harness compiled.
+fn wrapped_build(
+    workspace: &Path,
+    selection: &Selection,
+    sidecars: Option<&SidecarTable>,
+    scratch: &Path,
+) -> (PathBuf, Observed, BTreeSet<String>) {
+    let wrapper = wrapper_in(scratch);
+    let target = host_triple().expect("host triple");
+    let events = scratch.join("events");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let run = |owner: &str, args: &[&str], package: &str, features: &[String]| {
+        let mut command = Command::new(&cargo);
+        command
+            .args(args)
+            .args(["--quiet", "--offline", "--locked", "--target", &target, "--package", package])
+            .arg("--manifest-path")
+            .arg(workspace.join("Cargo.toml"))
+            .arg("--target-dir")
+            .arg(scratch.join("target"))
+            .env("RUSTC_WRAPPER", &wrapper)
+            .env("BISCUIT_CI_BUILD_WRAP", "1")
+            .env("BISCUIT_CI_BUILD_COUNTER_DIR", &events)
+            .env("BISCUIT_CI_BUILD_PACKAGE", owner)
+            .env("BISCUIT_CI_BUILD_CONFIGURATION", "reconcile");
+        if !features.is_empty() {
+            command.args(["--features", &features.join(",")]);
+        }
+        let output = command.output().expect("running cargo");
+        assert!(output.status.success(), "{owner} {package}: {}", String::from_utf8_lossy(&output.stderr));
+    };
+    for (owner, features) in &selection.owners {
+        run(owner, &["test", "--no-run"], owner, features);
+        for invocation in selection.invocations.iter().filter(|invocation| &invocation.owner == owner) {
+            let Some(name) = invocation.label.strip_prefix("sidecar ") else {
+                continue;
+            };
+            let sidecar = &sidecars.expect("a sidecar table").sidecars[name];
+            run(owner, &["build", "--profile", "test"], &sidecar.package, &sidecar.features);
+        }
+    }
+
+    let fixture_members: BTreeSet<String> = cargo_metadata::MetadataCommand::new()
+        .manifest_path(workspace.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .expect("fixture metadata")
+        .workspace_packages()
+        .iter()
+        .map(|package| package.name.to_string())
+        .collect();
+    let mut observed = Observed::default();
+    let mut harnesses: BTreeSet<String> = BTreeSet::new();
+    for entry in fs::read_dir(&events).expect("the wrapper recorded events") {
+        let path = entry.expect("event entry").path();
+        let event: Event = serde_json::from_str(&fs::read_to_string(&path).expect("event read")).expect("event parses");
+        if event.probe {
+            continue;
+        }
+        let Some(package) = event.cargo_package.filter(|name| fixture_members.contains(name)) else {
+            continue;
+        };
+        let build_script = event.crate_name.as_deref().is_some_and(|name| name.starts_with("build_script_"));
+        let library = event.crate_types.iter().any(|kind| LIBRARY_KINDS.contains(&kind.as_str()));
+        if build_script {
+            *observed.build_scripts.entry((event.package, package)).or_default() += 1;
+        } else if library {
+            *observed.libraries.entry((event.package, package)).or_default() += 1;
+        } else if package == event.package {
+            harnesses.insert(package);
+        }
+    }
+    (events, observed, harnesses)
+}
+
+/// Each configuration of `report`, counted per `(first owner, crate)`.
+fn predicted(report: &Report) -> BTreeMap<(String, String), usize> {
+    let mut predicted = BTreeMap::new();
+    for krate in &report.crates {
+        for config in &krate.configurations {
+            *predicted.entry((config.first_owner.clone(), krate.krate.clone())).or_default() += 1;
+        }
+    }
+    predicted
+}
+
+#[test]
+fn a_wrapped_fixture_build_compiles_exactly_the_predicted_configurations() {
+    // The model's claim is about what Cargo compiles, so it is checked against
+    // a build. `fa-owner-bin` has no library or build script; before the model
+    // excluded such packages it predicted a configuration for that root that
+    // no compile produced. `fa-util` has a build script, whose compiles must be
+    // charged to a configuration without being counted as one.
+    let workspace = fixture();
+    let scratch = Scratch::new("wrapped");
+    let target = host_triple().expect("host triple");
+    let owners: Vec<String> = ["fa-core", "fa-owner-bin", "fa-owner-own", "fa-owner-plain", "fa-owner-third", "fa-owner-wsdep"]
+        .map(str::to_owned)
+        .to_vec();
+    let selection = collect(&workspace, &target, &owners, None).expect("the fixture resolves");
+    let (events, observed, harnesses) = wrapped_build(&workspace, &selection, None, &scratch.0);
+    assert!(harnesses.contains("fa-owner-bin"), "the bin-only owner was built: {harnesses:?}");
+
+    let report = attribute(&target, &selection.owners, &selection.invocations, &selection.members, &selection.tables, None, &BTreeSet::new())
+        .expect("attributes");
+    // Both directions at once: a prediction with no compile, or a compile with
+    // no prediction, makes the maps differ.
+    assert_eq!(predicted(&report), observed.libraries, "predicted (left) vs library compiles (right)");
+    assert!(report.crates.iter().all(|krate| krate.krate != "fa-owner-bin"), "{:#?}", report.crates);
+
+    // Cargo compiles a build script once per feature set of its own package,
+    // so how many compiles an owner records is Cargo's business; every one
+    // must belong to a configuration that owner's library compile provides.
+    assert!(
+        observed.build_scripts.contains_key(&("fa-core".to_owned(), "fa-util".to_owned())),
+        "the first owner compiled fa-util's build script: {:?}",
+        observed.build_scripts
+    );
+    for key in observed.build_scripts.keys() {
+        assert_eq!(key.1, "fa-util", "only fa-util has a build script: {:?}", observed.build_scripts);
+        assert!(observed.libraries.contains_key(key), "{key:?} compiled a build script but no library");
+    }
+
+    let compiles = read_compiles(&events, &selection.members).expect("events parse");
+    let timed = attribute(
+        &target,
+        &selection.owners,
+        &selection.invocations,
+        &selection.members,
+        &selection.tables,
+        Some(&compiles),
+        &BTreeSet::new(),
+    )
+    .expect("attributes");
+    assert!(timed.unexplained_compiles.is_empty(), "{:#?}", timed.unexplained_compiles);
+    // Each owner first builds at most one fa-util configuration here, so an
+    // owner's fa-util compiles, build script included, are that configuration's.
+    for config in &crate_report(&timed, "fa-util").configurations {
+        let owned: Vec<&Compile> = compiles
+            .iter()
+            .filter(|compile| compile.package == "fa-util" && compile.owner == config.first_owner)
+            .collect();
+        let expected: f64 = owned.iter().map(|compile| compile.seconds).sum();
+        let seconds = config.seconds.expect("a timed configuration has seconds");
+        assert!((seconds - expected).abs() < 1e-9, "{}: {seconds} vs {owned:#?}", config.first_owner);
+    }
+    assert!(
+        compiles
+            .iter()
+            .any(|compile| compile.build_script && compile.owner == "fa-core" && compile.package == "fa-util"),
+        "the join saw the build-script compile fa-core's fa-util configuration is charged with"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The `--align` what-if
+// ---------------------------------------------------------------------------
+
+#[test]
+fn one_owner_two_configurations_keep_their_own_seconds_and_merge_under_alignment() {
+    // `fa-fwd-user` builds itself twice: its archive without `fa-fwd/feat`,
+    // and its sidecar (`fa-owner-fwd`) with it. Both are first built by the
+    // same owner. An equal split of that owner's seconds charged 5.5s to each
+    // and, because the owner still has a configuration left under alignment,
+    // counted nothing removed.
+    let events = Scratch::new("one-owner");
+    // Out of start order on disk: the join orders by start time.
+    write_event(&events.0, 30, "fa-fwd-user", "fa-owner-fwd", &["lib"], 2_000);
+    write_event(&events.0, 20, "fa-fwd-user", "fa-fwd-user", &["lib"], 1_500);
+    write_event(&events.0, 10, "fa-fwd-user", "fa-fwd-user", &["lib"], 9_500);
+    let workspace = fixture();
+
+    let as_is = fixture_report(&workspace, &["fa-fwd-user"], Some(&events.0));
+    let user = crate_report(&as_is, "fa-fwd-user");
+    let seconds: Vec<_> = user.configurations.iter().map(|config| config.seconds).collect();
+    assert_eq!(seconds, vec![Some(9.5), Some(1.5)], "archive first, then the sidecar");
+    assert!(user.configurations.iter().all(|config| config.first_owner == "fa-fwd-user"));
+    assert_eq!(as_is.totals.seconds_divergent, Some(1.5));
+    assert!(as_is.unexplained_compiles.is_empty(), "{:#?}", as_is.unexplained_compiles);
+
+    let aligned = fixture_report_aligned(&workspace, &["fa-fwd-user"], Some(&events.0), &["fa-fwd"]);
+    let user = crate_report(&aligned, "fa-fwd-user");
+    assert_eq!(user.configurations.len(), 1, "{user:#?}");
+    assert_eq!(user.configurations[0].seconds, Some(9.5), "the surviving compile keeps its own seconds");
+    assert_eq!(aligned.totals.seconds_removed, Some(1.5), "the merged-away compile is credited");
+    assert_eq!(aligned.totals.seconds_first, Some(11.5), "fa-fwd-user 9.5s + fa-owner-fwd 2s");
+    assert!(aligned.unexplained_compiles.is_empty(), "{:#?}", aligned.unexplained_compiles);
+}
+
+#[test]
+fn a_build_script_is_charged_with_its_packages_next_library_compile() {
+    let built = |host| Built {
+        owner: "o".to_owned(),
+        package: PackageKey { name: "w".to_owned(), version: "0.1.0".to_owned(), source: String::new() },
+        host,
+        provides: None,
+    };
+    let compile = |started_ms, build_script, host, seconds| Compile {
+        owner: "o".to_owned(),
+        package: "w".to_owned(),
+        host,
+        build_script,
+        started_ms,
+        seconds,
+    };
+    let compiles = [
+        compile(0, false, false, 4.0),
+        compile(1, true, true, 0.5),
+        compile(2, false, false, 3.0),
+        // A third target-side compile the model has no slot for.
+        compile(3, false, false, 1.0),
+        compile(4, true, true, 0.25),
+    ];
+    let (spent, unexplained) = join(&compiles, &[built(false), built(false)]);
+    assert_eq!(spent, vec![4.0, 3.5], "the build script before the second compile joins it");
+    assert_eq!(unexplained.len(), 1, "{unexplained:#?}");
+    assert_eq!(unexplained[0].seconds, 1.25, "the extra compile, and a build script nothing followed");
+}
+
+/// Copy the fixture workspace's manifests and sources into `dir`.
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("copy destination");
+    for entry in fs::read_dir(from).expect("fixture directory") {
+        let entry = entry.expect("fixture entry");
+        let path = entry.path();
+        if entry.file_name() == "target" {
+            continue;
+        }
+        if path.is_dir() {
+            copy_tree(&path, &to.join(entry.file_name()));
+        } else {
+            fs::copy(&path, to.join(entry.file_name())).expect("copying a fixture file");
+        }
+    }
+}
+
+#[test]
+fn a_forwarded_feature_what_if_matches_a_build_with_the_alignment_declared() {
+    // `fa-fwd/feat` forwards to `fa-leaf/deep`, which implies `deeper`. Aligning
+    // `fa-fwd` therefore re-identifies `fa-leaf` too, and only by modeling that
+    // does `fa-fwd-user`'s second configuration collapse. The prediction is
+    // checked against a real build of a copy that declares the alignment:
+    // `fa-fwd-user` itself enables `fa-fwd/feat`.
+    let workspace = fixture();
+    let target = host_triple().expect("host triple");
+    let owners: Vec<String> = ["fa-fwd-user", "fa-owner-fwd"].map(str::to_owned).to_vec();
+    let sidecars = fixture_sidecars();
+    let selection = collect(&workspace, &target, &owners, Some(&sidecars)).expect("the fixture resolves");
+    let aligned = BTreeSet::from(["fa-fwd".to_owned()]);
+    let what_if = |tables: &FeatureTables, compiles: Option<&[Compile]>| {
+        attribute(&target, &selection.owners, &selection.invocations, &selection.members, tables, compiles, &aligned)
+            .expect("attributes")
+    };
+
+    // As built: the model matches the build, and each compile is joined.
+    let built = Scratch::new("fwd-as-built");
+    let (events, observed, _) = wrapped_build(&workspace, &selection, Some(&sidecars), &built.0);
+    let as_is = attribute(&target, &selection.owners, &selection.invocations, &selection.members, &selection.tables, None, &BTreeSet::new())
+        .expect("attributes");
+    assert_eq!(predicted(&as_is), observed.libraries, "as built: predicted (left) vs compiled (right)");
+    assert_eq!(observed.libraries.get(&("fa-fwd-user".to_owned(), "fa-fwd-user".to_owned())), Some(&2));
+
+    // With the alignment declared.
+    let declared = Scratch::new("fwd-declared");
+    let copy = declared.0.join("workspace");
+    copy_tree(&workspace, &copy);
+    let manifest = copy.join("fwd-user/Cargo.toml");
+    let text = fs::read_to_string(&manifest).expect("fwd-user manifest");
+    let edited = text.replace(
+        r#"fa-fwd = { path = "../vendor/fwd" }"#,
+        r#"fa-fwd = { path = "../vendor/fwd", features = ["feat"] }"#,
+    );
+    assert_ne!(edited, text, "the alignment declaration applied");
+    fs::write(&manifest, edited).expect("declaring the alignment");
+    let copy_selection = collect(&copy, &target, &owners, Some(&sidecars)).expect("the copy resolves");
+    let (_, aligned_observed, _) = wrapped_build(&copy, &copy_selection, Some(&sidecars), &declared.0);
+
+    let compiles = read_compiles(&events, &selection.members).expect("events parse");
+    let modeled = what_if(&selection.tables, Some(&compiles));
+    assert_eq!(predicted(&modeled), aligned_observed.libraries, "what-if (left) vs aligned build (right)");
+    let unmodeled = what_if(&FeatureTables::new(), None);
+    assert_ne!(predicted(&unmodeled), aligned_observed.libraries, "without forwarding the what-if misses the collapse");
+
+    // The removed compile is the sidecar's, the later of the owner's two.
+    let sidecar_seconds = compiles
+        .iter()
+        .filter(|compile| compile.owner == "fa-fwd-user" && compile.package == "fa-fwd-user")
+        .nth(1)
+        .expect("two compiles of fa-fwd-user")
+        .seconds;
+    assert!(modeled.unexplained_compiles.is_empty(), "{:#?}", modeled.unexplained_compiles);
+    assert_eq!(modeled.totals.seconds_removed, Some(sidecar_seconds));
 }

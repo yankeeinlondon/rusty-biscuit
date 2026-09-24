@@ -1,0 +1,9 @@
+[package]
+name = "fa-owner-fwd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fa-fwd = { path = "../vendor/fwd", features = ["feat"] }
+fa-fwd-user = { path = "../fwd-user" }

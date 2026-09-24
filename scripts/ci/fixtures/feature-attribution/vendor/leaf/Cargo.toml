@@ -1,0 +1,9 @@
+[package]
+name = "fa-leaf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+deep = ["deeper"]
+deeper = []
