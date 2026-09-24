@@ -22,7 +22,8 @@ Two reference forms are recognized, and nothing else:
 Files are found the way rustc finds them — by walking `mod` declarations from
 each Cargo target root — so the nextest identity of every reference is exact:
 a literal inside a test function names that test, and one in a helper names the
-module it lives in. A file no target reaches is not compiled and is not read.
+whole binary, since a helper's callers may live in any of its modules. A file no
+target reaches is not compiled and is not read.
 
 ## Notes
 
@@ -152,8 +153,11 @@ class Reference:
 
     `path` is the resolved repository path the literal names — the changed path
     itself, or a directory containing it. `unit` is the nextest filterset that
-    selects the test reading it, and is `None` exactly when `product` is true:
-    an embedded file outside test code has no test to narrow to.
+    selects the L1 tests that may read it: one test, or a whole binary for a
+    helper. It is `None` when no L1 cell can run a reader: the reference is
+    `product` (an embedded file outside test code has no test to narrow to),
+    its test is not L1, its target needs features CI does not enable, or it is
+    a helper in a binary with no L1 test.
     """
 
     path: str
