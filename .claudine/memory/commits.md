@@ -178,6 +178,27 @@ belong here.
   blob at `git show :<new-path>` (or `git cat-file -p :<new-path>` under zsh).
   For a rename-only commit the OLD path's content is whatever `git show
   HEAD:<old-path>` prints; if the rename is R100 the two blobs match.
+- **`--pathspec-from-file` silently drops the rename destination.** When a
+  staged batch is dominated by renames (e.g. a move to
+  `_completed/<name>/`) and the pathspec list contains BOTH the old and new
+  path of every renamed file, `git commit --only -F <msg>
+  --pathspec-from-file=<list>` records the source D's and any unrelated A's
+  but NOT the destination A's for the renamed files. The commit looks
+  successful (D entries + new file A's all show), `git status` shows the
+  destination paths still staged as `A`, and the commit tree at HEAD is
+  missing the moved files — the rename was half-committed. Verify with
+  `git ls-tree HEAD <new-dir>/` after the commit; a missing
+  `<new-dir>/spec.md` (or any other renamed file) is the giveaway.
+  Recover with `git update-ref HEAD HEAD~1` (index and working tree are
+  preserved) and recommit with the inline `--` pathspec form
+  (`git commit --only -F <msg> -- <old1> <new1> <old2> <new2> ...`),
+  which records the renames correctly. The inline form escapes the
+  ARG_MAX concern only when the rename batch is under ~40 pairs; for a
+  larger rename set, dispatch as parallel `--only` commits, one per
+  half-batch of paths, and let the orchestrator collapse them if the
+  journal rule requires a single atomic commit (each commit re-signs
+  with a fresh hash; verify with `git diff` between original and
+  recomposed commit that only the messages differ).
 - Splitting a single file's content across two commits (e.g. two
   `planning(repo)` commits whose spec.md needs `review_iterations: 5→6` in
   commit 1 and `6→7` in commit 2): `git commit --only -- <path>` UPDATES
