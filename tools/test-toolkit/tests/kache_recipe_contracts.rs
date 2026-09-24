@@ -1,16 +1,15 @@
-//! Contracts for the kache recipes in the root justfile
+//! Text contracts for the kache recipes in the root justfile
 //! (`install-kache`, `_ensure-kache`, `kache-status`), as reworked by
 //! fixes/2026-09-23-ensuring-kache-support (2026-09-23).
 //!
-//! These pin the structural contract of the recipes the way
-//! `ci_workflow_contracts.rs` always has — by asserting the justfile text —
-//! because the behaviors are host-mutating (install, sign, daemon, activation)
-//! and cannot run inside a test: the installer always targets latest with a
-//! binary-only mode, the macOS re-sign gate lives in the installer, init
-//! decides through the shared probe and runs the spec §4 order under the
-//! failure contract, and the status recipe reads the store from the same
-//! probe instead of reconstructing kache's resolution rules. The full D1/D2
-//! rework (CI-side assertions) stays in `ci_workflow_contracts.rs`.
+//! What remains here is what the fixture host cannot run: the macOS re-sign
+//! gate's source-install fallback, the CI step-aside guard, the report
+//! block's fields, and stale policy text. The recipes' behavior — spec §4
+//! order, restart triggers, idempotence, the failure contract, and the
+//! below-floor branches — is pinned by running them in
+//! `kache_init_contracts.rs`, `kache_ensure_contracts.rs`, and
+//! `kache_status_contracts.rs`. The full D1/D2 rework (CI-side assertions)
+//! stays in `ci_workflow_contracts.rs`.
 
 use std::{fs, path::PathBuf};
 
@@ -23,8 +22,9 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn read(relative: &str) -> String {
-    let path = repo_root().join(relative);
+/// Callers spell the root join (`repo_root().join("justfile")`) so the CI
+/// test-input index can see which file this binary reads.
+fn read(path: PathBuf) -> String {
     // Working trees on Windows check out CRLF while the index holds LF;
     // contract scanning must not depend on the host's checkout convention.
     fs::read_to_string(&path)
@@ -36,7 +36,7 @@ fn read(relative: &str) -> String {
 /// including) the next recipe definition. A recipe definition starts at
 /// column 0, mentions `:` but not `:=` (assignments), and is not a comment.
 fn recipe(name_prefix: &str) -> String {
-    let justfile = read("justfile");
+    let justfile = read(repo_root().join("justfile"));
     let mut block = String::new();
     let mut inside = false;
     for line in justfile.lines() {
@@ -153,27 +153,6 @@ fn install_kache_owns_the_binary_and_nothing_else() {
     );
 }
 
-/// init decides through the shared filesystem probe, never the OS name, and
-/// a non-qualifying verdict is terminal for the sequence.
-#[test]
-fn ensure_kache_decides_through_the_shared_probe() {
-    let block = recipe("_ensure-kache");
-    assert!(
-        block.contains("./scripts/kache-host.sh qualify"),
-        "qualification runs the shared probe script"
-    );
-    assert!(
-        block.contains("kache-host: verdict=no-qualify reason="),
-        "the non-qualifying branch parses the probe's verdict line"
-    );
-    for stale in ["skipped on WSL", "skipped on Windows"] {
-        assert!(
-            !block.contains(stale),
-            "the OS-name policy text is gone (`{stale}`)"
-        );
-    }
-}
-
 /// CI never installs or upgrades kache; if a workflow ever runs `just init`,
 /// the step steps aside before probing (2026-09-23 ruling).
 #[test]
@@ -189,95 +168,6 @@ fn ensure_kache_steps_aside_in_ci_environments() {
     assert!(
         guard < probe,
         "the CI guard must run before anything that could install or upgrade"
-    );
-}
-
-/// The qualifying path runs the spec §4 order, textually: install, placement
-/// from doctor, the user config write, the passthrough re-assert, the daemon
-/// lifecycle strictly after the config write, and activation last. The
-/// config write always sets the ratified pair — the pin is deliberate even
-/// when it equals kache's default.
-#[test]
-fn ensure_kache_runs_the_spec_section_4_order() {
-    let block = recipe("_ensure-kache");
-    let install = block
-        .find("just install-kache")
-        .expect("step 2 installs or upgrades via the explicit recipe");
-    let placement = block
-        .find("./scripts/kache-host.sh report")
-        .expect("step 3 reads the store through the shared report");
-    let config_write = block
-        .find("kache-config-merge.py \"$kache_config\" cache local_store \"$store\" ignore_env true")
-        .expect("step 4 writes the ratified local_store + ignore_env");
-    let passthrough = block
-        .find("./scripts/kache-host.sh probe-passthrough")
-        .expect("step 5 re-asserts the passthrough gate");
-    let daemon = block
-        .find("kache daemon --json")
-        .expect("step 6 reads the daemon state");
-    let activation = block
-        .find("kache-config-merge.py \"$cargo_home/config.toml\" build rustc-wrapper kache")
-        .expect("step 7 activates through the Cargo home config");
-    for (earlier, later, why) in [
-        (install, placement, "placement follows install"),
-        (placement, config_write, "the config write follows placement"),
-        (config_write, passthrough, "the passthrough gate follows the config write"),
-        (passthrough, daemon, "the daemon lifecycle follows the config write"),
-        (daemon, activation, "activation is last"),
-    ] {
-        assert!(
-            earlier < later,
-            "spec §4 ordering violated ({why}): {earlier} vs {later}"
-        );
-    }
-}
-
-/// A below-floor install on a non-qualifying host upgrades only after an
-/// interactive confirmation, in binary-only mode; a non-interactive init
-/// stops with an error instead of upgrading or skipping silently.
-#[test]
-fn ensure_kache_upgrades_below_floor_only_when_confirmed() {
-    let block = recipe("_ensure-kache");
-    assert!(
-        block.contains("[ -t 0 ]"),
-        "interactivity is decided on stdin being a TTY"
-    );
-    assert!(
-        block.contains("just install-kache true"),
-        "the confirmed upgrade is the binary-only mode"
-    );
-    assert!(
-        block.contains("non-interactive"),
-        "the non-interactive path names what it is"
-    );
-    assert!(
-        block.contains("refusing to upgrade or skip silently") && block.contains("exit 1"),
-        "a non-interactive below-floor host stops with an error, not a warning"
-    );
-}
-
-/// The failure contract (spec §4): every pre-activation step routes through
-/// one helper that prints WARNING lines, leaves kache off, and undoes an
-/// activation an earlier run wrote — the empty rustc-wrapper value is the
-/// neutralized form, applied through the same validated merge helper.
-#[test]
-fn ensure_kache_failure_contract_leaves_kache_off() {
-    let block = recipe("_ensure-kache");
-    assert!(
-        block.contains("just install-kache || kache_off"),
-        "an install failure ends the sequence through the failure contract"
-    );
-    assert!(
-        block.contains("build rustc-wrapper \"\""),
-        "the undo neutralizes an existing activation through the merge helper"
-    );
-    assert!(
-        block.contains("kache left OFF; 'just init' continues"),
-        "a pre-activation failure lets init complete its other steps"
-    );
-    assert!(
-        block.contains("warn "),
-        "failures are loud (WARNING lines)"
     );
 }
 
@@ -325,8 +215,8 @@ fn kache_status_shares_the_probe_and_fails_loudly_on_drift() {
         "the KACHE_DIR reconstruction behind the false verdicts is gone"
     );
     assert!(
-        block.contains("repo .cargo/config.toml") && block.contains("cargo_home/config.toml"),
-        "the activation-precedence reporting (env / repo / Cargo home) stays"
+        block.contains("./scripts/kache-host.sh wrapper"),
+        "the active wrapper comes from the shared Cargo-precedence helper, not a text search"
     );
     assert!(
         block.contains(r#"export RUSTC_WRAPPER=\"\""#),
@@ -343,7 +233,7 @@ fn kache_status_shares_the_probe_and_fails_loudly_on_drift() {
 /// (repo rule).
 #[test]
 fn justfile_carries_no_stale_kache_policy_text() {
-    let justfile = read("justfile");
+    let justfile = read(repo_root().join("justfile"));
     for stale in [
         "Installed, NOT activated",
         "never reinstall",
@@ -351,6 +241,8 @@ fn justfile_carries_no_stale_kache_policy_text() {
         "Activation stays a host decision",
         "Exists because activation is HOST policy",
         "does NOT activate it",
+        "skipped on WSL",
+        "skipped on Windows",
     ] {
         assert!(
             !justfile.contains(stale),

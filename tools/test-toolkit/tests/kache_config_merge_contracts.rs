@@ -106,7 +106,56 @@ fn corpus_fixtures() -> Vec<&'static str> {
         "config-with-cache.toml",
         "config-without-cache.toml",
         "cargo-config.toml",
+        "config-inline-comments.toml",
     ]
+}
+
+/// The keys the kache write targets; their lines keep everything but the
+/// value.
+const TARGET_KEYS: [&str; 2] = ["local_store", "ignore_env"];
+
+/// The trailing comment of a `key = value` line, including the whitespace
+/// before its `#`; a `#` inside a basic or literal string does not count.
+fn trailing_comment(line: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, char) in line.char_indices() {
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if char == '\\' => escaped = true,
+            Some(open) if char == open => quote = None,
+            Some(_) => {}
+            None if char == '"' || char == '\'' => quote = Some(char),
+            None if char == '#' => return &line[line[..index].trim_end().len()..],
+            None => {}
+        }
+    }
+    ""
+}
+
+/// A fixture line survives the merge: verbatim, or — for a targeted key —
+/// with its indentation, key, `=` spacing, and trailing comment intact.
+fn assert_line_survives(name: &str, merged: &str, line: &str) {
+    let targeted = TARGET_KEYS.iter().any(|key| {
+        line.trim_start()
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+    if !targeted {
+        assert!(
+            merged.contains(line),
+            "{name}: line lost by the merge: {line:?}\nmerged:\n{merged}"
+        );
+        return;
+    }
+    let prefix = &line[..=line.find('=').expect("targeted line has '='")];
+    let comment = trailing_comment(line);
+    assert!(
+        merged
+            .lines()
+            .any(|merged_line| merged_line.starts_with(prefix) && merged_line.ends_with(comment)),
+        "{name}: targeted line lost its prefix or comment {comment:?}: {line:?}\nmerged:\n{merged}"
+    );
 }
 
 /// Passive corpus: every shipped fixture survives the kache config write —
@@ -143,12 +192,9 @@ fn corpus_every_fixture_holds_its_shape_through_the_kache_write() {
             "{name}: ignore_env value"
         );
 
-        let before = fs::read_to_string(&target).unwrap();
+        let merged = fs::read_to_string(&target).unwrap();
         for line in fs::read_to_string(fixture(name)).unwrap().lines() {
-            assert!(
-                before.contains(line) || line.contains("local_store"),
-                "{name}: line lost by the merge: {line:?}"
-            );
+            assert_line_survives(name, &merged, line);
         }
     }
 }
@@ -174,11 +220,8 @@ fn existing_cache_table_is_merged_in_place_with_a_dated_backup() {
         "the stale value is replaced:\n{merged}"
     );
     assert!(!merged.contains("\"/old/location\""));
-    for line in original.lines().filter(|l| !l.contains("local_store")) {
-        assert!(
-            merged.contains(line),
-            "a comment or key line was lost:\n{line:?}\nmerged:\n{merged}"
-        );
+    for line in original.lines() {
+        assert_line_survives("config-with-cache.toml", &merged, line);
     }
 
     let backups: Vec<_> = fs::read_dir(&scratch.0)
@@ -231,6 +274,156 @@ fn repeated_write_is_a_byte_identical_no_op() {
             .count()
     };
     assert_eq!(backups(&scratch.0), 1, "the no-op adds no backup");
+}
+
+fn backup_count(dir: &Path, name: &str) -> usize {
+    let prefix = format!("{name}.bak-");
+    fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .count()
+}
+
+/// Review-1 finding #8: replacing a targeted key's value keeps that line's
+/// indentation, `=` spacing, and trailing comment, and a `#` inside the old
+/// quoted value is not mistaken for the comment's start.
+#[test]
+fn inline_comments_on_targeted_keys_survive_a_changing_write() {
+    let scratch = Scratch::new("inline-comments");
+    let target = scratch.copy_fixture("config-inline-comments.toml");
+    let original = fs::read_to_string(&target).unwrap();
+
+    let output = merge(
+        &target,
+        &[
+            "cache",
+            "local_store",
+            "/Volumes/coding/kache",
+            "ignore_env",
+            "true",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr:\n{}",
+        stderr(&output)
+    );
+
+    let merged = fs::read_to_string(&target).unwrap();
+    let expected: String = original
+        .replace(
+            "  local_store = \"/old/#1 store\"   # retain this placement reason",
+            "  local_store = \"/Volumes/coding/kache\"   # retain this placement reason",
+        )
+        .replace(
+            "ignore_env = false # intentional for old setup",
+            "ignore_env = true # intentional for old setup",
+        );
+    assert_ne!(expected, original, "the fixture holds both targeted lines");
+    assert_eq!(merged, expected, "only the two values changed");
+
+    let value = parse(&target);
+    let cache = value.get("cache").and_then(|c| c.as_table()).unwrap();
+    assert_eq!(
+        cache.get("local_store").and_then(|v| v.as_str()),
+        Some("/Volumes/coding/kache")
+    );
+    assert_eq!(
+        cache.get("ignore_env").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(backup_count(&scratch.0, "config-inline-comments.toml"), 1);
+}
+
+/// With a trailing comment on each targeted line, a write of the values the
+/// file already holds is a byte-identical no-op with no backup — both on the
+/// untouched fixture and after a changing write.
+#[test]
+fn inline_comments_do_not_defeat_the_no_op_detection() {
+    let scratch = Scratch::new("inline-noop");
+    let target = scratch.copy_fixture("config-inline-comments.toml");
+    let original = fs::read(&target).unwrap();
+
+    let same = merge(
+        &target,
+        &[
+            "cache",
+            "local_store",
+            "/old/#1 store",
+            "ignore_env",
+            "false",
+        ],
+    );
+    assert_eq!(same.status.code(), Some(0), "stderr:\n{}", stderr(&same));
+    assert!(stdout(&same).contains("already holds"), "{}", stdout(&same));
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        original,
+        "current values change nothing"
+    );
+    assert_eq!(backup_count(&scratch.0, "config-inline-comments.toml"), 0);
+
+    let args = [
+        "cache",
+        "local_store",
+        "/Volumes/coding/kache",
+        "ignore_env",
+        "true",
+    ];
+    assert_eq!(merge(&target, &args).status.code(), Some(0));
+    let first = fs::read(&target).unwrap();
+    let second = merge(&target, &args);
+    assert_eq!(second.status.code(), Some(0));
+    assert!(
+        stdout(&second).contains("already holds"),
+        "{}",
+        stdout(&second)
+    );
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        first,
+        "the repeat changes nothing"
+    );
+    assert_eq!(backup_count(&scratch.0, "config-inline-comments.toml"), 1);
+}
+
+/// A literal-string value holding `#` keeps its trailing comment too; a
+/// multi-line value is refused with the original untouched rather than
+/// half-rewritten.
+#[test]
+fn literal_strings_are_edited_and_multi_line_values_refused() {
+    let scratch = Scratch::new("quote-styles");
+    let literal = scratch.0.join("literal.toml");
+    fs::write(&literal, "[cache]\nlocal_store = '/lit/#x' # why\n").unwrap();
+    let output = merge(&literal, &["cache", "local_store", "/new"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fs::read_to_string(&literal).unwrap(),
+        "[cache]\nlocal_store = \"/new\" # why\n"
+    );
+
+    let multi_line = scratch.0.join("multi-line.toml");
+    let original = "[cache]\nlocal_store = \"\"\"\n/old\"\"\"\n";
+    fs::write(&multi_line, original).unwrap();
+    let output = merge(&multi_line, &["cache", "local_store", "/new"]);
+    assert_ne!(
+        output.status.code(),
+        Some(0),
+        "a multi-line value is refused"
+    );
+    assert!(
+        stderr(&output).contains("multi-line"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(fs::read_to_string(&multi_line).unwrap(), original);
 }
 
 /// A file with no `[cache]` table gets one appended at the end; the tables

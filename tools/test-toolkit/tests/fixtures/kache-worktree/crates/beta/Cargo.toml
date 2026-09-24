@@ -1,0 +1,8 @@
+[package]
+name = "kache-fixture-beta"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+kache-fixture-alpha = { path = "../alpha" }

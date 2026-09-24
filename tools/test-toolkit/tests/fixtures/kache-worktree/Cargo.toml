@@ -1,0 +1,10 @@
+# Deliberately its own workspace: `real_kache_worktree_restore` copies it into
+# a scratch Git repository and builds it in two successive worktrees. It must
+# never join the monorepo's member list or share its lockfile.
+#
+# Three library crates in a chain (`gamma` -> `beta` -> `alpha`) and no
+# registry dependencies, so an offline build takes about a second and every
+# compiled unit is an rlib kache caches.
+[workspace]
+resolver = "3"
+members = ["crates/alpha", "crates/beta", "crates/gamma"]
