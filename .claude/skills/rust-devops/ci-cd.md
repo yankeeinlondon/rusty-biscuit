@@ -652,6 +652,9 @@ configuration beyond a crate's first names its root cause (`own`,
 `--events <ci-build counter dir>` from a timed local pass adds seconds.
 Read **sole** (what removing that cause alone saves) before **split**, and
 use `--align <crates>` to model a proposed alignment before writing one.
+It stays a local `local-tools` diagnostic on purpose: no CI job emits it, and
+it is not a `ci-build` subcommand. It answers a question asked when owner
+build time regresses, not on every run.
 
 ### What each stage cost, and why three numbers are observed from outside
 
