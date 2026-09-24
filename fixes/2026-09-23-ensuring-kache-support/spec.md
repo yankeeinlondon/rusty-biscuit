@@ -10,8 +10,8 @@ reviewed_on: 2026-09-23
 needs_rulings: false
 review_iterations: 0
 implemented: false
-owner: Ken Snyder <ken@ken.net>
-origin: `just install` in darkmatter could not link the zed-dmls wasm extension on the dev Mac, 2026-09-23
+owner: "Ken Snyder <ken@ken.net>"
+origin: "`just install` in darkmatter could not link the zed-dmls wasm extension on the dev Mac, 2026-09-23"
 packages: []
 references:
     spike-daemon-ignore-env.md: Measured proof (kache 0.23.1, scratch daemon) that the daemon honors [cache] ignore_env from the config file, with control run, socket/runtime-follows-store nuance, and raw-env probe-drip caveat.
@@ -37,6 +37,41 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 review_note: the clarification process served as a review
+human_review: false
+message_to_agent: |
+    Phase 1 (foundation) is complete; everything Phase 2 needs is landed:
+
+    - `scripts/kache-host.sh` is the shared probe. Subcommands: `qualify`
+      (exit 0/1/2; first stdout line `kache-host: verdict=qualify candidate=...`
+      or `kache-host: verdict=no-qualify reason=...`), `report` (store from
+      `kache doctor --json`, devices, base, passthrough), `probe-passthrough`
+      (exit 0 pass / 1 stripped / 2 cannot-run; `KACHE_HOST_BIN` overrides the
+      kache binary probed — use it for the pristine-specimen check).
+    - `scripts/kache-config-merge.py FILE TABLE KEY VALUE [KEY VALUE ...]`
+      performs both config writes (kache `cache local_store <path> ignore_env
+      true`; Cargo `build rustc-wrapper kache`). A no-op write reports
+      "already holds" and changes nothing — compare pre/post file CONTENT for
+      the daemon-restart-on-config-change trigger, not mtime. Backups are
+      `FILE.bak-YYYYMMDD-HHMMSS`.
+    - Spike (fixes/2026-09-23-ensuring-kache-support/spike-doctor-json.md):
+      for the restart trigger prefer `kache daemon --json` — `daemon_running`
+      bool, `daemon_version` bare ("0.26.3", directly comparable to
+      `kache --version` and doctor `.version`), `socket`, `daemon_config_path`.
+      Doctor's `Daemon version` detail is v-prefixed with an epoch suffix;
+      store path only exists as doctor `checks[label == "Cache dir"].detail`.
+    - macOS traps discovered while building the passthrough probe (Phase 4's
+      drills run through them): bash expunges DYLD_* from its own environment
+      at startup, so no bash-based observer can ever see the variable; a
+      plain copy of a platform binary (/usr/bin/env, printenv) is killed by
+      AMFI outside the system volume, so any copied-binary specimen must be
+      ad hoc re-signed; and `kache rustc` with no compiler arguments is
+      rejected, so probes must pass an argument. The shipped probe handles
+      all three.
+    - `.github/kache-min-version` is now 0.23.0; the maintenance audit needed
+      no change. Contract tests live in
+      tools/test-toolkit/tests/kache_host_contracts.rs and
+      kache_config_merge_contracts.rs — Phase 3's contract-test task should
+      extend ci_workflow_contracts.rs and leave these two as they are.
 ---
 
 # Make kache a host setup that `just init` owns end to end
