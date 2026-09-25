@@ -234,7 +234,7 @@ fn dot_to_png(dot_source: &str, png_path: &str) {
 
 | | |
 |---|---|
-| **Crate** | [mermaid-rs-renderer](https://crates.io/crates/mermaid-rs-renderer) v0.2.1 |
+| **Crate** | [mermaid-rs-renderer](https://crates.io/crates/mermaid-rs-renderer) v0.3.1 |
 | **Repository** | [1jehuang/mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) |
 | **Docs** | [docs.rs/mermaid-rs-renderer](https://docs.rs/mermaid-rs-renderer) |
 | **License** | MIT |
@@ -256,9 +256,9 @@ fn dot_to_png(dot_source: &str, png_path: &str) {
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `cli` | Yes | Enables `mmdr` CLI binary via `clap` |
-| `png` | Yes | Enables PNG output via `resvg` 0.46 + `usvg` 0.46 |
+| `png` | Yes | Enables PNG output via `resvg` 0.47 + `usvg` 0.47 |
 
-Use `default-features = false` for SVG-only library embedding (~80 vs ~180 transitive deps).
+Use `default-features = false` for SVG-only library embedding (~80 vs ~180 transitive deps). `biscuit-visualized` does this and rasterizes with its own `resvg`.
 
 #### Output Formats
 
@@ -271,7 +271,7 @@ Use `default-features = false` for SVG-only library embedding (~80 vs ~180 trans
 
 #### Limitations
 
-- Early development (v0.2.x) — API may change
+- Early development (v0.3.x) — API may change; 0.3 rejects input without a diagram header and malformed `%%{init}%%` lines
 - Visual fidelity may not match mermaid-cli in all diagram types (no browser rendering engine)
 - Performance advantage decreases for 200+ node diagrams
 
@@ -715,4 +715,4 @@ flowchart TD
     end
 ```
 
-The **layout-rs + resvg** combination integrates naturally with the existing monorepo dependencies and requires no external binaries. If richer diagram types beyond node-and-edge graphs are needed (sequence diagrams, ER diagrams, state machines), **mermaid-rs-renderer** covers those at the cost of being a younger project (v0.2.x).
+The **layout-rs + resvg** combination integrates naturally with the existing monorepo dependencies and requires no external binaries. If richer diagram types beyond node-and-edge graphs are needed (sequence diagrams, ER diagrams, state machines), **mermaid-rs-renderer** covers those at the cost of being a younger project (v0.3.x).
