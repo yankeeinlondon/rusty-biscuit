@@ -132,7 +132,15 @@ pub fn git_from(base: &Path, dir: &Path, args: &[&str]) -> Result<String, Worktr
 }
 
 /// [`git_from`] without trimming, for NUL-separated (`-z`) output.
+///
+/// Invalid UTF-8 becomes U+FFFD, so distinct paths can read as one; use
+/// [`git_from_bytes`] where a path's identity matters.
 pub fn git_from_raw(base: &Path, dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+    git_from_bytes(base, dir, args).map(|out| String::from_utf8_lossy(&out).into_owned())
+}
+
+/// [`git_from`]'s stdout exactly as git wrote it.
+pub fn git_from_bytes(base: &Path, dir: &Path, args: &[&str]) -> Result<Vec<u8>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
@@ -149,7 +157,7 @@ pub fn git_from_raw(base: &Path, dir: &Path, args: &[&str]) -> Result<String, Wo
         return Err(WorktreeError::GitCommand(stderr));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.stdout)
 }
 
 #[cfg(any(test, feature = "count-git"))]

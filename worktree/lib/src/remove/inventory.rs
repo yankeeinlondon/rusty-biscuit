@@ -2,11 +2,12 @@
 //! (modified, staged, untracked) and its ignored entries.
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::WorktreeError;
-use crate::git::git_from_raw;
+use crate::git::git_from_bytes;
 
 /// One modified, staged, or untracked path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +26,7 @@ pub struct Inventory {
     /// `git status --ignored=matching` entries, repository-relative. A
     /// directory ends with `/` and is listed once only when a directory
     /// pattern matches it; otherwise its ignored children are listed.
-    pub ignored: Vec<String>,
+    pub ignored: Vec<PathBuf>,
 }
 
 /// One line of the grouped ignored-entry display.
@@ -51,12 +52,14 @@ impl Inventory {
 
     /// The ignored entries grouped by their first path component, in path
     /// order: `target/` with 6 entries rather than six `target/...` lines.
+    /// For display only: names are decoded lossily.
     pub fn ignored_groups(&self) -> Vec<IgnoredGroup> {
         let mut groups: BTreeMap<String, usize> = BTreeMap::new();
         for entry in &self.ignored {
+            let entry = entry.to_string_lossy();
             let name = match entry.split_once('/') {
                 Some((first, _)) => format!("{first}/"),
-                None => entry.clone(),
+                None => entry.into_owned(),
             };
             *groups.entry(name).or_default() += 1;
         }
@@ -66,31 +69,36 @@ impl Inventory {
             .collect()
     }
 
-    /// Parses `git status --porcelain=v1 -z --ignored=matching` output.
-    pub fn from_status_z(output: &str) -> Self {
+    /// Parses `git status --porcelain=v1 -z --ignored=matching` output,
+    /// keeping each path's exact bytes.
+    ///
+    /// ## Errors
+    ///
+    /// [`WorktreeError::GitParse`] for a path that is not UTF-8 on a platform
+    /// whose paths are not bytes (Windows).
+    pub fn from_status_z(output: &[u8]) -> Result<Self, WorktreeError> {
         let mut inventory = Self::default();
-        let mut records = output.split('\0').filter(|record| !record.is_empty());
+        let mut records = output.split(|&byte| byte == 0).filter(|record| !record.is_empty());
         while let Some(record) = records.next() {
             if record.len() < 4 {
                 continue;
             }
-            let (status, path) = (&record[..2], &record[3..]);
+            let (status, path) = (String::from_utf8_lossy(&record[..2]), path_from_git(&record[3..])?);
             if status.contains(['R', 'C']) {
                 // `-z` puts the original path in the following record.
                 records.next();
             }
             if status == "!!" {
-                inventory.ignored.push(path.to_string());
+                inventory.ignored.push(path);
                 continue;
             }
-            let path = PathBuf::from(path);
             inventory.dirty.push(DirtyEntry {
-                status: status.to_string(),
+                status: status.into_owned(),
                 is_source: sniff::filesystem::path_kind::is_source_code_path(&path),
                 path,
             });
         }
-        inventory
+        Ok(inventory)
     }
 
     /// A BLAKE3 digest over each dirty path, its status, and its working
@@ -99,13 +107,21 @@ impl Inventory {
     ///
     /// A dirty entry that is a directory (git lists an untracked nested
     /// repository or a modified submodule as one entry) contributes every
-    /// path beneath it and each file's content, without following symlinks.
+    /// path beneath it and each file's mode and content, without following
+    /// symlinks.
     ///
     /// Two runs of `wt remove` compare this to prove nothing that removal
     /// would delete changed in between: an edit that keeps the status, a
     /// restaged version that keeps both the status and the working bytes, a
-    /// new untracked file (including one inside such a directory), or a new
-    /// ignored entry all change it. Changes inside ignored entries do not.
+    /// new untracked file (including one inside such a directory), a changed
+    /// symlink target, a regular file's executable bit (Unix only), or a new
+    /// ignored entry all change it. Changes inside ignored entries do not,
+    /// nor do timestamps or permission bits git ignores.
+    ///
+    /// Paths and symlink targets enter as their exact OS bytes
+    /// ([`OsStr::as_encoded_bytes`]), never a lossy decoding, and every field
+    /// is length-prefixed, so two distinct names never hash alike. The bytes
+    /// are platform-specific: the digest is comparable only on one machine.
     ///
     /// ## Errors
     ///
@@ -116,28 +132,29 @@ impl Inventory {
     ///   digest without it could not see staged work.
     pub fn fingerprint(&self, base: &Path, worktree: &Path) -> Result<String, WorktreeError> {
         let mut dirty: Vec<&DirtyEntry> = self.dirty.iter().collect();
-        dirty.sort_by(|a, b| a.path.cmp(&b.path));
-        let mut ignored: Vec<&String> = self.ignored.iter().collect();
-        ignored.sort();
+        // By bytes: `Path` ordering compares components and ignores a
+        // trailing `/`.
+        dirty.sort_by(|a, b| a.path.as_os_str().as_encoded_bytes().cmp(b.path.as_os_str().as_encoded_bytes()));
+        let mut ignored: Vec<&PathBuf> = self.ignored.iter().collect();
+        ignored.sort_by(|a, b| a.as_os_str().as_encoded_bytes().cmp(b.as_os_str().as_encoded_bytes()));
 
-        let mut text = String::new();
+        let mut record = Record::default();
         for entry in dirty {
             let content = content_digest(&worktree.join(&entry.path))?;
-            text.push_str(&format!(
-                "dirty\0{}\0{}\0{content}\n",
-                entry.status,
-                entry.path.to_string_lossy()
-            ));
+            record
+                .field(b"dirty")
+                .field(entry.status.as_bytes())
+                .field(entry.path.as_os_str().as_encoded_bytes())
+                .field(&content);
         }
         for entry in ignored {
-            text.push_str(&format!("ignored\0{entry}\n"));
+            record.field(b"ignored").field(entry.as_os_str().as_encoded_bytes());
         }
         // The whole index rather than a pathspec of the dirty paths, which
         // pathspec magic and command-line length limits make fragile.
-        let index = git_from_raw(base, worktree, &["ls-files", "--stage", "-z"])?;
-        text.push_str("index\0");
-        text.push_str(&index);
-        Ok(biscuit_hash::blake3_hash(&text))
+        let index = git_from_bytes(base, worktree, &["ls-files", "--stage", "-z"])?;
+        record.field(b"index").field(&index);
+        Ok(record.digest())
     }
 }
 
@@ -147,7 +164,7 @@ impl Inventory {
 /// Untracked files are listed individually (`-uall`), except that git lists
 /// an untracked nested repository as one directory entry.
 pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, WorktreeError> {
-    let output = git_from_raw(
+    let output = git_from_bytes(
         base,
         worktree,
         &[
@@ -162,65 +179,135 @@ pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, Work
             "--ignored=matching",
         ],
     )?;
-    Ok(Inventory::from_status_z(&output))
+    Inventory::from_status_z(&output)
 }
 
-/// The working content at `path`, or `absent` when nothing is there.
-fn content_digest(path: &Path) -> Result<String, WorktreeError> {
+/// A path from git's `-z` output, byte for byte.
+///
+/// Windows paths are UTF-16 and git writes them as UTF-8, so bytes that are
+/// not UTF-8 there name no file this process could address, and are refused
+/// rather than decoded lossily into a different name.
+#[cfg(unix)]
+fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
+    use std::os::unix::ffi::OsStrExt;
+    Ok(PathBuf::from(OsStr::from_bytes(bytes)))
+}
+
+/// See the Unix variant.
+#[cfg(not(unix))]
+fn path_from_git(bytes: &[u8]) -> Result<PathBuf, WorktreeError> {
+    String::from_utf8(bytes.to_vec()).map(PathBuf::from).map_err(|_| {
+        WorktreeError::GitParse(format!(
+            "git listed a path that is not UTF-8: {}",
+            String::from_utf8_lossy(bytes)
+        ))
+    })
+}
+
+/// Hash input built from length-prefixed fields, so no field's bytes (a
+/// filename may hold NUL-free but otherwise arbitrary bytes) can pass for a
+/// separator or another field.
+#[derive(Default)]
+struct Record(Vec<u8>);
+
+impl Record {
+    fn field(&mut self, bytes: &[u8]) -> &mut Self {
+        self.0.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        self.0.extend_from_slice(bytes);
+        self
+    }
+
+    /// The BLAKE3 digest of the fields so far, as hex.
+    fn digest(&self) -> String {
+        biscuit_hash::blake3_hash_bytes(&self.0)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
+/// The working content at `path` as hash input, or `absent` when nothing is
+/// there.
+fn content_digest(path: &Path) -> Result<Vec<u8>, WorktreeError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok("absent".to_string());
+            return Ok(b"absent".to_vec());
         }
         Err(error) => return Err(unreadable(path, error)),
     };
     if metadata.is_dir() {
-        let mut listing = String::new();
+        let mut listing = Record::default();
         // `.git` is walked too: a nested repository's commits and index are
         // lost with the directory, and the outer `git status` never lists them.
         // The outer status may refresh a submodule's own index; that refuses
         // a handoff spuriously, never accepts a change.
-        list_directory(path, "", &mut listing)?;
-        return Ok(format!("dir:{}", biscuit_hash::blake3_hash(&listing)));
+        list_directory(path, &[], &mut listing)?;
+        return Ok(format!("dir:{}", listing.digest()).into_bytes());
     }
     entry_digest(path, &metadata)
 }
 
-/// A file's BLAKE3 digest, a symlink's target (never followed), or a marker
-/// for other file types, which have no content to read.
-fn entry_digest(path: &Path, metadata: &fs::Metadata) -> Result<String, WorktreeError> {
+/// A file's git mode and BLAKE3 digest, a symlink's exact target bytes
+/// (never followed), or a marker for other file types, which have no content
+/// to read.
+fn entry_digest(path: &Path, metadata: &fs::Metadata) -> Result<Vec<u8>, WorktreeError> {
     let file_type = metadata.file_type();
     if file_type.is_symlink() {
         let target = fs::read_link(path).map_err(|error| unreadable(path, error))?;
-        return Ok(format!("link:{}", target.to_string_lossy()));
+        let mut digest = b"link:".to_vec();
+        digest.extend_from_slice(target.as_os_str().as_encoded_bytes());
+        return Ok(digest);
     }
     if !file_type.is_file() {
-        return Ok("special".to_string());
+        return Ok(b"special".to_vec());
     }
+    let mode = file_mode(metadata);
     fs::File::open(path)
         .and_then(|mut file| biscuit_hash::blake3_hash_reader(&mut file))
-        .map(|digest| format!("file:{digest}"))
+        .map(|digest| format!("file:{mode}:{digest}").into_bytes())
         .map_err(|error| unreadable(path, error))
 }
 
-/// Appends one line per path under `dir`, in name order, keyed by its
-/// `/`-separated path relative to the walk's root so every OS hashes the
-/// same text.
-fn list_directory(dir: &Path, prefix: &str, listing: &mut String) -> Result<(), WorktreeError> {
+/// The mode git would record for this regular file: `100755` when the owner
+/// may execute it, as git decides, else `100644`. A chmod alone keeps a
+/// modified file's status and bytes, so without this it would pass a handoff.
+#[cfg(unix)]
+fn file_mode(metadata: &fs::Metadata) -> &'static str {
+    use std::os::unix::fs::PermissionsExt;
+    if metadata.permissions().mode() & 0o100 != 0 {
+        "100755"
+    } else {
+        "100644"
+    }
+}
+
+/// Windows has no executable bit; git takes the mode from the index there.
+#[cfg(not(unix))]
+fn file_mode(_metadata: &fs::Metadata) -> &'static str {
+    "no-exec-bit"
+}
+
+/// Adds a (path, content) field pair per path under `dir`, in name order.
+/// The path is the exact name bytes relative to the walk's root, joined by
+/// `/`, so it does not depend on the absolute location.
+fn list_directory(dir: &Path, prefix: &[u8], listing: &mut Record) -> Result<(), WorktreeError> {
     let mut children = fs::read_dir(dir)
         .and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
         .map_err(|error| unreadable(dir, error))?;
     children.sort_by_key(|child| child.file_name());
     for child in children {
         let path = child.path();
-        let relative = format!("{prefix}{}", child.file_name().to_string_lossy());
+        let mut relative = prefix.to_vec();
+        relative.extend_from_slice(child.file_name().as_encoded_bytes());
         let metadata = fs::symlink_metadata(&path).map_err(|error| unreadable(&path, error))?;
         if metadata.is_dir() {
-            listing.push_str(&format!("{relative}/\0dir\n"));
-            list_directory(&path, &format!("{relative}/"), listing)?;
+            relative.push(b'/');
+            listing.field(&relative).field(b"dir");
+            list_directory(&path, &relative, listing)?;
         } else {
             let digest = entry_digest(&path, &metadata)?;
-            listing.push_str(&format!("{relative}\0{digest}\n"));
+            listing.field(&relative).field(&digest);
         }
     }
     Ok(())
@@ -241,7 +328,7 @@ mod tests {
     #[test]
     fn parses_every_status_kind_and_skips_rename_origins() {
         let output = " M src/lib.rs\0A  staged.md\0R  new.rs\0old.rs\0?? notes.txt\0!! target/\0!! .env\0";
-        let inventory = Inventory::from_status_z(output);
+        let inventory = Inventory::from_status_z(output.as_bytes()).unwrap();
         let paths: Vec<_> = inventory.dirty.iter().map(|e| e.path.clone()).collect();
         assert_eq!(
             paths,
@@ -250,14 +337,14 @@ mod tests {
         assert_eq!(inventory.dirty[2].status, "R ");
         assert!(inventory.dirty[0].is_source);
         assert!(!inventory.dirty[1].is_source);
-        assert_eq!(inventory.ignored, ["target/", ".env"]);
+        assert_eq!(inventory.ignored, ["target/", ".env"].map(PathBuf::from));
         assert!(inventory.has_source());
         assert!(inventory.needs_consent());
     }
 
     #[test]
     fn clean_output_needs_no_consent() {
-        let inventory = Inventory::from_status_z("");
+        let inventory = Inventory::from_status_z(b"").unwrap();
         assert!(!inventory.needs_consent());
         assert!(!inventory.has_source());
     }
@@ -274,7 +361,7 @@ mod tests {
                 "notes.md",
                 "logs/",
             ]
-            .map(String::from)
+            .map(PathBuf::from)
             .to_vec(),
         };
         assert_eq!(
@@ -323,7 +410,7 @@ mod tests {
                 ("A ", "staged.rs".to_string()),
             ]
         );
-        let mut ignored = inventory.ignored.clone();
+        let mut ignored: Vec<_> = inventory.ignored.iter().map(|p| p.to_string_lossy().into_owned()).collect();
         ignored.sort();
         // A directory pattern lists `target/` once; `**/build/*` lists children.
         assert_eq!(ignored, [".env", "build/CACHE", "build/out/", "target/"]);
@@ -426,6 +513,94 @@ mod tests {
         }
     }
 
+    /// `\xff` and `\xfe` both decode lossily to U+FFFD, so only exact bytes
+    /// tell these symlink targets and names apart.
+    #[cfg(unix)]
+    mod non_utf8_paths {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::symlink;
+
+        use super::*;
+
+        fn relink(link: &Path, target: &[u8]) {
+            let _ = fs::remove_file(link);
+            symlink(OsStr::from_bytes(target), link).unwrap();
+        }
+
+        fn print(repo: &TestRepo, wt: &Path) -> String {
+            let base = repo.path();
+            collect_inventory(&base, wt).unwrap().fingerprint(&base, wt).unwrap()
+        }
+
+        #[test]
+        fn status_paths_keep_their_exact_bytes() {
+            let inventory = Inventory::from_status_z(b"?? a-\xff\0!! b-\xfe/\0").unwrap();
+            assert_eq!(inventory.dirty[0].path.as_os_str().as_bytes(), b"a-\xff");
+            assert_eq!(inventory.ignored[0].as_os_str().as_bytes(), b"b-\xfe/");
+        }
+
+        #[test]
+        fn fingerprint_changes_with_a_symlink_target_at_the_root() {
+            let repo = TestRepo::new();
+            let wt = repo.add_worktree("feat/x", "feat-x", "main");
+            relink(&wt.join("link"), b"target-\xff");
+            let approved = print(&repo, &wt);
+            assert_eq!(approved, print(&repo, &wt), "stable when nothing changes");
+
+            relink(&wt.join("link"), b"target-\xfe");
+            assert_ne!(approved, print(&repo, &wt));
+        }
+
+        #[test]
+        fn fingerprint_changes_with_a_symlink_target_inside_an_untracked_nested_repo() {
+            let repo = TestRepo::new();
+            let wt = worktree_with_nested_repo(&repo);
+            relink(&wt.join("nested/link"), b"target-\xff");
+            let approved = print(&repo, &wt);
+            assert_eq!(approved, print(&repo, &wt), "stable when nothing changes");
+
+            relink(&wt.join("nested/link"), b"target-\xfe");
+            assert_ne!(approved, print(&repo, &wt));
+        }
+
+        /// Needs a filesystem that accepts names that are not UTF-8; macOS
+        /// APFS refuses them, so there the test notes the skip and returns.
+        #[test]
+        fn fingerprint_changes_with_an_edit_to_a_non_utf8_file_or_a_lossy_equal_rename() {
+            let repo = TestRepo::new();
+            let wt = worktree_with_nested_repo(&repo);
+            let file = wt.join(OsStr::from_bytes(b"notes-\xff"));
+            if let Err(error) = fs::write(&file, "approved\n") {
+                eprintln!("skipped: this filesystem refuses a non-UTF-8 file name ({error})");
+                return;
+            }
+            let approved = print(&repo, &wt);
+
+            fs::write(&file, "edited\n").unwrap();
+            let edited = print(&repo, &wt);
+            assert_ne!(approved, edited, "an edited root file");
+
+            fs::write(wt.join(OsStr::from_bytes(b"nested/child-\xff")), "same\n").unwrap();
+            let before_rename = print(&repo, &wt);
+            fs::rename(
+                wt.join(OsStr::from_bytes(b"nested/child-\xff")),
+                wt.join(OsStr::from_bytes(b"nested/child-\xfe")),
+            )
+            .unwrap();
+            assert_ne!(before_rename, print(&repo, &wt), "a nested child renamed");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_status_path_that_is_not_utf8_is_refused_on_windows() {
+        assert!(matches!(
+            Inventory::from_status_z(b"?? a-\xff\0"),
+            Err(WorktreeError::GitParse(_))
+        ));
+    }
+
     /// Restaging keeps the status (`MM`) and the working bytes; only the
     /// index entry's object ID differs.
     #[test]
@@ -446,5 +621,70 @@ mod tests {
         let before = stage_then_edit("staged before\n");
         let after = stage_then_edit("new staged work\n");
         assert_ne!(before, after);
+    }
+
+    /// A chmod keeps a modified file's status (` M`), its bytes, and its
+    /// index entry; only the working file's mode tells the states apart.
+    #[cfg(unix)]
+    mod executable_bit {
+        use std::os::unix::fs::PermissionsExt;
+
+        use super::*;
+
+        fn set_mode(path: &Path, mode: u32) {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+
+        fn print(repo: &TestRepo, wt: &Path) -> String {
+            let base = repo.path();
+            collect_inventory(&base, wt).unwrap().fingerprint(&base, wt).unwrap()
+        }
+
+        #[test]
+        fn fingerprint_changes_when_only_a_modified_tracked_files_mode_changes() {
+            let repo = TestRepo::new();
+            repo.git(&["config", "core.filemode", "true"]);
+            fs::write(repo.path().join("run.sh"), "echo one\n").unwrap();
+            set_mode(&repo.path().join("run.sh"), 0o644);
+            repo.git(&["add", "run.sh"]);
+            repo.git(&["commit", "-q", "-m", "script"]);
+            let wt = repo.add_worktree("feat/x", "feat-x", "main");
+            let script = wt.join("run.sh");
+            fs::write(&script, "echo edited\n").unwrap();
+            set_mode(&script, 0o644);
+            let approved = print(&repo, &wt);
+            assert_eq!(approved, print(&repo, &wt), "stable when nothing changes");
+
+            set_mode(&script, 0o755);
+            assert_eq!(repo.git_in(&wt, &["status", "--porcelain=v1"]), "M run.sh");
+            assert!(repo.git_in(&wt, &["diff", "--summary"]).contains("mode change 100644 => 100755"));
+            assert_ne!(approved, print(&repo, &wt));
+        }
+
+        #[test]
+        fn fingerprint_changes_when_only_a_mode_inside_an_untracked_nested_repo_changes() {
+            let repo = TestRepo::new();
+            let wt = worktree_with_nested_repo(&repo);
+            let notes = wt.join("nested/notes");
+            set_mode(&notes, 0o644);
+            let approved = print(&repo, &wt);
+            assert_eq!(approved, print(&repo, &wt), "stable when nothing changes");
+
+            set_mode(&notes, 0o755);
+            assert_ne!(approved, print(&repo, &wt));
+        }
+
+        /// Git ignores every permission bit but the owner's execute bit.
+        #[test]
+        fn fingerprint_ignores_permission_bits_git_does_not_record() {
+            let repo = TestRepo::new();
+            let wt = worktree_with_nested_repo(&repo);
+            let notes = wt.join("nested/notes");
+            set_mode(&notes, 0o644);
+            let approved = print(&repo, &wt);
+
+            set_mode(&notes, 0o600);
+            assert_eq!(approved, print(&repo, &wt));
+        }
     }
 }

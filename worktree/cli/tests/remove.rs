@@ -863,6 +863,200 @@ fn an_unreadable_file_inside_a_nested_repo_refuses_the_handoff_with_exit_4() {
     assert!(fixture.branch_exists("feat/x"));
 }
 
+/// Paths that are not UTF-8. `\xff` and `\xfe` both decode lossily to
+/// U+FFFD, so only a byte-faithful fingerprint tells them apart.
+#[cfg(unix)]
+mod non_utf8_paths {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    const APPROVED: &[u8] = b"target-\xff";
+    const CHANGED: &[u8] = b"target-\xfe";
+
+    fn relink(link: &Path, target: &[u8]) {
+        let _ = fs::remove_file(link);
+        symlink(OsStr::from_bytes(target), link).unwrap();
+    }
+
+    fn target_of(link: &Path) -> Vec<u8> {
+        fs::read_link(link).unwrap().as_os_str().as_bytes().to_vec()
+    }
+
+    /// A file named by `name`, or `None` (with a note) on a filesystem that
+    /// refuses names that are not UTF-8, as macOS APFS does.
+    fn create(dir: &Path, name: &[u8], content: &str) -> Option<PathBuf> {
+        let path = dir.join(OsStr::from_bytes(name));
+        match fs::write(&path, content) {
+            Ok(()) => Some(path),
+            Err(error) => {
+                eprintln!("skipped: this filesystem refuses a non-UTF-8 file name ({error})");
+                None
+            }
+        }
+    }
+
+    fn assert_refused_with_nothing_removed(fixture: &Fixture, landing: &Path, token: &str) {
+        fixture
+            .wt(landing)
+            .args(["remove", "--handoff", token])
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("Removed").not());
+        assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
+        assert!(fixture.branch_exists("feat/x"));
+    }
+
+    #[test]
+    fn a_changed_symlink_target_between_the_runs_refuses_with_nothing_removed() {
+        let fixture = Fixture::new();
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let link = wt.join("link");
+        relink(&link, APPROVED);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        relink(&link, CHANGED);
+        assert_refused_with_nothing_removed(&fixture, &landing, &token);
+        assert_eq!(target_of(&link), CHANGED);
+    }
+
+    #[test]
+    fn a_changed_symlink_target_inside_an_untracked_nested_repo_refuses_with_nothing_removed() {
+        let fixture = Fixture::new();
+        let wt = worktree_with_nested_repo(&fixture);
+        let link = wt.join("nested/link");
+        relink(&link, APPROVED);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        relink(&link, CHANGED);
+        assert_eq!(git(&wt, &["status", "--porcelain=v1", "-uall"]), "?? nested/");
+        assert_refused_with_nothing_removed(&fixture, &landing, &token);
+        assert_eq!(target_of(&link), CHANGED);
+    }
+
+    #[test]
+    fn an_unchanged_non_utf8_symlink_target_is_removed_by_the_handoff() {
+        let fixture = Fixture::new();
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        relink(&wt.join("link"), APPROVED);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(0)
+            .stderr(predicate::str::contains("Removed worktree"));
+        assert!(!wt.exists());
+        assert!(!fixture.branch_exists("feat/x"));
+    }
+
+    #[test]
+    fn an_edited_non_utf8_file_name_between_the_runs_refuses_with_nothing_removed() {
+        let fixture = Fixture::new();
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let Some(file) = create(&wt, b"notes-\xff", "approved content\n") else {
+            return;
+        };
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        fs::write(&file, "new work after approval\n").unwrap();
+        assert_refused_with_nothing_removed(&fixture, &landing, &token);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new work after approval\n");
+    }
+
+    #[test]
+    fn a_nested_child_renamed_to_a_name_with_the_same_lossy_text_refuses_with_nothing_removed() {
+        let fixture = Fixture::new();
+        let wt = worktree_with_nested_repo(&fixture);
+        let nested = wt.join("nested");
+        let Some(approved) = create(&nested, b"child-\xff", "same content\n") else {
+            return;
+        };
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        let renamed = nested.join(OsStr::from_bytes(b"child-\xfe"));
+        fs::rename(&approved, &renamed).unwrap();
+        assert_refused_with_nothing_removed(&fixture, &landing, &token);
+        assert_eq!(fs::read_to_string(&renamed).unwrap(), "same content\n");
+    }
+}
+
+/// A chmod keeps a modified tracked file's status (` M`), its bytes, and its
+/// index entry, so only the working file's mode tells the states apart.
+#[cfg(unix)]
+mod executable_bit {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn set_mode(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// `run.sh` committed at `100644` with `core.filemode=true`, then edited
+    /// without staging in `feat-x`.
+    fn worktree_with_modified_script(fixture: &Fixture) -> (PathBuf, PathBuf) {
+        let repo = fixture.repo();
+        git(&repo, &["config", "core.filemode", "true"]);
+        fs::write(repo.join("run.sh"), "echo one\n").unwrap();
+        set_mode(&repo.join("run.sh"), 0o644);
+        git(&repo, &["add", "run.sh"]);
+        git(&repo, &["commit", "-q", "-m", "script"]);
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let script = wt.join("run.sh");
+        fs::write(&script, "echo edited\n").unwrap();
+        set_mode(&script, 0o644);
+        assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "M run.sh");
+        (wt, script)
+    }
+
+    #[test]
+    fn a_changed_executable_bit_between_the_runs_refuses_with_nothing_removed() {
+        let fixture = Fixture::new();
+        let (wt, script) = worktree_with_modified_script(&fixture);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        set_mode(&script, 0o755);
+        assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "M run.sh");
+        assert!(git(&wt, &["diff", "--summary"]).contains("mode change 100644 => 100755"));
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("Removed").not());
+        assert_eq!(fs::read_to_string(&script).unwrap(), "echo edited\n");
+        assert_eq!(mode_of(&script), 0o755);
+        assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
+        assert!(fixture.branch_exists("feat/x"));
+    }
+
+    #[test]
+    fn an_unchanged_executable_bit_is_removed_by_the_handoff() {
+        let fixture = Fixture::new();
+        let (wt, _script) = worktree_with_modified_script(&fixture);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(0)
+            .stderr(predicate::str::contains("Removed worktree"));
+        assert!(!wt.exists());
+        assert!(!fixture.branch_exists("feat/x"));
+    }
+}
+
 #[test]
 fn an_expired_token_refuses_with_exit_4() {
     let fixture = Fixture::new();

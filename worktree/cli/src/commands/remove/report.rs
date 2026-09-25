@@ -423,7 +423,7 @@ mod tests {
 
         let many = Inventory {
             dirty: Vec::new(),
-            ignored: (0..11).map(|i| format!("dir{i}/")).collect(),
+            ignored: (0..11).map(|i| PathBuf::from(format!("dir{i}/"))).collect(),
         };
         assert!(files_markup(&many).starts_with("<red><b>11 ignored entries</b></red>"));
         assert_eq!(files_markup(&Inventory::default()), "<dim>No uncommitted or ignored files.</dim>");
