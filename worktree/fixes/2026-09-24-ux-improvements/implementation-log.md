@@ -2,6 +2,9 @@
 spec: /Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/spec.md
 plan: worktree/fixes/2026-09-24-ux-improvements/plan.md
 implemented_by: claude/opus
+implementation_1: "2026-09-25T08:42:22-07:00"
+implementation_2: "2026-09-25T10:08:34-07:00"
+implementation_3: "2026-09-25T10:58:59-07:00"
 started_phase: 1
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -977,3 +980,205 @@ Phase 6 changed no behavior, so it adds no tests. The requirement-to-test mappin
 - `spec.md`: `status: implemented`, `implemented: true`. `human_review` stays `true`: the two items from earlier phases (confirm Decisions 20–33; keep Phase 5's two departures) are still unanswered, and Phase 6 has now written that behavior into the user docs.
 - The spec is **not** moved to `_completed`; the author closes it.
 - No `cargo fmt`, no commit, no staging.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-25T08:42:22-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Real-terminal tests do not verify the specified colors and emphasis' at 08:42:38
+        - discovery: `tmux capture-pane -e` (tmux 3.7b) keeps RGB colors as `38;2;…`/`48;2;…` and merges attributes (`2;3m`, `0m` resets); the new parser in `cli/tests/styled_capture/mod.rs` turns a capture into per-cell style state and also accepts the 256-color index tmux would pick for an RGB value, so assertions survive a server without RGB support. Its own checks are L1 (`cli/tests/styled_capture_parse.rs`), because a `#[test]` inside a `level2_*` binary without the `level2_` prefix would be stranded in no tier.
+        - discovery: inside tmux `wt` cannot query the terminal background (multiplexer), so the row highlight followed the host's macOS appearance. The tests now pin it with `COLORFGBG` (`15;0` dark, `0;15` light), which `biscuit-terminal` reads before that fallback.
+        - discovery: the PR badge can be exercised offline: a PR store seeded with `fetched_at = now` sits inside the 60 s window, so `wt` makes no request (a refused `HTTPS_PROXY` guards anyway). The emerald-800 badge renders as `48;2;0;96;69`.
+        - `level2_list_verbose.rs`: new `level2_list_styles_follow_the_design_in_tmux` with a fixture (`DesignFixture`) holding a clean base repo, a conflicting child (`clash`), a non-source dirty worktree (`docs-work`), a source dirty current worktree (`feature-test`) with an open PR, fork-origin records under `main`, and `origin/main` one commit ahead. It asserts the caption (local and remote badges, yellow count), the remote-badge target header, the row order and visible glyphs (`○ base repo`, `├─ clash`, `● wt-docs`, `└─ feature-test`), the dim ring, yellow and orange dots, bold current name, the local badge, the red conflict connector and cell, gray clean connectors, the PR badge, the dark highlight on every cell of the current row and on no other row, the legend dots, and the light highlight on a second run.
+        - `level2_list_verbose.rs`: the two existing tmux tests drop their "any `\x1b[`" check; `assert_redesigned_table` now asserts the dim ring and the bold, highlighted name on the current row (dark mode pinned).
+        - `level2_dirty_tree.rs`: the fixture (`src/bin/render_dirty_tree.rs`) now renders `README.md`, `docs/guide.md`, and `src/lib.rs` (and ends with a newline so the prompt does not join the last row). The test asserts every tree row (`├──`, `│   └──`, `└──`, indent), orange `lib.rs`, yellow `README.md`/`guide.md`, dim directories, and unstyled connectors.
+        - sanity check: five temporary source mutations (source file yellow in the tree; conflict connector gray; dark highlight `40,42,54`; PR badge blue; source dot yellow) each failed the matching L2 test with a message naming the cell and its actual style; all sources restored (`git diff` of `cli/src/commands/` empty).
+        - results: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` 10 passed (tmux run=9; the Kitty test skips on this host), `just test` 288 passed, `just lint` clean, clippy with `terminal-tests --tests` clean, `just check-tier-coverage worktree` stranded 0. `BISCUIT_TEST_LEVEL_REQUIRED=2` fails only the Kitty test (no Kitty on this host), as that switch makes every backend fatal.
+        - docs: the `worktree` skill's `wt list` section gained one line on the styled-capture tests and `COLORFGBG`.
+- work completed for 'Real-terminal tests do not verify the specified colors and emphasis' at 08:52:32
+- starting the work on 'Graph visibility and sizing lack real-terminal verification' at 08:52:32
+        - discovery: the existing Kitty test could never have proven anything: `kitty @ get-text --ansi` returns cell text, never the APC graphics bytes it asserted on, and `KittyHarness::available()` needs `KITTY_LISTEN_ON`, which only a remote-control Kitty exports, so it skipped on every host run.
+        - discovery: a private Kitty started with `open -g -n -a kitty --args --config NONE -o allow_remote_control=socket-only --listen-on unix:<sock> …` does not take focus (frontmost app checked before and every 0.5 s after), gets exactly the `initial_window_width/height` cells asked for (`Nc`), and reports real pixel sizes (TIOCGWINSZ 1400×975 for 100×39; `CSI 16t` answers 14×25 cells). `--start-as=hidden` also keeps focus but the window is never drawn: `screencapture -l` of it is solid black, so it cannot prove display. `--start-as=minimized` gave split panes a few columns wide (os skill note).
+        - discovery: `kitty @ ls` reports each OS window's `platform_window_id`, which is the CGWindowID `screencapture -x -o -l <id>` needs; the capture of an unfocused, visible window shows the rendered graph image, and its pixel grid equals Kitty's cell pixel grid (content = columns × cell width, 1 px border, title bar above).
+        - discovery: `open` passes the caller's environment through, so the pane inherits e.g. `TERM_PROGRAM=WezTerm`; `wt` must be run with it unset. A quit with a shell running opens a "Quit kitty?" confirmation window unless `confirm_os_window_close=0`.
+        - discovery: `wt` reserves the image's rows itself (`CSI s`, APC `a=T,c=<cols>` with no `r=`, `CSI u`, `CSI <rows>B`), so the text rows below the image prove only `wt`'s reservation; whether Kitty drew the image into that reservation needs the pixels.
+        - `biscuit-test-harness`: new `kitty::KittyInstance` (macOS): `launch(columns, lines)` starts a private Kitty as above with the harness's rc-suppressed login shell, waits for its socket and prompt, and `Drop` quits it (`action quit`); a later launch quits instances whose owning pid is dead (`/tmp/biscuit-kitty-<pid>-*`). `harness()` returns a `KittyHarness` aimed at it (new private `--to` address on every `kitty @` call), and `screenshot(path)` runs `screencapture -x -o -l`. `KittyHarness::capture_extent(extent)` added for `--extent=all`. Existing `KittyHarness` behavior is unchanged.
+        - discovery: `kitty @ get-text` returns a soft-wrapped line whole, and `--add-wrap-markers` does not split it (it only ends every line with `\r`), so the test re-splits lines at the window width to get screen rows.
+        - `cli/tests/level2_graph_in_kitty.rs` (new L2 binary, `[[test]]` with `terminal-tests`): a main checkout with five linked worktrees, each with its own commit. `wt list` runs from `main` under `script` in the private Kitty, with `TERM_PROGRAM` unset; the pane reports its cell size (`CSI 16 t`). Assertions: the APC carries `c=` and no `r=`; `c` fits the window; the PNG is `c × cell width` wide; the rows `wt` reserves (`CSI <n> B`) equal the rows Kitty covers (`ceil(png height / cell height)`); rows respect the half-height cap; the next text after the legend comes `n` or `n + 1` rows later; the table's rows and column borders are intact; the elision notice counts 1–4 hidden lanes; and the screenshot's drawn-pixel box matches the PNG's drawn-pixel box placed at the row after the legend (±3 px). `level2_graph_height_cap_elides_lanes_in_a_short_kitty_window` (100×32) and `level2_graph_fits_a_narrow_kitty_window` (56×60).
+        - `level2_list_verbose.rs`: `level2_graph_emits_image_protocol_bytes_in_kitty` deleted (superseded; it asserted bytes `get-text` never returns) with its shared-Kitty static.
+        - defect found by the new test and fixed: `biscuit-terminal` computed an image's covered rows as `ceil(f32)` of `columns × aspect × cell aspect`, which lands on `13.000001` for exact multiples and reserved one blank row too many under the graph (1 in 8 runs here; 704 of 3,900 exact cases in a sweep). New `terminal_image::cursor::covered_rows` uses integer arithmetic and replaces the formula in `kitty.rs` (both paths), `iterm.rs`, and `protocol.rs`; L1 test `covered_rows_are_exact_on_whole_rows` (fails 14 vs 13 with the float formula). `bt image`'s debug report (`biscuit-terminal/cli/src/commands/image.rs`) still prints the float estimate; left alone as out of scope.
+        - sanity check (each restored, `git diff biscuit-terminal/` clean afterwards): Kitty placement `Y=12` (pixels only, text unchanged) failed the narrow test with "drew the graph at (9, 476, …) but … belongs at (9, 464, …)"; `max_rows = viewport.rows` failed the short test with "31 rows exceed half of 32"; no width trimming plus a clamp of `available + 20` failed the narrow test with "the graph's 76 columns must fit the 56-column window".
+        - results: `BISCUIT_TEST_REQUIRED_BACKENDS=kitty,tmux just test-l2` 11 passed, backend proof kitty run=2, tmux run=9; the two Kitty tests 15 consecutive green runs after the row fix; frontmost app stayed `wezterm-gui` throughout and no instance was left running. `just test` 288 passed, `just lint` clean, clippy `-D warnings` clean for `worktree-cli` (`terminal-tests --tests`), `biscuit-test-harness`, and `biscuit-terminal`; `biscuit-test-harness` 117 passed; `biscuit-terminal` `just test` 3315 passed and its image/diagram L2 tests 33 passed; the other `KittyHarness` consumers (`biscuit-terminal-cli`, `biscuit-tui-cli`, `tree-hugger-cli`) compile; `just check-tier-coverage worktree` stranded 0. No CI metadata change: `l2-backends` already lists `kitty`, and the tests skip where `KittyInstance::can_launch()` is false (Linux, Windows, CI runners without Kitty).
+        - docs: `biscuit-test-harness/README.md` (new "A private Kitty per test" section, availability table), the `biscuit-test-harness`, `worktree`, and `os` (macOS) skills, `worktree/docs/git-graph.md` Tests, and `docs/dependencies.md` (`base64`, `image` dev-dependencies of `worktree/cli`).
+- work completed for 'Graph visibility and sizing lack real-terminal verification' at 09:25:22
+- starting the work on 'PowerShell move-first behavior lacks its required Level 2 test' at 09:25:22
+        - discovery: the harness has no Windows real-console backend (`win_input` is L3 `SendKeys` into a focused window; tmux has no Windows port; WezTerm needs a mux socket an SSH/nextest session lacks). A pseudoconsole needs none of them: `xpty` 0.3.6 (already in `Cargo.lock` for `unchained-ai`) opens ConPTY without `PSEUDOCONSOLE_INHERIT_CURSOR`, so no DSR handshake, no window, no focus. `expectrl`'s session type is Unix-only in this workspace.
+        - discovery: ConPTY writes a repainted screen (cursor moves), not text in order, so the new test reads the prompt's appearance from the stream only and asserts on the console's own screen buffer, dumped by the scene script through `$Host.UI.RawUI.GetBufferContents` (the Windows analogue of `tmux capture-pane`).
+        - `cli/tests/level2_powershell_remove.rs` (new `[[test]]`, `terminal-tests`, `#![cfg(windows)]`; `xpty` is a `cfg(windows)` dev-dependency): PowerShell 5.1 launched in a pseudoconsole with the worktree (or its `docs/`) as its process working directory; the wrapper from `wt --completions powershell` is dot-sourced by a typed command, `wt remove feat-x` runs through it, and the files question is answered `y`.
+        - discovery: a PowerShell 5.1 script could not parse `$cells[$y, $x]` on the `BufferCell[,]` from `GetBufferContents` ("Missing ']' after array index expression"); `$cells.GetValue($y, $x)` works. First run also timed out at nextest's 30 s with no message, so each wait is now 15 s (`STEP`) and fails with the console stream.
+        - assertions (both tests): exit 0; the screen shows `Uncommitted files (1):`/`notes.txt` (base-repo test), the files question after exactly one blank line, `Moving you to the base repo` or `Moving you to the feat/theme worktree`, `Removed worktree`, and `You are now in`; `Get-Location` and `[Environment]::CurrentDirectory` both equal the landing path (the base repo, or `feat-theme\docs` when launched in `feat-x\docs` with a fork record); the directory is gone, `git worktree list` no longer lists it, and the Safe branch is deleted.
+        - sanity check: with the wrapper's `[Environment]::CurrentDirectory = …` line removed, both tests failed on build-win-native with exit 4 and "the folder … is in use by another program" on screen; `git checkout` restored `cli/src/shell_integration.rs` (no diff).
+        - results: `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell` on build-win-native: 2 passed (5.4–6.3 s each, i.e. executed, not skipped), two consecutive green runs of the final code after one green run of a diagnostic version; `cross-check --os windows worktree-cli` (L1, archive mode) 162 passed and does not select the new tests. macOS: `just test` 288 passed, `just lint` clean, `just check-tier-coverage worktree` stranded 0 (the file is `#![cfg(windows)]`, so macOS and Linux build it empty, the repo's convention for OS-specific tests). Clippy was not run for the Windows target (the macOS cross-check of this crate dies in `blake3`/`aws-lc-sys`, and the standing clone is not for ad hoc work).
+        - blocker (CI provisioning, not added): CI does not run this test. `worktree-cli` declares `l2-backends = ["tmux", "kitty"]`, `windows-latest` hosts neither, so its L2 cell there is the governed gap (`features/_unscheduled/windows-l2-ci-leg`); and `windows-latest` runs only on push to `main`. Running it in CI needs a ConPTY backend identity in `test_toolkit::Backend` and `affected_scope.py`'s backend list, a `conpty` capability on `windows-latest` in `.github/ci/environments.json`, and `worktree-cli` listing it in `l2-backends` (then gating with `Backend::ConPty` rather than the string label).
+        - observation, out of scope: on Windows the "Moving you to …" line prints mixed separators and a trailing backslash (`…/.tmpX/repo\ to finish`, `…/wts/feat-theme\docs`).
+        - docs: `worktree` skill (`wt remove` tests; fixed drifted "PowerShell has no L1 execution test"), `os` skill `windows.md` new "A real console without a window: ConPTY" section and its SKILL.md index line, `docs/dependencies.md` (`xpty` Windows-only dev-dependency).
+- work completed for 'PowerShell move-first behavior lacks its required Level 2 test' at 09:47:23
+- starting the work on 'Pull-request URLs disappear on terminals without clickable links' at 09:47:23
+        - the review says to "choose the fallback behavior with the author"; the spec's second `human_review_items` entry and the review's second `human_review_items` entry both put this exact choice to the author, and neither has been answered
+        - option (1), badge-only, needs a spec and docs edit that records a decision the author has not made; option (2), visible URL, needs the `Table` component to break long words (a separate biscuit-terminal change) or the URL moved outside the table
+        - deferred: no code or spec change was made; the author's answer decides which of the two follow-ups to implement
+- work deferred for 'Pull-request URLs disappear on terminals without clickable links' at 09:47:23
+- final verification on macOS: `worktree/just test` 288 passed; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1h 05m. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 were deferred (see reasons below):
+
+- **Pull-request URLs disappear on terminals without clickable links** (medium): deferred for the author's decision. Both the review and the spec's `human_review_items` ask the author to choose between keeping badge-only output (then the spec and docs are updated) and showing the URL (then `Table` must break long words or the URL moves out of the table). Implementing either one first would make that choice for the author.
+
+Follow-ups found during this cycle (not review findings):
+
+- `level2_powershell_remove.rs` passes on build-win-native but no CI cell runs it: `worktree-cli`'s `l2-backends` are `tmux` and `kitty`, and `windows-latest` has neither. Running it in CI needs a ConPTY backend in `test_toolkit::Backend` and `affected_scope.py`, a `conpty` capability in `.github/ci/environments.json`, and `worktree-cli` listing it.
+- On Windows, the "Moving you to …" line mixes `/` and `\` and can end in a stray backslash.
+- `bt image`'s debug report still uses the old floating-point row estimate that the new `covered_rows` helper replaced.
+- The private-Kitty tests run only on macOS and need the Screen Recording permission for the terminal running them.
+
+The files changed in this cycle:
+
+- `worktree/cli/tests/styled_capture/mod.rs`, `worktree/cli/tests/styled_capture_parse.rs` (new)
+- `worktree/cli/tests/level2_dirty_tree.rs`, `worktree/cli/tests/level2_list_verbose.rs`, `worktree/cli/src/bin/render_dirty_tree.rs`
+- `worktree/cli/tests/level2_graph_in_kitty.rs`, `worktree/cli/tests/level2_powershell_remove.rs` (new)
+- `worktree/cli/Cargo.toml`, `Cargo.lock`, `docs/dependencies.md`, `worktree/docs/git-graph.md`
+- `biscuit-test-harness/src/kitty.rs`, `biscuit-test-harness/README.md`
+- `biscuit-terminal/lib/src/components/terminal_image/{cursor,iterm,kitty,protocol,tests}.rs`
+- `.claude/skills/worktree/SKILL.md`, `.claude/skills/biscuit-test-harness/SKILL.md`, `.claude/skills/os/macos.md`, `.claude/skills/os/windows.md`
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-25T10:08:34-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- the review has 4 findings (3 unblocked high, 1 blocked medium); the blocked one now carries the author's `DECISION:` (badge-only; no visible `[text](url)`), so all 4 are in scope
+- starting the work on 'Remote deletion handoff can delete an unapproved branch' at 10:08:50
+        - discovery: `handoff::verify` compares only `HandoffState` (repo, target, head, branch, fingerprint, landing); the remote approval is judged afterwards in `run_handoff`, which checked `observed_sha` alone. `execute` deletes whatever destination the fresh `Facts::gather` computed from `branch.<name>.remote/merge`, so a retargeted upstream at the same commit passed the lease check
+        - discovery: `RemoteApproval.destination`'s doc said "`None` when there was none to delete", but an `Absent` remote stores `Some(destination)`; code is correct, doc drifted (it is `None` only with no `origin` remote); fixed with the change
+        - changed: `worktree/cli/src/commands/remove/mod.rs` — `run_handoff` maps the fresh `facts.remote` through the same `remote_approval` helper the first run used and refuses (exit 3, `RefusedToLoseWork`, report printed, "The branch on origin to delete changed since you confirmed.") when its `destination` differs from the stored one, before the SHA check and before `execute`; `Some`/`None` in either direction counts as a mismatch
+        - changed: `worktree/lib/src/remove/handoff.rs` (`RemoteApproval.destination` doc), `.claude/skills/worktree/SKILL.md` (move-first bullet now names the destination and head checks)
+        - changed: `worktree/cli/tests/remove.rs` — L1 `a_changed_remote_destination_between_the_runs_refuses_with_nothing_removed` (review's fixture: `main`, `origin/approved`, `origin/unapproved`, `feat/x` at one commit; upstream retargeted between runs); asserts exit 3, both origin branches present, worktree and `feat/x` intact
+        - results: negative control — with the new check disabled (`if false && …`) the test fails with exit 0, `Deleted branch feat/x`, `Deleted origin/unapproved` (the review's reproduction); source restored and the test passes
+        - results: `just test` 289 passed, 17 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'Remote deletion handoff can delete an unapproved branch' at 10:10:44
+- starting the work on 'Real-terminal tests depend on clearing stale pane output' at 10:10:44
+        - discovery: the harness captures the visible pane only (`capture-pane -p -e`, no scrollback), yet `clear` sent into a reused tmux pane on this host (tmux 3.7b) leaves the earlier frame on screen, so any second run in the same pane sees the first run's text
+        - discovery: `level2_list_styles_follow_the_design_in_tmux` reused one pane for the dark and light runs, and waited for the old legend to vanish (timed out); `level2_move_first_through_each_wrapper_lands_in_the_fork_parent` reused one pane for bash, zsh, and fish, so `assert_one_blank_line_before` matched the first shell's prompt
+        - discovery: the same pattern existed in `level2_move_first_lands_in_the_base_repo_without_a_fork_record` (one pane across shells) and `level2_move_first_failures_leave_the_worktree_intact` (one pane across shells and three scenes each); their `plain.contains("expired")`/`"checked-out commit"`/`"Moving you to the base repo"` checks could pass on an earlier run's output. `level2_dirty_tree.rs` and the other two `level2_list_verbose.rs` tests already run once per fresh pane and needed no change
+        - changed: `worktree/cli/tests/level2_list_verbose.rs` — `DesignFixture::list_in` spawns its own `TmuxHarness` per call (one detached session per background variant); dropped the `clear` and the wait for the old legend to disappear; the test no longer creates a harness itself. All assertions, including the light-background one, unchanged
+        - changed: `worktree/cli/tests/level2_remove.rs` — helper renamed `harness()` to `fresh_harness()` (a local binding shadowed it) with a doc on why; every scene run in the three move-first tests spawns its own pane (per shell, and per scene in the failures test). No assertion changed
+        - results: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2 level2_list_styles_follow_the_design_in_tmux` passed 3/3 (1.91 s, 1.93 s, 1.96 s); `… level2_move_first_through_each_wrapper_lands_in_the_fork_parent` passed 3/3 (4.87 s, 4.90 s, 5.01 s); bash, zsh, and fish are all installed on this host
+        - results: `BISCUIT_TEST_REQUIRED_BACKENDS=kitty,tmux just test-l2` 11 passed, 182 skipped; backend-proof tmux run=9, kitty run=2
+        - results: `just test` 289 passed, 17 skipped; `just lint` clean; `cargo clippy -p worktree-cli --features terminal-tests --tests` clean; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'Real-terminal tests depend on clearing stale pane output' at 10:16:02
+- starting the work on 'Held-directory refusal lacks the specified Level 2 regression' at 10:16:02
+        - discovery: `WorktreeError::DirectoryInUse` renders as `Error: the folder <path> is in use by another program` and exits 4; `remove_worktree` runs `check_not_in_use` only after the policy decision, so `--force-worktree` (dirty and ignored files approved without a prompt) plus a Safe branch (on `main`) leaves the lock check as the only thing that can stop removal
+        - discovery: the existing L1 lock tests hold the directory with `ping` spawned directly and a fixed 300 ms sleep; the new holder instead waits for ping's first stdout bytes (its current directory is set up by then), bounded at 15 s, with `CREATE_NO_WINDOW` and null stdin/stderr
+        - changed: `worktree/cli/tests/level2_powershell_remove.rs` adds `Holder` (Drop kills and reaps ping, declared after `Scene` so the lock is released before the tempdir cleanup), `Scene::run_from_base`, `unwrapped` (joins full-width screen rows), and `level2_powershell_refuses_a_worktree_another_program_holds_with_exit_4_and_nothing_removed`; tracked `docs/guide.md`, untracked `notes.txt`, and `.env` ignored through `.git/info/exclude` (preconditions asserted with `git status --porcelain --ignored`); `//!` doc describes the new case
+        - discovery: first Windows run failed only on the tracked-file content: `build-win-native` checks out with CRLF (`"guide\r\n"`); the assertion now normalizes line endings. The negative-control console showed the screen buffer hard-wrapping mid-word at 120 columns (`P` / `ermission denied`), which `unwrapped` handles; both facts recorded in `.claude/skills/os/windows.md` (ConPTY section)
+        - changed: `.claude/skills/worktree/SKILL.md` mentions the held-directory case of the Windows L2 file
+        - results: `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell` green twice: new test 5.059 s and 5.017 s, the two move-first tests 5.6-5.8 s; 3 run, 3 passed, no LEAK
+        - negative control: `check_not_in_use` temporarily returned `Ok(())`; the new test failed (exit 1, not 4; console showed `failed to delete '…/wts/feat-x': Permission denied` from `git worktree remove`), the other two passed; source restored from a copy and `git diff worktree/lib/src/remove/mod.rs` is empty
+        - results: macOS `just test` (worktree) 289 passed, 17 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'Held-directory refusal lacks the specified Level 2 regression' at 10:27:57
+- starting the work on 'Pull-request URLs disappear on terminals without clickable links' at 10:27:57
+        - the review now records the author's `DECISION:` the visible `[text](url)` is NOT wanted in this layout, so the review's option (1) applies: update the spec to accept badge-only output
+        - discovery: code, user docs, and L1 already match badge-only: `pr_badge` in `cli/src/commands/list_table.rs` drops the URL without `osc_link_support`, `worktree/docs/cli/list.md` says "shows the number only, with no visible URL", and L1 `pr_badges_link_through_osc_8_and_print_no_url_without_it` (`cli/tests/list_table.rs`) asserts it; only the spec contradicted them
+        - changed: `spec.md` item 5 "PR badge" now says the badge links only with OSC 8 and shows the number otherwise; "Dropped by design" replaces the Prose `[text](url)` parenthetical with a ruled (2026-09-25, review 2) bullet giving the reason
+        - changed: `spec.md` frontmatter, the second `human_review_items` entry: departure 1 is marked decided (keep); departure 2 (the graph's 80-column cutoff) is still open, so the entry and `human_review: true` stay
+        - not done (review's SIDE NOTE, explicitly not needed to close this spec): route every terminal link through one common struct that enforces standards and declares its no-link fallback
+        - no code change, so no new test is needed
+- work completed for 'Pull-request URLs disappear on terminals without clickable links' at 10:28:21
+- final verification on macOS: `worktree/just test` 289 passed, 17 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded; `BISCUIT_TEST_REQUIRED_BACKENDS=kitty,tmux just test-l2` 11 passed (after finding 2's change; finding 3's file is Windows-only); `level2_powershell` 3 passed twice on build-win-native
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 20m. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 4 were fixed, 0 were deferred (see reasons below):
+
+- none deferred. The previously blocked finding (PR URLs on terminals without links) was resolved by the author's decision recorded in the review; only the spec needed changing.
+
+Follow-ups found during this cycle (not review findings):
+
+- the review's SIDE NOTE: every terminal link should go through one common struct that enforces standards and declares its no-link fallback (not needed to close this spec)
+- `level2_powershell_remove.rs` (now 3 tests) still runs in no CI cell; the provisioning need recorded in cycle 1 is unchanged
+- the spec's second `human_review_items` entry still asks about departure 2 (the graph's 80-column cutoff), and the first entry (Decisions 20–33) is still unanswered
+
+The files changed in this cycle:
+
+- `worktree/cli/src/commands/remove/mod.rs`, `worktree/lib/src/remove/handoff.rs`, `worktree/cli/tests/remove.rs` (finding 1)
+- `worktree/cli/tests/level2_list_verbose.rs`, `worktree/cli/tests/level2_remove.rs` (finding 2)
+- `worktree/cli/tests/level2_powershell_remove.rs`, `.claude/skills/os/windows.md` (finding 3)
+- `worktree/fixes/2026-09-24-ux-improvements/spec.md` (finding 4)
+- `.claude/skills/worktree/SKILL.md` (findings 1 and 3)
+
+## Author decisions after review 3
+
+> **recorded at:** 2026-09-25
+
+- the author confirmed Decisions 20–33 as written; they are now "ruled 2026-09-25" in `spec.md`, and the plan's Phase 1 "R1–R11 are ruled" checkbox is ticked
+- Decision 21 carries an amendment: review 3's first finding (the approval does not identify the remote repository) replaces "`ls-remote origin`" with a recorded, resolved deletion endpoint used for both the live check and the deletion; the finding's fix implements it
+- the author kept the graph at every terminal width (no 80-column cutoff), recorded as Decision 34
+- `human_review` is now `false` and both `human_review_items` are removed; review 3's two findings are unaffected and still need fixing
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-25T10:58:59-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- starting the work on 'Remote deletion approval does not identify the remote repository' at 10:59:20
+        - discovery: `git push <url>` (unlike `git push origin`) leaves `refs/remotes/origin/<branch>` behind (checked on git 2.55), so `delete_remote_branch` now drops that ref best-effort after a successful push to keep parity with the old `push origin --delete`
+        - design: new `remote::push_endpoints` returns `git remote get-url --push --all origin` (pushurl over url, insteadOf/pushInsteadOf applied), compared as git spells it, never canonicalized
+        - design: `RemoteState::{Absent, Present, Unavailable}` carry the resolved `endpoint`; `preflight_remote_deletion` runs `ls-remote <endpoint>` and `delete_remote_branch(base, endpoint, destination, sha)` pushes to `<endpoint>`, so report, lease, and deletion address the same repository; deadline and kill-tree unchanged (`run_noninteractive`)
+        - design: `RemoteHeads::live_head` now takes the remote to ask; the safety tiers' `origin/*` checks still pass `origin` (fetch URL, which produced those tracking refs)
+        - design (multiple push URLs): refuse rather than check each; new `RemoteState::MultiplePushUrls`, and `wt remove --force-remote` exits 3 before any question or removal (exit 3, not 4, because dropping `--force-remote` is a remedy); a second push URL added between the runs refuses the handoff through the endpoint comparison
+        - design: `RemoteApproval.endpoint` added; `HANDOFF_FORMAT_VERSION` 1 -> 2; `run_handoff` refuses (exit 3, before local removal) with "The repository origin pushes to changed since you confirmed." when the re-resolved endpoint differs
+        - report: the Origin line names the push URL (`Origin (<url>):`) and a MultiplePushUrls line lists them
+        - files: `lib/src/remove/{remote,live_remote,safety,handoff}.rs`, `cli/src/commands/remove/{mod,report}.rs`, `cli/tests/remove.rs`, `worktree/README.md`, `.claude/skills/worktree/SKILL.md`
+        - tests (L1, `cli/tests/remove.rs`): `a_changed_origin_url_between_the_runs_refuses_with_nothing_removed`, `a_changed_origin_push_url_between_the_runs_refuses_with_nothing_removed`, `a_separate_push_url_is_both_observed_and_deleted_from`, `several_push_urls_refuse_force_remote_with_nothing_removed`; the first two were confirmed to fail with the endpoint check disabled
+        - tests (lib): `remote::tests::push_endpoints_follow_pushurl_and_list_every_push_url`, `remote::tests::several_push_urls_are_reported_without_asking_any`; existing remote/report/handoff tests updated for the new fields
+        - results: `just test` 295 passed, 17 skipped (L2); `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'Remote deletion approval does not identify the remote repository' at 11:04:54
+- starting the work on 'Handoff fingerprint misses changes to staged content' at 11:04:54
+        - discovery: `Inventory::fingerprint` hashed only status letters, paths, working bytes, and ignored entries; restaging under an unchanged `MM` with the same working bytes left it identical, so the handoff removed the worktree and the staged version lost its index reference
+        - design: the fingerprint now also hashes the whole `git ls-files --stage -z` listing (mode, object ID, conflict stage, path per entry), run through `git_from_raw(base, worktree, ..)` like `collect_inventory`; logical entries, not the raw index file, so stat/cache metadata cannot cause false refusals
+        - design: whole index rather than a pathspec of dirty paths (restricting would also be correct, but pathspec magic characters and Windows command-line length make a path list fragile; one listing per run is cheap and only the two handoff paths call it)
+        - design: signature is now `fingerprint(&self, base, worktree) -> Result<String, WorktreeError>`; a failed listing fails the run (exit 1) instead of producing a weaker digest. The fingerprint stays a 64-hex string, so `HandoffRecord`'s shape is unchanged and no format bump beyond the existing `HANDOFF_FORMAT_VERSION = 2` is needed (an old record simply mismatches and expires in 60 s)
+        - files: `worktree/lib/src/remove/inventory.rs` (fingerprint + `///` docs + test), `worktree/cli/src/commands/remove/mod.rs` (both callers pass `&facts.base` and `?`), `worktree/cli/tests/remove.rs` (regression), `.claude/skills/worktree/SKILL.md` (fingerprint coverage line)
+        - tests: `remove::inventory::tests::fingerprint_changes_when_only_the_staged_version_changes` (lib L1) and `a_restaged_version_between_the_runs_refuses_with_nothing_removed` (`cli/tests/remove.rs`, L1: `--force-worktree` first run, restage keeping `MM` and working bytes, handoff exits 3; working file, `git show :README.md`, registration, and branch intact); both fail with the index line disabled and pass with it
+        - results: `just test` 297 passed, 17 skipped (L2); `just lint` clean; `just check-tier-coverage worktree` 0 stranded; `just test-perf` 17 passed (perf gates time `wt list` only; the fingerprint is not on that path)
+- work completed for 'Handoff fingerprint misses changes to staged content' at 11:07:50
+- follow-up to finding 2: `spec.md` item 3 move-first step 1 now says the fingerprint covers Git's logical index entries (mode, object ID, conflict stage), and that with `--force-remote` the record holds the resolved push endpoint (Decision 21); before this, the spec did not describe either
+- cross-OS check: `just cross-check worktree-cli --os windows` ran the five new CLI regressions on build-win-native, and all 5 passed; `just cross-check worktree --os windows` passed all 125 tests (including `push_endpoints_follow_pushurl_and_list_every_push_url` and `fingerprint_changes_when_only_the_staged_version_changes`)
+- final verification on macOS: `worktree/just test` 297 passed, 17 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded; `just test-perf` 17 passed
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 12m. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- a remote with several push URLs is refused for `--force-remote` (exit 3, before any question or removal) rather than checked destination by destination; Decision 21 allows either
+- the safety tiers' live checks of `origin/*` refs still ask `origin` (its fetch URL, which produced those tracking refs); only the `--force-remote` observation, lease, and deletion use the resolved push endpoint
+- after a successful deletion by URL, `refs/remotes/origin/<branch>` is removed best-effort, because `git push <url>` does not update it the way `git push origin` did
+
+The files changed in this cycle:
+
+- `worktree/lib/src/remove/remote.rs`, `live_remote.rs`, `safety.rs`, `handoff.rs` (finding 1)
+- `worktree/lib/src/remove/inventory.rs` (finding 2)
+- `worktree/cli/src/commands/remove/mod.rs` (findings 1 and 2), `worktree/cli/src/commands/remove/report.rs` (finding 1)
+- `worktree/cli/tests/remove.rs` (findings 1 and 2)
+- `worktree/README.md` (finding 1), `.claude/skills/worktree/SKILL.md` (findings 1 and 2)
+- `worktree/fixes/2026-09-24-ux-improvements/spec.md` (wording for both findings)

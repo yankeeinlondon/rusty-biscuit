@@ -505,8 +505,9 @@ Wave 1 runs these spikes in parallel. Each is time-boxed and produces a short fi
 
 ### Validation checkpoint
 
-- [ ] R1–R11 are ruled and recorded in `spec.md`'s Decisions. The spike notes exist and any spec deltas are ruled.
+- [x] R1–R11 are ruled and recorded in `spec.md`'s Decisions. The spike notes exist and any spec deltas are ruled.
     - *Status 2026-09-24 (Phase 1 agent):* the recommendations, amended by the spikes, are recorded as **proposed** rulings (Decisions 20–33), and `spike-s1.md` … `spike-s5.md` exist. This box stays open until the author confirms or overrides Decisions 20–33; the spec's `human_review_items` explain each choice.
+    - *Status 2026-09-25:* the author confirmed Decisions 20–33 as written; Decision 21 is amended by review 3's remote-repository finding.
 
 ## Phase 2 — Fixes: shell wrapper, resolution, `--from`, sniff PR-for-one-branch
 
