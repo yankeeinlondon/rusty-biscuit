@@ -35,6 +35,13 @@ pub fn run(name: &str, force: u8, delete_branch_flag: bool) -> Result<(), Worktr
 
     if should_prompt {
         render_dirty_summary(&terminal, &display_name, &dirty);
+        if !dirty.paths.is_empty() && !crate::env::is_interactive() {
+            return Err(WorktreeError::RefusedToLoseWork(format!(
+                "\n<red><b>Nothing was removed.</b></red> Worktree <blue>{display_name}</blue> has \
+                uncommitted files and there is no terminal to confirm discarding them.\n  \
+                <dim>Pass <i>-ff</i> to discard them.</dim>"
+            )));
+        }
         let prompt_msg = build_prompt_message(&display_name, &dirty);
         if !confirm(&prompt_msg)? {
             let cancelled = format!("<dim>Cancelled. Worktree <blue>{display_name}</blue> was not removed.</dim>");

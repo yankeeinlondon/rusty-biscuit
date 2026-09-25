@@ -16781,6 +16781,7 @@ dependencies = [
  "clap_complete",
  "dirs",
  "inquire",
+ "insta",
  "predicates",
  "serial_test",
  "sniff",

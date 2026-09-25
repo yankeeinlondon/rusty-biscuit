@@ -109,7 +109,7 @@ impl Cache {
     }
 }
 
-fn main_worktree_path() -> Option<PathBuf> {
+pub(crate) fn main_worktree_path() -> Option<PathBuf> {
     let output = git_command(&["worktree", "list", "--porcelain"]).ok()?;
     output
         .lines()
@@ -118,6 +118,15 @@ fn main_worktree_path() -> Option<PathBuf> {
 }
 
 pub fn cache_path(repo_root: &Path) -> Result<PathBuf, WorktreeError> {
+    repo_cache_file(repo_root, "json")
+}
+
+/// A per-repository file in the user cache directory, named
+/// `<repo hash>.<suffix>`.
+///
+/// Pass the main worktree's path so every worktree of a repository shares
+/// the same files.
+pub fn repo_cache_file(repo_root: &Path, suffix: &str) -> Result<PathBuf, WorktreeError> {
     let cache_dir = dirs::cache_dir().ok_or_else(|| {
         WorktreeError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -126,7 +135,7 @@ pub fn cache_path(repo_root: &Path) -> Result<PathBuf, WorktreeError> {
     })?;
     let canonical = fs::canonicalize(repo_root)?;
     let hash = biscuit_hash::xx_hash(&canonical.to_string_lossy());
-    Ok(cache_dir.join("worktree").join(format!("{hash:016x}.json")))
+    Ok(cache_dir.join("worktree").join(format!("{hash:016x}.{suffix}")))
 }
 
 /// Atomically replace `path` with `bytes`.

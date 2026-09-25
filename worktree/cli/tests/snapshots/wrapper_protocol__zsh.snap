@@ -1,0 +1,29 @@
+---
+source: worktree/cli/tests/wrapper_protocol.rs
+expression: "wrapper(Shell::Zsh, exe).unwrap()"
+---
+wt() {
+    local out line rc dest="" token=""
+    out="$(WT_SHELL_WRAPPER=1 command wt "$@")"
+    rc=$?
+    if [ -n "$out" ]; then
+        while IFS= read -r line; do
+            case "$line" in
+                cd:*) dest="${line#cd:}" ;;
+                remove-handoff:*) token="${line#remove-handoff:}" ;;
+                *) printf '%s\n' "$line" ;;
+            esac
+        done <<WT_OUTPUT
+$out
+WT_OUTPUT
+    fi
+    [ "$rc" -eq 0 ] || return "$rc"
+    if [ -n "$dest" ]; then
+        builtin cd -- "$dest" || return 1
+    fi
+    if [ -n "$token" ]; then
+        WT_SHELL_WRAPPER=1 command wt remove --handoff "$token"
+        return
+    fi
+    return 0
+}

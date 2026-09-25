@@ -56,8 +56,11 @@ pub struct CreateResult {
     /// Branch name
     pub branch: String,
     /// When the branch already existed and was reused as-is, the short commit it
-    /// points at. `None` when a fresh branch was forked from the current HEAD.
+    /// points at. `None` when a fresh branch was forked.
     pub reused_branch_at: Option<String>,
+    /// The local branch a fresh branch was forked from. `None` when an
+    /// existing branch was reused.
+    pub forked_from: Option<String>,
 }
 
 /// Detect the default branch name (main or master).
@@ -490,10 +493,25 @@ fn check_clean_merge(default_branch: &str, branch: &str) -> bool {
 /// Callers are responsible for resolving `base` (e.g. via
 /// [`worktree::config::resolve_base_dir`] or an interactive prompt).
 ///
+/// A new branch forks from the local branch `from`, or from the current
+/// branch when `from` is `None`, and its fork origin is recorded (see
+/// [`crate::fork_origin`]). An existing branch is reused as-is and records
+/// nothing.
+///
 /// ## Errors
 ///
-/// Returns an error if the worktree already exists or git commands fail.
-pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, WorktreeError> {
+/// - [`WorktreeError::WorktreeAlreadyExists`] when the directory exists.
+/// - [`WorktreeError::FromWithExistingBranch`] when `branch` exists and `from`
+///   was given, since `from` would be ignored.
+/// - [`WorktreeError::FromBranchNotFound`] when `from` is not a local branch.
+/// - [`WorktreeError::DetachedHeadWithoutFrom`] when a new branch is requested
+///   from a detached HEAD without `from`.
+/// - Any git failure.
+pub fn create_worktree(
+    branch: &str,
+    base: &Path,
+    from: Option<&str>,
+) -> Result<CreateResult, WorktreeError> {
     let info = repo_info()?;
 
     let dir_name = dasherize(branch);
@@ -506,7 +524,13 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
     // Check if the branch already exists
     let branch_exists = git_command(&["rev-parse", "--verify", branch]).is_ok();
 
-    let reused_branch_at = if branch_exists {
+    if branch_exists {
+        if let Some(from) = from {
+            return Err(WorktreeError::FromWithExistingBranch {
+                branch: branch.to_string(),
+                from: from.to_string(),
+            });
+        }
         git_command(&[
             "worktree",
             "add",
@@ -516,83 +540,166 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
         // Reusing the branch as-is checks it out wherever it already points — it
         // is NOT forked from the current HEAD. Report the commit so callers can
         // warn about silently resurrecting a stale branch.
-        git_command(&["rev-parse", "--short", branch]).ok()
-    } else {
-        git_command(&[
-            "worktree",
-            "add",
-            &target_path.display().to_string(),
-            "-b",
-            branch,
-        ])?;
-        None
+        let reused_branch_at = git_command(&["rev-parse", "--short", branch]).ok();
+        return Ok(CreateResult {
+            target_cwd: target_path.join(&info.relative_path),
+            worktree_path: target_path,
+            branch: branch.to_string(),
+            reused_branch_at,
+            forked_from: None,
+        });
+    }
+
+    let (fork_base, base_sha) = match from {
+        Some(from) => {
+            let full_ref = format!("refs/heads/{from}");
+            let sha = git_command(&["rev-parse", "--verify", "--quiet", &full_ref])
+                .map_err(|_| WorktreeError::FromBranchNotFound(from.to_string()))?;
+            (from.to_string(), sha)
+        }
+        None => {
+            // A detached HEAD would otherwise be recorded as a fork parent,
+            // writing a SHA where a branch name belongs.
+            let current = git_command(&["symbolic-ref", "--quiet", "--short", "HEAD"])
+                .map_err(|_| WorktreeError::DetachedHeadWithoutFrom(branch.to_string()))?;
+            (current, git_command(&["rev-parse", "HEAD"])?)
+        }
     };
 
-    let target_cwd = target_path.join(&info.relative_path);
+    let target = target_path.display().to_string();
+    let mut add_args = vec!["worktree", "add", target.as_str(), "-b", branch];
+    // The full ref keeps a same-named tag from shadowing the branch.
+    let start_point = format!("refs/heads/{fork_base}");
+    if from.is_some() {
+        add_args.push(&start_point);
+    }
+    git_command(&add_args)?;
+
+    // Fork-origin records live in the user cache; failing to write one only
+    // loses the branch's place in the listing's tree, so it never fails the
+    // create after the worktree exists.
+    if let Some(repo_root) = crate::cache::main_worktree_path()
+        && let Ok(path) = crate::fork_origin::fork_origin_path(&repo_root)
+    {
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let origin = crate::fork_origin::ForkOrigin {
+            base_branch: fork_base.clone(),
+            base_sha,
+            created_at,
+        };
+        let _ = crate::fork_origin::record(&path, branch, origin);
+    }
 
     Ok(CreateResult {
+        target_cwd: target_path.join(&info.relative_path),
         worktree_path: target_path,
-        target_cwd,
         branch: branch.to_string(),
-        reused_branch_at,
+        reused_branch_at: None,
+        forked_from: Some(fork_base),
     })
 }
 
-/// Find a worktree by name.
-///
-/// Matches against the branch name, dasherized directory name, or "base" for the main checkout.
+/// Find a worktree by name; see [`resolve_worktree`] for the rules.
 pub fn find_worktree(name: &str) -> Result<WorktreeEntry, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
-    let entries = parse_worktree_list(&porcelain);
+    resolve_worktree(&parse_worktree_list(&porcelain), name)
+}
 
-    // "base" matches the main checkout
+/// Resolve `name` against `entries` (main checkout first).
+///
+/// - `base` is always the main checkout, whatever branch it has checked out.
+/// - Otherwise every worktree whose branch equals `name`, and every linked
+///   worktree whose directory basename equals `name` or its dasherized form,
+///   matches. Exactly one distinct worktree resolves; more than one is
+///   [`WorktreeError::AmbiguousWorktree`], never a silent pick.
+///
+/// The main checkout's basename is the repository's name, not a worktree
+/// name, so it does not match; `base` is its stable name.
+pub fn resolve_worktree(
+    entries: &[WorktreeEntry],
+    name: &str,
+) -> Result<WorktreeEntry, WorktreeError> {
     if name == "base" {
         return entries
-            .into_iter()
+            .iter()
             .find(|e| e.is_main)
+            .cloned()
             .ok_or_else(|| WorktreeError::WorktreeNotFound("base".into()));
     }
 
     let dasherized_name = dasherize(name);
-
-    for entry in &entries {
-        // Match by branch name
-        if entry.branch.as_deref() == Some(name) {
-            return Ok(entry.clone());
-        }
-
-        // Match by dasherized directory name
-        if let Some(dir_name) = entry.path.file_name()
-            && dir_name.to_string_lossy() == dasherized_name
-        {
-            return Ok(entry.clone());
+    let mut matches: Vec<&WorktreeEntry> = Vec::new();
+    for entry in entries {
+        let branch_match = entry.branch.as_deref() == Some(name);
+        let basename_match = !entry.is_main
+            && basename(entry).is_some_and(|dir| dir == name || dir == dasherized_name);
+        if (branch_match || basename_match) && !matches.iter().any(|m| m.path == entry.path) {
+            matches.push(entry);
         }
     }
 
-    Err(WorktreeError::WorktreeNotFound(name.into()))
+    match matches.as_slice() {
+        [] => Err(WorktreeError::WorktreeNotFound(name.into())),
+        [only] => Ok((*only).clone()),
+        many => Err(WorktreeError::AmbiguousWorktree {
+            name: name.to_string(),
+            candidates: many
+                .iter()
+                .map(|entry| crate::error::WorktreeCandidate {
+                    branch: entry.branch.clone(),
+                    basename: basename(entry).unwrap_or_default(),
+                    path: entry.path.clone(),
+                })
+                .collect(),
+        }),
+    }
 }
 
-/// List worktree names for shell completions.
+/// List worktree names for shell completions; see [`completion_names`].
 pub fn worktree_names() -> Vec<String> {
     let Ok(porcelain) = git_command(&["worktree", "list", "--porcelain"]) else {
         return vec!["base".to_string()];
     };
+    completion_names(&parse_worktree_list(&porcelain))
+}
 
-    let entries = parse_worktree_list(&porcelain);
+/// Every name [`resolve_worktree`] accepts for `entries`, deduplicated:
+/// `base`, the main checkout's branch when attached, and each linked
+/// worktree's branch (when attached) and directory basename.
+///
+/// The default branch is offered only when some checkout has it, because a
+/// branch name resolves by actual checkout.
+pub fn completion_names(entries: &[WorktreeEntry]) -> Vec<String> {
     let mut names = vec!["base".to_string()];
-
     for entry in entries {
-        if entry.is_main {
-            continue;
-        }
-        if let Some(branch) = entry.branch {
-            names.push(branch);
-        } else if let Some(dir) = entry.path.file_name() {
-            names.push(dir.to_string_lossy().to_string());
+        let candidates = [
+            entry.branch.clone(),
+            (!entry.is_main).then(|| basename(entry)).flatten(),
+        ];
+        for name in candidates.into_iter().flatten() {
+            if !names.contains(&name) {
+                names.push(name);
+            }
         }
     }
-
     names
+}
+
+fn basename(entry: &WorktreeEntry) -> Option<String> {
+    entry
+        .path
+        .file_name()
+        .map(|dir| dir.to_string_lossy().into_owned())
+}
+
+/// Every local branch name, for `--from` completion. Empty when git fails.
+pub fn local_branches() -> Vec<String> {
+    git_command(&["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .map(|out| out.lines().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 /// Remove a worktree by absolute path.
@@ -1247,5 +1354,387 @@ branch refs/heads/fix/bug-42
         };
         assert!(matches!(merged, DeleteBranchOutcome::Deleted));
         assert!(matches!(preserved, DeleteBranchOutcome::Preserved { .. }));
+    }
+
+    // --- Resolution and completions (item 2) --------------------------------
+
+    fn entries(porcelain: &str) -> Vec<WorktreeEntry> {
+        parse_worktree_list(porcelain)
+    }
+
+    fn resolved_path(entries: &[WorktreeEntry], name: &str) -> PathBuf {
+        resolve_worktree(entries, name)
+            .unwrap_or_else(|e| panic!("{name} should resolve: {e}"))
+            .path
+    }
+
+    fn ambiguous_paths(entries: &[WorktreeEntry], name: &str) -> Vec<PathBuf> {
+        match resolve_worktree(entries, name) {
+            Err(WorktreeError::AmbiguousWorktree { candidates, .. }) => {
+                candidates.into_iter().map(|c| c.path).collect()
+            }
+            other => panic!("{name} should be ambiguous, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_by_branch_and_by_basename_reach_the_same_worktree() {
+        let list = entries(PORCELAIN_SAMPLE);
+        let auth = PathBuf::from("/tmp/worktrees/my-project/feature-auth");
+
+        assert_eq!(resolved_path(&list, "feature/auth"), auth);
+        assert_eq!(resolved_path(&list, "feature-auth"), auth);
+        // The input is dasherized for the basename comparison.
+        assert_eq!(resolved_path(&list, "Feature/Auth"), auth);
+        assert_eq!(
+            resolved_path(&list, "base"),
+            PathBuf::from("/Users/ken/code/my-project")
+        );
+        assert_eq!(
+            resolved_path(&list, "main"),
+            PathBuf::from("/Users/ken/code/my-project")
+        );
+    }
+
+    #[test]
+    fn resolve_unknown_name_is_not_found() {
+        let list = entries(PORCELAIN_SAMPLE);
+        assert!(matches!(
+            resolve_worktree(&list, "nope"),
+            Err(WorktreeError::WorktreeNotFound(name)) if name == "nope"
+        ));
+        // The main checkout's basename is the repository name, not a worktree name.
+        assert!(matches!(
+            resolve_worktree(&list, "my-project"),
+            Err(WorktreeError::WorktreeNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn two_worktrees_on_one_branch_are_ambiguous() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/main\n\n\
+             worktree /wt/repo/feat-a\nHEAD 2222\nbranch refs/heads/feat/a\n\n\
+             worktree /wt/repo/feat-a-copy\nHEAD 2222\nbranch refs/heads/feat/a\n",
+        );
+        assert_eq!(
+            ambiguous_paths(&list, "feat/a"),
+            vec![
+                PathBuf::from("/wt/repo/feat-a"),
+                PathBuf::from("/wt/repo/feat-a-copy")
+            ]
+        );
+        // Each basename still names exactly one of them.
+        assert_eq!(
+            resolved_path(&list, "feat-a-copy"),
+            PathBuf::from("/wt/repo/feat-a-copy")
+        );
+    }
+
+    #[test]
+    fn basename_collision_across_parent_directories_is_ambiguous() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/main\n\n\
+             worktree /one/spike\nHEAD 2222\nbranch refs/heads/spike/one\n\n\
+             worktree /two/spike\nHEAD 3333\nbranch refs/heads/spike/two\n",
+        );
+        assert_eq!(
+            ambiguous_paths(&list, "spike"),
+            vec![PathBuf::from("/one/spike"), PathBuf::from("/two/spike")]
+        );
+        assert_eq!(resolved_path(&list, "spike/two"), PathBuf::from("/two/spike"));
+    }
+
+    #[test]
+    fn branch_name_colliding_with_another_basename_is_ambiguous() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/main\n\n\
+             worktree /wt/repo/parser-work\nHEAD 2222\nbranch refs/heads/parser\n\n\
+             worktree /wt/repo/parser\nHEAD 3333\nbranch refs/heads/other\n",
+        );
+        assert_eq!(
+            ambiguous_paths(&list, "parser"),
+            vec![
+                PathBuf::from("/wt/repo/parser-work"),
+                PathBuf::from("/wt/repo/parser")
+            ]
+        );
+    }
+
+    #[test]
+    fn ambiguity_error_lists_branch_basename_and_path() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/main\n\n\
+             worktree /one/spike\nHEAD 2222\nbranch refs/heads/spike/one\n\n\
+             worktree /two/spike\nHEAD 3333\ndetached\n",
+        );
+        let message = resolve_worktree(&list, "spike").unwrap_err().to_string();
+        assert!(message.contains("'spike' matches more than one worktree"), "{message}");
+        assert!(
+            message.contains("branch spike/one, directory spike, at /one/spike"),
+            "{message}"
+        );
+        assert!(
+            message.contains("branch (detached), directory spike, at /two/spike"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn base_on_another_branch_while_default_is_checked_out_elsewhere() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/develop\n\n\
+             worktree /wt/repo/main\nHEAD 2222\nbranch refs/heads/main\n\n\
+             worktree /wt/repo/feat-x\nHEAD 3333\nbranch refs/heads/feat/x\n",
+        );
+        assert_eq!(resolved_path(&list, "base"), PathBuf::from("/repo"));
+        assert_eq!(resolved_path(&list, "develop"), PathBuf::from("/repo"));
+        // `main` resolves by actual checkout, not to the base checkout.
+        assert_eq!(resolved_path(&list, "main"), PathBuf::from("/wt/repo/main"));
+
+        assert_eq!(
+            completion_names(&list),
+            ["base", "develop", "main", "feat/x", "feat-x"]
+        );
+    }
+
+    #[test]
+    fn detached_worktrees_resolve_and_complete_by_basename_only() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\ndetached\n\n\
+             worktree /wt/repo/bisect\nHEAD 2222\ndetached\n",
+        );
+        assert_eq!(resolved_path(&list, "bisect"), PathBuf::from("/wt/repo/bisect"));
+        assert_eq!(resolved_path(&list, "base"), PathBuf::from("/repo"));
+        // A detached base checkout offers only `base`; the default branch is not
+        // checked out anywhere, so it is not offered.
+        assert_eq!(completion_names(&list), ["base", "bisect"]);
+    }
+
+    #[test]
+    fn completion_names_offer_branch_and_basename_deduplicated() {
+        let list = entries(
+            "worktree /repo\nHEAD 1111\nbranch refs/heads/main\n\n\
+             worktree /wt/repo/feature-auth\nHEAD 2222\nbranch refs/heads/feature/auth\n\n\
+             worktree /wt/repo/simple\nHEAD 3333\nbranch refs/heads/simple\n\n\
+             worktree /wt/repo/feature-auth-2\nHEAD 2222\nbranch refs/heads/feature/auth\n",
+        );
+        assert_eq!(
+            completion_names(&list),
+            [
+                "base",
+                "main",
+                "feature/auth",
+                "feature-auth",
+                "simple",
+                "feature-auth-2"
+            ]
+        );
+        // Every offered name resolves or reports ambiguity; none is not-found.
+        for name in completion_names(&list) {
+            assert!(
+                !matches!(
+                    resolve_worktree(&list, &name),
+                    Err(WorktreeError::WorktreeNotFound(_))
+                ),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn find_worktree_and_worktree_names_read_the_real_repository() {
+        let repo = temp_repo();
+        let linked = repo.path().join("linked-dir");
+        run_git(
+            repo.path(),
+            &["worktree", "add", linked.to_str().unwrap(), "-b", "feat/linked"],
+        );
+        let _guard = DirGuard::enter(repo.path());
+
+        let by_branch = find_worktree("feat/linked").expect("branch resolves");
+        let by_dir = find_worktree("linked-dir").expect("basename resolves");
+        assert_eq!(by_branch.path, by_dir.path);
+        assert!(find_worktree("base").expect("base resolves").is_main);
+        assert_eq!(
+            worktree_names(),
+            ["base", "main", "feat/linked", "linked-dir"]
+        );
+    }
+
+    // --- create --from and fork-origin records (item 6) ---------------------
+
+    struct ForkStoreCleanup(PathBuf);
+
+    impl Drop for ForkStoreCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    fn fork_store(repo: &Path) -> (PathBuf, ForkStoreCleanup) {
+        let path = crate::fork_origin::fork_origin_path(repo).expect("fork store path");
+        let _ = fs::remove_file(&path);
+        (path.clone(), ForkStoreCleanup(path))
+    }
+
+    fn rev_parse(repo: &Path, rev: &str) -> String {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", rev])
+            .output()
+            .expect("git rev-parse");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn commit_file(repo: &Path, name: &str) {
+        fs::write(repo.join(name), name).expect("write file");
+        run_git(repo, &["add", name]);
+        run_git(repo, &["commit", "-m", name]);
+    }
+
+    /// A repo on `main` with a `feat/theme` branch one commit ahead.
+    fn repo_with_theme_branch() -> tempfile::TempDir {
+        let repo = temp_repo();
+        run_git(repo.path(), &["checkout", "-b", "feat/theme"]);
+        commit_file(repo.path(), "theme.txt");
+        run_git(repo.path(), &["checkout", "main"]);
+        repo
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_from_forks_the_named_branch_and_records_it() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        let result =
+            create_worktree("fix/x", base.path(), Some("feat/theme")).expect("create --from");
+
+        assert_eq!(result.forked_from.as_deref(), Some("feat/theme"));
+        assert!(result.reused_branch_at.is_none());
+        let theme_tip = rev_parse(repo.path(), "feat/theme");
+        assert_eq!(rev_parse(&result.worktree_path, "HEAD"), theme_tip);
+        assert_ne!(theme_tip, rev_parse(repo.path(), "main"));
+
+        let store = crate::fork_origin::ForkOriginStore::load_from(&store_path);
+        let origin = store.get("fix/x").expect("fork origin recorded");
+        assert_eq!(origin.base_branch, "feat/theme");
+        assert_eq!(origin.base_sha, theme_tip);
+        assert!(origin.created_at > 0);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_without_from_forks_and_records_the_current_branch() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        let result = create_worktree("fix/y", base.path(), None).expect("create");
+
+        assert_eq!(result.forked_from.as_deref(), Some("main"));
+        let main_tip = rev_parse(repo.path(), "main");
+        assert_eq!(rev_parse(&result.worktree_path, "HEAD"), main_tip);
+        let store = crate::fork_origin::ForkOriginStore::load_from(&store_path);
+        assert_eq!(store.get("fix/y").unwrap().base_branch, "main");
+        assert_eq!(store.get("fix/y").unwrap().base_sha, main_tip);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_from_with_existing_branch_fails_and_creates_nothing() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        let error = create_worktree("feat/theme", base.path(), Some("main")).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "`feat/theme` already exists, so `--from main` would be ignored. \
+             Drop `--from` to reuse it."
+        );
+        assert!(!base.path().join(repo_name(repo.path())).join("feat-theme").exists());
+        assert!(!store_path.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_reusing_an_existing_branch_records_nothing() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        let result = create_worktree("feat/theme", base.path(), None).expect("reuse");
+
+        assert!(result.reused_branch_at.is_some());
+        assert!(result.forked_from.is_none());
+        assert!(crate::fork_origin::ForkOriginStore::load_from(&store_path).is_empty());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_from_a_missing_or_remote_only_branch_names_it() {
+        let repo = repo_with_theme_branch();
+        // A remote-tracking ref with no local branch of the same name.
+        let main_tip = rev_parse(repo.path(), "main");
+        run_git(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/remote-only", &main_tip],
+        );
+        // A tag must not stand in for a local branch either.
+        run_git(repo.path(), &["-c", "tag.gpgSign=false", "tag", "v1"]);
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        for from in ["no-such-branch", "remote-only", "origin/remote-only", "v1"] {
+            let error = create_worktree("fix/z", base.path(), Some(from)).unwrap_err();
+            assert!(
+                matches!(&error, WorktreeError::FromBranchNotFound(name) if name == from),
+                "{from}: {error:?}"
+            );
+            assert_eq!(
+                error.to_string(),
+                format!("`--from {from}` does not name an existing local branch")
+            );
+        }
+        assert!(!base.path().join(repo_name(repo.path())).join("fix-z").exists());
+        assert!(!store_path.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_on_detached_head_requires_from() {
+        let repo = repo_with_theme_branch();
+        let main_tip = rev_parse(repo.path(), "main");
+        run_git(repo.path(), &["checkout", "--detach", &main_tip]);
+        let base = tempfile::tempdir().expect("base dir");
+        let (store_path, _cleanup) = fork_store(repo.path());
+        let _guard = DirGuard::enter(repo.path());
+
+        let error = create_worktree("fix/d", base.path(), None).unwrap_err();
+        assert!(matches!(error, WorktreeError::DetachedHeadWithoutFrom(_)));
+        let message = error.to_string();
+        assert!(message.contains("HEAD is detached"), "{message}");
+        assert!(message.contains("`fix/d`"), "{message}");
+        assert!(message.contains("--from <branch>"), "{message}");
+        assert!(!store_path.exists());
+
+        let result =
+            create_worktree("fix/d", base.path(), Some("feat/theme")).expect("detached + --from");
+        assert_eq!(result.forked_from.as_deref(), Some("feat/theme"));
+        let store = crate::fork_origin::ForkOriginStore::load_from(&store_path);
+        assert_eq!(store.get("fix/d").unwrap().base_branch, "feat/theme");
+    }
+
+    fn repo_name(repo: &Path) -> String {
+        repo.file_name().unwrap().to_string_lossy().into_owned()
     }
 }

@@ -26,6 +26,7 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 worktree = { path = "../lib", features = ["count-git"] }
 assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+insta = "1"
 predicates = "3"
 serial_test = "3"
 tempfile = "3"

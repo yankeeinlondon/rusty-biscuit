@@ -27,8 +27,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub perf: bool,
 
-    /// Generate shell completions for the specified shell
-    #[arg(long, value_name = "SHELL", hide = true)]
+    /// Print the shell integration (cd wrapper + completions) for a shell
+    #[arg(long, value_name = "SHELL", hide = true, value_parser = parse_shell)]
     pub completions: Option<Shell>,
 }
 
@@ -41,6 +41,10 @@ pub enum Commands {
     Create {
         /// Branch name for the new worktree
         branch: String,
+
+        /// Local branch to fork the new branch from (default: the current branch)
+        #[arg(long, value_name = "BASE", add = ArgValueCompleter::new(complete_local_branches))]
+        from: Option<String>,
 
         /// Create the worktree but don't change into it
         #[arg(long)]
@@ -85,11 +89,28 @@ fn complete_worktree_names(_current: &std::ffi::OsStr) -> Vec<clap_complete::Com
         .collect()
 }
 
+fn complete_local_branches(_current: &std::ffi::OsStr) -> Vec<clap_complete::CompletionCandidate> {
+    worktree::worktree::local_branches()
+        .into_iter()
+        .map(clap_complete::CompletionCandidate::new)
+        .collect()
+}
+
+fn parse_shell(value: &str) -> Result<Shell, String> {
+    let supported = crate::shell_integration::SUPPORTED_SHELLS;
+    if !supported.contains(&value) {
+        return Err(format!("expected one of: {}", supported.join(", ")));
+    }
+    value.parse()
+}
+
 const AFTER_HELP: &str = "\
 Examples:
   wt                    List all worktrees (default)
   wt list               List all worktrees with status
   wt create feature/x   Create a new worktree for branch feature/x
+  wt create fix/y --from feat/theme
+                        Fork fix/y from feat/theme instead of the current branch
   wt create fix/y --stay Create without changing directory
   wt go feature-x       Navigate to a worktree
   wt go base            Navigate back to the base checkout
@@ -98,7 +119,9 @@ Examples:
   wt remove feature-x -ff Remove immediately, no confirmation
   wt remove feature-x -b Remove worktree AND soft-delete its branch
 
-Shell Integration (cd wrapper + completions):
+Shell Integration (cd wrapper + completions; `wt go` needs it):
   source <(wt --completions bash)              Add to ~/.bashrc
   source <(wt --completions zsh)               Add to ~/.zshrc
-  source (wt --completions fish | psub)        Add to config.fish";
+  wt --completions fish | source               Add to config.fish
+  wt --completions powershell | Out-String | Invoke-Expression
+                                               Add to $PROFILE";
