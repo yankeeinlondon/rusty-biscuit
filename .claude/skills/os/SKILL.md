@@ -116,6 +116,8 @@ push mode.
   attached a console and redirected a std handle to `CONOUT$`, so the panic
   message went to that console instead of nextest's pipe. See "Attaching a
   console inside a nextest process" in [windows.md](windows.md).
+- **Green gates that did not test your worktree:** a Bash `cd <area>`
+  followed `CDPATH` into the main checkout. See [macos.md](macos.md).
 - **Red only on the macOS host, L2, with a shell prompt in the captured
   frame:** a host shell-startup prompt swallowed the input; see
   [macos.md](macos.md). Not a repo defect.

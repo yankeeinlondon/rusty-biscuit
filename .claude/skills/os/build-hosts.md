@@ -242,6 +242,12 @@ Do not export `RUSTC_WRAPPER` in a session that touches them: in hardlink mode (
 ZFS without a working clone path; the WSL guest is ext4) a restored artifact is a read-only link
 into the store, and the next unwrapped rebuild fails with "output file ... is not writeable"
 (2026-09-09, 89 such files). Ruling per platform: `docs/kache-strategy.md`.
+On 2026-09-25 the `fix-wt-ux` standing clone on `build-linux` still carried such links:
+archive mode failed while compiling the release `ci-build` tool
+(`target/release/deps/librenderable-*.rmeta is not writeable`). Passing a build flag
+(`--features image`, `--all-features`) takes the native path, which builds only the debug
+profile, and that ran green. The stale links are still there until someone clears that clone's
+`target/release`.
 
 `unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
 `RUSTC_WRAPPER=""` does (measured 2026-09-21):

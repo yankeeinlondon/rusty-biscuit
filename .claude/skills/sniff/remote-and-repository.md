@@ -139,3 +139,17 @@ points on the shared `run_with_deadline` helper.
   private repositories behind 404. Only the exact lookup `get_pull_request`
   keeps "404 means absent". `query_pull_requests` still treats a list 404 as
   exhaustion.
+
+### Blocking open-PR listing
+
+`remote::blocking::open_pull_requests` (and `_with`) lists a repository's open
+PRs as `PrSummary` through the same `run_with_deadline` helper and error
+contract. Both entry points page through the focused client's private
+`pr_list_rows`, which uses `NotFound::Error`; keep new PR list walks on it.
+
+- Filter server-side by the open state (GitHub/Gitea `open`, GitLab `opened`,
+  Bitbucket `OPEN`) and re-check locally with the same per-provider state rule.
+- A GitLab fork MR names its source project only by ID. Resolve each distinct
+  fork once with `projects/{id}`; a 404 there leaves `source_repo: None`
+  instead of failing the list.
+- Callers match a PR to a local branch on source repository *and* branch.
