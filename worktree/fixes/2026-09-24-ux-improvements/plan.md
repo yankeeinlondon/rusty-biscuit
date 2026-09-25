@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-24
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: false
 source_files_during_phase_1: []
@@ -168,6 +168,35 @@ skills_files_updated_during_phase_4:
     - .claude/skills/os/macos.md
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_5:
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/default_target.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree
     - worktree-cli
@@ -574,12 +603,12 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 10 — Parallel, in the library
 
-- [ ] **Comparison-cache generalization**
+- [x] **Comparison-cache generalization**
     - The key becomes `(target_tip, branch_tip, version)`.
     - Bump `CACHE_FORMAT_VERSION`.
     - Serves the `-> {default}` column, the `-> parent` column, and the caption (`rev-list --left-right --count`).
     - Update the worktree skill's cache sentence.
-- [ ] **List data model**
+- [x] **List data model**
     - Read the default tip, the `origin/<default>` tip, the fork-parent tips, and whether each parent exists from one `git for-each-ref refs/heads refs/remotes`, replacing `default_tip_sha`.
     - Use the Phase 3 target-selection function.
     - Per branch, compute `already in`, `clean`, or `conflicts` against the target and, when the parent is not the default branch, against the parent.
@@ -587,7 +616,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
     - Build the fork tree from the fork-origin store: parent rows without worktrees, deleted parents, root-level branches with no record, and detached rows.
     - Prune stale fork records during the existing save.
     - Keep the `parse_worktree_state` / `fill_worktree_statuses` seam intact.
-- [ ] **PR cache and deadline**
+- [x] **PR cache and deadline**
     - Store per-repository PR results with their fetch time (R9).
     - Skip the network within 60 s of the last fetch.
     - Otherwise run sniff's open-PR request on a thread in parallel with the git work, under a 300 ms deadline.
@@ -597,7 +626,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 11 — CLI rendering (depends on Wave 10)
 
-- [ ] **The table**
+- [x] **The table**
     - Rewrite the table rendering in `worktree/cli/src/commands/list.rs`:
         - the caption with the count in yellow
         - the Worktree column with dot glyphs and `base repo` in dim italic; the current worktree's name in bold
@@ -609,7 +638,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - the current row highlighted through the new `Table` API
     - Retire the 120-column suppression rule.
     - L1 snapshots for every caption variant, cell, badge placement, and the legend.
-- [ ] **Graph handoff**
+- [x] **Graph handoff**
     - `git_graph.rs` gathers typed facts only: commits per line with full SHAs, ref tips, and open PRs.
     - Build a `GitGraph` from those facts.
     - Delete `default_graph_width` and the CLI's Mermaid text building.
@@ -618,18 +647,18 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 12 — Performance and L2 (parallel; depends on Wave 11)
 
-- [ ] **Performance gates**
+- [x] **Performance gates**
     - Run the existing `perf_command_sla`, `cache_warm_path`, and `cache_cold_path` tests and the `list_status` bench against the ratified targets.
     - Add cases for:
         - the network down
         - a stubbed slow PR request that hits the deadline
         - a fresh PR cache that makes no request (assert through a call counter)
-- [ ] **L2 list**
+- [x] **L2 list**
     - Update `level2_list_verbose.rs` and `list_output.rs` for the new table and graph in a real terminal.
 
 ### Validation checkpoint
 
-- [ ] `just test`, `just test-l2`, and `just lint` pass in `worktree`. All of acceptance criterion 5 is green.
+- [x] `just test`, `just test-l2`, and `just lint` pass in `worktree`. All of acceptance criterion 5 is green.
 
 ## Phase 6 — Documentation, cross-OS evidence, and hand-off
 

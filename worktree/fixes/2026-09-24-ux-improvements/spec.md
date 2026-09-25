@@ -29,39 +29,40 @@ human_review_items:
     - |-
         **Confirm the fourteen proposed decisions from Phase 1 (Decisions 20–33 at the end of this spec).**
 
-        Why now: Phases 2–4 are built on these decisions as proposed, and Phase 5 relies on the last one still open.
+        Why now: Phases 2–5 are built on all fourteen as proposed, and Phase 6 writes them into the user documentation as shipped behavior. Overriding one after Phase 6 means reworking code *and* docs.
 
-        - **Built in Phases 2–4:** 20 (the handoff token), 21 (the live remote check), 22 (the 2-second PR wait), 23 (the hidden `--handoff` flag), 24 (the Windows lock check), 25–28, 30 (landing directory), 31 (ignored files), 32 (the graph's natural width), and 33 (PowerShell encoding).
-        - **Next up:** Phase 5 uses 29 (terminal rows for the graph's height cap; about 12 rows when every output stream is redirected).
-
-        Overriding a built decision now means reworking finished code. Decision 32 was built in Phase 4 as proposed: diagram widths come from the renderer's own measurement, and a test checks that it matches the drawn image exactly.
+        - Phase 5 used Decision 29 (the graph is capped at about half the terminal's rows) and Decision 22's 300 ms wait for `wt list`'s PR request.
+        - Every one of them is backed by a measurement or a documented API, and every test in the touched packages passes with them.
 
         Options:
 
-        - **Confirm all fourteen as written.** Pro: no rework, and Phase 5 starts on settled ground. Con: none known; each is backed by a measurement or a documented API.
-        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the overridden parts of Phases 2–4 must be reworked, and the next agent must adjust the plan.
+        - **Confirm all fourteen as written.** Pro: no rework; Phase 6 documents settled behavior. Con: none known.
+        - **Confirm most and override some.** Pro: you keep control. Con: the overridden parts of Phases 2–5 must be reworked before Phase 6 documents them.
 
-        Recommendation: **confirm all fourteen.** None of them widens scope, and every test in the touched packages passes with them as written.
+        Recommendation: **confirm all fourteen.**
+    - |-
+        **Two small departures from the spec's wording in the new `wt list` (Phase 5). Keep them?**
+
+        Why now: Phase 6 describes `wt list` in the README and `docs/cli/list.md`; it should describe the behavior you want.
+
+        1. **PR badges are clickable links only in terminals that support links.** The spec says terminals without link support should show the link as visible text, `[PR #99](https://…)`. In practice the table component never splits a long word, so one URL made the whole table fail with "Table could not be rendered in 120 columns". Now those terminals show the badge without the URL.
+           - *Keep (recommended):* the table always renders; the PR number is still shown. Con: no URL on those terminals.
+           - *Follow the spec literally:* the URL is visible, but the table can disappear on ordinary widths. A real fix would need the table component to break long words, a separate change.
+        2. **The graph no longer disappears below 80 columns.** The old cutoff is gone, because the spec's sizing rule says a narrow terminal shows a smaller graph (the graph trims commits, then shrinks).
+           - *Keep (recommended):* matches the spec's sizing rule. Con: on a very narrow terminal the graph is small.
+           - *Restore the cutoff:* no graph under 80 columns, as before.
+
+        Recommendation: **keep both.** Smaller notes, no decision needed: the table keeps square corners (the component has no rounded style), and `wt list -v` now shows its commit list whenever a non-default branch is checked out, including in the base checkout.
 message_to_agent: |-
-    Phase 4 (dependencies for the table and graph) is done; see "## Phase 4" in implementation-log.md. Facts the Phase 5 agent needs:
-    - Decisions 20-33 are still PROPOSED. Phase 5 uses Decision 29 (terminal rows via biscuit-terminal's size detection; half of them caps the base-view graph). `GitGraph` already applies the cap from `GraphViewport::for_terminal(term, layout)`, which reads `term.height()`.
-    - CDPATH TRAP (cost a full gate cycle): agent shells here export a CDPATH that includes the MAIN checkout, so a Bash `cd worktree` from this worktree's root lands in /Users/ken/coding/personal/rusty-biscuit/worktree and `just test` there tests the wrong tree while reporting green. In scripts, `unset CDPATH` and cd to absolute paths. Check the first log line. It is recorded in the os skill's macos.md.
-    - Graph handoff API (biscuit_terminal::components::git_graph, `image` feature):
-      - `GitGraph::new(default_branch, Vec<LaneEntry>)`, where `LaneEntry::Commit(full_sha)` or `LaneEntry::Elided(n)`, oldest first.
-      - `.with_line(GraphLine::new(branch).with_parent(p).forked_at(sha).with_entries(..).with_created_at(t).with_last_active(t))`, `.with_ref(name, sha)`, `.with_pull_request(GraphPullRequest{number, source_branch, target_branch})`, `.with_current_branch(b)`, and `.with_width(ImageWidth)` for `--width`.
-      - The component owns the lane/tag rule, lane order (by created_at), elision, and fit-by-trimming. `--width` with a non-scale width disables width trimming.
-    - What the caller must supply for the lane/tag rule:
-      - Pass the local default branch and `origin/<default>` as `with_ref`, or no tags appear for them.
-      - When `origin/<default>` is only AHEAD of the local tip (the PR-driven case), put its extra commits on the default lane (the lane is the descendant tip), not in a line.
-      - Pass `origin/<default>` as a `GraphLine` only when it has DIVERGED; that is what gives it a lane.
-      - A branch already in its parent is a `GraphLine` with no entries and `fork_sha` = its tip, and it becomes a tag.
-      - PR tags match `source_branch` only, so filter PRs to your own source repository before passing them (a fork's same-named branch must not get the badge).
-    - mermaid-rs-renderer's parser always names the first lane "main", whatever the default branch is called (the default branch's real name shows as a tag). A non-default branch literally named "main" is drawn as "main~".
-    - `default_graph_width` still exists in worktree/cli/src/commands/list.rs. Phase 4 only added an `ImageWidth::Scale(_)` arm to its `fits` match. `MermaidDiagram` now defaults to `ImageWidth::Scale(1.0)`; wt passes an explicit width today, so its output is unchanged until you hand off to `GitGraph`.
-    - Performance: `GitGraph::plan` measures each candidate with mermaid-rs-renderer, whose text metrics use fontdb system fonts. Width trimming costs one measurement per trimmed commit, and height trimming one per added lane. Measure this in Phase 5's perf gates. It is on the image path only, and the table must not call it.
-    - Open PRs: `sniff::remote::blocking::open_pull_requests(remote_url, deadline) -> Result<Vec<PrSummary>, PrUnavailable>`. `PrSummary { number, html_url: Option, source_repo: Option<"owner/repo" or GitLab project path>, source_branch: Option, target_branch: Option }` is non_exhaustive. Auth, 404, timeout, and over-limit paging are all `Err`, never an empty list, so never cache an `Err` as "no PRs". Call it from a plain thread; it refuses to run inside a Tokio runtime.
-    - Row emphasis: `Table::highlight_row(body_row_index, renderable::color::Color)` (0-based body row, out of range is a no-op). Terminal only; it composes with striping.
-    - Known and not caused by this work (from Phase 3): under `BISCUIT_TEST_LEVEL_REQUIRED=2`, `level2_list_verbose::level2_graph_emits_image_protocol_bytes_in_kitty` fails on this Mac because Kitty is not installed.
+    Phase 5 (the `wt list` table and graph) is done; see "## Phase 5" in implementation-log.md. What Phase 6 needs:
+    - STALE DOCS YOU MUST REWRITE (left for the plan's drift pass): `worktree/README.md` and `worktree/docs/cli/list.md` still describe the old five-column table, the commit-count width table, and the 80-column graph cutoff. The current behavior is in `worktree/docs/git-graph.md` (rewritten) and in `worktree/cli/src/commands/list_table.rs` / `cli/tests/list_table.rs` (the snapshot `list_table__the_spec_example_renders_as_ruled.snap` is the table). `worktree/docs/performance-testing.md` is already updated, including the 2026-09-25 re-measured targets.
+    - Phase 5 decisions to document (and see the spec's second human_review item): PR badges link only when the terminal supports OSC 8 (no visible URL otherwise); no minimum terminal width for the graph; `-w/--width` replaces the scale-derived width and disables trimming; `wt list -v` follows "a non-default branch is checked out"; the base view is "the default branch is checked out"; the PR age line appears only when a request failed and stored results stand in.
+    - LINUX CROSS-CHECK: archive mode on build-linux still fails before any test on the stale read-only `target/release/deps/librenderable-*.rmeta` links in the standing clone. Add a build flag to take the native path: `just cross-check worktree-cli --os linux --no-default-features` (worktree-cli and worktree have no default features, so nothing else changes). Native mode runs without a tier filter, so the `perf_` gates run there too (they passed).
+    - WINDOWS: `dirs::cache_dir()` ignores HOME, so tests that seed the PR or fork store use the real per-user path there (see `MixedFixture::pr_store` and `list_output.rs`'s `fork_store`). All new tests passed on native Windows.
+    - PR tests never touch the network: `cli/tests/perf_support::ProxyStub` sets `HTTPS_PROXY` to a hanging or refusing local port (sniff's reqwest honors it; tokens come only from env vars, which the tests remove).
+    - `perf_support`'s own unit tests are skipped by `just test` because the module name starts with `perf_`; they run in `just test-perf`.
+    - Still true: the CDPATH trap (unset CDPATH, absolute paths); Kitty is not installed on the Mac, so the Kitty L2 test skips (and fails under BISCUIT_TEST_LEVEL_REQUIRED=2); `.claude/skills/biscuit-terminal/mermaid-diagrams.md` still describes the `mmdc` CLI (noted in Phase 4, out of scope so far).
+    - WSL2 was not cross-checked in Phase 5; Phase 6's cross-OS task covers it.
 ---
 
 # Worktree UX improvements

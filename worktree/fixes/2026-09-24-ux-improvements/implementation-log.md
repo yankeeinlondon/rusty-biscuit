@@ -167,6 +167,35 @@ skills_files_updated_during_phase_4:
     - .claude/skills/os/macos.md
     - .claude/skills/os/SKILL.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_5:
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/default_target.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree
     - worktree-cli
@@ -623,3 +652,102 @@ Placement: every new biscuit-terminal and biscuit-visualized test is a lib unit 
   - `os/macos.md` and `os/SKILL.md` (`CDPATH`), and `os/build-hosts.md` (the stale kache links in the standing clone).
 - **The worktree skill is unchanged.** `wt` does not use `GitGraph` or `open_pull_requests` yet (that is Phase 5). The one `wt` source change is a match arm.
 - **Observed and not fixed** (out of scope): `.claude/skills/biscuit-terminal/mermaid-diagrams.md` still describes rendering through the `mmdc` CLI and recommends installing `@mermaid-js/mermaid-cli`. Rendering has been pure Rust through biscuit-visualized for some time.
+
+## Phase 5
+
+The `wt list` table and graph (item 5): the generalized comparison cache, the list data model, the PR store, the redesigned table, and the handoff to `GitGraph`.
+
+### Starting conditions
+
+- Decisions 20–33 are still **proposed**; this phase uses Decision 29 (terminal rows) through `GitGraph`'s existing `GraphViewport::for_terminal`.
+- Shell scripts `unset CDPATH` and use absolute paths (the Phase 4 trap).
+
+### Library (Wave 10)
+
+- `cache.rs`: `CacheKey { target_tip_sha, branch_tip_sha, version }`, `CACHE_FORMAT_VERSION = 2`. A version-1 file (the old `default_tip_sha` key) loads empty (`cache_written_with_the_version_one_key_shape_loads_empty`).
+- `default_target.rs`: the rule moved into the pure `choose_default_target(default, local, remote, contains)`; `select_default_target` (used by `wt remove`) calls it with `merge-base --is-ancestor`. `wt list` answers `contains` from the cached caption counts, so a warm list runs no `merge-base`.
+- New `listing.rs`:
+  - `RefTips` from one `for-each-ref --format=%(objectname) %(refname) refs/heads refs/remotes` (symbolic `origin/HEAD` skipped). It replaces `default_tip_sha`, which is deleted.
+  - `compare_cached(cache, target_sha, branch_sha)`: `rev-list --left-right --count` and a speculative `merge-tree` on full SHAs, in parallel. A `rev-list` failure is `None` and is not cached (the old code turned it into "0 ahead, 0 behind, clean").
+  - `Comparison::merge_state` (`AlreadyIn` when ahead = 0, else `Clean`/`Conflicts`), `Caption`/`CaptionState` (in sync, ahead, behind, diverged), `ParentComparison` (`NotApplicable`, `Deleted`, `Compared`).
+  - `build_tree` (pure): default branch first, records nest branches under parents, parent rows without worktrees, deleted parents as roots with dotted children, no-record branches at the root in worktree order, detached rows last. Siblings follow `created_at`, then name. A record cycle is cut so no branch disappears; two worktrees on one branch give two rows.
+- `worktree.rs`: `WorktreeStatus` is now `{ entry, dirty }`; `WorktreeList` gains `target`, `caption`, `tree`, `comparisons` (by branch), `refs()`, and `fork_origins()`. `fill_worktree_statuses` spawns the dirty walks first, then the caption, the target, and one thread per branch comparison. The `parse_worktree_state` / `fill_worktree_statuses` seam is kept.
+  - Fork records of deleted branches are pruned in the same pass, **only after a successful `for-each-ref`** (an empty ref set would make every record look deleted).
+- New `pull_requests.rs`: `<repo hash>.prs.json` (format 1, `fetched_at`, `source_repo`, PRs). `open_pull_requests(store, now, connect)` returns stored results inside the 60 s window without calling `connect` (so no git call either); otherwise one request under 300 ms; on failure the stored results with `stale = true`; a failure is never written. `PrListing::for_branch` matches source repository (ASCII case-insensitive) **and** branch; a PR without a source repository matches nothing. `placement(target, parent, default)` picks the parent column, the default column, or beside the branch. `SniffOpenPrSource` wraps `sniff::remote::blocking::open_pull_requests`.
+- Skill: the worktree skill's cache paragraph is replaced by a `wt list` section (cache key, seam, prune guard, PR store).
+
+### CLI rendering (Wave 11)
+
+- New `cli/src/commands/list_table.rs` (`pub`, so `tests/list_table.rs` can snapshot it; snapshots cannot live in the shared modules' unit tests, which compile twice). It is pure over `TableFacts` (from `WorktreeList` plus the `PrListing`):
+  - Caption: `[main] is N commits behind/ahead of [origin/main]`, `is in sync with`, and `has diverged from [origin/main]: N commits ahead, M commits behind`; only the counts are yellow; singular "commit"; no caption without both refs.
+  - Worktree column: `○` dim, `●` yellow (other files), `●` orange (source); `base repo` dim italic (bold italic when current); the current name bold.
+  - Branch column: guides and `├─`/`└─` connectors from the tree rows, gray when the branch merges cleanly into its parent (the target comparison under the default branch), red when it conflicts, dim `├┄`/`└┄` under a deleted parent; the default branch as a local badge; a deleted parent dim, italic, struck through, plus `(deleted)`; `detached @ <sha>` dim italic.
+  - Target columns: the header is `-> ` plus a remote badge (`origin/…`) or a local badge; cells `already in`/`clean` (dim italic), `conflicts` (red), `—` (dim) on the default and detached rows, `parent deleted` (gray), empty for a parent row without a worktree, and `?` when git failed (never a fake answer).
+  - Badges: local blue-800, remote violet-800, PR emerald-800, one space of padding. PR badges follow `placement`.
+  - Legend (two lines) and the dim `PRs as of N min ago` line (only for stale stored results; `less than a minute`, `N h`, `N days` variants).
+  - The current row is highlighted with `Table::highlight_row` (rgb 38,42,54 dark / 234,238,246 light).
+- `list.rs`: `run_pipeline` spawns the PR thread (`pr gather` stage) and the graph/verbose thread right after `parse_worktree_state`, runs `fill_worktree_statuses`, then renders caption/table/legend, the graph, and the verbose section. The PR source is injected (`PrConnect`); unit tests pass `no_prs`.
+- `git_graph.rs` rewritten: `GatherInput::from_list`, `gather(input, needs_graph, needs_verbose) -> (Option<GraphFacts>, Option<VerboseData>)`, and `GraphFacts::to_git_graph(prs, width)`. Deleted: `CommitId`, `display_sha`, `BranchGraphData`, `BaseGraphData`, `worktree_graph`, `base_graph`, `elision_commit`, `default_graph_width`, `MIN_GRAPH_TERMINAL_WIDTH`, `graph_eligible`. Verbose helpers (`format_commit` and friends) are unchanged.
+  - The default lane ends at the descendant default tip (one `merge-base` when local and origin differ); a diverged `origin/<default>` is a line of its own; both tips are refs. The focused view adds a line for a recorded non-default fork parent; the base view nests a line under its recorded parent when the parent is drawn. `last_active` is the tip's commit time (from `%ct` in the same `log`), `created_at` from the fork record. A `+N` square is counted only when a line fills its 5-commit window.
+  - PRs reach `GitGraph` only through `PrListing::for_branch`, because `GitGraph` matches by branch name alone.
+- `worktree/docs/git-graph.md` is rewritten for this design (the old text described a component that was never built). `worktree/docs/performance-testing.md` is corrected where it named deleted functions and the old cache key, and gains a "PR Request" section.
+
+### Decisions made during implementation (not in the spec)
+
+- **No minimum terminal width for the graph.** The old 80-column gate (`MIN_GRAPH_TERMINAL_WIDTH`) is removed: the spec's sizing rule says a narrow terminal shows a smaller graph, which `GitGraph` does by trimming and then clamping. `run_pipeline_gathers_the_graph_on_a_narrow_image_terminal` replaces the gate's tests.
+- **PR badges are links only where the terminal shows OSC 8 links.** The spec keeps Prose's degradation of links to visible `[text](url)` on other terminals. With it, `Table` (which never breaks inside a word) needed 128 content columns for the spec example and printed "Table could not be rendered in 120 columns" instead of the table. The badge text stays; only the URL is dropped (`pr_badges_link_through_osc_8_and_print_no_url_without_it`).
+- **Square table corners.** The spec's mock-up shows rounded corners; `Table` has no rounded border style, and the corners are not among the ruled cell/caption/badge/legend facts. Not changed.
+- **Verbose follows the current branch, not the checkout.** `wt list -v` shows the verbose section whenever the current branch is not the default branch (previously: whenever the current worktree was not the main checkout). The base view is likewise "the default branch is checked out".
+- **Tree sibling order** is the fork record's `created_at` (whole seconds), then name; branches created in the same second sort by name.
+
+### Performance and L2 (Wave 12)
+
+- **PR requests in tests never leave the host.** sniff's reqwest client honors `HTTPS_PROXY` (verified: the stub received `CONNECT api.github.com:443`), and provider tokens come only from environment variables (`GH_TOKEN`, `GITHUB_TOKEN`, …), which the tests remove. `perf_support` gains `ProxyStub::hanging()` (accepts, never answers, counts connections) and `ProxyStub::refusing()` (a closed port: the network down), `MixedFixture::with_github_origin`, `wt_command_via(proxy)`, `pr_store()`, `seed_pr_store()`, and `stage_from_perf()`.
+  - On Windows the user cache directory does not follow `HOME`, so `pr_store()` (and `list_output.rs`'s `fork_store()`) use the real per-user path there, keyed by the temporary repository, and the tests delete what they seed.
+- New L1 behavior tests through the real binary (`tests/list_prs.rs`): a fresh store makes **zero** connections and shows its badge; a stalled request stops at the deadline, shows the stored badge with "PRs as of 12 min ago", and leaves the store byte-for-byte unchanged; a refused connection shows the table with no badges and creates no store, and with a store it shows the stored badge with its age.
+- New perf gates (`tests/perf_pr_request.rs`, `perf_` prefix, so they run in `just test-perf` like the existing gates) and the re-measured table are in `worktree/docs/performance-testing.md`. Every `pr gather` in the stalled case was 309–317 ms (the 300 ms deadline plus runtime setup).
+- `level2_list_verbose.rs`: both tmux tests now assert the redesigned table (`-> parent` header, `base repo`, the feature row's `○` and `clean`, both legend lines). `list_output.rs` asserts the new table byte for byte (with an isolated home) and adds `create_from_records_the_parent_that_list_draws`: `wt create --from` writes the record, `wt list` nests the branch, answers `clean` / `conflicts`, and prunes a deleted branch's record on disk.
+
+### Requirement-to-test mapping (acceptance criterion 5 and this phase's tasks)
+
+| Requirement | Tests | Level |
+|---|---|---|
+| Cache key `(target_tip, branch_tip, version)`, version bumped; an old-shape file is not reused | `cache::tests::cache_written_with_the_version_one_key_shape_loads_empty` (the exact version-1 JSON), `cache_round_trip_atomic`, `cache_wrong_version_returns_empty` | L1 |
+| One cache serves the caption and both target columns; a warm run has no `rev-list` or `merge-base` | `listing::repo_tests::one_cache_serves_the_caption_and_both_target_columns`, `worktree::tests::list_worktrees_warm_run_*`, `*_tip_advance_invalidates_cache_entry` | L1 |
+| Tips from one `for-each-ref`, replacing `default_tip_sha` | `worktree::tests::list_worktrees_reads_tips_from_one_for_each_ref`, `listing::tests::ref_tips_parse_local_and_remote_branches_and_skip_symbolic_heads` | L1 |
+| Target selection (Phase 3 rule) and every caption state, with a real bare origin | `listing::repo_tests::the_caption_and_target_follow_origin_in_every_direction` (in sync, behind, diverged, ahead), `default_target::tests::choosing_from_tips_follows_the_same_rule`, `listing::tests::caption_states_cover_every_direction` | L1 |
+| `already in` / `clean` / `conflicts` against the target | `listing::repo_tests::the_target_column_reports_already_in_clean_and_conflicts`, `listing::tests::merge_state_reads_ahead_first` | L1 |
+| `-> parent`, deleted parents, tree rows, prune during the save | `listing::repo_tests::the_parent_column_and_tree_follow_the_fork_records_and_prune_stale_ones`; end to end through `wt create --from`: `list_output::create_from_records_the_parent_that_list_draws` | L1 |
+| Fork tree: spec example, parent rows without worktrees, default row when the base is elsewhere, roots, sibling order, guides, cycles, duplicates, detached | `listing::tests::*` (11 tests; `the_spec_example_builds_the_spec_tree` is the spec's table row for row) | L1 |
+| PR store: 60 s window skips the request (call counter), 300 ms deadline, stale results with age, never cache a failure, corrupt/other-version/future files | `pull_requests::tests::*` (8 tests); through the binary: `list_prs::a_fresh_pr_store_makes_no_request_and_shows_its_badges` (0 connections), `a_stalled_pr_request_stops_at_its_deadline_and_shows_stored_badges_with_their_age`, `with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored` | L1 |
+| Match by source repository **and** branch; badge placement by target | `pull_requests::tests::prs_match_by_source_repository_and_branch`, `badges_follow_the_prs_target`; rendered: `list_table::pr_badges_follow_the_prs_target_and_skip_forks`; graph: `git_graph::tests::the_git_graph_tags_own_prs_only_and_takes_the_width_override` | L1 |
+| Table cells, caption variants, badges, legend, row emphasis (L1 snapshots) | `list_table::the_spec_example_renders_as_ruled` (snapshot), `caption_variants_read_as_ruled` (all four states plus singular and none), `only_the_caption_count_is_colored_yellow`, `every_cell_kind_renders_as_ruled`, `an_unknown_comparison_is_a_question_mark_not_an_answer`, `the_target_header_names_a_remote_or_local_target`, `styles_follow_the_design` (highlight, bold, red connector, strikethrough, dot colors), `pr_badges_link_through_osc_8_and_print_no_url_without_it`, `the_legend_explains_both_columns`, `the_pr_age_line_appears_only_for_stored_results`; real binary: `list_output::list_output_is_the_redesigned_table` | L1 |
+| Graph handoff: typed facts with full SHAs, fork parents, origin ahead/diverged, elision, criss-cross, shared merge-base, `--width` override | `git_graph::tests::*` (9 tests) | L1 |
+| Pipeline: PR stage beside the git work, graph gathered on a narrow image terminal, no graph work without image support | `list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal`, `run_pipeline_without_image_support_or_verbose_gathers_no_graph`, `run_pipeline_graph_git_calls_begin_before_list_gather_completes`, and the kept stage tests | L1 |
+| `list gather` within warm 120 / cold 300 ms and full `wt list` within 1 s, including the network down and a PR request at its deadline | `perf_cache_warm_list_gather_meets_sla`, `perf_cache_cold_list_gather_meets_sla`, `perf_full_command_non_image_meets_sla`, `perf_pr_request::perf_list_meets_sla_with_the_network_down`, `perf_list_meets_sla_when_the_pr_request_hits_its_deadline`; bench `list_status` | perf |
+| Table and graph in a real terminal | `level2_list_verbose::level2_list_verbose_renders_table_and_verbose_in_tmux`, `level2_list_verbose_renders_with_graph_path_active` (both assert the new table); `level2_graph_emits_image_protocol_bytes_in_kitty` | L2 |
+
+Placement: every new test is compiled by a declared target (lib unit tests, `commands::*::tests` in both CLI targets, and auto-discovered `cli/tests/*.rs`; worktree-cli does not set `autotests = false`). No behavior test carries a tier marker. The two new timing gates start with `perf_`, like the existing gates, so `just test` leaves them to `just test-perf`. `just check-tier-coverage worktree`: 0 stranded. No feature gates were added. No test reads a repository file.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `just test` (worktree) | 286 passed, 17 skipped. The skips are the 7 `perf_` gates plus `perf_support`'s own parser tests (its module name starts with `perf_`) in each of the 5 binaries that include it. |
+| `just test-l2` (worktree) | 9 passed. `level2_graph_emits_image_protocol_bytes_in_kitty` skips itself here because Kitty is not installed (known since Phase 3). |
+| `just test-perf` (worktree) | all green: warm 12.8 ms, cold 23.6 ms, full 55.7 ms, network down 21.0 / 10.5 / 52.9 ms, stalled PR 11.6 ms warm and 359.7 ms full |
+| `just lint` (worktree), plus `cargo clippy --all-targets` | clean |
+| `cargo bench --bench list_status` (short window) | `list_status/warm` 79 ms on this checkout |
+
+### Cross-OS
+
+- **Native Windows** (`just cross-check worktree-cli --os windows`, CI's L1 archive mode): 160 passed, 21 skipped (the `perf_` family). Every new test ran, including `list_prs` (the proxy stub and the Windows cache-path branch) and `list_output::create_from_records_the_parent_that_list_draws`. `worktree` lib: 122 passed (the 2 `cfg(unix)` tests do not compile there).
+- **Linux**: archive mode failed before any test, on the stale read-only `librenderable-*.rmeta` link in the standing clone (the kache trap recorded in `build-hosts.md` in Phase 4). `--no-default-features` (worktree-cli has no default features) takes the native path: 179 passed, with no tier filter, so the perf gates ran too. `worktree` lib: 124 passed.
+- **WSL2** was not cross-checked. Nothing here is WSL-specific, and the nightly schedule covers WSL2.
+
+### Docs and skills
+
+- Rewritten: `worktree/docs/git-graph.md`. Updated: `worktree/docs/performance-testing.md` (deleted function names, the cache key, a "PR Request" section, and the re-measured targets).
+- Skill: `.claude/skills/worktree/SKILL.md` gains a `wt list` section (cache key, the parse/fill seam, the prune guard, the PR store, `list_table`, the graph handoff, and the proxy-stub test technique).
+- **Left for Phase 6 (the plan's docs drift pass):** `worktree/README.md` and `worktree/docs/cli/list.md` still describe the old table, the automatic width table, and the 80-column graph cutoff.
+- No `cargo fmt` was run. No crate was added, so `docs/dependencies.md` and `Cargo.lock` are unchanged.
