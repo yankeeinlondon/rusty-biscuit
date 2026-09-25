@@ -87,6 +87,28 @@ fn temp_repo_with_feature_worktree() -> (tempfile::TempDir, PathBuf) {
     (parent, wt_path)
 }
 
+/// The redesigned table in a real terminal: the target and parent headers,
+/// the base-repo row, the feature row with its dirty dot and merge answer,
+/// and both legend lines.
+fn assert_redesigned_table(frame: &CapturedFrame) {
+    let plain = &frame.plain;
+    for expected in [
+        "-> parent",
+        "base repo",
+        "wt-feature",
+        "merges cleanly into parent",
+        "uncommitted source files",
+    ] {
+        assert!(plain.contains(expected), "expected {expected:?} in the table.\nplain:\n{plain}");
+    }
+    let feature_row = plain
+        .lines()
+        .find(|line| line.contains("wt-feature") && line.contains('│'))
+        .unwrap_or_else(|| panic!("no feature row.\nplain:\n{plain}"));
+    assert!(feature_row.contains("○ wt-feature"), "clean dot: {feature_row}");
+    assert!(feature_row.contains("clean"), "merge answer: {feature_row}");
+}
+
 /// Capture the pane including scrollback history, because the table + graph
 /// image + verbose section may exceed the visible pane height.
 fn capture_with_scrollback(harness: &TmuxHarness) -> CapturedFrame {
@@ -130,11 +152,7 @@ fn level2_list_verbose_renders_table_and_verbose_in_tmux() {
 
     let frame = capture_with_scrollback(&harness);
 
-    assert!(
-        frame.plain.contains("Worktree") || frame.plain.contains("Branch"),
-        "expected table headers in captured pane.\nplain:\n{}",
-        frame.plain,
-    );
+    assert_redesigned_table(&frame);
     assert!(
         frame.plain.contains("feature-test"),
         "expected 'feature-test' branch name in verbose output.\nplain:\n{}",
@@ -193,11 +211,7 @@ fn level2_list_verbose_renders_with_graph_path_active() {
     let frame = capture_with_scrollback(&harness);
 
     // Status table must survive the graph path.
-    assert!(
-        frame.plain.contains("Worktree") || frame.plain.contains("Branch"),
-        "expected table headers even with graph path active.\nplain:\n{}",
-        frame.plain,
-    );
+    assert_redesigned_table(&frame);
 
     // Verbose section: the feature branch name must still appear.
     assert!(

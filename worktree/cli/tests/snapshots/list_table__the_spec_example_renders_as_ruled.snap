@@ -1,0 +1,23 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "plain(&Example::new())"
+---
+
+  main  is 7 commits behind  origin/main
+
+┌───────────────────┬──────────────────────────────────┬──────────────────┬─────────────────────┐
+│ Worktree          │ Branch                           │ ->  origin/main  │ -> parent           │
+├───────────────────┼──────────────────────────────────┼──────────────────┼─────────────────────┤
+│ ○ base repo       │  main                            │ —                │ —                   │
+│ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean  PR #99    │ —                   │
+│ ● feat-theme      │ ├─ feat/theme                    │ clean            │ —                   │
+│ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean            │ conflicts  PR #104  │
+│ ○ old-cleanup     │ └─ chore/old-cleanup             │ already in       │ —                   │
+│ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean            │ —                   │
+│                   │ experiments (deleted)            │                  │                     │
+│ ● spike-parser    │ └┄ spike/parser                  │ conflicts        │ parent deleted      │
+│ ● bisect          │ detached @ a1b2c3d               │ —                │ —                   │
+└───────────────────┴──────────────────────────────────┴──────────────────┴─────────────────────┘
+
+ Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
+ Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted
