@@ -39,6 +39,11 @@ compatible archived phase, OS, runner class, and request shape.
   `a_missing_root_keeps_the_callers_counters` pins it.
 - Rayon/spawned workers explicitly inherit or pool the collector.
 - Add a collector whenever adding a new parallel execution site.
+- To prove every visitor flushed, count each admitted entry from a
+  `#[cfg(test)]` hook through `increment_counter`, which is thread-buffered,
+  and compare the total with a serial entry count. `increment_counter_dynamic`
+  writes to the collector directly, so it cannot detect a lost flush. See
+  `nested.rs` `every_visitor_flushes_its_work_into_the_request`.
 
 If a counter drops after code adds work, first suspect missing worker
 propagation.
@@ -95,5 +100,12 @@ inventing a second Sniff increment.
   walk yields it as a directory. Check root-entry parity when converting a
   walker (`2026-09-20-repo-perf` `evidence/spike.md`). On a tiny tree, the
   default parallel policy may also run every callback on one thread.
+- With `git_global(true)`, `ignore` reads the global excludes file through the
+  process's `HOME`/`USERPROFILE` and `XDG_CONFIG_HOME`, so a Git-root walk
+  fixture inherits the host's global ignores. Assert Git ignore rules in a
+  child test process with a disposable home
+  (`git_ignore_rules_apply_under_an_isolated_git_configuration`), never by
+  mutating this process's environment. Outside a Git repository, `.gitignore`
+  and the global excludes do not apply; `.ignore` still does.
 - The previously evaluated small hot-path changes were below the project
   threshold. Revisit them only with new counter or profile evidence.
