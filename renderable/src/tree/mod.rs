@@ -38,8 +38,8 @@ pub use attrs::{
     ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, DisclosureStyleHints,
     HintNamespace, HrAlignment, HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading,
     LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs,
-    ProgressHints, SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableTerminalHints,
-    TaskHints, TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
+    ProgressHints, SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableRowHighlight,
+    TableTerminalHints, TaskHints, TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
 };
 // Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
 // test can observe the `NodeAttrs::data` hint-access counter while folding a
