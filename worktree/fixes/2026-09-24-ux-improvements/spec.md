@@ -24,6 +24,44 @@ reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-24
 review_iterations: 0
+human_review: true
+human_review_items:
+    - |-
+        **Confirm the fourteen proposed decisions from Phase 1 (Decisions 20–33 at the end of this spec).**
+
+        Why now: Phase 1 exists to settle open questions before any code is written. The plan says Phase 2 starts only after you confirm or override these. Most of them change code shape in Phase 2 (error types, exit codes, where files are stored, the shell wrappers), so changing them later means rework.
+
+        Each decision is one short paragraph, and most confirm the plan's original recommendation. The ones the experiments **changed** or **added** are:
+
+        - **21:** the live `git ls-remote` check must kill the whole process tree at its 3-second deadline, and must switch off Git Credential Manager's pop-up.
+        - **27:** the rule for accepting a shortened commit ID from a PR provider.
+        - **31:** how ignored files are listed in the removal report.
+        - **32:** a corrected renderer function name.
+        - **33:** a text-encoding fix in the PowerShell wrapper.
+
+        Options:
+
+        - **Confirm all fourteen as written.** Pro: Phase 2 starts immediately. Con: none known; every one is backed by a measurement or a documented API.
+        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the next agent must adjust the plan to match.
+
+        Recommendation: **confirm all fourteen.** None of them widens scope. The four with the most visible effect (21, 27, 31, 33) each fix a failure seen in the experiments: a hung process, a false "safe" answer, a misleading list, and corrupted paths.
+    - |-
+        **Decide how the removal report lists ignored files (Decision 31).**
+
+        Why now: the spec's example ("`.env, notes.md, target/`") assumes Git reports an ignored folder as one line. That only happens when the ignore rule names the folder. This repository's own rule is `**/target/*`, so Git lists `target/debug/`, `target/CACHEDIR.TAG`, and four more. A `*.log` rule lists every log file, one by one. Phase 3 builds the report, and the handoff safety check hashes this list, so the choice has to be made first.
+
+        Options:
+
+        - **Group by top-level folder in the report and hash the full list (recommended).** The report shows `target/ (6 entries)` and caps the list at 10, like the dirty-file list. Pro: short, readable, and still exact for safety. Con: a little formatting code.
+        - **Show Git's raw list.** Pro: no extra code. Con: the report can run to hundreds of lines and bury the question under it (the display bug in item 1).
+        - **Ask Git to collapse folders itself (`--ignored=traditional`).** Pro: shorter raw output. Con: measured about 3x slower (0.20 s against 0.07 s here), and it still lists files one by one in folders that also hold tracked files.
+message_to_agent: |-
+    Phase 1 (rulings and spikes) changed no production code. Read Decisions 20-33 in this spec and the five spike notes (spike-s1.md ... spike-s5.md) before starting Phase 2; they amend the plan in ways the plan text does not yet show:
+    - Decisions 20-33 are PROPOSED until the author confirms them (human_review). Do not start Phase 2 on them unconfirmed.
+    - sniff (S1): build the blocking PR entry points on FocusedProviderClient, not the older provider path. focused.rs maps a 404 to Ok(None) and query_pull_requests treats that as "no more pages", so a private GitHub repository without access reads as "no PRs". A 404 on a list endpoint must become PrUnavailable. Gitea: take merged-PR head SHAs from the LIST endpoint only (the single-PR endpoint reports the live branch tip), use head.label for the branch name, and page with `limit` (Gitea ignores per_page). Bitbucket: pass state=OPEN&state=MERGED explicitly, because the default returns OPEN only. Unrelated drift bugs found in passing (Gitea has_merged rename, Bitbucket All/Closed comment) go in separate commits.
+    - Deadline-bounded git calls (S2): killing `git` is not enough. Put the child in its own process group on Unix and kill the group; use `taskkill /T /F` on Windows, where `git.exe` is a launcher shim. Never join pipe-reader threads without a timeout.
+    - Shell wrappers (S3): the POSIX wrapper collects the cd:/remove-handoff: values in its read loop and acts after the loop, so the handoff call keeps the terminal's stdin. The handoff call also sets WT_SHELL_WRAPPER=1. The PowerShell wrapper must set [Console]::OutputEncoding to UTF-8 for the call. fish is now installed on the macOS dev host (/opt/homebrew/bin/fish 4.9.3); no build host has fish, and Windows has no pwsh (5.1 only).
+    - Graph sizing (S5): the natural width comes from measure_svg_dimensions(...).viewbox_width, not render_svg_with_dimensions. Terminal::cell_size() exists but returns None on native Windows. The 8x16 fallback is duplicated in about 7 places; add one shared constant instead of another literal.
 ---
 
 # Worktree UX improvements
@@ -48,23 +86,24 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
 
     Git normally prevents one branch from being checked out in two worktrees, but forced or externally modified worktrees can still produce ambiguous metadata. Name resolution must handle that state instead of choosing a worktree arbitrarily.
 
-    Completions (the library's `worktree_names`) will offer, for each non-main worktree, BOTH the branch name and the worktree's dasherized directory basename (deduped when the two are equal); plus `base`. The detected default branch name (e.g. `main`) is ALSO offered as a candidate and resolves to the base checkout: typing or completing `base` or the default branch name brings the user back to the base checkout. Detached worktrees contribute their directory basename only.
+    Completions (the library's `worktree_names`) will offer, for each non-main worktree, BOTH the branch name and the worktree's dasherized directory basename (deduped when the two are equal); plus `base`. They also offer the base checkout's actual branch name, if attached. The detected default branch name (e.g. `main`) appears only when that branch is checked out in a worktree. Detached worktrees contribute their directory basename only.
 
     The "dasherized" form of a name is its lowercased form with every character that is not alphanumeric or a dash replaced by a dash; it is the form used for the worktree's directory name.
 
-    Resolution contract (the library's `find_worktree`), applied in this order:
+    Resolution contract (the library's `find_worktree`):
 
-    - `base` and the detected default branch name resolve to the main checkout.
-    - A worktree-name match (dasherized directory basename) wins when unique. If two registered paths have the same basename, report the paths as ambiguous; names are not globally unique across directories.
-    - A branch-name match resolves to the single worktree on that branch. If MORE THAN ONE worktree is on that branch, the command fails with a new error that describes the ambiguity: it names the branch, lists each worktree's name AND path on that branch, and hints to use the unique worktree name instead.
+    - `base` resolves to the main checkout, whatever branch it has checked out.
+    - For every other input, collect exact branch-name matches and exact directory-basename matches. One distinct worktree resolves. Multiple distinct worktrees fail as ambiguous, whether the collision is between branches, basenames, or a branch and another worktree's basename. The error lists each worktree's branch (if attached), basename, and path. A basename is unique only within its parent directory, not across the repository.
     - This applies uniformly to `wt go` and `wt remove` (no CWD-based auto-disambiguation).
-    - No match remains a not-found error. The base checkout cannot be removed; `wt remove base` and `wt remove <default branch>` refuse before showing any removal prompt.
+    - No match remains a not-found error. The base checkout cannot be removed; `wt remove base` and any name that resolves to the base checkout refuse before showing any removal prompt.
+
+    Reader's note: mapping the default branch name directly to `base` would send `wt go main` to the wrong checkout when the base checkout is on another branch and `main` is checked out elsewhere. Branch names therefore resolve by actual checkout; `base` is the stable way to reach the main checkout.
 
 3. Default Behavior for `remove` is Poor
 
     When you are trying to delete a worktree, we currently do NOT delete the branch and require the caller to remember to use the `-b` to make their intent clear that they DO want to remove the branch as well.
 
-    The rewrite (ruled 2026-09-24) starts from one question: **would removing this lose work?** `wt remove <name>` removes the worktree AND its local branch whenever that loses nothing, never deletes the remote branch unless told to, and loses work only when a `--force-*` flag says so.
+    The rewrite (ruled 2026-09-24) starts from one question: **would removing this lose work?** `wt remove <name>` removes the worktree AND its local branch whenever the safety checks show that work remains elsewhere, never deletes the remote branch unless told to, and loses work only after an explicit `--force-*` flag or an interactive answer.
 
     **Safety tiers.** The worktree's safety depends on its dirty files; the branch's safety depends on where its last commit can be found. Checking the last commit is enough: every earlier commit on the branch is part of its history, so wherever the last commit is found, all of them are.
 
@@ -74,12 +113,13 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     | **Pretty safe** | any other local branch, any `origin/*` branch (including this branch's own origin copy), or a tag | Remove; no prompt; one line names where the work still lives (e.g. "your commits also live on `feat/theme`, which is not merged into main yet") | Remove |
     | **Not safe** | nowhere else | Show what would be lost; ask (see below) | Keep the branch (see below) |
 
-    - The worktree is safe to remove when it has no dirty files (modified, staged, or untracked).
-    - "Found on" means the last commit is part of that ref's history, as of the last fetch: `wt` never fetches, so an `origin/*` ref the server has since deleted still counts. The status report says "as of your last fetch".
-    - A merged PR counts because squash and rebase merges write new commits to the default branch, so the branch's own commits never appear there. This replaces the earlier "squash-merge detection is out of scope" limitation. The remove flow asks the forge for the branch's open or merged PR (see item 5's PR detection); when that answer is unavailable (offline, no credentials), the branch falls through to the lower tiers, where a pushed branch is still Pretty safe.
+    - The worktree is safe to remove when it has no dirty files (modified, staged, or untracked) and no ignored entries. Git's ignore rules keep files out of version control; they do not establish that their contents are disposable, so a local `.env`, notes, or build output all need consent (ruled 2026-09-24, Decisions 18).
+    - "Found on" means the last commit is part of that ref's history. Local refs and tags are checked directly; an `origin/*` ref is only an observation from the last fetch. The report labels remote-tracking evidence "as of your last fetch". Before using a remote-tracking ref other than `origin/<default>` to justify automatic local-branch deletion, apply the live check below.
+    - An open PR counts as Safe only when the provider reports that its source head is the exact current local branch tip; then the provider still has those commits. A merged PR counts as Safe only when its recorded source head is the exact current local branch tip, so commits made after the merge cannot be mistaken for merged work. This also covers squash and rebase merges, whose resulting commits have different SHAs. A PR for another source repository must match that repository's identity as well as the branch name. If the provider cannot supply the source head, source repository, or definitive open/merged state, the PR grants no Safe evidence. An unavailable answer (offline or no credentials) falls through to the other refs; a pushed branch can still be Pretty safe.
+    - A remote-tracking ref is evidence only of the last observed state. Before deleting the local branch automatically on the strength of an `origin/*` ref other than `origin/<default>`, query that live remote branch head. It qualifies when the live SHA equals the local tip, or when it equals the remote-tracking SHA and that local ref contains the local tip. Otherwise the live remote might have moved or have unobserved commits; keep the local branch and report that its remote copy could not be verified. Local refs and tags remain usable offline. This check does not fetch or mutate local refs. `origin/<default>` is exempt: in a PR-driven workflow it moves constantly, so its live head rarely equals the last-fetched one, and requiring that would keep nearly every merged branch; the default branch is also the ref least likely to be rewritten or deleted.
     - A detached worktree has no branch; only its dirty files matter.
 
-    **Flags.** Three flags, one per object, each guaranteeing that its object is removed with no question asked, whatever the tier. There are no short forms: "force" is meant to make the caller stop and think, and full cleanup of unsafe work takes all three.
+    **Flags.** Three flags, one per object, each authorizing removal without a safety prompt whatever the tier. They cannot override git errors, a failed shell handoff, a held Windows directory, or remote protection. There are no short forms: "force" is meant to make the caller stop and think, and full cleanup of unsafe work takes all three.
 
     | Flag | Guarantees | Git equivalent |
     |---|---|---|
@@ -89,31 +129,33 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
 
     Without flags the remote branch is never deleted, even when that would be harmless: deleting from origin affects other people and closes any open PR on the branch.
 
-    **When `--force-remote` is given**, the branch's tier is computed without its own origin copy and without its open PR, since the command is about to delete both. A branch that was Pretty safe only because it was pushed becomes Not safe, and without `--force-branch` the local branch is kept, so the work survives locally.
+    **When `--force-remote` is given**, the branch's tier is computed without its own origin copy and without its open PR, since the command is about to delete both. A branch that was Pretty safe only because it was pushed becomes Not safe, and without `--force-branch` the local branch is kept, so the work survives locally. The remote destination comes from the branch's configured upstream, if it is on `origin`, or otherwise from `origin/<branch>`; never infer a remote branch from a PR in a different repository. If neither exists, report that no matching remote branch exists. Before deletion, query the live remote head. If its commits are unavailable locally, say that their number and contents are unknown rather than claiming there are none; otherwise show remote-only commits. Use a lease against the observed SHA for deletion, so a push between the report and deletion causes a failure rather than deleting new work. A protected-branch refusal is an ordinary remote failure. Do not claim success from a stale remote-tracking ref.
 
     **Flow.**
 
     1. **Report first.** Before asking anything or removing anything, `wt remove` prints the status:
         - The worktree's dirty files: up to 10 are listed as a tree, colored by kind with the table's dot palette (source files orange, other files yellow); above 10, a bold red count of every dirty path (modified, staged, and untracked) replaces the list. Today's 50-file cap and its "...and N more" line are deleted.
-        - One dim line naming the ignored entries that removal will also delete (top-level matches from `git status --ignored=matching`, which does not descend into ignored folders, e.g. ".env, notes.md, target/"). Ignored files never affect the safety tier.
+        - The ignored entries removal would also delete (top-level matches from `git status --ignored=matching`, which does not descend into ignored folders, e.g. ".env, notes.md, target/"), stating that their contents will be deleted.
         - The branch's tier and where its work lives.
-        - Its ahead/behind against the furthest-ahead default branch, named in the text (e.g. "3 ahead, 12 behind origin/main").
+        - Its ahead/behind against the selected default-branch target, named in the text (e.g. "3 ahead, 12 behind origin/main").
         - Its origin copy (as of the last fetch) and any PR.
-    2. **Worktree.** Clean, or `--force-worktree`: removed. Dirty without the flag: interactive asks "discard these files and remove the worktree?" (default No; No removes nothing); non-interactive removes nothing and exits with an error naming the files and `--force-worktree`.
+    2. **Worktree.** Clean with no ignored entries, or `--force-worktree`: removed. Dirty files or ignored entries without the flag: interactive asks "discard these files and remove the worktree?", naming the dirty files and the ignored entries (default No; No removes nothing); non-interactive removes nothing and exits with an error naming them and `--force-worktree`.
     3. **Local branch** (only once the worktree is removed; git cannot delete a branch a worktree has checked out). Safe, Pretty safe, or `--force-branch`: deleted. Not safe without the flag: interactive shows the commits that would be lost (subjects, or a bold red count when there are more than 10) and offers "keep the branch" (default) or "delete it and lose N commits"; non-interactive keeps the branch, prints a warning naming it and why, and still succeeds (exit 0). `wt remove` removes everything it safely can.
     4. **Remote branch.** Only with `--force-remote`.
 
-    `--force-branch` on a dirty worktree without `--force-worktree` is a conflict: deleting the branch requires removing the worktree and its files. Non-interactive: an error before anything is removed ("`--force-branch` needs the worktree removed first, and it has uncommitted files; add `--force-worktree` to discard them"). Interactive: step 2's question about the files is asked instead.
+    Classify safety only after resolving the actual target and collecting the refs. If the ref check or git command needed to establish safety fails, keep the branch and report the failure; an unknown result is never Safe or Pretty safe. `--force-branch` explicitly overrides that uncertainty. The status report distinguishes local commits from remote-only commits, and names the exact ref used as evidence for each tier.
+
+    `--force-branch` on a dirty worktree, or one with ignored entries, without `--force-worktree` is a conflict: deleting the branch requires removing the worktree and its files. Non-interactive: an error before anything is removed ("`--force-branch` needs the worktree removed first, and it has uncommitted files; add `--force-worktree` to discard them"). Interactive: step 2's question about the files is asked instead.
 
     **Removing the worktree you are standing in** (ruled 2026-09-24). `wt remove` removes it and moves the shell out through the wrapper's `cd:` protocol, the same one `wt go` uses:
 
     - It lands in the fork parent's worktree when the branch has a fork-origin record and that parent branch has a worktree; otherwise in the base repo. Either way it keeps the current subdirectory when that path exists there (`wt go`'s rule) and says where the caller landed.
     - **Move first, then remove, on every OS** (spike-confirmed on Windows, 2026-09-24). On Windows a directory that is a process's current directory cannot be deleted, so the shell must leave before the removal runs; using the same sequence everywhere keeps one code path that every OS tests:
-        1. The first `wt remove` run does every check and asks every question, but removes nothing. It turns the answers into explicit flags (e.g. "delete the branch anyway" becomes `--force-branch`) and prints two lines on standard output: `cd:<landing path>`, then an instruction to run the removal. That instruction can only re-run `wt remove` for this worktree with those flags, never an arbitrary command.
-        2. The wrapper moves the shell, then runs that `wt remove` from the landing directory.
-        3. The second run re-checks the tiers with no prompts and removes. If the state has changed so that a flag it was not given is now needed, it refuses with nothing removed.
+        1. The first `wt remove` run does every check and asks every question, but removes nothing. It records the selected worktree's canonical path, its current HEAD and branch tip, the dirty-state fingerprint, the intended landing path, and the approved force choices in a handoff record in the user-cache store. The fingerprint covers each modified, staged, and untracked path, its status, and its content with `biscuit-hash` BLAKE3. The fingerprint also covers the set of ignored top-level entries, so a new ignored entry appearing between the runs makes the second run refuse. The record expires after one minute and is keyed by a random, hard-to-guess token. Standard output contains a `cd:` line and a fixed `remove-handoff:` token. This is a protocol token, not a shell command; the wrapper never evaluates output as shell code.
+        2. The wrapper changes directory. Only after a successful `cd` does it invoke `wt remove --handoff <token>`; a failed `cd` returns an error and leaves the worktree intact. The wrapper passes the token as one quoted argument and never interpolates it into a command string.
+        3. The second run checks that the token identifies the same repository, worktree path, HEAD, branch tip, dirty state, and landing destination, and that the caller is outside the target. It re-checks the safety tiers without prompts. Any state change or new risk refuses with nothing removed and asks the caller to start again. Consume the token before mutation so it cannot be replayed. An expired or missing token also refuses without mutation.
       The caller is only moved once every question is answered; a refusal or a cancelled prompt in the first run leaves the shell where it is.
-    - `wt` moves its own current directory out of the worktree before any removal (on Windows a child process starts in the shell's directory and would hold it), and runs git against the base repo (`git -C`), never from inside the worktree.
+    - `wt` runs git against the base repo (`git -C`), never from inside the target. The second run starts from the landing directory after the wrapper moves; a direct removal from another worktree also runs from outside the target.
     - When the shell wrapper is not active, so `wt` cannot move the shell, `wt remove` refuses (exit as a refusal, nothing removed) with the same "shell wrapper not active" help `wt go` shows, plus the option of running the command from another directory.
 
     **Windows** (ruled 2026-09-24 from measurements on the Windows build host; the details are in the `os` skill's `windows.md`, "Current-directory locks"):
@@ -132,8 +174,8 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     | 0 | Done | Everything requested was removed; the branch was kept with a warning (Not safe, no `--force-branch`); the caller cancelled at a prompt; the first run of move-first handed off to the wrapper (the wrapper stops on a non-zero exit) |
     | 1 | Something failed | A git command failed; origin could not be reached during `--force-remote` (the local removal has already happened, and the report lists what was removed and the command that finishes the job, `git push origin --delete <branch>`) |
     | 2 | Invalid arguments | clap's existing behavior, e.g. the retired `-b` |
-    | 3 | Refused to avoid losing work; nothing removed | A dirty worktree without `--force-worktree`; `--force-branch` on a dirty worktree without `--force-worktree`; the second run of move-first found a risk it was not given a flag for |
-    | 4 | Blocked by the environment; nothing removed, and no `--force-*` flag helps | Standing in the worktree without the shell wrapper; the folder is in use by another program (the Windows lock check) |
+    | 3 | Refused to avoid losing work; nothing removed | A dirty worktree, or one with ignored entries, without `--force-worktree`; `--force-branch` on a dirty worktree without `--force-worktree`; the second run of move-first found a risk it was not given a flag for |
+    | 4 | Blocked by the environment; nothing removed, and no `--force-*` flag helps | Standing in the worktree without the shell wrapper; the folder is in use by another program (the Windows lock check); an expired or missing handoff token (start again) |
 
     Codes 3 and 4 are separate because the fix differs: for 3, a `--force-*` flag if the loss is acceptable; for 4, move elsewhere or close the program. Elsewhere, `wt go` without the wrapper exits 4 (today it exits 0 although nothing happened); `wt create` without the wrapper still creates the worktree and exits 0 with a message that it could not move the shell.
 
@@ -174,24 +216,9 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
       Run git branch -D fix/ci-build-feature-divergence if you want to force-delete it.
     ```
 
-5. Ruled 2026-09-24: `wt remove`'s status report states ahead/behind against the furthest-ahead default branch, named in the text. The safety tiers count both the local default branch and `origin/<default>` regardless.
+5. More Complete Information
 
-    When we run `wt list` (or just `wt` as an alias) we get useful and highly visual information. This is a good starting point but there is information missing. Things we must understand to fully communicate status include:
-
-    - worktree/branches must know if they can cleanly merge into the _default branch_ (e.g., main/master) but that could be either the local default branch or the remote local default branch (which ever is further along)
-        - in the cases of PR's being pushed it's far more likely that the remote is farther along
-        - if we don't have network and have no way to discern the latest commit on the _default branch_ of the remote then we can fallback to the local branch temporarily
-    - worktree/branches _may_ have been forked from "main" but really they could be from any branch; knowing this history is insightful and worth having
-        - whatever branch a new worktree/branch combo was forked from is a signal which often predicts where that new worktree/branch will ultimately be merged back into later on
-        - because there is a reasonable chance that before the new commits in this branch make their way back to the _default branch_ they are likely to merge with the branch they came from. We should be able to let the user know if that merge is a clean merge or not
-    - at any given moment, we need to be able to communicate whether a worktree/branch being removed would be "lossy" or not
-        - a worktree that has dirty files in it will always be lossy if deleted
-        - a clean worktree is the more nuanced question:
-            - if the worktree is at the same commit (or earlier) on the _default branch_ (local or remote) then the worktree can be deleted and nothing is lost
-            - if the worktree is ahead of the _default branch_ then we must determine the following:
-                - if the remote has this branch and is current (or ahead) of the local branch then we _could_ delete the branch and not loose anything so long as that remote branch has a clear merge path to get into the default branch at some future point
-                - the likelihood that this plan to get into main exists is made far more likely if that remote branch has been raised as a PR
-                - 
+    `wt list` should show whether each branch can merge into the selected default-branch target and, where known, its fork parent. This describes merge readiness; item 3's `wt remove` report makes the separate decision about what deletion would lose. A remote-tracking ref is local, last-fetched information; a network outage does not change the comparison target unless that ref is absent.
 
     ### Table Design
 
@@ -257,7 +284,7 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
 
     The fork-origin record supplies the parent name. Kept from the previously-ruled T2 mechanism: `wt create` persists { base branch, base sha, created at } in the library's user-cache store keyed by branch. The reused-existing-branch path records nothing. Stale records (branches deleted) are pruned during the save that `wt list` already performs.
 
-    **`-> {default}` column** -- the header names the furthest-ahead default branch as a remote badge (`-> [origin/main]`), or local `-> [main]` when the local tip leads or there is no remote. Cells:
+    **`-> {default}` column** -- the header names the selected default-branch target as a remote badge (`-> [origin/main]`), or local `-> [main]` when the local tip contains the remote tip or there is no remote. Cells:
 
     - `already in` (dim italic) -- every commit on the branch is already on the target.
     - `clean` (dim italic) -- the branch has commits the target lacks, and merging them would not conflict.
@@ -266,7 +293,7 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
 
     **`-> parent` column** -- the same vocabulary against the branch's fork parent. `—` when the parent is the default branch (the previous column already answers it), when there is no fork-origin record, and on the default-branch and detached rows. `parent deleted` (neutral color) when the recorded parent no longer exists.
 
-    **PR badge** -- an open PR is a proposed merge into a specific base branch, so its badge (`[PR #99]`, a link to the PR) follows the cell of the column whose target is the PR's base: the `-> parent` column when the PR targets the fork parent, otherwise the `-> {default}` column. No badge when there is no open PR; the absence of a PR is not a problem to flag, since many workflows never use PRs.
+    **PR badge** -- an open PR is a proposed merge into a specific base branch, so its badge (`[PR #99]`, a link to the PR) follows the cell of the column whose target is the PR's base: the `-> parent` column when the PR targets the fork parent, or the `-> {default}` column when it targets the selected default branch. If it targets neither, show `PR #99 → {target}` beside the branch name; placing it under either target column would imply a merge destination the PR does not use. No badge when there is no open PR; the absence of a PR is not a problem to flag, since many workflows never use PRs.
 
     **Badges** -- three roles with distinct background colors: a local branch (`[main]`), a remote branch (`[origin/main]`), and a PR (`[PR #99]`). Badge text is padded with one space on each side and needs no special font.
 
@@ -281,7 +308,7 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     - The earlier emoji proposals (👍/📙/📕 status glyphs, ✔/💥 merge icons, 🌏/📦 remote icons) and a separate Loss column.
     - The old 120-terminal-column suppression rule is RETIRED with the old layout. No width/capability suppression rules are defined for the new table; rules may be added later if needed. (Prose's built-in degradation of links to visible `[text](url)` on non-OSC8 terminals still applies automatically -- that is a capability behavior, not a width rule.)
 
-    **PR detection** -- the PR badge and its link require each open PR's number, URL, source branch, and target branch; git has no concept of PRs. Ruled: the **sniff library provides this cross-platform**. Sniff's `remote` module (feature-gated) already has normalized provider clients for GitHub, GitLab, Gitea, and Bitbucket, credential handling, `GitRemote::from_url` provider detection, the `commit_links` identity authority, and a `list_pull_requests(owner, repo, state)` provider method whose `PullRequestInfo` carries `number`, `html_url`, `source_branch`, and `target_branch`. `wt list` makes ONE repository-wide "list open PRs" request and matches PRs to branches in memory by source branch; there is no per-branch query. `wt remove` is the exception: its Safe tier needs the open or merged PR for the one branch being removed, including the PR's head commit, so it makes one per-branch request (same deadline; an unavailable answer falls through to the lower tiers). No new network dependencies or auth plumbing in the worktree area -- see Cross-package dependencies.
+    **PR detection** -- the PR badge and its link require each open PR's number, URL, source repository, source branch, and target branch; git has no concept of PRs. Ruled: the **sniff library provides this cross-platform**. Sniff's `remote` module (feature-gated) already has normalized provider clients for GitHub, GitLab, Gitea, and Bitbucket, credential handling, `GitRemote::from_url` provider detection, the `commit_links` identity authority, and a `list_pull_requests(owner, repo, state)` provider method whose `PullRequestInfo` carries `number`, `html_url`, `source_branch`, and `target_branch`. `wt list` makes ONE repository-wide "list open PRs" request and matches PRs to worktree branches by both source repository and branch name; a same-named branch in a fork must not receive the wrong badge. `wt remove` is the exception: its Safe tier needs the open or merged PR for the one branch being removed, including the PR's recorded source head SHA, so it makes one per-branch request (same deadline; an unavailable answer falls through to the lower tiers). No new network dependencies or auth plumbing in the worktree area -- see Cross-package dependencies.
 
     Note: the fork base becomes an explicit input once item 6's `--from` flag lands (default: the current branch), so recording it is recording an input.
 
@@ -293,7 +320,7 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     |---|---|---|
     | Default-branch tip, `origin/<default>` tip, fork-parent tips, and whether a recorded parent still exists | One `git for-each-ref refs/heads refs/remotes`, replacing today's `rev-parse {default}` | About the same |
     | Caption line (default branch vs its origin peer) | One `rev-list --left-right --count {default}...origin/{default}`, cached by SHA pair | One call, usually a cache hit |
-    | `-> {default}` column | Today's `rev-list` + speculative `merge-tree`, aimed at the furthest-ahead default-branch tip; `already in` is "ahead = 0" | No new calls |
+    | `-> {default}` column | Today's `rev-list` + speculative `merge-tree`, aimed at the selected default-branch target; `already in` is "ahead = 0" | No new calls |
     | `-> parent` column | The same `rev-list` + `merge-tree` pair against the fork parent's tip, only for branches whose parent is not the default branch | Two calls per such branch, cached |
     | Branch tree | The fork-origin records in the user-cache store; built in memory | No git calls |
     | Worktree dot | Today's live `git status` per worktree (never cached) | Unchanged |
@@ -308,7 +335,7 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     - The open-PR request runs in parallel with the git work under a strict deadline (about 300 ms).
     - Results are stored per repository in the user-cache store with their fetch time. When the stored results are younger than a freshness window (about 60 s), `wt list` skips the network request entirely.
     - When the request fails or misses the deadline (offline, slow network, no credentials), the table shows the stored badges and a dim line under the legend stating their age (e.g. "PRs as of 12 min ago"). With nothing stored, the table shows no PR badges. Neither case is an error.
-    - Without credentials, a private repository returns no PRs, which renders the same as "no open PRs".
+    - An authentication or permission error is an unavailable answer, not an empty list. Without credentials for a private repository, show cached badges with their age or omit them; never cache the error as "no open PRs".
 
     **Sync and async** -- sniff's provider clients are async and the worktree library is thread-based. Sniff provides a blocking entry point for the open-PR list so synchronous callers (the worktree library and others) do not each build their own runtime.
 
@@ -371,9 +398,10 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     - we should add the `--from <base>` flag to allow a user to explicitly state which branch they want to fork off of (default: the current branch): `wt create fix/x --from feat/theme`. (Ruled 2026-09-24: `--from`, because `wt create <branch>` already names the NEW branch, so `--branch` would name two different branches in one command.)
     - If the new branch already exists and `--from` is given, `wt create` fails instead of silently ignoring the flag: "`feat/theme` already exists, so `--from main` would be ignored. Drop `--from` to reuse it." Without `--from`, today's reuse-with-warning behavior stays.
     - A `--from` branch that does not exist is an error naming it.
+    - `--from` names an existing local branch. A detached checkout has no current branch to record as a fork parent, so creating a new branch from it requires `--from`; the error explains that choice. This prevents a detached HEAD SHA from being written as a branch name in the fork-origin record.
     - The fork-origin record (item 5) stores the `--from` branch, or the current branch by default.
 
-7. Ruled 2026-09-24: the dirty-file list is colored by kind with the table's dot palette (source orange, other yellow); up to 10 files are listed, above that a bold red count of every dirty path; the 50-file cap is deleted; item 1's layout fix is part of the new report (item 3).
+7. Shell Wrapper Detection
 
     `wt go`, `wt create`, and `wt remove` move the caller's shell by printing `cd:<path>` on standard output, which the shell wrapper (a shell function) acts on after `wt` exits. Today `wt` decides the wrapper is active when standard output is not a terminal. That is also true for scripts, `just` recipes, editor task runners, and AI agents, which capture standard output but never act on `cd:`. Under item 3's rule for removing the worktree you are standing in, an agent could be left in a deleted directory.
 
@@ -383,26 +411,27 @@ This spec is about fixing the user experience rough edges in the `wt` CLI (and l
     - Without it: `wt go` and `wt create` print the existing "shell wrapper not active" help instead of `cd:`; `wt remove` of the worktree the caller is standing in refuses (item 3).
     - The wrappers are generated by `wt --completions <shell>` (bash, zsh, fish, in `worktree-cli`'s `main.rs`), which becomes their only source: the hand-written copies in `worktree/shell/` (`wt.sh`, `wt.fish`) are deleted and the docs point to `wt --completions` (ruled 2026-09-24).
     - A PowerShell wrapper is added (`wt --completions powershell`), so native Windows users get `wt go`, `wt create`, and item 3's move-first removal. It sets `[Environment]::CurrentDirectory` along with `Set-Location` (item 3's Windows notes). There is no wrapper for cmd.exe.
-    - Every wrapper understands item 3's second instruction (re-run `wt remove` after moving) as well as `cd:`.
+    - Every wrapper understands item 3's `remove-handoff:` token as well as `cd:`: after a successful `cd` it runs the fixed command `wt remove --handoff <token>`, passing the token as one quoted argument, and never evaluates `wt`'s output as shell code.
 
 ## Acceptance criteria and testing
 
 Testing follows the `rust-testing` skill's levels: L1 for logic against temporary repositories, L2 for real-terminal behavior through `biscuit-test-harness`, never taking window focus. Every criterion holds on macOS, Linux, native Windows, and WSL2; where a Windows or WSL2 L2 cell is not provisioned in CI, the criterion is recorded as unmet with provisioning as the required change, never narrowed.
 
 1. **Display.** Every question `wt remove` asks starts after one blank line below the report (L2 capture).
-2. **Completions.** `worktree_names` offers each worktree's branch name and directory name (deduped), `base`, and the default branch name; `find_worktree` resolves in the ruled order, and two worktrees on one branch produce the ambiguity error listing each worktree's name and path (L1).
+2. **Completions.** `worktree_names` offers each worktree's branch name and directory name (deduped), plus `base`; the default branch name appears when it is checked out. `find_worktree` resolves in the ruled order, including when the base checkout is on a non-default branch. Two worktrees on one branch or with the same basename produce an ambiguity error listing their paths (L1).
 3. **Remove.**
-    - Every combination of tier (Safe, Pretty safe, Not safe, including a merged PR and a tag), dirty state, `--force-*` flags, and interactive/non-interactive produces the documented result and exit code (L1; PR answers from a stub, including "unavailable").
-    - The prompts, and move-first through each wrapper (zsh, bash, fish, PowerShell), work in a real terminal, land in the fork parent's worktree or the base repo, and say where (L2).
-    - No path leaves a half-removed worktree: on Windows, a held directory produces exit 4 with nothing removed, and move-first removes a worktree the PowerShell window was launched inside (L2 on Windows).
+    - Every combination of tier (Safe, Pretty safe, Not safe, including a merged PR and a tag), dirty state, ignored entries (none, a file such as `.env`, a folder such as `target/`), `--force-*` flags, and interactive/non-interactive produces the documented result and exit code (L1; PR answers from a stub, including "unavailable").
+    - The prompts, and move-first through each wrapper (zsh, bash, fish, PowerShell), work in a real terminal, land in the fork parent's worktree or the base repo, and say where. A failed `cd`, an expired token, or a changed worktree or branch between the two runs leaves the worktree intact; wrapper output is never evaluated as shell code (L1 and L2).
+    - An open or merged PR counts as Safe only for the same source repository and exact branch tip. A stale or deleted `origin/*` ref cannot by itself justify automatic deletion; remote unavailability preserves the local branch. A remote push between preflight and `--force-remote` deletion fails the lease, preserving the new remote head (L1 with local bare remotes and stubbed provider answers).
+    - On Windows, a held directory is detected before `git worktree remove` and produces exit 4 with nothing removed; move-first removes a worktree the PowerShell window was launched inside (L2 on Windows).
 4. **Branch removal.** The original bug's case (a branch merged into HEAD but not into its upstream) is deleted or kept exactly as the tiers say, never silently preserved (L1).
 5. **List and graph.**
     - Table cells, caption variants, badges, and legend render as ruled (L1 snapshots).
     - `list gather` stays within the ratified targets (warm 120 ms, cold 300 ms; full non-image `wt list` 1 s), including with the network down and a slow PR request hitting its deadline; stored PR results within the freshness window skip the network (L1 and the existing performance gates).
     - `GitGraph` applies the lane/tag rule, trims commits to fit the width cap and lanes to fit the base view's height cap, and sizes images from the scale rule (L1 on the generated Mermaid text and computed sizes).
     - The `mermaid-rs-renderer` 0.3.1 upgrade passes `biscuit-visualized`'s suite, including the fixed pie-contrast test.
-6. **`--from`.** A worktree forks from the named base and records it; `--from` with an existing branch, and a `--from` branch that does not exist, fail with the ruled messages (L1).
-7. **Wrapper detection.** `cd:` and the move-first instruction are printed only when `WT_SHELL_WRAPPER=1` is set; `wt go` without it exits 4; every generated wrapper, including PowerShell, sets the variable and acts on both instructions (L1 for the output, L2 per shell).
+6. **`--from`.** A worktree forks from the named local base and records it; `--from` with an existing destination branch, a nonexistent or nonlocal base, and a detached checkout without `--from` fail with the ruled messages (L1).
+7. **Wrapper detection.** `cd:` and the `remove-handoff:` token are printed only when `WT_SHELL_WRAPPER=1` is set; `wt go` without it exits 4; every generated wrapper, including PowerShell, sets the variable, handles both protocol lines, checks the `cd` result, and invokes the fixed `wt remove --handoff` command (L1 for the output, L2 per shell).
 
 ## Sequencing
 
@@ -414,8 +443,8 @@ Fixes first (ruled 2026-09-24):
 
 ## Packages
 
-- `worktree` (library): the name-resolution contract (`find_worktree`, `worktree_names`, including the ambiguity error), default-branch detection, state classification (dirtiness, ahead/behind), the remove flow's safety tiers and lost-commit count, furthest-ahead baseline facts (local default-branch tip vs the remote tracking ref tip as last fetched), per-branch mergeability against the default branch and the fork parent, remote-branch presence, open-PR state with its deadline and freshness cache (via sniff's `remote` feature), fork-origin persistence in the user-cache store, remote-branch deletion, and branch deletion (`git branch -D`, decided by the safety tiers).
-- `worktree-cli`: the shell wrappers (`--completions` output and `worktree/shell/`) and wrapper detection (item 7), the flag surface, rendering (the redesigned list table with its caption and legend, the dirty-file tree, the >10-file count), the prompts (confirmations and the choice menu), and gathering the graph's git facts for `GitGraph` (deleting `default_graph_width`).
+- `worktree` (library): the name-resolution contract (`find_worktree`, `worktree_names`, including ambiguity errors), default-branch detection, state classification (dirtiness, ahead/behind), the remove flow's safety tiers and lost-commit count, default-branch target selection (local or last-fetched remote tip), per-branch mergeability against the default branch and fork parent, live verification of remote safety evidence, open-PR state with its deadline and freshness cache (via sniff's `remote` feature), fork-origin persistence and the short-lived remove handoff in the user-cache store, `biscuit-hash` content fingerprinting for that handoff, lease-protected remote-branch deletion, and branch deletion (`git branch -D`, decided by the safety tiers).
+- `worktree-cli`: the shell wrappers (`--completions` output only; `worktree/shell/` is deleted) and wrapper detection (item 7), the flag surface, rendering (the redesigned list table with its caption and legend, the dirty-file tree, the >10-file count), the prompts (confirmations and the choice menu), and gathering the graph's git facts for `GitGraph` (deleting `default_graph_width`).
 - `biscuit-terminal`, `biscuit-visualized`, `sniff`: the changes listed under Cross-package dependencies. This spec is deliberately cross-package (ruled 2026-09-24).
 
 ## Cross-package dependencies
@@ -429,19 +458,19 @@ Fixes first (ruled 2026-09-24):
     - A trial upgrade on 2026-09-24 compiled with no code changes (`resvg`/`usvg` move to 0.47, adding `tiny-skia` 0.12); the gitGraph drafts rendered byte-identical; biscuit-terminal's Mermaid, diagram, and parity tests (1,088) and Darkmatter's Mermaid tests (61) passed.
     - One `biscuit-visualized` test fails: 0.3 changed the default third pie color from `#FFFFFF` to `hsl(0, 0%, 60%)`, and `fix_pie_text_contrast` reads only hex colors. Fix: parse `hsl()` in the contrast helper and update `mermaid_pie_chart_init_directive_applies_custom_colors`, whose comment assumes a white slice.
     - Update the version noted in `biscuit-terminal/docs/data-visualization/visualizing-graph-expressions.md`.
-3. `sniff` -- `remote` module: blocking entry points, built on the existing async `list_pull_requests` provider method, credential handling, and `commit_links` identity authority, for (a) a repository's open PRs (number, URL, source branch, target branch) for `wt list`, and (b) the open or merged PR for one source branch, including its head commit SHA, for `wt remove`'s Safe tier. `PullRequestInfo` does not carry the head commit SHA today. Both entry points work for all four providers sniff supports (GitHub, GitLab, Gitea, Bitbucket) at launch (ruled 2026-09-24).
+3. `sniff` -- `remote` module: blocking entry points, built on the existing async `list_pull_requests` provider method, credential handling, and `commit_links` identity authority, for (a) a repository's open PRs (number, URL, source repository, source branch, target branch) for `wt list`, and (b) the open or merged PR for one source repository and branch, including its recorded source head commit SHA and definitive state, for `wt remove`'s Safe tier. `PullRequestInfo` does not carry all of these identity and head fields today. An authentication failure must remain distinguishable from an empty PR list. Both entry points work for all four providers sniff supports (GitHub, GitLab, Gitea, Bitbucket) at launch (ruled 2026-09-24).
 
 These changes are part of this spec (ruled 2026-09-24: the spec is cross-package); the order they land in is under Sequencing.
 
 ## Decisions
 
 1. Ruled 2026-09-24: interactive means stdin and stderr are both terminals and `CI` is not set, and the exit codes are 0 done, 1 failure, 2 invalid arguments, 3 refused to avoid losing work, 4 blocked by the environment (see item 3).
-2. Ruled 2026-09-24: when origin cannot be reached during `--force-remote`, the local removal has already happened; `wt remove` exits 1 and the report lists what was removed and the `git push origin --delete <branch>` command that finishes the job. With no remote at all, `--force-remote` reports that there is no remote branch. The safety tiers need no network, and an unavailable PR answer falls through to the lower tiers (item 3); the list table's offline behavior is ruled under item 5's Data Gathering.
+2. Ruled 2026-09-24: when origin cannot be reached during `--force-remote`, the local removal has already happened; `wt remove` exits 1 and the report lists what was removed and the `git push origin --delete <branch>` command that finishes the job. With no remote at all, `--force-remote` reports that there is no remote branch. Local refs, tags, and `origin/<default>` need no network; evidence from other `origin/*` refs is verified live and, when the remote cannot be reached, does not count, so the local branch is kept. An unavailable PR answer falls through to the lower tiers (item 3); the list table's offline behavior is ruled under item 5's Data Gathering.
 3. Ruled 2026-09-24 (by item 3's rewrite): remote deletion only happens with `--force-remote`, which is the caller's explicit acceptance; the status report printed first shows any commits that exist only on the remote branch.
 4. Ruled 2026-09-24: "unique commits" is replaced by item 3's safety tiers (where the branch's last commit is found) and its lost-commit count.
-5. Confirm: the remove flow's status report ahead/behind facts use the furthest-ahead default branch baseline (assumed from the table ruling). This affects only the report; the safety tiers count both the local default branch and `origin/<default>`.
+5. Ruled 2026-09-24: the remove report uses the same default-branch target as the list table: the descendant tip, or `origin/<default>` when the tips diverge. The safety tiers inspect both refs independently.
 6. Ruled 2026-09-24: remove it and move the shell to the fork parent's worktree, or the base repo (see item 3). Refuses when the shell wrapper is not active; wrapper detection is ruled under item 7. Windows is ruled too: move first, then remove, on every OS, with a lock check before `git worktree remove` on Windows (spike-confirmed on the Windows build host, 2026-09-24).
-7. Dirty-file display details: state-based coloring (staged yellow, untracked red) vs the current kind-based coloring (source red, non-source yellow); color for modified-unstaged; what the ">10 files" count includes; whether item 1's layout fix is subsumed by the new remove flow's rendering (expected yes -- confirm); whether the current renderer's 50-file cap + overflow footer is deleted by the >10 rule.
+7. Ruled 2026-09-24: the dirty-file list uses kind-based coloring (source orange, other yellow), counts every modified, staged, and untracked path above 10, and replaces the old 50-file cap. Item 1's spacing is part of the new remove report.
 8. Ruled 2026-09-24: the flag is `--from <base>`; `--from` with an existing branch is an error, as is a `--from` branch that does not exist (item 6).
 9. Ruled 2026-09-24: L1 tests for the logic, L2 real-terminal tests for prompts and the shell wrappers; per-item acceptance criteria are under Acceptance criteria and testing.
 10. Ruled 2026-09-24: one spec, kept in `worktree/fixes/`; the items reference each other too heavily to split.
@@ -452,5 +481,24 @@ These changes are part of this spec (ruled 2026-09-24: the spec is cross-package
 15. Ruled 2026-09-24: the truncated note from the original draft ("NOTE: I do not remember") is deleted.
 16. Ruled 2026-09-24: `GitGraph` works around the `mermaid-rs-renderer` attribute-parsing bug, and the bug is reported upstream against 0.3.1 as an issue plus a small PR, drafted for review before filing (item 5's Graph View).
 17. Ruled 2026-09-24: the scale reference is 100% = diagram body text one terminal line tall, and `GitGraph` defaults to 125%. The base view's maximum height is ruled too; see item 5's Graph sizing.
-18. Ruled 2026-09-24: ignored files are mentioned, not blocked: `wt remove`'s report names the ignored top-level entries removal will delete, and they never affect the safety tier (item 3).
+18. Ruled 2026-09-24 (revised after review): ignored entries require consent like dirty files: interactive asks (default No), non-interactive needs `--force-worktree`, and the handoff fingerprint covers the ignored-entry set (item 3). The earlier "mention, don't block" ruling could delete an ignored `.env` or notes file without consent. Accepted cost: worktrees with build output such as `target/` prompt, and scripts pass `--force-worktree`.
 19. Ruled 2026-09-24: `wt --completions <shell>` is the only source of the shell wrappers; `worktree/shell/` is deleted (item 7).
+
+### Proposed rulings from Phase 1 (awaiting the author's confirmation)
+
+Phase 1 of `plan.md` recorded one recommendation per open question (R1–R11) and ran five spikes (`spike-s1.md` … `spike-s5.md` in this directory). Each entry below is **proposed, not ruled** until the author confirms or overrides it; Phase 2 starts after that.
+
+20. **R1, handoff token randomness** (proposed): 128 bits from the OS CSPRNG through `getrandom` 0.4, encoded as 32 lowercase hex characters. `getrandom` 0.4 is already a workspace dependency (Darkmatter's `ctx.id`), so `worktree` adds no new crate to the graph; `docs/dependencies.md` gains a `worktree` row.
+21. **R2, live remote-head check** (proposed, amended by S2): run `git -C <base repo> -c credential.interactive=never ls-remote origin refs/heads/<branch>` with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, and `GIT_SSH_COMMAND` set to the user's SSH command (`$GIT_SSH_COMMAND`, else `core.sshCommand`, else `ssh`) plus `-o BatchMode=yes`, under a 3 s deadline. At the deadline kill the whole process tree (a process group on Unix; `taskkill /T /F` on Windows, since a Job Object cannot be nested inside an SSH session's Job): S2 showed that killing `git` alone leaves `ssh`/`git-remote-https` holding the output pipe on every OS and, on Windows, leaves the real `git.exe` running and holding its working directory. A timeout or failure is "unavailable": the local branch is kept, and `--force-remote` exits 1 (Decisions 2).
+22. **R3, PR deadline for `wt remove`** (proposed): 2 s for `wt remove`'s per-branch request, 300 ms for `wt list`. This replaces item 5's "same deadline" wording for `wt remove`.
+23. **R4, `--handoff` surface** (proposed): `--handoff <token>` is hidden, conflicts with `<name>` and every `--force-*` flag (the approved choices come from the record), and `<name>` is optional only when `--handoff` is present.
+24. **R5, failed rename-back in the Windows lock probe** (proposed): retry the rename back three times, 50 ms apart; if it still fails, exit 1 naming both paths and the `move` command that restores the worktree, and never proceed to removal. S4 measured the probe at about 1.5 ms per rename pair and showed a held directory fails on the first rename with nothing changed, so this guards a narrow race.
+25. **R6, "`CI` is set"** (proposed): the variable is present and not empty.
+26. **R7, exit-code plumbing** (proposed): a CLI-side exit-code classification (0/1/3/4; clap keeps 2); `WorktreeError::RefusedToLoseWork` and `WorktreeError::BlockedByEnvironment`, each carrying its report; `Cancelled` maps to 0; `main.rs` owns the mapping; `wt go` without a wrapper returns `BlockedByEnvironment`.
+27. **R8, abbreviated PR source-head SHAs** (proposed, amended by S1): when the provider's SHA is shorter than the local tip's full object ID (40 for SHA-1, 64 for SHA-256), it counts only if it is at least 7 lowercase hex characters, the local tip starts with it, and it resolves to exactly one object in the local repository (`git rev-parse --disambiguate`). Otherwise the PR grants no Safe evidence. Only Bitbucket Cloud abbreviates (12 characters in practice). For Gitea and Forgejo, a merged PR's head SHA is taken from the list endpoint only, because the single-PR endpoint reports the live branch tip (S1).
+28. **R9, where the new records live** (proposed): beside the comparison cache, as sibling files of `cache::cache_path` (`<user cache>/worktree/<repo hash>.json`) keyed by the same repository hash, each with its own format version and written with `atomic_write`: `<repo hash>.fork-origins.json`, `<repo hash>.prs.json`, and one `<repo hash>.handoff-<token>.json` per pending handoff. The repository hash is taken from the main worktree's path so every worktree of a repository shares the records.
+29. **R10, terminal rows for the graph height cap** (proposed, confirmed by S5): use biscuit-terminal's existing size detection, which falls through stdout, stderr, and stdin, so it still works when the wrapper captures stdout. When every stream is redirected it reports 24 rows (cap about 12).
+30. **R11, landing directory for a detached worktree** (proposed): the base repo.
+31. **Ignored-entry display** (proposed, from S4): `git status --ignored=matching` lists a directory once only when a directory pattern matches it. This repository's own `**/target/*` lists `target/debug/`, `target/CACHEDIR.TAG`, and so on, and a `*.log` pattern lists every file. The handoff fingerprint hashes the full list; the report groups entries by their first path component (`target/ (6 entries)`) and applies the dirty list's 10-item cap and bold red total. Item 3's "e.g. `.env, notes.md, target/`" is then the grouped display, not the raw list.
+32. **Graph natural width** (proposed correction, from S5): the SVG's natural width comes from `mermaid-rs-renderer` 0.3.1's `measure_svg_dimensions` (`SvgDimensions::viewbox_width`), not `render_svg_with_dimensions`, which returns the SVG string. The measurement must use biscuit's theme, because layout depends on its font size. gitGraph branch labels use the theme's body size: 16 in the Default and Forest themes and 14 in Dark and Neutral; commit IDs are 10 in all. Item 5's and Cross-package dependencies' mentions of `render_svg_with_dimensions` read as this function.
+33. **PowerShell wrapper encoding** (proposed, from S3): the PowerShell wrapper sets `[Console]::OutputEncoding` to UTF-8 (no BOM) for the `wt` call and restores it afterwards. Windows PowerShell 5.1 otherwise decodes `wt`'s output with the console code page (IBM437 on the build host) and corrupts non-ASCII `cd:` paths.

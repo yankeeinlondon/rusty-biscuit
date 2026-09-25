@@ -224,6 +224,25 @@ Compare against that, never against `to_string_lossy()`.
   via `cargo:rustc-link-arg-bin=<bin>=…`), as `darkmatter/cli`,
   `claudine/cli`, and `sniff/cli` do. It covers the main thread only; spawned
   threads keep Rust's 2 MiB default.
+- **Killing `git` at a deadline leaves the real git running.** `git.exe` on
+  `PATH` is the `Git\cmd\git.exe` launcher, which starts
+  `mingw64\bin\git.exe`; that in turn runs the transport (`git-remote-https`,
+  `ssh`). `Child::kill` ends only the launcher. The orphans keep the stderr
+  pipe open (a reader waiting for EOF blocks about 20 s) and hold their working
+  directory, so a git started inside a directory the tool then deletes locks
+  it. `taskkill /T /F /PID <pid>` released everything at the deadline, under
+  SSH too. Unix has the pipe half of this (the transport grandchild holds
+  stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
+  Measured on build-win-native, 2026-09-24
+  (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
+- **Windows PowerShell 5.1 re-encodes a native command's captured stdout** with
+  `[Console]::OutputEncoding`, which is the OEM code page (IBM437 on
+  build-win-native). A UTF-8 `café-ü日` arrived as `caf├⌐-├╝µùÑ`. A wrapper
+  that captures a Rust binary's output (`$out = & tool.exe`) must set
+  `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` around
+  the call and restore it in `finally`. stdin and stderr stay TTYs while
+  stdout is captured. Measured 2026-09-24 under `ssh -tt`
+  (`worktree/fixes/2026-09-24-ux-improvements/spike-s3.md`).
 
 ## Current-directory locks
 
@@ -261,7 +280,10 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
 - **Detecting the lock without side effects:** rename the directory to a
   sibling name and straight back (`std::fs::rename` twice). It fails exactly
   for current-directory holders and open files, and leaves an unlocked
-  directory untouched.
+  directory untouched. Cost on ReFS with 3,000 files inside: about 1.5 ms per
+  rename pair; a held directory fails on the *first* rename in about 2 ms, so
+  the rename back only fails if something takes the lock in between
+  (2026-09-24, `spike-s4.md` in the same fix directory).
 
 ## Attaching a console inside a nextest process
 
