@@ -169,7 +169,13 @@
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs. The
   fork-origin records (`<repo hash>.fork-origins.json`) share that directory
-  and key.
+  and key, as do `wt remove`'s one-minute handoff records
+  (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
+  `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
+  `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
+  `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
+  and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
+  No new external crate was added; each was already in the workspace graph.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates. No new external crate was added.
 - `claudine/contract` (`claudine-contract`) implements
@@ -1064,7 +1070,7 @@ This is a Rust workspace with the following modules:
 
 - [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
 
-    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce._
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token._
 
     _Tags: random, csprng, system_
 
