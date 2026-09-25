@@ -67,9 +67,9 @@ pub enum ImageWidth {
 impl ImageWidth {
     /// Columns that `natural_width` units occupy at `scale`, before any clamp.
     ///
-    /// Pixels per unit = `scale × cell height ÷ 16`; columns = the scaled width
-    /// divided by the cell width, rounded up, and at least 1. A zero-sized
-    /// `cell` falls back to [`CellSize::FALLBACK`].
+    /// Pixels per unit = `scale × cell height ÷` [`SCALE_REFERENCE_TEXT_UNITS`];
+    /// columns = the scaled width divided by the cell width, rounded up, and at
+    /// least 1. A zero-sized `cell` falls back to [`CellSize::FALLBACK`].
     pub fn scaled_columns(scale: f32, natural_width: f32, cell: CellSize) -> u32 {
         let cell = if cell.width == 0 || cell.height == 0 {
             CellSize::FALLBACK

@@ -15,7 +15,8 @@
 //! (it has diverged). With no current branch, or the default branch checked
 //! out, every line with commits of its own gets a lane. Every other ref whose
 //! tip is a drawn commit is a **tag** on that commit, and an open PR is a tag
-//! `PR #n → target` on its source branch's tip.
+//! on its source branch's tip; the precise form is documented in
+//! `worktree/docs/cli/list.md`.
 //!
 //! ## Renderer workarounds
 //!
@@ -794,8 +795,9 @@ impl GitGraph {
     }
 }
 
-/// Image rows for `natural_height` units at `scale`: a cell is 16 units tall
-/// at scale 1.0, whatever its pixel size.
+/// Image rows for `natural_height` units at `scale`: a cell is
+/// [`SCALE_REFERENCE_TEXT_UNITS`] units tall at scale 1.0, whatever its pixel
+/// size.
 fn rows_for(scale: f32, natural_height: f32) -> u32 {
     ((natural_height * scale / SCALE_REFERENCE_TEXT_UNITS).ceil() as u32).max(1)
 }
