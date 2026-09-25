@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use super::width::ImageWidth;
+use crate::discovery::fonts::CellSize;
 use super::{TerminalImage, TerminalImageError};
 
 impl TerminalImage {
@@ -15,13 +16,13 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
     ) -> Result<(String, u32, f32), TerminalImageError> {
         let term_width = term.width().max(1);
-        let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
+        let cell = term.cell_size();
+        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
         let target_cells = dims.image_width;
-        let (cell_pixel_width, cell_pixel_height) = term
-            .cell_size()
+        let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
-            .unwrap_or((8u32, 16u32));
+            .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
         let image_aspect = img.height() as f32 / img.width() as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
         let raw_height = target_cells as f32 * image_aspect * cell_aspect;
@@ -32,6 +33,7 @@ impl TerminalImage {
             ImageWidth::Fill => "100%".to_string(),
             ImageWidth::Percent(pct) => format!("{:.0}%", pct * 100.0),
             ImageWidth::Characters(chars) => chars.to_string(),
+            ImageWidth::Scale(_) => target_cells.to_string(),
         };
 
         let filename = Path::new(&self.filename)
@@ -71,17 +73,17 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_iterm2(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
-        let dims = self.resolve_dimensions(term_width);
-
         let img = self.load_image()?;
+        let cell = crate::discovery::fonts::cell_size();
+        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
 
         // Use resolved dimensions
         let char_width = dims.image_width;
 
         // Resize to preserve aspect ratio based on character width
-        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+        let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
-            .unwrap_or((8u32, 16u32));
+            .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
 
         let target_pixel_width = char_width * cell_pixel_width;
         let aspect_ratio = img.height() as f32 / img.width() as f32;
@@ -104,6 +106,7 @@ impl TerminalImage {
             ImageWidth::Fill => "100%".to_string(),
             ImageWidth::Percent(pct) => format!("{:.0}%", pct * 100.0),
             ImageWidth::Characters(chars) => chars.to_string(),
+            ImageWidth::Scale(_) => char_width.to_string(),
         };
 
         // Get filename for iTerm2

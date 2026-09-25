@@ -319,7 +319,7 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - **Transparent background**: Blends seamlessly with terminal (default)
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **High resolution**: 2x scale for sharp rendering on modern displays
-- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
 - **Aspect ratio preservation**: Images always maintain correct proportions via viuer
 
 **Rendering backend:**
@@ -423,7 +423,7 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - **Transparent background**: Blends seamlessly with terminal (default)
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **Title support**: Add a title above the diagram (`-t`/`--title`)
-- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
 - **Aspect ratio preservation**: Images always maintain correct proportions via viuer
 
 **Rendering backend:**
@@ -536,7 +536,7 @@ Mixed directed and undirected expression syntax is rejected. For example, `a -> 
 - **Transparent background**: Blends with terminal (default)
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **Metadata output**: `--meta` writes render metadata to stderr (filename, cache hit, file size, render time)
-- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
 
 ### Common Diagram Options
 

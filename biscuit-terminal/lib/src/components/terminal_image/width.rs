@@ -1,6 +1,10 @@
 //! Image width specification, parsing, and dimension calculation helpers.
 
 use super::TerminalImageError;
+use crate::discovery::fonts::CellSize;
+
+/// SVG user units of body text that fill one terminal line at `ImageWidth::Scale(1.0)`.
+pub const SCALE_REFERENCE_TEXT_UNITS: f32 = 16.0;
 
 /// Width specification for image rendering.
 ///
@@ -17,6 +21,11 @@ use super::TerminalImageError;
 ///
 /// - **`Characters(u32)`**: Fixed width in terminal character cells. The image is scaled
 ///   to occupy exactly this many columns.
+///
+/// - **`Scale(f32)`**: Size the image from its natural width, relative to terminal
+///   text. At `1.0`, 16 units of the image (Mermaid's body text size) are one
+///   terminal line tall, so every diagram draws nodes and text at the same size
+///   whatever its content. See [`ImageWidth::scaled_columns`].
 ///
 /// ## Examples
 ///
@@ -49,6 +58,28 @@ pub enum ImageWidth {
     Percent(f32),
     /// A fixed width based on character width.
     Characters(u32),
+    /// A scale relative to terminal text, applied to the content's natural width.
+    ///
+    /// Content that cannot report a natural width resolves this like `Fill`.
+    Scale(f32),
+}
+
+impl ImageWidth {
+    /// Columns that `natural_width` units occupy at `scale`, before any clamp.
+    ///
+    /// Pixels per unit = `scale × cell height ÷ 16`; columns = the scaled width
+    /// divided by the cell width, rounded up, and at least 1. A zero-sized
+    /// `cell` falls back to [`CellSize::FALLBACK`].
+    pub fn scaled_columns(scale: f32, natural_width: f32, cell: CellSize) -> u32 {
+        let cell = if cell.width == 0 || cell.height == 0 {
+            CellSize::FALLBACK
+        } else {
+            cell
+        };
+        let pixels_per_unit = scale * cell.height as f32 / SCALE_REFERENCE_TEXT_UNITS;
+        // `as u32` saturates: NaN and negative results become 0, then 1.
+        ((natural_width * pixels_per_unit / cell.width as f32).ceil() as u32).max(1)
+    }
 }
 
 impl Default for ImageWidth {
@@ -83,6 +114,7 @@ pub fn calculate_display_dimensions(
         ImageWidth::Fill => term_width * cell_pixel_width,
         ImageWidth::Percent(pct) => ((term_width as f32) * pct * (cell_pixel_width as f32)) as u32,
         ImageWidth::Characters(chars) => chars * cell_pixel_width,
+        ImageWidth::Scale(scale) => (img_width as f32 * scale) as u32,
     };
 
     // Calculate height preserving aspect ratio

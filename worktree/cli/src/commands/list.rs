@@ -130,7 +130,9 @@ fn run_pipeline(
 
                 let fits = match &graph_width {
                     ImageWidth::Percent(_) | ImageWidth::Fill => true,
-                    ImageWidth::Characters(_) => terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH,
+                    ImageWidth::Characters(_) | ImageWidth::Scale(_) => {
+                        terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH
+                    }
                 };
 
                 if fits {

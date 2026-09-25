@@ -1,6 +1,7 @@
 //! Kitty graphics-protocol rendering paths for [`TerminalImage`].
 
 use crate::discovery::detection::TerminalApp;
+use crate::discovery::fonts::CellSize;
 
 use super::{TerminalImage, TerminalImageError};
 
@@ -14,14 +15,14 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
     ) -> Result<(String, u32, f32), TerminalImageError> {
         let term_width = term.width().max(1);
-        let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
+        let cell = term.cell_size();
+        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
         let target_cells = dims.image_width;
 
-        let (cell_pixel_width, cell_pixel_height) = term
-            .cell_size()
+        let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
-            .unwrap_or((8u32, 16u32));
+            .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
 
         let png_data = self.encode_as_png(&img)?;
         let image_aspect = img.height() as f32 / img.width() as f32;
@@ -68,17 +69,17 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_kitty(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
-        let dims = self.resolve_dimensions(term_width);
-
         let img = self.load_image()?;
+        let cell = crate::discovery::fonts::cell_size();
+        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
 
         // Use resolved dimensions
         let target_cells = dims.image_width;
 
         // Use measured cell size when available for correct aspect ratio calculation.
-        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+        let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
-            .unwrap_or((8u32, 16u32));
+            .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
 
         // Don't resize the image - send it at original resolution and let Kitty handle scaling.
         // This preserves maximum quality and lets Kitty's aspect ratio preservation work correctly.

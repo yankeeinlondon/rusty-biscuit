@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::components::renderable::TerminalRenderable;
+use crate::components::terminal_image::{ImageWidth, ResolvedDimensions, TerminalImage};
+use crate::discovery::fonts::CellSize;
 use crate::utils::layout::LayoutTerminalExt;
 
 use renderable::tree::{RenderNode, TreeRenderable};
@@ -44,6 +46,16 @@ pub enum MermaidRenderError {
     /// Image display failed
     #[error("Image display failed: {0}")]
     DisplayError(String),
+}
+
+/// The theme for the attached terminal's color mode; an unknown mode is dark.
+pub(crate) fn terminal_theme() -> MermaidTheme {
+    let is_dark = matches!(
+        crate::discovery::detection::color_mode(),
+        crate::discovery::detection::ColorMode::Dark
+            | crate::discovery::detection::ColorMode::Unknown
+    );
+    MermaidTheme::for_color_mode(is_dark)
 }
 
 /// A Mermaid diagram renderer for terminal output.
@@ -140,16 +152,9 @@ impl MermaidRenderer {
     /// // Theme is automatically configured based on terminal color mode
     /// ```
     pub fn for_terminal<S: Into<String>>(instructions: S) -> Self {
-        let color_mode = crate::discovery::detection::color_mode();
-        let is_dark = matches!(
-            color_mode,
-            crate::discovery::detection::ColorMode::Dark
-                | crate::discovery::detection::ColorMode::Unknown
-        );
-
         Self {
             diagram: biscuit_visualized::mermaid::MermaidDiagram::new(instructions)
-                .with_theme(MermaidTheme::for_color_mode(is_dark)),
+                .with_theme(terminal_theme()),
             scale: 2,
             transparent_background: true,
         }
@@ -320,6 +325,13 @@ impl MermaidRenderer {
     /// println!("Rendered to: {:?} (cache hit: {})", path, cache_hit);
     /// # Ok::<(), biscuit_terminal::components::mermaid::MermaidRenderError>(())
     /// ```
+    /// Measures the diagram's natural size in SVG user units.
+    pub fn natural_size(
+        &self,
+    ) -> Result<biscuit_visualized::mermaid::NaturalSize, MermaidRenderError> {
+        Ok(self.diagram.natural_size()?)
+    }
+
     /// Renders the diagram to a cached PNG at the specified target pixel width.
     ///
     /// Height is derived from the SVG's aspect ratio. The rasterizer renders
@@ -433,11 +445,13 @@ impl MermaidDiagram {
     /// Creates a new `MermaidDiagram` with the given Mermaid instructions.
     ///
     /// Automatically configures theme based on terminal color mode and
-    /// uses a transparent background. Default width is 50%.
+    /// uses a transparent background. Default width is `ImageWidth::Scale(1.0)`:
+    /// body text is one terminal line tall, so every diagram draws at the same
+    /// size, capped at the available columns.
     pub fn new<S: Into<String>>(instructions: S) -> Self {
         Self {
             renderer: MermaidRenderer::for_terminal(instructions),
-            width: super::terminal_image::ImageWidth::Percent(0.5),
+            width: super::terminal_image::ImageWidth::Scale(1.0),
             layout: crate::utils::layout::Layout::default(),
         }
     }
@@ -559,6 +573,33 @@ impl MermaidDiagram {
         })
     }
 
+    /// Resolves the image's columns for a terminal `term_width` wide.
+    ///
+    /// `ImageWidth::Scale` measures the diagram's natural width first; the
+    /// other variants never parse the diagram here.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `MermaidRenderError::Visualization` when a scaled diagram does
+    /// not parse.
+    pub fn resolve_dimensions(
+        &self,
+        term_width: u32,
+        cell: Option<CellSize>,
+    ) -> Result<ResolvedDimensions, MermaidRenderError> {
+        let natural_width = match self.width {
+            ImageWidth::Scale(_) => Some(self.renderer.natural_size()?.width),
+            _ => None,
+        };
+        Ok(TerminalImage::resolve_scaled_dimensions_for(
+            &self.width,
+            &self.layout,
+            term_width,
+            natural_width,
+            cell,
+        ))
+    }
+
     /// Renders the diagram to a terminal image string without layout applied.
     ///
     /// Returns the raw image output on success, or the fallback code block
@@ -583,21 +624,24 @@ impl MermaidDiagram {
         // terminal's detected cell size, and have the rasterizer render the
         // SVG once at that exact pixel width. No oversampling, no downstream
         // downscaling — text glyphs are rasterised at the display resolution.
-        let dims = super::terminal_image::TerminalImage::resolve_dimensions_for(
-            &self.width,
-            &self.layout,
-            term.width(),
-        );
-        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
+        let cell = term.cell_size();
+        let dims = self.resolve_dimensions(term.width(), cell)?;
+        let cell_pixel_width = cell.map_or(CellSize::FALLBACK.width, |cs| cs.width.max(1));
         let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
 
         let (png_path, cache_hit) = self
             .renderer
             .render_to_cached_png_at_width(target_width_px)?;
 
+        // The raster's pixel width is not the SVG's natural width, so a scale
+        // must not be re-resolved against the PNG: pin the columns instead.
+        let display_width = match self.width {
+            ImageWidth::Scale(_) => ImageWidth::Characters(dims.image_width),
+            ref other => other.clone(),
+        };
         let term_image = super::terminal_image::TerminalImage::new(&png_path)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
-            .with_width(self.width.clone());
+            .with_width(display_width);
 
         let width_cells = dims.image_width;
 
@@ -831,5 +875,50 @@ mod tests {
                 eprintln!("Mermaid SVG render unavailable in unit-test env: {e}");
             }
         }
+    }
+
+    const GIT_GRAPH: &str = "gitGraph\n    commit id: \"4c2e4d5\"\n    branch feat/theme\n    checkout feat/theme\n    commit id: \"7a1b2c3\"";
+
+    #[test]
+    fn diagram_defaults_to_scale_one() {
+        let diagram = MermaidDiagram::new(GIT_GRAPH);
+        assert_eq!(diagram.width, ImageWidth::Scale(1.0));
+    }
+
+    #[test]
+    fn scaled_columns_come_from_the_measured_svg_width() {
+        let cell = CellSize::FALLBACK;
+        let diagram = MermaidDiagram::new(GIT_GRAPH);
+        let natural = diagram.renderer.natural_size().unwrap().width;
+        let dims = diagram.resolve_dimensions(500, Some(cell)).unwrap();
+        assert_eq!(dims.image_width, ImageWidth::scaled_columns(1.0, natural, cell));
+        assert_eq!(dims.image_width, (natural / 8.0).ceil() as u32);
+
+        // 125% of the same diagram is wider by the scale, give or take rounding.
+        let larger = diagram
+            .clone()
+            .with_width(ImageWidth::Scale(1.25))
+            .resolve_dimensions(500, Some(cell))
+            .unwrap();
+        assert_eq!(larger.image_width, ((natural * 1.25) / 8.0).ceil() as u32);
+    }
+
+    #[test]
+    fn a_narrow_terminal_caps_the_scaled_width() {
+        let diagram = MermaidDiagram::new(GIT_GRAPH);
+        let dims = diagram.resolve_dimensions(10, Some(CellSize::FALLBACK)).unwrap();
+        assert_eq!(dims.image_width, 10);
+    }
+
+    #[test]
+    fn a_scaled_diagram_that_does_not_parse_is_an_error() {
+        let diagram = MermaidDiagram::new("no diagram header here");
+        assert!(matches!(
+            diagram.resolve_dimensions(80, None),
+            Err(MermaidRenderError::Visualization(_))
+        ));
+        // Other widths never parse while resolving.
+        let fixed = diagram.with_width(ImageWidth::Characters(30));
+        assert_eq!(fixed.resolve_dimensions(80, None).unwrap().image_width, 30);
     }
 }

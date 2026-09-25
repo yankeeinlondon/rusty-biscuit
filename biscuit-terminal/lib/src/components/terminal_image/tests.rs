@@ -1207,3 +1207,135 @@ fn test_resolve_dimensions_right_alignment() {
     // Right-aligned: 80 - 30 = 50
     assert_eq!(dims.x_offset, 50);
 }
+
+// ---------------------------------------------------------------------------
+// ImageWidth::Scale
+// ---------------------------------------------------------------------------
+
+const CELL_8X16: CellSize = CellSize {
+    width: 8,
+    height: 16,
+};
+
+#[test]
+fn scaled_columns_follow_the_cell_height_rule() {
+    // 16-unit text on a 16 px line: one unit per pixel, 400 / 8 = 50 columns.
+    assert_eq!(ImageWidth::scaled_columns(1.0, 400.0, CELL_8X16), 50);
+    // A 10x20 cell draws 1.25 px per unit: 500 px / 10 = 50 columns, the same
+    // visual size on a larger font.
+    let cell_10x20 = CellSize {
+        width: 10,
+        height: 20,
+    };
+    assert_eq!(ImageWidth::scaled_columns(1.0, 400.0, cell_10x20), 50);
+    // 125% rounds up: 400 × 1.25 / 8 = 62.5.
+    assert_eq!(ImageWidth::scaled_columns(1.25, 400.0, CELL_8X16), 63);
+    // A high-DPI cell (16x32) keeps the columns and doubles the pixels.
+    let retina = CellSize {
+        width: 16,
+        height: 32,
+    };
+    assert_eq!(ImageWidth::scaled_columns(1.0, 400.0, retina), 50);
+}
+
+#[test]
+fn scaled_columns_never_drop_below_one() {
+    assert_eq!(ImageWidth::scaled_columns(1.0, 0.0, CELL_8X16), 1);
+    assert_eq!(ImageWidth::scaled_columns(-1.0, 400.0, CELL_8X16), 1);
+    assert_eq!(ImageWidth::scaled_columns(f32::NAN, 400.0, CELL_8X16), 1);
+    assert_eq!(ImageWidth::scaled_columns(1.0, f32::NAN, CELL_8X16), 1);
+}
+
+#[test]
+fn scaled_columns_treat_a_zero_cell_as_the_fallback() {
+    let zero = CellSize {
+        width: 0,
+        height: 16,
+    };
+    assert_eq!(
+        ImageWidth::scaled_columns(1.0, 400.0, zero),
+        ImageWidth::scaled_columns(1.0, 400.0, CellSize::FALLBACK)
+    );
+    assert_eq!(CellSize::FALLBACK, CELL_8X16);
+}
+
+#[test]
+fn scale_resolves_from_the_natural_width_and_clamps_to_the_available_columns() {
+    let layout = Layout::default();
+    let dims = TerminalImage::resolve_scaled_dimensions_for(
+        &ImageWidth::Scale(1.0),
+        &layout,
+        120,
+        Some(400.0),
+        Some(CELL_8X16),
+    );
+    assert_eq!(dims.image_width, 50);
+
+    // Wider than the terminal: capped at the available columns.
+    let dims = TerminalImage::resolve_scaled_dimensions_for(
+        &ImageWidth::Scale(1.0),
+        &layout,
+        40,
+        Some(400.0),
+        Some(CELL_8X16),
+    );
+    assert_eq!(dims.image_width, 40);
+
+    // Margins shrink the cap.
+    let mut margined = Layout::default();
+    margined.margin.left = TargetValue::universal(Length::ch(5));
+    margined.margin.right = TargetValue::universal(Length::ch(5));
+    let dims = TerminalImage::resolve_scaled_dimensions_for(
+        &ImageWidth::Scale(1.0),
+        &margined,
+        40,
+        Some(400.0),
+        Some(CELL_8X16),
+    );
+    assert_eq!((dims.available_width, dims.image_width), (30, 30));
+}
+
+#[test]
+fn scale_without_a_cell_size_uses_the_8x16_fallback() {
+    let dims = TerminalImage::resolve_scaled_dimensions_for(
+        &ImageWidth::Scale(1.25),
+        &Layout::default(),
+        200,
+        Some(400.0),
+        None,
+    );
+    assert_eq!(dims.image_width, 63);
+}
+
+#[test]
+fn scale_without_a_natural_width_fills_the_available_columns() {
+    let dims = TerminalImage::resolve_dimensions_for(&ImageWidth::Scale(1.0), &Layout::default(), 90);
+    assert_eq!(dims.image_width, dims.available_width);
+}
+
+#[test]
+fn other_widths_ignore_the_natural_width() {
+    for width in [
+        ImageWidth::Fill,
+        ImageWidth::Percent(0.5),
+        ImageWidth::Characters(25),
+    ] {
+        let plain = TerminalImage::resolve_dimensions_for(&width, &Layout::default(), 100);
+        let scaled = TerminalImage::resolve_scaled_dimensions_for(
+            &width,
+            &Layout::default(),
+            100,
+            Some(4000.0),
+            Some(CELL_8X16),
+        );
+        assert_eq!(plain.image_width, scaled.image_width, "{width:?}");
+    }
+}
+
+#[test]
+fn legacy_display_dimensions_scale_the_pixel_width() {
+    assert_eq!(
+        calculate_display_dimensions(200, 100, &ImageWidth::Scale(0.5), 80),
+        (100, 50)
+    );
+}
