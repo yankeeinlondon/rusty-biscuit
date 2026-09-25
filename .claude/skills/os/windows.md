@@ -284,6 +284,13 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
   rename pair; a held directory fails on the *first* rename in about 2 ms, so
   the rename back only fails if something takes the lock in between
   (2026-09-24, `spike-s4.md` in the same fix directory).
+- **A test that needs a lock holder must spawn the holder directly.**
+  `Command::new("cmd").args(["/C", "ping -n 30 …"])` followed by `kill()`
+  kills `cmd` only. `ping` keeps running, holds the directory, and keeps
+  the inherited output pipe open, so nextest waits the full 30 s. Spawn
+  `ping` itself with `current_dir` set and null stdio
+  (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
+  2026-09-24).
 
 ## Attaching a console inside a nextest process
 

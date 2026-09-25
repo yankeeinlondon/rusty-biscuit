@@ -23,7 +23,7 @@ Because every shared module compiles twice, its `#[cfg(test)]` unit tests also r
 
 ## Exit codes and interactivity
 
-- `cli/src/exit.rs` maps errors to 0 (done or `Cancelled`), 1 (failure), 3 (`WorktreeError::RefusedToLoseWork`), and 4 (`WorktreeError::BlockedByEnvironment`); clap owns 2. Those two variants carry Prose markup that `main.rs` prints as-is. Other errors are escaped with `Prose::escape_text`.
+- `cli/src/exit.rs` maps errors to 0 (done or `Cancelled`), 1 (failure), 3 (`WorktreeError::RefusedToLoseWork`), and 4 (`WorktreeError::BlockedByEnvironment`, `WorktreeError::DirectoryInUse`); clap owns 2. Those two variants carry Prose markup that `main.rs` prints as-is. Other errors are escaped with `Prose::escape_text`.
 - `env::is_interactive()` means stdin and stderr are terminals and `CI` is unset or empty. Stdout is never consulted.
 
 ## Name resolution
@@ -37,6 +37,20 @@ Because every shared module compiles twice, its `#[cfg(test)]` unit tests also r
 ## Fork-origin records
 
 `worktree::fork_origin` stores `{ base_branch, base_sha, created_at }` per branch in `<repo hash>.fork-origins.json`. The file sits beside the comparison cache (`cache::repo_cache_file`) and is keyed by the main worktree's path. `create_worktree(branch, base, from)` records only newly created branches, as a best-effort write that never fails a create. `--from` must name a local branch (`refs/heads/…`), and a detached HEAD requires `--from`. `ForkOriginStore::prune` drops records of deleted branches and keeps records whose parent was deleted.
+
+## `wt remove`
+
+The library half is `worktree::remove` (`lib/src/remove/`); the CLI half is `cli/src/commands/remove/` (`mod.rs` flow, `policy.rs`, `report.rs`).
+
+- `inventory`: one `git status --porcelain=v1 -z -uall --ignored=matching`. Ignored entries count like dirty files (consent needed). The report groups them by first path component, because `**/target/*`-style rules list children, not `target/`. `Inventory::fingerprint` hashes each dirty path's status and content plus the ignored set (BLAKE3).
+- `safety::assess` classifies Safe / Pretty safe / Not safe / Unknown from one `for-each-ref --contains <tip>`, with the PR lookup (sniff, 2 s) on a parallel thread. An `origin/*` ref other than `origin/<default>` counts only after the live check (`live_remote::LsRemote`). Tests inject `PrSource` and `RemoteHeads` stubs.
+- `live_remote::run_noninteractive` is the only way removal code touches the network. It disables every credential prompt and kills the whole process tree at the deadline (process group on Unix, `taskkill /T /F` on Windows). A plain `Child::kill` leaves the transport holding the pipe.
+- `default_target::select_default_target` picks `main` or `origin/main` (the descendant; origin when diverged). Phase 5's list reuses it.
+- `policy::decide` is pure: (situation, flags, scripted answers) to actions. Its L1 matrix covers every tier × contents × flag subset × mode.
+- Git runs through `git::git_from(base, dir, ..)` (`git -C`, cwd = base). `run` calls `set_current_dir(base)` right after resolving the target, so neither `wt` nor a git child holds the worktree on Windows.
+- Move-first: inside the target with `WT_SHELL_WRAPPER=1`, the first run writes `handoff::HandoffRecord` (`<repo hash>.handoff-<token>.json`, 60 s) and prints `cd:` + `remove-handoff:`. `--handoff` consumes the record before judging it, then `verify` checks "caller outside the target" first (exit 4) and then every stored field (exit 3). A branch approved only because it was safe must still be safe.
+- On Windows `remove::remove_worktree` runs `check_not_in_use` (rename to a sibling and back) first. A held directory is `WorktreeError::DirectoryInUse`, which exits 4.
+- Tests: lib unit tests use `remove::test_support::TestRepo` (local bare `origin`, plus a `pusher` clone for other people's pushes). `cli/tests/remove.rs` sets `NO_COLOR=1`, because `wt` colors stderr even when it is captured. `cli/tests/level2_remove.rs` drives bash, zsh, and fish wrappers in tmux, with a `wt` shim that runs `WT_TEST_BETWEEN` before the handoff call. `cli/tests/powershell_wrapper_exec.rs` is Windows-only L1.
 
 `worktree::worktree::list_worktrees` uses `worktree::cache` to persist SHA-pair branch comparison results under the user cache directory. The cache key is `(default_tip_sha, branch_tip_sha, CACHE_FORMAT_VERSION)`, so branch/default tip movement self-invalidates ahead/behind and clean-merge results. Dirty working-tree status is never cached and remains a live `git status` check.
 
