@@ -22,6 +22,8 @@ mod host_capability_cache;
 mod integration;
 mod merge_conflict_prediction;
 mod network_primitives;
+#[cfg(feature = "remote")]
+mod pr_for_branch;
 mod program_installable;
 mod program_serialization;
 mod recent_commits;
