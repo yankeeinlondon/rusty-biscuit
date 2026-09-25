@@ -20,8 +20,11 @@
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
     - you should not assume that _every_ specification requires human review; rather only those which require important design decisions, or involve activities and tests that only the human can do (versus an agent) 
     - when you've set `human_review` to `true` you must also set the `human_review_items` as a list of things you want the human to review:
+        - if any of the review's findings are blocked by this need for human review then make sure that the finding is clearly marked as blocked and the what is blocking it is also clear and then set the frontmatter property `has_blocked_findings` to `true`
+            - if ALL of the reviews findings are blocked due to human review then set `blocked` to `true`
         - this list should avoid any jargon and should NOT assume that the reviewer has any familiarity with this repo
-        - each review item must clearly articulate what the review item is, what is expected from the user, and in cases where a design decision is being asked for providing an enumeration of possible solutions. 
+        - if a review has made "decisions" they do not need to be reaffirmed again during this cycle unless something in the decision has changed enough that the review has changed. In these cases you must describe the change, why it was changed, and rather than referring to an obscure decision reference provide the actual decision text itself.
+        - each review item must clearly articulate what the review item is, what is expected from the user, and in cases where a design decision is being asked for, providing an enumeration of possible solutions (as a markdown list). 
         - to aid in each item having good clarity you may treat the content of each item as Markdown content and include diagrams using Mermaid if that helps in providing clarity to your audience.
         - Note: when the review item is longer than a sentence you should leverage YAML's `|-` operator to create Frontmatter properties which are more human readable. For instance:
 

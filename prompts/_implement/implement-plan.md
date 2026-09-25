@@ -1,4 +1,8 @@
 ---
+description: |-
+    Implements a plan phase by phase.
+
+    - if an appropriately named _specification_ or _design_ file is found in the same directory then they will be referenced to in the log's frontmatter as well as the prose content 
 $schema:
     phase: number(required;default(1)) -> the phase of the plan to start with
     total_phases: number(required) -> the total number of phases the plan has

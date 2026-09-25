@@ -107,6 +107,8 @@ Read both the specification document and then perform a review on the implementa
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
+::file ../_writing-clearly.md 
+
 ## Test Rigor — Level 1 / Level 2 / Level 3
 
 Test count is not test rigor. Phrases like "covered by substantial unit and integration tests" are banned from this review unless you can pair each user-facing requirement with a verification level:
