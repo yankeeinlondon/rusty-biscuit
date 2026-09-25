@@ -2,6 +2,17 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-visualized` moves `mermaid-rs-renderer` from 0.2 (locked 0.2.1) to
+  0.3.1 (2026-09-24, worktree `2026-09-24-ux-improvements`), for 0.3's
+  `measure_svg_dimensions` (the natural SVG size that scale-based image widths
+  need) and its layout and theme fixes. The edge now sets
+  `default-features = false`: the crate's `png` feature pulled a second
+  `resvg`/`usvg` (0.46 under 0.2, 0.47 under 0.3) and `cli` pulled `clap`, and
+  biscuit rasterizes with its own `resvg` 0.45. The lockfile drops `resvg` 0.46,
+  `usvg` 0.46, `kurbo` 0.13, `svgtypes` 0.16, `roxmltree` 0.21, and `imagesize`
+  0.14. 0.3 derives its default pie palette as `hsl()`, which biscuit's
+  pie-label contrast fix now parses.
+
 - Every `reqwest` edge in the workspace sets `default-features = false` and
   re-lists `default-tls`, `charset`, and `http2`. The one default this drops is
   `system-proxy` (`hyper-util/client-proxy-system`), which removed
@@ -877,6 +888,12 @@ This is a Rust workspace with the following modules:
     _Tags: url, parsing, web_
 
 ### Image Processing
+
+- [mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) _v0.3.1_ [📄](https://docs.rs/mermaid-rs-renderer)
+
+    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` with `default-features = false` (SVG only; biscuit rasterizes with its own `resvg`)._
+
+    _Tags: image, diagrams, svg_
 
 - [image](https://github.com/image-rs/image) _v0.25_ [📄](https://docs.rs/image)
 
