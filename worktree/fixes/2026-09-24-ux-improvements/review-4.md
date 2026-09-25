@@ -7,10 +7,13 @@ blocked: false
 reviewed_by: codex/default
 created: 2026-09-25T11:11:35-07:00
 spec: 2026-09-24-ux-improvements/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
 description: "A **fix** review of `2026-09-24-ux-improvements/spec.md`"
 fix: 2026-09-24-ux-improvements/review-4.md
 previous: 2026-09-24-ux-improvements/review-3.md
+next: 2026-09-24-ux-improvements/review-5.md
 findings:
     - title: Git can rewrite the approved deletion endpoint a second time
       priority: high

@@ -5,6 +5,9 @@ implemented_by: claude/opus
 implementation_1: "2026-09-25T08:42:22-07:00"
 implementation_2: "2026-09-25T10:08:34-07:00"
 implementation_3: "2026-09-25T10:58:59-07:00"
+implementation_4: "2026-09-25T11:32:13-07:00"
+implementation_5: "2026-09-25T13:46:04-07:00"
+implementation_6: "2026-09-25T14:08:28-07:00"
 started_phase: 1
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -1182,3 +1185,148 @@ The files changed in this cycle:
 - `worktree/cli/tests/remove.rs` (findings 1 and 2)
 - `worktree/README.md` (finding 1), `.claude/skills/worktree/SKILL.md` (findings 1 and 2)
 - `worktree/fixes/2026-09-24-ux-improvements/spec.md` (wording for both findings)
+
+## Implementation of Review Findings #4
+
+> **started at:** 2026-09-25T11:32:13-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-4.md'
+- this is iteration 4 of the review-to-implement cycle
+- starting the work on 'Git can rewrite the approved deletion endpoint a second time' at 11:32:39
+        - design (orchestrator): git cannot disable URL rewriting for one command, and resolving the URL again cannot handle arbitrary chains of rules. So `--force-remote` now refuses (exit 3, before any question or removal) when any `url.*.insteadOf` or `url.*.pushInsteadOf` value is a prefix of the resolved push endpoint. With no matching rule, `ls-remote <endpoint>` and `push <endpoint>` both address the endpoint literally
+        - new `RemoteState::RewrittenEndpoint { destination, endpoint, rule }`, where `rule` is spelled `<key>=<value>`. Rules are read with `git config --null --list`, because `--get-regexp` exits 1 when nothing matches, and `--null` handles subsections that contain spaces. A config read failure is `Unavailable`
+        - discovery: the handoff comparisons passed when a rule was added between the runs, because `git remote get-url --push origin` still printed the same URL. `run_handoff` already ran every check before `execute`, but it had no rewrite check. The shared `unprovable_remote()` helper (covering `MultiplePushUrls` and `RewrittenEndpoint`) now runs in both `run` and `run_handoff` before any mutation
+        - defense in depth: `delete_remote_branch` checks the rules again and returns `Err` before pushing
+        - files: `worktree/lib/src/remove/remote.rs`, `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/src/commands/remove/report.rs`, `worktree/cli/tests/remove.rs`, `worktree/README.md`, `.claude/skills/worktree/SKILL.md`, `spec.md` (review-4 amendment to Decision 21)
+        - tests (L1):
+                - lib: `a_rewrite_rule_matching_the_endpoint_is_found_in_any_letter_case`, `rewrite_rules_parse_from_null_separated_config`, `a_rewritten_endpoint_is_refused_before_asking_it_and_never_pushed_to`
+                - report: extended `remote_states_read_plainly`
+                - CLI: `a_rewrite_rule_matching_the_push_url_refuses_force_remote_with_nothing_removed` (direct) and `a_rewrite_rule_added_between_the_runs_refuses_with_nothing_removed` (handoff). Both assert exit 3, that the worktree, the local branch, and `feat/x` on `approved.git` and `other.git` are intact, and that every ref in `other.git` is unchanged. Both failed with the rule check stubbed out
+        - results: `just test` 302 passed, 17 skipped; `just lint` clean; 0 stranded tests
+        - note: the existing CLI remove tests do not isolate HOME, so a user's global `url.*` rule could in principle match the temp paths (unlikely; left as is to match those tests)
+- work completed for 'Git can rewrite the approved deletion endpoint a second time' at 11:36:57
+- starting the work on 'Remote deletion can use the branch being deleted as its safety evidence' at 11:36:57
+        - cause: `classify` in `safety.rs` checked default-branch evidence before it dropped the `--force-remote` target, so an upstream of `origin/main` made the branch Safe on the strength of the ref about to be deleted
+        - fix: under `force_remote`, the target is filtered out while the ref list is built, before every tier check. The later remote-ref filter became redundant and was removed. Deleting the default branch on origin stays allowed: when no other copy survives, the tier is Not safe and the local branch is kept unless `--force-branch` is given
+        - second leak: `lost_commits` counted the target through the `origin/HEAD` alias, which reported 0 lost commits. It now always passes `--exclude=origin/HEAD`; the branch that `origin/HEAD` points to is still counted under its own name
+        - move-first path: `run_handoff` calls the same `Facts::gather` and `assess`, so the handoff gets the same fix
+        - files: `worktree/lib/src/remove/safety.rs` (fix, comments, tests), `worktree/cli/tests/remove.rs`, `worktree/README.md` (`--force-remote` bullet), `.claude/skills/worktree/SKILL.md`
+        - tests (L1):
+                - lib: `force_remote_never_counts_a_default_branch_destination_as_evidence` (Not safe, 1 lost; without the flag, still Safe via `origin/main`) and `force_remote_of_a_default_branch_destination_still_accepts_independent_copies` (a tag gives Pretty safe; a fast-forwarded local main gives Safe)
+                - CLI: `force_remote_of_the_upstream_default_branch_keeps_the_local_branch`, its `_after_a_handoff` variant, and its `_accepts_an_independent_tag` variant. All 5 fail with the fix reverted
+                - test setup: the bare origin needs `receive.denyDeleteCurrent=ignore` to delete its HEAD branch; the tag is created with `update-ref` because this host's git config forces annotated tags
+        - results: `just test` 307 passed, 17 skipped; `just lint` clean; 0 stranded tests
+        - observation, not changed: in the handoff flow, a Not safe branch that is kept is stored as a plain "keep", so the second run prints the dim `Kept branch` line rather than the yellow warning (the first run's report does say Not safe). This predates this cycle
+- work completed for 'Remote deletion can use the branch being deleted as its safety evidence' at 11:45:19
+- final verification on macOS: `worktree/just test` 307 passed, 17 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+- cross-OS: `just cross-check worktree-cli --os windows` and `just cross-check worktree --os windows` both pass on build-win-native (covers the prefix matching against Windows paths in the URL-rule check)
+
+### Successful Completion
+
+The implementation of review cycle 4 has completed successfully in 13m. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- rather than pinning the endpoint, `--force-remote` refuses (exit 3, nothing removed) whenever any `insteadOf`/`pushInsteadOf` rule matches the resolved push endpoint. Git cannot switch rewriting off for one command, and this is the review's "refuse" option
+- `lost_commits` now always excludes `origin/HEAD`, an alias that otherwise counted the `--force-remote` target as a surviving copy
+
+The files changed in this cycle:
+
+- `worktree/lib/src/remove/remote.rs` (finding 1), `worktree/lib/src/remove/safety.rs` (finding 2)
+- `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/src/commands/remove/report.rs` (finding 1)
+- `worktree/cli/tests/remove.rs` (findings 1 and 2)
+- `worktree/README.md`, `.claude/skills/worktree/SKILL.md` (findings 1 and 2)
+- `worktree/fixes/2026-09-24-ux-improvements/spec.md` (Decision 21 amendment, finding 1)
+
+## Implementation of Review Findings #5
+
+> **started at:** 2026-09-25T13:46:04-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-5.md'
+- this is iteration 5 of the review-to-implement cycle
+- starting the work on 'An approved relative endpoint can resolve as another remote and delete from its push repository' at 13:46:15
+        - cause: `endpoint_rewrite_rule` checked only `url.*.insteadOf`/`pushInsteadOf`, but git also reads a repository argument that names a configured remote as that remote (`ls-remote` takes its fetch URL, `push` its push URL), so origin's relative push URL `approved` could be observed in one repository and deleted from another
+        - design choice for reviewer confirmation: refuse rather than force a literal address; prefixing `./` would change the meaning of scp-like endpoints (`host:repo`), and git 2.55 resolves config remotes even when the name contains `/`
+        - design choice for reviewer confirmation: the orchestrator's suggested probe, `git remote get-url <endpoint>`, was rejected after testing git 2.55: it says "No such remote" for remotes defined in global scope or by `-c`, while `git -c remote.approved.pushurl=<other> push approved --delete feat/x` still deleted from `<other>`
+        - fix: `remote::endpoint_rewrite_rule` became `endpoint_reinterpretation`, returning `Reinterpretation::{Rewrite(rule), RemoteName { source }}` from the same single `git config --null --list` read (every scope, `-c`, includes); any `remote.<endpoint>.*` key counts (exact, case-sensitive name match, as git does), since `pushurl` alone redirects `push` and keys like `receivepack`/`vcs` change what runs; legacy `remotes/<endpoint>` and `branches/<endpoint>` files are checked through `rev-parse --git-path` when the name has no directory separator (git reads them only then)
+        - fix: `RemoteState::RewrittenEndpoint { rule }` generalized to `ReinterpretedEndpoint { by: Reinterpretation }`; direct preflight, the handoff's second run (`unprovable_remote`), and the final guard in `delete_remote_branch` all refuse through it (exit 3, nothing removed), and the report and refusal name the key or file defining the colliding remote
+        - docs: remote.rs module and function docs, the `run_handoff` comment, `worktree/README.md`, the `wt remove` bullet in `.claude/skills/worktree/SKILL.md`, and a review 5 amendment to Decision 21 (plus the review-4 amendment's "so both commands address it literally" claim removed)
+        - files: `worktree/lib/src/remove/remote.rs`, `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/src/commands/remove/report.rs`, `worktree/cli/tests/remove.rs`, `worktree/README.md`, `.claude/skills/worktree/SKILL.md`, `worktree/fixes/2026-09-24-ux-improvements/spec.md`
+        - tests (lib): `an_endpoint_naming_a_remote_is_found_in_config_and_legacy_files` (includes the `delete_remote_branch` guard), `rewrite_rules_and_remote_names_parse_from_null_separated_config` (replaces `rewrite_rules_parse_from_null_separated_config`); report unit test extended for the remote-name line
+        - tests (CLI, new `TwoRemotes::relative()` fixture with bare `approved`/`other` inside the base checkout): `an_endpoint_that_names_another_remote_refuses_force_remote_with_nothing_removed`, `a_remote_named_like_the_endpoint_added_between_the_runs_refuses_with_nothing_removed`, `an_endpoint_naming_a_remote_from_command_line_config_refuses_with_nothing_removed` (`GIT_CONFIG_COUNT` env), and success case `an_unambiguous_relative_endpoint_is_observed_and_deleted_from`
+        - results: with the remote-name detection stubbed, the 2 lib tests and all 3 CLI refusal regressions failed; restored, `just test` 312 passed (17 skipped by the area filter), `just lint` clean, `just check-tier-coverage worktree` zero stranded; Windows cross-check not run
+- work completed for 'An approved relative endpoint can resolve as another remote and delete from its push repository' at 13:52:38
+- orchestrator verification on macOS: `worktree/just test` 312 passed, 17 skipped; `just lint` clean
+- cross-OS: `just cross-check worktree-cli --os windows` (177 passed) and `just cross-check worktree --os windows` both pass on build-win-native, covering the directory-separator test and legacy-file lookup on Windows paths
+
+### Successful Completion
+
+The implementation of review cycle 5 has completed successfully in 9m. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- `--force-remote` refuses (exit 3, nothing removed) when origin's push endpoint names a remote, rather than forcing a literal address; a `./` prefix would change the meaning of scp-like endpoints such as `host:repo`
+- detection reads the same `git config --null --list` as the rewrite check, not `git remote get-url <endpoint>`, which misses remotes defined in global config or by `-c` on git 2.55
+- any `remote.<endpoint>.*` key triggers the refusal, including a fetch-only entry that git would actually treat literally; this is deliberately broad rather than a reimplementation of git's rules
+
+The files changed in this cycle:
+
+- `worktree/lib/src/remove/remote.rs`
+- `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/src/commands/remove/report.rs`
+- `worktree/cli/tests/remove.rs`
+- `worktree/README.md`, `.claude/skills/worktree/SKILL.md`
+- `worktree/fixes/2026-09-24-ux-improvements/spec.md` (Decision 21 review 5 amendment)
+
+## Implementation of Review Findings #6
+
+> **started at:** 2026-09-25T14:08:28-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-6.md'
+- this is iteration 6 of the review-to-implement cycle 
+
+- starting the work on 'Changes inside an untracked nested repository escape the handoff check and are deleted' at 14:09:13
+        - cause: `content_digest` in `worktree/lib/src/remove/inventory.rs` returned the constant `dir` for a directory entry; git lists an untracked nested repository as one `?? nested/` entry even with `-uall`, so edits and new files inside it never changed `Inventory::fingerprint`, and `run_handoff` deleted them after approval. File open/read failures were also silently hashed as `unreadable`
+        - fix: a dirty entry that is a directory now contributes a sorted, recursive listing of every path beneath it (directories, file BLAKE3 digests via `biscuit-hash`, symlink targets without following them, a `special` marker for FIFOs/sockets instead of opening them), keyed by `/`-separated relative paths so every OS hashes the same text; any read failure under a dirty entry returns `WorktreeError::Io` naming the path; a dirty path that no longer exists is still `absent` (a legitimate ` D`)
+        - design choices for reviewer confirmation:
+                - the nested repository's `.git` directory is walked too: its commits and index are lost with the directory and the outer `git status` never lists them; the outer status does not touch an untracked nested repository, so the fingerprint is stable (the unchanged-content tests prove it)
+                - registered submodules (` M sub`, directory path) take the same walk; checked by hand: untracked and staged content inside a non-absorbed submodule leave its files stable across outer `git status` runs, but an mtime-only touch lets the outer status rewrite `sub/.git/index`, which refuses the handoff spuriously (exit 3), never accepts a change
+                - inspection failures exit 4 (`BlockedByEnvironment`, "nothing removed, and no `--force-*` flag helps"): the CLI's new `fingerprint` helper maps the library's `WorktreeError::Io` (the fingerprint's only source of `Io`; git failures are `GitCommand`, still exit 1) to a Nothing-was-removed message on both the first move-first run and the handoff run; exit 3 was rejected because no force flag can make an unreadable file verifiable
+                - top-level file digests are now prefixed `file:`; this only changes the hashed text, and handoff records live 60 s
+        - docs changed: `fingerprint` and `collect_inventory` doc comments (nested-repository exception to `-uall`, directory walk, error contract), `worktree/README.md` (move-first refusal covers nested-repository contents; unreadable file exits 4), `.claude/skills/worktree/SKILL.md` (`Inventory::fingerprint` bullet)
+        - files changed: `worktree/lib/src/remove/inventory.rs`, `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/tests/remove.rs`, `worktree/README.md`, `.claude/skills/worktree/SKILL.md`
+        - tests added:
+                - lib: `fingerprint_covers_edits_and_new_files_inside_an_untracked_nested_repo` (asserts git reports only `?? nested/`; unchanged is equal, edited child and new child each differ), `fingerprint_fails_when_a_path_inside_a_dirty_directory_is_unreadable` (Unix only; returns early when running as root)
+                - CLI (`cli/tests/remove.rs`, auto-discovered `remove` target): `changes_inside_an_untracked_nested_repo_between_the_runs_refuse_with_nothing_removed` (exit 3; worktree, registration, branch, changed and new files intact), `an_unchanged_untracked_nested_repo_is_removed_by_the_handoff` (exit 0), `an_unreadable_file_inside_a_nested_repo_refuses_the_handoff_with_exit_4` (Unix only)
+        - results:
+                - `just test` (worktree): 317 passed, 17 skipped
+                - `just lint` (worktree): clean, exit 0
+                - `just check-tier-coverage worktree`: 0 stranded
+                - fail-before: with the `dir` marker temporarily restored, the lib nested-repo test and both CLI refusal tests failed while the unchanged-content success case passed; after restoring the fix all pass
+                - OS note: relative keys are built with `/` so Windows hashes identical text; not run on Windows, where junctions and non-UTF-8 names (hashed lossily) are the remaining risk
+- work completed for 'Changes inside an untracked nested repository escape the handoff check and are deleted' at 14:12:58
+- orchestrator verification on macOS at 14:15:30: `worktree/just test` 317 passed, 17 skipped; `just lint` clean
+- cross-OS: `just cross-check worktree --os windows` and `just cross-check worktree-cli --os windows` both pass on build-win-native, covering the `/`-joined walk keys on Windows paths
+- note: during this cycle something outside the session staged the working tree; the index was left as found, so the cycle's edits are partly staged and partly unstaged
+
+### Successful Completion
+
+The implementation of review cycle 6 has completed successfully in 8m. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- the nested repository's `.git` directory is included in the directory walk, so its commits and index count as working content
+- a registered submodule whose own index the outer `git status` refreshes may refuse a handoff spuriously (exit 3); it can never accept a change
+- a path under a dirty entry that cannot be read refuses with exit 4 (`BlockedByEnvironment`), not exit 3, because no `--force-*` flag makes it verifiable
+
+The files changed in this cycle:
+
+- `worktree/lib/src/remove/inventory.rs`
+- `worktree/cli/src/commands/remove/mod.rs`
+- `worktree/cli/tests/remove.rs`
+- `worktree/README.md`, `.claude/skills/worktree/SKILL.md`
