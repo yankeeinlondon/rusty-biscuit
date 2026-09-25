@@ -228,7 +228,7 @@ pub struct TreeRow {
     pub worktree: Option<usize>,
     /// The tree parent's branch name; `None` at the root level.
     pub parent: Option<String>,
-    /// The tree parent is a deleted branch (a dotted connector).
+    /// The tree parent is a deleted branch.
     pub parent_deleted: bool,
     /// For each ancestor below the root, outermost first: whether it has
     /// later siblings, so its vertical guide continues past this row. Empty at
@@ -236,7 +236,7 @@ pub struct TreeRow {
     pub guides: Vec<bool>,
     /// 0 at the root level.
     pub depth: usize,
-    /// The last of its siblings (`└` rather than `├`).
+    /// The last of its siblings.
     pub last: bool,
 }
 

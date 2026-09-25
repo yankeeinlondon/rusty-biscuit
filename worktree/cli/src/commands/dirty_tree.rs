@@ -5,10 +5,10 @@
 //! filesystem component (`├── `, `└── `, `│   `, four-space indent) and emits
 //! Prose-flavored markup so the caller can colorize via `Prose::new(...).render(...)`.
 //!
-//! Files are colored by kind with the `wt list` dirty-dot palette: source code
-//! (per `sniff::filesystem::path_kind::is_source_code_path`) orange, other
-//! files yellow; directories are dim. Callers cap how many paths they pass;
-//! `wt remove` shows a count instead of a tree above 10.
+//! Files are colored by kind with the `wt list` dirty-dot palette, split by
+//! `sniff::filesystem::path_kind::is_source_code_path`. Callers cap how many
+//! paths they pass; `wt remove` shows a count instead of a tree above its
+//! `LIST_LIMIT`.
 //!
 //! ## Why a custom implementation?
 //!

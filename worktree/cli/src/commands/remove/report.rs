@@ -14,7 +14,7 @@ use worktree::remove::safety::{BranchSafety, Commit, Evidence, PrLookup, Tier};
 
 use crate::commands::dirty_tree;
 
-/// Above this many entries a list becomes a bold red count.
+/// Above this many entries a list becomes a count.
 pub const LIST_LIMIT: usize = 10;
 
 fn esc(text: &str) -> String {
@@ -76,7 +76,7 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
     )
 }
 
-/// Dirty files as a tree (or a bold red count above [`LIST_LIMIT`]), then the
+/// Dirty files as a tree (or a count above [`LIST_LIMIT`]), then the
 /// ignored entries grouped by top-level folder.
 pub fn files_markup(inventory: &Inventory) -> String {
     let mut out = String::new();
@@ -236,7 +236,7 @@ pub(super) fn commit_count(count: usize) -> String {
     }
 }
 
-/// The commits deleting the branch would lose: subjects, or a bold red count
+/// The commits deleting the branch would lose: subjects, or a count
 /// above [`LIST_LIMIT`].
 pub fn lost_commits_markup(commits: &[Commit]) -> String {
     if commits.len() > LIST_LIMIT {

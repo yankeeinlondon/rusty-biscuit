@@ -125,7 +125,7 @@ impl PrListing {
         })
     }
 
-    /// Whole minutes since the fetch, for the "PRs as of N min ago" line.
+    /// Whole minutes since the fetch, for the PR age line.
     pub fn age_minutes(&self, now: u64) -> Option<u64> {
         self.fetched_at.map(|fetched| now.saturating_sub(fetched) / 60)
     }
@@ -138,7 +138,7 @@ pub enum PrPlacement {
     Parent,
     /// After the `-> {default}` cell.
     Default,
-    /// Beside the branch name as `PR #n → target`.
+    /// Beside the branch name, with the PR's target named.
     BesideBranch,
 }
 

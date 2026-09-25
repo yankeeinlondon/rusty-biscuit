@@ -67,8 +67,7 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     out
 }
 
-/// `[main] is N commits behind [origin/main]` and its siblings. Only the
-/// counts are colored.
+/// The caption: the local default branch against its origin peer.
 pub fn caption_markup(caption: &Caption) -> String {
     let local = local_badge(&caption.local);
     let remote = remote_badge(&caption.remote);
@@ -88,8 +87,7 @@ pub fn caption_markup(caption: &Caption) -> String {
     }
 }
 
-/// The two legend lines: the column name in the default foreground, then the
-/// glyph samples and their meanings in dim.
+/// The two legend lines, one each for the Worktree and Branch column glyphs.
 pub fn legend_markup() -> [String; 2] {
     [
         format!(
@@ -107,8 +105,8 @@ pub fn legend_markup() -> [String; 2] {
     ]
 }
 
-/// The dim "PRs as of N min ago" line, shown only when the request failed and
-/// stored results stand in.
+/// The PR age line, shown only when the request failed and stored results
+/// stand in.
 pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
     if !prs.stale {
         return None;
@@ -339,8 +337,8 @@ fn merge_markup(comparison: Comparison) -> String {
     }
 }
 
-/// Gray when the branch merges cleanly (or is already in), red when it
-/// conflicts, and dim under a deleted parent.
+/// Colors a tree connector by the row's merge state; a deleted parent
+/// overrides it.
 fn connector_markup(glyph: &str, state: Option<MergeState>, parent_deleted: bool) -> String {
     if parent_deleted {
         return format!("<dim>{glyph}</dim>");
@@ -351,7 +349,7 @@ fn connector_markup(glyph: &str, state: Option<MergeState>, parent_deleted: bool
     }
 }
 
-/// Single-column text glyphs, colored by ANSI.
+/// Single-column text glyphs.
 fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     match dirty {
         DirtyStatus::Clean => "<dim>○</dim>",

@@ -25,7 +25,7 @@ pub const PR_DEADLINE: Duration = Duration::from_secs(2);
 /// Where the branch's work was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Evidence {
-    /// `main` or `origin/main`.
+    /// The default branch or its origin copy, by short name.
     DefaultBranch(String),
     PullRequest {
         number: u64,
