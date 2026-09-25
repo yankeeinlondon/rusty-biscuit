@@ -1252,8 +1252,8 @@ belong here.
     same planning commit when the spec's `message_to_agent` reserves
     the move for the author's review. The canonical "close cycle N and
     move to completed" pattern applies when the orchestrator owns the
-    move decision; when the author has decoupled it ("do not move it to
-    _completed or run `just complete` — that is the author's call"),
+move decision; when the author has decoupled it ("do not move it to
+    `_completed` or run `just complete` — that is the author's call"),
     the planning commit ships the final review, the implementation-log
     appends the per-cycle records, and the spec frontmatter adds
     `completed: true`, but the active directory remains in place.
@@ -1261,7 +1261,41 @@ belong here.
     (`ready: true`, `implemented: false`, no `next:`); the planning
     commit was `planning(repo): record review cycles 1-7 and finalize
     kache host-setup fix` and the directory stayed in `fixes/`. The
-    "cycle close into _completed/ is valid even when the moved spec
+    "cycle close into `_completed/` is valid even when the moved spec
     still shows `implemented: false`" rule governs the canonical
     pattern; this entry governs the deferred-move variant.
+- The `ignore` crate reads its global excludes file (under `git_global(true)`)
+    through the **process** `HOME`/`USERPROFILE`/`XDG_CONFIG_HOME`, not through
+    any test-isolated handle. Mutating this process's environment to assert
+    a Git-ignore-rule fixture would silently shift `ignore`'s behavior across
+    the whole test binary. Pattern: mark a child test `#[ignore]`, write a
+    parent test that uses `std::process::Command::new(env!("CURRENT_EXE"))` (or
+    `cargo test` re-exec) to spawn it with `HOME`/`USERPROFILE` pointing at a
+    `tempdir()` and `XDG_CONFIG_HOME` removed, then write a sentinel line
+    proving the child ran. The parent asserts through the sentinel; the child
+    is inert when run by hand. Outside a Git repo only `.ignore` applies
+    (`.gitignore` and global excludes do not). Verified with
+    `git_ignore_rules_apply_under_an_isolated_git_configuration` /
+    `git_ignore_rules_child` in
+    `sniff/lib/src/filesystem/repo/nested.rs` Phase 3 (`2026-09-20-repo-perf`).
+- Proving every visitor in a parallel walk flushed requires a counter that
+    goes through the **thread-buffered** path, not the direct-write path. A
+    `#[cfg(test)]` hook called from the visitor that uses `increment_counter`
+    (thread-buffered) will reflect a missing flush because the dropped
+    visitor's buffer never reaches the collector; a sibling
+    `increment_counter_dynamic` call to record worker identity writes to the
+    collector directly and cannot detect the lost flush, so it cannot
+    substitute. Cross-check the post-walk total against a serial entry count
+    — parity under one worker is the control. See
+    `every_visitor_flushes_its_work_into_the_request` in
+    `sniff/lib/src/filesystem/repo/nested.rs` and the skill note in
+    `.claude/skills/sniff/performance.md` (`2026-09-20-repo-perf` Phase 3).
+- `just cross-check sniff --os <os> <filter>` runs the filter through a
+    remote shell, which mangles any nextest `-E` filterset that uses
+    parentheses (the shell's quoting breaks). Use a plain substring filter
+    (e.g. `nested::tests`) and pass `--no-capture` so SKIP lines (the
+    Developer Mode skip on Windows, the macOS APFS non-Unicode skip, etc.)
+    surface in captured output; without `--no-capture` the printer's
+    carriage-return progress lines hide SKIPs. Same caveat applies to any
+    other just recipe that wraps a remote-shell `cargo nextest run`.
 
