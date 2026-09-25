@@ -167,7 +167,11 @@
   nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
-  directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
+  directory, keyed by canonical repo-root xxHash plus branch tip SHAs. The
+  fork-origin records (`<repo hash>.fork-origins.json`) share that directory
+  and key.
+- `worktree/cli` uses `insta` as a development dependency to snapshot the shell
+  wrappers `wt --completions` generates. No new external crate was added.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
