@@ -111,6 +111,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   unmigrated base too, and the failing set varied between runs. Treat such a
   run as no evidence either way. It also ignores `SIGTERM`: stop it with
   `kitty @ --to unix:<sock> close-window --match all`.
+  What does work (2026-09-25): a *normal* (not minimized, not hidden)
+  instance per test, `open -g -n -a kitty --args --config NONE -o
+  allow_remote_control=socket-only -o initial_window_width=<N>c …`, which
+  stays unfocused, has exactly the cells asked for, and can be screenshotted
+  with `screencapture -x -o -l <platform_window_id from kitty @ ls>`. That is
+  `biscuit_test_harness::kitty::KittyInstance`. A hidden instance's
+  screenshot is black (never drawn). Stop an instance with `kitty @ --to …
+  action quit`; without `confirm_os_window_close=0` that opens a "Quit
+  kitty?" window instead.
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
   spawns an interactive login shell, so anything the host's shell startup
   does interactively lands in the pane. A first-run tool prompt (seen with

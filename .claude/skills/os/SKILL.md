@@ -169,7 +169,7 @@ push mode.
   cache-quota and `main`-cancellation behavior, merge-gate bypass, and the
   cross-run noise and comparison rules.
 - [windows.md](windows.md) — path spelling, home directory lookup, handle
-  inheritance, current-directory locks (deleting a directory a shell stands in), batch-file argument rule, Ctrl+C status, console allocation and
+  inheritance, current-directory locks (deleting a directory a shell stands in), a windowless real console for L2 (ConPTY), batch-file argument rule, Ctrl+C status, console allocation and
   `CONOUT$` redirection under nextest, cross-compile targets, Markdown
   backslash escapes.
 - [macos.md](macos.md) — `/var` symlink, Docker for Linux evidence, L2

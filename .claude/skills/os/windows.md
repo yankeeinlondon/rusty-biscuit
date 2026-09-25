@@ -296,6 +296,38 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
   (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
   2026-09-24).
 
+## A real console without a window: ConPTY
+
+Measured on `build-win-native` on 2026-09-25 through `just cross-check`
+(`worktree/cli/tests/level2_powershell_remove.rs`).
+
+- **A pseudoconsole is a Level 2 console that needs no backend.** `xpty`
+  (already in `Cargo.lock` for `unchained-ai`) opens ConPTY from inside the SSH
+  session's nextest process, with no window and no focus change. Interactive
+  Windows PowerShell 5.1 runs in it with PSReadLine, keystrokes are plain bytes
+  (`\r` for Enter), and a Rust prompt (inquire) sees a terminal. `xpty` leaves
+  out `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost sends no DSR that the test
+  would have to answer.
+- **The output stream is a repaint, not the text.** PSReadLine's echo of one
+  typed line arrived as `. 'C:\…\s. 'C:\…\sc. 'C:\…\sce…`. Wait for a single
+  word in the stream at most; assert on the console's own screen buffer,
+  which the session can dump with `$Host.UI.RawUI.GetBufferContents` (the
+  Windows counterpart of `tmux capture-pane`).
+- **Index that buffer with `GetValue`.** In a script, `$cells[$y, $x]` on the
+  `BufferCell[,]` it returns failed to parse ("Missing ']' after array index
+  expression"); `$cells.GetValue($y, $x).Character` works.
+- **The screen buffer hard-wraps at the column width, mid-word.** A long
+  error line (a temp path) split as `…': P` / `ermission denied`. Join a
+  full-width row to the next without a space before matching a phrase
+  (`unwrapped` in that test, 2026-09-25).
+- **`build-win-native` checks files out with CRLF** (`core.autocrlf`), so a
+  test that wrote `"guide\n"`, committed it, and read the file back from a
+  `git worktree add` checkout got `"guide\r\n"`. Normalize line endings
+  before comparing checked-out content (2026-09-25).
+- The process's working directory is the one passed to `CommandBuilder::cwd`,
+  so this is also how a test reproduces "a window launched inside the
+  directory" for the current-directory lock above.
+
 ## Attaching a console inside a nextest process
 
 `biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary `windows-latest`
