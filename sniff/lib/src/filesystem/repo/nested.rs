@@ -229,22 +229,68 @@ struct Candidate {
 /// explode the candidate set.
 ///
 /// Marker evidence is matched in-memory against the filenames the walker
-/// already yields, rather than re-probing the filesystem per directory. This
-/// collapses the per-directory `path.join(marker).exists()` + `read_dir`
-/// syscall storm into the single batched `ignore` walk, with two intentional
-/// deltas from the older probe-based loop:
+/// already yields, rather than re-probing the filesystem per directory. Two
+/// long-standing consequences, relative to the older probe-based loop this
+/// replaced:
 ///
-/// - A gitignored marker file inside a non-gitignored directory is no longer
-///   detected (the walker honors `git_ignore` and skips it). Marker files are
-///   conventionally committed, so this is judged negligible; see the spec's
-///   "Intentional Behavior Change" section.
-/// - A directory whose name happens to match a marker file (e.g.
-///   `nested/package.json/`) is no longer treated as evidence. The loop now
-///   inspects non-directory entries only, which is the true marker contract.
+/// - A gitignored marker file inside a non-gitignored directory is not
+///   detected, because the walker honors `git_ignore`. Marker files are
+///   conventionally committed, so this is judged negligible.
+/// - A directory whose name matches a marker file (e.g.
+///   `nested/package.json/`) is not evidence: only non-directory entries are,
+///   which is the true marker contract. Its descendants are still walked.
+///
+/// The walk runs on `ignore`'s parallel walker with its default worker count
+/// (available parallelism, capped at 12). The result does not depend on
+/// scheduling: every matching marker is kept and
+/// [`candidates_from_marker_paths`] sorts what it returns.
+///
+/// The starting root itself is never evidence. `ignore`'s serial walker
+/// yields a symlinked root with the link's (non-directory) file type, so the
+/// pre-parallel walk registered the link's *parent*, outside the repository,
+/// when the link was named like a marker; that is no longer possible.
 fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
+    walk_for_nested_markers_with_threads(root, None)
+}
+
+/// [`walk_for_nested_markers`] with an explicit worker count.
+///
+/// `None` keeps `ignore`'s default policy and is what production passes; tests
+/// pass `Some(n)` to pin a one-worker or multi-worker run.
+fn walk_for_nested_markers_with_threads(root: &Path, threads: Option<usize>) -> Vec<Candidate> {
+    use ignore::WalkState;
+    use std::sync::{Arc, Mutex};
+
+    /// Per-visitor state: marker paths are buffered locally and merged into
+    /// `shared` once, when the visitor drops, so no lock is taken per entry.
+    ///
+    /// The collector makes work recorded on this visitor's thread visible to
+    /// the request; it flushes when dropped on that thread.
+    struct MarkerWorker {
+        shared: Arc<Mutex<Vec<PathBuf>>>,
+        collector: performance::WorkerCollector,
+        local: Vec<PathBuf>,
+    }
+
+    impl Drop for MarkerWorker {
+        fn drop(&mut self) {
+            if self.local.is_empty() {
+                return;
+            }
+            let mut shared = self
+                .shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            shared.append(&mut self.local);
+        }
+    }
+
     performance::increment_counter(counters::FS_READ_DIRS, 1);
     performance::increment_counter(counters::REPO_NESTED_MARKER_WALKS, 1);
-    let walker = WalkBuilder::new(root)
+
+    let shared: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut builder = WalkBuilder::new(root);
+    builder
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
@@ -257,21 +303,51 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
                 .file_name()
                 .to_str()
                 .is_some_and(should_skip_directory_name)
+        });
+    if let Some(threads) = threads {
+        builder.threads(threads);
+    }
+    builder.build_parallel().run(|| {
+        let mut worker = MarkerWorker {
+            shared: Arc::clone(&shared),
+            collector: performance::WorkerCollector::inherit(),
+            local: Vec::new(),
+        };
+        Box::new(move |result| {
+            // Unlike `ManifestIndex::build`, activate only after the error
+            // check: `ignore` runs its first visitor on the *calling* thread
+            // and hands it only root errors (e.g. a missing root). Activating
+            // there would clear the caller's buffered counters, and dropping
+            // it would uninstall the caller's collector.
+            let Ok(entry) = result else {
+                return WalkState::Continue;
+            };
+            worker.collector.activate();
+            // Marker evidence is a file contract: skip directories so a
+            // directory whose name happens to match a marker does not count.
+            if entry.depth() == 0
+                || entry.file_type().is_some_and(|ft| ft.is_dir())
+                || !is_nested_marker_path(entry.path())
+            {
+                return WalkState::Continue;
+            }
+            worker.local.push(entry.into_path());
+            WalkState::Continue
         })
-        .build();
+    });
 
-    let paths: Vec<PathBuf> = walker
-        .filter_map(|entry| entry.ok())
-        // Marker evidence is a file contract: skip directories so a directory
-        // whose name happens to match a marker does not count as evidence.
-        .filter(|entry| !entry.file_type().is_some_and(|ft| ft.is_dir()))
-        .map(|entry| entry.path().to_path_buf())
-        .collect();
-
+    // `run` returns only after every worker has joined, so every visitor has
+    // dropped and merged its batch.
+    let paths = std::mem::take(
+        &mut *shared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    );
     candidates_from_marker_paths(root, &paths)
 }
 
-/// Every non-directory entry the pre-parallelization serial walk admitted.
+/// Every non-directory entry below `root` the pre-parallelization serial walk
+/// admitted.
 ///
 /// A frozen copy of the serial collect-all loop `walk_for_nested_markers`
 /// used before the `2026-09-20-repo-perf` fix. It is kept independent of the
@@ -279,6 +355,10 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
 /// parallel walk and the in-process "before" side of its measurements, so a
 /// change to the production builder must not change it too. It records no
 /// work counters.
+///
+/// Its one deliberate difference from that loop is skipping the depth-0 root
+/// entry, which the loop admitted for a symlinked root; see
+/// [`walk_for_nested_markers`].
 #[cfg(any(test, feature = "bench-internals"))]
 fn serial_reference_paths(root: &Path) -> Vec<PathBuf> {
     WalkBuilder::new(root)
@@ -297,7 +377,7 @@ fn serial_reference_paths(root: &Path) -> Vec<PathBuf> {
         })
         .build()
         .filter_map(|entry| entry.ok())
-        .filter(|entry| !entry.file_type().is_some_and(|ft| ft.is_dir()))
+        .filter(|entry| entry.depth() != 0 && !entry.file_type().is_some_and(|ft| ft.is_dir()))
         .map(|entry| entry.path().to_path_buf())
         .collect()
 }
@@ -666,6 +746,111 @@ mod tests {
             },
             "the pruned node_modules marker is not walked"
         );
+    }
+
+    /// One fallback invocation is one logical walk, whatever the worker
+    /// count: the counters sit at the chokepoint, not in the visitors.
+    #[test]
+    fn fallback_walk_records_one_logical_walk_per_invocation() {
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        for sub in ["a", "b/c", "d"] {
+            let nested = root.join(sub);
+            std::fs::create_dir_all(&nested).expect("create nested dir");
+            std::fs::write(nested.join("Cargo.toml"), "[workspace]\n").expect("write marker");
+        }
+
+        for threads in [None, Some(1), Some(4)] {
+            let (candidates, counts) =
+                testing::measure(|| walk_for_nested_markers_with_threads(root, threads));
+
+            assert_eq!(
+                candidates.iter().map(|c| c.root.clone()).collect::<Vec<_>>(),
+                vec![root.join("a"), root.join("b/c"), root.join("d")],
+                "threads = {threads:?}"
+            );
+            assert_eq!(
+                counts.get(counters::FS_READ_DIRS),
+                1,
+                "threads = {threads:?}: {:?}",
+                counts.all()
+            );
+            assert_eq!(
+                counts.get(counters::REPO_NESTED_MARKER_WALKS),
+                1,
+                "threads = {threads:?}: {:?}",
+                counts.all()
+            );
+        }
+    }
+
+    /// A missing root reaches `ignore`'s first visitor as an error on the
+    /// *calling* thread. That visitor must not disturb the caller's collector:
+    /// work recorded before the walk, the walk's own counters, and work
+    /// recorded after it must all survive.
+    #[test]
+    fn a_missing_root_keeps_the_callers_counters() {
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let missing = dir.path().join("does-not-exist");
+
+        let (candidates, counts) = testing::measure(|| {
+            performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+            let candidates = walk_for_nested_markers(&missing);
+            performance::increment_counter(counters::FS_FILE_OPENS, 1);
+            candidates
+        });
+
+        assert!(candidates.is_empty(), "a missing root yields no candidates");
+        assert_eq!(counts.get(counters::FS_READ_DIRS), 1, "{:?}", counts.all());
+        assert_eq!(
+            counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            1,
+            "{:?}",
+            counts.all()
+        );
+        assert_eq!(
+            counts.get(counters::REPO_MANIFEST_PARSES),
+            1,
+            "work recorded before the walk was lost: {:?}",
+            counts.all()
+        );
+        assert_eq!(
+            counts.get(counters::FS_FILE_OPENS),
+            1,
+            "work recorded after the walk was lost: {:?}",
+            counts.all()
+        );
+    }
+
+    /// A symlinked starting root named like a marker is not evidence: before
+    /// the parallel walk, the serial walker admitted the link itself and
+    /// registered its parent — a directory outside the walked tree.
+    #[cfg(unix)]
+    #[test]
+    fn a_marker_named_symlinked_root_registers_no_candidate_outside_the_root() {
+        use crate::filesystem::repo::nested_benchmark;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let target = dir.path().join("target-tree");
+        std::fs::create_dir_all(target.join("apps/web")).expect("create nested dir");
+        std::fs::write(target.join("apps/web/package.json"), "{}\n").expect("write marker");
+        let link = dir.path().join("package.json");
+        std::os::unix::fs::symlink(&target, &link).expect("create root symlink");
+
+        let mut standards = vec![
+            MonorepoStandard::NpmWorkspaces,
+            MonorepoStandard::YarnWorkspaces,
+            MonorepoStandard::BunWorkspaces,
+        ];
+        standards.sort_by_key(|s| s.spec().id);
+        let expected = vec![(link.join("apps/web"), standards)];
+
+        assert_eq!(nested_benchmark::production_walk(&link), expected);
+        assert_eq!(nested_benchmark::serial_reference_walk(&link), expected);
     }
 
     /// The root-marker exception survives the supplied-evidence path.
