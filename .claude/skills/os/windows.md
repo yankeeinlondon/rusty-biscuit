@@ -37,6 +37,10 @@ helper that resolves it is named so it is not re-derived.
    Windows launch test names its roots instead: the provider selector (e.g.
    `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
    storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
+   `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
+   so a Windows test that seeds a cache file writes to the real per-user
+   path, keyed by its temporary repository, and deletes what it seeded
+   (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`
