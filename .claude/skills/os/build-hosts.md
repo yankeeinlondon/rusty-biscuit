@@ -59,6 +59,18 @@ Each value is an SSH destination: an alias from the developer's
 ...` so a missing key fails fast instead of prompting. The `post-quantum`
 warnings SSH prints are noise.
 
+For an ad hoc PowerShell script on `BUILD_WIN`, copy it over and run it with
+`-File`; do not pipe it into `powershell -Command -`. Piped input is read
+line by line, and on 2026-09-24 a script with multi-line `foreach`/`switch`
+blocks printed nothing and reported no error. The remote shell is
+PowerShell, so `%TEMP%` stays literal; quote the command for your local shell
+and use `$env:TEMP`:
+
+```sh
+scp -q probe.ps1 "$BUILD_WIN":AppData/Local/Temp/probe.ps1
+ssh -o BatchMode=yes "$BUILD_WIN" 'powershell -NoProfile -ExecutionPolicy Bypass -File $env:TEMP\probe.ps1; Remove-Item $env:TEMP\probe.ps1'
+```
+
 `BUILD_WIN` and `BUILD_WSL` are commonly the same physical machine. If the
 WSL guest's sshd hangs while the distro is running, go through the Windows
 side: `ssh "$BUILD_WIN" 'wsl.exe -d <distro> -e <argv>'` and strip NULs from

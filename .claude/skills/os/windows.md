@@ -225,6 +225,44 @@ Compare against that, never against `to_string_lossy()`.
   `claudine/cli`, and `sniff/cli` do. It covers the main thread only; spawned
   threads keep Rust's 2 MiB default.
 
+## Current-directory locks
+
+Measured on `build-win-native` on 2026-09-24 (Windows PowerShell 5.1,
+git 2.55.0.windows.3) while designing `wt remove` for the worktree the shell
+is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
+
+- **A process's current directory cannot be deleted, moved, or renamed**
+  ("The process cannot access the file because it is being used by another
+  process"). Unix has no such lock, so code that removes a directory the user
+  may be standing in is untested until it runs here.
+- **Which shells actually hold the lock:**
+
+  | Shell state | Locks the directory? |
+  |---|---|
+  | Any process *launched* with the directory as its working directory (a terminal tab opened there, `Start-Process -WorkingDirectory`) | Yes |
+  | cmd.exe after `cd /d` | Yes |
+  | Windows PowerShell after `Set-Location`/`cd` | No: `Set-Location` does not change the process's Win32 current directory |
+  | Git Bash (MSYS) after `cd` | No |
+  | A `FileSystemWatcher` on it (Explorer, editors) | No |
+
+- **Child processes start in PowerShell's *location*, not its Win32 current
+  directory.** A `wt.exe` or `git` launched from a PowerShell that has
+  `cd`'d into a directory holds that directory itself, so a tool that deletes
+  it must first move its own current directory out
+  (`std::env::set_current_dir`) and address the repository with `git -C`.
+- **Releasing a PowerShell lock takes both moves:** `Set-Location` *and*
+  `[Environment]::CurrentDirectory = …`. Moving only the location left a
+  window that was launched inside the directory still holding it.
+- **`git worktree remove` fails late, not cleanly.** With the directory held,
+  it exits 255 with "failed to delete '…': Permission denied" *after* deleting
+  every file, removing `.git/worktrees/<name>`, and dropping the worktree from
+  `git worktree list`. Only the empty directory remains, and a following
+  `git branch -D` succeeds. Check for the lock before calling it.
+- **Detecting the lock without side effects:** rename the directory to a
+  sibling name and straight back (`std::fs::rename` twice). It fails exactly
+  for current-directory holders and open files, and leaves an unlocked
+  directory untouched.
+
 ## Attaching a console inside a nextest process
 
 `biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary `windows-latest`
