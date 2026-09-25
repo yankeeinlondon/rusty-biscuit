@@ -218,8 +218,6 @@ pub fn open_pull_requests_with(
 
 /// Runs one focused-client operation on a fresh current-thread runtime, with
 /// every request bounded by `deadline` from now, and classifies its failure.
-///
-/// Shared by every blocking entry point.
 fn run_with_deadline<T, F, Fut>(
     client: &FocusedProviderClient,
     deadline: Duration,
