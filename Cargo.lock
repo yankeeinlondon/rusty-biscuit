@@ -16693,12 +16693,14 @@ name = "worktree-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64 0.22.1",
  "biscuit-terminal",
  "biscuit-test-harness",
  "chrono",
  "clap 4.6.1",
  "clap_complete",
  "dirs",
+ "image",
  "inquire",
  "insta",
  "predicates",
@@ -16708,6 +16710,7 @@ dependencies = [
  "tempfile",
  "test-toolkit",
  "worktree",
+ "xpty",
 ]
 
 [[package]]

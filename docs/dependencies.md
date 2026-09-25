@@ -192,7 +192,12 @@
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
-  its tests. No new external crate was added.
+  its tests. `base64` and `image` (PNG only), both development, decode the
+  graph image `wt` transmits and the Kitty window screenshot in
+  `level2_graph_in_kitty.rs`. No new external crate was added; both were
+  already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
+  dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
+  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
