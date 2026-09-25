@@ -90,19 +90,22 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
     > **Note:** the shell completions for `wt` are dynamic: they offer `base`, the base checkout's branch, and each worktree's branch name and directory name
 
-- `wt remove <name> [-f | -ff] [-b]`
+- `wt remove <name> [--force-worktree] [--force-branch] [--force-remote]`
 
-    Removes a worktree by name (or branch name).
+    Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work?
 
-    - safety semantics:
-        - clean worktrees prompt for confirmation (no force flag)
-        - dirty worktrees (with uncommitted files) prompt for confirmation
-        - `-f` / `--force` skips confirmation when safe (clean, or fewer than 10 non-source files)
-        - `-ff` removes immediately regardless of state, skipping all confirmation
-    - source-code awareness: uncommitted source files (e.g. `.rs`, `.ts`, `.py`) trigger a stronger warning than non-source files (e.g. `.md`, `.txt`)
-    - `-b` / `--branch` also attempts a soft delete (`git branch -d`) of the worktree's branch after removal; if the branch is not fully merged, a warning is shown with a hint to use `git branch -D` to force-delete it
+    - **report first**: before asking or removing anything it prints the worktree's uncommitted files (a tree of up to 10, colored by kind, otherwise a bold red count), its ignored entries grouped by top-level folder (their contents are deleted too), the branch's safety tier and the ref that proves it, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
+    - **the worktree**: removed when it has no uncommitted or ignored files, or with `--force-worktree`; otherwise an interactive run asks (default No) and a non-interactive run removes nothing and exits 3
+    - **the local branch**, by where its last commit is found:
+        - *Safe*: on the default branch (local or `origin/<default>`), or the exact head of an open or merged PR from this repository; deleted
+        - *Pretty safe*: on another local branch, a tag, or an `origin/*` branch whose live head `wt` checked with `git ls-remote` (3 s deadline, never prompting for credentials); deleted, and the report names where the commits still live
+        - *Not safe*: nowhere else, or it could not be checked; an interactive run lists the commits and offers "keep" (default) or "delete"; a non-interactive run keeps it with a warning and still exits 0. `--force-branch` deletes it anyway (`git branch -D`)
+    - **the branch on origin**: deleted only with `--force-remote` (which also closes any open PR), under a lease on the head the report showed, so a push made in between fails the deletion instead of losing commits. The tiers then ignore the branch's own origin copy and open PR. If origin cannot be reached, the local removal still happens and `wt` exits 1 with the `git push origin --delete <branch>` that finishes the job
+    - `--force-branch` on a worktree with files but without `--force-worktree` is a conflict (exit 3 when non-interactive)
+    - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks everything, then moves your shell to the fork parent's worktree (or the base repo) and the wrapper finishes the removal from there, keeping your subdirectory when it exists there. If anything changed between the two steps, or the handoff is over a minute old, nothing is removed. Without the wrapper `wt remove` refuses (exit 4)
+    - on Windows, a worktree folder another program holds (a cmd window or terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4
     - the main checkout cannot be removed (use plain `git` for that), whether it is named `base` or by its branch
-    - with no terminal to confirm (stdin or stderr is not a terminal, or `CI` is set), a dirty worktree is refused with nothing removed (exit 3)
+    - an interactive run needs stdin and stderr to be terminals and `CI` to be unset or empty
 
 - `wt help`
 
