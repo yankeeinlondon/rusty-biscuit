@@ -19,17 +19,19 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-24
 review_iterations: 0
+implemented: true
+implemented_by: claude/opus
 human_review: true
 human_review_items:
     - |-
         **Confirm the fourteen proposed decisions from Phase 1 (Decisions 20–33 at the end of this spec).**
 
-        Why now: Phases 2–5 are built on all fourteen as proposed, and Phase 6 writes them into the user documentation as shipped behavior. Overriding one after Phase 6 means reworking code *and* docs.
+        Why now: all six phases are built on the fourteen as proposed, and Phase 6 has written them into the user documentation (`worktree/README.md`, `worktree/docs/cli/list.md`) as shipped behavior. This is the last point before the spec is closed; overriding one later means reworking code *and* docs.
 
         - Phase 5 used Decision 29 (the graph is capped at about half the terminal's rows) and Decision 22's 300 ms wait for `wt list`'s PR request.
         - Every one of them is backed by a measurement or a documented API, and every test in the touched packages passes with them.
@@ -37,13 +39,13 @@ human_review_items:
         Options:
 
         - **Confirm all fourteen as written.** Pro: no rework; Phase 6 documents settled behavior. Con: none known.
-        - **Confirm most and override some.** Pro: you keep control. Con: the overridden parts of Phases 2–5 must be reworked before Phase 6 documents them.
+        - **Confirm most and override some.** Pro: you keep control. Con: the overridden parts of the code and the Phase 6 docs must both be reworked.
 
         Recommendation: **confirm all fourteen.**
     - |-
         **Two small departures from the spec's wording in the new `wt list` (Phase 5). Keep them?**
 
-        Why now: Phase 6 describes `wt list` in the README and `docs/cli/list.md`; it should describe the behavior you want.
+        Why now: Phase 6 has documented both as shipped behavior in the README and `docs/cli/list.md`; the spec should not close on behavior you did not choose.
 
         1. **PR badges are clickable links only in terminals that support links.** The spec says terminals without link support should show the link as visible text, `[PR #99](https://…)`. In practice the table component never splits a long word, so one URL made the whole table fail with "Table could not be rendered in 120 columns". Now those terminals show the badge without the URL.
            - *Keep (recommended):* the table always renders; the PR number is still shown. Con: no URL on those terminals.
@@ -54,15 +56,13 @@ human_review_items:
 
         Recommendation: **keep both.** Smaller notes, no decision needed: the table keeps square corners (the component has no rounded style), and `wt list -v` now shows its commit list whenever a non-default branch is checked out, including in the base checkout.
 message_to_agent: |-
-    Phase 5 (the `wt list` table and graph) is done; see "## Phase 5" in implementation-log.md. What Phase 6 needs:
-    - STALE DOCS YOU MUST REWRITE (left for the plan's drift pass): `worktree/README.md` and `worktree/docs/cli/list.md` still describe the old five-column table, the commit-count width table, and the 80-column graph cutoff. The current behavior is in `worktree/docs/git-graph.md` (rewritten) and in `worktree/cli/src/commands/list_table.rs` / `cli/tests/list_table.rs` (the snapshot `list_table__the_spec_example_renders_as_ruled.snap` is the table). `worktree/docs/performance-testing.md` is already updated, including the 2026-09-25 re-measured targets.
-    - Phase 5 decisions to document (and see the spec's second human_review item): PR badges link only when the terminal supports OSC 8 (no visible URL otherwise); no minimum terminal width for the graph; `-w/--width` replaces the scale-derived width and disables trimming; `wt list -v` follows "a non-default branch is checked out"; the base view is "the default branch is checked out"; the PR age line appears only when a request failed and stored results stand in.
-    - LINUX CROSS-CHECK: archive mode on build-linux still fails before any test on the stale read-only `target/release/deps/librenderable-*.rmeta` links in the standing clone. Add a build flag to take the native path: `just cross-check worktree-cli --os linux --no-default-features` (worktree-cli and worktree have no default features, so nothing else changes). Native mode runs without a tier filter, so the `perf_` gates run there too (they passed).
-    - WINDOWS: `dirs::cache_dir()` ignores HOME, so tests that seed the PR or fork store use the real per-user path there (see `MixedFixture::pr_store` and `list_output.rs`'s `fork_store`). All new tests passed on native Windows.
-    - PR tests never touch the network: `cli/tests/perf_support::ProxyStub` sets `HTTPS_PROXY` to a hanging or refusing local port (sniff's reqwest honors it; tokens come only from env vars, which the tests remove).
-    - `perf_support`'s own unit tests are skipped by `just test` because the module name starts with `perf_`; they run in `just test-perf`.
-    - Still true: the CDPATH trap (unset CDPATH, absolute paths); Kitty is not installed on the Mac, so the Kitty L2 test skips (and fails under BISCUIT_TEST_LEVEL_REQUIRED=2); `.claude/skills/biscuit-terminal/mermaid-diagrams.md` still describes the `mmdc` CLI (noted in Phase 4, out of scope so far).
-    - WSL2 was not cross-checked in Phase 5; Phase 6's cross-OS task covers it.
+    All six phases are implemented; the spec is ready for review and is NOT moved to `_completed` (the author closes it). Phase 6 details are in "## Phase 6" of implementation-log.md. For the reviewer:
+    - Phase 6 changed no behavior. Docs: `worktree/docs/cli/list.md` rewritten for the new table/graph, `worktree/README.md`'s `wt list` and cache sections, `docs/dependencies.md`, and one `os` skill fact (`dirs::cache_dir()` ignores HOME on Windows). Source edits are a comment-only quality pass over 9 files (two drifted comments fixed: `pr_age_markup`/`PrListing::age_minutes` and `safety::Evidence::DefaultBranch`).
+    - No per-command docs were added for remove/go/create: `docs/cli/` holds only `list.md` and the README documents those commands in full.
+    - Cross-OS: L1 green on macOS, Linux, native Windows, and WSL2; worktree-cli L2 green on macOS, Linux, and WSL2 with tmux required. Unmet, with provisioning as the required change: a Windows real-console L2 harness for PowerShell prompts, fish on build-linux and WSL2, zsh on WSL2, and Kitty on the Mac and build-linux.
+    - Linux cross-check still needs `--no-default-features` (native path) because the standing clone on build-linux has stale read-only `librenderable-*.rmeta` links that break archive mode.
+    - One failing test OUTSIDE this work: `biscuit-terminal-cli::level2 level2_prose_styling::level2_columns_word_wrap_in_pane` fails deterministically on this Mac because the shell's echo of the long `bt prose "aaa…"` command wraps into a row of only `a`s, which the test mistakes for output. The Prose output itself wraps correctly. Nothing in this branch reaches that code.
+    - Plan checkbox "R1–R11 are ruled" (Phase 1) stays open on purpose until the author confirms Decisions 20–33 (first human_review item).
 ---
 
 # Worktree UX improvements

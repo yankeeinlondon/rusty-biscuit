@@ -196,6 +196,152 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_6:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/terminal_image/width.rs
+    - sniff/lib/src/remote/blocking.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remove/safety.rs
+docs_updated_during_phase_6:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/os/windows.md
+source_code:
+    - Cargo.lock
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/fork_origin.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/lib.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/src/exit.rs
+    - worktree/cli/src/shell_integration.rs
+    - worktree/cli/src/commands/go.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/src/commands/remove.rs
+    - worktree/cli/tests/wrapper_protocol.rs
+    - worktree/cli/tests/shell_wrapper_exec.rs
+    - worktree/cli/tests/snapshots/wrapper_protocol__bash.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__zsh.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__fish.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__powershell.snap
+    - worktree/shell/wt.sh (deleted)
+    - worktree/shell/wt.fish (deleted)
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/types.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/provider.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - sniff/cli/src/output/remote.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/default_target.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/remove/live_remote.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/remove.rs (moved to remove/mod.rs)
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/level2_remove.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+    - worktree/cli/tests/powershell_wrapper_exec.rs
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/components/mermaid.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/src/components/table/types.rs
+    - biscuit-terminal/lib/src/components/terminal_image/iterm.rs
+    - biscuit-terminal/lib/src/components/terminal_image/kitty.rs
+    - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+    - biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+    - biscuit-terminal/lib/src/components/terminal_image/tests.rs
+    - biscuit-terminal/lib/src/components/terminal_image/width.rs
+    - biscuit-terminal/lib/src/discovery/fonts/types.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/terminal.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/snapshots/l1__table_parity__table_highlight_row_with_striping_snapshot.snap
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - renderable/src/tree/attrs.rs
+    - renderable/src/tree/mod.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+documentation:
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/spike-s1.md
+    - worktree/fixes/2026-09-24-ux-improvements/spike-s2.md
+    - worktree/fixes/2026-09-24-ux-improvements/spike-s3.md
+    - worktree/fixes/2026-09-24-ux-improvements/spike-s4.md
+    - worktree/fixes/2026-09-24-ux-improvements/spike-s5.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/README.md
+    - docs/dependencies.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - biscuit-terminal/docs/data-visualization/visualizing-graph-expressions.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/terminal_image.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/cli/README.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-issue.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-pr.patch
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+    - worktree/docs/cli/list.md
+completed_phase: 6
+implemented: true
 packages:
     - worktree
     - worktree-cli
@@ -751,3 +897,83 @@ Placement: every new test is compiled by a declared target (lib unit tests, `com
 - Skill: `.claude/skills/worktree/SKILL.md` gains a `wt list` section (cache key, the parse/fill seam, the prune guard, the PR store, `list_table`, the graph handoff, and the proxy-stub test technique).
 - **Left for Phase 6 (the plan's docs drift pass):** `worktree/README.md` and `worktree/docs/cli/list.md` still describe the old table, the automatic width table, and the 80-column graph cutoff.
 - No `cargo fmt` was run. No crate was added, so `docs/dependencies.md` and `Cargo.lock` are unchanged.
+
+## Phase 6
+
+Documentation, cross-OS evidence, and hand-off. No behavior changed in this phase: the source edits are comment-only.
+
+### Starting conditions
+
+- Decisions 20–33 are still **proposed**; the author has not confirmed them. The docs written here describe the behavior as built on them, so the spec's `human_review_items` stay open.
+- The CDPATH trap was checked first: this session runs zsh, which tries `./<dir>` before `CDPATH`, and every run printed this worktree's paths (test counts match Phase 4's: biscuit-visualized 77, biscuit-terminal 3314, sniff 2857).
+
+### Docs drift pass (Wave 13)
+
+- `worktree/docs/cli/list.md` rewritten for the Phase 5 table and graph: the spec example (copied from `list_table__the_spec_example_renders_as_ruled.snap`), the default-branch target, the caption states, every column and cell kind, PR badge placement, the OSC 8 rule (no visible URL elsewhere), the 300 ms / 60 s PR request, the age line, the graph's two views, no minimum width, `-w` turning trimming off, and `-v` following "a non-default branch is checked out". The old commit-count width table and the 80-column cutoff are gone. `--perf` is added to the flag table.
+- `worktree/README.md`: the `wt list` entry describes the caption, the four columns, badges, and the graph, and links to `docs/cli/list.md`; "Ahead/Behind + Merge Result Cache" becomes "Comparison Cache" (keyed by the compared pair of tip SHAs, one cache for the caption and both target columns).
+- **No per-command docs were created for `remove`, `go`, or `create`.** The plan made them conditional on the area documenting commands per file. `docs/cli/` holds only `list.md`, and the README already documents those three commands in full; a second copy would be a drift source.
+- `AFTER_HELP` was reviewed and already matches the flags; unchanged.
+- `worktree/docs/git-graph.md` and `worktree/docs/performance-testing.md` were rewritten/updated in Phase 5; re-read, no drift found.
+- `docs/dependencies.md`: the worktree note now names the pair-of-tips cache key and the 60 s PR store (`<repo hash>.prs.json`, through sniff's blocking `open_pull_requests`), and the worktree-cli note adds `insta` for the list-table snapshots and `serde_json` (development) for seeding the PR store and editing a handoff record. No crate was added.
+- Skills:
+  - `.claude/skills/worktree/SKILL.md`: re-read against the code; the fork-origin store, handoff, exit codes, and cache key sections are current. Unchanged.
+  - sniff skill (`SKILL.md`, `remote-and-repository.md`) already covers `pr_for_branch` and `open_pull_requests`; biscuit-terminal skill (`components.md`, `image-rendering.md`) already covers `GitGraph`, `ImageWidth::Scale`, and `Table::highlight_row`. Unchanged.
+  - `.claude/skills/os/windows.md`: added that `dirs::cache_dir()` ignores `HOME` like `dirs::home_dir()`, so a Windows test that seeds a cache file writes to the real per-user path and must delete it (Phase 5's finding). The Windows lock probe and PowerShell wrapper facts were already recorded in Phase 1.
+  - `tools/test-toolkit`'s `ci_workflow_contracts` reads the `os` skill: 163 passed after the edit.
+- Stale-reference sweep (`git grep`, excluding `_completed/` and this fix directory): no `FORCE_BYPASS_FILE_LIMIT`, `DeleteBranchOutcome`, `default_graph_width`, `MIN_GRAPH_TERMINAL_WIDTH`, `worktree/shell/`, or `wt remove -b/-f/-ff`. The one `default_tip_sha` hit is `cache.rs`'s deliberate version-1 JSON fixture.
+
+### Comment-quality pass (subagent)
+
+Comment-only; `git diff -U0` shows no non-comment line. 9 files:
+
+- Drift found and fixed (the code is right, the comment was wrong):
+  - `list_table::pr_age_markup` and `PrListing::age_minutes` quoted "PRs as of N min ago"; the code also prints "less than a minute", `N h`, and `N days`. The quoted text is removed.
+  - `safety::Evidence::DefaultBranch` named "`main` or `origin/main`"; it holds whatever the default branch is called.
+- Pre-emptive: the "16" in `ImageWidth::scaled_columns` and `GitGraph::rows_for` now links `SCALE_REFERENCE_TEXT_UNITS`; the "10" in `dirty_tree.rs`'s module doc now names `LIST_LIMIT`.
+- Removed color/glyph/format-string narration from `list_table.rs` (`caption_markup`, `legend_markup`, `connector_markup`, `dirty_dot`), `remove/report.rs`, `dirty_tree.rs`, `listing.rs` (`TreeRow`), `pull_requests.rs` (`PrPlacement::BesideBranch`), and `git_graph.rs`'s module doc; one redundant sentence from `sniff/lib/src/remote/blocking.rs`.
+- `cargo doc -W rustdoc::all` reports nothing in the touched files (the crates' other rustdoc warnings predate this branch).
+
+### Cross-OS evidence
+
+| Host | Package | Mode | Result |
+|---|---|---|---|
+| macOS (local) | worktree + worktree-cli | `just test` | 286 passed, 17 skipped (the `perf_` family) |
+| macOS (local) | worktree-cli | `just test-l2` | 9 passed; bash, zsh, and fish all ran. The Kitty test skips (not installed) |
+| macOS (local) | worktree | `just test-perf` | 17 passed |
+| native Windows | worktree-cli | `cross-check` archive (CI's L1) | 160 passed, 21 skipped (`perf_`), incl. `powershell_wrapper_exec::a_directory_held_by_another_program_exits_4_with_nothing_removed` and `move_first_removes_the_worktree_powershell_was_launched_inside` |
+| native Windows | worktree | archive | 122 passed |
+| Linux (build-linux) | worktree-cli | `--no-default-features` (native; the archive path still hits the stale `librenderable-*.rmeta` links) | 179 passed, 0 skipped (perf gates included) |
+| Linux | worktree | native | 124 passed |
+| Linux | worktree-cli L2 | `BISCUIT_TEST_REQUIRED_BACKENDS=tmux … --features terminal-tests level2_` | 9 passed. `--no-capture` on the move-first test: bash and zsh ran, **fish is not installed** |
+| WSL2 (build-win) | worktree-cli | archive, produced as ubuntu-latest, consumed as wsl2-ubuntu | 162 passed, 26 skipped |
+| WSL2 | worktree | archive | 124 passed |
+| WSL2 | worktree-cli L2 | tmux required, `--no-capture` | 9 passed; **zsh and fish are not installed** (bash only); Kitty skipped |
+
+**Unmet, with provisioning as the required change** (never narrowed):
+
+- A Windows real-console L2 harness for `wt remove`'s interactive prompts in PowerShell. `just ci-local --plan` lists `worktree-cli/windows-latest/L2` and `wsl2-ubuntu/L2` as accepted gaps. The non-interactive Windows cells (PowerShell move-first, held-directory exit 4) run as Windows-only L1 and passed above.
+- fish on build-linux and the WSL2 guest; zsh on the WSL2 guest. Those wrapper paths are proven on macOS only.
+- Kitty on the Mac and build-linux (`level2_graph_emits_image_protocol_bytes_in_kitty` skips; known since Phase 3).
+
+`just ci-local --plan` was run (read-only). Nothing was pushed.
+
+### Other areas (DoD gates)
+
+| Area | `just test` | `just test-l2` | `just lint` |
+|---|---|---|---|
+| worktree | 286 passed | 9 passed | clean |
+| biscuit-terminal | 3314 passed, 55 skipped | **1 failed** (see below), 45 passed | clean |
+| biscuit-visualized | 77 passed | not applicable (stub recipe) | clean |
+| sniff | 2857 passed, 31 skipped | 6 passed | clean |
+
+- **Pre-existing, not caused by this branch:** `biscuit-terminal-cli::level2 level2_prose_styling::level2_columns_word_wrap_in_pane` fails every time (3 of 3 reruns). The captured frame shows why: the test types `bt prose "<cols+5 a's>"`, the shell echoes that command, and the echo wraps into a line made only of `a`s. The test's `is_wrap_row` excludes only the echo line that contains `bt' prose`, so it takes that continuation line as the first wrap row and finds the real output two rows later. The Prose output itself (`aaaa…-` then `aaaaaa`) wraps correctly on consecutive rows. This branch's only change under `biscuit-terminal/cli/src` is an `ImageWidth::Scale` arm in `parse_column_width`, which the test never reaches. Not fixed here (out of scope); the fix is for the test to find the output after the prompt line, not by content alone.
+
+### Requirement-to-test mapping
+
+Phase 6 changed no behavior, so it adds no tests. The requirement-to-test mappings for acceptance criteria 1–7 are in the Phase 2, 3, and 5 sections above; the table above is this phase's evidence that they hold on each OS. `just check-tier-coverage` was not re-run because no test was added or renamed.
+
+### Frontmatter and hand-off
+
+- `spec.md`: `status: implemented`, `implemented: true`. `human_review` stays `true`: the two items from earlier phases (confirm Decisions 20–33; keep Phase 5's two departures) are still unanswered, and Phase 6 has now written that behavior into the user docs.
+- The spec is **not** moved to `_completed`; the author closes it.
+- No `cargo fmt`, no commit, no staging.
