@@ -114,6 +114,19 @@ belong here.
   `git show :Cargo.lock | grep '"<dep>"'` against the staged manifest; a lock
   entry with no declaring manifest in the same commit is an orphan. In a
   parallel batch the manifest's group commits first, or absorbs the lock.
+- `Cargo.lock` can SHRINK when a dep bump turns off default features. Most
+  bump audits assume additive growth; a manifest that sets
+  `default-features = false` (or removes a feature from a feature list) can
+  drop transitive crates from the lockfile, e.g. `mermaid-rs-renderer` from
+  0.2.1 to 0.3.1 with `default-features = false` lost resvg 0.46, usvg 0.46,
+  kurbo 0.13, svgtypes 0.16, roxmltree 0.21, imagesize 0.14, and the clap
+  transitive of the `cli` feature — seven removals and no additions because
+  the package already rasterizes with its own resvg 0.45. Verification is
+  still `git diff --cached -- Cargo.lock`, but the audit is "every dropped
+  crate is one we are certain nothing downstream needs" rather than "no new
+  crates leaked in". List the dropped crates in the commit body so a
+  reviewer scanning the body sees the shrink is intentional, not a
+  surprise from the version bump.
 - A workflow `BISCUIT_REQUIRE_<TOOL>: "1"` declaration on a step is coupled
   to a `require_tools("<tool>", ...)` call in the Python suite that step
   runs: the env var only does work when the guard reads it, and the guard
