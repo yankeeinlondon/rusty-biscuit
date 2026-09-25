@@ -23,11 +23,16 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 ## CLI Commands
 
 - `wt list`
-    Lists the worktree's (along with the base repo checkout) which currently exist.
+    Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
-    - the base/worktree the user is currently in is highlighted
-    - an indication of whether the each worktree is "clean" (aka, could be merged back into main/master without any conflicts) or "conflict"
-    - an indication of how many commits each worktree is ahead/behind of main/master
+    - a caption comparing the local default branch with `origin/<default>` (in sync, ahead, behind, or diverged)
+    - a table with one row per worktree; the current row is highlighted
+        - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
+        - **Branch**: a tree of which branch was forked from which (recorded by `wt create`); deleted parents are struck through
+        - **`-> {default}`**: `already in`, `clean`, or `conflicts` against the default branch (local or `origin/<default>`, whichever contains the other)
+        - **`-> parent`**: the same against the branch's fork parent
+        - open PRs from this repository as badges, placed by the PR's target; the request waits at most 300 ms and its answer is reused for 60 s
+    - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
 
     > The **list** command is the default command so it will be run if a user types only `wt`
 
@@ -167,10 +172,10 @@ Run `wt list --perf` to emit a per-stage timing report to stderr after the comma
 
 Use `just bench-save` to capture a host-derived baseline before a change, then `just bench-compare` after the change to see the delta. The shared bench helpers run a preflight check (battery, memory, load) and use a host-derived baseline ID so comparisons stay on the same machine.
 
-### Ahead/Behind + Merge Result Cache
+### Comparison Cache
 
-`wt list` caches each branch's `(ahead, behind, is_clean)` result by default-branch tip SHA and worktree branch tip SHA. Cache files live under the user cache directory in a `worktree` subdirectory; the full path and invalidation rules are documented in [`docs/performance-testing.md`](./docs/performance-testing.md).
+`wt list` caches each `(ahead, behind, is_clean)` comparison by the pair of commit SHAs it compared (target tip and branch tip), so one cache serves the caption, the `-> {default}` column, and the `-> parent` column. Cache files live under the user cache directory in a `worktree` subdirectory, beside the fork-origin records and the PR store; the full path and invalidation rules are documented in [`docs/performance-testing.md`](./docs/performance-testing.md).
 
-The cache self-invalidates when either branch tip changes. `CACHE_FORMAT_VERSION` forces invalidation when the on-disk shape or semantics change, and working-tree dirtiness is still measured live on every run.
+The cache self-invalidates when either tip changes. `CACHE_FORMAT_VERSION` forces invalidation when the on-disk shape or semantics change, and working-tree dirtiness is still measured live on every run.
 
 See [`docs/performance-testing.md`](./docs/performance-testing.md) for the full performance contract.
