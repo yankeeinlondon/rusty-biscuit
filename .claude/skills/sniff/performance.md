@@ -83,5 +83,11 @@ inventing a second Sniff increment.
   and path before optimizing.
 - Inventory subsets are nondeterministic when truncated, even though complete
   results are deterministic.
+- `ignore`'s serial `build()` walks a symlinked starting root differently from
+  `build_parallel()`: the serial walk yields the depth-0 root with the link's
+  file type, so a "non-directory" filter admits the root path. The parallel
+  walk yields it as a directory. Check root-entry parity when converting a
+  walker (`2026-09-20-repo-perf` `evidence/spike.md`). On a tiny tree, the
+  default parallel policy may also run every callback on one thread.
 - The previously evaluated small hot-path changes were below the project
   threshold. Revisit them only with new counter or profile evidence.
