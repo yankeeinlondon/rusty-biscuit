@@ -8,6 +8,9 @@ implementation_3: "2026-09-25T10:58:59-07:00"
 implementation_4: "2026-09-25T11:32:13-07:00"
 implementation_5: "2026-09-25T13:46:04-07:00"
 implementation_6: "2026-09-25T14:08:28-07:00"
+implementation_7: "2026-09-25T14:49:38-07:00"
+implementation_8: "2026-09-25T15:09:37-07:00"
+implementation_9: "2026-09-25T15:18:16-07:00"
 started_phase: 1
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
@@ -1330,3 +1333,129 @@ The files changed in this cycle:
 - `worktree/cli/src/commands/remove/mod.rs`
 - `worktree/cli/tests/remove.rs`
 - `worktree/README.md`, `.claude/skills/worktree/SKILL.md`
+
+## Implementation of Review Findings #7
+
+> **started at:** 2026-09-25T14:49:38-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-7.md'
+- this is iteration 7 of the review-to-implement cycle
+- starting the work on 'Lossy path encoding lets changed symlinks pass the removal handoff' at 14:50:10
+        - discovery: three lossy boundaries fed the fingerprint: `entry_digest` (symlink target via `to_string_lossy`), `list_directory` (child names via `to_string_lossy`), and `git_from_raw` (whole `status -z` / `ls-files -z` output via `from_utf8_lossy`); `Inventory::ignored` was also a lossy `Vec<String>`
+        - design: byte-faithful rather than refusing. New `git::git_from_bytes` returns git's stdout untouched; `git_from_raw` now wraps it (its other caller, `remote::endpoint_reinterpretation`'s `config --null --list`, is unchanged). `collect_inventory` and the index listing use `git_from_bytes`
+        - design: `Inventory::from_status_z` now takes `&[u8]` and returns `Result`; paths are built with `OsStr::from_bytes` on Unix, and on non-Unix (Windows, where git writes UTF-8) a non-UTF-8 path is `WorktreeError::GitParse` before any mutation. `Inventory::ignored` is now `Vec<PathBuf>`; `ignored_groups` decodes lossily for display only
+        - design: the fingerprint input is a private `Record` of length-prefixed (u64 LE) byte fields hashed with `biscuit_hash::blake3_hash_bytes`; names, dirty paths, ignored paths, and symlink targets enter via `OsStr::as_encoded_bytes` (raw bytes on Unix, WTF-8 on Windows: injective, same-machine comparable, no cfg split). Dirty and ignored entries sort by those bytes, because `Path` ordering ignores a trailing `/`. Symlinks still are never followed
+        - touched outside the lib: `cli/src/commands/remove/report.rs` test fixture builds `PathBuf` ignored entries
+        - docs: rewrote the `fingerprint`, `from_status_z`, `entry_digest`, `list_directory`, `content_digest`, `ignored_groups`, and `git_from_raw` doc comments; the worktree skill's `inventory` bullet now records the byte-faithful encoding and the APFS test skip. README does not describe the fingerprint's path handling, so it is unchanged
+        - tests added, lib (`worktree`, `remove::inventory::tests::non_utf8_paths`, `#[cfg(unix)]`): `status_paths_keep_their_exact_bytes`, `fingerprint_changes_with_a_symlink_target_at_the_root`, `fingerprint_changes_with_a_symlink_target_inside_an_untracked_nested_repo`, `fingerprint_changes_with_an_edit_to_a_non_utf8_file_or_a_lossy_equal_rename` (skips with an eprintln when the filesystem refuses the name); plus `#[cfg(windows)] a_status_path_that_is_not_utf8_is_refused_on_windows`
+        - tests added, CLI (`worktree-cli` `remove` target, `non_utf8_paths` module, `#[cfg(unix)]`): `a_changed_symlink_target_between_the_runs_refuses_with_nothing_removed`, `a_changed_symlink_target_inside_an_untracked_nested_repo_refuses_with_nothing_removed`, `an_unchanged_non_utf8_symlink_target_is_removed_by_the_handoff` (exit 0), `an_edited_non_utf8_file_name_between_the_runs_refuses_with_nothing_removed`, `a_nested_child_renamed_to_a_name_with_the_same_lossy_text_refuses_with_nothing_removed`; refusals assert exit 3, no "Removed", the changed target/content kept, worktree registration, and local branch
+        - fail-before (macOS): reintroducing the three lossy conversions made 5 fail (the exact-bytes parse, both lib symlink tests, both CLI symlink tests); the unchanged case passed; the two filename tests skip on APFS. Source restored from a copy, diff clean
+        - fail-before (Linux, `just cross-check <pkg> --os linux --no-default-features non_utf8` on the reverted tree): `worktree` 0/4 passed (all 4 failed, including the filename/rename test, proving it runs on Linux); `worktree-cli` 1/5 passed (the unchanged success case), 4 failed including both filename tests. Source then restored
+        - `just test` (worktree): 326 passed, 17 skipped
+        - `just lint` (worktree): pass (exit 0)
+        - `just check-tier-coverage worktree`: pass, 0 stranded
+        - `just cross-check worktree --os linux`: archive mode failed before any test on the stale read-only `librenderable-*.rmeta` in the standing clone; with `--no-default-features`: pass, 139 passed, 0 skipped
+        - `just cross-check worktree-cli --os linux`: same rmeta archive failure; with `--no-default-features`: pass, 204 passed, 0 skipped (all 5 new CLI tests ran)
+        - `just cross-check worktree --os windows`: pass, 133 passed, 0 skipped (the Windows GitParse test ran)
+        - `just cross-check worktree-cli --os windows`: pass, 179 passed, 26 skipped
+        - WSL2 not run (follows Linux code paths; not requested)
+- work completed for 'Lossy path encoding lets changed symlinks pass the removal handoff' at 15:04:15
+- orchestrator verification on macOS at 15:04:48: `worktree/just test` 326 passed, 17 skipped; `just lint` clean; the only remaining `to_string_lossy` calls in `inventory.rs` feed the grouped ignored-entry display and a test assertion, never the fingerprint
+
+### Successful Completion
+
+The implementation of review cycle 7 has completed successfully in 16m. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- exact bytes are preserved rather than refusing unusual names: git's `-z` output is read as bytes (`git_from_bytes`) and, on Unix, paths are built with `OsStr::from_bytes`
+- on Windows a git status path that is not valid UTF-8 is refused with `WorktreeError::GitParse` before any mutation; this is covered only by a parser unit test
+- the fingerprint input is a length-prefixed byte record using `OsStr::as_encoded_bytes`, so it is byte-faithful on the one machine that runs both invocations but not comparable across OSes (the spec does not require that)
+- the fingerprint's input format changed, so a handoff whose two runs use different `wt` builds refuses (exit 3), which is harmless
+- the Linux cross-checks needed `--no-default-features` because of the stale read-only `librenderable-*.rmeta` links in build-linux's clone; WSL2 was not run
+
+The files changed in this cycle:
+
+- `worktree/lib/src/git.rs`
+- `worktree/lib/src/remove/inventory.rs`
+- `worktree/cli/src/commands/remove/report.rs`
+- `worktree/cli/tests/remove.rs`
+- `.claude/skills/worktree/SKILL.md`
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-09-25T15:09:37-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- starting the work on 'Executable-bit changes after approval escape the removal handoff check' at 15:09:44
+        - discovered: a regular file's fingerprint record held only its BLAKE3 digest; for a tracked, already-modified file a `chmod` leaves the ` M` status, the bytes, and the index entry unchanged, so the handoff passed and deleted the worktree and branch
+        - changed `worktree/lib/src/remove/inventory.rs`: each regular file's record is now `file:{mode}:{blake3}`; a new `file_mode` helper returns `100755`/`100644` on Unix (owner exec bit, the rule git applies) and the constant `no-exec-bit` elsewhere
+                - the mode comes from metadata `entry_digest` already reads: no extra git subprocess, no timestamps; other permission bits (e.g. 0644 to 0600) still do not change the fingerprint
+                - the same helper covers files inside dirty directories and untracked nested repositories; byte-faithful paths and no-symlink-traversal are unchanged
+                - doc comments on `Inventory::fingerprint` and `entry_digest` updated to state the executable-bit contract
+        - changed `.claude/skills/worktree/SKILL.md`: the `Inventory::fingerprint` description now says the file record includes its git mode on Unix
+        - library tests added (`#[cfg(unix)] mod executable_bit` in `inventory.rs`, fixtures set `core.filemode=true`):
+                - `fingerprint_changes_when_only_a_modified_tracked_files_mode_changes` (asserts ` M` status and `mode change 100644 => 100755`; equal when unchanged)
+                - `fingerprint_changes_when_only_a_mode_inside_an_untracked_nested_repo_changes`
+                - `fingerprint_ignores_permission_bits_git_does_not_record`
+        - CLI tests added (`#[cfg(unix)] mod executable_bit` in `worktree/cli/tests/remove.rs`):
+                - `a_changed_executable_bit_between_the_runs_refuses_with_nothing_removed`: exit 3; bytes, mode 0755, worktree registration, and branch preserved
+                - `an_unchanged_executable_bit_is_removed_by_the_handoff`: exit 0; worktree and branch removed
+        - fail-before: with `file_mode` temporarily forced to `100644`, `just test executable_bit` ran 5 tests, 2 passed, 3 failed (both library "changes" tests and the CLI refusal); source restored
+        - results (subagent): `worktree/just test` 331 passed, 17 skipped; `just lint` clean for both packages; `just check-tier-coverage worktree` 0 stranded; `just cross-check worktree --os windows` 133 passed, 0 skipped
+        - Linux and WSL2 cross-checks not run: the change follows the same `#[cfg(unix)]` path exercised on macOS
+- work completed for 'Executable-bit changes after approval escape the removal handoff check' at 15:13:00
+- orchestrator verification on macOS at 15:13:18: `worktree/just test` 331 passed, 17 skipped; `just lint` clean
+
+### Successful Completion
+
+The implementation of review cycle 8 has completed successfully in 4m. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+Design choices a reviewer should confirm:
+
+- only the owner-execute bit enters the fingerprint, which matches git's own 100755/100644 rule; other permission changes are deliberately ignored
+- on non-Unix platforms the record carries the constant `no-exec-bit`, because git takes the mode from the index there
+- the record format changed again, so a handoff whose two runs use different `wt` builds refuses (exit 3), which is harmless
+
+The files changed in this cycle:
+
+- `worktree/lib/src/remove/inventory.rs`
+- `worktree/cli/tests/remove.rs`
+- `.claude/skills/worktree/SKILL.md`
+
+## Implementation of Review Findings #9
+
+> **started at:** 2026-09-25T15:18:16-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-24-ux-improvements/review-9.md'
+- this is iteration 9 of the review-to-implement cycle
+- starting the work on 'Graph concurrency test fails under valid thread scheduling' at 15:18:40
+        - `commands/list/tests.rs` is a `#[cfg(test)]` child of `commands/list.rs`, which is compiled into both the `worktree-cli` lib and the `wt` bin, so the test and the seam run twice (`worktree-cli` and `worktree-cli::bin/wt`)
+        - the git-call recorder is still used by `list_worktrees_resolves_default_branch_once` and `run_skips_graph_git_calls_when_image_unavailable`, so nothing became dead code and the recorder was left alone
+        - seam: `run_pipeline` calls `tests::overlap::arrive(Gather::Graph)` at the start of the graph worker and `arrive(Gather::List)` just before `fill_worktree_statuses`, both behind `#[cfg(test)]` (non-test builds are unchanged); `overlap::arrive` does nothing unless a test has installed a rendezvous
+        - the rendezvous (Mutex + Condvar in a static slot, uninstalled by a drop guard) makes each side wait up to 10 s for the other to arrive and records whether it did; the test asserts both saw each other, so it rejects both sequential orders (graph after list returns, and graph joined before list starts)
+        - replaced `run_pipeline_graph_git_calls_begin_before_list_gather_completes` with `run_pipeline_gathers_the_graph_while_list_gather_is_unfinished` (L1 name, no tier segment)
+        - fail-before: variant A (list gather moved before graph spawn) gave 2 run / 0 passed / 2 failed at ~10.4 s each with outcome `(false, true)`; variant B (graph joined before list gather) gave 2 run / 0 passed / 2 failed at ~10.4 s each with outcome `(true, false)`; neither hung
+        - pass-after: restored concurrent code, `just test run_pipeline_g` gave 4 run / 4 passed (both targets)
+        - stability: 25 consecutive runs of `just test run_pipeline_gathers_the_graph_while`, 25 passed, 0 failed
+        - `just test` (worktree area): 331 run, 331 passed, 17 skipped; `just lint` clean; `cargo clippy -p worktree-cli --all-targets -- -D warnings` clean; `just check-tier-coverage worktree`: 0 stranded
+        - worktree skill: it records no list-pipeline concurrency test pattern, so it needed no update
+- work completed for 'Graph concurrency test fails under valid thread scheduling' at 15:21:55
+- orchestrator verification on macOS at 15:22:00: `worktree/just test` 331 passed, 17 skipped; `just lint` clean
+- cross-OS runs skipped: the change is a test-only `#[cfg(test)]` seam built from `std` Mutex/Condvar primitives, with no OS-specific code
+
+### Successful Completion
+
+The implementation of review cycle 9 has completed successfully in 4m. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- none deferred
+
+The files changed in this cycle:
+
+- `worktree/cli/src/commands/list.rs` (two `#[cfg(test)]` seam calls only)
+- `worktree/cli/src/commands/list/tests.rs`
