@@ -97,15 +97,23 @@ impl Inventory {
     /// content; over the set of ignored entries; and over every index entry's
     /// mode, object ID, stage, and path (`git ls-files --stage`).
     ///
+    /// A dirty entry that is a directory (git lists an untracked nested
+    /// repository or a modified submodule as one entry) contributes every
+    /// path beneath it and each file's content, without following symlinks.
+    ///
     /// Two runs of `wt remove` compare this to prove nothing that removal
     /// would delete changed in between: an edit that keeps the status, a
     /// restaged version that keeps both the status and the working bytes, a
-    /// new untracked file, or a new ignored entry all change it.
+    /// new untracked file (including one inside such a directory), or a new
+    /// ignored entry all change it. Changes inside ignored entries do not.
     ///
     /// ## Errors
     ///
-    /// Fails when git cannot list the index; a digest without it could not
-    /// see staged work.
+    /// - [`WorktreeError::Io`] when a path under a dirty entry cannot be
+    ///   read; the digest would not cover it. A dirty path that no longer
+    ///   exists is not an error.
+    /// - [`WorktreeError::GitCommand`] when git cannot list the index; a
+    ///   digest without it could not see staged work.
     pub fn fingerprint(&self, base: &Path, worktree: &Path) -> Result<String, WorktreeError> {
         let mut dirty: Vec<&DirtyEntry> = self.dirty.iter().collect();
         dirty.sort_by(|a, b| a.path.cmp(&b.path));
@@ -114,7 +122,7 @@ impl Inventory {
 
         let mut text = String::new();
         for entry in dirty {
-            let content = content_digest(&worktree.join(&entry.path));
+            let content = content_digest(&worktree.join(&entry.path))?;
             text.push_str(&format!(
                 "dirty\0{}\0{}\0{content}\n",
                 entry.status,
@@ -136,8 +144,8 @@ impl Inventory {
 /// Collects the inventory of the worktree at `worktree`, running git from
 /// `base` (see [`crate::git::git_from`]).
 ///
-/// Untracked files are listed individually (`-uall`), so the count covers
-/// every path.
+/// Untracked files are listed individually (`-uall`), except that git lists
+/// an untracked nested repository as one directory entry.
 pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, WorktreeError> {
     let output = git_from_raw(
         base,
@@ -157,21 +165,72 @@ pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, Work
     Ok(Inventory::from_status_z(&output))
 }
 
-fn content_digest(path: &Path) -> String {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return "absent".to_string();
+/// The working content at `path`, or `absent` when nothing is there.
+fn content_digest(path: &Path) -> Result<String, WorktreeError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok("absent".to_string());
+        }
+        Err(error) => return Err(unreadable(path, error)),
     };
-    if metadata.file_type().is_symlink() {
-        return fs::read_link(path)
-            .map(|target| format!("link:{}", target.to_string_lossy()))
-            .unwrap_or_else(|_| "link".to_string());
-    }
     if metadata.is_dir() {
-        return "dir".to_string();
+        let mut listing = String::new();
+        // `.git` is walked too: a nested repository's commits and index are
+        // lost with the directory, and the outer `git status` never lists them.
+        // The outer status may refresh a submodule's own index; that refuses
+        // a handoff spuriously, never accepts a change.
+        list_directory(path, "", &mut listing)?;
+        return Ok(format!("dir:{}", biscuit_hash::blake3_hash(&listing)));
+    }
+    entry_digest(path, &metadata)
+}
+
+/// A file's BLAKE3 digest, a symlink's target (never followed), or a marker
+/// for other file types, which have no content to read.
+fn entry_digest(path: &Path, metadata: &fs::Metadata) -> Result<String, WorktreeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        let target = fs::read_link(path).map_err(|error| unreadable(path, error))?;
+        return Ok(format!("link:{}", target.to_string_lossy()));
+    }
+    if !file_type.is_file() {
+        return Ok("special".to_string());
     }
     fs::File::open(path)
         .and_then(|mut file| biscuit_hash::blake3_hash_reader(&mut file))
-        .unwrap_or_else(|_| "unreadable".to_string())
+        .map(|digest| format!("file:{digest}"))
+        .map_err(|error| unreadable(path, error))
+}
+
+/// Appends one line per path under `dir`, in name order, keyed by its
+/// `/`-separated path relative to the walk's root so every OS hashes the
+/// same text.
+fn list_directory(dir: &Path, prefix: &str, listing: &mut String) -> Result<(), WorktreeError> {
+    let mut children = fs::read_dir(dir)
+        .and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
+        .map_err(|error| unreadable(dir, error))?;
+    children.sort_by_key(|child| child.file_name());
+    for child in children {
+        let path = child.path();
+        let relative = format!("{prefix}{}", child.file_name().to_string_lossy());
+        let metadata = fs::symlink_metadata(&path).map_err(|error| unreadable(&path, error))?;
+        if metadata.is_dir() {
+            listing.push_str(&format!("{relative}/\0dir\n"));
+            list_directory(&path, &format!("{relative}/"), listing)?;
+        } else {
+            let digest = entry_digest(&path, &metadata)?;
+            listing.push_str(&format!("{relative}\0{digest}\n"));
+        }
+    }
+    Ok(())
+}
+
+fn unreadable(path: &Path, error: std::io::Error) -> WorktreeError {
+    WorktreeError::Io(std::io::Error::new(
+        error.kind(),
+        format!("cannot read {}: {error}", path.display()),
+    ))
 }
 
 #[cfg(test)]
@@ -307,6 +366,64 @@ mod tests {
         // A new ignored entry.
         fs::write(wt.join("debug.log"), "x\n").unwrap();
         assert_ne!(untracked, print());
+    }
+
+    /// A worktree whose only dirty entry is an untracked nested repository,
+    /// which git lists as one `?? nested/` line.
+    fn worktree_with_nested_repo(repo: &TestRepo) -> PathBuf {
+        let wt = repo.add_worktree("feat/x", "feat-x", "main");
+        fs::create_dir(wt.join("nested")).unwrap();
+        repo.git_in(&wt.join("nested"), &["init", "-q", "-b", "main"]);
+        fs::write(wt.join("nested/notes"), "approved content\n").unwrap();
+        let inventory = collect_inventory(&repo.path(), &wt).unwrap();
+        let dirty: Vec<_> = inventory
+            .dirty
+            .iter()
+            .map(|e| (e.status.as_str(), e.path.to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(dirty, [("??", "nested/".to_string())]);
+        wt
+    }
+
+    #[test]
+    fn fingerprint_covers_edits_and_new_files_inside_an_untracked_nested_repo() {
+        let repo = TestRepo::new();
+        let wt = worktree_with_nested_repo(&repo);
+        let base = repo.path();
+        let print = || collect_inventory(&base, &wt).unwrap().fingerprint(&base, &wt).unwrap();
+
+        let approved = print();
+        assert_eq!(approved, print(), "stable when nothing changes");
+
+        fs::write(wt.join("nested/notes"), "new work after approval\n").unwrap();
+        let edited = print();
+        assert_ne!(approved, edited, "an edited child");
+
+        fs::write(wt.join("nested/new-file"), "new work\n").unwrap();
+        assert_ne!(edited, print(), "a new child");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fingerprint_fails_when_a_path_inside_a_dirty_directory_is_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = TestRepo::new();
+        let wt = worktree_with_nested_repo(&repo);
+        let base = repo.path();
+        let secret = wt.join("nested/notes");
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::File::open(&secret).is_ok() {
+            // Root reads it regardless of the mode bits.
+            return;
+        }
+
+        let result = collect_inventory(&base, &wt).unwrap().fingerprint(&base, &wt);
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o644)).unwrap();
+        match result {
+            Err(WorktreeError::Io(error)) => assert!(error.to_string().contains("notes"), "{error}"),
+            other => panic!("expected an I/O error naming the file, got {other:?}"),
+        }
     }
 
     /// Restaging keeps the status (`MM`) and the working bytes; only the

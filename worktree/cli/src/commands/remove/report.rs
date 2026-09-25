@@ -9,7 +9,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use worktree::remove::Inventory;
-use worktree::remove::remote::{RemoteOnly, RemoteState};
+use worktree::remove::remote::{Reinterpretation, RemoteOnly, RemoteState};
 use worktree::remove::safety::{BranchSafety, Commit, Evidence, PrLookup, Tier};
 
 use crate::commands::dirty_tree;
@@ -270,6 +270,25 @@ pub fn remote_markup(state: &RemoteState) -> String {
             endpoints.len(),
             esc(&endpoints.join(", "))
         ),
+        RemoteState::ReinterpretedEndpoint {
+            endpoint,
+            by: Reinterpretation::Rewrite(rule),
+            ..
+        } => format!(
+            "{} <yellow>git would rewrite this URL again</yellow> by <i>{}</i>, so <i>--force-remote</i> cannot tell which repository it would delete from.",
+            origin_label(endpoint),
+            esc(rule)
+        ),
+        RemoteState::ReinterpretedEndpoint {
+            endpoint,
+            by: Reinterpretation::RemoteName { source },
+            ..
+        } => format!(
+            "{} <yellow>git would read this URL as the remote <b>{}</b></yellow> (defined by <i>{}</i>), so <i>--force-remote</i> cannot tell which repository it would delete from.",
+            origin_label(endpoint),
+            esc(endpoint),
+            esc(source)
+        ),
         RemoteState::Absent {
             destination,
             endpoint,
@@ -506,6 +525,22 @@ mod tests {
             endpoints: vec!["/a.git".into(), "/b.git".into()],
         };
         assert!(remote_markup(&several).contains("pushes to 2 repositories"));
+        let rewritten = RemoteState::ReinterpretedEndpoint {
+            destination: "feat/x".into(),
+            endpoint: "/a.git".into(),
+            by: Reinterpretation::Rewrite("url./b.git.pushinsteadof=/a.git".into()),
+        };
+        assert!(remote_markup(&rewritten).contains("would rewrite this URL again"));
+        assert!(remote_markup(&rewritten).contains("url./b.git.pushinsteadof=/a.git"));
+        let named = RemoteState::ReinterpretedEndpoint {
+            destination: "feat/x".into(),
+            endpoint: "approved".into(),
+            by: Reinterpretation::RemoteName {
+                source: "remote.approved.pushurl".into(),
+            },
+        };
+        assert!(remote_markup(&named).contains("as the remote <b>approved</b>"));
+        assert!(remote_markup(&named).contains("remote.approved.pushurl"));
     }
 
     #[test]

@@ -28,7 +28,8 @@ use worktree::remove::handoff::{
 };
 use worktree::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::remote::{
-    RemoteState, delete_remote_branch, preflight_remote_deletion, remote_destination,
+    Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion,
+    remote_destination,
 };
 use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, SafetyInput, SniffPrSource, assess,
@@ -188,14 +189,8 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
 
     let facts = Facts::gather(&base, entry, flags.force_remote)?;
     eprintln!("{}", facts.render_report(&terminal));
-    if let Some(RemoteState::MultiplePushUrls { .. }) = &facts.remote {
-        return Err(WorktreeError::RefusedToLoseWork(
-            "\n<red><b>Nothing was removed.</b></red> Origin pushes to more than one repository, \
-            so <i>--force-remote</i> cannot delete the branch from exactly the one reported.\n  \
-            <dim>Leave out <i>--force-remote</i>, or delete the branch in each repository with \
-            <i>git push</i>.</dim>"
-                .to_string(),
-        ));
+    if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
+        return Err(WorktreeError::RefusedToLoseWork(refusal));
     }
 
     let interactive = crate::env::is_interactive();
@@ -224,6 +219,45 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         }
         Decision::Proceed(actions) if inside => hand_off(&terminal, &facts, &cwd, actions),
         Decision::Proceed(actions) => execute(&terminal, &facts, actions),
+    }
+}
+
+/// `--force-remote` cannot show that it deletes from exactly the repository
+/// reported.
+fn unprovable_remote(state: Option<&RemoteState>) -> Option<String> {
+    match state? {
+        RemoteState::MultiplePushUrls { .. } => Some(
+            "\n<red><b>Nothing was removed.</b></red> Origin pushes to more than one repository, \
+            so <i>--force-remote</i> cannot delete the branch from exactly the one reported.\n  \
+            <dim>Leave out <i>--force-remote</i>, or delete the branch in each repository with \
+            <i>git push</i>.</dim>"
+                .to_string(),
+        ),
+        RemoteState::ReinterpretedEndpoint {
+            endpoint,
+            by: Reinterpretation::Rewrite(rule),
+            ..
+        } => Some(format!(
+            "\n<red><b>Nothing was removed.</b></red> Git would rewrite origin's push URL <b>{}</b> \
+            again by <i>{}</i>, so <i>--force-remote</i> cannot delete the branch from exactly the \
+            repository reported.\n  \
+            <dim>Leave out <i>--force-remote</i>, or change that rule.</dim>",
+            esc(endpoint),
+            esc(rule)
+        )),
+        RemoteState::ReinterpretedEndpoint {
+            endpoint,
+            by: Reinterpretation::RemoteName { source },
+            ..
+        } => Some(format!(
+            "\n<red><b>Nothing was removed.</b></red> Git would read origin's push URL <b>{}</b> \
+            as the name of the remote defined by <i>{}</i>, so <i>--force-remote</i> cannot delete \
+            the branch from exactly the repository reported.\n  \
+            <dim>Leave out <i>--force-remote</i>, or rename that remote.</dim>",
+            esc(endpoint),
+            esc(source)
+        )),
+        _ => None,
     }
 }
 
@@ -387,6 +421,14 @@ fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> R
             destination,
             "origin pushes to more than one repository",
         )),
+        Some(RemoteState::ReinterpretedEndpoint {
+            destination,
+            endpoint,
+            by,
+        }) => Err(failure(
+            destination,
+            &format!("origin's push URL {endpoint}: {by}"),
+        )),
         Some(RemoteState::Absent { .. }) | Some(RemoteState::NoRemote) | None => {
             print(terminal, "<dim>Nothing to delete on origin.</dim>");
             Ok(())
@@ -454,7 +496,7 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
-        fingerprint: facts.inventory.fingerprint(&facts.base, &facts.entry.path)?,
+        fingerprint: fingerprint(facts)?,
         landing: canonical(&landing),
     };
     let token = handoff::new_token()?;
@@ -507,6 +549,15 @@ fn remote_approval(state: Option<&RemoteState>) -> RemoteApproval {
             endpoint: None,
             observed_sha: None,
         },
+        Some(RemoteState::ReinterpretedEndpoint {
+            destination,
+            endpoint,
+            ..
+        }) => RemoteApproval {
+            destination: Some(destination.clone()),
+            endpoint: Some(endpoint.clone()),
+            observed_sha: None,
+        },
         Some(RemoteState::NoRemote) | None => RemoteApproval {
             destination: None,
             endpoint: None,
@@ -520,6 +571,23 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default()
+}
+
+/// [`Inventory::fingerprint`] of the target, refusing (exit 4) when part of
+/// what removal would delete cannot be read: an approval that does not cover
+/// it could not prove it unchanged.
+fn fingerprint(facts: &Facts) -> Result<String, WorktreeError> {
+    facts
+        .inventory
+        .fingerprint(&facts.base, &facts.entry.path)
+        .map_err(|error| match error {
+            WorktreeError::Io(error) => WorktreeError::BlockedByEnvironment(start_again(&format!(
+                "Could not read everything the removal would delete: {}. \
+                Make it readable, or run <i>wt remove</i> from outside the worktree.",
+                esc(&error.to_string())
+            ))),
+            other => other,
+        })
 }
 
 fn start_again(reason: &str) -> String {
@@ -561,7 +629,7 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
-        fingerprint: facts.inventory.fingerprint(&facts.base, &facts.entry.path)?,
+        fingerprint: fingerprint(&facts)?,
         landing: canonical(&cwd),
     };
     match handoff::verify(&record, &fresh, &cwd) {
@@ -606,6 +674,13 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
             return Err(WorktreeError::RefusedToLoseWork(start_again(
                 "The repository origin pushes to changed since you confirmed.",
             )));
+        }
+        // A rewrite rule or a remote named like the endpoint, added since
+        // the first run, leaves the endpoint's spelling unchanged but would
+        // redirect the deletion.
+        if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
+            eprintln!("{}", facts.render_report(&terminal));
+            return Err(WorktreeError::RefusedToLoseWork(refusal));
         }
         let now_sha = match &facts.remote {
             Some(RemoteState::Present { sha, .. }) => Some(sha.clone()),

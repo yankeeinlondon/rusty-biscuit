@@ -5,11 +5,20 @@
 //! deletion, and `ls-remote origin` reads the fetch URL while `push origin`
 //! follows the push URL. So the live check and the deletion both address
 //! origin's resolved push endpoint ([`push_endpoints`]), which the handoff
-//! record also stores (Decision 21, amended by review 3).
+//! record also stores (Decision 21, amended by reviews 3 and 4).
+//!
+//! Git does not always take that argument literally, and has no switch to
+//! make it: it rewrites a URL again (`ls-remote` by `insteadOf`, `push` by
+//! `pushInsteadOf`, else `insteadOf`), and reads an argument that names a
+//! configured remote as that remote, whose fetch and push URLs can differ
+//! (review 5). So an endpoint is only used when
+//! [`endpoint_reinterpretation`] finds neither; then both commands address
+//! it literally and observe and delete in the same repository. Otherwise
+//! `--force-remote` is refused before anything is removed.
 
 use std::path::Path;
 
-use crate::git::git_from;
+use crate::git::{git_from, git_from_raw};
 
 use super::live_remote::{PUSH_DEADLINE, RemoteHeads, run_noninteractive};
 use super::safety::Commit;
@@ -37,6 +46,9 @@ pub fn remote_destination(base: &Path, branch: &str) -> Option<String> {
 /// spelled as git prints them. Relative paths resolve against `base`, which
 /// is where every network call runs.
 ///
+/// Passing one back to git can change its meaning; see
+/// [`endpoint_reinterpretation`].
+///
 /// ## Errors
 ///
 /// Git's reason, for example when there is no `origin` remote.
@@ -44,6 +56,84 @@ pub fn push_endpoints(base: &Path) -> Result<Vec<String>, String> {
     let out = git_from(base, base, &["remote", "get-url", "--push", "--all", "origin"])
         .map_err(|e| e.to_string())?;
     Ok(out.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
+}
+
+/// Why git would not address `endpoint` literally when given it as the
+/// repository argument of `ls-remote` or `push`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reinterpretation {
+    /// A `url.<base>.insteadOf` or `url.<base>.pushInsteadOf` rule whose
+    /// value is a prefix of the endpoint, spelled `<key>=<value>` with git's
+    /// lowercased key.
+    Rewrite(String),
+    /// The endpoint is also a remote's name, so git reads that remote's URLs
+    /// instead. `source` is the first configuration key (any
+    /// `remote.<endpoint>.*`, as git prints it) or legacy
+    /// `remotes/`/`branches/` file (as `rev-parse --git-path` spells it)
+    /// that defines it.
+    RemoteName { source: String },
+}
+
+impl std::fmt::Display for Reinterpretation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rewrite(rule) => write!(f, "git would rewrite it by {rule}"),
+            Self::RemoteName { source } => {
+                write!(f, "git would read it as the remote defined by {source}")
+            }
+        }
+    }
+}
+
+/// `None` means git passes `endpoint` through unchanged to both `ls-remote`
+/// and `push`. Configuration comes from every scope, including `-c`.
+///
+/// Any `remote.<endpoint>.*` key counts, not only `url`: a `pushurl` alone
+/// redirects `push`, and keys such as `receivepack` or `vcs` change what
+/// runs. `git remote get-url` is no substitute, since it ignores remotes
+/// defined outside the repository's own configuration.
+///
+/// ## Errors
+///
+/// Git's reason when the configuration or a legacy remote path cannot be
+/// read.
+pub fn endpoint_reinterpretation(base: &Path, endpoint: &str) -> Result<Option<Reinterpretation>, String> {
+    let config = git_from_raw(base, base, &["config", "--null", "--list"]).map_err(|e| e.to_string())?;
+    if let Some(found) = matching_reinterpretation(&config, endpoint) {
+        return Ok(Some(found));
+    }
+    // Git reads these files only for a name without a directory separator.
+    if endpoint.is_empty() || endpoint == "." || endpoint == ".." || endpoint.chars().any(std::path::is_separator) {
+        return Ok(None);
+    }
+    let remotes = format!("remotes/{endpoint}");
+    let branches = format!("branches/{endpoint}");
+    let paths = git_from(base, base, &["rev-parse", "--git-path", &remotes, "--git-path", &branches])
+        .map_err(|e| e.to_string())?;
+    Ok(paths
+        .lines()
+        .find(|path| base.join(path).exists())
+        .map(|path| Reinterpretation::RemoteName { source: path.to_string() }))
+}
+
+/// The configuration half of [`endpoint_reinterpretation`], over
+/// `git config --null --list` output (`key\nvalue\0` entries, or a bare
+/// `key\0` for a key without a value). The first matching entry wins.
+fn matching_reinterpretation(config: &str, endpoint: &str) -> Option<Reinterpretation> {
+    config.split('\0').find_map(|entry| {
+        let (key, value) = entry.split_once('\n').map_or((entry, None), |(key, value)| (key, Some(value)));
+        let names_endpoint = key
+            .strip_prefix("remote.")
+            .and_then(|rest| rest.rsplit_once('.'))
+            .is_some_and(|(name, _)| name == endpoint);
+        if names_endpoint {
+            return Some(Reinterpretation::RemoteName { source: key.to_string() });
+        }
+        let is_rewrite = key.starts_with("url.")
+            && (key.ends_with(".insteadof") || key.ends_with(".pushinsteadof"));
+        let value = value.filter(|value| is_rewrite && endpoint.starts_with(value))?;
+        Some(Reinterpretation::Rewrite(format!("{key}={value}")))
+    })
 }
 
 /// What deleting the branch on origin would do, as observed live.
@@ -58,6 +148,15 @@ pub enum RemoteState {
     MultiplePushUrls {
         destination: String,
         endpoints: Vec<String>,
+    },
+    /// Git would not take the resolved endpoint literally, so it could send
+    /// the live check and the deletion somewhere else, possibly to two
+    /// different repositories. `--force-remote` refuses this before removing
+    /// anything.
+    ReinterpretedEndpoint {
+        destination: String,
+        endpoint: String,
+        by: Reinterpretation,
     },
     /// The endpoint answered and has no such branch.
     Absent { destination: String, endpoint: String },
@@ -112,6 +211,23 @@ pub fn preflight_remote_deletion(
             };
         }
     };
+    match endpoint_reinterpretation(base, &endpoint) {
+        Ok(None) => {}
+        Ok(Some(by)) => {
+            return RemoteState::ReinterpretedEndpoint {
+                destination,
+                endpoint,
+                by,
+            };
+        }
+        Err(reason) => {
+            return RemoteState::Unavailable {
+                destination,
+                endpoint,
+                reason,
+            };
+        }
+    }
     match heads.live_head(&endpoint, &destination) {
         Ok(None) => RemoteState::Absent { destination, endpoint },
         Err(reason) => RemoteState::Unavailable {
@@ -160,13 +276,17 @@ fn remote_only_commits(base: &Path, remote_sha: &str, tip: &str) -> RemoteOnly {
 /// ## Errors
 ///
 /// Git's reason: a failed lease, a protected branch, or an unreachable
-/// endpoint.
+/// endpoint. Also refuses, without pushing, when git would no longer take
+/// `endpoint` literally ([`endpoint_reinterpretation`]).
 pub fn delete_remote_branch(
     base: &Path,
     endpoint: &str,
     destination: &str,
     observed_sha: &str,
 ) -> Result<(), String> {
+    if let Some(by) = endpoint_reinterpretation(base, endpoint)? {
+        return Err(format!("not deleting from {endpoint}: {by}"));
+    }
     let refname = format!("refs/heads/{destination}");
     let lease = format!("--force-with-lease={refname}:{observed_sha}");
     let refspec = format!(":{refname}");
@@ -244,6 +364,107 @@ mod tests {
         repo.git(&["config", "remote.origin.url", "short:repo.git"]);
         repo.git(&["config", "url./rewritten/.pushInsteadOf", "short:"]);
         assert_eq!(push_endpoints(&repo.path()), Ok(vec!["/rewritten/repo.git".to_string()]));
+    }
+
+    #[test]
+    fn a_rewrite_rule_matching_the_endpoint_is_found_in_any_letter_case() {
+        let repo = TestRepo::with_origin();
+        let endpoint = origin_url(&repo);
+        assert_eq!(endpoint_reinterpretation(&repo.path(), &endpoint), Ok(None));
+
+        repo.git(&["config", "url./elsewhere/.insteadOf", "/unrelated/"]);
+        assert_eq!(endpoint_reinterpretation(&repo.path(), &endpoint), Ok(None), "no prefix match");
+
+        repo.git(&["config", "url./Else/Where.git.pushInsteadOf", &endpoint]);
+        assert_eq!(
+            endpoint_reinterpretation(&repo.path(), &endpoint),
+            Ok(Some(Reinterpretation::Rewrite(format!("url./Else/Where.git.pushinsteadof={endpoint}"))))
+        );
+
+        repo.git(&["config", "--unset", "url./Else/Where.git.pushInsteadOf"]);
+        let parent = repo.origin_path().parent().unwrap().to_str().unwrap().to_string();
+        repo.git(&["config", "url./other/.insteadOf", &parent]);
+        assert_eq!(
+            endpoint_reinterpretation(&repo.path(), &endpoint),
+            Ok(Some(Reinterpretation::Rewrite(format!("url./other/.insteadof={parent}"))))
+        );
+    }
+
+    #[test]
+    fn rewrite_rules_and_remote_names_parse_from_null_separated_config() {
+        let rewrite = |rule: &str| Some(Reinterpretation::Rewrite(rule.to_string()));
+        let remote = |key: &str| Some(Reinterpretation::RemoteName { source: key.to_string() });
+        let config = "user.name\nTest\0url.a b.insteadof\n/x/\0url.c.pushinsteadof\n/y/\0\
+            remote.pushdefault\napproved\0remote.sub/dir.v1.pushurl\n/p\0remote.Upper.url\n/u\0\
+            remote.bare.vcs\0";
+        assert_eq!(matching_reinterpretation(config, "/z/repo.git"), None);
+        assert_eq!(matching_reinterpretation(config, "/x/repo.git"), rewrite("url.a b.insteadof=/x/"));
+        assert_eq!(matching_reinterpretation(config, "/y/repo.git"), rewrite("url.c.pushinsteadof=/y/"));
+        assert_eq!(matching_reinterpretation("url.c.pushinsteadof\0", "/y/"), None, "no value");
+        // Any key of the remote counts; its name may hold dots and slashes,
+        // and git matches it case-sensitively.
+        assert_eq!(matching_reinterpretation(config, "sub/dir.v1"), remote("remote.sub/dir.v1.pushurl"));
+        assert_eq!(matching_reinterpretation(config, "bare"), remote("remote.bare.vcs"));
+        assert_eq!(matching_reinterpretation(config, "approved"), None, "a value, not a name");
+        assert_eq!(matching_reinterpretation(config, "upper"), None);
+        assert_eq!(matching_reinterpretation(config, "Upper"), remote("remote.Upper.url"));
+    }
+
+    #[test]
+    fn an_endpoint_naming_a_remote_is_found_in_config_and_legacy_files() {
+        let repo = TestRepo::with_origin();
+        repo.git(&["remote", "set-url", "origin", "approved"]);
+        assert_eq!(endpoint_reinterpretation(&repo.path(), "approved"), Ok(None));
+
+        repo.git(&["config", "remote.approved.pushurl", "/elsewhere/other.git"]);
+        assert_eq!(
+            endpoint_reinterpretation(&repo.path(), "approved"),
+            Ok(Some(Reinterpretation::RemoteName { source: "remote.approved.pushurl".into() }))
+        );
+        let error = delete_remote_branch(&repo.path(), "approved", "main", &repo.sha("main")).unwrap_err();
+        assert!(error.contains("read it as the remote defined by remote.approved.pushurl"), "{error}");
+        repo.git(&["config", "--unset", "remote.approved.pushurl"]);
+
+        for dir in ["remotes", "branches"] {
+            let file = repo.path().join(".git").join(dir).join("approved");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "/elsewhere/other.git\n").unwrap();
+            let Ok(Some(Reinterpretation::RemoteName { source })) =
+                endpoint_reinterpretation(&repo.path(), "approved")
+            else {
+                panic!("the {dir} file names a remote");
+            };
+            assert!(source.ends_with(&format!("{dir}/approved")), "{source}");
+            std::fs::remove_file(&file).unwrap();
+        }
+        assert_eq!(endpoint_reinterpretation(&repo.path(), "approved"), Ok(None));
+    }
+
+    #[test]
+    fn a_rewritten_endpoint_is_refused_before_asking_it_and_never_pushed_to() {
+        let repo = TestRepo::with_origin();
+        repo.git(&["branch", "feat/x"]);
+        repo.git(&["push", "-q", "origin", "feat/x"]);
+        let endpoint = origin_url(&repo);
+        // Resolution rewrites `alias:` to the real origin once; the second
+        // rule would then send the push elsewhere.
+        repo.git(&["remote", "set-url", "origin", "alias:"]);
+        repo.git(&["config", &format!("url.{endpoint}.pushInsteadOf"), "alias:"]);
+        repo.git(&["config", "url./nonexistent/other.git.pushInsteadOf", &endpoint]);
+        assert_eq!(push_endpoints(&repo.path()), Ok(vec![endpoint.clone()]));
+
+        let state = preflight_remote_deletion(&repo.path(), "feat/x", &repo.sha("feat/x"), &heads(&repo));
+        assert_eq!(
+            state,
+            RemoteState::ReinterpretedEndpoint {
+                destination: "feat/x".into(),
+                endpoint: endpoint.clone(),
+                by: Reinterpretation::Rewrite(format!("url./nonexistent/other.git.pushinsteadof={endpoint}")),
+            }
+        );
+        let error = delete_remote_branch(&repo.path(), &endpoint, "feat/x", &repo.sha("feat/x")).unwrap_err();
+        assert!(error.contains("would rewrite"), "{error}");
+        assert_eq!(heads(&repo).live_head(&endpoint, "feat/x"), Ok(Some(repo.sha("feat/x"))));
     }
 
     #[test]

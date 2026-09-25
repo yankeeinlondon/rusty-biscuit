@@ -9,6 +9,9 @@
 //! - **Not safe**: nowhere else. **Unknown** (a git failure) is treated as
 //!   Not safe.
 //!
+//! With `--force-remote`, the origin branch about to be deleted is evidence
+//! at no tier, even when it is `origin/<default>`.
+//!
 //! See item 3 of `2026-09-24-ux-improvements` for the full rules.
 
 use std::path::Path;
@@ -192,7 +195,8 @@ pub struct SafetyInput<'a> {
     /// or `None` without an origin remote.
     pub remote_branch: Option<&'a str>,
     /// `--force-remote`: leave out the branch's own origin copy and its open
-    /// PR, since both are about to be deleted.
+    /// PR, since both are about to be deleted. The copy counts at no tier,
+    /// including when it is `origin/<default>`.
     pub force_remote: bool,
     /// `owner/repo` of origin; a PR from another repository never counts.
     pub source_repo: Option<&'a str>,
@@ -255,11 +259,16 @@ fn classify(
     let own_remote = input
         .remote_branch
         .map(|name| format!("refs/remotes/origin/{name}"));
+    // The destination `--force-remote` deletes is no evidence at any tier,
+    // even when it is the default branch (an upstream of `origin/main`).
+    let doomed_remote = own_remote.as_deref().filter(|_| input.force_remote);
     let default_local = format!("refs/heads/{}", input.default_branch);
     let default_remote = format!("refs/remotes/origin/{}", input.default_branch);
     let refs: Vec<&str> = containing
         .lines()
-        .filter(|name| *name != own_local && *name != "refs/remotes/origin/HEAD")
+        .filter(|name| {
+            *name != own_local && *name != "refs/remotes/origin/HEAD" && Some(*name) != doomed_remote
+        })
         .collect();
 
     // Pass 1 -- Safe.
@@ -286,7 +295,6 @@ fn classify(
         .iter()
         .copied()
         .filter(|name| name.starts_with("refs/remotes/origin/"))
-        .filter(|name| !(input.force_remote && Some(*name) == own_remote.as_deref()))
         .collect();
     remote_refs.sort_by_key(|name| Some(*name) != own_remote.as_deref());
     for full_ref in remote_refs {
@@ -407,6 +415,9 @@ fn origin_copy(base: &Path, name: &str, tip: &str) -> Option<OriginCopy> {
 /// Commits on the branch that no other local branch, `origin/*` ref, or tag
 /// contains; with `--force-remote`, the branch's own origin copy does not
 /// count either.
+///
+/// `origin/HEAD` never counts: the ref it points at is listed under its own
+/// name, and as an alias it would bring back an excluded destination.
 fn lost_commits(input: &SafetyInput<'_>) -> Result<Vec<Commit>, String> {
     let exclude_local = format!("--exclude={}", input.branch);
     let exclude_remote = input
@@ -424,7 +435,7 @@ fn lost_commits(input: &SafetyInput<'_>) -> Result<Vec<Commit>, String> {
     if let Some(exclude) = exclude_remote.as_deref() {
         args.push(exclude);
     }
-    args.extend(["--remotes=origin", "--tags"]);
+    args.extend(["--exclude=origin/HEAD", "--remotes=origin", "--tags"]);
     let out = git_from(input.base, input.base, &args).map_err(|e| e.to_string())?;
     Ok(out
         .lines()
@@ -698,6 +709,61 @@ mod tests {
 
         let without = assess_with(&repo, &tip, false, PrLookup::NoneFound, &heads);
         assert_eq!(without.lost_commits, Ok(Vec::new()));
+    }
+
+    /// `feat/x` tracks `origin/main`, the only ref holding its commit, so
+    /// `--force-remote` would delete `main` on origin. Local `main` is behind.
+    fn feature_tracking_origin_main(repo: &TestRepo) -> String {
+        let tip = feature(repo);
+        repo.git(&["push", "-q", "origin", "feat/x:main"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["branch", "-q", "--set-upstream-to=origin/main", "feat/x"]);
+        // `origin/HEAD` aliases the destination and must not stand in for it.
+        repo.git(&["remote", "set-head", "origin", "main"]);
+        tip
+    }
+
+    fn assess_tracking_main(repo: &TestRepo, tip: &str, force_remote: bool) -> BranchSafety {
+        let base = repo.path();
+        let input = SafetyInput {
+            base: &base,
+            branch: "feat/x",
+            tip,
+            default_branch: "main",
+            remote_branch: Some("main"),
+            force_remote,
+            source_repo: Some(REPO),
+        };
+        assess(&input, &StubPr(PrLookup::NoneFound), &live(repo))
+    }
+
+    #[test]
+    fn force_remote_never_counts_a_default_branch_destination_as_evidence() {
+        let repo = TestRepo::with_origin();
+        let tip = feature_tracking_origin_main(&repo);
+
+        let forced = assess_tracking_main(&repo, &tip, true);
+        assert_eq!(forced.tier, Tier::NotSafe);
+        assert_eq!(forced.lost_commits.unwrap().len(), 1);
+
+        let kept = assess_tracking_main(&repo, &tip, false);
+        assert_eq!(kept.tier, Tier::Safe(Evidence::DefaultBranch("origin/main".into())));
+        assert_eq!(kept.lost_commits, Ok(Vec::new()));
+    }
+
+    #[test]
+    fn force_remote_of_a_default_branch_destination_still_accepts_independent_copies() {
+        let repo = TestRepo::with_origin();
+        let tip = feature_tracking_origin_main(&repo);
+
+        repo.git(&["tag", "v1", &tip]);
+        let tagged = assess_tracking_main(&repo, &tip, true);
+        assert_eq!(tagged.tier, Tier::PrettySafe(Evidence::Tag("v1".into())));
+        assert_eq!(tagged.lost_commits, Ok(Vec::new()));
+
+        repo.git(&["merge", "-q", "--ff-only", "feat/x"]);
+        let merged = assess_tracking_main(&repo, &tip, true);
+        assert_eq!(merged.tier, Tier::Safe(Evidence::DefaultBranch("main".into())));
     }
 
     #[test]
