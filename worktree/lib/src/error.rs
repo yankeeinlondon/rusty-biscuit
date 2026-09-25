@@ -60,6 +60,25 @@ pub enum WorktreeError {
     #[error("{0}")]
     BlockedByEnvironment(String),
 
+    /// Another program holds the worktree directory (Windows only: its
+    /// current directory, or an open file inside). Nothing was removed.
+    #[error("the folder {} is in use by another program", .0.display())]
+    DirectoryInUse(std::path::PathBuf),
+
+    /// The Windows lock probe renamed the worktree and could not rename it
+    /// back. Nothing was removed; `move` restores the original name.
+    #[error(
+        "the worktree was left at {} after a lock check and could not be renamed back; \
+        restore it with: move \"{}\" \"{}\"",
+        .temporary.display(),
+        .temporary.display(),
+        .original.display()
+    )]
+    LockProbeRenameBack {
+        original: std::path::PathBuf,
+        temporary: std::path::PathBuf,
+    },
+
     /// `wt create --from` was given for a branch that already exists.
     #[error(
         "`{branch}` already exists, so `--from {from}` would be ignored. Drop `--from` to reuse it."

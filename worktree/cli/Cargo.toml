@@ -28,6 +28,7 @@ assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 insta = "1"
 predicates = "3"
+serde_json = "1.0"
 serial_test = "3"
 tempfile = "3"
 
@@ -37,6 +38,10 @@ required-features = ["terminal-tests"]
 
 [[test]]
 name = "level2_list_verbose"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_remove"
 required-features = ["terminal-tests"]
 
 # CI policy: worktree-cli owns the area's L2 (real-terminal) tier tests.

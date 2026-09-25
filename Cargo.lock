@@ -16757,9 +16757,11 @@ dependencies = [
 name = "worktree"
 version = "0.1.0"
 dependencies = [
+ "biscuit-file",
  "biscuit-hash",
  "criterion",
  "dirs",
+ "getrandom 0.4.2",
  "serde",
  "serde_json",
  "serial_test",
@@ -16783,6 +16785,7 @@ dependencies = [
  "inquire",
  "insta",
  "predicates",
+ "serde_json",
  "serial_test",
  "sniff",
  "tempfile",

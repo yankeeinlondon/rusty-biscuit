@@ -18,7 +18,9 @@ pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
         WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
-        WorktreeError::BlockedByEnvironment(_) => BLOCKED_BY_ENVIRONMENT,
+        WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse(_) => {
+            BLOCKED_BY_ENVIRONMENT
+        }
         _ => FAILURE,
     }
 }
@@ -38,6 +40,10 @@ mod tests {
             exit_code(&WorktreeError::BlockedByEnvironment("no wrapper".into())),
             4
         );
+        assert_eq!(
+            exit_code(&WorktreeError::DirectoryInUse("C:\\wt\\feat-x".into())),
+            4
+        );
     }
 
     #[test]
@@ -51,6 +57,10 @@ mod tests {
                 candidates: Vec::new(),
             },
             WorktreeError::FromBranchNotFound("nope".into()),
+            WorktreeError::LockProbeRenameBack {
+                original: "a".into(),
+                temporary: "b".into(),
+            },
         ];
         for error in failures {
             assert_eq!(exit_code(&error), 1, "{error:?}");

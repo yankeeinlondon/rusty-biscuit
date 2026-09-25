@@ -54,8 +54,20 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
         Commands::Go { name, .. } => commands::go(&name),
         Commands::Remove {
             name,
-            force,
-            branch,
-        } => commands::remove(&name, force, branch),
+            force_worktree,
+            force_branch,
+            force_remote,
+            handoff,
+        } => match handoff {
+            Some(token) => commands::remove_handoff(&token),
+            None => commands::remove(
+                name.as_deref().unwrap_or_default(),
+                commands::RemoveFlags {
+                    force_worktree,
+                    force_branch,
+                    force_remote,
+                },
+            ),
+        },
     }
 }

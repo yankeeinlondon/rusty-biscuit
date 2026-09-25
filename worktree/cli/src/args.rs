@@ -62,23 +62,35 @@ pub enum Commands {
         help: Option<bool>,
     },
 
-    /// Remove a worktree (and optionally its branch)
+    /// Remove a worktree and, when its commits are safe elsewhere, its branch
     Remove {
-        /// Worktree name to remove
-        #[arg(add = ArgValueCompleter::new(complete_worktree_names))]
-        name: String,
+        /// Worktree name (branch or directory) to remove
+        #[arg(
+            required_unless_present = "handoff",
+            add = ArgValueCompleter::new(complete_worktree_names)
+        )]
+        name: Option<String>,
 
-        /// Force removal. Pass twice (-ff) to skip all confirmation.
-        ///
-        /// - `-f` / `--force`: skip confirmation when safe (clean, or <10 files
-        ///   with no source code). Confirm when uncommitted source/many files exist.
-        /// - `-ff`: remove immediately regardless of state.
-        #[arg(long, short = 'f', action = clap::ArgAction::Count)]
-        force: u8,
+        /// Remove the worktree even if it has uncommitted or ignored files
+        #[arg(long)]
+        force_worktree: bool,
 
-        /// Also attempt a soft delete (`git branch -d`) of the worktree's branch
-        #[arg(long, short = 'b')]
-        branch: bool,
+        /// Delete the local branch even if its commits exist nowhere else
+        #[arg(long)]
+        force_branch: bool,
+
+        /// Also delete the branch on origin (closes any open PR for it)
+        #[arg(long)]
+        force_remote: bool,
+
+        /// Finish a removal the shell wrapper handed off (internal)
+        #[arg(
+            long,
+            hide = true,
+            value_name = "TOKEN",
+            conflicts_with_all = ["name", "force_worktree", "force_branch", "force_remote"]
+        )]
+        handoff: Option<String>,
     },
 }
 
@@ -114,10 +126,14 @@ Examples:
   wt create fix/y --stay Create without changing directory
   wt go feature-x       Navigate to a worktree
   wt go base            Navigate back to the base checkout
-  wt remove feature-x   Remove a worktree (prompts on dirty files)
-  wt remove feature-x -f Remove (skip confirm when safe)
-  wt remove feature-x -ff Remove immediately, no confirmation
-  wt remove feature-x -b Remove worktree AND soft-delete its branch
+  wt remove old-cleanup Remove the worktree and its branch when the branch's
+                        commits are safe elsewhere (merged, pushed, or on
+                        another branch); otherwise keep the branch and say why
+  wt remove spike-parser --force-branch
+                        Also delete a branch whose commits exist nowhere else
+  wt remove fix-wt-ux --force-worktree --force-branch --force-remote
+                        Remove everything: uncommitted files, the branch, and
+                        the branch on origin (closing any open PR)
 
 Shell Integration (cd wrapper + completions; `wt go` needs it):
   source <(wt --completions bash)              Add to ~/.bashrc
