@@ -29,32 +29,39 @@ human_review_items:
     - |-
         **Confirm the fourteen proposed decisions from Phase 1 (Decisions 20–33 at the end of this spec).**
 
-        Why now: Phases 2 and 3 are built on these decisions as proposed, and the next phases rely on the rest.
+        Why now: Phases 2–4 are built on these decisions as proposed, and Phase 5 relies on the last one still open.
 
-        - **Built in Phases 2–3:** 20 (the handoff token), 21 (the live remote check), 22 (the 2-second PR wait), 23 (the hidden `--handoff` flag), 24 (the Windows lock check), 25–28, 30 (landing directory), 31 (ignored files), and 33 (PowerShell encoding).
-        - **Next up:** Phase 4, next, uses 32 (how the graph's natural width is measured). Phase 5 uses 29 (terminal rows for the graph height cap).
+        - **Built in Phases 2–4:** 20 (the handoff token), 21 (the live remote check), 22 (the 2-second PR wait), 23 (the hidden `--handoff` flag), 24 (the Windows lock check), 25–28, 30 (landing directory), 31 (ignored files), 32 (the graph's natural width), and 33 (PowerShell encoding).
+        - **Next up:** Phase 5 uses 29 (terminal rows for the graph's height cap; about 12 rows when every output stream is redirected).
 
-        Overriding a built decision now means reworking finished code, and overriding 32 after Phase 4 means reworking it too.
-
-        Decision 31 (how the removal report lists ignored files) was built the recommended way. The report shows `target/ (6 entries)` rather than one line per file, caps the list at 10 like the dirty-file list, and the safety check still covers every entry.
+        Overriding a built decision now means reworking finished code. Decision 32 was built in Phase 4 as proposed: diagram widths come from the renderer's own measurement, and a test checks that it matches the drawn image exactly.
 
         Options:
 
-        - **Confirm all fourteen as written.** Pro: no rework, and Phase 4 starts on settled ground. Con: none known; each is backed by a measurement or a documented API.
-        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the overridden parts of Phases 2–3 must be reworked, and the next agent must adjust the plan.
+        - **Confirm all fourteen as written.** Pro: no rework, and Phase 5 starts on settled ground. Con: none known; each is backed by a measurement or a documented API.
+        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the overridden parts of Phases 2–4 must be reworked, and the next agent must adjust the plan.
 
-        Recommendation: **confirm all fourteen.** None of them widens scope, and the Phase 2–3 tests (including real-terminal runs in bash, zsh, and fish, and runs on native Windows) pass with them as written.
+        Recommendation: **confirm all fourteen.** None of them widens scope, and every test in the touched packages passes with them as written.
 message_to_agent: |-
-    Phase 3 (the `wt remove` rewrite) is done; see "## Phase 3" in implementation-log.md. Facts the Phase 4 agent needs:
-    - Decisions 20-33 are still PROPOSED. Phase 4 uses Decision 32 (`measure_svg_dimensions` / `SvgDimensions::viewbox_width` for natural width). Check whether the author has confirmed or overridden it before building `ImageWidth::Scale`.
-    - `worktree/lib` now enables sniff's `remote` feature, so `wt` already links reqwest and tokio. Phase 4's blocking open-PR list can be called from the worktree library directly, the same way `worktree::remove::safety::SniffPrSource` calls `pull_request_for_branch`. Keep lookups out of any Tokio runtime; `wt` has none.
-    - The default-branch target rule is implemented once, in `worktree::default_target::select_default_target(base, default)` (returns `DefaultTarget { reference, sha, diverged }`). Phase 5's `-> {default}` column and caption must reuse it, not re-derive it.
-    - The dirty-file palette is already in code: `cli/src/commands/dirty_tree.rs` colors source files `<orange>` and other files `<yellow>`. Phase 5's table dots should use the same Prose colors.
-    - `wt` colors stderr even when it is captured. `assert_cmd` tests should set `NO_COLOR=1`, as `cli/tests/remove.rs` does, or needles break on SGR codes.
-    - Tests that write the fork-origin or handoff records use the real user cache directory (`dirs::cache_dir()`), keyed by the temp repository, so remove those files in `Drop` (see the `Fixture`/`Scene` drops in `cli/tests/remove.rs` and `cli/tests/level2_remove.rs`).
-    - `just cross-check <package> --os windows` takes about 4 minutes per package and works from this Mac. Windows-only tests (`#![cfg(windows)]`) run only there and in CI's Windows cell.
-    - Known and not caused by this work: under `BISCUIT_TEST_LEVEL_REQUIRED=2`, `level2_list_verbose::level2_graph_emits_image_protocol_bytes_in_kitty` fails on this Mac because Kitty is not installed. Plain `just test-l2` skips it.
-    - Recorded as unmet: no Windows L2 (real console) cell exists for interactive PowerShell prompts. The prompt-free Windows scenarios (move-first from a PowerShell launched inside the worktree, and a held folder exiting 4) are covered by Windows-only L1 tests.
+    Phase 4 (dependencies for the table and graph) is done; see "## Phase 4" in implementation-log.md. Facts the Phase 5 agent needs:
+    - Decisions 20-33 are still PROPOSED. Phase 5 uses Decision 29 (terminal rows via biscuit-terminal's size detection; half of them caps the base-view graph). `GitGraph` already applies the cap from `GraphViewport::for_terminal(term, layout)`, which reads `term.height()`.
+    - CDPATH TRAP (cost a full gate cycle): agent shells here export a CDPATH that includes the MAIN checkout, so a Bash `cd worktree` from this worktree's root lands in /Users/ken/coding/personal/rusty-biscuit/worktree and `just test` there tests the wrong tree while reporting green. In scripts, `unset CDPATH` and cd to absolute paths. Check the first log line. It is recorded in the os skill's macos.md.
+    - Graph handoff API (biscuit_terminal::components::git_graph, `image` feature):
+      - `GitGraph::new(default_branch, Vec<LaneEntry>)`, where `LaneEntry::Commit(full_sha)` or `LaneEntry::Elided(n)`, oldest first.
+      - `.with_line(GraphLine::new(branch).with_parent(p).forked_at(sha).with_entries(..).with_created_at(t).with_last_active(t))`, `.with_ref(name, sha)`, `.with_pull_request(GraphPullRequest{number, source_branch, target_branch})`, `.with_current_branch(b)`, and `.with_width(ImageWidth)` for `--width`.
+      - The component owns the lane/tag rule, lane order (by created_at), elision, and fit-by-trimming. `--width` with a non-scale width disables width trimming.
+    - What the caller must supply for the lane/tag rule:
+      - Pass the local default branch and `origin/<default>` as `with_ref`, or no tags appear for them.
+      - When `origin/<default>` is only AHEAD of the local tip (the PR-driven case), put its extra commits on the default lane (the lane is the descendant tip), not in a line.
+      - Pass `origin/<default>` as a `GraphLine` only when it has DIVERGED; that is what gives it a lane.
+      - A branch already in its parent is a `GraphLine` with no entries and `fork_sha` = its tip, and it becomes a tag.
+      - PR tags match `source_branch` only, so filter PRs to your own source repository before passing them (a fork's same-named branch must not get the badge).
+    - mermaid-rs-renderer's parser always names the first lane "main", whatever the default branch is called (the default branch's real name shows as a tag). A non-default branch literally named "main" is drawn as "main~".
+    - `default_graph_width` still exists in worktree/cli/src/commands/list.rs. Phase 4 only added an `ImageWidth::Scale(_)` arm to its `fits` match. `MermaidDiagram` now defaults to `ImageWidth::Scale(1.0)`; wt passes an explicit width today, so its output is unchanged until you hand off to `GitGraph`.
+    - Performance: `GitGraph::plan` measures each candidate with mermaid-rs-renderer, whose text metrics use fontdb system fonts. Width trimming costs one measurement per trimmed commit, and height trimming one per added lane. Measure this in Phase 5's perf gates. It is on the image path only, and the table must not call it.
+    - Open PRs: `sniff::remote::blocking::open_pull_requests(remote_url, deadline) -> Result<Vec<PrSummary>, PrUnavailable>`. `PrSummary { number, html_url: Option, source_repo: Option<"owner/repo" or GitLab project path>, source_branch: Option, target_branch: Option }` is non_exhaustive. Auth, 404, timeout, and over-limit paging are all `Err`, never an empty list, so never cache an `Err` as "no PRs". Call it from a plain thread; it refuses to run inside a Tokio runtime.
+    - Row emphasis: `Table::highlight_row(body_row_index, renderable::color::Color)` (0-based body row, out of range is a no-op). Terminal only; it composes with striping.
+    - Known and not caused by this work (from Phase 3): under `BISCUIT_TEST_LEVEL_REQUIRED=2`, `level2_list_verbose::level2_graph_emits_image_protocol_bytes_in_kitty` fails on this Mac because Kitty is not installed.
 ---
 
 # Worktree UX improvements

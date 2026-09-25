@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-24
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: false
 source_files_during_phase_1: []
@@ -108,12 +108,76 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - Cargo.lock
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/components/mermaid.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/src/components/table/types.rs
+    - biscuit-terminal/lib/src/components/terminal_image/iterm.rs
+    - biscuit-terminal/lib/src/components/terminal_image/kitty.rs
+    - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+    - biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+    - biscuit-terminal/lib/src/components/terminal_image/tests.rs
+    - biscuit-terminal/lib/src/components/terminal_image/width.rs
+    - biscuit-terminal/lib/src/discovery/fonts/types.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/terminal.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/snapshots/l1__table_parity__table_highlight_row_with_striping_snapshot.snap
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - renderable/src/tree/attrs.rs
+    - renderable/src/tree/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - worktree/cli/src/commands/list.rs
+docs_updated_during_phase_4:
+    - docs/dependencies.md
+    - biscuit-terminal/docs/data-visualization/visualizing-graph-expressions.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/terminal_image.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/cli/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_4:
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-issue.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-pr.patch
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/biscuit-terminal/image-rendering.md
+    - .claude/skills/renderable/tree.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/build-hosts.md
 packages:
     - worktree
     - worktree-cli
     - sniff
     - sniff-cli
     - darkmatter
+    - biscuit-visualized
+    - biscuit-terminal
+    - biscuit-terminal-cli
+    - renderable
 ---
 
 # Plan: Worktree UX improvements
@@ -454,23 +518,23 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 7 — Parallel
 
-- [ ] **mermaid-rs-renderer 0.3.1**
+- [x] **mermaid-rs-renderer 0.3.1**
     - Bump the dependency in `biscuit-visualized/src/Cargo.toml` (resvg and usvg move to 0.47, adding tiny-skia 0.12).
     - Teach `fix_pie_text_contrast` to parse `hsl()`, and update `mermaid_pie_chart_init_directive_applies_custom_colors` and its white-slice comment.
     - Update the version in `biscuit-terminal/docs/data-visualization/visualizing-graph-expressions.md` and in `docs/dependencies.md`.
     - Validate: `biscuit-visualized`'s suite, biscuit-terminal's Mermaid, diagram, and parity tests, and Darkmatter's Mermaid tests.
-- [ ] **Per-row highlight on `Table`**
+- [x] **Per-row highlight on `Table`**
     - Add a typed style slot on `TableStyle` plus a builder method (for example `highlight_row(index, color)`) that composes with striping; the highlight wins on its row.
     - Update the component docs.
     - L1 snapshot.
-- [ ] **sniff: a repository's open PRs**
+- [x] **sniff: a repository's open PRs**
     - Add a blocking `open_pull_requests(remote_url, deadline) -> Result<Vec<PrSummary>, PrUnavailable>` returning number, URL, source repository, source branch, and target branch. It reuses the Phase 2 runtime helper and the extended record.
     - All four providers.
     - L1 with `wiremock`, including auth failure and timeout distinguished from an empty list.
 
 ### Wave 8 — Parallel (depends on the mermaid upgrade)
 
-- [ ] **`ImageWidth::Scale(f32)`**
+- [x] **`ImageWidth::Scale(f32)`**
     - Pixels per SVG unit = scale × cell height ÷ 16.
     - Columns = ceil(SVG width × pixels per unit ÷ cell width).
     - Clamp to the available columns minus the margins.
@@ -478,7 +542,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
     - Take the natural width from `render_svg_with_dimensions` (S5).
     - `MermaidDiagram` defaults to `Scale(1.0)`. Audit the existing `MermaidDiagram` callers, including Darkmatter, for the changed default.
     - L1 on the computed sizes.
-- [ ] **`GitGraph` core**
+- [x] **`GitGraph` core**
     - A new `biscuit-terminal/lib/src/components/git_graph.rs`.
     - Typed input: lines of commits with full SHAs, ref tips, open PRs, elision counts, and the current branch.
     - Lane/tag rule:
@@ -492,19 +556,19 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 9 — `GitGraph` sizing and upstream drafts (depends on Wave 8)
 
-- [ ] **Fit by trimming**
+- [x] **Fit by trimming**
     - The default scale is 125%.
     - The width cap trims commits (a larger `+N`) before any shrinking.
     - The base-view height cap is about half the terminal rows (R10). Past it, show fewer lanes, most recently active first, followed by "N more worktrees not shown".
     - L1 on the trimming decisions and the computed sizes.
-- [ ] **Upstream drafts**
+- [x] **Upstream drafts**
     - Write a minimal-reproduction issue and a small PR that strips attributes from the branch name in `branch` and `merge`.
     - Save both as drafts in this directory (`upstream-issue.md`, `upstream-pr.patch`) for the author. **Do not file them.**
 
 ### Validation checkpoint
 
-- [ ] `just test` and `just lint` pass in `biscuit-visualized`, `biscuit-terminal`, `sniff`, and `darkmatter`, plus `just test` in `worktree`, which exercises the existing graph path.
-- [ ] The acceptance criterion 5 bullets for `GitGraph` and the renderer upgrade are green.
+- [x] `just test` and `just lint` pass in `biscuit-visualized`, `biscuit-terminal`, `sniff`, and `darkmatter`, plus `just test` in `worktree`, which exercises the existing graph path.
+- [x] The acceptance criterion 5 bullets for `GitGraph` and the renderer upgrade are green.
 
 ## Phase 5 — `wt list` table and graph (item 5)
 

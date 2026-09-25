@@ -107,12 +107,76 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - Cargo.lock
+    - biscuit-visualized/src/Cargo.toml
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/tests/mermaid_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/components/mermaid.rs
+    - biscuit-terminal/lib/src/components/table/table.rs
+    - biscuit-terminal/lib/src/components/table/types.rs
+    - biscuit-terminal/lib/src/components/terminal_image/iterm.rs
+    - biscuit-terminal/lib/src/components/terminal_image/kitty.rs
+    - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+    - biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+    - biscuit-terminal/lib/src/components/terminal_image/tests.rs
+    - biscuit-terminal/lib/src/components/terminal_image/width.rs
+    - biscuit-terminal/lib/src/discovery/fonts/types.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - biscuit-terminal/lib/src/terminal.rs
+    - biscuit-terminal/lib/tests/l1/table_parity.rs
+    - biscuit-terminal/lib/tests/l1/snapshots/l1__table_parity__table_highlight_row_with_striping_snapshot.snap
+    - biscuit-terminal/cli/src/commands/shared.rs
+    - renderable/src/tree/attrs.rs
+    - renderable/src/tree/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - worktree/cli/src/commands/list.rs
+docs_updated_during_phase_4:
+    - docs/dependencies.md
+    - biscuit-terminal/docs/data-visualization/visualizing-graph-expressions.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/mermaid_diagram.md
+    - biscuit-terminal/docs/components/table.md
+    - biscuit-terminal/docs/components/terminal_image.md
+    - biscuit-terminal/lib/src/components/table/README.md
+    - biscuit-terminal/cli/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_4:
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-issue.md
+    - worktree/fixes/2026-09-24-ux-improvements/upstream-pr.patch
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/biscuit-terminal/image-rendering.md
+    - .claude/skills/renderable/tree.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/os/SKILL.md
+    - .claude/skills/os/build-hosts.md
 packages:
     - worktree
     - worktree-cli
     - sniff
     - sniff-cli
     - darkmatter
+    - biscuit-visualized
+    - biscuit-terminal
+    - biscuit-terminal-cli
+    - renderable
 ---
 
 # Implementation Log for 2026-09-24-ux-improvements (6 phases)
@@ -412,3 +476,150 @@ Placement:
 - `docs/dependencies.md`: the worktree note now covers the handoff records, `getrandom`, the `blake3` feature, `sniff/remote`, and `biscuit-file`. The `getrandom` catalog entry names the new use.
 - `.claude/skills/worktree/SKILL.md`: new "`wt remove`" section, and `DirectoryInUse` added under exit code 4.
 - `.claude/skills/os/windows.md`: a lock-holder test must spawn the holder directly, never through `cmd /C`.
+
+## Phase 4
+
+Dependencies for the table and graph: the `mermaid-rs-renderer` 0.3.1 upgrade, `Table::highlight_row`, sniff's `open_pull_requests`, `ImageWidth::Scale`, the `GitGraph` component with fit-by-trimming, and the upstream drafts. The sniff entry point and the `Table` highlight were built by two parallel subagents. Everything else was done in the main session.
+
+### Starting conditions
+
+- Decisions 20–33 are still **proposed** (the spec's `human_review` from Phase 3 is unanswered). This phase builds on Decision 32 as proposed: the natural width comes from `measure_svg_dimensions` (`viewbox_width`), measured with biscuit's theme.
+- `just test` in `worktree` was green at the end of Phase 3.
+
+### mermaid-rs-renderer 0.3.1 (Wave 7)
+
+- `biscuit-visualized/src/Cargo.toml`: `mermaid-rs-renderer = { version = "0.3.1", default-features = false }`.
+  - **Deviation from the plan's wording.** The plan expected resvg/usvg to move to 0.47 and tiny-skia 0.12 to be added. Those are the crate's `png` feature. biscuit rasterizes with its own resvg 0.45 and never used the crate's PNG path (the `cli` feature pulls clap too). With default features off, the lockfile **drops** resvg 0.46, usvg 0.46, kurbo 0.13, svgtypes 0.16, roxmltree 0.21, and imagesize 0.14 (the duplicates 0.2.1 already carried), and nothing new is added. Spike S5 had recommended considering this.
+- **Pie contrast.** 0.3 derives the default pie palette as `hsl(…)`; the third default slice is `hsl(0, 0%, 60%)`, a mid gray.
+  - `fix_pie_text_contrast` now parses `#rgb`, `#rrggbb`, and `hsl(h, s%, l%)` (`parse_css_color`, `hsl_to_rgb`).
+  - **Rule change.** Parsing alone would have put light text on the gray at 2.3:1 contrast (the old rule was "luminance > 0.4 means dark text"). Each label now takes whichever of the two label colors has the higher WCAG contrast ratio against its slice. This flips one existing expectation: the TypeScript blue `#3178C6` is a near tie (3.9:1 dark against 3.6:1 light) and now gets dark text. `mermaid_pie_chart_init_directive_applies_custom_colors` asserts the new result, and its white-slice comment is replaced.
+  - **Doc drift fixed.** The helper's doc said "> 0.5" while the code used 0.4. The doc now describes the contrast rule.
+- `MermaidDiagram::natural_size()` (biscuit-visualized) returns `NaturalSize { width, height }` in SVG units from `measure_svg_dimensions(...).viewbox_{width,height}`, using the same parse, theme, `%%{init}%%` overrides, and layout as `render`. `render_svg` and `natural_size` share the new `compute_layout`.
+- The 0.3 parser now rejects input without a diagram header and malformed `%%{init}%%` lines. No fixture in biscuit-visualized, biscuit-terminal, or darkmatter tripped on this.
+- Docs: `docs/dependencies.md` (a note and a catalog entry under Image Processing) and `visualizing-graph-expressions.md` (0.3.1, the `png` feature's 0.47 deps, and the header rule).
+
+### `Table::highlight_row` (Wave 7, subagent)
+
+- `Table::highlight_row(row, color)` with the typed slot `TableStyle::highlight_row: Option<TableRowHighlight>`.
+  - The index is the 0-based body row. An out-of-range index is a no-op, and a second call replaces the first.
+  - On its row the highlight beats both stripe colors. Cell foreground and bold are kept, and the background is restored after each SGR reset inside a cell.
+  - The background covers padding and inner separators but not the outer borders. It is degraded to 256 and 16 colors like stripes, and dropped when the terminal has no color.
+  - Browser and Markdown output ignore it, as they ignore striping.
+- **`renderable` is touched too.** The default `Table::render` goes through the render tree, and striping reaches it through `renderable::tree::TableTerminalHints`. `TableRowHighlight` and a `highlight_row` hint field (serde default, skipped when `None`) follow the same path.
+- **Doc drift fixed.** The striping docs in `table.rs` and `types.rs` said "even data rows"; the code stripes 0-indexed rows 1, 3, 5. The docs now say "every second data row (0-indexed rows 1, 3, 5, ...)". The subagent also reported that `lib/src/components/table/README.md`'s field table describes the `alternate_*` fields as `bool`s that need true color. That is left for a docs pass.
+
+### sniff: `open_pull_requests` (Wave 7, subagent)
+
+- `sniff::remote::blocking::open_pull_requests(remote_url, deadline) -> Result<Vec<PrSummary>, PrUnavailable>`, plus `open_pull_requests_with(&FocusedProviderClient, deadline)`.
+  - `PrSummary { number, html_url, source_repo, source_branch, target_branch }` is `#[non_exhaustive]`. `source_repo` is `owner/repo` (the GitLab project path), and `None` when the provider cannot name it.
+  - It reuses Phase 2's `PrUnavailable`, `run_with_deadline`, `client_for_url`, and `classify`, and refuses to run inside a Tokio runtime.
+- **Errors, never an empty list:** 401/403 is `Auth`; a 404 on the list (GitHub's private-repository case) is `NotFoundOrNotPermitted`; a missed deadline is `Timeout`; more than `MAX_PAGES` (20) pages is `Other`, rather than a shortened list.
+- Paging follows each provider's next-page rule. Rows are filtered to open state again locally.
+- **Deviation from the spec's wording, as in Phase 2.** The spec says to build on the async `list_pull_requests` provider method. Like Phase 2's `pull_request_for_branch`, this uses `FocusedProviderClient` instead, because `list_pull_requests` reads one page and folds a list 404 into an empty list (spike S1).
+- GitLab fork MRs name their source project only by ID, so each distinct fork costs one `GET projects/{id}`. A 404 there leaves `source_repo: None`, and any other error fails the list.
+- The paging loop moved from `branch_pull_requests` into a shared private `pr_list_rows`. All `pr_for_branch` tests still pass. The `pr_for_branch.rs` fixture helpers became `pub(super)` so both test modules can use them.
+
+### `ImageWidth::Scale(f32)` (Wave 8)
+
+- `ImageWidth::scaled_columns(scale, natural_width, cell)` implements the formula: pixels per unit = scale × cell height ÷ `SCALE_REFERENCE_TEXT_UNITS` (16), and columns = ⌈natural width × pixels per unit ÷ cell width⌉, at least 1. A zero cell uses `CellSize::FALLBACK`. NaN and negative values give 1.
+- `TerminalImage::resolve_scaled_dimensions_for(width, layout, term_width, natural_width, cell)` clamps to the available columns after margins. `resolve_dimensions_for` delegates to it with no natural width, so `Scale` there behaves like `Fill`.
+- **One fallback constant.** `CellSize::FALLBACK` (8×16) replaces the `unwrap_or((8u32, 16u32))` literals in the files this phase touched (`kitty.rs`, `iterm.rs`, `protocol.rs`, and `mermaid.rs`). The `graph_expression.rs` literal is left alone, since that file is otherwise untouched.
+- **Rasters.** The Kitty, iTerm, and inline paths now load the image before resolving, so `Scale` on a raster uses its pixel width. iTerm's width parameter sends the resolved cell count for `Scale`.
+- **`MermaidDiagram`** now defaults to `Scale(1.0)` and gains `resolve_dimensions(term_width, cell)`, which measures the SVG only for `Scale`. The PNG is shown with `ImageWidth::Characters(columns)`, because re-resolving a scale against the raster's pixel width would give a different size.
+  - `MermaidRenderer::natural_size()` wraps the biscuit-visualized call. `terminal_theme()` is the extracted color-mode theme choice, now shared with `GitGraph`.
+- **Audit of the changed default** (callers relying on `MermaidDiagram::new`'s width):
+  - `darkmatter::mermaid::render_terminal::render_for_terminal`, render-tree Mermaid promotion (`render_tree/render.rs`), and every `bt` diagram command without `--width` now draw at body-text size instead of 50% width. This is the ruled behavior.
+  - `wt list` passes an explicit width, so it is unchanged until Phase 5.
+  - `darkmatter`'s `render_to_svg` and `fallback_code_block` callers are unaffected.
+  - `biscuit-terminal/cli/README.md` said "(default: 50%)" and is corrected.
+- Two exhaustive matches needed an arm. In `worktree/cli/src/commands/list.rs`, `Scale` fits like `Characters`; `--width` never produces `Scale`, and Phase 5 rewrites this code. In `bt`'s `parse_column_width`, `Scale` is rejected like `Fill`.
+- **Doc drift fixed.** `Terminal::cell_size()`'s doc said the fallback was a CSI 14t query. The code tries the `TIOCGWINSZ` pixel fields first, then CSI 14t, and always returns `None` on native Windows.
+- `parse_width_spec` has no string form for `Scale` (not required).
+
+### `GitGraph` (Waves 8–9)
+
+`biscuit-terminal/lib/src/components/git_graph.rs` (behind the `image` feature, re-exported from the prelude) and `git_graph/tests.rs`.
+
+- **Typed input:**
+  - `GitGraph::new(default_branch, Vec<LaneEntry>)`, where a `LaneEntry` is `Commit(full sha)` or `Elided(n)`.
+  - `GraphLine { branch, parent, fork_sha, entries, created_at, last_active }`.
+  - `with_ref(name, sha)`, `GraphPullRequest { number, source_branch, target_branch }`, and `with_current_branch`.
+  - `with_scale` (default `DEFAULT_GIT_GRAPH_SCALE` = 1.25), `with_width`, and `with_theme`.
+- **Lane/tag rule:**
+  - Lanes are the default branch, the current branch, its non-default fork parent, and `origin/<default>` when it is passed as a line with commits of its own. In the base view (the default branch checked out, or no current branch), every line with commits of its own gets a lane.
+  - Every other drawn ref tip is a tag. A lane's own tip is not tagged with its own name, and lines with no commits of their own tag their fork commit.
+  - A PR is a tag `PR #n → target` on its source branch's tip.
+- **Lane order.** Siblings forking at the same commit follow `created_at` (lines without one come last), then input order. There are no `order:` attributes.
+- **Renderer facts found here** (in 0.3.1's parser, not in the spec):
+  - The parser always names the first lane `main`; `mainBranchName` is honored only when there are no branches. So the default branch is always that lane, and its real name appears only as a tag. A non-default branch named `main` is drawn as `main~` (`~` cannot occur in a git branch name).
+  - Parents are looked up by commit ID, and IDs are labels. Short IDs are therefore lengthened past 7 characters where two SHAs share a prefix, and a repeated `+N` gets trailing spaces, which do not show. Before this, `wt`'s graph could emit duplicate `+N` IDs.
+- **Fitting** (`plan` / `plan_with(viewport, measure)`):
+  - Height (base view only): past `rows / 2`, keep the default lane (and a diverged `origin/<default>`), then add lanes most recently active first, each with its drawn ancestors, until the next would not fit. `hidden_lanes` produces the dim "N more worktree(s) not shown" line.
+  - Width: while columns exceed the viewport, fold one unpinned commit (not a lane tip, fork point, or tagged commit) into a `+N` square. A commit beside an existing square goes first, then the oldest commit on the lane showing the most commits; ties go to the earlier lane. When nothing can be trimmed, the image shrinks through `MermaidDiagram`'s clamp.
+  - An explicit non-scale `with_width` is never trimmed to. `with_width(Scale(s))` replaces the scale.
+  - **A bug the fake measurer caught.** The first version always took the oldest commit on the longest lane. Converting a lone commit into a `+1` square saves only its label's width, and ties then spread `+1` squares across lanes (4 trims where 2 merges were enough). The merge-first rule fixed it.
+- **Measurement is injected.** `plan` measures with biscuit-visualized's `natural_size` in the render theme. Text widths come from system fonts (`fontdb`), so exact sizes vary by OS. L1 tests pin exact decisions with a fake measurer, and one test checks relations only with the real renderer.
+- **Rendering:**
+  - Terminal: the fitted plan through `MermaidDiagram` at `Scale(scale)` (or the override), with the layout copied, followed by the hidden-lanes note.
+  - Tree: `MermaidDiagram`'s projection of the untrimmed text.
+  - Browser: the untrimmed SVG as a raw-HTML island in the Default theme unless one is set, with a `<pre><code class="language-mermaid">` fallback.
+- **Visual check** (a throwaway example, deleted afterwards): the spec example rendered to PNG shows three lanes in creation order, the `main` and `origin/main` tags, `PR #104 → feat/theme` on `feat/dark-fixes`, and the `+4` square. Its natural size is 626 × 234 units. At 125% with an 8×16 cell that is 98 × 19; the spec estimated 104 × 19. The fully trimmed version (three `+1` squares with distinct IDs, plus `+6`) also connected correctly and narrowed to 542 units.
+- `worktree/docs/git-graph.md` is an older, never-built `GitGraph` design. Phase 5 rewrites it, as the plan says. It was not edited here.
+
+### Upstream drafts (Wave 9)
+
+- `upstream-issue.md`: a minimal reproduction, expected and actual results, the cause, the fix, and a lower-priority note about the hard-coded `main` lane.
+- `upstream-pr.patch`: a diff against the published 0.3.1 source (`src/parser.rs` only). It adds `gitgraph_branch_name`, which takes the first token or a quoted string, applied to `branch`, `checkout`/`switch`, and `merge`, plus two parser tests.
+  - Verified on a scratch copy in `/tmp`, since deleted. The published crate omits fixture files its own lib tests `include_str!`, so empty placeholders were added there. The two new tests fail on 0.3.1's behavior and pass with the patch, and the existing `parse_gitgraph_basic` still passes. The "Actual" output quoted in the issue was captured from 0.3.1, not inferred.
+  - **Nothing was filed.**
+
+### Requirement-to-test mapping
+
+| Requirement | Tests (all L1) |
+|---|---|
+| 0.3.1 upgrade passes biscuit-visualized's suite, including the fixed pie-contrast test | biscuit-visualized `just test` (77); `tests::mermaid_tests::mermaid_pie_chart_init_directive_applies_custom_colors` (the original failing input: default third slice `hsl(0, 0%, 60%)`) |
+| `hsl()` parsing and the contrast choice, including malformed input | `mermaid::render::tests::parses_hex_and_hsl_colors`, `rejects_malformed_colors`, `label_color_follows_the_higher_contrast_ratio` |
+| Natural size equals the rendered `viewBox` (Decision 32), for both the 16-unit and 14-unit themes | `tests::mermaid_tests::mermaid_natural_size_matches_the_rendered_viewbox`, `mermaid_natural_size_rejects_unparseable_input`, `mermaid_natural_size_grows_with_commits` |
+| Downstream Mermaid, diagram, and parity tests | biscuit-terminal filter `scale\|scaled\|mermaid\|diagram\|parity\|width`: 1,270 passed. darkmatter `test(~mermaid)`: 73 passed |
+| `ImageWidth::Scale` computed sizes | `terminal_image::tests::scaled_columns_follow_the_cell_height_rule` (8×16, 10×20, 16×32, 125% rounding), `scaled_columns_never_drop_below_one`, `scaled_columns_treat_a_zero_cell_as_the_fallback`, `scale_resolves_from_the_natural_width_and_clamps_to_the_available_columns` (including margins), `scale_without_a_cell_size_uses_the_8x16_fallback`, `scale_without_a_natural_width_fills_the_available_columns`, `other_widths_ignore_the_natural_width`, `legacy_display_dimensions_scale_the_pixel_width` |
+| `MermaidDiagram` defaults to `Scale(1.0)` and sizes from the measured SVG | `mermaid::tests::diagram_defaults_to_scale_one`, `scaled_columns_come_from_the_measured_svg_width`, `a_narrow_terminal_caps_the_scaled_width`, `a_scaled_diagram_that_does_not_parse_is_an_error` |
+| Row highlight | `table::table::tests::highlight_row_*` (9 tests) and snapshot `l1::table_parity::table_highlight_row_with_striping_snapshot`; renderable `table_terminal_hints_round_trip`, `table_terminal_hints_omit_absent_highlight_when_serialized` |
+| Open-PR list on all four providers; auth failure and timeout distinct from empty | `open_pull_requests::*` (11 tests; see the subagent report above) |
+| `GitGraph` lane/tag rule on the spec's example (standing in `feat-dark-fixes`) | `git_graph::tests::the_spec_example_emits_the_spec_text` (exact text), `branch_and_checkout_statements_carry_no_attributes`, `a_focused_view_draws_no_lane_for_an_unrelated_branch`, `a_branch_already_in_the_default_branch_is_a_tag`, `the_base_view_gives_every_branch_with_commits_a_lane`, `origin_default_is_a_tag_until_it_diverges`, `a_default_branch_not_named_main_is_the_root_lane_and_a_tag`, `pull_requests_tag_their_source_tip_and_skip_undrawn_branches`, `lanes_forking_at_one_commit_follow_creation_order`, `a_fork_point_outside_the_drawn_commits_hangs_from_the_lane_start`, `ids_are_unique_even_when_short_shas_or_elisions_repeat`, `quotes_in_ref_names_cannot_break_a_tag`, `a_default_lane_without_commits_draws_nothing`, `every_emitted_graph_parses` |
+| Trimming decisions and computed sizes | `a_graph_that_fits_is_not_trimmed_and_sizes_from_the_scale`, `the_width_cap_trims_commits_before_anything_shrinks`, `trimming_stops_when_only_pinned_commits_remain`, `an_explicit_width_is_never_trimmed_to`, `a_scale_width_replaces_the_scale`, `the_base_view_height_cap_keeps_the_most_recently_active_lanes`, `the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit`, `a_focused_view_is_never_cut_by_the_height_cap`, `a_failed_measurement_trims_nothing`, `the_viewport_comes_from_the_terminal_after_margins`, `measured_sizes_trim_to_the_width_cap` (real renderer) |
+| Terminal, tree, and browser outputs | `without_image_support_the_terminal_gets_the_code_block_and_the_lane_note`, `the_tree_projection_carries_the_untrimmed_source`, `the_browser_output_is_an_svg_island` |
+
+Placement: every new biscuit-terminal and biscuit-visualized test is a lib unit test (`#[cfg(test)]`, compiled by `--features image` / `--all-features`, as each justfile runs them). The sniff tests sit in the declared `tests/l1/` binary under `#[cfg(feature = "remote")]`, which is in sniff's CI features. The table snapshot is in the existing `l1::table_parity`. No test name has a tier marker. A draft name, `real_measurements_…`, would have left L1 and was renamed to `measured_sizes_trim_to_the_width_cap` before it ever ran.
+
+### Gates
+
+- **The first gate run tested the wrong tree.** The gate script looped `cd "$area" && just test`. This host's `CDPATH` lists the main checkout and has no leading `.`, so Bash sent every `cd` to `/Users/ken/coding/personal/rusty-biscuit/<area>`, and all 12 gates "passed" there. The first log line and the test counts gave it away (biscuit-visualized 71 instead of 77). The rerun used `unset CDPATH` and absolute paths, and each log starts with the worktree path. The trap is recorded in the `os` skill (`macos.md`, plus an index line in `SKILL.md`).
+- The final run is all green, in this worktree:
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| biscuit-visualized | 77 passed | clean |
+| biscuit-terminal (lib + CLI) | 3314 passed, 55 skipped | clean |
+| sniff (lib + CLI) | 2857 passed, 31 skipped | clean |
+| renderable | 546 passed | clean |
+| worktree (lib + CLI) | 264 passed, 11 skipped (the same 11 as Phases 2–3) | clean |
+| darkmatter | 8498 passed, 12 skipped | clean |
+
+- `just check-tier-coverage` reports 0 stranded tests for biscuit-terminal, biscuit-visualized, sniff, renderable, and worktree.
+- **Cross-OS** (`just cross-check`):
+  - biscuit-terminal on native Windows: 2973 passed, including all 28 `git_graph::tests` (the real-renderer sizing test among them). That host has no cell size, so this exercises the 8×16 fallback.
+  - biscuit-terminal on Linux: archive mode failed before any test ran. Its release `ci-build` compile hit a read-only `librenderable-*.rmeta` in the standing clone, the kache hardlink trap already described in `build-hosts.md`. `--features image` (the native path) then passed: 3043, including the 28 `git_graph` tests. The stale links remain in that clone. This is noted in `build-hosts.md`, but not cleared, because that needs manual deletion on the shared host.
+  - biscuit-visualized needs a build flag for cross-check (the plan names no ubuntu-latest build for it). With `--all-features`: 77 passed on both Linux and native Windows.
+  - WSL2 was not cross-checked. Nothing here is WSL-specific, and the nightly schedule covers WSL2.
+- No `cargo fmt` was run. A formatting hook in this environment reformatted `git_graph.rs` and `git_graph/tests.rs` after they were written; that was not a `cargo fmt` invocation by this session.
+
+### Docs and skills
+
+- New: `biscuit-terminal/docs/components/git_graph.md`, and an index row in `docs/components/index.md`.
+- Updated: `mermaid_diagram.md` (the `Scale(1.0)` default and a Sizing section), `terminal_image.md` (`Scale`, `scaled_columns`, `resolve_scaled_dimensions_for`), `table.md` and the table README (subagent), `biscuit-terminal/cli/README.md` (the default diagram width), `visualizing-graph-expressions.md`, `docs/dependencies.md`, and sniff's README and CHANGELOG (subagent).
+- Skills:
+  - `biscuit-terminal/components.md` (the `GitGraph` row and `MermaidDiagram`'s default) and `image-rendering.md` (`Scale` and `CellSize::FALLBACK`).
+  - `renderable/tree.md` (the table highlight hint), and `sniff/SKILL.md` plus `remote-and-repository.md` (open-PR listing).
+  - `os/macos.md` and `os/SKILL.md` (`CDPATH`), and `os/build-hosts.md` (the stale kache links in the standing clone).
+- **The worktree skill is unchanged.** `wt` does not use `GitGraph` or `open_pull_requests` yet (that is Phase 5). The one `wt` source change is a match arm.
+- **Observed and not fixed** (out of scope): `.claude/skills/biscuit-terminal/mermaid-diagrams.md` still describes rendering through the `mmdc` CLI and recommends installing `@mermaid-js/mermaid-cli`. Rendering has been pure Rust through biscuit-visualized for some time.

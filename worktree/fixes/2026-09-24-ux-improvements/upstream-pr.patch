@@ -1,0 +1,87 @@
+diff --git a/src/parser.rs b/src/parser.rs
+index c537d04..262cba3 100644
+--- a/src/parser.rs
++++ b/src/parser.rs
+@@ -2736,7 +2736,7 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
+             continue;
+         }
+         if lower.starts_with("branch ") {
+-            let name = line.get(7..).unwrap_or("").trim();
++            let name = gitgraph_branch_name(line.get(7..).unwrap_or(""));
+             if !name.is_empty() {
+                 let order = extract_gitgraph_order(line);
+                 let head = branch_heads.get(&current_branch).cloned().unwrap_or(None);
+@@ -2756,9 +2756,9 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
+         }
+         if lower.starts_with("checkout ") || lower.starts_with("switch ") {
+             let name = if lower.starts_with("checkout ") {
+-                line.get(9..).unwrap_or("").trim()
++                gitgraph_branch_name(line.get(9..).unwrap_or(""))
+             } else {
+-                line.get(7..).unwrap_or("").trim()
++                gitgraph_branch_name(line.get(7..).unwrap_or(""))
+             };
+             if !name.is_empty() {
+                 current_branch = name.to_string();
+@@ -2776,7 +2776,7 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
+             continue;
+         }
+         if lower.starts_with("merge ") {
+-            let from_branch = line.get(6..).unwrap_or("").trim();
++            let from_branch = gitgraph_branch_name(line.get(6..).unwrap_or(""));
+             if from_branch.is_empty() {
+                 continue;
+             }
+@@ -2858,6 +2858,19 @@ fn parse_gitgraph_diagram(input: &str) -> Result<ParseOutput> {
+     Ok(ParseOutput { graph, init_config })
+ }
+ 
++/// The branch name at the start of a `branch`, `checkout`, `switch`, or
++/// `merge` argument: a quoted string, or the first whitespace-separated token.
++/// Attributes that follow (`order: 1`, `id: "m"`, `tag: "v1"`, `type: ...`)
++/// are not part of the name.
++fn gitgraph_branch_name(rest: &str) -> &str {
++    let rest = rest.trim();
++    if let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') {
++        let inner = &rest[1..];
++        return inner.find(quote).map_or(inner, |end| &inner[..end]);
++    }
++    rest.split_whitespace().next().unwrap_or("")
++}
++
+ fn parse_gitgraph_direction(line: &str) -> Option<Direction> {
+     let trimmed = line.trim();
+     if trimmed.eq_ignore_ascii_case("LR") {
+@@ -7061,6 +7074,32 @@ A["foo & bar"] & B --> C"#;
+         assert!(parsed.graph.gitgraph.branches.len() >= 2);
+     }
+ 
++    #[test]
++    fn parse_gitgraph_branch_attributes_are_not_part_of_the_name() {
++        let input = "gitGraph\n  commit id: \"A\"\n  branch feat order: 1\n  checkout feat\n  commit id: \"B\"\n  checkout main\n  merge feat id: \"M\" tag: \"v1\"";
++        let parsed = parse_mermaid(input).unwrap();
++        let gitgraph = &parsed.graph.gitgraph;
++        let names: Vec<&str> = gitgraph.branches.iter().map(|b| b.name.as_str()).collect();
++        assert_eq!(names, vec!["main", "feat"]);
++        assert_eq!(gitgraph.branches[1].order, Some(1.0));
++        let feat_commit = gitgraph.commits.iter().find(|c| c.id == "B").unwrap();
++        assert_eq!(feat_commit.branch, "feat");
++        let merge = gitgraph.commits.iter().find(|c| c.id == "M").unwrap();
++        assert_eq!(merge.parents, vec!["A".to_string(), "B".to_string()]);
++        assert_eq!(merge.tags, vec!["v1".to_string()]);
++    }
++
++    #[test]
++    fn parse_gitgraph_quoted_branch_names() {
++        let input = "gitGraph\n  commit id: \"A\"\n  branch \"feat/x y\" order: 2\n  checkout \"feat/x y\"\n  commit id: \"B\"\n  checkout main\n  merge \"feat/x y\"";
++        let parsed = parse_mermaid(input).unwrap();
++        let gitgraph = &parsed.graph.gitgraph;
++        assert_eq!(gitgraph.branches.len(), 2);
++        assert_eq!(gitgraph.branches[1].name, "feat/x y");
++        let merge = gitgraph.commits.last().unwrap();
++        assert_eq!(merge.parents, vec!["A".to_string(), "B".to_string()]);
++    }
++
+     #[test]
+     fn parse_c4_basic() {
+         let input = "C4Context\n  Person(admin, \"Admin\")\n  System(sys, \"System\")\n  Rel(admin, sys, \"Uses\")\n  Boundary(b0, \"Boundary\") { SystemDb(db, \"DB\") }";
