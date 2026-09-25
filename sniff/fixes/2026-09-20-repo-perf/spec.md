@@ -1,6 +1,6 @@
 ---
 area: sniff
-status: draft
+status: planned
 created: 2026-09-20
 reviewed: true
 reviewed_by: "codex/gpt-6-astra"
@@ -9,6 +9,53 @@ owner: Ken Snyder <ken@ken.net>
 origin: darkmatter compose-floor investigation, 2026-09-20
 packages:
     - sniff
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+human_review: false
+message_to_agent: |-
+    Phase 1 (claude/default) is done; the harness is in the working tree and is NOT committed
+    (this session may not commit), so the "harness commit" boundary is whatever commit captures
+    Phase 1's files. Read evidence/spike.md before Phase 2. It found one real serial/parallel
+    divergence: when the starting root is a SYMLINK to a directory, ignore's serial build() yields
+    the depth-0 root entry with the link's file type (not a dir), so today's non-directory filter
+    admits the root path; build_parallel() yields it as a dir and drops it. Normally harmless
+    (the root's basename is not a marker), but a symlinked root NAMED like a marker (e.g. a link
+    called package.json) makes today's production walk register the root's PARENT (outside the
+    repo) as a nested candidate; the parallel walk does not. Default ruling proposed in spike.md
+    (author may override in review): treat the depth-0 root entry as never being marker evidence -
+    skip entry.depth() == 0 in the parallel callback, give the Phase 3 serial reference the same
+    skip (documented as its one deliberate delta from the pre-change loop), and pin with a test.
+    The serial reference already exists as nested.rs `serial_reference_paths` (frozen copy of the
+    pre-change loop, cfg(any(test, feature = "bench-internals"))) and is exposed with the production
+    walk and corpus counts through `sniff::filesystem::repo::nested_benchmark`; if you adopt the
+    depth-0 ruling, add the skip there and update its doc comment. Phase 4 measurement recipe
+    (commands, CRITERION_HOME, SNIFF_BENCH_NESTED_CORPUS, bracket order) is in
+    evidence/baseline/README.md; baseline medians: walk 168.6 ms debug / 62.9 ms release,
+    detect_repo_structure 240 ms / 77 ms; corpus 12,893 entries, 116 markers, 112 candidates.
+    Also: the default policy ran tiny fixtures on ONE callback thread - use an explicit
+    multi-worker thread count (Ruling 1 seam) for worker-propagation tests. `cargo clippy
+    --features network` (without remote) has pre-existing dead-code errors unrelated to this fix;
+    lint with `bench-internals` or `remote,bench-internals`. Unrelated working-tree changes
+    appeared during Phase 1 (sniff/.ai/plans/... deletion, sniff/fixes/2026-09-25-recent-commits/,
+    prompts/_implement/implement-plan.md) - not ours; leave them alone.
 ---
 
 # Parallelize the nested-marker walk

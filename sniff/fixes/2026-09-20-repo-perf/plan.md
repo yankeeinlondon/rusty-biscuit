@@ -8,6 +8,26 @@ fix: 2026-09-20-repo-perf
 spec: sniff/fixes/2026-09-20-repo-perf/spec.md
 packages:
     - sniff
+source_files_during_phase_1:
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/benches/cases/repo.rs
+    - sniff/lib/examples/work_counts.rs
+docs_updated_during_phase_1:
+    - sniff/lib/benches/README.md
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_1:
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/spike.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/environment.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/README.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/summary-table.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/work_counts-release.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/work_counts-debug.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/raw/
+skills_files_updated_during_phase_1:
+    - .claude/skills/sniff/performance.md
 ---
 
 # Parallelize the nested-marker walk — implementation plan
@@ -199,16 +219,16 @@ during review.
 
 Tasks:
 
-- [ ] **Verify grounding**
+- [x] **Verify grounding**
     - Re-confirm every grounding fact above on the working branch (ignore
       lockfile version, direct dependency, caller census, counter sites,
       existing tests, darkmatter test locations) and note any drift in the
       fix's log before proceeding.
-- [ ] **Run parity probe**
+- [x] **Run parity probe**
     - Execute the time-boxed spike; record findings (entry-set equality,
       observed worker count on the corpus, symlinked-root behavior) in
       `evidence/spike.md`; promote or discard its assertions per the outcome.
-- [ ] **Land harness commit**
+- [x] **Land harness commit**
     - Add the no-behavior-change measurement seam:
       `#[cfg(any(test, feature = "bench-internals"))]` exposure of the walk,
       an env-gated corpus bench row in `sniff/lib/benches/cases/repo.rs`
@@ -216,20 +236,20 @@ Tasks:
       `work_counts` extension needed for fallback-path counter snapshots.
     - Verify `just lint` and the existing nested/detection tests stay green;
       this commit must not alter `walk_for_nested_markers` behavior.
-- [ ] **Record environment**
+- [x] **Record environment**
     - Capture the performance fingerprint once into
       `evidence/environment.md`: host, OS, cores, available parallelism,
       `rustc -vV`, commit SHAs (baseline and after sides) plus uncommitted
       state, lockfile state, feature set, build profiles, ignore
       configuration, cache treatment (warmed, labeled as such), test-runner
       concurrency, and the worker policy in force.
-- [ ] **Capture corpus facts**
+- [x] **Capture corpus facts**
     - On this checkout, re-derive the historical counts: total walked paths,
       marker-file count (92 / 11,290 are the historical figures), and the
       root spelling used; verify the measured request actually enters the
       fallback (fresh-collector `REPO_NESTED_MARKER_WALKS ≥ 1`, no supplied
       evidence); store under `evidence/baseline/`.
-- [ ] **Capture baseline tranche**
+- [x] **Capture baseline tranche**
     - On the fixed-path worktree at the harness commit, measure the isolated
       serial walk and public `detect_repo_structure(<repo root>)` in debug
       and release: ≥3 warmups, ≥20 measured samples per case, median and
