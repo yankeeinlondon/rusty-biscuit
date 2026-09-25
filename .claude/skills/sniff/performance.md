@@ -31,6 +31,12 @@ compatible archived phase, OS, runner class, and request shape.
   `performance::is_collecting()`; use `StageTimer::start`.
 - Parallel walker workers own a `WorkerCollector`; activate it in callbacks and
   flush on drop.
+- In `build_parallel().run(..)`, activate only after matching `Ok(entry)`.
+  `ignore` (0.4.25) builds its first visitor on the *calling* thread and hands
+  it root errors, such as a missing root. Activating there clears the caller's
+  buffered counters, and dropping it uninstalls the caller's collector, so the
+  whole request reads zero. The `nested.rs` fallback walk does this, and
+  `a_missing_root_keeps_the_callers_counters` pins it.
 - Rayon/spawned workers explicitly inherit or pool the collector.
 - Add a collector whenever adding a new parallel execution site.
 
