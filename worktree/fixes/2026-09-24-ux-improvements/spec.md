@@ -29,43 +29,32 @@ human_review_items:
     - |-
         **Confirm the fourteen proposed decisions from Phase 1 (Decisions 20–33 at the end of this spec).**
 
-        Why now: Phase 2 has run on the proposed decisions it touched: 25 (what "`CI` is set" means), 26 (exit codes), 27 (the PR commit ID is stored exactly as received), 28 (where the records live), and 33 (the PowerShell encoding). Overriding any of those now means reworking finished code. Phase 3, the `wt remove` rewrite, is built on the rest: 20 (handoff token), 21 (the live remote check), 22 (the PR deadline), 23 (the hidden `--handoff` flag), 24 (Windows lock probe), 30 (landing directory), and 31 (ignored files). Confirming before Phase 3 avoids a second round of rework.
+        Why now: Phases 2 and 3 are built on these decisions as proposed, and the next phases rely on the rest.
 
-        Each decision is one short paragraph, and most confirm the plan's original recommendation. The ones the experiments **changed** or **added** are:
+        - **Built in Phases 2–3:** 20 (the handoff token), 21 (the live remote check), 22 (the 2-second PR wait), 23 (the hidden `--handoff` flag), 24 (the Windows lock check), 25–28, 30 (landing directory), 31 (ignored files), and 33 (PowerShell encoding).
+        - **Next up:** Phase 4, next, uses 32 (how the graph's natural width is measured). Phase 5 uses 29 (terminal rows for the graph height cap).
 
-        - **21:** the live `git ls-remote` check must kill the whole process tree at its 3-second deadline, and must switch off Git Credential Manager's pop-up.
-        - **27:** the rule for accepting a shortened commit ID from a PR provider.
-        - **31:** how ignored files are listed in the removal report.
-        - **32:** a corrected renderer function name.
-        - **33:** a text-encoding fix in the PowerShell wrapper.
+        Overriding a built decision now means reworking finished code, and overriding 32 after Phase 4 means reworking it too.
 
-        Options:
-
-        - **Confirm all fourteen as written.** Pro: Phase 2 starts immediately. Con: none known; every one is backed by a measurement or a documented API.
-        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the next agent must adjust the plan to match.
-
-        Recommendation: **confirm all fourteen.** None of them widens scope. The four with the most visible effect (21, 27, 31, 33) each fix a failure seen in the experiments: a hung process, a false "safe" answer, a misleading list, and corrupted paths.
-    - |-
-        **Decide how the removal report lists ignored files (Decision 31).**
-
-        Why now: the spec's example ("`.env, notes.md, target/`") assumes Git reports an ignored folder as one line. That only happens when the ignore rule names the folder. This repository's own rule is `**/target/*`, so Git lists `target/debug/`, `target/CACHEDIR.TAG`, and four more. A `*.log` rule lists every log file, one by one. Phase 3 builds the report, and the handoff safety check hashes this list, so the choice has to be made first.
+        Decision 31 (how the removal report lists ignored files) was built the recommended way. The report shows `target/ (6 entries)` rather than one line per file, caps the list at 10 like the dirty-file list, and the safety check still covers every entry.
 
         Options:
 
-        - **Group by top-level folder in the report and hash the full list (recommended).** The report shows `target/ (6 entries)` and caps the list at 10, like the dirty-file list. Pro: short, readable, and still exact for safety. Con: a little formatting code.
-        - **Show Git's raw list.** Pro: no extra code. Con: the report can run to hundreds of lines and bury the question under it (the display bug in item 1).
-        - **Ask Git to collapse folders itself (`--ignored=traditional`).** Pro: shorter raw output. Con: measured about 3x slower (0.20 s against 0.07 s here), and it still lists files one by one in folders that also hold tracked files.
+        - **Confirm all fourteen as written.** Pro: no rework, and Phase 4 starts on settled ground. Con: none known; each is backed by a measurement or a documented API.
+        - **Confirm most and override some.** Pro: you keep control of anything you disagree with. Con: the overridden parts of Phases 2–3 must be reworked, and the next agent must adjust the plan.
+
+        Recommendation: **confirm all fourteen.** None of them widens scope, and the Phase 2–3 tests (including real-terminal runs in bash, zsh, and fish, and runs on native Windows) pass with them as written.
 message_to_agent: |-
-    Phase 2 is done (see the "## Phase 2" section of implementation-log.md). Facts the Phase 3 agent (the `wt remove` rewrite) needs:
-    - Decisions 20-33 are still marked PROPOSED (human_review). Phase 2 ran on the author's instruction to proceed; check whether the author has since confirmed or overridden 20-24, 30, and 31, which Phase 3 depends on.
-    - Exit plumbing exists: `WorktreeError::RefusedToLoseWork(markup)` exits 3 and `BlockedByEnvironment(markup)` exits 4. `main.rs` prints their Prose markup as-is (add your own heading) and escapes every other error. `cli/src/env.rs` has `is_interactive()` and `shell_wrapper_active()`. `commands::go::wrapper_setup_help()` is the shared wrapper-setup text; reuse it for remove's "wrapper not active" refusal.
-    - Interim behavior to replace: `commands/remove.rs` now returns `RefusedToLoseWork` for a dirty worktree when not interactive (the only exit-3 producer). The test `wrapper_protocol::exit_3_when_removal_would_lose_files_and_nobody_can_confirm` uses `wt remove feat/dirty` with no flags. Keep it passing, or move it to the new flow's equivalent case.
-    - The wrappers already handle `remove-handoff:<token>`: after a successful `cd` they run `WT_SHELL_WRAPPER=1 command wt remove --handoff "<token>"` (PowerShell: `& $wtExe remove --handoff $token`). The flag itself does not exist yet; add it as ruled in Decision 23.
-    - Wrapper tests: `cli/tests/shell_wrapper_exec.rs` runs bash (on Unix) and zsh (on macOS) against a stub `wt`. It is a template for the L2 wrapper tests. fish is at /opt/homebrew/bin/fish on this Mac. Windows PowerShell 5.1 is on build-win-native.
-    - Keep insta snapshots out of `cli/src` unit tests: every shared module compiles into both the lib and the bin target, so a snapshot gets two names (see the worktree skill).
-    - Fork origins: `worktree::fork_origin::{fork_origin_path, ForkOriginStore}` records `{base_branch, base_sha, created_at}` per new branch. Use it to pick the landing directory: the parent branch's worktree when one exists, else the base repo.
-    - sniff PR evidence: `sniff::remote::blocking::pull_request_for_branch(remote_url, source_repo, branch, deadline) -> Result<Option<PrEvidence>, PrUnavailable>`. It takes no local tip. Among merged PRs it returns the most recent, not the one matching your tip, so an older merged PR that matches is missed and the branch falls to a lower tier (safe). If that case matters, add a local-tip preference in sniff. Apply Decision 27's prefix rules yourself to `PrEvidence::source_head_sha`. Hosts that cannot be identified from the URL (self-hosted Gitea, GitLab) return `Unsupported`, which counts as unavailable. Never call it inside a Tokio runtime; `wt` has none.
-    - Known and not fixed: a linked worktree nested inside the base checkout also counts as "current" for base (`is_current_worktree` prefix check). The move-first "caller is inside the target" check must not reuse that prefix logic naively; compare against the target path itself, per the os skill's path guidance.
+    Phase 3 (the `wt remove` rewrite) is done; see "## Phase 3" in implementation-log.md. Facts the Phase 4 agent needs:
+    - Decisions 20-33 are still PROPOSED. Phase 4 uses Decision 32 (`measure_svg_dimensions` / `SvgDimensions::viewbox_width` for natural width). Check whether the author has confirmed or overridden it before building `ImageWidth::Scale`.
+    - `worktree/lib` now enables sniff's `remote` feature, so `wt` already links reqwest and tokio. Phase 4's blocking open-PR list can be called from the worktree library directly, the same way `worktree::remove::safety::SniffPrSource` calls `pull_request_for_branch`. Keep lookups out of any Tokio runtime; `wt` has none.
+    - The default-branch target rule is implemented once, in `worktree::default_target::select_default_target(base, default)` (returns `DefaultTarget { reference, sha, diverged }`). Phase 5's `-> {default}` column and caption must reuse it, not re-derive it.
+    - The dirty-file palette is already in code: `cli/src/commands/dirty_tree.rs` colors source files `<orange>` and other files `<yellow>`. Phase 5's table dots should use the same Prose colors.
+    - `wt` colors stderr even when it is captured. `assert_cmd` tests should set `NO_COLOR=1`, as `cli/tests/remove.rs` does, or needles break on SGR codes.
+    - Tests that write the fork-origin or handoff records use the real user cache directory (`dirs::cache_dir()`), keyed by the temp repository, so remove those files in `Drop` (see the `Fixture`/`Scene` drops in `cli/tests/remove.rs` and `cli/tests/level2_remove.rs`).
+    - `just cross-check <package> --os windows` takes about 4 minutes per package and works from this Mac. Windows-only tests (`#![cfg(windows)]`) run only there and in CI's Windows cell.
+    - Known and not caused by this work: under `BISCUIT_TEST_LEVEL_REQUIRED=2`, `level2_list_verbose::level2_graph_emits_image_protocol_bytes_in_kitty` fails on this Mac because Kitty is not installed. Plain `just test-l2` skips it.
+    - Recorded as unmet: no Windows L2 (real console) cell exists for interactive PowerShell prompts. The prompt-free Windows scenarios (move-first from a PowerShell launched inside the worktree, and a held folder exiting 4) are covered by Windows-only L1 tests.
 ---
 
 # Worktree UX improvements

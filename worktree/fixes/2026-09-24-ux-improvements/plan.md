@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-24
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: false
 source_files_during_phase_1: []
@@ -69,6 +69,45 @@ skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/sniff/SKILL.md
     - .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/default_target.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/remove/live_remote.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/exit.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/remove.rs (moved to remove/mod.rs)
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/level2_remove.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+    - worktree/cli/tests/powershell_wrapper_exec.rs
+docs_updated_during_phase_3:
+    - worktree/README.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/windows.md
 packages:
     - worktree
     - worktree-cli
@@ -314,11 +353,11 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 4 — Parallel, in the library (`worktree/lib/src/remove/` as a new module)
 
-- [ ] **Removal inventory**
+- [x] **Removal inventory**
     - Collect the dirty entries from `git status --porcelain` (modified, staged, untracked), with a kind classification that reuses `has_source` logic.
     - Collect the ignored top-level entries from `--ignored=matching` (S4).
     - All git calls run through `git -C <base repo>` or `git -C <target>` for read-only status. Nothing runs with the target as the working directory.
-- [ ] **Safety evidence and tiers**
+- [x] **Safety evidence and tiers**
     - Select the default-branch target: the descendant of local and `origin/<default>`; `origin/<default>` when they diverge; local when there is no remote-tracking ref. This becomes a shared function that Phase 5 reuses.
     - Pass 1 — Safe: the tip is reachable from local `<default>` or `origin/<default>`, **or** the PR evidence (from sniff) matches the source repository and the exact tip (R8).
     - Pass 2 — Pretty safe: the tip is reachable from another local branch, an `origin/*` ref, or a tag. `origin/*` evidence other than `origin/<default>` must pass the live check (R2): the live SHA equals the local tip, or the live SHA equals the tracking SHA and the tracking ref contains the tip.
@@ -330,7 +369,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
     - L1 with local bare remotes and a PR-evidence stub trait:
         - every tier: merged PR, open PR, fork PR, tag, other branch, own origin copy, stale origin ref, deleted remote branch, remote unreachable
         - the original bug case (item 4): merged into HEAD, not into its upstream
-- [ ] **Handoff record**
+- [x] **Handoff record**
     - The record holds:
         - a token from R1
         - repository identity, canonical target path, HEAD, branch tip, landing path, approved force choices, and created-at time
@@ -343,7 +382,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - replay
         - each field changing, including a new ignored entry and a content-only edit
         - a caller still inside the target
-- [ ] **Removal primitives**
+- [x] **Removal primitives**
     - `remove_worktree` gains a `#[cfg(windows)]` lock probe before `git worktree remove`: rename to a sibling and back, following R5. A held directory returns `BlockedByEnvironment`.
     - Branch deletion: `git branch -D` only, decided by the caller. Delete `delete_branch` and `DeleteBranchOutcome`.
     - Remote deletion:
@@ -356,11 +395,11 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 5 — CLI flow (depends on Wave 4)
 
-- [ ] **Flag surface**
+- [x] **Flag surface**
     - Replace `force: u8` and `branch: bool` with `--force-worktree`, `--force-branch`, `--force-remote`, and the hidden `--handoff` (R4). No short forms.
     - Rewrite `AFTER_HELP` with the spec's examples.
     - Retired flags produce clap's own error (exit 2). Covered by L1.
-- [ ] **Report renderer**
+- [x] **Report renderer**
     - Render with `Prose` and `UnorderedList`:
         - The dirty tree: at most 10 entries, colored by kind with the table's dot palette. Above 10, a bold red total count. The 50-file cap and "…and N more" are deleted from `dirty_tree.rs`.
         - The ignored entries, with the contents-deleted wording.
@@ -369,7 +408,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - The origin copy, "as of your last fetch".
         - The PR.
     - Each question starts after exactly one blank line (item 1).
-- [ ] **Decision flow**
+- [x] **Decision flow**
     - Order: report, then the worktree question, then the branch question, then the remote step.
     - Covers:
         - the `--force-branch`-without-`--force-worktree` conflict: an error in non-interactive mode, and the files question in interactive mode
@@ -377,7 +416,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - non-interactive keep with a warning (exit 0)
         - a `--force-remote` failure after local removal (exit 1, with the finishing `git push origin --delete` command)
     - Keep the policy as a pure function, from (inventory, tier, flags, interactivity, answers) to actions and an exit code, so the L1 matrix does not need a terminal.
-- [ ] **Move-first removal from inside the target**
+- [x] **Move-first removal from inside the target**
     - Detect that the current directory is inside the target.
     - Without a wrapper, exit 4 with the `wt go` help plus "run it from another directory".
     - With a wrapper:
@@ -388,27 +427,28 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 6 — Remove test matrix (parallel; depends on Wave 5)
 
-- [ ] **L1 policy matrix**
+- [x] **L1 policy matrix**
     - Cover this cross-product: tier × dirty state × ignored entries (none, `.env`, `target/`) × each flag subset × interactive or not.
     - Assert the resulting actions and exit codes, including every row of the spec's Examples table.
     - PR answers come from the stub, including "unavailable".
-- [ ] **L2 real-terminal tests** (`worktree/cli/tests/level2_remove.rs`)
+- [x] **L2 real-terminal tests** (`worktree/cli/tests/level2_remove.rs`)
     - The blank line before each prompt.
     - The Not safe menu.
     - Move-first through zsh, bash, and fish wrappers under tmux:
         - It lands in the fork parent or the base repo, and says which.
         - A failed `cd` (landing directory removed between runs), an expired token, and a changed branch tip each leave the worktree intact.
     - Never take focus. Gate with `require_level!`.
-- [ ] **Windows L2**
+- [x] **Windows L2**
     - A PowerShell wrapper, launched with the target as its working directory, removes the target.
     - The held-directory check exits 4.
     - If CI has no Windows L2 cell, record the criterion as unmet with provisioning as the required change. Run it on the Windows build host per the `os` skill.
+    - *Status 2026-09-24 (Phase 3 agent):* both scenarios ask no question, so they run as Windows-only **L1** tests, `cli/tests/powershell_wrapper_exec.rs` plus a `cfg(windows)` lib test. CI's Windows L1 cell runs them, and they passed on `build-win-native` through `just cross-check`. No Windows L2 (real console) cell exists for the interactive PowerShell prompts, so that part is recorded as unmet, with provisioning a Windows L2 harness as the required change.
 
 ### Validation checkpoint
 
-- [ ] `just test`, `just test-l2`, and `just lint` pass in `worktree`. Acceptance criteria 1, 3, and 4 have named passing tests.
-- [ ] Code search finds no `-ff`, `FORCE_BYPASS_FILE_LIMIT`, `delete_branch`, or `DeleteBranchOutcome`.
-- [ ] The Phase 1–3 changes form a coherent landing point: the fixes ship before the list work, as sequenced.
+- [x] `just test`, `just test-l2`, and `just lint` pass in `worktree`. Acceptance criteria 1, 3, and 4 have named passing tests (see the Phase 3 mapping in `implementation-log.md`).
+- [x] Code search finds no `-ff`, `FORCE_BYPASS_FILE_LIMIT`, `delete_branch`, or `DeleteBranchOutcome`. The one `-ff` left is in `retired_flags_are_clap_errors`, which asserts clap rejects it.
+- [x] The Phase 1–3 changes form a coherent landing point: the fixes ship before the list work, as sequenced.
 
 ## Phase 4 — Dependencies for the table and graph
 
