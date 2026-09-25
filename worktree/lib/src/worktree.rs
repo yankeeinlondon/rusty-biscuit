@@ -1,8 +1,14 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use crate::cache::{CACHE_FORMAT_VERSION, Cache, CacheKey, CacheValue, cache_path};
+use crate::cache::{Cache, cache_path};
+use crate::default_target::{DefaultTarget, choose_default_target};
 use crate::error::WorktreeError;
+use crate::fork_origin::ForkOriginStore;
+use crate::listing::{
+    BranchComparisons, Caption, ParentComparison, RefTips, TreeRow, build_tree, compare_cached,
+};
 use crate::git::{git_command, git_command_in, repo_info};
 use crate::util::dasherize;
 
@@ -37,14 +43,8 @@ pub enum DirtyStatus {
 #[derive(Debug, Clone)]
 pub struct WorktreeStatus {
     pub entry: WorktreeEntry,
-    /// Whether the branch can merge cleanly into the default branch
-    pub is_clean: bool,
     /// Working-tree dirtiness in this worktree's checkout
     pub dirty: DirtyStatus,
-    /// Commits ahead of default branch
-    pub ahead: usize,
-    /// Commits behind default branch
-    pub behind: usize,
 }
 
 #[derive(Debug)]
@@ -82,11 +82,6 @@ pub fn default_branch() -> Result<String, WorktreeError> {
     Err(WorktreeError::GitParse(
         "cannot determine default branch".into(),
     ))
-}
-
-/// Resolve the current tip SHA for the default branch.
-pub fn default_tip_sha(default_branch: &str) -> Result<String, WorktreeError> {
-    git_command(&["rev-parse", default_branch])
 }
 
 /// Parse `git worktree list --porcelain` output into entries.
@@ -163,108 +158,204 @@ fn is_current_worktree(cwd: &Path, cwd_canonical: &Path, worktree_path: &Path) -
 
 /// A snapshot of the worktree listing for a single invocation.
 ///
-/// Captures the default branch name resolved by [`list_worktrees`] so callers
-/// do not need to re-derive it (and re-invoke git) downstream.
+/// [`parse_worktree_state`] fills the cheap facts (entries, default branch,
+/// ref tips, fork-origin records) and [`fill_worktree_statuses`] the rest, so
+/// callers can start other work from the parsed state while the expensive
+/// per-worktree pass runs.
 #[derive(Debug)]
 pub struct WorktreeList {
     pub default_branch: String,
     entries: Vec<WorktreeEntry>,
-    default_tip: Option<String>,
+    refs: RefTips,
+    /// `for-each-ref` succeeded, so a branch missing from `refs` is deleted.
+    refs_read: bool,
+    forks: ForkOriginStore,
+    fork_file: Option<PathBuf>,
     cache_file: Option<PathBuf>,
+    /// One per entry, in entry order.
     pub statuses: Vec<WorktreeStatus>,
+    /// The tip the `-> {default}` column compares against.
+    pub target: Option<DefaultTarget>,
+    /// The local default branch against `origin/<default>`; `None` without
+    /// both refs.
+    pub caption: Option<Caption>,
+    /// The Branch column's rows, in display order.
+    pub tree: Vec<TreeRow>,
+    /// Keyed by branch name, for every existing non-default branch in the tree.
+    pub comparisons: HashMap<String, BranchComparisons>,
 }
 
 /// Get status for all worktrees.
 ///
-/// Each worktree's per-entry git work is dispatched in parallel via
-/// `std::thread::scope`. Branch comparison uses a SHA-keyed cache when both the
-/// default branch tip and worktree HEAD SHA are available. Working-tree
-/// dirtiness is always measured live.
+/// Dirty status is always measured live. Branch comparisons go through the
+/// SHA-pair cache (see [`crate::cache`]).
 pub fn list_worktrees() -> Result<WorktreeList, WorktreeError> {
     let mut list = parse_worktree_state()?;
     fill_worktree_statuses(&mut list)?;
     Ok(list)
 }
 
-/// Parse the cheap git state needed before per-worktree status analysis.
+/// Parse the cheap git state needed before per-worktree status analysis:
+/// `worktree list`, the default branch, one `for-each-ref`, and the
+/// fork-origin records.
 pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
     let entries = parse_worktree_list(&porcelain);
     let default_branch = default_branch()?;
-    let default_tip = default_tip_sha(&default_branch).ok();
-    let cache_file = entries
-        .first()
-        .and_then(|entry| cache_path(&entry.path).ok())
-        .filter(|_| default_tip.is_some());
+    let refs = RefTips::read();
+    let refs_read = refs.is_some();
+    let main_path = entries.first().map(|entry| entry.path.clone());
+    let cache_file = main_path.as_deref().and_then(|path| cache_path(path).ok());
     if let Some(parent) = cache_file.as_ref().and_then(|path| path.parent()) {
         let _ = std::fs::create_dir_all(parent);
     }
+    let fork_file = main_path
+        .as_deref()
+        .and_then(|path| crate::fork_origin::fork_origin_path(path).ok());
+    let forks = fork_file
+        .as_deref()
+        .map(ForkOriginStore::load_from)
+        .unwrap_or_default();
 
     Ok(WorktreeList {
         default_branch,
         entries,
-        default_tip,
+        refs: refs.unwrap_or_default(),
+        refs_read,
+        forks,
+        fork_file,
         cache_file,
         statuses: Vec::new(),
+        target: None,
+        caption: None,
+        tree: Vec::new(),
+        comparisons: HashMap::new(),
     })
 }
 
-/// Populate per-worktree statuses for a parsed worktree state.
+/// Populate dirty status, the caption, the default-branch target, the fork
+/// tree, and every branch comparison for a parsed worktree state.
+///
+/// Records of deleted branches are pruned from the fork-origin store here.
 pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeError> {
-    let cache = Arc::new(Mutex::new(
+    let cache = Mutex::new(
         list.cache_file
             .as_deref()
             .map(Cache::load_or_default_from)
             .unwrap_or_default(),
-    ));
-
-    let entries = list.entries.clone();
+    );
+    let refs = list.refs.clone();
     let default_branch = list.default_branch.clone();
-    let default_tip = list.default_tip.clone();
-    let statuses = std::thread::scope(|scope| {
-        let handles: Vec<_> = entries
-            .into_iter()
+    let entries = list.entries.clone();
+
+    let tree = build_tree(&entries, &default_branch, &refs.local, &list.forks);
+
+    let (statuses, caption, target, comparisons) = std::thread::scope(|scope| {
+        let dirty_handles: Vec<_> = entries
+            .iter()
             .map(|entry| {
-                let default = default_branch.as_str();
-                let default_tip = default_tip.clone();
-                let cache = Arc::clone(&cache);
-                scope.spawn(move || {
-                    let dirty_handle = {
-                        let path = entry.path.clone();
-                        std::thread::spawn(move || dirty_status(&path))
-                    };
-
-                    let (ahead, behind, is_clean) =
-                        branch_status_with_cache(default, default_tip.as_deref(), &cache, &entry);
-
-                    let dirty = dirty_handle.join().expect("dirty_status thread panicked");
-
-                    WorktreeStatus {
-                        entry,
-                        is_clean,
-                        dirty,
-                        ahead,
-                        behind,
-                    }
-                })
+                let path = entry.path.clone();
+                scope.spawn(move || dirty_status(&path))
             })
             .collect();
 
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("worktree status thread panicked"))
-            .collect::<Vec<_>>()
+        let local_tip = refs.local(&default_branch).map(str::to_string);
+        let remote_name = format!("origin/{default_branch}");
+        let remote_tip = refs.remote(&remote_name).map(str::to_string);
+        let caption = local_tip.as_deref().zip(remote_tip.as_deref()).and_then(|(local, remote)| {
+            compare_cached(&cache, remote, local).map(|comparison| Caption {
+                local: default_branch.clone(),
+                remote: remote_name.clone(),
+                ahead: comparison.ahead,
+                behind: comparison.behind,
+            })
+        });
+        let target = choose_default_target(&default_branch, local_tip, remote_tip, |ancestor, descendant| {
+            match &caption {
+                // The caption compared the local tip (branch) with the remote
+                // tip (target): the remote contains the local tip when the
+                // local side is 0 ahead, and vice versa.
+                Some(caption) if refs.remote(&remote_name) == Some(ancestor) => caption.behind == 0,
+                Some(caption) if refs.remote(&remote_name) == Some(descendant) => caption.ahead == 0,
+                _ => git_command(&["merge-base", "--is-ancestor", ancestor, descendant]).is_ok(),
+            }
+        });
+
+        let comparisons = compare_tree(&tree, &refs, &default_branch, target.as_ref(), &cache, scope);
+
+        let statuses: Vec<WorktreeStatus> = entries
+            .iter()
+            .cloned()
+            .zip(dirty_handles)
+            .map(|(entry, handle)| WorktreeStatus {
+                entry,
+                dirty: handle.join().expect("dirty_status thread panicked"),
+            })
+            .collect();
+        (statuses, caption, target, comparisons)
     });
 
     if let Some(path) = list.cache_file.as_ref() {
-        let _ = cache
-            .lock()
-            .expect("cache mutex poisoned")
-            .save_atomic(path);
+        let _ = cache.lock().expect("cache mutex poisoned").save_atomic(path);
+    }
+    // Without a successful `for-each-ref` every branch would look deleted.
+    if let (true, Some(path)) = (list.refs_read, list.fork_file.as_ref()) {
+        let live: HashSet<String> = list.refs.local.keys().cloned().collect();
+        if list.forks.prune(&live) > 0 {
+            let _ = list.forks.save_atomic(path);
+        }
     }
 
     list.statuses = statuses;
+    list.caption = caption;
+    list.target = target;
+    list.tree = tree;
+    list.comparisons = comparisons;
     Ok(())
+}
+
+/// Compares every existing non-default branch in the tree with the target and,
+/// when its tree parent is another existing branch, with that parent. Each
+/// branch runs on its own thread.
+fn compare_tree<'scope>(
+    tree: &[TreeRow],
+    refs: &'scope RefTips,
+    default_branch: &str,
+    target: Option<&DefaultTarget>,
+    cache: &'scope Mutex<Cache>,
+    scope: &'scope std::thread::Scope<'scope, '_>,
+) -> HashMap<String, BranchComparisons> {
+    let mut seen = HashSet::new();
+    let mut handles = Vec::new();
+    for row in tree {
+        let Some(branch) = row.branch() else { continue };
+        if branch == default_branch || !seen.insert(branch.to_string()) {
+            continue;
+        }
+        let Some(tip) = refs.local(branch) else { continue };
+        let target_sha = target.map(|target| target.sha.clone());
+        let parent = match (&row.parent, row.parent_deleted) {
+            (Some(_), true) => Err(ParentComparison::Deleted),
+            (Some(parent), false) if parent != default_branch => refs
+                .local(parent)
+                .map(str::to_string)
+                .ok_or(ParentComparison::Deleted),
+            _ => Err(ParentComparison::NotApplicable),
+        };
+        let branch = branch.to_string();
+        handles.push(scope.spawn(move || {
+            let target = target_sha.and_then(|sha| compare_cached(cache, &sha, tip));
+            let parent = match parent {
+                Ok(parent_sha) => ParentComparison::Compared(compare_cached(cache, &parent_sha, tip)),
+                Err(fixed) => fixed,
+            };
+            (branch, BranchComparisons { target, parent })
+        }));
+    }
+    handles
+        .into_iter()
+        .map(|handle| handle.join().expect("comparison thread panicked"))
+        .collect()
 }
 
 impl WorktreeList {
@@ -272,80 +363,16 @@ impl WorktreeList {
     pub fn entries(&self) -> &[WorktreeEntry] {
         &self.entries
     }
-}
 
-fn branch_status_with_cache(
-    default: &str,
-    default_tip: Option<&str>,
-    cache: &Arc<Mutex<Cache>>,
-    entry: &WorktreeEntry,
-) -> (usize, usize, bool) {
-    if entry.is_main {
-        return (0, 0, true);
+    /// Branch tips from the parse step; empty when `for-each-ref` failed.
+    pub fn refs(&self) -> &RefTips {
+        &self.refs
     }
 
-    let Some(ref branch) = entry.branch else {
-        return (0, 0, true);
-    };
-
-    // A non-main branch with no HEAD SHA (porcelain omitted the `HEAD` line)
-    // cannot form a cache key, so `key` is `None` below: the cache is skipped
-    // and the live branch comparison runs. Turning "no cache key" into a clean
-    // (0, 0, true) result would silently report the branch as equivalent to the
-    // default branch.
-    let key = default_tip
-        .zip(entry.head_sha.as_deref())
-        .map(|(default_tip_sha, branch_tip_sha)| CacheKey {
-            default_tip_sha: default_tip_sha.to_string(),
-            branch_tip_sha: branch_tip_sha.to_string(),
-            version: CACHE_FORMAT_VERSION,
-        });
-
-    if let Some(value) = key
-        .as_ref()
-        .and_then(|key| cache.lock().expect("cache mutex poisoned").get(key).copied())
-    {
-        return (value.ahead, value.behind, value.is_clean);
+    /// Fork-origin records as loaded (pruned once statuses are filled).
+    pub fn fork_origins(&self) -> &ForkOriginStore {
+        &self.forks
     }
-
-    let (ahead, behind, is_clean) = gather_ahead_behind_clean(default, branch);
-
-    if let Some(key) = key {
-        cache.lock().expect("cache mutex poisoned").put(
-            key,
-            CacheValue {
-                ahead,
-                behind,
-                is_clean,
-            },
-        );
-    }
-
-    (ahead, behind, is_clean)
-}
-
-fn gather_ahead_behind_clean(default: &str, branch: &str) -> (usize, usize, bool) {
-    // notes: optional per-call timing belongs behind internal instrumentation.
-    // Keep public `--perf` reporting aggregated as `list gather`.
-    std::thread::scope(|scope| {
-        let ahead_behind_handle =
-            scope.spawn(|| ahead_behind(default, branch).unwrap_or((0, 0)));
-        let clean_merge_handle = scope.spawn(|| check_clean_merge(default, branch));
-
-        let (ahead, behind) = ahead_behind_handle
-            .join()
-            .expect("ahead_behind thread panicked");
-        let speculative_is_clean = clean_merge_handle
-            .join()
-            .expect("check_clean_merge thread panicked");
-        let is_clean = if ahead == 0 || behind == 0 {
-            true
-        } else {
-            speculative_is_clean
-        };
-
-        (ahead, behind, is_clean)
-    })
 }
 
 /// Inspect a worktree's working tree and classify its dirtiness.
@@ -403,32 +430,6 @@ fn porcelain_path(line: &str) -> Option<&str> {
     } else {
         Some(rest)
     }
-}
-
-/// Get ahead/behind counts for a branch relative to the default branch.
-fn ahead_behind(default_branch: &str, branch: &str) -> Result<(usize, usize), WorktreeError> {
-    let range = format!("{default_branch}...{branch}");
-    let output = git_command(&["rev-list", "--left-right", "--count", &range]);
-
-    match output {
-        Ok(text) => {
-            let parts: Vec<&str> = text.split_whitespace().collect();
-            if parts.len() == 2 {
-                let behind = parts[0].parse().unwrap_or(0);
-                let ahead = parts[1].parse().unwrap_or(0);
-                Ok((ahead, behind))
-            } else {
-                Ok((0, 0))
-            }
-        }
-        Err(_) => Ok((0, 0)),
-    }
-}
-
-/// Check if a branch can merge cleanly into the default branch.
-fn check_clean_merge(default_branch: &str, branch: &str) -> bool {
-    // Use git merge-tree (available since git 2.38)
-    git_command(&["merge-tree", "--write-tree", default_branch, branch]).is_ok()
 }
 
 /// Create a new worktree under `base`.
@@ -802,11 +803,12 @@ branch refs/heads/fix/bug-42
         }
     }
 
-    fn status_for_branch<'a>(list: &'a WorktreeList, branch: &str) -> &'a WorktreeStatus {
-        list.statuses
-            .iter()
-            .find(|status| status.entry.branch.as_deref() == Some(branch))
-            .unwrap_or_else(|| panic!("missing status for branch {branch}"))
+    /// The `-> {default}` comparison for `branch`.
+    fn target_of(list: &WorktreeList, branch: &str) -> crate::listing::Comparison {
+        list.comparisons
+            .get(branch)
+            .and_then(|comparisons| comparisons.target)
+            .unwrap_or_else(|| panic!("missing target comparison for branch {branch}"))
     }
 
     fn rev_list_count(calls: &[Vec<String>]) -> usize {
@@ -821,22 +823,22 @@ branch refs/heads/fix/bug-42
         })
     }
 
-    fn rev_list_branch_count(calls: &[Vec<String>], branch: &str) -> usize {
+    /// `rev-list` calls whose symmetric range ends at `branch_sha`.
+    fn rev_list_branch_count(calls: &[Vec<String>], branch_sha: &str) -> usize {
         recorder::count_matching(calls, |args| {
             args.first().map(String::as_str) == Some("rev-list")
                 && args
                     .last()
-                    .map(|range| range.ends_with(&format!("...{branch}")))
-                    .unwrap_or(false)
+                    .is_some_and(|range| range.ends_with(&format!("...{branch_sha}")))
         })
     }
 
-    fn merge_tree_branch_count(calls: &[Vec<String>], branch: &str) -> usize {
+    fn merge_tree_branch_count(calls: &[Vec<String>], branch_sha: &str) -> usize {
         recorder::count_matching(calls, |args| {
             args.len() >= 4
                 && args[0] == "merge-tree"
                 && args[1] == "--write-tree"
-                && args[3] == branch
+                && args[3] == branch_sha
         })
     }
 
@@ -935,22 +937,10 @@ branch refs/heads/fix/bug-42
         let warm = list_worktrees().expect("warm list should succeed");
         let calls = recorder::finish_recording();
 
-        assert_eq!(
-            rev_list_count(&calls),
-            0,
-            "warm cache should skip rev-list, got {calls:?}"
-        );
-        assert_eq!(
-            merge_tree_count(&calls),
-            0,
-            "warm cache should skip merge-tree, got {calls:?}"
-        );
+        assert_eq!(rev_list_count(&calls), 0, "warm cache should skip rev-list, got {calls:?}");
+        assert_eq!(merge_tree_count(&calls), 0, "warm cache should skip merge-tree, got {calls:?}");
         for branch in ["feature-a", "feature-b"] {
-            let cold_status = status_for_branch(&cold, branch);
-            let warm_status = status_for_branch(&warm, branch);
-            assert_eq!(warm_status.ahead, cold_status.ahead);
-            assert_eq!(warm_status.behind, cold_status.behind);
-            assert_eq!(warm_status.is_clean, cold_status.is_clean);
+            assert_eq!(target_of(&warm, branch), target_of(&cold, branch));
         }
 
         remove_cache_for(repo.path());
@@ -967,56 +957,19 @@ branch refs/heads/fix/bug-42
         let list = list_worktrees().expect("cold list should succeed");
         let calls = recorder::finish_recording();
 
-        assert_eq!(
-            status_for_branch(&list, "diverged").ahead,
-            1,
-            "diverged branch should be ahead"
-        );
-        assert_eq!(
-            status_for_branch(&list, "diverged").behind,
-            1,
-            "diverged branch should be behind"
-        );
-        assert_eq!(
-            status_for_branch(&list, "fast-forward").ahead,
-            1,
-            "fast-forward branch should be ahead"
-        );
-        assert_eq!(
-            status_for_branch(&list, "fast-forward").behind,
-            0,
-            "fast-forward branch should not be behind"
-        );
-        assert_eq!(
-            rev_list_branch_count(&calls, "diverged"),
-            1,
-            "diverged branch should run one rev-list, got {calls:?}"
-        );
-        assert_eq!(
-            merge_tree_branch_count(&calls, "diverged"),
-            1,
-            "diverged branch should run one merge-tree, got {calls:?}"
-        );
-        assert_eq!(
-            rev_list_branch_count(&calls, "fast-forward"),
-            1,
-            "fast-forward branch should run one rev-list, got {calls:?}"
-        );
-        assert_eq!(
-            merge_tree_branch_count(&calls, "fast-forward"),
-            1,
-            "fast-forward branch should run speculative merge-tree, got {calls:?}"
-        );
-        assert_eq!(
-            rev_list_branch_count(&calls, "main"),
-            0,
-            "main branch should not run rev-list, got {calls:?}"
-        );
-        assert_eq!(
-            merge_tree_branch_count(&calls, "main"),
-            0,
-            "main branch should not run merge-tree, got {calls:?}"
-        );
+        let diverged = target_of(&list, "diverged");
+        assert_eq!((diverged.ahead, diverged.behind), (1, 1));
+        let fast_forward = target_of(&list, "fast-forward");
+        assert_eq!((fast_forward.ahead, fast_forward.behind), (1, 0));
+
+        let main_sha = rev_parse(repo.path(), "main");
+        for branch in ["diverged", "fast-forward"] {
+            let sha = rev_parse(repo.path(), branch);
+            assert_eq!(rev_list_branch_count(&calls, &sha), 1, "{branch}: one rev-list, got {calls:?}");
+            assert_eq!(merge_tree_branch_count(&calls, &sha), 1, "{branch}: one merge-tree, got {calls:?}");
+        }
+        assert_eq!(rev_list_branch_count(&calls, &main_sha), 0, "main compares with nothing, got {calls:?}");
+        assert_eq!(merge_tree_branch_count(&calls, &main_sha), 0, "main compares with nothing, got {calls:?}");
 
         remove_cache_for(repo.path());
     }
@@ -1031,13 +984,12 @@ branch refs/heads/fix/bug-42
         recorder::start_recording();
         let list = list_worktrees().expect("cold list should succeed");
         let calls = recorder::finish_recording();
-        let fast_forward = status_for_branch(&list, "fast-forward");
+        let fast_forward = target_of(&list, "fast-forward");
 
-        assert_eq!(fast_forward.ahead, 1);
-        assert_eq!(fast_forward.behind, 0);
+        assert_eq!((fast_forward.ahead, fast_forward.behind), (1, 0));
         assert!(fast_forward.is_clean);
         assert_eq!(
-            merge_tree_branch_count(&calls, "fast-forward"),
+            merge_tree_branch_count(&calls, &rev_parse(repo.path(), "fast-forward")),
             1,
             "fast-forward branch should still launch speculative merge-tree, got {calls:?}"
         );
@@ -1060,16 +1012,8 @@ branch refs/heads/fix/bug-42
         let _ = list_worktrees().expect("warm list should succeed");
         let warm_calls = recorder::finish_recording();
 
-        assert_eq!(
-            rev_list_count(&warm_calls),
-            0,
-            "warm cache should skip rev-list, got {warm_calls:?}"
-        );
-        assert_eq!(
-            merge_tree_count(&warm_calls),
-            0,
-            "warm cache should skip merge-tree, got {warm_calls:?}"
-        );
+        assert_eq!(rev_list_count(&warm_calls), 0, "warm cache should skip rev-list, got {warm_calls:?}");
+        assert_eq!(merge_tree_count(&warm_calls), 0, "warm cache should skip merge-tree, got {warm_calls:?}");
         assert!(
             warm_calls.len() < cold_calls.len(),
             "warm path should issue fewer git calls than cold path: cold={cold_calls:?}, warm={warm_calls:?}"
@@ -1089,16 +1033,35 @@ branch refs/heads/fix/bug-42
         let _ = list_worktrees().expect("cold list should succeed");
         let calls = recorder::finish_recording();
 
-        assert_eq!(
-            rev_list_count(&calls),
-            2,
-            "cold run should make one rev-list call per non-main branch, got {calls:?}"
-        );
-        assert_eq!(
-            merge_tree_count(&calls),
-            2,
-            "cold run should make one speculative merge-tree call per non-main branch, got {calls:?}"
-        );
+        assert_eq!(rev_list_count(&calls), 2, "one rev-list per non-main branch, got {calls:?}");
+        assert_eq!(merge_tree_count(&calls), 2, "one merge-tree per non-main branch, got {calls:?}");
+
+        remove_cache_for(repo.path());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn list_worktrees_reads_tips_from_one_for_each_ref() {
+        let (repo, _feature_a, _feature_b) = temp_repo_with_diverged_worktrees();
+        let _guard = DirGuard::enter(repo.path());
+
+        recorder::start_recording();
+        let list = list_worktrees().expect("list should succeed");
+        let calls = recorder::finish_recording();
+
+        let count = |command: &str| {
+            recorder::count_matching(&calls, |args| args.first().map(String::as_str) == Some(command))
+        };
+        assert_eq!(count("for-each-ref"), 1, "got {calls:?}");
+        // `default_branch()` probes `rev-parse --verify main` without a remote;
+        // no tip is resolved with a bare `rev-parse <branch>` any more.
+        let tip_lookups = recorder::count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("rev-parse") && args.get(1).map(String::as_str) != Some("--verify")
+        });
+        assert_eq!(tip_lookups, 0, "tips come from for-each-ref, got {calls:?}");
+        assert_eq!(list.refs().local("feature-a"), Some(rev_parse(repo.path(), "feature-a").as_str()));
+        assert_eq!(list.target.as_ref().map(|t| t.reference.as_str()), Some("main"));
+        assert_eq!(list.caption, None, "no origin, no caption");
 
         remove_cache_for(repo.path());
     }
@@ -1111,7 +1074,7 @@ branch refs/heads/fix/bug-42
         remove_cache_for(repo.path());
 
         let cold = list_worktrees().expect("cold list should succeed");
-        assert_eq!(status_for_branch(&cold, "feature-a").ahead, 1);
+        assert_eq!(target_of(&cold, "feature-a").ahead, 1);
 
         fs::write(feature_a.join("feature-a-2.txt"), "feature a 2\n").expect("write feature a");
         run_git(&feature_a, &["add", "."]);
@@ -1121,15 +1084,9 @@ branch refs/heads/fix/bug-42
         let updated = list_worktrees().expect("updated list should succeed");
         let calls = recorder::finish_recording();
 
-        assert!(
-            rev_list_count(&calls) >= 1,
-            "branch tip move should recompute rev-list, got {calls:?}"
-        );
-        assert!(
-            merge_tree_count(&calls) >= 1,
-            "branch tip move should recompute merge-tree, got {calls:?}"
-        );
-        assert_eq!(status_for_branch(&updated, "feature-a").ahead, 2);
+        assert!(rev_list_count(&calls) >= 1, "branch tip move should recompute rev-list, got {calls:?}");
+        assert!(merge_tree_count(&calls) >= 1, "branch tip move should recompute merge-tree, got {calls:?}");
+        assert_eq!(target_of(&updated, "feature-a").ahead, 2);
 
         remove_cache_for(repo.path());
     }
@@ -1142,7 +1099,7 @@ branch refs/heads/fix/bug-42
         remove_cache_for(repo.path());
 
         let cold = list_worktrees().expect("cold list should succeed");
-        assert_eq!(status_for_branch(&cold, "feature-a").behind, 1);
+        assert_eq!(target_of(&cold, "feature-a").behind, 1);
 
         fs::write(repo.path().join("main-2.txt"), "main 2\n").expect("write main");
         run_git(repo.path(), &["add", "."]);
@@ -1152,64 +1109,9 @@ branch refs/heads/fix/bug-42
         let updated = list_worktrees().expect("updated list should succeed");
         let calls = recorder::finish_recording();
 
-        assert!(
-            rev_list_count(&calls) >= 1,
-            "default tip move should recompute rev-list, got {calls:?}"
-        );
-        assert!(
-            merge_tree_count(&calls) >= 1,
-            "default tip move should recompute merge-tree, got {calls:?}"
-        );
-        assert_eq!(status_for_branch(&updated, "feature-a").behind, 2);
-
-        remove_cache_for(repo.path());
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn list_worktrees_missing_head_sha_runs_live_skipping_cache() {
-        let (repo, feature_a, _feature_b) = temp_repo_with_diverged_worktrees();
-        let _guard = DirGuard::enter(repo.path());
-        remove_cache_for(repo.path());
-
-        // Warm the cache with feature-a's real HEAD. A regression that turns
-        // "no cache key" into a clean (0, 0, true) result would surface here as
-        // a bogus zero ahead/behind with no git calls instead of a live
-        // recompute.
-        let _ = list_worktrees().expect("populate cache");
-        let default_tip = default_tip_sha("main").expect("default tip");
-        let cache = Arc::new(Mutex::new(Cache::load_or_default_from(
-            &cache_path(repo.path()).expect("cache path"),
-        )));
-        let entry = WorktreeEntry {
-            path: feature_a,
-            branch: Some("feature-a".to_string()),
-            head_sha: None,
-            is_main: false,
-            is_current: false,
-        };
-
-        recorder::start_recording();
-        let (ahead, behind, _is_clean) =
-            branch_status_with_cache("main", Some(&default_tip), &cache, &entry);
-        let calls = recorder::finish_recording();
-
-        assert_eq!(
-            ahead, 1,
-            "missing HEAD SHA must run live ahead/behind, not report a bogus clean state"
-        );
-        assert_eq!(
-            behind, 1,
-            "missing HEAD SHA must run live ahead/behind, not report a bogus clean state"
-        );
-        assert!(
-            rev_list_count(&calls) >= 1,
-            "missing HEAD SHA should skip the cache but still run live rev-list, got {calls:?}"
-        );
-        assert!(
-            merge_tree_count(&calls) >= 1,
-            "missing HEAD SHA should skip the cache but still run live merge-tree, got {calls:?}"
-        );
+        assert!(rev_list_count(&calls) >= 1, "default tip move should recompute rev-list, got {calls:?}");
+        assert!(merge_tree_count(&calls) >= 1, "default tip move should recompute merge-tree, got {calls:?}");
+        assert_eq!(target_of(&updated, "feature-a").behind, 2);
 
         remove_cache_for(repo.path());
     }

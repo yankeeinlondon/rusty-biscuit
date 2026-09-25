@@ -1,10 +1,13 @@
-//! SHA-pair cache for worktree branch status.
+//! SHA-pair cache for branch comparisons.
 //!
-//! Cache entries are keyed by the deterministic pair of default-branch tip SHA
-//! and worktree branch tip SHA. Tip changes self-invalidate by producing a new
-//! key, while stale entries are tolerated opportunistically because they are
-//! unreachable until the same pair appears again. Working-tree dirtiness is not
-//! cached; it remains a live `git status` walk for each listing.
+//! Cache entries are keyed by the pair of a target tip SHA and a branch tip
+//! SHA, so one cache serves every comparison `wt list` makes: a branch against
+//! the default-branch target, a branch against its fork parent, and the local
+//! default branch against `origin/<default>` for the caption. Tip changes
+//! self-invalidate by producing a new key, while stale entries are tolerated
+//! opportunistically because they are unreachable until the same pair appears
+//! again. Working-tree dirtiness is not cached; it remains a live `git status`
+//! walk for each listing.
 
 use std::collections::HashMap;
 use std::fs;
@@ -15,19 +18,23 @@ use serde::{Deserialize, Serialize};
 use crate::error::WorktreeError;
 use crate::git::{git_command, repo_info};
 
-pub const CACHE_FORMAT_VERSION: u32 = 1;
+pub const CACHE_FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CacheKey {
-    pub default_tip_sha: String,
+    /// The tip the branch would merge into.
+    pub target_tip_sha: String,
     pub branch_tip_sha: String,
     pub version: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheValue {
+    /// Commits on the branch that the target lacks.
     pub ahead: usize,
+    /// Commits on the target that the branch lacks.
     pub behind: usize,
+    /// Whether merging the branch into the target would not conflict.
     pub is_clean: bool,
 }
 
@@ -178,7 +185,7 @@ mod tests {
 
     fn sample_key(version: u32) -> CacheKey {
         CacheKey {
-            default_tip_sha: "1111111111111111111111111111111111111111".to_string(),
+            target_tip_sha: "1111111111111111111111111111111111111111".to_string(),
             branch_tip_sha: "2222222222222222222222222222222222222222".to_string(),
             version,
         }
@@ -239,6 +246,20 @@ mod tests {
 
         assert!(Cache::load_or_default_from(&path).is_empty());
         assert_eq!(fs::read(&path).expect("cache file remains"), bytes);
+    }
+
+    /// A cache written before the key generalized from the default tip to any
+    /// target tip must not be read under the new key.
+    #[test]
+    fn cache_written_with_the_version_one_key_shape_loads_empty() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("cache.json");
+        let version_one = r#"{"format_version":1,"entries":[{"key":{"default_tip_sha":"1111111111111111111111111111111111111111","branch_tip_sha":"2222222222222222222222222222222222222222","version":1},"value":{"ahead":2,"behind":1,"is_clean":true}}]}"#;
+        fs::write(&path, version_one).expect("write version-1 cache");
+
+        let loaded = Cache::load_or_default_from(&path);
+        assert!(loaded.is_empty());
+        assert_eq!(loaded.get(&sample_key(CACHE_FORMAT_VERSION)), None);
     }
 
     #[cfg(unix)]

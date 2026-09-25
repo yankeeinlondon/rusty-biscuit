@@ -32,8 +32,23 @@ pub fn select_default_target(base: &Path, default_branch: &str) -> Option<Defaul
     };
     let local = resolve(&format!("refs/heads/{default_branch}^{{commit}}"));
     let remote = resolve(&format!("refs/remotes/origin/{default_branch}^{{commit}}"));
-    let remote_name = format!("origin/{default_branch}");
+    choose_default_target(default_branch, local, remote, |ancestor, descendant| {
+        is_ancestor(base, ancestor, descendant)
+    })
+}
 
+/// The selection rule of [`select_default_target`] over already-resolved
+/// tips, with ancestry answered by `contains(ancestor, descendant)`.
+///
+/// `wt list` answers ancestry from its cached caption comparison instead of
+/// running `merge-base`.
+pub fn choose_default_target(
+    default_branch: &str,
+    local: Option<String>,
+    remote: Option<String>,
+    contains: impl Fn(&str, &str) -> bool,
+) -> Option<DefaultTarget> {
+    let remote_name = format!("origin/{default_branch}");
     let target = |reference: &str, sha: String, diverged: bool| DefaultTarget {
         reference: reference.to_string(),
         sha,
@@ -44,9 +59,9 @@ pub fn select_default_target(base: &Path, default_branch: &str) -> Option<Defaul
         (Some(local), None) => Some(target(default_branch, local, false)),
         (None, Some(remote)) => Some(target(&remote_name, remote, false)),
         (Some(local), Some(remote)) => {
-            if is_ancestor(base, &remote, &local) {
+            if contains(&remote, &local) {
                 Some(target(default_branch, local, false))
-            } else if is_ancestor(base, &local, &remote) {
+            } else if contains(&local, &remote) {
                 Some(target(&remote_name, remote, false))
             } else {
                 Some(target(&remote_name, remote, true))
@@ -101,6 +116,24 @@ mod tests {
         let target = select_default_target(&repo.path(), "main").unwrap();
         assert_eq!(target.reference, "main");
         assert!(!target.diverged);
+    }
+
+    #[test]
+    fn choosing_from_tips_follows_the_same_rule() {
+        let pick = |local: Option<&str>, remote: Option<&str>, contains: &dyn Fn(&str, &str) -> bool| {
+            choose_default_target("main", local.map(String::from), remote.map(String::from), contains)
+                .map(|target| (target.reference, target.sha, target.diverged))
+        };
+        let never = |_: &str, _: &str| false;
+        let equal = |a: &str, b: &str| a == b;
+        let local_behind = |ancestor: &str, _: &str| ancestor == "L";
+
+        assert_eq!(pick(None, None, &never), None);
+        assert_eq!(pick(Some("L"), None, &never), Some(("main".into(), "L".into(), false)));
+        assert_eq!(pick(None, Some("R"), &never), Some(("origin/main".into(), "R".into(), false)));
+        assert_eq!(pick(Some("S"), Some("S"), &equal), Some(("main".into(), "S".into(), false)));
+        assert_eq!(pick(Some("L"), Some("R"), &local_behind), Some(("origin/main".into(), "R".into(), false)));
+        assert_eq!(pick(Some("L"), Some("R"), &never), Some(("origin/main".into(), "R".into(), true)));
     }
 
     #[test]
