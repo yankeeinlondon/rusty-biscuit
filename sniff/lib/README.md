@@ -559,6 +559,22 @@ requests; redirects are disabled, with
 only the official GitHub and Bitbucket API-host mappings accepted as cross-host
 provider endpoints.
 
+`remote::blocking::pull_request_for_branch(remote_url, source_repo, branch,
+deadline)` answers "which PR came from this branch?" for callers without an
+async runtime. It builds its own current-thread Tokio runtime, so it must not be
+called from inside one. The deadline bounds the whole lookup. A PR counts
+only if it is open or merged and its head is `branch` in `source_repo`, so a
+fork's same-named branch never matches. An open PR outranks merged ones, and
+the most recent merged PR wins among several. The result carries the source
+head SHA exactly as the provider sent it (Bitbucket Cloud abbreviates it to 12
+characters), and Gitea's is read from the list endpoint, which freezes it at
+merge. Missing or rejected credentials, 403, a 404 on the list, rate limits,
+timeouts, and unsupported hosts are typed `PrUnavailable` errors, never
+`Ok(None)`. Only hosts the URL identifies without a probe are supported;
+`pull_request_for_branch_with` takes a client built after consented discovery.
+`PullRequestInfo` also carries `source_repo`, `source_repo_is_target`, and
+`source_head_sha`.
+
 `FocusedProviderClient::from_pull_request_url` and
 `job_reference_from_url` accept a canonical provider **web or API** URL. Route
 grammars are matched per flavor rather than by scanning for a shared marker
