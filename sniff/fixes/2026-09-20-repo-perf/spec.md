@@ -31,32 +31,25 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 human_review: false
 message_to_agent: |-
-    Phase 2 (claude/default) is done, uncommitted in the working tree; the production diff is
-    nested.rs only. What Phase 3+ needs to know:
-    (1) Depth-0 ruling ADOPTED: the parallel callback skips entry.depth() == 0, and
-    serial_reference_paths has the same skip (documented there as its one deliberate delta). The Unix
-    pin test a_marker_named_symlinked_root_registers_no_candidate_outside_the_root exists; Phase 3
-    still owns the native-Windows symlinked-root case (R5).
-    (2) R1 seam: private fn walk_for_nested_markers_with_threads(root, Option<usize>); None is the
-    production default and Some(n) calls WalkBuilder::threads(n). Use Some(1) and Some(n>1) for the
-    one-worker and multi-worker parity runs.
-    (3) IMPORTANT deviation from manifest_index.rs: WorkerCollector::activate() is called AFTER the
-    Ok(entry) match, not first. ignore 0.4.25 builds its first visitor on the CALLING thread and
-    passes it only root errors (e.g. a missing root). Activating there clears the caller's buffered
-    counters, and its drop uninstalls the caller's collector.
-    a_missing_root_keeps_the_callers_counters pins this (it fails with activate-first). Keep that
-    order when adding the R2 test-only callback counter: increment only for Ok entries, after
-    activate().
-    (4) Already covered by Phase 2 tests, so Phase 3 can reuse them rather than duplicate: counter
-    1/1 for a populated root (default, 1, and 4 workers) and for a missing root.
-    fallback_walk_records_one_logical_walk_per_invocation and the missing-root test live in the
-    nested.rs test module. Still owned by Phase 3: the empty root, supplied evidence including
-    Some(&[]), and R2 propagation.
-    (5) ManifestIndex::build has the same latent activate-first pattern, but its root always exists
-    at its only production call site. It was left unchanged as out of scope and noted in the log;
-    do not widen scope to fix it here.
-    (6) Unchanged from Phase 1: lint with bench-internals or remote,bench-internals, because
-    --features network alone has pre-existing dead-code errors.
+    Phase 3 (claude/default) is done, uncommitted in the working tree. The only non-test change is a
+    #[cfg(test)] hook in the nested.rs parallel callback (R2): the skip condition is split so that
+    tests::record_admitted_entry() runs for every entry past the depth-0/directory filters. Non-test
+    builds compile to the same logic Phase 2 committed. What Phase 4+ needs to know:
+    (1) The parity/semantics/counter suite lives in the nested.rs tests module (14 new tests, 13 run in
+    L1; git_ignore_rules_child is an #[ignore]d subprocess fixture launched by
+    git_ignore_rules_apply_under_an_isolated_git_configuration with HOME/USERPROFILE set to a temp home,
+    because ignore reads global excludes from the process home). It is inert when run by hand.
+    (2) For the Phase 5 OS legs, run `just cross-check sniff --os <os> nested::tests`. Native Windows
+    (20/20) and Linux (22/22) already passed in Phase 3. Windows really created symlinks (Developer
+    Mode is on, no R5 skip) and ran the non-Unicode walk half. Linux ran the mode-000 denial. WSL2 has
+    not been run. cross-check cannot take a nextest -E filterset with parentheses (the remote shell
+    breaks the quoting), so use plain substring filters, and pass --no-capture to see SKIP lines.
+    (3) Worker-count evidence (wide 522-entry fixture, default policy) is already recorded in the
+    Phase 3 log: 10 threads on this Mac, 12 on Linux and on Windows. Phase 4 still needs the corpus
+    worker count.
+    (4) Unchanged: lint with bench-internals or remote,bench-internals, because --features network
+    alone has pre-existing dead-code errors. ManifestIndex::build's latent activate-first pattern is
+    still deliberately out of scope.
 ---
 
 # Parallelize the nested-marker walk

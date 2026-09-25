@@ -34,6 +34,15 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/sniff/performance.md
+source_files_during_phase_3:
+    - sniff/lib/src/filesystem/repo/nested.rs
+docs_updated_during_phase_3:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/sniff/performance.md
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -279,3 +288,101 @@ it is noted for the author.
   - WSL2 was not run in this phase. There is no `cfg` difference from
     Linux; the full OS legs are Phase 5.
 - Production diff: `nested.rs` only. No dependency changes.
+
+## Phase 3
+
+### Starting state (2026-09-25)
+
+- Phase 2 is committed (`f9af74815`); the working tree was clean. The serial
+  reference (`serial_reference_paths` with the depth-0 skip) and the R1 seam
+  (`walk_for_nested_markers_with_threads`) already existed, so Work-group A's
+  "Serial reference" task is satisfied by them plus the new `assert_parity`
+  helper. No new serial-walker code was written.
+
+### Production-file change (test-only)
+
+- The one change outside the test module is the R2 hook in the parallel
+  callback: the combined skip condition is split into two steps. The first
+  skips depth 0 and directories; then `#[cfg(test)] tests::record_admitted_entry()`
+  runs; then the marker check. Non-test builds compile to the same logic as
+  Phase 2. The hook runs after `activate()`, as the Phase 2 note required.
+- `record_admitted_entry` increments `test.nested_walk.admitted_entries`
+  (test-defined, not in `counters.rs`) through the thread-buffered
+  `increment_counter`. It also records one `test.nested_walk.worker_thread.<id>`
+  per thread through `increment_counter_dynamic`, using a thread-local
+  once-flag. That flag is sound because `ignore` 0.4.25 spawns fresh scoped
+  threads per `run` (`walk.rs:1410`).
+- I checked that no in-crate test asserts an exact counter map (all
+  `counts.all()` uses are diagnostic messages), so the extra test counters
+  cannot disturb other tests.
+
+### Tests added (`filesystem::repo::nested::tests`, lib unit-test target, L1)
+
+Every parity check goes through `assert_parity(root)`. It compares the
+parallel walk under `Some(1)`, `None` (production default), and `Some(4)` with
+the serial reference, as complete ordered `(root, matched_standards)` values.
+The calling test then asserts independently spelled expected candidates, so a
+shared projection bug cannot pass.
+
+| Requirement | Test |
+|---|---|
+| AC2 matrix: all 12 fixed names, `.sln`/`.slnx`, depths/siblings, Gradle pair → one standard, `package.json` → 3 standards, many markers in one dir, look-alike names, root markers excluded | `every_marker_name_registers_its_standards_at_any_depth` |
+| Empty, root-only (every marker at root), and missing roots | `empty_root_only_and_missing_roots_register_no_candidates` |
+| Wide tree, 20 repeats × 3 worker configs; expected derived from the placement rule | `wide_tree_parity_holds_across_repeats_and_worker_counts` |
+| Hidden dirs eligible; prune (12 names, top-level and nested) authoritative; marker-named directories are not evidence, their descendants are | `prune_hidden_and_marker_named_directories_keep_their_semantics` |
+| Non-directory symlinks admitted (including dangling); directory links not followed; no canonicalization (the macOS `/var` temp root stays spelled as given) | `non_directory_symlinks_are_admitted_and_directory_links_are_not_followed` |
+| Symlinked starting root, serial vs parallel, under the link spelling (R5, cross-platform; Windows skips with a printed reason only without the privilege) | `a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling` |
+| Walk-level platform case rules (fixed names fold only on Windows; `.SLN`/`.SLNX` never match) | `walked_marker_names_follow_the_platform_case_rules` |
+| Non-Unicode basenames are not markers; a walk that meets one continues | `non_unicode_basenames_are_not_markers` (the walk half skips with a printed reason where the filesystem refuses the name: macOS APFS) |
+| Permission denial is best effort (R6) | `an_unreadable_directory_is_skipped_and_the_walk_continues` (`cfg(unix)`; skips if run privileged. Native Windows is not asserted: that would need ACL editing) |
+| Git and non-Git roots: untracked marker found; `.gitignore` exclusion and `!` negation; nested `.gitignore`; `.ignore`; `.git/info/exclude`; controlled global excludes; outside Git only `.ignore` applies | `git_ignore_rules_apply_under_an_isolated_git_configuration`, which spawns the `#[ignore]`d `git_ignore_rules_child` with `HOME`/`USERPROFILE` set to a disposable home and `XDG_CONFIG_HOME` removed, and requires a sentinel line proving the child's assertions ran. Run by hand, the child returns without asserting. |
+| Chokepoint counters for an empty root, in all worker configs (populated and missing roots are already pinned by Phase 2 tests) | `an_empty_root_records_one_logical_walk` |
+| Supplied evidence (`Some(markers)` and `Some(&[])`) starts no fallback walk; populated evidence reaches the same detector outcomes and seeds as the fallback; `Some(&[])` also reads no dirs | `supplied_evidence_starts_no_fallback_walk` |
+| R2 worker propagation: the admitted-entry counter equals the serial reference's entry count (522); distinct worker threads printed as diagnostics, exactly 1 for `Some(1)` | `every_visitor_flushes_its_work_into_the_request` |
+| Retained tests | All nine pre-existing `nested.rs` tests and the `detection.rs` tests are unmodified and green |
+
+### Mutation checks (temporarily applied, then reverted)
+
+- Commenting out `worker.collector.activate()` made
+  `every_visitor_flushes_its_work_into_the_request` fail (`left: 0, right: 522`).
+- Switching the production builder to `git_exclude(false)` made the Git-ignore
+  isolation test fail with a parity divergence.
+
+### Worker-count evidence (wide fixture, 522 entries)
+
+| Host | `Some(1)` | default | `Some(4)` |
+|---|---:|---:|---:|
+| macOS (M4 Max, 16 logical CPUs) | 1 | 10 | 4 |
+| Linux (build-linux) | 1 | 12 | 4 |
+| native Windows (build-win-native) | 1 | 12 | 4 |
+
+### Gates
+
+- `just test` (sniff): **2874 passed, 32 skipped**. That is Phase 2's 2861
+  plus 13 of the 14 new tests. The 14th is the `#[ignore]`d child fixture,
+  which accounts for the extra skip.
+- `just lint`: clean.
+- `cargo clippy -D warnings --all-targets` is clean for:
+  - `-p sniff`;
+  - `-p sniff --features bench-internals`;
+  - `-p sniff --features remote,bench-internals`;
+  - `-p sniff-cli`.
+  One `cloned_ref_to_slice_refs` lint in a new test was fixed.
+- Cross-OS (`just cross-check sniff --os <os> nested::tests`):
+  - native Windows: 20/20 passed (the two `cfg(unix)` tests are not compiled
+    there). Uncaptured reruns showed no SKIP lines, so the symlink tests
+    really created links (Developer Mode is on), and the non-Unicode walk half
+    ran on NTFS.
+  - Linux: 22/22 passed. The non-Unicode walk half and the mode-000 denial
+    both ran; neither skipped.
+  - WSL2 was not run (same `cfg` path as Linux); the OS legs are Phase 5.
+- `--run-ignored all` over the nested/detection filter: 73/73 passed, after
+  making the child inert when started without its parent.
+
+### Skill update
+
+`.claude/skills/sniff/performance.md` gained two bullets:
+- how to prove every parallel visitor flushed, and why
+  `increment_counter_dynamic` cannot;
+- the trap that `ignore`'s global excludes come from the process's
+  `HOME`/`USERPROFILE`, and the child-process isolation pattern.

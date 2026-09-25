@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-20
-phase: 2
+phase: 3
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-20-repo-perf
@@ -36,6 +36,15 @@ docs_created_during_phase_1:
     - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/work_counts-debug.md
     - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/raw/
 skills_files_updated_during_phase_1:
+    - .claude/skills/sniff/performance.md
+source_files_during_phase_3:
+    - sniff/lib/src/filesystem/repo/nested.rs
+docs_updated_during_phase_3:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
     - .claude/skills/sniff/performance.md
 ---
 
@@ -341,39 +350,39 @@ helpers, so coordinate final assembly serially.
 
 **Work-group A — parity core** (concurrent with B and C):
 
-- [ ] **Serial reference**
+- [x] **Serial reference**
     - Add the test-only serial reference retaining the pre-change walker
       settings and collect-all-non-directory behavior, feeding the unchanged
       `candidates_from_marker_paths` projection (AC1). It is a parity oracle
       and the same-process timing baseline — clearly documented as such.
-- [ ] **Parity assertions**
+- [x] **Parity assertions**
     - For each fixture: assert the parallel and serial-reference candidate
       lists are equal as complete ordered `(root, matched_standards)` values
       (not byte-identical `Vec<Candidate>`), and independently assert the
       expected candidates for at least the rich fixtures so a shared
       projection bug cannot make both sides pass.
-- [ ] **Repeat and vary workers**
+- [x] **Repeat and vary workers**
     - Repeat the wide-tree comparison at least 20× (scheduling variance) and
       run it through the R1 seam in both a one-worker (`Some(1)`) and the
       default multi-worker configuration; both must pass all fixtures.
 
 **Work-group B — fixture semantics** (concurrent with A and C):
 
-- [ ] **Marker fixture matrix**
+- [x] **Marker fixture matrix**
     - Disposable fixtures covering: multiple sibling directories and depths;
       empty and root-only trees; every one of the 12 fixed marker names; both
       `.sln` and `.slnx` suffixes; multiple markers mapping to one standard
       (both Gradle settings files); one marker mapping to multiple standards
       (`package.json` → npm/yarn/bun); multiple markers in one directory.
       Fixtures are immutable during assertion; no racy deletion.
-- [ ] **Ignore-rule fixtures**
+- [x] **Ignore-rule fixtures**
     - Git and non-Git roots; untracked-but-unignored marker (discoverable);
       `.gitignore` exclusion and negation; `.ignore`; controlled global
       excludes and `.git/info/exclude`. Isolate host Git/ignore configuration
       using the repository test utilities (git2-based init and fixture Git
       plumbing already used in `detection.rs`); never mutate process
       environment concurrently.
-- [ ] **Traversal-edge fixtures**
+- [x] **Traversal-edge fixtures**
     - Hidden directories stay eligible; the named-directory prune stays
       authoritative (`node_modules`, `target`, `dist`, `build`, …); a
       marker-named directory is not evidence but its permitted descendants
@@ -381,7 +390,7 @@ helpers, so coordinate final assembly serially.
       symlinks to markers are admitted without following nested directory
       links or canonicalizing collected paths; a symlinked starting root is
       compared serial-vs-parallel where supported (R5).
-- [ ] **Platform case rules**
+- [x] **Platform case rules**
     - Fixed marker names ASCII case-insensitive on native Windows and
       byte-exact on Unix (macOS, WSL2); `.sln`/`.slnx` case-sensitive
       everywhere; non-Unicode basenames are not markers. Reuse the existing
@@ -391,20 +400,20 @@ helpers, so coordinate final assembly serially.
 
 **Work-group C — counters and propagation** (concurrent with A and B):
 
-- [ ] **Chokepoint counters**
+- [x] **Chokepoint counters**
     - Under a fresh collector (`performance::testing::measure`): direct
       fallback invocation on a populated fixture, an empty root, and a
       missing root each report exactly one `FS_READ_DIRS` and one
       `REPO_NESTED_MARKER_WALKS`; supplied-evidence discovery — including
       `Some(&[])` — reports zero fallback walks; legitimate detector work is
       accounted separately, never asserted to be zero.
-- [ ] **Worker propagation**
+- [x] **Worker propagation**
     - Implement the R2 test-only callback counter; expected total equals the
       fixture entry count (cross-checked against the serial reference);
       assert the collector's post-walk reading matches. Include a diagnostic
       capture of the distinct worker threads observed on the wide fixture
       (feeds the "actual worker count" evidence gap the spec calls out).
-- [ ] **Retain existing tests**
+- [x] **Retain existing tests**
     - Keep `root_marker_does_not_register_a_candidate`,
       `supplied_evidence_and_the_fallback_walk_agree`, and the other existing
       tests listed in the grounding facts passing without weakening them.
