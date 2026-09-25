@@ -26,7 +26,11 @@ impl TerminalImage {
         let image_aspect = img.height() as f32 / img.width() as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
         let raw_height = target_cells as f32 * image_aspect * cell_aspect;
-        let height_cells = (raw_height.ceil() as u32).max(1);
+        let height_cells = super::cursor::covered_rows(
+            target_cells,
+            (img.width(), img.height()),
+            (cell_pixel_width, cell_pixel_height),
+        );
         let png_data = self.encode_as_png(&img)?;
 
         let width_param = match &self.width {

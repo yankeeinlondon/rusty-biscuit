@@ -28,7 +28,11 @@ impl TerminalImage {
         let image_aspect = img.height() as f32 / img.width() as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
         let raw_height = target_cells as f32 * image_aspect * cell_aspect;
-        let height_cells = (raw_height.ceil() as u32).max(1);
+        let height_cells = super::cursor::covered_rows(
+            target_cells,
+            (img.width(), img.height()),
+            (cell_pixel_width, cell_pixel_height),
+        );
 
         // WezTerm needs explicit row sizing for correct geometry. Kitty-family
         // peers render correctly with width-only sizing.
@@ -85,12 +89,12 @@ impl TerminalImage {
         // This preserves maximum quality and lets Kitty's aspect ratio preservation work correctly.
         let png_data = self.encode_as_png(&img)?;
 
-        // Calculate expected rows for cursor advancement:
         // Kitty preserves aspect ratio when only c= is specified (no r=).
-        // rows = cols * (image_height / image_width) * (cell_width / cell_height)
-        let image_aspect = img.height() as f32 / img.width() as f32;
-        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
-        let display_cells_height = (target_cells as f32 * image_aspect * cell_aspect).ceil() as u32;
+        let display_cells_height = super::cursor::covered_rows(
+            target_cells,
+            (img.width(), img.height()),
+            (cell_pixel_width, cell_pixel_height),
+        );
 
         // Only specify columns (c=), let Kitty calculate rows to preserve aspect ratio
         let image = self.render_kitty_width_only(&png_data, target_cells);

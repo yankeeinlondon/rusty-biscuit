@@ -1339,3 +1339,15 @@ fn legacy_display_dimensions_scale_the_pixel_width() {
         (100, 50)
     );
 }
+
+/// Whole rows stay whole: the `f32` product put 13 rows at `13.000001` and
+/// reserved 14, a blank row under a Kitty image (seen at L2 in `wt list`).
+#[test]
+fn covered_rows_are_exact_on_whole_rows() {
+    use super::cursor::covered_rows;
+    assert_eq!(covered_rows(56, (784, 325), (14, 25)), 13);
+    assert_eq!(covered_rows(20, (280, 25), (14, 25)), 1);
+    assert_eq!(covered_rows(56, (784, 326), (14, 25)), 14);
+    // Drawn at half its pixel width, so half its height: 200 px in 20 px rows.
+    assert_eq!(covered_rows(50, (1000, 400), (10, 20)), 10);
+}
