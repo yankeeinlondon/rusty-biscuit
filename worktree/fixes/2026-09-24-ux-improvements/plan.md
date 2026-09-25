@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-24
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: false
 source_files_during_phase_1: []
@@ -18,8 +18,63 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1:
     - .claude/skills/os/windows.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_2:
+    - Cargo.lock
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/fork_origin.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/lib.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/env.rs
+    - worktree/cli/src/exit.rs
+    - worktree/cli/src/shell_integration.rs
+    - worktree/cli/src/commands/go.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/src/commands/remove.rs
+    - worktree/cli/tests/wrapper_protocol.rs
+    - worktree/cli/tests/shell_wrapper_exec.rs
+    - worktree/cli/tests/snapshots/wrapper_protocol__bash.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__zsh.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__fish.snap
+    - worktree/cli/tests/snapshots/wrapper_protocol__powershell.snap
+    - worktree/shell/wt.sh (deleted)
+    - worktree/shell/wt.fish (deleted)
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/types.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/src/remote/gitlab.rs
+    - sniff/lib/src/remote/gitea.rs
+    - sniff/lib/src/remote/bitbucket.rs
+    - sniff/lib/src/remote/provider.rs
+    - sniff/lib/src/remote/mod.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - sniff/cli/src/output/remote.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+docs_updated_during_phase_2:
+    - worktree/README.md
+    - docs/dependencies.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - worktree/fixes/2026-09-24-ux-improvements/plan.md
+    - worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
+    - worktree/fixes/2026-09-24-ux-improvements/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/remote-and-repository.md
 packages:
     - worktree
+    - worktree-cli
+    - sniff
+    - sniff-cli
+    - darkmatter
 ---
 
 # Plan: Worktree UX improvements
@@ -179,11 +234,11 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 2 — CLI foundation (sequential, blocks Wave 3)
 
-- [ ] **Exit-code plumbing** (R7)
+- [x] **Exit-code plumbing** (R7)
     - Add the `RefusedToLoseWork` and `BlockedByEnvironment` variants to `worktree/lib/src/error.rs`.
     - Map errors to exit codes 0/1/3/4 in `worktree/cli/src/main.rs`. `Cancelled` exits 0.
     - L1: an `assert_cmd` test per code.
-- [ ] **Interactivity and wrapper detection**
+- [x] **Interactivity and wrapper detection**
     - Add one CLI module (for example `worktree/cli/src/env.rs`) with two functions:
         - `is_interactive()`: stdin and stderr are TTYs, and `CI` is unset or empty (R6).
         - `shell_wrapper_active()`: `WT_SHELL_WRAPPER == "1"`.
@@ -192,7 +247,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Wave 3 — Parallel
 
-- [ ] **Generated wrappers** (item 7)
+- [x] **Generated wrappers** (item 7)
     - Rewrite the bash, zsh, and fish wrappers in `print_completions` to:
         - set `WT_SHELL_WRAPPER=1` for the one invocation, per S3
         - handle `cd:` and `remove-handoff:` lines
@@ -203,11 +258,11 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
     - Delete `worktree/shell/`, and point the README and docs at `wt --completions`.
     - Update `AFTER_HELP`'s shell-integration block to include PowerShell.
     - L1: snapshot each generated script, and assert the variable, both protocol lines, the `cd` check, and the absence of `eval`, `Invoke-Expression`, and `iex`.
-- [ ] **`wt go` / `wt create` without a wrapper**
+- [x] **`wt go` / `wt create` without a wrapper**
     - `wt go` returns `BlockedByEnvironment` (exit 4) with the existing help, which becomes shell-appropriate by naming all four `--completions` shells.
     - `wt create` without a wrapper creates the worktree, prints the could-not-move message, and exits 0.
     - L1: tests with and without the variable.
-- [ ] **Resolution and completions** (item 2)
+- [x] **Resolution and completions** (item 2)
     - Rewrite `find_worktree` in `worktree/lib/src/worktree.rs`:
         - `base` resolves to the main checkout.
         - Otherwise collect exact branch matches and exact basename matches (the input is dasherized for the basename comparison), then dedupe by worktree path.
@@ -226,7 +281,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - a base checkout on a non-default branch while `main` is checked out elsewhere
         - detached worktrees
         - deduping
-- [ ] **Fork-origin store and `--from`** (item 6)
+- [x] **Fork-origin store and `--from`** (item 6)
     - Add a new `worktree/lib/src/fork_origin.rs`:
         - `{ base_branch, base_sha, created_at }` keyed by branch
         - its own format version, stored per R9
@@ -238,7 +293,7 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
         - It records the fork origin only for new branches.
     - Add `--from <base>` to `Commands::Create`, with completion over local branches.
     - L1 against temporary repositories, covering each ruled message.
-- [ ] **sniff: PR for one branch** (spike S1 must be complete)
+- [x] **sniff: PR for one branch** (spike S1 must be complete)
     - Extend `PullRequestInfo`, or add a richer record, with the source repository identity and the source head SHA. Fill them in all four providers.
     - Add a `blocking` module behind the `remote` feature:
         - `pull_request_for_branch(remote_url, source_repo, branch, deadline) -> Result<Option<PrEvidence>, PrUnavailable>`
@@ -250,8 +305,8 @@ Covers items 2, 6, and 7, plus the sniff entry point that the remove flow's Safe
 
 ### Validation checkpoint
 
-- [ ] `just test` and `just lint` pass in `worktree` and `sniff`. The new tests exist for acceptance criteria 2, 6, and 7 (output side).
-- [ ] Manual smoke in zsh:
+- [x] `just test` and `just lint` pass in `worktree` and `sniff`. The new tests exist for acceptance criteria 2, 6, and 7 (output side).
+- [x] Manual smoke in zsh:
     - `source <(wt --completions zsh)`; `wt go <basename>` and `wt go <branch>` both work.
     - `command wt go x` exits 4.
 
