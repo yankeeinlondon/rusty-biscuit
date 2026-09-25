@@ -126,6 +126,9 @@ provider that overrides `list_documents_with` must also override
 preserves provider/repository identity, pagination bounds, host policy,
 credential scope, and typed malformed/missing/auth/rate-limit/capability/
 transport errors. Never collapse a focused provider error to an empty list.
+`remote::blocking::pull_request_for_branch` is its deadline-bound blocking
+entry point for "which PR came from this branch", and a list 404 there is an
+error, not "no PR".
 
 Read [remote-and-repository.md](remote-and-repository.md) for topology,
 worktree, aggregate, and remote details.
