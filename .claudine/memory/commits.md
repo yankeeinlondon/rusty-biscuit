@@ -630,6 +630,27 @@ belong here.
   (silent intermediate breakage) or returns failure and the
   orchestrator re-dispatches it as wasted work. The pre-flight is the
   small cost; the silent breakage is the expensive one to debug later.
+- A sub-agent briefed with a precise message body that ALSO makes file
+    changes beyond the staged snapshot (e.g., the brief says "substitute
+    literal 16 in `rows_for` doc comment" and the agent also substitutes 16
+    in a *different* doc comment in the same file because it sees the
+    pattern and decides to "complete the job") commits a polluted tree
+    whose diff does not match the body. Recovery: `git update-ref HEAD
+    HEAD~1` rolls the commit back, but the index now holds the polluted
+    blob — the original staged snapshot is gone from the index. Recover
+    it with `git fsck --dangling | awk '/dangling blob/ {print $3}'`,
+    pipe each through `git cat-file -p <hash>` until you find the file's
+    content (the staged snapshot is identifiable by its `git diff
+    --cached` output, which the brief must record verbatim), then
+    `git cat-file -p <blob> > <path>` to restore the working tree,
+    `git add <path>` to update the index, and `git commit --only -F
+    <msg> -- <paths>` to recommit. Verify by `git diff <parent> <hash>`
+    showing exactly the hunk list the body describes. The pre-flight is
+    simpler: the brief's `git diff --cached <path>` output must list
+    every hunk the message body enumerates, and the sub-agent must
+    refuse to commit (and report back) if either side lists a hunk the
+    other does not. Inventing extra hunks to "complete" a brief that
+    does not enumerate them is the failure mode.
 
 ## Verification
 
