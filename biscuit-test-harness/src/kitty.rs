@@ -7,9 +7,9 @@
 //! returns `false` and dependent tests skip cleanly.
 //!
 //! The harness shells out to `kitty @` (alias for `kitty +kitten
-//! send-text` etc.) for control. We deliberately do not start our own
-//! kitty GUI — these tests must run inside an existing kitty session
-//! to be useful.
+//! send-text` etc.) for control. [`KittyHarness`] drives an existing kitty
+//! session; [`KittyInstance`] starts a private, unfocused kitty (macOS) for
+//! tests that need a known window size or a screenshot of what kitty drew.
 
 #![allow(dead_code)]
 
@@ -31,6 +31,8 @@ pub const SHARED_WINDOW_ENV: &str = "BISCUIT_SHARED_KITTY_WINDOW_ID";
 /// Harness that drives a running kitty GUI via `kitty @`.
 pub struct KittyHarness {
     window_id: Option<String>,
+    /// `--to` address for every `kitty @` call; `None` uses `KITTY_LISTEN_ON`.
+    to: Option<String>,
     spawn_visibility: SpawnVisibility,
     /// When `true`, [`Drop`] closes the kitty window. When `false`
     /// (set by [`KittyHarness::attach`]) the window is left alone.
@@ -42,6 +44,7 @@ impl KittyHarness {
     pub fn new() -> Self {
         Self {
             window_id: None,
+            to: None,
             spawn_visibility: SpawnVisibility::default(),
             owned: true,
         }
@@ -52,6 +55,7 @@ impl KittyHarness {
     pub fn attach(window_id: impl Into<String>) -> Self {
         Self {
             window_id: Some(window_id.into()),
+            to: None,
             spawn_visibility: SpawnVisibility::default(),
             owned: false,
         }
@@ -116,6 +120,11 @@ impl KittyHarness {
         self.window_id()
     }
 
+    /// A `kitty @` command aimed at this harness's kitty instance.
+    fn remote(&self) -> Command {
+        remote_command(self.to.as_deref())
+    }
+
     fn window_id(&self) -> &str {
         self.window_id
             .as_deref()
@@ -136,8 +145,8 @@ impl KittyHarness {
     /// parsed, or the spawned window id is not present in the listing.
     pub fn pane_cols(&self) -> io::Result<u32> {
         let want = self.window_id().to_string();
-        let mut cmd = Command::new("kitty");
-        cmd.args(["@", "ls"]);
+        let mut cmd = self.remote();
+        cmd.arg("ls");
         let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -196,8 +205,8 @@ impl KittyHarness {
 
     fn close_window(&mut self) {
         if let Some(id) = self.window_id.take() {
-            let mut cmd = Command::new("kitty");
-            cmd.args(["@", "close-window", "--match", &format!("id:{id}")])
+            let mut cmd = self.remote();
+            cmd.args(["close-window", "--match", &format!("id:{id}")])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
@@ -246,8 +255,8 @@ impl TerminalHarness for KittyHarness {
             return Err(io::Error::other("kitty remote control not available"));
         }
         let shell = super::detect_shell();
-        let mut cmd = Command::new("kitty");
-        cmd.args(["@", "launch", "--type=window", "--no-response=false"]);
+        let mut cmd = self.remote();
+        cmd.args(["launch", "--type=window", "--no-response=false"]);
         if self.spawn_visibility == SpawnVisibility::Background {
             cmd.arg("--keep-focus");
         }
@@ -283,8 +292,8 @@ impl TerminalHarness for KittyHarness {
         if !Self::available() {
             return Err(io::Error::other("kitty remote control not available"));
         }
-        let mut cmd = Command::new("kitty");
-        cmd.args(["@", "launch", "--type=window", "--no-response=false"]);
+        let mut cmd = self.remote();
+        cmd.args(["launch", "--type=window", "--no-response=false"]);
         if self.spawn_visibility == SpawnVisibility::Background {
             cmd.arg("--keep-focus");
         }
@@ -311,9 +320,8 @@ impl TerminalHarness for KittyHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.window_id().to_string();
-        let mut cmd = Command::new("kitty");
+        let mut cmd = self.remote();
         cmd.args([
-            "@",
             "send-text",
             "--match",
             &format!("id:{id}"),
@@ -331,14 +339,28 @@ impl TerminalHarness for KittyHarness {
     }
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
+        self.capture_extent("screen")
+    }
+}
+
+impl KittyHarness {
+    /// [`capture`](TerminalHarness::capture) with `kitty @ get-text`'s
+    /// `--extent` (`screen`, `all` for screen plus scrollback, ...).
+    ///
+    /// `get-text` returns a soft-wrapped line as one line, without trailing
+    /// blanks, so a line longer than the window spans several screen rows.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when `kitty @ get-text` fails.
+    pub fn capture_extent(&self, extent: &str) -> io::Result<CapturedFrame> {
         let id = self.window_id().to_string();
-        let mut cmd = Command::new("kitty");
+        let mut cmd = self.remote();
         cmd.args([
-            "@",
             "get-text",
             "--match",
             &format!("id:{id}"),
-            "--extent=screen",
+            &format!("--extent={extent}"),
             "--ansi",
         ]);
         let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
@@ -350,6 +372,195 @@ impl TerminalHarness for KittyHarness {
         }
         let raw = String::from_utf8_lossy(&out.stdout).into_owned();
         Ok(CapturedFrame::from_raw(raw))
+    }
+}
+
+/// `kitty @`, addressed to `to` when given and to `KITTY_LISTEN_ON` otherwise.
+fn remote_command(to: Option<&str>) -> Command {
+    let mut cmd = Command::new("kitty");
+    cmd.arg("@");
+    if let Some(to) = to {
+        cmd.args(["--to", to]);
+    }
+    cmd
+}
+
+/// Prefix of a [`KittyInstance`]'s socket directory; the owning pid follows.
+const INSTANCE_DIR_PREFIX: &str = "biscuit-kitty-";
+
+/// A private kitty GUI with its own remote-control socket and one OS window of
+/// a fixed size, for tests that need a known pane geometry or a screenshot of
+/// what kitty actually drew (images, not just cell text).
+///
+/// The instance never takes focus: it is started with `open -g`, and kitty
+/// does not activate itself. Its window is visible and unfocused, because a
+/// `--start-as=hidden` window is never drawn and screenshots of it are black.
+/// macOS only; [`can_launch`](Self::can_launch) is `false` elsewhere.
+///
+/// [`Drop`] quits the instance. An instance whose test process died is quit by
+/// the next [`launch`](Self::launch) on the host.
+pub struct KittyInstance {
+    /// Holds the socket; removed on drop.
+    _dir: tempfile::TempDir,
+    to: String,
+    window_id: String,
+    platform_window_id: u64,
+}
+
+impl KittyInstance {
+    /// `true` on macOS when `kitty` and `screencapture` are on `$PATH`.
+    pub fn can_launch() -> bool {
+        cfg!(target_os = "macos") && which("kitty") && which("screencapture") && which("open")
+    }
+
+    /// Starts kitty with one `columns` × `lines` cell window running the
+    /// harness's rc-suppressed login shell, and waits for its prompt.
+    ///
+    /// The default configuration (`--config NONE`) is used, so colors, font,
+    /// and padding do not depend on the host's `kitty.conf`: the background
+    /// is black and the window has no padding.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error off macOS, or when kitty does not start or its socket
+    /// does not answer within [`SPAWN_TIMEOUT`].
+    pub fn launch(columns: u32, lines: u32) -> io::Result<Self> {
+        if !Self::can_launch() {
+            return Err(io::Error::other("a private kitty instance needs macOS, kitty, and screencapture"));
+        }
+        cleanup_stale_kitty_instances();
+        // `/tmp`, not `$TMPDIR`: a unix socket path is limited to 104 bytes.
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("{INSTANCE_DIR_PREFIX}{}-", super::owner_process_id()))
+            .tempdir_in("/tmp")?;
+        let to = format!("unix:{}", dir.path().join("kitty.sock").display());
+
+        let mut cmd = Command::new("open");
+        // `-g` keeps kitty in the background; `-n` starts a new instance even
+        // when the user already runs kitty. `open` passes this environment on.
+        cmd.args(["-g", "-n", "-a", "kitty", "--args", "--config", "NONE"]);
+        for option in [
+            "allow_remote_control=socket-only".to_string(),
+            "remember_window_size=no".to_string(),
+            format!("initial_window_width={columns}c"),
+            format!("initial_window_height={lines}c"),
+            // Otherwise quitting with a shell running opens a confirmation window.
+            "confirm_os_window_close=0".to_string(),
+        ] {
+            cmd.args(["-o", &option]);
+        }
+        cmd.args(["--listen-on", &to]);
+        cmd.args(super::login_shell_argv(&super::detect_shell(), false));
+        super::apply_color_forcing_env(&mut cmd);
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "open -a kitty failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+
+        let deadline = std::time::Instant::now() + SPAWN_TIMEOUT;
+        let (window_id, platform_window_id) = loop {
+            if let Some(ids) = first_window(&to) {
+                break ids;
+            }
+            if std::time::Instant::now() > deadline {
+                quit_instance(&to);
+                return Err(io::Error::other("the private kitty instance never answered on its socket"));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        let instance = Self { _dir: dir, to, window_id, platform_window_id };
+        wait_for_prompt(&mut instance.harness())?;
+        Ok(instance)
+    }
+
+    /// A harness attached to the instance's window. It does not own the
+    /// window; the instance closes it.
+    pub fn harness(&self) -> KittyHarness {
+        let mut harness = KittyHarness::attach(self.window_id.clone());
+        harness.to = Some(self.to.clone());
+        harness
+    }
+
+    /// Writes a PNG of the instance's OS window (title bar included) to
+    /// `path`, without raising or focusing it.
+    ///
+    /// The capture's pixels are kitty's device pixels: the cell grid is
+    /// `columns × cell width` wide, centered between equal side borders and
+    /// flush with the bottom border.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when `screencapture` fails. Without the Screen
+    /// Recording permission for the calling terminal, macOS returns an image
+    /// without the window's contents rather than an error.
+    pub fn screenshot(&self, path: &std::path::Path) -> io::Result<()> {
+        let mut cmd = Command::new("screencapture");
+        cmd.args(["-x", "-o", "-l", &self.platform_window_id.to_string()]).arg(path);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        if !out.status.success() || !path.exists() {
+            return Err(io::Error::other(format!(
+                "screencapture failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for KittyInstance {
+    fn drop(&mut self) {
+        quit_instance(&self.to);
+    }
+}
+
+/// The first window's id and its OS window's `platform_window_id` (the macOS
+/// CGWindowID), once the instance answers `kitty @ ls`.
+fn first_window(to: &str) -> Option<(String, u64)> {
+    let mut cmd = remote_command(Some(to));
+    cmd.arg("ls");
+    let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let listing: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let os_window = listing.as_array()?.first()?;
+    let platform = os_window.get("platform_window_id")?.as_u64()?;
+    let window = os_window.get("tabs")?.as_array()?.first()?.get("windows")?.as_array()?.first()?;
+    Some((window.get("id")?.as_u64()?.to_string(), platform))
+}
+
+fn quit_instance(to: &str) {
+    let mut cmd = remote_command(Some(to));
+    cmd.args(["action", "quit"]).stdout(Stdio::null()).stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+}
+
+/// Quits private instances whose owning process is gone. A test killed by a
+/// timeout skips [`Drop`], and its window would otherwise stay on screen.
+fn cleanup_stale_kitty_instances() {
+    let Ok(entries) = std::fs::read_dir("/tmp") else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(owner) = name
+            .strip_prefix(INSTANCE_DIR_PREFIX)
+            .and_then(|rest| rest.split('-').next())
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if super::process_is_alive(owner) {
+            continue;
+        }
+        let socket = entry.path().join("kitty.sock");
+        if socket.exists() {
+            quit_instance(&format!("unix:{}", socket.display()));
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
     }
 }
 
