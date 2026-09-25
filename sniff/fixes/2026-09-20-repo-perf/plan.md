@@ -1,13 +1,22 @@
 ---
 total_phases: 6
 created: 2026-09-20
-phase: 1
+phase: 2
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-20-repo-perf
 spec: sniff/fixes/2026-09-20-repo-perf/spec.md
 packages:
     - sniff
+source_files_during_phase_2:
+    - sniff/lib/src/filesystem/repo/nested.rs
+docs_updated_during_phase_2:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/sniff/performance.md
 source_files_during_phase_1:
     - sniff/lib/src/filesystem/repo/nested.rs
     - sniff/lib/src/filesystem/repo/mod.rs
@@ -271,7 +280,7 @@ counter snapshots) stored under `sniff/fixes/2026-09-20-repo-perf/evidence/`.
 Depends on Phase 1 (harness commit and spike findings). Production change,
 kept surgical.
 
-- [ ] **Rewrite the walk**
+- [x] **Rewrite the walk**
     - Replace `build()` with `build_parallel()` in `walk_for_nested_markers`
       preserving: `hidden(false)`, `git_ignore(true)`, `git_global(true)`,
       `git_exclude(true)`, the existing `filter_entry` directory prune, and
@@ -292,7 +301,7 @@ kept surgical.
       still drop cleanly (flush collector, merge its possibly-empty batch) —
       the `Drop`-based pattern provides this; keep the struct owned by the
       boxed closure so it drops on the executing thread.
-- [ ] **Propagate collectors**
+- [x] **Propagate collectors**
     - Follow `manifest_index.rs` exactly: `WorkerCollector::inherit()` when
       building each visitor, `activate()` as the first statement of the
       callback, flush via drop on the worker thread. After `run` returns
@@ -301,11 +310,11 @@ kept surgical.
     - Keep `FS_READ_DIRS` + `REPO_NESTED_MARKER_WALKS` increments exactly
       where they are (before the walk), including for empty and missing
       roots; add no counters.
-- [ ] **Add worker-count seam**
+- [x] **Add worker-count seam**
     - Implement the R1 private seam (`Option<usize>` threads parameter
       defaulting to `None` = locked ignore default). Production path passes
       `None`; nothing public is exposed and no tuning knob is documented.
-- [ ] **Drift-proof the docs**
+- [x] **Drift-proof the docs**
     - Update the module/function docs for the parallel walk: per-worker
       buffers, merge-once, collector propagation, default worker policy.
       Fix the ambiguous "see the spec's 'Intentional Behavior Change' section"
@@ -314,7 +323,7 @@ kept surgical.
       not as changes introduced by this fix (spec compatibility section).
     - Per AGENTS.md comment discipline: no HOW-narration; keep the
       contract/invariant comments that earn their length.
-- [ ] **Smoke the result**
+- [x] **Smoke the result**
     - Existing `nested.rs` and `detection.rs` tests pass unchanged;
       `performance::testing::measure` shows exactly one
       `FS_READ_DIRS` + one `REPO_NESTED_MARKER_WALKS` for a direct fallback

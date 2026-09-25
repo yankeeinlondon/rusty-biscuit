@@ -25,6 +25,15 @@ skills_files_updated_during_phase_1:
     - .claude/skills/sniff/performance.md
 packages:
     - sniff
+source_files_during_phase_2:
+    - sniff/lib/src/filesystem/repo/nested.rs
+docs_updated_during_phase_2:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/sniff/performance.md
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -159,3 +168,114 @@ module in `nested.rs`, run and then deleted; none of it remains.
 The sniff skill's `performance.md` gained one trap bullet: serial versus
 parallel `ignore` root-entry handling for a symlinked root, and tiny trees
 running on one thread.
+
+## Phase 2
+
+### Starting state (2026-09-25)
+
+- The Phase 1 harness is committed (`a734cdfc8` and ancestors); the working
+  tree was clean at the start. Grounding facts are unchanged:
+  `walk_for_nested_markers` still has one caller, and the counters sit where
+  the plan says.
+
+### Rulings applied
+
+- **Depth-0 root entry (spike finding 2): adopted as the default.** The
+  parallel callback skips `entry.depth() == 0`. For a symlinked root this is
+  redundant with the directory filter on the parallel side, but it holds on
+  every platform. `serial_reference_paths` got the same skip, and its doc
+  records this as its one deliberate difference from the pre-change loop.
+  For a non-symlink root, the root is a directory and was already dropped,
+  so corpus counts and Phase 1 baselines are unaffected. The author can
+  still override this in review.
+- **R1 seam:** `walk_for_nested_markers_with_threads(root, Option<usize>)`
+  is a private fn. Production `walk_for_nested_markers(root)` delegates with
+  `None`, and `Some(n)` maps to `WalkBuilder::threads(n)`. Nothing is public;
+  the bench seam still calls `walk_for_nested_markers`.
+- The R2 test-only callback counter is left to Phase 3 (Work-group C), as
+  the plan schedules.
+
+### Deviation from the template: collector activation order
+
+The plan says to follow `manifest_index.rs` exactly, with `activate()` as the
+first statement of the callback. Reading `ignore` 0.4.25
+(`WalkParallel::visit`) shows that the first `builder.build()` visitor lives
+on the **calling** thread and receives only root errors (`device_num` /
+`DirEntryRaw::from_path` failures, e.g. a missing root).
+`WorkerCollector::activate()` on the calling thread clears that thread's
+`COUNTER_BUFFER`/`STAGE_BUFFER`, and its drop sets `CURRENT_COLLECTOR` to
+`None`. So with activate-first, a missing root would:
+
+1. discard the just-recorded `FS_READ_DIRS` / `REPO_NESTED_MARKER_WALKS`
+   and any earlier buffered request work;
+2. stop the caller from recording anything for the rest of the request.
+
+Mitigation: activate after the `Ok(entry)` match. Errors record no work, so
+nothing is lost. Proof:
+- Regression test `a_missing_root_keeps_the_callers_counters`.
+- With the activate-first variant temporarily swapped in, it **failed**
+  (`FS_READ_DIRS` read 0). With the final code it passes.
+
+`ManifestIndex::build` has the same latent pattern. Its only production call
+(`detection.rs:722`) runs after nested outcomes exist, so its root exists and
+the hazard is not reachable in practice (only if the root vanishes
+mid-request). It is out of scope for this surgical fix and left unchanged;
+it is noted for the author.
+
+### Implementation (`nested.rs` only)
+
+- `build()` → `build_parallel().run(..)`, with the builder settings
+  unchanged.
+- Per-visitor `MarkerWorker { shared, collector, local }`, with a `Drop`
+  merge into `Arc<Mutex<Vec<PathBuf>>>`: one lock per visitor lifetime, and
+  only when its batch is non-empty.
+- The callback does these steps in order:
+  - `Err` → continue;
+  - activate the collector;
+  - skip depth 0, entries whose available file type is a directory (never
+    `is_file()`), and non-markers (`is_nested_marker_path` runs before any
+    allocation);
+  - `entry.into_path()` into the local vec.
+  There are no metadata reads, cap, or early exit.
+- After `run` returns (workers joined, so all visitors have dropped and
+  merged), `mem::take` the shared vec and call
+  `candidates_from_marker_paths` once.
+- The counters stay at the top of the walk body, once per invocation.
+- Docs:
+  - The function doc now describes the parallel walk, the default worker
+    policy, the scheduling-independent result, and the root-entry rule.
+  - The ignored-marker and marker-named-directory notes are reworded as
+    long-standing behavior relative to the older probe loop.
+  - The ambiguous "see the spec's 'Intentional Behavior Change' section"
+    link is removed.
+  - Inline comments explain the activation order and the join/merge
+    invariant.
+
+### Tests added (lib unit-test target; no tier marker, so L1)
+
+| Requirement | Test |
+|---|---|
+| One logical walk per invocation, with counters at the chokepoint, for the default, 1-worker, and 4-worker configurations; candidates are correct in each | `filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation` |
+| A missing root yields no candidates and keeps 1/1 walk counters; caller work recorded before *and* after the walk survives (regression for the activation-order hazard; failed with activate-first) | `filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters` |
+| A marker-named symlinked root registers no candidate outside the root; production and serial reference both equal independently spelled candidates, keeping the link spelling | `filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root` (`cfg(unix)`; Windows symlink coverage is Phase 3 R5) |
+| Existing behavior retained | the five pre-existing nested tests, `serial_reference_walk_matches_the_production_walk`, and the `detection.rs` tests are all unmodified and green |
+
+### Gates
+
+- Focused: `cargo nextest run -p sniff --lib --features remote -E
+  'test(/filesystem::repo::(nested|detection)/)'` gave 59 passed.
+- `just test` (sniff): **2861 passed, 31 skipped**. That is Phase 1's 2858
+  plus the 3 new tests; the skips are the same pre-existing tier/capability
+  skips.
+- `just lint`: clean.
+- `cargo clippy -D warnings --all-targets` is clean for:
+  - `-p sniff`;
+  - `-p sniff --features remote,bench-internals`;
+  - `-p sniff-cli`.
+- Cross-OS (`just cross-check sniff --os <os> nested::tests`):
+  - native Windows: 8/8 passed (the `cfg(unix)` symlink test is not
+    compiled there);
+  - Linux (build-linux): 9/9 passed.
+  - WSL2 was not run in this phase. There is no `cfg` difference from
+    Linux; the full OS legs are Phase 5.
+- Production diff: `nested.rs` only. No dependency changes.

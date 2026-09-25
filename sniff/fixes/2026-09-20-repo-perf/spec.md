@@ -31,31 +31,32 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 human_review: false
 message_to_agent: |-
-    Phase 1 (claude/default) is done; the harness is in the working tree and is NOT committed
-    (this session may not commit), so the "harness commit" boundary is whatever commit captures
-    Phase 1's files. Read evidence/spike.md before Phase 2. It found one real serial/parallel
-    divergence: when the starting root is a SYMLINK to a directory, ignore's serial build() yields
-    the depth-0 root entry with the link's file type (not a dir), so today's non-directory filter
-    admits the root path; build_parallel() yields it as a dir and drops it. Normally harmless
-    (the root's basename is not a marker), but a symlinked root NAMED like a marker (e.g. a link
-    called package.json) makes today's production walk register the root's PARENT (outside the
-    repo) as a nested candidate; the parallel walk does not. Default ruling proposed in spike.md
-    (author may override in review): treat the depth-0 root entry as never being marker evidence -
-    skip entry.depth() == 0 in the parallel callback, give the Phase 3 serial reference the same
-    skip (documented as its one deliberate delta from the pre-change loop), and pin with a test.
-    The serial reference already exists as nested.rs `serial_reference_paths` (frozen copy of the
-    pre-change loop, cfg(any(test, feature = "bench-internals"))) and is exposed with the production
-    walk and corpus counts through `sniff::filesystem::repo::nested_benchmark`; if you adopt the
-    depth-0 ruling, add the skip there and update its doc comment. Phase 4 measurement recipe
-    (commands, CRITERION_HOME, SNIFF_BENCH_NESTED_CORPUS, bracket order) is in
-    evidence/baseline/README.md; baseline medians: walk 168.6 ms debug / 62.9 ms release,
-    detect_repo_structure 240 ms / 77 ms; corpus 12,893 entries, 116 markers, 112 candidates.
-    Also: the default policy ran tiny fixtures on ONE callback thread - use an explicit
-    multi-worker thread count (Ruling 1 seam) for worker-propagation tests. `cargo clippy
-    --features network` (without remote) has pre-existing dead-code errors unrelated to this fix;
-    lint with `bench-internals` or `remote,bench-internals`. Unrelated working-tree changes
-    appeared during Phase 1 (sniff/.ai/plans/... deletion, sniff/fixes/2026-09-25-recent-commits/,
-    prompts/_implement/implement-plan.md) - not ours; leave them alone.
+    Phase 2 (claude/default) is done, uncommitted in the working tree; the production diff is
+    nested.rs only. What Phase 3+ needs to know:
+    (1) Depth-0 ruling ADOPTED: the parallel callback skips entry.depth() == 0, and
+    serial_reference_paths has the same skip (documented there as its one deliberate delta). The Unix
+    pin test a_marker_named_symlinked_root_registers_no_candidate_outside_the_root exists; Phase 3
+    still owns the native-Windows symlinked-root case (R5).
+    (2) R1 seam: private fn walk_for_nested_markers_with_threads(root, Option<usize>); None is the
+    production default and Some(n) calls WalkBuilder::threads(n). Use Some(1) and Some(n>1) for the
+    one-worker and multi-worker parity runs.
+    (3) IMPORTANT deviation from manifest_index.rs: WorkerCollector::activate() is called AFTER the
+    Ok(entry) match, not first. ignore 0.4.25 builds its first visitor on the CALLING thread and
+    passes it only root errors (e.g. a missing root). Activating there clears the caller's buffered
+    counters, and its drop uninstalls the caller's collector.
+    a_missing_root_keeps_the_callers_counters pins this (it fails with activate-first). Keep that
+    order when adding the R2 test-only callback counter: increment only for Ok entries, after
+    activate().
+    (4) Already covered by Phase 2 tests, so Phase 3 can reuse them rather than duplicate: counter
+    1/1 for a populated root (default, 1, and 4 workers) and for a missing root.
+    fallback_walk_records_one_logical_walk_per_invocation and the missing-root test live in the
+    nested.rs test module. Still owned by Phase 3: the empty root, supplied evidence including
+    Some(&[]), and R2 propagation.
+    (5) ManifestIndex::build has the same latent activate-first pattern, but its root always exists
+    at its only production call site. It was left unchanged as out of scope and noted in the log;
+    do not widen scope to fix it here.
+    (6) Unchanged from Phase 1: lint with bench-internals or remote,bench-internals, because
+    --features network alone has pre-existing dead-code errors.
 ---
 
 # Parallelize the nested-marker walk
