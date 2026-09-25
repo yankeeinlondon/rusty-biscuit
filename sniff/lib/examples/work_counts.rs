@@ -16,6 +16,11 @@
 //!
 //! Fixtures are the same synthetic trees the Criterion benches use, so a
 //! counter here and a timing there describe the same workload.
+//!
+//! Set `SNIFF_WORK_COUNTS_CORPUS` to a checkout to add a
+//! `repo_structure_corpus` case: `detect_repo_structure` on that tree, whose
+//! `filesystem.repo.nested_marker_walks` shows whether it took the
+//! nested-marker fallback walk the `nested_marker_walk_corpus` bench times.
 
 // The bench fixture builders are deliberately `#[path]`-includable so benches,
 // profiling examples, and tests materialize byte-identical trees.
@@ -73,6 +78,14 @@ fn main() {
     report("git_status_unified_diffs_100_dirty", || {
         detect_git_with_request(dirty.path(), &GitRequest::deep()).map(drop)
     });
+
+    if let Some(corpus) = std::env::var_os("SNIFF_WORK_COUNTS_CORPUS") {
+        let corpus = std::path::PathBuf::from(corpus);
+        println!("Corpus: `{}`\n", corpus.display());
+        report("repo_structure_corpus", || {
+            detect_repo_structure(&corpus).map(drop)
+        });
+    }
 }
 
 /// Runs `case` under a private collector and prints what it cost.

@@ -11,6 +11,9 @@ pub mod identity;
 pub mod manifest_index;
 pub mod maven;
 pub(crate) mod nested;
+#[cfg(any(test, feature = "bench-internals"))]
+#[doc(hidden)]
+pub use nested::benchmark as nested_benchmark;
 pub mod npm;
 pub mod nx_turbo;
 pub(crate) mod ownership;

@@ -271,6 +271,91 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
     candidates_from_marker_paths(root, &paths)
 }
 
+/// Every non-directory entry the pre-parallelization serial walk admitted.
+///
+/// A frozen copy of the serial collect-all loop `walk_for_nested_markers`
+/// used before the `2026-09-20-repo-perf` fix. It is kept independent of the
+/// production walker on purpose: it is both the parity oracle for the
+/// parallel walk and the in-process "before" side of its measurements, so a
+/// change to the production builder must not change it too. It records no
+/// work counters.
+#[cfg(any(test, feature = "bench-internals"))]
+fn serial_reference_paths(root: &Path) -> Vec<PathBuf> {
+    WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                return true;
+            }
+            !entry
+                .file_name()
+                .to_str()
+                .is_some_and(should_skip_directory_name)
+        })
+        .build()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| !entry.file_type().is_some_and(|ft| ft.is_dir()))
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
+/// Measurement access to the nested-marker fallback walk.
+///
+/// Only compiled for tests and the `bench-internals` feature; it is not part of
+/// the public API.
+#[cfg(any(test, feature = "bench-internals"))]
+#[doc(hidden)]
+pub mod benchmark {
+    use std::path::{Path, PathBuf};
+
+    use super::MonorepoStandard;
+
+    /// A nested candidate as an ordered `(root, matched_standards)` pair.
+    pub type CandidateFields = (PathBuf, Vec<MonorepoStandard>);
+
+    /// Sizes of the tree the serial reference walk sees under one root.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NestedWalkCorpus {
+        /// Non-directory entries admitted by the walk's ignore and prune rules.
+        pub walked_entries: usize,
+        /// Of those, the entries whose file name is a nested-workspace marker.
+        pub marker_entries: usize,
+    }
+
+    /// The production fallback walk, including its work counters.
+    pub fn production_walk(root: &Path) -> Vec<CandidateFields> {
+        into_fields(super::walk_for_nested_markers(root))
+    }
+
+    /// The frozen pre-parallelization serial walk, without work counters.
+    pub fn serial_reference_walk(root: &Path) -> Vec<CandidateFields> {
+        let paths = super::serial_reference_paths(root);
+        into_fields(super::candidates_from_marker_paths(root, &paths))
+    }
+
+    /// Count what the serial reference walk visits under `root`.
+    pub fn corpus(root: &Path) -> NestedWalkCorpus {
+        let paths = super::serial_reference_paths(root);
+        NestedWalkCorpus {
+            walked_entries: paths.len(),
+            marker_entries: paths
+                .iter()
+                .filter(|path| super::is_nested_marker_path(path))
+                .count(),
+        }
+    }
+
+    fn into_fields(candidates: Vec<super::Candidate>) -> Vec<CandidateFields> {
+        candidates
+            .into_iter()
+            .map(|candidate| (candidate.root, candidate.matched_standards))
+            .collect()
+    }
+}
+
 /// Whether `path` names a nested-workspace marker file.
 ///
 /// This is the predicate the shared observation walk applies when it records
@@ -527,6 +612,60 @@ mod tests {
             "supplied evidence must dispatch the same standards as the walk"
         );
         assert_eq!(supplied.len(), 3, "root marker must not be a candidate");
+    }
+
+    /// The measurement seam's serial reference and the production walk agree,
+    /// and both match candidates spelled out independently of the shared
+    /// projection, so the "before" side of the walk benchmarks is the walk it
+    /// claims to be.
+    #[test]
+    fn serial_reference_walk_matches_the_production_walk() {
+        use crate::filesystem::repo::nested_benchmark;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), "{}\n").expect("write root marker");
+        for (sub, file) in [
+            ("apps/web", "package.json"),
+            ("apps/web", "pnpm-workspace.yaml"),
+            ("crates/core", "Cargo.toml"),
+            ("node_modules/dep", "package.json"),
+            ("marker/package.json", "notes.txt"),
+        ] {
+            let nested = root.join(sub);
+            std::fs::create_dir_all(&nested).expect("create nested dir");
+            std::fs::write(nested.join(file), "{}\n").expect("write fixture file");
+        }
+
+        let mut expected = vec![
+            (
+                root.join("apps/web"),
+                vec![
+                    MonorepoStandard::NpmWorkspaces,
+                    MonorepoStandard::YarnWorkspaces,
+                    MonorepoStandard::PnpmWorkspaces,
+                    MonorepoStandard::BunWorkspaces,
+                ],
+            ),
+            (
+                root.join("crates/core"),
+                vec![MonorepoStandard::CargoWorkspace],
+            ),
+        ];
+        for (_, standards) in &mut expected {
+            standards.sort_by_key(|s| s.spec().id);
+        }
+
+        assert_eq!(nested_benchmark::serial_reference_walk(root), expected);
+        assert_eq!(nested_benchmark::production_walk(root), expected);
+        assert_eq!(
+            nested_benchmark::corpus(root),
+            nested_benchmark::NestedWalkCorpus {
+                walked_entries: 5,
+                marker_entries: 4,
+            },
+            "the pruned node_modules marker is not walked"
+        );
     }
 
     /// The root-marker exception survives the supplied-evidence path.

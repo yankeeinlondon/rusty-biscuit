@@ -9,6 +9,11 @@
 //! Each [`BenchmarkId`](criterion::BenchmarkId) is parameterized by
 //! package count, so Criterion produces a single comparable line across
 //! counts.
+//!
+//! The `nested_marker_walk_corpus` group times the nested-marker fallback walk
+//! against a caller-named checkout. It is manual evidence for
+//! `2026-09-20-repo-perf`, not a portable timing gate: it registers only when
+//! `SNIFF_BENCH_NESTED_CORPUS` names a directory and `bench-internals` is on.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box};
 use sniff::filesystem::file_types::scan_file_inventory;
@@ -61,5 +66,49 @@ pub fn register(c: &mut Criterion) {
         );
     }
 
+    group.finish();
+
+    #[cfg(feature = "bench-internals")]
+    register_nested_marker_corpus(c);
+}
+
+#[cfg(feature = "bench-internals")]
+fn register_nested_marker_corpus(c: &mut Criterion) {
+    use criterion::SamplingMode;
+    use sniff::filesystem::repo::nested_benchmark;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    let Some(corpus) = std::env::var_os("SNIFF_BENCH_NESTED_CORPUS").map(PathBuf::from) else {
+        return;
+    };
+    // Recorded beside the timings so a sample can be tied to the tree it walked.
+    let facts = nested_benchmark::corpus(&corpus);
+    let candidates = nested_benchmark::serial_reference_walk(&corpus).len();
+    eprintln!(
+        "nested_marker_walk_corpus: root={} walked_entries={} marker_entries={} candidates={candidates}",
+        corpus.display(),
+        facts.walked_entries,
+        facts.marker_entries,
+    );
+
+    let mut group = c.benchmark_group("nested_marker_walk_corpus");
+    // Flat sampling keeps every one of the 20 samples at the same iteration
+    // count, so `sample.json` holds directly comparable per-sample times.
+    group
+        .sampling_mode(SamplingMode::Flat)
+        .sample_size(20)
+        .warm_up_time(Duration::from_secs(3))
+        .measurement_time(Duration::from_secs(10));
+
+    group.bench_function("serial_reference", |b| {
+        b.iter(|| black_box(nested_benchmark::serial_reference_walk(black_box(&corpus))));
+    });
+    group.bench_function("production", |b| {
+        b.iter(|| black_box(nested_benchmark::production_walk(black_box(&corpus))));
+    });
+    group.bench_function("detect_repo_structure", |b| {
+        b.iter(|| black_box(detect_repo_structure(black_box(&corpus)).unwrap()));
+    });
     group.finish();
 }
