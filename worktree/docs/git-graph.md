@@ -68,4 +68,5 @@ Each open PR from origin's own repository whose head is a drawn branch becomes a
 
 - [`git_graph/tests.rs`](../cli/src/commands/git_graph/tests.rs): the facts each view hands over (exact full SHAs, fork points, parents, elision, origin ahead and diverged, a criss-cross history), the shared `merge-base`, call counts, PR filtering, and the `--width` override.
 - `GitGraph`'s own tests cover the lane/tag rule, trimming, and sizing (`biscuit-terminal/lib/src/components/git_graph/tests.rs`).
-- `level2_list_verbose.rs` runs the image path in real terminals.
+- `level2_list_verbose.rs` runs the image path in tmux, which cannot display it.
+- `level2_graph_in_kitty.rs` checks the graph as Kitty draws it (macOS): in a short and a narrow window, the image's columns fit, its rows respect the half-height cap and match the rows `wt` reserves, the elision notice follows it, the table is intact, and a screenshot shows the image where it belongs.
