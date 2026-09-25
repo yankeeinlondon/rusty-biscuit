@@ -9,7 +9,7 @@ use renderable::tree::render::{
 };
 use renderable::tree::{
     ColumnAlign, ColumnConditional, RenderNode, RenderStrictness, TableCellHints, TableColumnHints,
-    TableTerminalHints, TreeRenderable,
+    TableRowHighlight, TableTerminalHints, TreeRenderable,
 };
 
 use renderable::style::Style;
@@ -228,7 +228,7 @@ impl Table {
 
     /// Enable alternating row background colors.
     ///
-    /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
+    /// When enabled, every second data row (0-indexed rows 1, 3, 5, ...) receives a
     /// background stripe in the adaptive default color for the terminal's
     /// light or dark mode. The color is degraded across color depths, so the
     /// stripe still renders on 256-color and 16-color terminals.
@@ -243,7 +243,7 @@ impl Table {
 
     /// Enable alternating row text colors.
     ///
-    /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
+    /// When enabled, every second data row (0-indexed rows 1, 3, 5, ...) receives a
     /// text-color stripe in the adaptive default color for the terminal's
     /// light or dark mode, degraded across color depths.
     ///
@@ -272,8 +272,37 @@ impl Table {
         self
     }
 
-    /// The typed [`TableStyle`] slots for this table — row striping plus the
-    /// header and body appearance slots.
+    /// Paint one data row's background with `color`.
+    ///
+    /// `row` is the 0-based **data** row index — the header is not counted, so
+    /// `0` is the first row below the header separator. An index past the last
+    /// data row highlights nothing. Calling this again replaces the previous
+    /// highlight; only one row is highlighted at a time.
+    ///
+    /// The highlight wins over striping on its row and composes with cell
+    /// styling as described under [Row highlight](TableStyle#row-highlight).
+    /// It is a terminal-only appearance: Browser and Markdown output ignore
+    /// it, as they ignore striping.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::{Table, TableColumn};
+    /// use renderable::color::{BasicColor, Color, RgbColor};
+    ///
+    /// let table = Table::new()
+    ///     .with_columns(vec![TableColumn::new("Branch")])
+    ///     .with_data(vec![vec!["main".into()], vec!["feature".into()]])
+    ///     .highlight_row(1, Color::Rgb(RgbColor::new(40, 44, 64, BasicColor::Black)));
+    /// assert_eq!(table.style().highlight_row.map(|h| h.row), Some(1));
+    /// ```
+    pub fn highlight_row(mut self, row: usize, color: Color) -> Self {
+        self.style.highlight_row = Some(TableRowHighlight { row, bg: color });
+        self
+    }
+
+    /// The typed [`TableStyle`] slots for this table — row striping, the row
+    /// highlight, and the header and body appearance slots.
     pub fn style(&self) -> TableStyle {
         self.style.clone()
     }
@@ -1028,7 +1057,7 @@ impl Table {
     /// within that space (accounting for border overhead).
     ///
     /// `stripe_bg` / `stripe_fg`, when `Some`, are the pre-resolved SGR
-    /// escape sequences applied to even data rows (0-indexed: 1, 3, 5, ...).
+    /// escape sequences applied to every second data row (0-indexed rows 1, 3, 5, ...).
     /// They are resolved by the caller through the shared, capability-aware
     /// color path so striping degrades with the terminal's color depth.
     ///
@@ -1142,21 +1171,14 @@ impl Table {
 
         // Calculate row heights for multi-line support
         let row_heights = self.calculate_row_heights_for_plan(&plan);
+        let highlight = highlight_bg_escape(self.style.highlight_row, term.color_depth);
+        let highlight = highlight.as_ref().map(|(row, bg)| (*row, bg.as_str()));
 
         // Render data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
             let row_height = row_heights.get(row_idx).copied().unwrap_or(1);
-            let is_striped = (stripe_bg.is_some() || stripe_fg.is_some()) && row_idx % 2 == 1;
-            let active_bg = if stripe_bg.is_some() && row_idx % 2 == 1 {
-                stripe_bg
-            } else {
-                None
-            };
-            let active_fg = if stripe_fg.is_some() && row_idx % 2 == 1 {
-                stripe_fg
-            } else {
-                None
-            };
+            let (active_bg, active_fg) = row_paint(row_idx, stripe_bg, stripe_fg, highlight);
+            let is_striped = active_bg.is_some() || active_fg.is_some();
 
             // Prepare wrapped and vertically-aligned content for each cell
             let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(plan.columns.len());
@@ -1449,6 +1471,8 @@ impl Table {
 
         // Calculate row heights for multi-line support
         let row_heights = self.calculate_row_heights_for_plan(&plan);
+        let highlight = highlight_bg_escape(self.style.highlight_row, term.color_depth);
+        let highlight = highlight.as_ref().map(|(row, bg)| (*row, bg.as_str()));
 
         // Data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
@@ -1489,8 +1513,7 @@ impl Table {
                     })
                     .collect();
 
-                let row_stripe = if row_idx % 2 == 1 { stripe_bg } else { None };
-                let row_text = if row_idx % 2 == 1 { stripe_fg } else { None };
+                let (row_stripe, row_text) = row_paint(row_idx, stripe_bg, stripe_fg, highlight);
                 result.push_str(&render_row_with_cursor_positioning(
                     &line_cells,
                     &widths,
@@ -1656,6 +1679,7 @@ impl Table {
             alternate_text_color: self.style.striped_text,
             stripe_bg: self.style.stripe_bg,
             stripe_text: self.style.stripe_text,
+            highlight_row: self.style.highlight_row,
         });
 
         // Carry the consolidated layout when it differs from the default.
@@ -2704,6 +2728,37 @@ pub(crate) fn stripe_fg_escape(
 ) -> Option<String> {
     let color = explicit.unwrap_or_else(|| default_stripe_text(color_mode));
     color_sgr(color, &depth, false)
+}
+
+/// Lowers the row highlight to its data row index and background SGR escape.
+///
+/// Degrades against `depth` through the shared [`color_sgr`] path like
+/// [`stripe_bg_escape`]; `None` when there is no highlight or the terminal has
+/// no color support.
+pub(crate) fn highlight_bg_escape(
+    highlight: Option<TableRowHighlight>,
+    depth: ColorDepth,
+) -> Option<(usize, String)> {
+    let highlight = highlight?;
+    color_sgr(highlight.bg, &depth, true).map(|sgr| (highlight.row, sgr))
+}
+
+/// Selects the background and text escapes that paint data row `row_idx`.
+///
+/// The highlighted row gets the highlight background and no text tint, so it
+/// looks the same whatever its stripe parity. Other odd-indexed rows get the
+/// stripe; the rest are unpainted.
+pub(crate) fn row_paint<'a>(
+    row_idx: usize,
+    stripe_bg: Option<&'a str>,
+    stripe_fg: Option<&'a str>,
+    highlight: Option<(usize, &'a str)>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    match highlight {
+        Some((row, bg)) if row == row_idx => (Some(bg), None),
+        _ if row_idx % 2 == 1 => (stripe_bg, stripe_fg),
+        _ => (None, None),
+    }
 }
 
 /// The escape sequence that resets only the background color.
@@ -5748,5 +5803,220 @@ mod tests {
         table.layout.margin = Edges::x(Length::ch(2));
         let node = table.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
+    }
+
+    // ── Row highlight ─────────────────────────────────────────────
+
+    const HIGHLIGHT_BG: &str = "\x1b[48;2;40;44;64m";
+    const STRIPE_BG: &str = "\x1b[44m";
+    const STRIPE_FG: &str = "\x1b[33m";
+
+    fn highlight_color() -> Color {
+        Color::Rgb(RgbColor::new(40, 44, 64, BasicColor::Black))
+    }
+
+    /// Four single-line rows, striped in background and text, with explicit
+    /// colors so the escapes are independent of the terminal's color mode.
+    fn striped_four_row_table() -> Table {
+        Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["row0".into()],
+                vec!["row1".into()],
+                vec!["row2".into()],
+                vec!["row3".into()],
+            ])
+            .with_stripe_bg(Color::BasicColor(BasicColor::Blue))
+            .with_stripe_text(Color::BasicColor(BasicColor::Yellow))
+    }
+
+    fn truecolor_terminal() -> Terminal {
+        let mut term = Terminal::new_optimistic(40);
+        term.color_depth = ColorDepth::TrueColor;
+        term.color_mode = ColorMode::Dark;
+        term
+    }
+
+    fn line_with<'a>(rendered: &'a str, needle: &str) -> &'a str {
+        rendered
+            .lines()
+            .find(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no line contains {needle:?}: {rendered:?}"))
+    }
+
+    /// Asserts the row highlight contract on one rendered table: row 1 takes
+    /// the highlight and no stripe; row 3 keeps both stripes; rows 0 and 2
+    /// stay unpainted.
+    fn assert_highlight_on_row1(rendered: &str) {
+        let row1 = line_with(rendered, "row1");
+        assert!(
+            row1.contains(HIGHLIGHT_BG),
+            "highlight bg on row1: {row1:?}"
+        );
+        assert!(
+            !row1.contains(STRIPE_BG) && !row1.contains(STRIPE_FG),
+            "highlight replaces the stripe on its row: {row1:?}"
+        );
+
+        let row3 = line_with(rendered, "row3");
+        assert!(
+            row3.contains(STRIPE_BG) && row3.contains(STRIPE_FG),
+            "neighboring striped row keeps its stripe: {row3:?}"
+        );
+        assert!(
+            !row3.contains(HIGHLIGHT_BG),
+            "no highlight on row3: {row3:?}"
+        );
+
+        for plain in ["row0", "row2"] {
+            let line = line_with(rendered, plain);
+            assert!(!line.contains('\x1b'), "{plain} stays unpainted: {line:?}");
+        }
+    }
+
+    #[test]
+    fn highlight_row_stores_typed_slot() {
+        let table = Table::new().highlight_row(2, highlight_color());
+
+        assert_eq!(
+            table.style().highlight_row,
+            Some(TableRowHighlight {
+                row: 2,
+                bg: highlight_color(),
+            })
+        );
+    }
+
+    #[test]
+    fn highlight_row_wins_over_stripe_on_tree_path() {
+        let table = striped_four_row_table().highlight_row(1, highlight_color());
+
+        let rendered = table.render(&truecolor_terminal());
+
+        assert_highlight_on_row1(&rendered);
+    }
+
+    #[test]
+    fn highlight_row_wins_over_stripe_on_space_padded_bespoke_path() {
+        let table = striped_four_row_table().highlight_row(1, highlight_color());
+        let mut term = truecolor_terminal();
+        term.is_tty = false;
+
+        let rendered = table.render_bespoke(&term);
+
+        assert_highlight_on_row1(&rendered);
+    }
+
+    #[test]
+    fn highlight_row_wins_over_stripe_on_cursor_positioned_path() {
+        let table = striped_four_row_table()
+            .highlight_row(1, highlight_color())
+            .prefer_cursor_alignment();
+        let mut term = truecolor_terminal();
+        term.is_tty = true;
+
+        let rendered = table.render(&term);
+
+        assert!(
+            rendered.contains("\x1b[3G"),
+            "cursor path taken: {rendered:?}"
+        );
+        let row1 = line_with(&rendered, "row1");
+        assert!(
+            row1.contains(HIGHLIGHT_BG),
+            "highlight bg on row1: {row1:?}"
+        );
+        assert!(!row1.contains(STRIPE_BG), "no stripe on row1: {row1:?}");
+        let row3 = line_with(&rendered, "row3");
+        assert!(row3.contains(STRIPE_BG), "row3 keeps its stripe: {row3:?}");
+    }
+
+    #[test]
+    fn highlight_row_spans_padding_and_leaves_borders_uncolored() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Notes")])
+            .with_data(vec![vec!["a".into(), "short".into()]])
+            .highlight_row(0, highlight_color());
+
+        let rendered = table.render(&truecolor_terminal());
+
+        let row = line_with(&rendered, "short");
+        assert!(
+            row.starts_with(&format!("│{HIGHLIGHT_BG} a")),
+            "highlight starts inside the left border, covering the padding: {row:?}"
+        );
+        assert!(
+            row.ends_with(&format!(" {BG_RESET}│")),
+            "highlight ends after the right padding, before the border: {row:?}"
+        );
+    }
+
+    #[test]
+    fn highlight_row_is_restored_after_cell_sgr_reset() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["\x1b[31mred\x1b[0m plain".into()]])
+            .highlight_row(0, highlight_color());
+
+        let rendered = table.render(&truecolor_terminal());
+
+        let row = line_with(&rendered, "plain");
+        assert!(
+            row.contains("\x1b[31mred"),
+            "cell foreground styling is kept: {row:?}"
+        );
+        assert!(
+            row.contains(&format!("\x1b[0m{HIGHLIGHT_BG} plain")),
+            "highlight bg is restored after the cell's reset: {row:?}"
+        );
+    }
+
+    #[test]
+    fn highlight_row_out_of_range_is_noop() {
+        let term = truecolor_terminal();
+        let baseline = striped_four_row_table().render(&term);
+
+        let highlighted = striped_four_row_table()
+            .highlight_row(4, highlight_color())
+            .render(&term);
+
+        assert_eq!(highlighted, baseline);
+        assert!(!highlighted.contains(HIGHLIGHT_BG));
+    }
+
+    #[test]
+    fn highlight_row_without_color_support_emits_no_sgr() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["row0".into()], vec!["row1".into()]])
+            .highlight_row(0, highlight_color());
+        let mut term = truecolor_terminal();
+        term.color_depth = ColorDepth::None;
+
+        let tree = table.render(&term);
+        let bespoke = table.render_bespoke(&term);
+
+        assert!(!tree.contains('\x1b'), "no SGR on the tree path: {tree:?}");
+        assert!(
+            !bespoke.contains('\x1b'),
+            "no SGR on the bespoke path: {bespoke:?}"
+        );
+    }
+
+    #[test]
+    fn highlight_row_degrades_below_truecolor() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["row0".into()]])
+            .highlight_row(0, highlight_color());
+        let mut term = truecolor_terminal();
+        term.color_depth = ColorDepth::Basic;
+
+        let rendered = table.render(&term);
+
+        assert!(
+            rendered.contains("\x1b[40m"),
+            "highlight degrades to its basic fallback: {rendered:?}"
+        );
     }
 }
