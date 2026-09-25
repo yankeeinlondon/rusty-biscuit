@@ -54,6 +54,26 @@ pub struct PrEvidence {
     pub target_branch: Option<String>,
 }
 
+/// One open PR against a repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PrSummary {
+    pub number: u64,
+    /// `None` when the provider sent no link, or one outside the provider's
+    /// own host.
+    pub html_url: Option<String>,
+    /// `owner/repo` (GitLab: full project path) of the repository the head
+    /// branch lives in, as the provider spells it; a fork's differs from the
+    /// target's.
+    ///
+    /// `None` when the provider cannot name it (a deleted fork, or a GitLab
+    /// fork project the caller may not see). Such a PR matches no local
+    /// branch.
+    pub source_repo: Option<String>,
+    pub source_branch: Option<String>,
+    pub target_branch: Option<String>,
+}
+
 /// Why no answer, positive or negative, could be obtained.
 ///
 /// None of these is ever reported as `Ok(None)`: only a provider that answered
@@ -139,6 +159,61 @@ pub fn pull_request_for_branch_with(
         client.branch_pull_requests(source_repo, branch).await
     })?;
     Ok(select_evidence(candidates, source_repo))
+}
+
+/// Lists every open PR against the repository at `remote_url`, in the
+/// provider's order.
+///
+/// Pages are followed up to the focused client's page bound. A match against
+/// a local branch must compare both [`PrSummary::source_repo`] and
+/// [`PrSummary::source_branch`], since a fork can open a PR from a branch with
+/// the same name.
+///
+/// Supported hosts are those of [`pull_request_for_branch`]; for a
+/// self-hosted server that needs consented discovery, call
+/// [`open_pull_requests_with`].
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// Every failure to get an answer is a [`PrUnavailable`], never an empty
+/// list: in particular a 401 or 403 is [`PrUnavailable::Auth`] and a list 404
+/// is [`PrUnavailable::NotFoundOrNotPermitted`]. More open PRs than the page
+/// bound allows is [`PrUnavailable::Other`].
+pub fn open_pull_requests(
+    remote_url: &str,
+    deadline: Duration,
+) -> Result<Vec<PrSummary>, PrUnavailable> {
+    let client = client_for_url(remote_url)?;
+    open_pull_requests_with(&client, deadline)
+}
+
+/// [`open_pull_requests`] through an already-built client, whose API base,
+/// fetch policy, and credential scope are used as they are.
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// As for [`open_pull_requests`].
+pub fn open_pull_requests_with(
+    client: &FocusedProviderClient,
+    deadline: Duration,
+) -> Result<Vec<PrSummary>, PrUnavailable> {
+    let records = run_with_deadline(client, deadline, |client| async move {
+        client.open_pull_requests().await
+    })?;
+    Ok(records
+        .into_iter()
+        .map(|record| PrSummary {
+            number: record.number,
+            html_url: Some(record.html_url).filter(|url| !url.is_empty()),
+            source_repo: record.source_repo,
+            source_branch: record.source_branch,
+            target_branch: record.target_branch,
+        })
+        .collect())
 }
 
 /// Runs one focused-client operation on a fresh current-thread runtime, with

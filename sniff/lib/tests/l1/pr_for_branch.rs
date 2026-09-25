@@ -16,15 +16,15 @@ use test_toolkit::EnvGuard;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FLAVORS: [ApiFlavor; 4] = [
+pub(super) const FLAVORS: [ApiFlavor; 4] = [
     ApiFlavor::GitHub,
     ApiFlavor::GitLab,
     ApiFlavor::Gitea,
     ApiFlavor::Bitbucket,
 ];
-const TARGET: &str = "acme/project";
-const BRANCH: &str = "feature";
-const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+pub(super) const TARGET: &str = "acme/project";
+pub(super) const BRANCH: &str = "feature";
+pub(super) const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 const TOKEN_VARIABLES: [&str; 8] = [
     "GH_TOKEN",
     "GITHUB_TOKEN",
@@ -38,21 +38,21 @@ const TOKEN_VARIABLES: [&str; 8] = [
 
 /// Clears every provider token so a developer's real credentials never reach
 /// the loopback server and the "no token" paths are deterministic.
-fn without_tokens() -> Vec<EnvGuard> {
+pub(super) fn without_tokens() -> Vec<EnvGuard> {
     TOKEN_VARIABLES
         .into_iter()
         .map(EnvGuard::remove_safe)
         .collect()
 }
 
-struct Provider {
+pub(super) struct Provider {
     runtime: tokio::runtime::Runtime,
     server: MockServer,
     flavor: ApiFlavor,
 }
 
 impl Provider {
-    fn start(flavor: ApiFlavor) -> Self {
+    pub(super) fn start(flavor: ApiFlavor) -> Self {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -65,18 +65,18 @@ impl Provider {
         }
     }
 
-    fn mount(&self, mock: Mock) {
+    pub(super) fn mount(&self, mock: Mock) {
         self.runtime.block_on(mock.mount(&self.server));
     }
 
     /// Serves `items` (one page) from this provider's PR list endpoint.
-    fn serve_list(&self, items: Vec<Value>) {
+    pub(super) fn serve_list(&self, items: Vec<Value>) {
         self.serve_list_response(
             ResponseTemplate::new(200).set_body_json(list_body(self.flavor, items)),
         );
     }
 
-    fn serve_list_response(&self, response: ResponseTemplate) {
+    pub(super) fn serve_list_response(&self, response: ResponseTemplate) {
         self.mount(
             Mock::given(method("GET"))
                 .and(path_regex(list_path_pattern(self.flavor)))
@@ -84,7 +84,7 @@ impl Provider {
         );
     }
 
-    fn client(&self) -> FocusedProviderClient {
+    pub(super) fn client(&self) -> FocusedProviderClient {
         let remote = ResolvedRemote {
             name: "origin".to_string(),
             fetch_url: "git@127.0.0.1:acme/project.git".to_string(),
@@ -116,7 +116,7 @@ impl Provider {
     }
 
     /// Query pairs of every request the server received, in order.
-    fn received_queries(&self) -> Vec<Vec<(String, String)>> {
+    pub(super) fn received_queries(&self) -> Vec<Vec<(String, String)>> {
         self.runtime
             .block_on(self.server.received_requests())
             .expect("request recording is on")
@@ -140,7 +140,7 @@ fn list_path_pattern(flavor: ApiFlavor) -> &'static str {
     }
 }
 
-fn list_body(flavor: ApiFlavor, items: Vec<Value>) -> Value {
+pub(super) fn list_body(flavor: ApiFlavor, items: Vec<Value>) -> Value {
     match flavor {
         ApiFlavor::Bitbucket => json!({ "values": items }),
         _ => Value::Array(items),
@@ -148,7 +148,7 @@ fn list_body(flavor: ApiFlavor, items: Vec<Value>) -> Value {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Lifecycle {
+pub(super) enum Lifecycle {
     Open,
     Merged,
     ClosedUnmerged,
@@ -158,7 +158,7 @@ enum Lifecycle {
 ///
 /// `source` is the head repository's `owner/repo`. GitLab has no path in the
 /// payload, so the fixture maps `TARGET` to project 1 and anything else to 2.
-fn pr(
+pub(super) fn pr(
     flavor: ApiFlavor,
     number: u64,
     lifecycle: Lifecycle,

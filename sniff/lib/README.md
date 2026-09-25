@@ -575,6 +575,17 @@ timeouts, and unsupported hosts are typed `PrUnavailable` errors, never
 `PullRequestInfo` also carries `source_repo`, `source_repo_is_target`, and
 `source_head_sha`.
 
+`remote::blocking::open_pull_requests(remote_url, deadline)` lists every open PR
+against a repository as `PrSummary` records (number, URL, source repository,
+source branch, target branch), on the same runtime, deadline, host support,
+and error contract as `pull_request_for_branch`; `open_pull_requests_with`
+takes a prebuilt client. It follows pages up to the focused client's bound and
+reports more than that as an error rather than a truncated list. A 401, 403,
+or list 404 is a `PrUnavailable` error, never an empty list. Match a PR to a
+local branch on both source repository and branch, since a fork can reuse a
+branch name. A GitLab fork's project path costs one lookup per distinct fork;
+a fork the caller cannot see keeps `source_repo: None`.
+
 `FocusedProviderClient::from_pull_request_url` and
 `job_reference_from_url` accept a canonical provider **web or API** URL. Route
 grammars are matched per flavor rather than by scanning for a shared marker

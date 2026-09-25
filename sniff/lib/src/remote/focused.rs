@@ -1,5 +1,7 @@
 //! Focused provider queries that preserve errors and item identity.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::time::{Duration, Instant};
 
 use biscuit_file::FetchPolicy;
@@ -374,84 +376,137 @@ impl FocusedProviderClient {
                 None
             };
         let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
-        let (size_key, size, filters) = match flavor {
-            ApiFlavor::GitHub => (
-                "per_page",
-                100,
-                vec![
-                    pair("head", &format!("{source_owner}:{branch}")),
-                    pair("state", "all"),
-                ],
-            ),
-            ApiFlavor::GitLab => (
-                "per_page",
-                100,
-                vec![pair("source_branch", branch), pair("state", "all")],
-            ),
-            // Gitea and Forgejo ignore `per_page`, and cap `limit` at
-            // `MAX_RESPONSE_ITEMS` (50 by default).
-            ApiFlavor::Gitea => ("limit", 50, vec![pair("state", "all")]),
-            ApiFlavor::Forgejo => (
-                "limit",
-                50,
-                vec![pair("state", "all"), pair("head", branch)],
-            ),
+        let filters = match flavor {
+            ApiFlavor::GitHub => vec![
+                pair("head", &format!("{source_owner}:{branch}")),
+                pair("state", "all"),
+            ],
+            ApiFlavor::GitLab => vec![pair("source_branch", branch), pair("state", "all")],
+            ApiFlavor::Gitea => vec![pair("state", "all")],
+            ApiFlavor::Forgejo => vec![pair("state", "all"), pair("head", branch)],
             // Without `state`, Bitbucket returns OPEN PRs only.
-            ApiFlavor::Bitbucket => (
-                "pagelen",
-                50,
-                vec![
-                    pair(
-                        "q",
-                        &format!("source.branch.name=\"{}\"", branch.replace('"', "\\\"")),
-                    ),
-                    pair("state", "OPEN"),
-                    pair("state", "MERGED"),
-                ],
-            ),
+            ApiFlavor::Bitbucket => vec![
+                pair(
+                    "q",
+                    &format!("source.branch.name=\"{}\"", branch.replace('"', "\\\"")),
+                ),
+                pair("state", "OPEN"),
+                pair("state", "MERGED"),
+            ],
             _ => return Err(unsupported("branch pull-request lookup", flavor)),
         };
-        let path = self.pr_list_path()?;
         let mut matches = Vec::new();
+        for item in self.pr_list_rows(filters).await? {
+            let Some(state) = evidence_state(flavor, &item) else {
+                continue;
+            };
+            let item_source_project = item.get("source_project_id").and_then(Value::as_u64);
+            let mut record = self.normalize_pr(item)?.details;
+            if record.source_branch.as_deref() != Some(branch) {
+                continue;
+            }
+            let from_source = match (flavor, source_project_id) {
+                (ApiFlavor::GitLab, Some(id)) => item_source_project == Some(id),
+                (ApiFlavor::GitLab, None) => record.source_repo_is_target == Some(true),
+                _ => record
+                    .source_repo
+                    .as_deref()
+                    .is_some_and(|repo| repo.eq_ignore_ascii_case(source_repo)),
+            };
+            if !from_source {
+                continue;
+            }
+            record.source_repo = Some(source_repo.to_string());
+            matches.push((record, state));
+        }
+        Ok(matches)
+    }
+
+    /// Every open PR against this client's repository.
+    ///
+    /// A GitLab MR from a fork names its source project only by ID, so each
+    /// distinct fork costs one `projects/{id}` lookup to fill `source_repo`;
+    /// a fork that lookup cannot see (deleted, or private to the caller) keeps
+    /// `source_repo: None` rather than failing the whole list.
+    ///
+    /// ## Errors
+    ///
+    /// A 404 on the list is an error (see [`NotFound`]), never an empty list.
+    /// [`SniffError::IncompleteRemoteDomain`] when [`MAX_PAGES`] is reached
+    /// first.
+    pub(crate) async fn open_pull_requests(&self) -> Result<Vec<PullRequestInfo>, SniffError> {
+        let flavor = self.remote.api_flavor;
+        let state = match flavor {
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => "open",
+            ApiFlavor::GitLab => "opened",
+            ApiFlavor::Bitbucket => "OPEN",
+            _ => return Err(unsupported("open pull-request listing", flavor)),
+        };
+        let rows = self
+            .pr_list_rows(vec![("state".to_string(), state.to_string())])
+            .await?;
+        let mut fork_paths: HashMap<u64, Option<String>> = HashMap::new();
+        let mut open = Vec::new();
+        for item in rows {
+            if evidence_state(flavor, &item) != Some(PrState::Open) {
+                continue;
+            }
+            let fork_project = (flavor == ApiFlavor::GitLab)
+                .then(|| {
+                    let id = |name| item.get(name).and_then(Value::as_u64);
+                    id("source_project_id")
+                        .filter(|source| Some(*source) != id("target_project_id"))
+                })
+                .flatten();
+            let mut record = self.normalize_pr(item)?.details;
+            if let Some(project) = fork_project {
+                if let Entry::Vacant(slot) = fork_paths.entry(project) {
+                    let path = self
+                        .get_json(&format!("projects/{project}"), &[])
+                        .await?
+                        .and_then(|value| value_string(&value, &["path_with_namespace"]));
+                    slot.insert(path);
+                }
+                record.source_repo = fork_paths[&project].clone();
+            }
+            open.push(record);
+        }
+        Ok(open)
+    }
+
+    /// Raw rows of every page of this repository's PR list under `filters`,
+    /// each page at the provider's largest size.
+    ///
+    /// A 404 is an error (see [`NotFound`]); reaching [`MAX_PAGES`] first is
+    /// [`SniffError::IncompleteRemoteDomain`].
+    async fn pr_list_rows(&self, filters: Vec<(String, String)>) -> Result<Vec<Value>, SniffError> {
+        let flavor = self.remote.api_flavor;
+        let (size_key, size) = match flavor {
+            // Gitea and Forgejo ignore `per_page`, and cap `limit` at
+            // `MAX_RESPONSE_ITEMS` (50 by default).
+            ApiFlavor::Gitea | ApiFlavor::Forgejo => ("limit", 50),
+            ApiFlavor::Bitbucket => ("pagelen", 50),
+            _ => ("per_page", 100),
+        };
+        let path = self.pr_list_path()?;
+        let mut rows = Vec::new();
         for page in 1..=MAX_PAGES {
             let mut params = filters.clone();
-            params.push(pair("page", &page.to_string()));
-            params.push(pair(size_key, &size.to_string()));
+            params.push(("page".to_string(), page.to_string()));
+            params.push((size_key.to_string(), size.to_string()));
             let response = self
                 .fetch_json(&path, &params, NotFound::Error)
                 .await?
                 .ok_or_else(|| malformed("missing pull-request page"))?;
             let (items, body_next) = page_items(response.value);
             let count = items.len();
-            for item in items {
-                let Some(state) = evidence_state(flavor, &item) else {
-                    continue;
-                };
-                let item_source_project = item.get("source_project_id").and_then(Value::as_u64);
-                let mut record = self.normalize_pr(item)?.details;
-                if record.source_branch.as_deref() != Some(branch) {
-                    continue;
-                }
-                let from_source = match (flavor, source_project_id) {
-                    (ApiFlavor::GitLab, Some(id)) => item_source_project == Some(id),
-                    (ApiFlavor::GitLab, None) => record.source_repo_is_target == Some(true),
-                    _ => record
-                        .source_repo
-                        .as_deref()
-                        .is_some_and(|repo| repo.eq_ignore_ascii_case(source_repo)),
-                };
-                if !from_source {
-                    continue;
-                }
-                record.source_repo = Some(source_repo.to_string());
-                matches.push((record, state));
-            }
+            rows.extend(items);
             let more = match flavor {
                 ApiFlavor::Bitbucket => body_next,
                 _ => response.link_next.unwrap_or(count >= size),
             };
             if !more {
-                return Ok(matches);
+                return Ok(rows);
             }
         }
         Err(incomplete_domain(flavor, "pull-request pages", MAX_PAGES))

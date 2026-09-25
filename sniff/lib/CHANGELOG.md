@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - **Breaking (source):** `InstallInterviewEvent::TimeoutWarning { prose }` — emitted after the failure status and before any retry prompt.
 - **Breaking (source):** `InstallInterviewOutcome::TimedOut { attempted }` — every attempt failed and the last was killed at its deadline.
 - `sniff::remote::blocking::{pull_request_for_branch, pull_request_for_branch_with}`: a deadline-bound, runtime-free lookup of the open or merged PR from one branch of one source repository, returning `PrEvidence` or a typed `PrUnavailable` (a list 404 is an error, never `Ok(None)`).
+- `sniff::remote::blocking::{open_pull_requests, open_pull_requests_with, PrSummary}`: a deadline-bound, runtime-free listing of a repository's open PRs with number, URL, source repository, source branch, and target branch. Pages are followed to the focused client's bound; 401/403 and a list 404 are typed `PrUnavailable` errors, never an empty list.
 - **Breaking (source):** `PullRequestInfo::{source_repo, source_repo_is_target, source_head_sha}`, filled by every Stage-1 provider and the focused client. The head SHA is stored exactly as received (Bitbucket Cloud sends 12 characters). Adding the fields is a source break for struct-literal callers.
 
 ### Changed
