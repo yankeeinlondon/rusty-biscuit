@@ -325,10 +325,12 @@ fn walk_for_nested_markers_with_threads(root: &Path, threads: Option<usize>) -> 
             worker.collector.activate();
             // Marker evidence is a file contract: skip directories so a
             // directory whose name happens to match a marker does not count.
-            if entry.depth() == 0
-                || entry.file_type().is_some_and(|ft| ft.is_dir())
-                || !is_nested_marker_path(entry.path())
-            {
+            if entry.depth() == 0 || entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                return WalkState::Continue;
+            }
+            #[cfg(test)]
+            tests::record_admitted_entry();
+            if !is_nested_marker_path(entry.path()) {
                 return WalkState::Continue;
             }
             worker.local.push(entry.into_path());
@@ -901,6 +903,832 @@ mod tests {
                 !case_variant,
                 "Unix-like platforms must compare marker names byte-exactly"
             );
+        }
+    }
+
+    /// Test-only work counter (ruling R2 of `2026-09-20-repo-perf`): one
+    /// increment per entry the parallel walk admits past its root and directory
+    /// filters. It goes through the ordinary thread-buffered counter path, so a
+    /// visitor whose `WorkerCollector` never flushed makes the total read short.
+    const ADMITTED_ENTRIES: &str = "test.nested_walk.admitted_entries";
+
+    /// Prefix of the diagnostic counters recording which threads admitted
+    /// entries: one key per distinct thread, each with the value one.
+    const WORKER_THREAD_PREFIX: &str = "test.nested_walk.worker_thread.";
+
+    /// Called by the parallel walk's visitor for every admitted entry.
+    pub(super) fn record_admitted_entry() {
+        use std::cell::Cell;
+
+        thread_local! {
+            // `ignore` runs every walk on freshly spawned scoped threads, so a
+            // thread only ever admits entries for one walk.
+            static RECORDED_THREAD: Cell<bool> = const { Cell::new(false) };
+        }
+
+        performance::increment_counter(ADMITTED_ENTRIES, 1);
+        if !RECORDED_THREAD.replace(true) {
+            performance::increment_counter_dynamic(
+                format!("{WORKER_THREAD_PREFIX}{:?}", std::thread::current().id()),
+                1,
+            );
+        }
+    }
+
+    /// Worker configurations every parity check runs: one worker, `ignore`'s
+    /// default policy (what production uses), and an explicit multi-worker
+    /// count that is parallel even on a small runner.
+    const WORKER_CONFIGS: [Option<usize>; 3] = [Some(1), None, Some(4)];
+
+    type Fields = crate::filesystem::repo::nested_benchmark::CandidateFields;
+
+    fn fields(candidates: Vec<Candidate>) -> Vec<Fields> {
+        candidates
+            .into_iter()
+            .map(|candidate| (candidate.root, candidate.matched_standards))
+            .collect()
+    }
+
+    /// Standards in the order a candidate reports them.
+    fn sorted(mut standards: Vec<MonorepoStandard>) -> Vec<MonorepoStandard> {
+        standards.sort_by_key(|s| s.spec().id);
+        standards
+    }
+
+    fn js_family() -> Vec<MonorepoStandard> {
+        sorted(vec![
+            MonorepoStandard::NpmWorkspaces,
+            MonorepoStandard::YarnWorkspaces,
+            MonorepoStandard::BunWorkspaces,
+        ])
+    }
+
+    fn write_fixture_file(root: &Path, relative: &str) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().expect("fixture file has a parent"))
+            .expect("create fixture dir");
+        std::fs::write(&path, "{}\n").expect("write fixture file");
+    }
+
+    /// Assert that the parallel walk, in every [`WORKER_CONFIGS`] entry, equals
+    /// the serial reference as complete ordered `(root, matched_standards)`
+    /// values, and return those values for the caller's independent check.
+    fn assert_parity(root: &Path) -> Vec<Fields> {
+        let reference = crate::filesystem::repo::nested_benchmark::serial_reference_walk(root);
+        for threads in WORKER_CONFIGS {
+            assert_eq!(
+                fields(walk_for_nested_markers_with_threads(root, threads)),
+                reference,
+                "threads = {threads:?}: the parallel walk diverged from the serial reference under {}",
+                root.display()
+            );
+        }
+        reference
+    }
+
+    /// Create a symlink, or return `false` where the platform requires a
+    /// privilege this process lacks (ruling R5: native Windows without
+    /// Developer Mode). The skip is printed so it shows in captured output.
+    fn try_symlink(target: &Path, link: &Path, target_is_dir: bool) -> bool {
+        #[cfg(unix)]
+        {
+            let _ = target_is_dir;
+            std::os::unix::fs::symlink(target, link).expect("create symlink");
+            true
+        }
+        #[cfg(windows)]
+        {
+            let result = if target_is_dir {
+                std::os::windows::fs::symlink_dir(target, link)
+            } else {
+                std::os::windows::fs::symlink_file(target, link)
+            };
+            match result {
+                Ok(()) => true,
+                // ERROR_PRIVILEGE_NOT_HELD
+                Err(error) if error.raw_os_error() == Some(1314) => {
+                    eprintln!(
+                        "SKIP: creating a symlink needs Developer Mode or elevation here ({error})"
+                    );
+                    false
+                }
+                Err(error) => panic!("create symlink {}: {error}", link.display()),
+            }
+        }
+    }
+
+    /// A tree `ignore` should split across workers: many sibling directories
+    /// at three depths, markers placed by index so the expected candidates are
+    /// derived from the placement rule rather than from the walk.
+    fn build_wide_fixture(root: &Path) -> Vec<Fields> {
+        let mut expected = Vec::new();
+        for index in 0..40 {
+            let top = format!("w{index:02}");
+            for filler in 0..8 {
+                write_fixture_file(root, &format!("{top}/pkg/f{filler}.txt"));
+            }
+            for filler in 0..4 {
+                write_fixture_file(root, &format!("{top}/pkg/sub/g{filler}.rs"));
+            }
+            if index % 2 == 0 {
+                write_fixture_file(root, &format!("{top}/Cargo.toml"));
+                expected.push((root.join(&top), vec![MonorepoStandard::CargoWorkspace]));
+            }
+            if index % 3 == 0 {
+                write_fixture_file(root, &format!("{top}/pkg/package.json"));
+                expected.push((root.join(&top).join("pkg"), js_family()));
+            }
+            if index % 5 == 0 {
+                write_fixture_file(root, &format!("{top}/pkg/sub/go.work"));
+                expected.push((
+                    root.join(&top).join("pkg").join("sub"),
+                    vec![MonorepoStandard::GoWorkspace],
+                ));
+            }
+        }
+        expected.sort_by(|a, b| a.0.cmp(&b.0));
+        expected
+    }
+
+    /// AC2 marker matrix: every fixed marker name, both solution suffixes,
+    /// several depths and siblings, two markers mapping to one standard, one
+    /// marker mapping to several, and several markers in one directory.
+    #[test]
+    fn every_marker_name_registers_its_standards_at_any_depth() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        for file in [
+            // Root markers and look-alike names are never candidates.
+            "Cargo.toml",
+            "package.json",
+            "notes/package.jsonx",
+            "notes/xpom.xml",
+            "notes/Cargo.lock",
+            "notes/App.sln.bak",
+            // One directory per fixed marker name and solution suffix.
+            "m01/Cargo.toml",
+            "m02/pnpm-workspace.yaml",
+            "m03/package.json",
+            "m04/pyproject.toml",
+            "m05/go.work",
+            "m06/settings.gradle",
+            "m07/settings.gradle.kts",
+            "m08/pom.xml",
+            "m09/rush.json",
+            "m10/nx.json",
+            "m11/turbo.json",
+            "m12/lerna.json",
+            "m13/App.sln",
+            "m14/App.slnx",
+            "m01/README.md",
+            "deep/a/b/c/d/Cargo.toml",
+            "gradle/settings.gradle",
+            "gradle/settings.gradle.kts",
+            "multi/package.json",
+            "multi/pnpm-workspace.yaml",
+            "multi/turbo.json",
+            "multi/One.sln",
+            "multi/Two.slnx",
+        ] {
+            write_fixture_file(root, file);
+        }
+
+        let expected: Vec<Fields> = vec![
+            (
+                root.join("deep/a/b/c/d"),
+                vec![MonorepoStandard::CargoWorkspace],
+            ),
+            (
+                root.join("gradle"),
+                vec![MonorepoStandard::GradleMultiProject],
+            ),
+            (root.join("m01"), vec![MonorepoStandard::CargoWorkspace]),
+            (root.join("m02"), vec![MonorepoStandard::PnpmWorkspaces]),
+            (root.join("m03"), js_family()),
+            (root.join("m04"), vec![MonorepoStandard::UvWorkspace]),
+            (root.join("m05"), vec![MonorepoStandard::GoWorkspace]),
+            (root.join("m06"), vec![MonorepoStandard::GradleMultiProject]),
+            (root.join("m07"), vec![MonorepoStandard::GradleMultiProject]),
+            (root.join("m08"), vec![MonorepoStandard::MavenMultiModule]),
+            (root.join("m09"), vec![MonorepoStandard::RushStack]),
+            (root.join("m10"), vec![MonorepoStandard::Nx]),
+            (root.join("m11"), vec![MonorepoStandard::Turborepo]),
+            (root.join("m12"), vec![MonorepoStandard::Lerna]),
+            (root.join("m13"), vec![MonorepoStandard::DotNetSolution]),
+            (root.join("m14"), vec![MonorepoStandard::DotNetSolution]),
+            (
+                root.join("multi"),
+                sorted(vec![
+                    MonorepoStandard::NpmWorkspaces,
+                    MonorepoStandard::YarnWorkspaces,
+                    MonorepoStandard::BunWorkspaces,
+                    MonorepoStandard::PnpmWorkspaces,
+                    MonorepoStandard::Turborepo,
+                    MonorepoStandard::DotNetSolution,
+                ]),
+            ),
+        ];
+
+        assert_eq!(assert_parity(root), expected);
+    }
+
+    /// Empty, root-only, and missing roots have nothing nested to find.
+    #[test]
+    fn empty_root_only_and_missing_roots_register_no_candidates() {
+        let empty = TempDir::new().expect("create temp dir");
+        assert_eq!(assert_parity(empty.path()), Vec::<Fields>::new());
+
+        let root_only = TempDir::new().expect("create temp dir");
+        for file in [
+            "Cargo.toml",
+            "pnpm-workspace.yaml",
+            "package.json",
+            "pyproject.toml",
+            "go.work",
+            "settings.gradle",
+            "settings.gradle.kts",
+            "pom.xml",
+            "rush.json",
+            "nx.json",
+            "turbo.json",
+            "lerna.json",
+            "App.sln",
+            "App.slnx",
+        ] {
+            write_fixture_file(root_only.path(), file);
+        }
+        assert_eq!(assert_parity(root_only.path()), Vec::<Fields>::new());
+
+        let missing = empty.path().join("does-not-exist");
+        assert_eq!(assert_parity(&missing), Vec::<Fields>::new());
+    }
+
+    /// Scheduling variance must not change the result: the wide tree is
+    /// compared 20 times in every worker configuration.
+    #[test]
+    fn wide_tree_parity_holds_across_repeats_and_worker_counts() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        let expected = build_wide_fixture(root);
+        assert_eq!(expected.len(), 20 + 14 + 8, "fixture placement rule");
+
+        for _ in 0..20 {
+            assert_eq!(assert_parity(root), expected);
+        }
+    }
+
+    /// Hidden directories stay eligible, the named-directory prune stays
+    /// authoritative at any depth, and a directory named like a marker is not
+    /// evidence though its descendants are still walked.
+    #[test]
+    fn prune_hidden_and_marker_named_directories_keep_their_semantics() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        for pruned in [
+            "node_modules",
+            "target",
+            "vendor",
+            "dist",
+            "build",
+            "out",
+            "bin",
+            "__pycache__",
+            ".venv",
+            ".turbo",
+            ".next",
+            ".cache",
+        ] {
+            write_fixture_file(root, &format!("{pruned}/package.json"));
+            write_fixture_file(root, &format!("{pruned}/pkg/Cargo.toml"));
+            write_fixture_file(root, &format!("lib/{pruned}/deep/pom.xml"));
+        }
+        for file in [
+            ".config/tool/package.json",
+            ".hidden/Cargo.toml",
+            "weird/package.json/inner/Cargo.toml",
+            "odd/Cargo.toml/pom.xml",
+        ] {
+            write_fixture_file(root, file);
+        }
+
+        let expected: Vec<Fields> = vec![
+            (root.join(".config/tool"), js_family()),
+            (root.join(".hidden"), vec![MonorepoStandard::CargoWorkspace]),
+            (
+                root.join("odd/Cargo.toml"),
+                vec![MonorepoStandard::MavenMultiModule],
+            ),
+            (
+                root.join("weird/package.json/inner"),
+                vec![MonorepoStandard::CargoWorkspace],
+            ),
+        ];
+
+        assert_eq!(assert_parity(root), expected);
+    }
+
+    /// A non-directory symlink named like a marker is admitted on its name
+    /// alone — even when dangling — while a directory link is never followed.
+    /// Collected paths keep the spelling they were walked under.
+    #[test]
+    fn non_directory_symlinks_are_admitted_and_directory_links_are_not_followed() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        write_fixture_file(root, "shared/templates/package.json.tmpl");
+        write_fixture_file(root, "real/pkg/Cargo.toml");
+        std::fs::create_dir_all(root.join("apps/web")).expect("create link dir");
+        std::fs::create_dir_all(root.join("dangling")).expect("create link dir");
+
+        if !try_symlink(
+            &root.join("shared/templates/package.json.tmpl"),
+            &root.join("apps/web/package.json"),
+            false,
+        ) || !try_symlink(
+            &root.join("missing.xml"),
+            &root.join("dangling/pom.xml"),
+            false,
+        ) || !try_symlink(&root.join("real"), &root.join("linked"), true)
+        {
+            return;
+        }
+
+        let expected: Vec<Fields> = vec![
+            (root.join("apps/web"), js_family()),
+            (
+                root.join("dangling"),
+                vec![MonorepoStandard::MavenMultiModule],
+            ),
+            (root.join("real/pkg"), vec![MonorepoStandard::CargoWorkspace]),
+        ];
+
+        let candidates = assert_parity(root);
+        assert_eq!(candidates, expected);
+        assert!(
+            candidates
+                .iter()
+                .all(|(candidate, _)| candidate.starts_with(root)),
+            "collected paths must keep the walked root's spelling, not a canonical one"
+        );
+    }
+
+    /// A symlinked starting root walks like its target, under the link's
+    /// spelling, in the serial reference and every parallel configuration.
+    #[test]
+    fn a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling() {
+        let dir = TempDir::new().expect("create temp dir");
+        let target = dir.path().join("repo");
+        for file in [
+            "Cargo.toml",
+            "apps/web/package.json",
+            "crates/core/Cargo.toml",
+            "node_modules/dep/package.json",
+        ] {
+            write_fixture_file(&target, file);
+        }
+        let link = dir.path().join("repo-link");
+        if !try_symlink(&target, &link, true) {
+            return;
+        }
+
+        let expected: Vec<Fields> = vec![
+            (link.join("apps/web"), js_family()),
+            (
+                link.join("crates/core"),
+                vec![MonorepoStandard::CargoWorkspace],
+            ),
+        ];
+
+        assert_eq!(assert_parity(&link), expected);
+    }
+
+    /// Walk-level check of the platform case rules the matcher tests pin:
+    /// fixed marker names fold ASCII case only on Windows, and the solution
+    /// suffixes are case-sensitive everywhere.
+    #[test]
+    fn walked_marker_names_follow_the_platform_case_rules() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        for file in [
+            "upper/Package.json",
+            "shout/CARGO.TOML",
+            "sol/App.SLN",
+            "solx/App.SLNX",
+            "exact/App.sln",
+        ] {
+            write_fixture_file(root, file);
+        }
+
+        let expected: Vec<Fields> = if cfg!(windows) {
+            vec![
+                (root.join("exact"), vec![MonorepoStandard::DotNetSolution]),
+                (root.join("shout"), vec![MonorepoStandard::CargoWorkspace]),
+                (root.join("upper"), js_family()),
+            ]
+        } else {
+            vec![(root.join("exact"), vec![MonorepoStandard::DotNetSolution])]
+        };
+
+        assert_eq!(assert_parity(root), expected);
+    }
+
+    /// A marker name followed by bytes that are not valid Unicode.
+    fn non_unicode_marker_like_name() -> std::ffi::OsString {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            std::ffi::OsStr::from_bytes(b"package.json\xff").to_os_string()
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            let mut wide: Vec<u16> = "package.json".encode_utf16().collect();
+            // An unpaired surrogate.
+            wide.push(0xD800);
+            std::ffi::OsString::from_wide(&wide)
+        }
+    }
+
+    /// A non-Unicode basename is never a marker, and a walk that meets one
+    /// keeps going. Filesystems that refuse such names (APFS) skip the walk
+    /// half and say so.
+    #[test]
+    fn non_unicode_basenames_are_not_markers() {
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        let name = non_unicode_marker_like_name();
+        let path = root.join("a").join(&name);
+
+        assert!(!is_nested_marker_path(&path));
+        assert!(candidates_from_marker_paths(root, std::slice::from_ref(&path)).is_empty());
+
+        write_fixture_file(root, "a/Cargo.toml");
+        if let Err(error) = std::fs::write(&path, "{}\n") {
+            eprintln!("SKIP walk half: this filesystem refuses non-Unicode names ({error})");
+            return;
+        }
+        assert_eq!(
+            assert_parity(root),
+            vec![(root.join("a"), vec![MonorepoStandard::CargoWorkspace])]
+        );
+    }
+
+    /// Restores a directory's mode so `TempDir` can delete it.
+    #[cfg(unix)]
+    struct RestoreMode(PathBuf);
+
+    #[cfg(unix)]
+    impl Drop for RestoreMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// Walk errors are best effort: an unreadable directory is skipped and the
+    /// rest of the tree is still searched (ruling R6).
+    ///
+    /// Unix only, where a mode-000 directory is an unprivileged read denial.
+    /// Native Windows would need ACL editing this crate does not do, so it is
+    /// not asserted there; a privileged Unix run (root) skips and says so.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_directory_is_skipped_and_the_walk_continues() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        write_fixture_file(root, "locked/inner/Cargo.toml");
+        write_fixture_file(root, "open/Cargo.toml");
+        let locked = root.join("locked");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("lock directory");
+        let _restore = RestoreMode(locked.clone());
+
+        if std::fs::read_dir(&locked).is_ok() {
+            eprintln!("SKIP: this process can read a mode-000 directory (privileged)");
+            return;
+        }
+
+        assert_eq!(
+            assert_parity(root),
+            vec![(root.join("open"), vec![MonorepoStandard::CargoWorkspace])]
+        );
+    }
+
+    /// Environment variable naming the isolated home the Git-ignore child must
+    /// run under; its absence means the child was started by hand.
+    const ISOLATED_HOME_ENV: &str = "SNIFF_NESTED_WALK_ISOLATED_HOME";
+
+    const GIT_IGNORE_CHILD: &str = "filesystem::repo::nested::tests::git_ignore_rules_child";
+
+    /// Printed by the child once every assertion has run.
+    const GIT_IGNORE_CHILD_SENTINEL: &str = "nested-walk git-ignore child: all assertions ran";
+
+    /// Git ignore semantics under a controlled Git configuration.
+    ///
+    /// `ignore` reads the global excludes file from the process's home
+    /// directory, so the assertions run in a child test process with `HOME`
+    /// (and `USERPROFILE`) pointed at a disposable home. Changing this
+    /// process's environment instead would race every concurrently running
+    /// test.
+    #[test]
+    fn git_ignore_rules_apply_under_an_isolated_git_configuration() {
+        let home = TempDir::new().expect("create temp home");
+        write_fixture_file(home.path(), ".config/git/ignore");
+        std::fs::write(
+            home.path().join(".config/git/ignore"),
+            "globally-ignored/\n",
+        )
+        .expect("write global excludes");
+
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let output = std::process::Command::new(executable)
+            .args([GIT_IGNORE_CHILD, "--exact", "--ignored", "--nocapture"])
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env_remove("XDG_CONFIG_HOME")
+            .env(ISOLATED_HOME_ENV, home.path())
+            .output()
+            .expect("run the git-ignore child test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            output.status.success(),
+            "child failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(
+            stdout.contains(GIT_IGNORE_CHILD_SENTINEL),
+            "the child test did not run its assertions:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
+    /// Child half of `git_ignore_rules_apply_under_an_isolated_git_configuration`.
+    #[test]
+    #[ignore = "subprocess fixture invoked by the git-ignore isolation test"]
+    fn git_ignore_rules_child() {
+        // Started by hand (e.g. a blanket ignored-test run), the host's own Git
+        // configuration would leak in, so there is nothing sound to assert.
+        let Some(home) = std::env::var_os(ISOLATED_HOME_ENV) else {
+            return;
+        };
+        assert_eq!(std::env::var_os("HOME"), Some(home));
+
+        let files = [
+            "found/Cargo.toml",
+            "generated/Cargo.toml",
+            "drop/pom.xml",
+            "keep/pom.xml",
+            "tool-cache/package.json",
+            "local-only/go.work",
+            "globally-ignored/nx.json",
+            "sub/private/lerna.json",
+            "sub/public/lerna.json",
+        ];
+        let write_ignore_files = |root: &Path| {
+            std::fs::write(
+                root.join(".gitignore"),
+                "generated/\n**/pom.xml\n!keep/pom.xml\n",
+            )
+            .expect("write .gitignore");
+            std::fs::write(root.join(".ignore"), "tool-cache/\n").expect("write .ignore");
+            std::fs::write(root.join("sub/.gitignore"), "private/\n")
+                .expect("write nested .gitignore");
+        };
+
+        // In a Git repository every rule applies. Nothing is committed, so an
+        // untracked but unignored marker must still be found.
+        let git_dir = TempDir::new().expect("create temp dir");
+        let git_root = git_dir.path();
+        git2::Repository::init(git_root).expect("init fixture repository");
+        for file in files {
+            write_fixture_file(git_root, file);
+        }
+        write_ignore_files(git_root);
+        std::fs::create_dir_all(git_root.join(".git/info")).expect("create .git/info");
+        std::fs::write(git_root.join(".git/info/exclude"), "local-only/\n")
+            .expect("write info/exclude");
+
+        assert_eq!(
+            assert_parity(git_root),
+            vec![
+                (
+                    git_root.join("found"),
+                    vec![MonorepoStandard::CargoWorkspace]
+                ),
+                (
+                    git_root.join("keep"),
+                    vec![MonorepoStandard::MavenMultiModule]
+                ),
+                (git_root.join("sub/public"), vec![MonorepoStandard::Lerna]),
+            ],
+            "Git root"
+        );
+
+        // Outside a repository only `.ignore` applies; `.gitignore` and the
+        // global excludes need Git.
+        let plain_dir = TempDir::new().expect("create temp dir");
+        let plain_root = plain_dir.path();
+        for file in files {
+            write_fixture_file(plain_root, file);
+        }
+        write_ignore_files(plain_root);
+
+        assert_eq!(
+            assert_parity(plain_root),
+            vec![
+                (
+                    plain_root.join("drop"),
+                    vec![MonorepoStandard::MavenMultiModule]
+                ),
+                (
+                    plain_root.join("found"),
+                    vec![MonorepoStandard::CargoWorkspace]
+                ),
+                (
+                    plain_root.join("generated"),
+                    vec![MonorepoStandard::CargoWorkspace]
+                ),
+                (
+                    plain_root.join("globally-ignored"),
+                    vec![MonorepoStandard::Nx]
+                ),
+                (
+                    plain_root.join("keep"),
+                    vec![MonorepoStandard::MavenMultiModule]
+                ),
+                (
+                    plain_root.join("local-only"),
+                    vec![MonorepoStandard::GoWorkspace]
+                ),
+                (plain_root.join("sub/private"), vec![MonorepoStandard::Lerna]),
+                (plain_root.join("sub/public"), vec![MonorepoStandard::Lerna]),
+            ],
+            "non-Git root"
+        );
+        println!("{GIT_IGNORE_CHILD_SENTINEL}");
+    }
+
+    /// An empty root is still one logical walk.
+    #[test]
+    fn an_empty_root_records_one_logical_walk() {
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        for threads in WORKER_CONFIGS {
+            let (candidates, counts) =
+                testing::measure(|| walk_for_nested_markers_with_threads(dir.path(), threads));
+
+            assert!(candidates.is_empty(), "threads = {threads:?}");
+            assert_eq!(
+                counts.get(counters::FS_READ_DIRS),
+                1,
+                "threads = {threads:?}: {:?}",
+                counts.all()
+            );
+            assert_eq!(
+                counts.get(counters::REPO_NESTED_MARKER_WALKS),
+                1,
+                "threads = {threads:?}: {:?}",
+                counts.all()
+            );
+        }
+    }
+
+    /// Supplied marker evidence — including an empty list — starts no
+    /// fallback walk, and a populated list reaches the same detector outcomes
+    /// the fallback walk does.
+    #[test]
+    fn supplied_evidence_starts_no_fallback_walk() {
+        use super::super::detection::RepoEvidence;
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tools/a")).expect("create nested workspace");
+        std::fs::write(
+            root.join("tools/Cargo.toml"),
+            "[workspace]\nmembers = [\"a\"]\n",
+        )
+        .expect("write nested workspace manifest");
+        std::fs::write(
+            root.join("tools/a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write member manifest");
+
+        let discover = |evidence: RepoEvidence<'_>| {
+            let mut seeds = Vec::new();
+            let mut outcomes = Vec::new();
+            discover_nested_workspace_outcomes(
+                root,
+                evidence,
+                &[],
+                &ManifestStore::default(),
+                &mut seeds,
+                &mut outcomes,
+            )
+            .expect("nested discovery");
+            let summary: Vec<(MonorepoStandard, PathBuf, usize)> = outcomes
+                .into_iter()
+                .map(|outcome| (outcome.standard, outcome.root, outcome.seeds.len()))
+                .collect();
+            (summary, seeds.len())
+        };
+
+        let (fallback, fallback_counts) = testing::measure(|| discover(RepoEvidence::default()));
+        assert_eq!(
+            fallback_counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            1,
+            "{:?}",
+            fallback_counts.all()
+        );
+        assert_eq!(
+            fallback.0,
+            vec![(MonorepoStandard::CargoWorkspace, root.join("tools"), 1)],
+            "the fallback walk finds the nested workspace"
+        );
+
+        let markers = vec![root.join("tools/Cargo.toml"), root.join("tools/a/Cargo.toml")];
+        let (supplied, supplied_counts) = testing::measure(|| {
+            discover(RepoEvidence {
+                nested_markers: Some(&markers),
+                ..RepoEvidence::default()
+            })
+        });
+        assert_eq!(
+            supplied_counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            0,
+            "{:?}",
+            supplied_counts.all()
+        );
+        assert_eq!(
+            supplied, fallback,
+            "supplied evidence reaches the fallback's outcomes and seeds"
+        );
+
+        let (empty, empty_counts) = testing::measure(|| {
+            discover(RepoEvidence {
+                nested_markers: Some(&[]),
+                ..RepoEvidence::default()
+            })
+        });
+        assert_eq!(empty, (Vec::new(), 0), "empty evidence means no candidates");
+        assert_eq!(
+            empty_counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            0,
+            "{:?}",
+            empty_counts.all()
+        );
+        assert_eq!(
+            empty_counts.get(counters::FS_READ_DIRS),
+            0,
+            "{:?}",
+            empty_counts.all()
+        );
+    }
+
+    /// Every visitor's `WorkerCollector` flushes into the request (ruling
+    /// R2): the per-entry test counter recorded on worker threads sums to the
+    /// serial reference's entry count. A lost flush reads short.
+    ///
+    /// Also prints how many distinct threads admitted entries, the
+    /// "actual worker count" evidence for this fixture on this host.
+    #[test]
+    fn every_visitor_flushes_its_work_into_the_request() {
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        build_wide_fixture(root);
+        let entries = serial_reference_paths(root).len() as u64;
+        assert_eq!(entries, 40 * 12 + 20 + 14 + 8, "fixture entry count");
+
+        for threads in WORKER_CONFIGS {
+            let (_, counts) =
+                testing::measure(|| walk_for_nested_markers_with_threads(root, threads));
+
+            assert_eq!(
+                counts.get(ADMITTED_ENTRIES),
+                entries,
+                "threads = {threads:?}: a visitor's work did not reach the collector"
+            );
+            let worker_threads = counts
+                .all()
+                .keys()
+                .filter(|name| name.starts_with(WORKER_THREAD_PREFIX))
+                .count();
+            eprintln!(
+                "threads = {threads:?}: {worker_threads} distinct worker thread(s) admitted {entries} entries"
+            );
+            let cap = threads.unwrap_or(12);
+            assert!(
+                (1..=cap).contains(&worker_threads),
+                "threads = {threads:?}: {worker_threads} worker threads"
+            );
+            if threads == Some(1) {
+                assert_eq!(worker_threads, 1, "a one-worker walk runs on one thread");
+            }
         }
     }
 }
