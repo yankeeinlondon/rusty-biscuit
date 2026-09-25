@@ -178,17 +178,21 @@
   nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
-  directory, keyed by canonical repo-root xxHash plus branch tip SHAs. The
-  fork-origin records (`<repo hash>.fork-origins.json`) share that directory
-  and key, as do `wt remove`'s one-minute handoff records
-  (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
+  directory, keyed by canonical repo-root xxHash plus the compared pair of tip
+  SHAs (target and branch). The fork-origin records
+  (`<repo hash>.fork-origins.json`) share that directory and key, as do
+  `wt list`'s 60-second open-PR store (`<repo hash>.prs.json`, fetched through
+  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s one-minute handoff
+  records (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
   `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
   and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
   No new external crate was added; each was already in the workspace graph.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
-  wrappers `wt --completions` generates. No new external crate was added.
+  wrappers `wt --completions` generates and the `wt list` table, and
+  `serde_json` (development) to seed the PR store and edit a handoff record in
+  its tests. No new external crate was added.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
