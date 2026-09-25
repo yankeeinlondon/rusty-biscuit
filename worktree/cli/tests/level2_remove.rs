@@ -315,7 +315,10 @@ fn assert_one_blank_line_before(plain: &str, needle: &str) {
     assert!(!lines[at - 2].trim().is_empty(), "more than one blank line before {needle:?}:\n{plain}");
 }
 
-fn harness() -> TmuxHarness {
+/// A freshly spawned pane. Every scene run gets its own: `clear` does not
+/// reliably empty a tmux pane, so a reused one can still show an earlier
+/// run's prompt or report, which the next run's text checks would match.
+fn fresh_harness() -> TmuxHarness {
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -329,7 +332,7 @@ fn level2_remove_files_question_follows_one_blank_line() {
     let scene = Scene::new();
     let wt = scene.add_worktree("feat/x", "feat-x");
     fs::write(wt.join("lib.rs"), "fn a() {}\n").unwrap();
-    let mut harness = harness();
+    let mut harness = fresh_harness();
 
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
@@ -355,7 +358,7 @@ fn level2_remove_not_safe_menu_defaults_to_keeping_the_branch() {
     fs::write(wt.join("only.txt"), "x\n").unwrap();
     git(&wt, &["add", "only.txt"]);
     git(&wt, &["commit", "-q", "-m", "only here"]);
-    let mut harness = harness();
+    let mut harness = fresh_harness();
 
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-y", "");
     scene.start(&mut harness, Shell::Bash, &script);
@@ -389,7 +392,6 @@ fn shells() -> Vec<Shell> {
 #[serial(level2_terminal)]
 fn level2_move_first_through_each_wrapper_lands_in_the_fork_parent() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let mut harness = harness();
     for shell in shells() {
         let scene = Scene::new();
         let parent = scene.add_worktree("feat/theme", "feat-theme");
@@ -397,6 +399,7 @@ fn level2_move_first_through_each_wrapper_lands_in_the_fork_parent() {
         scene.record_fork("feat/x", "feat/theme");
         fs::write(wt.join("notes.txt"), "draft\n").unwrap();
         let inside = wt.join("docs");
+        let mut harness = fresh_harness();
 
         let script = scene.script(shell, true, &inside, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
@@ -420,10 +423,10 @@ fn level2_move_first_through_each_wrapper_lands_in_the_fork_parent() {
 #[serial(level2_terminal)]
 fn level2_move_first_lands_in_the_base_repo_without_a_fork_record() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let mut harness = harness();
     for shell in shells() {
         let scene = Scene::new();
         let wt = scene.add_worktree("feat/x", "feat-x");
+        let mut harness = fresh_harness();
 
         let script = scene.script(shell, true, &wt, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
@@ -440,7 +443,6 @@ fn level2_move_first_lands_in_the_base_repo_without_a_fork_record() {
 #[serial(level2_terminal)]
 fn level2_move_first_failures_leave_the_worktree_intact() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let mut harness = harness();
     for shell in shells() {
         // A failed `cd`: the landing directory (the fork parent's worktree)
         // is gone, so the wrapper stops before the handoff.
@@ -449,6 +451,7 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
         let wt = scene.add_worktree("feat/x", "feat-x");
         scene.record_fork("feat/x", "feat/theme");
         fs::remove_dir_all(&parent).unwrap();
+        let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
         let outcome = scene.wait_outcome();
@@ -464,6 +467,7 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
             sed 's/\"created_at\": [0-9]*/\"created_at\": 1/' \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"",
             scene.handoff_prefix()
         );
+        let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", &expire);
         scene.start(&mut harness, shell, &script);
         let outcome = scene.wait_outcome();
@@ -479,6 +483,7 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
             "git -C {} commit -q --allow-empty -m late",
             quote(&wt)
         );
+        let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", &commit);
         scene.start(&mut harness, shell, &script);
         let outcome = scene.wait_outcome();

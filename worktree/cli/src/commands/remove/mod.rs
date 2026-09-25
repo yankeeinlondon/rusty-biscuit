@@ -188,6 +188,15 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
 
     let facts = Facts::gather(&base, entry, flags.force_remote)?;
     eprintln!("{}", facts.render_report(&terminal));
+    if let Some(RemoteState::MultiplePushUrls { .. }) = &facts.remote {
+        return Err(WorktreeError::RefusedToLoseWork(
+            "\n<red><b>Nothing was removed.</b></red> Origin pushes to more than one repository, \
+            so <i>--force-remote</i> cannot delete the branch from exactly the one reported.\n  \
+            <dim>Leave out <i>--force-remote</i>, or delete the branch in each repository with \
+            <i>git push</i>.</dim>"
+                .to_string(),
+        ));
+    }
 
     let interactive = crate::env::is_interactive();
     let decision = policy::decide(facts.situation(interactive), flags, &mut |question| {
@@ -355,9 +364,12 @@ fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> R
     };
     match &facts.remote {
         Some(RemoteState::Present {
-            destination, sha, ..
+            destination,
+            endpoint,
+            sha,
+            ..
         }) => {
-            delete_remote_branch(&facts.base, destination, sha)
+            delete_remote_branch(&facts.base, endpoint, destination, sha)
                 .map_err(|reason| failure(destination, &reason))?;
             print(
                 terminal,
@@ -368,7 +380,13 @@ fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> R
         Some(RemoteState::Unavailable {
             destination,
             reason,
+            ..
         }) => Err(failure(destination, reason)),
+        // `run` refuses this before removing anything.
+        Some(RemoteState::MultiplePushUrls { destination, .. }) => Err(failure(
+            destination,
+            "origin pushes to more than one repository",
+        )),
         Some(RemoteState::Absent { .. }) | Some(RemoteState::NoRemote) | None => {
             print(terminal, "<dim>Nothing to delete on origin.</dim>");
             Ok(())
@@ -436,7 +454,7 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
-        fingerprint: facts.inventory.fingerprint(&facts.entry.path),
+        fingerprint: facts.inventory.fingerprint(&facts.base, &facts.entry.path)?,
         landing: canonical(&landing),
     };
     let token = handoff::new_token()?;
@@ -460,19 +478,38 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
 fn remote_approval(state: Option<&RemoteState>) -> RemoteApproval {
     match state {
         Some(RemoteState::Present {
-            destination, sha, ..
+            destination,
+            endpoint,
+            sha,
+            ..
         }) => RemoteApproval {
             destination: Some(destination.clone()),
+            endpoint: Some(endpoint.clone()),
             observed_sha: Some(sha.clone()),
         },
-        Some(RemoteState::Absent { destination } | RemoteState::Unavailable { destination, .. }) => {
-            RemoteApproval {
-                destination: Some(destination.clone()),
-                observed_sha: None,
+        Some(
+            RemoteState::Absent {
+                destination,
+                endpoint,
             }
-        }
+            | RemoteState::Unavailable {
+                destination,
+                endpoint,
+                ..
+            },
+        ) => RemoteApproval {
+            destination: Some(destination.clone()),
+            endpoint: Some(endpoint.clone()),
+            observed_sha: None,
+        },
+        Some(RemoteState::MultiplePushUrls { destination, .. }) => RemoteApproval {
+            destination: Some(destination.clone()),
+            endpoint: None,
+            observed_sha: None,
+        },
         Some(RemoteState::NoRemote) | None => RemoteApproval {
             destination: None,
+            endpoint: None,
             observed_sha: None,
         },
     }
@@ -524,7 +561,7 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
-        fingerprint: facts.inventory.fingerprint(&facts.entry.path),
+        fingerprint: facts.inventory.fingerprint(&facts.base, &facts.entry.path)?,
         landing: canonical(&cwd),
     };
     match handoff::verify(&record, &fresh, &cwd) {
@@ -553,6 +590,23 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         )));
     }
     if let Some(approval) = &remote_approval {
+        // The destination and endpoint are recomputed from configuration,
+        // and two branches or repositories can share a head, so the SHA alone
+        // cannot tell that `execute` would delete a branch the caller never
+        // saw.
+        let current = self::remote_approval(facts.remote.as_ref());
+        if current.destination != approval.destination {
+            eprintln!("{}", facts.render_report(&terminal));
+            return Err(WorktreeError::RefusedToLoseWork(start_again(
+                "The branch on origin to delete changed since you confirmed.",
+            )));
+        }
+        if current.endpoint != approval.endpoint {
+            eprintln!("{}", facts.render_report(&terminal));
+            return Err(WorktreeError::RefusedToLoseWork(start_again(
+                "The repository origin pushes to changed since you confirmed.",
+            )));
+        }
         let now_sha = match &facts.remote {
             Some(RemoteState::Present { sha, .. }) => Some(sha.clone()),
             _ => None,

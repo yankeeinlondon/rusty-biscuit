@@ -265,38 +265,51 @@ pub fn remote_markup(state: &RemoteState) -> String {
         RemoteState::NoRemote => {
             "<b>Origin</b>: there is no origin remote, so no remote branch to delete.".to_string()
         }
-        RemoteState::Absent { destination } => format!(
-            "<b>Origin</b>: no matching remote branch exists (<b>{}</b>), so there is nothing to delete there.",
+        RemoteState::MultiplePushUrls { endpoints, .. } => format!(
+            "<b>Origin</b>: <yellow>origin pushes to {} repositories</yellow> ({}), so <i>--force-remote</i> cannot delete from exactly one.",
+            endpoints.len(),
+            esc(&endpoints.join(", "))
+        ),
+        RemoteState::Absent {
+            destination,
+            endpoint,
+        } => format!(
+            "{} no matching remote branch exists (<b>{}</b>), so there is nothing to delete there.",
+            origin_label(endpoint),
             esc(destination)
         ),
         RemoteState::Unavailable {
             destination,
+            endpoint,
             reason,
         } => format!(
-            "<b>Origin</b>: <yellow>origin could not be reached</yellow> ({}), so <b>origin/{}</b> cannot be deleted now.",
+            "{} <yellow>origin could not be reached</yellow> ({}), so <b>origin/{}</b> cannot be deleted now.",
+            origin_label(endpoint),
             esc(reason),
             esc(destination)
         ),
         RemoteState::Present {
             destination,
+            endpoint,
             remote_only,
             ..
         } => {
+            let label = origin_label(endpoint);
             let name = format!("<b>origin/{}</b>", esc(destination));
             match remote_only {
                 RemoteOnly::Unknown => format!(
-                    "<b>Origin</b>: {name} will be deleted. It has commits that were never fetched here; their number and contents are unknown."
+                    "{label} {name} will be deleted. It has commits that were never fetched here; their number and contents are unknown."
                 ),
                 RemoteOnly::Known(commits) if commits.is_empty() => format!(
-                    "<b>Origin</b>: {name} will be deleted; it has no commits your branch lacks."
+                    "{label} {name} will be deleted; it has no commits your branch lacks."
                 ),
                 RemoteOnly::Known(commits) if commits.len() > LIST_LIMIT => format!(
-                    "<b>Origin</b>: {name} will be deleted, with <red><b>{}</b></red> that exist only there.",
+                    "{label} {name} will be deleted, with <red><b>{}</b></red> that exist only there.",
                     commit_count(commits.len())
                 ),
                 RemoteOnly::Known(commits) => {
                     let mut out = format!(
-                        "<b>Origin</b>: {name} will be deleted, with {} that exist only there:\n",
+                        "{label} {name} will be deleted, with {} that exist only there:\n",
                         commit_count(commits.len())
                     );
                     for commit in commits {
@@ -310,6 +323,16 @@ pub fn remote_markup(state: &RemoteState) -> String {
                 }
             }
         }
+    }
+}
+
+/// Names the push URL, since the report must describe the repository the
+/// deletion modifies, which need not be the one `origin` fetches from.
+fn origin_label(endpoint: &str) -> String {
+    if endpoint.is_empty() {
+        "<b>Origin</b>:".to_string()
+    } else {
+        format!("<b>Origin</b> <dim>({})</dim>:", esc(endpoint))
     }
 }
 
@@ -452,24 +475,37 @@ mod tests {
     #[test]
     fn remote_states_read_plainly() {
         assert!(remote_markup(&RemoteState::NoRemote).contains("no origin remote"));
-        assert!(remote_markup(&RemoteState::Absent { destination: "feat/x".into() }).contains("no matching remote branch"));
+        assert!(remote_markup(&RemoteState::Absent {
+            destination: "feat/x".into(),
+            endpoint: "/srv/widgets.git".into(),
+        })
+        .contains("no matching remote branch"));
         let unknown = RemoteState::Present {
             destination: "feat/x".into(),
+            endpoint: "/srv/widgets.git".into(),
             sha: "1".repeat(40),
             remote_only: RemoteOnly::Unknown,
         };
         assert!(remote_markup(&unknown).contains("number and contents are unknown"));
         let known = RemoteState::Present {
             destination: "feat/x".into(),
+            endpoint: "/srv/widgets.git".into(),
             sha: "1".repeat(40),
             remote_only: RemoteOnly::Known(commits(2)),
         };
         assert!(remote_markup(&known).contains("with 2 commits that exist only there:"));
         let down = RemoteState::Unavailable {
             destination: "feat/x".into(),
+            endpoint: "/srv/widgets.git".into(),
             reason: "timeout".into(),
         };
         assert!(remote_markup(&down).contains("could not be reached"));
+        assert!(remote_markup(&down).starts_with("<b>Origin</b> <dim>(/srv/widgets.git)</dim>:"));
+        let several = RemoteState::MultiplePushUrls {
+            destination: "feat/x".into(),
+            endpoints: vec!["/a.git".into(), "/b.git".into()],
+        };
+        assert!(remote_markup(&several).contains("pushes to 2 repositories"));
     }
 
     #[test]

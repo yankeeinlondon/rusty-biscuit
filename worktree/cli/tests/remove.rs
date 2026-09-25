@@ -673,6 +673,35 @@ fn a_new_ignored_entry_between_the_runs_refuses() {
     assert!(wt.join(".env").exists());
 }
 
+/// Restaging keeps the status (`MM`) and the working bytes, even with
+/// `--force-worktree` approved; the staged version alone must refuse.
+#[test]
+fn a_restaged_version_between_the_runs_refuses_with_nothing_removed() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let stage_then_edit = |staged: &str| {
+        fs::write(wt.join("README.md"), staged).unwrap();
+        git(&wt, &["add", "README.md"]);
+        fs::write(wt.join("README.md"), "working copy\n").unwrap();
+        assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "MM README.md");
+    };
+    stage_then_edit("staged before\n");
+    let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+    stage_then_edit("new staged work\n");
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("uncommitted or ignored files"))
+        .stderr(predicate::str::contains("Removed").not());
+    assert_eq!(fs::read_to_string(wt.join("README.md")).unwrap(), "working copy\n");
+    assert_eq!(git(&wt, &["show", ":README.md"]), "new staged work");
+    assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
+    assert!(fixture.branch_exists("feat/x"));
+}
+
 #[test]
 fn an_expired_token_refuses_with_exit_4() {
     let fixture = Fixture::new();
@@ -760,4 +789,166 @@ fn a_branch_that_stops_being_safe_between_the_runs_refuses() {
         .stderr(predicate::str::contains("no longer safe"));
     assert!(wt.exists());
     assert!(fixture.branch_exists("feat/x"));
+}
+
+/// Two origin branches at one commit: the lease cannot tell them apart, so
+/// the second run must compare the destination itself.
+#[test]
+fn a_changed_remote_destination_between_the_runs_refuses_with_nothing_removed() {
+    let fixture = Fixture::with_origin();
+    git(&fixture.repo(), &["push", "-q", "origin", "main:approved", "main:unapproved"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    git(&fixture.repo(), &["branch", "--set-upstream-to=origin/approved", "feat/x"]);
+    let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
+
+    git(&fixture.repo(), &["branch", "--set-upstream-to=origin/unapproved", "feat/x"]);
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("branch on origin to delete changed"))
+        .stderr(predicate::str::contains("Deleted").not());
+    assert!(fixture.origin_has("approved"));
+    assert!(fixture.origin_has("unapproved"));
+    assert!(wt.exists());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+// --- The repository `--force-remote` deletes from -----------------------------
+
+/// `approved.git` and `other.git`, each holding `main` and `feat/x` at the same
+/// commit, with `origin` pointing at `approved.git`; `feat/x` is also a
+/// worktree.
+struct TwoRemotes {
+    fixture: Fixture,
+    wt: PathBuf,
+    approved: PathBuf,
+    other: PathBuf,
+}
+
+impl TwoRemotes {
+    fn new() -> Self {
+        let fixture = Fixture::new();
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let approved = fixture.root.path().join("approved.git");
+        let other = fixture.root.path().join("other.git");
+        for bare in [&approved, &other] {
+            let bare = bare.to_str().unwrap();
+            git(fixture.root.path(), &["init", "-q", "--bare", "-b", "main", bare]);
+            git(&fixture.repo(), &["push", "-q", bare, "main", "feat/x"]);
+        }
+        git(&fixture.repo(), &["remote", "add", "origin", approved.to_str().unwrap()]);
+        Self {
+            fixture,
+            wt,
+            approved,
+            other,
+        }
+    }
+
+    fn url(path: &Path) -> &str {
+        path.to_str().unwrap()
+    }
+
+    fn head_in(bare: &Path, branch: &str) -> Option<String> {
+        let out = git(bare, &["for-each-ref", "--format=%(objectname)", &format!("refs/heads/{branch}")]);
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Nothing was removed anywhere.
+    fn assert_untouched(&self) {
+        assert!(Self::head_in(&self.approved, "feat/x").is_some(), "approved.git keeps feat/x");
+        assert!(Self::head_in(&self.other, "feat/x").is_some(), "other.git keeps feat/x");
+        assert!(self.wt.exists(), "the worktree stays");
+        assert!(self.fixture.branch_exists("feat/x"), "the local branch stays");
+    }
+
+    fn handoff_after(&self, change: &[&str]) {
+        let (landing, token) = first_run(&self.fixture, &self.wt, &["--force-remote"]);
+        git(&self.fixture.repo(), change);
+        self.fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains("repository origin pushes to changed"))
+            .stderr(predicate::str::contains("Deleted").not());
+        self.assert_untouched();
+    }
+}
+
+#[test]
+fn a_changed_origin_url_between_the_runs_refuses_with_nothing_removed() {
+    let remotes = TwoRemotes::new();
+    remotes.handoff_after(&["remote", "set-url", "origin", TwoRemotes::url(&remotes.other)]);
+}
+
+#[test]
+fn a_changed_origin_push_url_between_the_runs_refuses_with_nothing_removed() {
+    let remotes = TwoRemotes::new();
+    remotes.handoff_after(&["remote", "set-url", "--push", "origin", TwoRemotes::url(&remotes.other)]);
+}
+
+/// Fetch and push URLs differ, and `approved.git`'s `feat/x` sits at another
+/// commit: observing the fetch URL would take the lease against the wrong
+/// head (or miss the branch), so a deletion that succeeds proves the report,
+/// the lease, and the push all used the push URL.
+#[test]
+fn a_separate_push_url_is_both_observed_and_deleted_from() {
+    let remotes = TwoRemotes::new();
+    let repo = remotes.fixture.repo();
+    git(&repo, &["checkout", "-q", "-b", "side"]);
+    let side = remotes.fixture.commit(&repo, "side.txt");
+    git(&repo, &["checkout", "-q", "main"]);
+    git(&repo, &["push", "-q", "--force", TwoRemotes::url(&remotes.approved), "side:feat/x"]);
+    git(&repo, &["remote", "set-url", "--push", "origin", TwoRemotes::url(&remotes.other)]);
+
+    let out = remotes
+        .fixture
+        .wt(&remotes.wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x", "--force-remote"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("other.git"))
+        .stderr(predicate::str::contains("origin/feat/x will be deleted; it has no commits"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&out);
+
+    remotes
+        .fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Deleted origin/feat/x"));
+    assert_eq!(TwoRemotes::head_in(&remotes.other, "feat/x"), None);
+    assert_eq!(TwoRemotes::head_in(&remotes.approved, "feat/x"), Some(side));
+    assert!(!remotes.wt.exists());
+}
+
+/// Deleting from several repositories would act on copies the report never
+/// showed, so the run refuses before removing anything (exit 3, since
+/// leaving out `--force-remote` is the remedy).
+#[test]
+fn several_push_urls_refuse_force_remote_with_nothing_removed() {
+    let remotes = TwoRemotes::new();
+    let repo = remotes.fixture.repo();
+    for bare in [&remotes.approved, &remotes.other] {
+        git(&repo, &["remote", "set-url", "--add", "--push", "origin", TwoRemotes::url(bare)]);
+    }
+
+    remotes
+        .fixture
+        .wt(&repo)
+        .args(["remove", "feat-x", "--force-remote"])
+        .assert()
+        .code(3)
+        .stdout("")
+        .stderr(predicate::str::contains("pushes to 2 repositories"))
+        .stderr(predicate::str::contains("Nothing was removed"));
+    remotes.assert_untouched();
 }

@@ -93,13 +93,20 @@ impl Inventory {
         inventory
     }
 
-    /// A BLAKE3 digest over each dirty path, its status, and its content, and
-    /// over the set of ignored entries.
+    /// A BLAKE3 digest over each dirty path, its status, and its working
+    /// content; over the set of ignored entries; and over every index entry's
+    /// mode, object ID, stage, and path (`git ls-files --stage`).
     ///
     /// Two runs of `wt remove` compare this to prove nothing that removal
-    /// would delete changed in between: an edit that keeps the status, a new
-    /// untracked file, or a new ignored entry all change it.
-    pub fn fingerprint(&self, worktree: &Path) -> String {
+    /// would delete changed in between: an edit that keeps the status, a
+    /// restaged version that keeps both the status and the working bytes, a
+    /// new untracked file, or a new ignored entry all change it.
+    ///
+    /// ## Errors
+    ///
+    /// Fails when git cannot list the index; a digest without it could not
+    /// see staged work.
+    pub fn fingerprint(&self, base: &Path, worktree: &Path) -> Result<String, WorktreeError> {
         let mut dirty: Vec<&DirtyEntry> = self.dirty.iter().collect();
         dirty.sort_by(|a, b| a.path.cmp(&b.path));
         let mut ignored: Vec<&String> = self.ignored.iter().collect();
@@ -117,7 +124,12 @@ impl Inventory {
         for entry in ignored {
             text.push_str(&format!("ignored\0{entry}\n"));
         }
-        biscuit_hash::blake3_hash(&text)
+        // The whole index rather than a pathspec of the dirty paths, which
+        // pathspec magic and command-line length limits make fragile.
+        let index = git_from_raw(base, worktree, &["ls-files", "--stage", "-z"])?;
+        text.push_str("index\0");
+        text.push_str(&index);
+        Ok(biscuit_hash::blake3_hash(&text))
     }
 }
 
@@ -272,7 +284,7 @@ mod tests {
         let wt = repo.add_worktree("feat/x", "feat-x", "main");
         fs::write(wt.join("README.md"), "one\n").unwrap();
         let base = repo.path();
-        let print = || collect_inventory(&base, &wt).unwrap().fingerprint(&wt);
+        let print = || collect_inventory(&base, &wt).unwrap().fingerprint(&base, &wt).unwrap();
 
         let first = print();
         assert_eq!(first, print(), "stable when nothing changes");
@@ -295,5 +307,27 @@ mod tests {
         // A new ignored entry.
         fs::write(wt.join("debug.log"), "x\n").unwrap();
         assert_ne!(untracked, print());
+    }
+
+    /// Restaging keeps the status (`MM`) and the working bytes; only the
+    /// index entry's object ID differs.
+    #[test]
+    fn fingerprint_changes_when_only_the_staged_version_changes() {
+        let repo = TestRepo::new();
+        let wt = repo.add_worktree("feat/x", "feat-x", "main");
+        let base = repo.path();
+        let stage_then_edit = |staged: &str| {
+            fs::write(wt.join("README.md"), staged).unwrap();
+            repo.git_in(&wt, &["add", "README.md"]);
+            fs::write(wt.join("README.md"), "working copy\n").unwrap();
+            let inventory = collect_inventory(&base, &wt).unwrap();
+            let statuses: Vec<_> = inventory.dirty.iter().map(|e| e.status.as_str()).collect();
+            assert_eq!(statuses, ["MM"]);
+            inventory.fingerprint(&base, &wt).unwrap()
+        };
+
+        let before = stage_then_edit("staged before\n");
+        let after = stage_then_edit("new staged work\n");
+        assert_ne!(before, after);
     }
 }

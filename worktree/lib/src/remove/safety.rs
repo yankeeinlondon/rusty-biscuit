@@ -295,7 +295,8 @@ fn classify(
             Ok(sha) => sha,
             Err(_) => continue,
         };
-        match heads.live_head(name) {
+        // By name, so the fetch URL that produced the tracking ref answers.
+        match heads.live_head("origin", name) {
             Ok(Some(live)) if live == input.tip || live == tracking => {
                 return Tier::PrettySafe(Evidence::RemoteBranch(format!("origin/{name}")));
             }
@@ -466,7 +467,7 @@ mod tests {
         }
     }
     impl RemoteHeads for StubHeads {
-        fn live_head(&self, branch: &str) -> Result<Option<String>, String> {
+        fn live_head(&self, _remote: &str, branch: &str) -> Result<Option<String>, String> {
             self.calls.lock().unwrap().push(branch.to_string());
             self.answer.clone()
         }

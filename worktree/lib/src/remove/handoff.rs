@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
 
-pub const HANDOFF_FORMAT_VERSION: u32 = 1;
+pub const HANDOFF_FORMAT_VERSION: u32 = 2;
 
 /// How long a record stays valid.
 pub const HANDOFF_TTL: Duration = Duration::from_secs(60);
@@ -53,8 +53,14 @@ pub enum BranchAction {
 /// The remote deletion `--force-remote` approved, and what the report showed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteApproval {
-    /// The branch name on origin; `None` when there was none to delete.
+    /// The branch name on origin; `None` when there is no `origin` remote.
+    /// The second run refuses if its freshly computed destination differs,
+    /// since a different branch can share `observed_sha`.
     pub destination: Option<String>,
+    /// Origin's resolved push URL, which the report observed and the deletion
+    /// pushes to. The second run refuses if it differs, since another
+    /// repository can hold the same branch at the same commit.
+    pub endpoint: Option<String>,
     /// The live head the report showed; the lease is taken against it.
     pub observed_sha: Option<String>,
 }
@@ -231,6 +237,7 @@ mod tests {
             branch: Some(BranchAction::DeleteIfSafe),
             remote: Some(RemoteApproval {
                 destination: Some("feat/x".into()),
+                endpoint: Some("/srv/git/widgets.git".into()),
                 observed_sha: Some("2".repeat(40)),
             }),
         }

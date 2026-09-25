@@ -1,5 +1,11 @@
 //! `--force-remote`: find the branch's copy on origin, report what only it
 //! holds, and delete it under a lease.
+//!
+//! `origin` is a nickname whose URLs can change between the report and the
+//! deletion, and `ls-remote origin` reads the fetch URL while `push origin`
+//! follows the push URL. So the live check and the deletion both address
+//! origin's resolved push endpoint ([`push_endpoints`]), which the handoff
+//! record also stores (Decision 21, amended by review 3).
 
 use std::path::Path;
 
@@ -26,21 +32,48 @@ pub fn remote_destination(base: &Path, branch: &str) -> Option<String> {
     Some(upstream.unwrap_or_else(|| branch.to_string()))
 }
 
+/// Where `git push origin` writes: origin's push URLs as git resolves them
+/// (`pushurl` over `url`, after `insteadOf`/`pushInsteadOf` rewriting),
+/// spelled as git prints them. Relative paths resolve against `base`, which
+/// is where every network call runs.
+///
+/// ## Errors
+///
+/// Git's reason, for example when there is no `origin` remote.
+pub fn push_endpoints(base: &Path) -> Result<Vec<String>, String> {
+    let out = git_from(base, base, &["remote", "get-url", "--push", "--all", "origin"])
+        .map_err(|e| e.to_string())?;
+    Ok(out.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
+}
+
 /// What deleting the branch on origin would do, as observed live.
+///
+/// `endpoint` is the push URL both the observation and the deletion use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteState {
     /// No `origin` remote.
     NoRemote,
-    /// Origin answered and has no such branch.
-    Absent { destination: String },
+    /// Origin pushes to more than one repository. `--force-remote` refuses
+    /// this before removing anything rather than check each one.
+    MultiplePushUrls {
+        destination: String,
+        endpoints: Vec<String>,
+    },
+    /// The endpoint answered and has no such branch.
+    Absent { destination: String, endpoint: String },
     Present {
         destination: String,
+        endpoint: String,
         /// The live head; the deletion's lease is taken against it.
         sha: String,
         remote_only: RemoteOnly,
     },
-    /// Origin could not be asked.
-    Unavailable { destination: String, reason: String },
+    /// The endpoint could not be asked.
+    Unavailable {
+        destination: String,
+        endpoint: String,
+        reason: String,
+    },
 }
 
 /// Commits on the remote branch that the local branch lacks.
@@ -52,7 +85,8 @@ pub enum RemoteOnly {
     Unknown,
 }
 
-/// Queries origin's live head for the branch and lists remote-only commits.
+/// Queries the push endpoint's live head for the branch and lists
+/// remote-only commits.
 pub fn preflight_remote_deletion(
     base: &Path,
     branch: &str,
@@ -62,13 +96,34 @@ pub fn preflight_remote_deletion(
     let Some(destination) = remote_destination(base, branch) else {
         return RemoteState::NoRemote;
     };
-    match heads.live_head(&destination) {
-        Ok(None) => RemoteState::Absent { destination },
-        Err(reason) => RemoteState::Unavailable { destination, reason },
+    let endpoint = match push_endpoints(base) {
+        Ok(mut endpoints) if endpoints.len() == 1 => endpoints.remove(0),
+        Ok(endpoints) if endpoints.len() > 1 => {
+            return RemoteState::MultiplePushUrls {
+                destination,
+                endpoints,
+            };
+        }
+        other => {
+            return RemoteState::Unavailable {
+                destination,
+                endpoint: String::new(),
+                reason: other.err().unwrap_or_else(|| "origin has no push URL".to_string()),
+            };
+        }
+    };
+    match heads.live_head(&endpoint, &destination) {
+        Ok(None) => RemoteState::Absent { destination, endpoint },
+        Err(reason) => RemoteState::Unavailable {
+            destination,
+            endpoint,
+            reason,
+        },
         Ok(Some(sha)) => {
             let remote_only = remote_only_commits(base, &sha, tip);
             RemoteState::Present {
                 destination,
+                endpoint,
                 sha,
                 remote_only,
             }
@@ -98,23 +153,36 @@ fn remote_only_commits(base: &Path, remote_sha: &str, tip: &str) -> RemoteOnly {
     }
 }
 
-/// Deletes `refs/heads/<destination>` on origin only if it still points at
-/// `observed_sha`, so a push made after the report fails the deletion instead
-/// of losing the new commits.
+/// Deletes `refs/heads/<destination>` at `endpoint` only if it still points
+/// at `observed_sha`, so a push made after the report fails the deletion
+/// instead of losing the new commits.
 ///
 /// ## Errors
 ///
-/// Git's reason: a failed lease, a protected branch, or an unreachable origin.
-pub fn delete_remote_branch(base: &Path, destination: &str, observed_sha: &str) -> Result<(), String> {
+/// Git's reason: a failed lease, a protected branch, or an unreachable
+/// endpoint.
+pub fn delete_remote_branch(
+    base: &Path,
+    endpoint: &str,
+    destination: &str,
+    observed_sha: &str,
+) -> Result<(), String> {
     let refname = format!("refs/heads/{destination}");
     let lease = format!("--force-with-lease={refname}:{observed_sha}");
     let refspec = format!(":{refname}");
     run_noninteractive(
         base,
-        &["push", "--porcelain", &lease, "origin", &refspec],
+        &["push", "--porcelain", &lease, endpoint, &refspec],
         PUSH_DEADLINE,
-    )
-    .map(|_| ())
+    )?;
+    // A push to a URL, unlike one to `origin`, leaves the remote-tracking ref
+    // behind; drop it as `git push origin --delete` would.
+    let _ = git_from(
+        base,
+        base,
+        &["update-ref", "-d", &format!("refs/remotes/origin/{destination}")],
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -150,14 +218,59 @@ mod tests {
         assert_eq!(remote_destination(&repo.path(), "feat/x").as_deref(), Some("feat/x"));
     }
 
+    fn origin_url(repo: &TestRepo) -> String {
+        repo.origin_path().to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn push_endpoints_follow_pushurl_and_list_every_push_url() {
+        let repo = TestRepo::new();
+        assert!(push_endpoints(&repo.path()).is_err(), "no origin");
+
+        let repo = TestRepo::with_origin();
+        assert_eq!(push_endpoints(&repo.path()), Ok(vec![origin_url(&repo)]));
+
+        repo.git(&["remote", "set-url", "--push", "origin", "/elsewhere/push.git"]);
+        assert_eq!(push_endpoints(&repo.path()), Ok(vec!["/elsewhere/push.git".to_string()]));
+
+        repo.git(&["remote", "set-url", "--add", "--push", "origin", "/elsewhere/second.git"]);
+        assert_eq!(
+            push_endpoints(&repo.path()),
+            Ok(vec!["/elsewhere/push.git".to_string(), "/elsewhere/second.git".to_string()])
+        );
+
+        // pushInsteadOf rewrites the URL git would actually push to.
+        repo.git(&["config", "--unset-all", "remote.origin.pushurl"]);
+        repo.git(&["config", "remote.origin.url", "short:repo.git"]);
+        repo.git(&["config", "url./rewritten/.pushInsteadOf", "short:"]);
+        assert_eq!(push_endpoints(&repo.path()), Ok(vec!["/rewritten/repo.git".to_string()]));
+    }
+
+    #[test]
+    fn several_push_urls_are_reported_without_asking_any() {
+        let repo = TestRepo::with_origin();
+        repo.git(&["remote", "set-url", "--add", "--push", "origin", "/elsewhere/second.git"]);
+        repo.git(&["remote", "set-url", "--add", "--push", "origin", &origin_url(&repo)]);
+        let state = preflight_remote_deletion(&repo.path(), "main", &repo.sha("main"), &heads(&repo));
+        let RemoteState::MultiplePushUrls { destination, endpoints } = state else {
+            panic!("expected several push URLs, got {state:?}");
+        };
+        assert_eq!(destination, "main");
+        assert_eq!(endpoints.len(), 2);
+    }
+
     #[test]
     fn preflight_reports_absent_present_and_remote_only_commits() {
         let repo = TestRepo::with_origin();
+        let endpoint = origin_url(&repo);
         let tip = repo.sha("main");
         repo.git(&["branch", "feat/x"]);
         assert_eq!(
             preflight_remote_deletion(&repo.path(), "feat/x", &tip, &heads(&repo)),
-            RemoteState::Absent { destination: "feat/x".into() }
+            RemoteState::Absent {
+                destination: "feat/x".into(),
+                endpoint: endpoint.clone(),
+            }
         );
 
         repo.git(&["push", "-q", "origin", "feat/x"]);
@@ -166,6 +279,7 @@ mod tests {
             state,
             RemoteState::Present {
                 destination: "feat/x".into(),
+                endpoint,
                 sha: tip.clone(),
                 remote_only: RemoteOnly::Known(Vec::new()),
             }
@@ -200,10 +314,15 @@ mod tests {
         let repo = TestRepo::with_origin();
         repo.git(&["branch", "feat/x"]);
         repo.git(&["push", "-q", "origin", "feat/x"]);
+        repo.git(&["fetch", "-q", "origin"]);
         let observed = repo.sha("feat/x");
 
-        delete_remote_branch(&repo.path(), "feat/x", &observed).unwrap();
-        assert_eq!(heads(&repo).live_head("feat/x"), Ok(None));
+        delete_remote_branch(&repo.path(), &origin_url(&repo), "feat/x", &observed).unwrap();
+        assert_eq!(heads(&repo).live_head("origin", "feat/x"), Ok(None));
+        assert!(
+            repo.try_git(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/feat/x"]).is_err(),
+            "the remote-tracking ref goes too, as with `git push origin --delete`"
+        );
     }
 
     #[test]
@@ -218,9 +337,10 @@ mod tests {
         };
 
         let theirs = repo.push_commit_to_origin("feat/x", "late.txt");
-        let error = delete_remote_branch(&repo.path(), "feat/x", &observed).unwrap_err();
+        let error =
+            delete_remote_branch(&repo.path(), &origin_url(&repo), "feat/x", &observed).unwrap_err();
         assert!(!error.is_empty());
-        assert_eq!(heads(&repo).live_head("feat/x"), Ok(Some(theirs)));
+        assert_eq!(heads(&repo).live_head("origin", "feat/x"), Ok(Some(theirs)));
     }
 
     #[test]
@@ -229,6 +349,9 @@ mod tests {
         repo.git(&["remote", "add", "origin", "/nonexistent/origin.git"]);
         let state = preflight_remote_deletion(&repo.path(), "main", &repo.sha("main"), &heads(&repo));
         assert!(matches!(state, RemoteState::Unavailable { .. }), "{state:?}");
-        assert!(delete_remote_branch(&repo.path(), "main", &repo.sha("main")).is_err());
+        assert!(
+            delete_remote_branch(&repo.path(), "/nonexistent/origin.git", "main", &repo.sha("main"))
+                .is_err()
+        );
     }
 }

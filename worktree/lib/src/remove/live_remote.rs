@@ -1,4 +1,4 @@
-//! Non-interactive, deadline-bound git network calls against `origin`.
+//! Non-interactive, deadline-bound git network calls.
 //!
 //! Every call runs with credential prompts disabled (`GIT_TERMINAL_PROMPT=0`,
 //! `credential.interactive=never`, `GCM_INTERACTIVE=never`) and SSH in batch
@@ -21,17 +21,18 @@ pub const LIVE_CHECK_DEADLINE: Duration = Duration::from_secs(3);
 /// Deadline for the lease-protected deletion push.
 pub const PUSH_DEADLINE: Duration = Duration::from_secs(30);
 
-/// Reads live branch heads on `origin`.
+/// Reads live branch heads.
 ///
 /// A trait so the tier logic can be tested with scripted answers.
 pub trait RemoteHeads: Sync {
-    /// The live SHA of `refs/heads/<branch>` on origin: `Ok(None)` when origin
-    /// answered and has no such branch, `Err` with a reason when origin could
-    /// not be asked (unreachable, no credentials, deadline).
-    fn live_head(&self, branch: &str) -> Result<Option<String>, String>;
+    /// The live SHA of `refs/heads/<branch>` at `remote` (a remote name, which
+    /// reads its fetch URL, or a URL): `Ok(None)` when it answered and has no
+    /// such branch, `Err` with a reason when it could not be asked
+    /// (unreachable, no credentials, deadline).
+    fn live_head(&self, remote: &str, branch: &str) -> Result<Option<String>, String>;
 }
 
-/// [`RemoteHeads`] through `git ls-remote origin`.
+/// [`RemoteHeads`] through `git ls-remote`.
 #[derive(Debug, Clone)]
 pub struct LsRemote<'a> {
     pub base: &'a Path,
@@ -39,11 +40,11 @@ pub struct LsRemote<'a> {
 }
 
 impl RemoteHeads for LsRemote<'_> {
-    fn live_head(&self, branch: &str) -> Result<Option<String>, String> {
+    fn live_head(&self, remote: &str, branch: &str) -> Result<Option<String>, String> {
         let refname = format!("refs/heads/{branch}");
         let output = run_noninteractive(
             self.base,
-            &["ls-remote", "origin", &refname],
+            &["ls-remote", remote, &refname],
             self.deadline,
         )?;
         Ok(output.lines().find_map(|line| {
@@ -186,12 +187,12 @@ mod tests {
             base: &repo.path(),
             deadline: LIVE_CHECK_DEADLINE,
         };
-        assert_eq!(heads.live_head("main").unwrap(), Some(repo.sha("main")));
-        assert_eq!(heads.live_head("no-such-branch").unwrap(), None);
+        assert_eq!(heads.live_head("origin", "main").unwrap(), Some(repo.sha("main")));
+        assert_eq!(heads.live_head("origin", "no-such-branch").unwrap(), None);
 
         // A push elsewhere is visible live without a fetch.
         let pushed = repo.push_commit_to_origin("main", "other.txt");
-        assert_eq!(heads.live_head("main").unwrap(), Some(pushed));
+        assert_eq!(heads.live_head("origin", "main").unwrap(), Some(pushed));
     }
 
     #[test]
@@ -201,7 +202,7 @@ mod tests {
             base: &repo.path(),
             deadline: LIVE_CHECK_DEADLINE,
         };
-        assert!(heads.live_head("main").is_err());
+        assert!(heads.live_head("origin", "main").is_err());
 
         let unreachable = TestRepo::new();
         unreachable.git(&["remote", "add", "origin", "/nonexistent/origin.git"]);
@@ -209,7 +210,7 @@ mod tests {
             base: &unreachable.path(),
             deadline: LIVE_CHECK_DEADLINE,
         };
-        assert!(heads.live_head("main").is_err());
+        assert!(heads.live_head("origin", "main").is_err());
     }
 
     #[cfg(unix)]
