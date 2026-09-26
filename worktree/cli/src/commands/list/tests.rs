@@ -497,7 +497,7 @@ mod gather {
 
     use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrListing, fetch_and_publish, unix_now};
 
-    use super::{run_git, temp_repo};
+    use super::{recorder, run_git, temp_repo};
 
     const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
 
@@ -573,6 +573,18 @@ mod gather {
         }
     }
 
+    /// The git calls `gather` made: a cache hit costs exactly the origin
+    /// lookup that binds the stored answer to the current `origin`.
+    fn git_calls_of(gather: impl FnOnce() -> PrListing) -> (PrListing, Vec<Vec<String>>) {
+        recorder::start_recording();
+        let listing = gather();
+        (listing, recorder::finish_recording())
+    }
+
+    fn origin_lookup() -> Vec<Vec<String>> {
+        vec![["remote", "get-url", "origin"].map(String::from).to_vec()]
+    }
+
     fn numbers(listing: &PrListing) -> Vec<u64> {
         listing.pull_requests.iter().map(|pr| pr.number).collect()
     }
@@ -588,8 +600,9 @@ mod gather {
         fixture.seed(12 * 60, 99);
         let stored = std::fs::read(&fixture.store).expect("store");
 
-        let listing = fixture.gather(answering);
+        let (listing, git_calls) = git_calls_of(|| fixture.gather(answering));
 
+        assert_eq!(git_calls, origin_lookup());
         assert_eq!(numbers(&listing), [99], "the stored badges, not a new answer");
         assert!(listing.is_stale_at(unix_now()), "shown with its age");
         assert_eq!(REQUESTS.load(Ordering::SeqCst), 0, "no request in the foreground");
@@ -626,8 +639,9 @@ mod gather {
         let fixture = Fixture::new();
         fixture.seed(10, 99);
 
-        let listing = fixture.gather(answering);
+        let (listing, git_calls) = git_calls_of(|| fixture.gather(answering));
 
+        assert_eq!(git_calls, origin_lookup(), "one local git call, no request");
         assert_eq!(numbers(&listing), [99]);
         assert!(!listing.is_stale_at(unix_now()));
         assert_eq!(REQUESTS.load(Ordering::SeqCst), 0);

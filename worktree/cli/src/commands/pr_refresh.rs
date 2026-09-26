@@ -19,9 +19,12 @@ pub const SUBCOMMAND: &str = "internal-refresh-prs";
 /// capturing `wt list`'s output wait for the worker. A spawn failure is
 /// ignored; the stale answer stays shown.
 pub fn launch(main: &Path) {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = spawn_worker(&exe, main);
+    }
+}
+
+fn spawn_worker(exe: &Path, main: &Path) -> std::io::Result<()> {
     let mut command = Command::new(exe);
     command
         .arg(SUBCOMMAND)
@@ -34,7 +37,7 @@ pub fn launch(main: &Path) {
         .stderr(Stdio::null());
     sniff::process::configure_detached_child(&mut command);
     // Dropping the handle neither waits for nor kills the worker.
-    let _ = command.spawn();
+    command.spawn().map(drop)
 }
 
 /// The worker: refreshes the stored answer for `repo` when it is a main
@@ -98,5 +101,15 @@ mod tests {
         assert_eq!(main_checkout(&main.join("sub")), None, "a subdirectory");
         assert_eq!(main_checkout(&root.path().join("missing")), None, "a missing path");
         assert_eq!(main_checkout(root.path()), None, "not a repository");
+    }
+
+    #[test]
+    fn a_worker_that_cannot_start_is_an_error_launch_discards() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let missing = root.path().join("no-such-wt");
+
+        let started = spawn_worker(&missing, root.path());
+
+        assert!(started.is_err(), "{started:?}");
     }
 }
