@@ -39,6 +39,10 @@ tempfile = "3"
 xpty = "0.3.6"
 
 [[test]]
+name = "level2_create"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_dirty_tree"
 required-features = ["terminal-tests"]
 
