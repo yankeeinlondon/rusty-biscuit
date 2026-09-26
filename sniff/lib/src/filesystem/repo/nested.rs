@@ -154,6 +154,8 @@ pub(crate) fn discover_nested_workspace_outcomes(
 ) -> Result<()> {
     let candidates = match evidence.nested_markers {
         Some(markers) => candidates_from_marker_paths(root, markers),
+        #[cfg(test)]
+        None if tests::serial_baseline_selected() => tests::serial_baseline_walk(root),
         None => walk_for_nested_markers(root),
     };
     if candidates.is_empty() {
@@ -240,8 +242,8 @@ struct Candidate {
 ///   `nested/package.json/`) is not evidence: only non-directory entries are,
 ///   which is the true marker contract. Its descendants are still walked.
 ///
-/// The walk runs on `ignore`'s parallel walker with its default worker count
-/// (available parallelism, capped at 12). The result does not depend on
+/// The walk runs on `ignore`'s parallel walker with
+/// [`nested_walk_worker_count`] workers. The result does not depend on
 /// scheduling: every matching marker is kept and
 /// [`candidates_from_marker_paths`] sorts what it returns.
 ///
@@ -253,10 +255,27 @@ fn walk_for_nested_markers(root: &Path) -> Vec<Candidate> {
     walk_for_nested_markers_with_threads(root, None)
 }
 
+/// Upper bound on the fallback walk's worker count.
+///
+/// `ignore`'s own default (available parallelism, capped at 12) gives every
+/// walk a fixed startup cost that grows with the worker count: workers are
+/// spawned per walk and idle workers poll on a 1 ms sleep. Four workers keep
+/// most of the large-tree gain at a lower small-tree floor and fewer threads
+/// under concurrent requests; see `2026-09-20-repo-perf`.
+const MAX_NESTED_WALK_WORKERS: usize = 4;
+
+/// Worker count the production walk uses: available parallelism, capped at
+/// [`MAX_NESTED_WALK_WORKERS`].
+fn nested_walk_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(MAX_NESTED_WALK_WORKERS)
+}
+
 /// [`walk_for_nested_markers`] with an explicit worker count.
 ///
-/// `None` keeps `ignore`'s default policy and is what production passes; tests
-/// pass `Some(n)` to pin a one-worker or multi-worker run.
+/// `None` uses [`nested_walk_worker_count`] and is what production passes;
+/// tests pass `Some(n)` to pin a one-worker or multi-worker run.
 fn walk_for_nested_markers_with_threads(root: &Path, threads: Option<usize>) -> Vec<Candidate> {
     use ignore::WalkState;
     use std::sync::{Arc, Mutex};
@@ -304,9 +323,7 @@ fn walk_for_nested_markers_with_threads(root: &Path, threads: Option<usize>) -> 
                 .to_str()
                 .is_some_and(should_skip_directory_name)
         });
-    if let Some(threads) = threads {
-        builder.threads(threads);
-    }
+    builder.threads(threads.unwrap_or_else(nested_walk_worker_count));
     builder.build_parallel().run(|| {
         let mut worker = MarkerWorker {
             shared: Arc::clone(&shared),
@@ -935,9 +952,9 @@ mod tests {
         }
     }
 
-    /// Worker configurations every parity check runs: one worker, `ignore`'s
-    /// default policy (what production uses), and an explicit multi-worker
-    /// count that is parallel even on a small runner.
+    /// Worker configurations every parity check runs: one worker, the
+    /// production policy ([`nested_walk_worker_count`]), and an explicit
+    /// multi-worker count that is parallel even on a small runner.
     const WORKER_CONFIGS: [Option<usize>; 3] = [Some(1), None, Some(4)];
 
     type Fields = crate::filesystem::repo::nested_benchmark::CandidateFields;
@@ -1721,7 +1738,7 @@ mod tests {
             eprintln!(
                 "threads = {threads:?}: {worker_threads} distinct worker thread(s) admitted {entries} entries"
             );
-            let cap = threads.unwrap_or(12);
+            let cap = threads.unwrap_or_else(nested_walk_worker_count);
             assert!(
                 (1..=cap).contains(&worker_threads),
                 "threads = {threads:?}: {worker_threads} worker threads"
@@ -1730,5 +1747,194 @@ mod tests {
                 assert_eq!(worker_threads, 1, "a one-worker walk runs on one thread");
             }
         }
+    }
+
+    thread_local! {
+        static SERIAL_BASELINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Test-only work counter: one increment per fallback that ran the serial
+    /// baseline instead of the production walk.
+    const SERIAL_BASELINE_WALKS: &str = "test.nested_walk.serial_baseline_walks";
+
+    /// Whether this thread's nested fallback should run the serial baseline.
+    pub(super) fn serial_baseline_selected() -> bool {
+        SERIAL_BASELINE.get()
+    }
+
+    /// The pre-`2026-09-20-repo-perf` fallback: the serial reference paths fed
+    /// to the unchanged candidate grouping.
+    pub(super) fn serial_baseline_walk(root: &Path) -> Vec<Candidate> {
+        performance::increment_counter(SERIAL_BASELINE_WALKS, 1);
+        candidates_from_marker_paths(root, &serial_reference_paths(root))
+    }
+
+    /// Run `f` with this thread's nested fallback routed to the serial
+    /// baseline, restoring the production walk even if `f` panics.
+    fn with_serial_baseline<T>(f: impl FnOnce() -> T) -> T {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SERIAL_BASELINE.set(false);
+            }
+        }
+        SERIAL_BASELINE.set(true);
+        let _restore = Restore;
+        f()
+    }
+
+    /// Several sibling and nested workspaces at different depths under a root
+    /// Cargo workspace, plus Cargo and `node_modules` workspaces the walker
+    /// prunes by directory name (`vendor`, `node_modules`).
+    ///
+    /// The fixture is not a Git repository, so host global excludes cannot
+    /// apply to it.
+    fn build_nested_workspace_fixture(root: &Path) {
+        let write = |relative: &str, content: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("fixture file has a parent"))
+                .expect("create fixture dir");
+            std::fs::write(&path, content).expect("write fixture file");
+        };
+        write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n",
+        );
+        for name in ["alpha", "beta"] {
+            write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            );
+        }
+        write(
+            "vendor/inner/Cargo.toml",
+            "[workspace]\nmembers = [\"x\"]\n",
+        );
+        write(
+            "vendor/inner/x/Cargo.toml",
+            "[package]\nname = \"vendored-x\"\nversion = \"0.1.0\"\n",
+        );
+        write("web/pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+        for name in ["site", "docs"] {
+            write(
+                &format!("web/packages/{name}/package.json"),
+                &format!("{{\"name\": \"{name}\", \"version\": \"1.0.0\"}}\n"),
+            );
+        }
+        write(
+            "services/go.work",
+            "go 1.22\n\nuse (\n\t./api\n\t./worker\n)\n",
+        );
+        for name in ["api", "worker"] {
+            write(
+                &format!("services/{name}/go.mod"),
+                &format!("module example.com/{name}\n\ngo 1.22\n"),
+            );
+        }
+        write(
+            "tools/js/package.json",
+            "{\"name\": \"js-tools\", \"private\": true, \"workspaces\": [\"packages/*\"]}\n",
+        );
+        write("tools/js/package-lock.json", "{\"lockfileVersion\": 3}\n");
+        write(
+            "tools/js/packages/lint/package.json",
+            "{\"name\": \"lint\", \"version\": \"2.0.0\"}\n",
+        );
+        write(
+            "node_modules/dep/package.json",
+            "{\"name\": \"dep\", \"workspaces\": [\"inner/*\"]}\n",
+        );
+        write(
+            "node_modules/dep/inner/pruned/package.json",
+            "{\"name\": \"pruned\"}\n",
+        );
+    }
+
+    /// AC5 controlled fixture: public structure detection is identical, as
+    /// complete serialized `RepoInfo`, whether the nested fallback runs the
+    /// pre-fix serial walk or the production parallel walk.
+    ///
+    /// Both requests must reach the fallback, each through its own walker, or
+    /// the comparison proves nothing about the walk change.
+    #[test]
+    fn public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture() {
+        use crate::filesystem::repo::detect_repo_structure;
+        use crate::performance::testing;
+
+        let dir = TempDir::new().expect("create temp dir");
+        let root = dir.path();
+        build_nested_workspace_fixture(root);
+
+        let detect = || {
+            let info = detect_repo_structure(root)
+                .expect("structure detection")
+                .expect("fixture is a repository");
+            let json = serde_json::to_string_pretty(&info).expect("serialize RepoInfo");
+            (info, json)
+        };
+        let ((_, baseline), baseline_counts) = testing::measure(|| with_serial_baseline(detect));
+        let ((changed_info, changed), changed_counts) = testing::measure(detect);
+
+        assert_eq!(
+            (
+                baseline_counts.get(SERIAL_BASELINE_WALKS),
+                baseline_counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            ),
+            (1, 0),
+            "the baseline request must take the fallback through the serial walk: {:?}",
+            baseline_counts.all()
+        );
+        assert_eq!(
+            (
+                changed_counts.get(SERIAL_BASELINE_WALKS),
+                changed_counts.get(counters::REPO_NESTED_MARKER_WALKS),
+            ),
+            (0, 1),
+            "the changed request must take the fallback through the parallel walk: {:?}",
+            changed_counts.all()
+        );
+        assert_eq!(
+            changed, baseline,
+            "the parallel walk changed the public repository result"
+        );
+
+        let mut packages: Vec<(String, String)> = changed_info
+            .packages
+            .as_ref()
+            .expect("a monorepo lists packages")
+            .iter()
+            .map(|package| (package.relative.clone(), package.name.clone()))
+            .collect();
+        packages.sort();
+        let expected: Vec<(String, String)> = [
+            ("crates/alpha", "alpha"),
+            ("crates/beta", "beta"),
+            ("services/api", "example.com/api"),
+            ("services/worker", "example.com/worker"),
+            ("tools/js/packages/lint", "lint"),
+            ("web/packages/docs", "docs"),
+            ("web/packages/site", "site"),
+        ]
+        .into_iter()
+        .map(|(relative, name)| (relative.to_string(), name.to_string()))
+        .collect();
+        assert_eq!(packages, expected, "{changed}");
+
+        let mut layers: Vec<(PathBuf, MonorepoStandard)> = changed_info
+            .monorepo_layers
+            .iter()
+            .map(|layer| (layer.root.clone(), layer.authority))
+            .collect();
+        layers.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            layers,
+            vec![
+                (root.to_path_buf(), MonorepoStandard::CargoWorkspace),
+                (root.join("services"), MonorepoStandard::GoWorkspace),
+                (root.join("tools/js"), MonorepoStandard::NpmWorkspaces),
+                (root.join("web"), MonorepoStandard::PnpmWorkspaces),
+            ],
+            "{changed}"
+        );
     }
 }
