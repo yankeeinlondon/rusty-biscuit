@@ -144,6 +144,26 @@ impl Scene {
         path
     }
 
+    fn create_included(&self) -> PathBuf {
+        fs::write(self.repo().join(".gitignore"), ".env\n").unwrap();
+        fs::write(self.repo().join(".worktreeinclude"), ".env\n").unwrap();
+        git(&self.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+        git(&self.repo(), &["commit", "-q", "-m", "include rules"]);
+        fs::write(self.repo().join(".env"), "SECRET=old\n").unwrap();
+        let base = self.root.path().join("wts");
+        fs::create_dir_all(&base).unwrap();
+        let output = Command::new(cargo_bin("wt"))
+            .current_dir(self.repo())
+            .args(["create", "included"])
+            .env("WT", &base)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let target = base.join("repo/included");
+        assert_eq!(fs::read(target.join(".env")).unwrap(), b"SECRET=old\n");
+        target
+    }
+
     fn record_fork(&self, branch: &str, parent: &str) {
         let store = worktree::fork_origin::fork_origin_path(&self.repo()).unwrap();
         worktree::fork_origin::record(
@@ -347,6 +367,79 @@ fn level2_remove_files_question_follows_one_blank_line() {
     assert_eq!(outcome.code, 0);
     assert!(wt.join("lib.rs").exists());
     assert!(scene.branch_exists("feat/x"));
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_changed_included_file_defaults_to_no() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.create_included();
+    fs::write(wt.join(".env"), "SECRET=new\n").unwrap();
+    let mut harness = fresh_harness();
+    let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    assert!(plain.contains(".env") && plain.contains("changed"), "{plain}");
+    assert_one_blank_line_before(&plain, "Discard the files listed above");
+    harness.send_key("Enter").unwrap();
+    assert_eq!(scene.wait_outcome().code, 0);
+    assert_eq!(fs::read(wt.join(".env")).unwrap(), b"SECRET=new\n");
+    assert!(scene.branch_exists("included"));
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_unknown_included_file_defaults_to_no() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.create_included();
+    let record = worktree::copy_record::record_path(&scene.repo(), &wt).unwrap();
+    fs::remove_file(record).unwrap();
+    scene.record_fork("included", "included");
+    let mut harness = fresh_harness();
+    let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    assert!(plain.contains(".env") && plain.contains("unknown"), "{plain}");
+    harness.send_key("Enter").unwrap();
+    assert_eq!(scene.wait_outcome().code, 0);
+    assert!(wt.join(".env").exists());
+    assert!(scene.branch_exists("included"));
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_unchanged_included_copy_removes_without_prompt() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.create_included();
+    let mut harness = fresh_harness();
+    let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let outcome = scene.wait_outcome();
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 0, "{plain}");
+    assert!(!plain.contains("Discard the files listed above"), "{plain}");
+    assert!(!wt.exists());
+    assert!(!scene.branch_exists("included"));
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_included_edit_between_handoff_runs_refuses_removal() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.create_included();
+    let edit = format!("printf 'SECRET=new\\n' > {}", quote(&wt.join(".env")));
+    let mut harness = fresh_harness();
+    let script = scene.script(Shell::Bash, true, &wt, "wt remove included", &edit);
+    scene.start(&mut harness, Shell::Bash, &script);
+    let outcome = scene.wait_outcome();
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 3, "{plain}");
+    assert_eq!(fs::read(wt.join(".env")).unwrap(), b"SECRET=new\n");
+    assert!(scene.branch_exists("included"));
 }
 
 #[test]
