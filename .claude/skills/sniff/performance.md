@@ -107,5 +107,13 @@ inventing a second Sniff increment.
   (`git_ignore_rules_apply_under_an_isolated_git_configuration`), never by
   mutating this process's environment. Outside a Git repository, `.gitignore`
   and the global excludes do not apply; `.ignore` still does.
+- `ignore`'s `build_parallel()` has a fixed cost per walk, whatever the tree's
+  size. `ignore` 0.4.25 spawns fresh worker threads for every `run`. Idle
+  workers poll with `thread::sleep(1 ms)`, and the walk ends only once every
+  worker is idle. On this Mac, an 8-file tree cost about 0.27 ms with one
+  worker, about 1.6 ms with two, and about 3.0 ms with the default twelve,
+  against 0.23 ms for a serial `build()` walk. Benchmark tiny trees and
+  concurrent callers, not just a large checkout, before converting a
+  per-request walker (`2026-09-20-repo-perf` `evidence/after/`).
 - The previously evaluated small hot-path changes were below the project
   threshold. Revisit them only with new counter or profile evidence.
