@@ -3,8 +3,8 @@ created: 2026-09-16
 status: draft
 for: spec.md
 absorbs:
-  - ../2026-07-15-type-system/spec.md
-  - ../2026-07-22-explicit-null/spec.md
+  - 2026-07-15-type-system
+  - 2026-07-22-explicit-null
 ---
 
 # Declarations Design Annex
@@ -14,7 +14,7 @@ This annex carries the Phase C/E design detail for the parent
 declaration layer, strict root validation, and the host integration
 contract. It is re-homed — with dated corrections, not copied wholesale —
 from the superseded July draft
-([2026-07-15-type-system](../2026-07-15-type-system/spec.md)); that draft
+(`2026-07-15-type-system`); that draft
 remains in place as the historical record, and this annex — not the draft —
 is the design of record. Where this annex and the July draft disagree,
 this annex wins. The parent specification's dated confirmed clarifications
@@ -22,7 +22,7 @@ also apply here; remaining compatibility implementation work is recorded
 in the parent specification. The consolidation itself is recorded as
 Resolved Decision 17 in the
 chartering spec
-([2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md)).
+(`2026-09-15-dasherized-identifiers`).
 
 Phase mapping: the declaration layer, static types, effective-schema
 projection, strict root validation, interpolation consistency, and the host
@@ -213,25 +213,23 @@ globally.
 
 ### Normalized expression types
 
-The declaration layer uses a normalized expression-facing type. It does not
-expose validation constraints other than optionality as expression types —
-and optionality's contribution is exactly `| null`, per the translation
-model.
+The declaration layer uses the shared compiled type descriptors from
+[function-contracts.md](function-contracts.md). Preserve scalar refinements,
+passive value constraints, array item types, tuple positions and rest shape,
+structured objects, callable signatures, and normalized unions. Optional
+schema properties contribute `| null` under the translation model.
 
-At minimum, the model distinguishes:
+Do not erase constraints merely to fit a six-shape JSON model: an unconstrained
+number and `number(integer; min(1))` have different binding guarantees. Runtime
+numeric values use `f64`; integer remains a constraint. Retaining nested shape
+does not require a complete nested flow solver. When implication cannot be
+proved within the analysis budget, report conditional compatibility rather
+than falsely proving acceptance or rejection. Raw JSON Schema projection keeps
+its conservative fallback rules below.
 
-- `unknown`;
-- `null` (Phase A vocabulary);
-- each supported scalar family, including Darkmatter refinements such as
-  `file`, `date`, `url`, and `expression`;
-- object;
-- array of a normalized item type;
-- a union of two or more distinct concrete types.
-
-Constraints such as `required`, `generated`, `eager`, `match(...)`,
-defaults, descriptions, and cardinality do not affect type identity beyond
-optionality's `| null`. Inline object shapes normalize to object for this
-feature; nested member typing is a non-goal.
+Descriptions, categories, generation hints, and eager resolution settings are
+metadata, not additional value types. Presence/default handling stays at its
+own schema or call boundary. Projection never executes eager resolution.
 
 An unresolved imported type must not reach effective-schema projection. If
 it does, projection returns a schema error rather than silently omitting
@@ -290,10 +288,9 @@ property-level union fold — is projected:
 - an `optional` property with projected type A contributes `A | null`;
 - a `required` property contributes A unchanged.
 
-`string(max-length: 5)` therefore projects to `string | null` for the same
-reason it is a five-constrained string: the default constraint participates
-in the effective runtime type, and constraints other than optionality are
-deliberately not reified beyond their scalar family.
+`string(max-length: 5)` therefore projects to a five-character-constrained
+string unioned with null. Retain the length constraint in the compiled type;
+optionality adds null without erasing the other constraints.
 
 ### Property-level unions
 
@@ -627,20 +624,20 @@ Custom host analysis callbacks are not required or authorized.
 
 ### Representation evidence and call presence
 
-The completed [representation prototype](spikes/function-declarations-findings.md)
+The historical [representation prototype](spikes/function-declarations-findings.md)
 supports separating call presence and argument order from schema value types
 and shared behavior metadata. A required function argument cannot be omitted
 merely because its value type is `unknown` or `null`; explicit null remains a
 supplied argument checked against that value type. This does not alter
 SimplifiedSchema property-omission semantics.
 
-The candidate is a proposed representation, not a validated generic checker.
+The candidate is a historical representation, not a validated generic checker.
 Its passive probes used an installed binary not proven to match this
 worktree; accepted metadata did not prove every nested definition or
-behavior. Planning must preserve catalog refinements, including `ip-address`,
-and audit variadic minimum counts, same-count overload dispatch, conversions,
-and fallback behavior. Exact candidate field names remain implementation
-choices. The parent specification records the evidence and completion limits.
+behavior. The consolidated `function-contracts.md` replaces its candidate
+syntax and specifies refinements, variadic counts, overloads, and recovery.
+Implementation must prove those contracts through normal dispatch and passive
+analysis; the old probe supplies none of that evidence.
 
 ## Design Properties
 
@@ -685,13 +682,16 @@ remaining host validation path must agree on whether a root is known.
 
 ### D7 — Compatibility (cross-phase)
 
-Existing evaluation precedence, runtime function contracts, arm selection,
-coercion, eager file rewriting, optional-value dropping, and short-circuit
-rules remain unchanged except where this design explicitly adds declaration
-visibility or whole-value string rescanning, or the parent specification's
-confirmed conditional and file-predicate contracts. The type-vocabulary changes
-(`unknown`, `null`) are owned by the parent spec's Phases A and C, not by
-this annex.
+Preserve evaluation precedence, document-schema arm selection, eager file
+rewriting, optional-value dropping, and short-circuit execution except for
+explicit changes in the parent specification. Function migration follows the
+confirmed merge decisions: shared conversions replace inconsistent legacy
+behavior, ordinary functions reject implicit null propagation, and numeric
+representation, limits, arithmetic, and presentation follow M4–M7 and M15–M16. Document and test those deliberate
+changes instead of treating legacy behavior as a compatibility requirement.
+This annex additionally introduces declaration visibility and whole-value
+string rescanning. The parent specification owns type vocabulary, conditional
+diagnostics, and file-predicate contracts.
 
 ## Non-Goals
 
@@ -705,10 +705,10 @@ this annex.
   remains in scope only for compatibility verification.
 - Changing schema validation, arm selection, coercion, eager file rewriting,
   or optional-value dropping beyond the parent specification's confirmed
-  new-type behavior. The `null(required)` and `unknown(required)` cases are
+  decisions. The `null(required)` and `unknown(required)` cases are
   explicit requirements, not contradictions to reject.
 - Changing function runtime contracts beyond the parent specification's
-  confirmed file-predicate behavior. `is_file_type` checks structure without
+  confirmed decisions. `is_file_type` checks structure without
   resolution; `file_exists` accepts null and retains advisory false results
   for known unsupported types.
 - Making all lifecycle globals available in all events or during preflight.
@@ -717,15 +717,15 @@ this annex.
   `additionalProperties`, or non-enumerable raw JSON Schema constructs.
 - Replacing Darkmatter's validator with the conservative expression-type
   projection.
-- Adding or changing SimplifiedSchema authoring syntax solely for this
-  feature.
+- Adding authoring syntax through this declaration-projection annex;
+  function and tuple grammar belongs to the consolidated parent feature.
 
 ## Acceptance Criteria
 
 Phase A criteria — `unknown`/`any`, `null`, their `required` behavior, and
 inclusive/exclusive unions — live in the parent spec's confirmed
 clarifications. The original null-type cases were absorbed from the superseded
-[2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md) draft.
+`2026-07-22-explicit-null` draft.
 
 ### Phase C — Darkmatter library
 
