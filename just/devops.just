@@ -2573,45 +2573,50 @@ status subject="":
         --recent-all) just _status_recent all;  exit 0 ;;
     esac
 
-    # No subject — show full overview (original behaviour)
+    # No subject — show full overview. A section with no spec directories
+    # (lifecycle directories like `_completed` do not count) is left out of the
+    # listing and named in a single closing line instead.
     if [[ -z "{{ subject }}" ]]; then
-        echo
-        echo -e "{{ bold }}{{ blue }}{{ underline }}Features{{ reset }}"
-        echo
-        if [[ -d features ]]; then
-            eza features -lhga --git --icons=always --hyperlink --group -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
-        else
-            echo -e "  {{ italic }}no features directory{{ reset }}"
-        fi
-        echo
-        echo -e "{{ bold }}Unscheduled{{ reset }}"
-        echo
-        if [[ -d features/_unscheduled ]]; then
-            eza features/_unscheduled -lhga --git --icons=always --hyperlink --group -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
-        else
-            echo -e "  {{ italic }}no unscheduled directory{{ reset }}"
-        fi
-        echo
-        echo -e "{{ bold }}{{ blue }}{{ underline }}Fixes{{ reset }}"
-        echo
-        if [[ -d fixes ]]; then
-            eza fixes -lDga -I '_*' --icons=always --hyperlink || echo -e "  {{ italic }}no fixes found{{ reset }}"
-        else
-            echo -e "  {{ italic }}no fixes directory{{ reset }}"
-        fi
-        echo
-        echo -e "{{ bold }}{{ magenta }}{{ underline }}Recent Reviews{{ reset }}"
-        echo
-        if [[ -d reviews ]]; then
-            mapfile -t recent_reviews < <(find reviews -maxdepth 1 -mindepth 1 -type d -mtime -3 2>/dev/null | sort)
-            if [[ ${#recent_reviews[@]} -gt 0 ]]; then
-                eza "${recent_reviews[@]}" -ldga --icons=always --hyperlink
-            else
-                echo -e "  {{ italic }}no reviews updated in the last 3 days{{ reset }}"
+        # eza sees a pipe under `$(…)`, so carry the terminal's color decision in.
+        if [[ -t 1 ]]; then color=always; else color=never; fi
+        spec_dirs() {
+            [[ -d "$1" ]] || return 0
+            find "$1" -maxdepth 1 -mindepth 1 -type d ! -name '_*' ! -name '.*' "${@:2}" -exec basename {} \; 2>/dev/null | sort
+        }
+        empty=()
+        # An empty `name` marks a subsection: shown when it has entries, but
+        # never named in the closing "had no entries" line.
+        section() {
+            local name="$1" heading="$2" dir="$3"; shift 3
+            if (( $# == 0 )); then
+                [[ -z "${name}" ]] || empty+=("${name}")
+                return 0
             fi
-        else
-            echo -e "  {{ italic }}no reviews directory{{ reset }}"
+            echo
+            echo -e "${heading}"
+            echo
+            (CDPATH= cd "./${dir}" && eza "$@" -ldga --icons=always --color="${color}" --hyperlink)
+        }
+
+        mapfile -t features < <(spec_dirs features)
+        mapfile -t unscheduled < <(spec_dirs features/_unscheduled)
+        mapfile -t fixes < <(spec_dirs fixes)
+        mapfile -t reviews < <(spec_dirs reviews -mtime -3)
+
+        section "Features" "{{ bold }}{{ blue }}{{ underline }}Features{{ reset }}" features ${features[@]+"${features[@]}"}
+        section "" "{{ bold }}Unscheduled{{ reset }}" features/_unscheduled ${unscheduled[@]+"${unscheduled[@]}"}
+        section "Fixes" "{{ bold }}{{ blue }}{{ underline }}Fixes{{ reset }}" fixes ${fixes[@]+"${fixes[@]}"}
+        section "Reviews" "{{ bold }}{{ magenta }}{{ underline }}Recent Reviews{{ reset }}" reviews ${reviews[@]+"${reviews[@]}"}
+
+        if (( ${#empty[@]} > 0 )); then
+            names="${empty[-1]}"
+            if (( ${#empty[@]} > 1 )); then
+                names="$(printf '%s, ' "${empty[@]:0:${#empty[@]}-1}")and ${names}"
+            fi
+            echo
+            echo -e "{{ dim }}- ${names} had no entries{{ reset }}"
         fi
+        echo
         exit 0
     fi
 
@@ -2786,7 +2791,7 @@ _status_recent scope="area":
                     stamp = None
             elif line and stamp is not None and line not in changed:
                 changed[line] = stamp
-        for line in git("status", "--porcelain").splitlines():
+        for line in git("status", "--porcelain", "-uall").splitlines():
             path = line[3:]
             if " -> " in path:
                 path = path.split(" -> ", 1)[1]
@@ -2805,9 +2810,11 @@ _status_recent scope="area":
     def cells(row):
         return (row[1], str(row[3]), "file" if row[3] == 1 else "files", age(row[4]))
 
+    SECTIONS = (("features", "Features"), ("fixes", "Fixes"), ("reviews", "Reviews"))
+
     def scan(area_dir, changed):
         rows = []
-        for kind in ("features", "fixes"):
+        for kind, _ in SECTIONS:
             base = os.path.join(area_dir, kind)
             if not os.path.isdir(base):
                 continue
@@ -2854,7 +2861,7 @@ _status_recent scope="area":
 
     def block(rows, widths, indent, heading_style, spaced):
         name_w, count_w, unit_w, age_w = widths
-        for kind, label in (("features", "Features"), ("fixes", "Fixes")):
+        for kind, label in SECTIONS:
             group = [row for row in rows if row[0] == kind]
             if not group:
                 continue
@@ -2888,13 +2895,26 @@ _status_recent scope="area":
         print(indent + DIM + ITALIC + "nothing touched in the " + window + RESET)
         print()
 
+    # Same closing line as the plain `just status` overview.
+    def no_entries(indent, rows):
+        empty = [
+            label for kind, label in SECTIONS
+            if not any(row[0] == kind for row in rows)
+        ]
+        if not empty:
+            return
+        names = empty[-1]
+        if len(empty) > 1:
+            names = ", ".join(empty[:-1]) + ", and " + names
+        print(indent + DIM + "- " + names + " had no entries" + RESET)
+        print()
+
     if SCOPE == "area":
         rows = scan(os.getcwd(), recent_files())
         title(sniff("area") or os.path.basename(os.getcwd()))
         if rows:
             block(rows, widths(rows), "  ", BOLD + BLUE + UNDERLINE, True)
-        else:
-            nothing_recent("  ")
+        no_entries("  ", rows)
         sys.exit(0)
 
     if SCOPE != "all":
