@@ -681,7 +681,8 @@ if let Some(info) = repo {
 When `RepoInfo` is serialized, the new keys appear only when populated:
 
 - `monorepo_standards` — array of detected standards with resolved binary metadata.
-- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, and `packages`.
+- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and, when a lockfile answered, `lockfile_match`.
+  Lockfile corroboration (`provenance: "lockfile"`, `lockfile_match`) runs only when the `RepoRequest` asks for it: `RepoRequest::full()` and `detect_repo` do; `RepoRequest::structure()`, `RepoRequest::focused(..)`, and `detect_repo_structure` read no lockfile for it and report manifest-derived provenance. Opt in with `RepoRequest::with_lockfile_provenance(true)`.
 
 #### Language Analysis
 
