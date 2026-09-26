@@ -8,7 +8,40 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - sniff/lib/src/process.rs
+    - sniff/lib/src/lib.rs
+    - sniff/lib/Cargo.toml
+    - playa/lib/src/detached/mod.rs
+    - playa/lib/src/detached/tests.rs
+    - playa/lib/Cargo.toml
+    - biscuit-speaks/lib/src/detached.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - Cargo.lock
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - sniff/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/os/build-hosts.md
+packages:
+    - sniff
+    - playa
+    - biscuit-speaks
+    - worktree
+    - worktree-cli
 ---
 
 # List and remove performance implementation plan
@@ -67,26 +100,26 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 2 — Three parallel implementation tracks
 
-- [ ] **Move detachment helper** — parallel; owns `sniff` and `playa` source/tests/manifests.
+- [x] **Move detachment helper** — parallel; owns `sniff` and `playa` source/tests/manifests.
   - Expose `sniff::process::configure_detached_child`; retain existing process-group, creation-flag, and standard-handle behavior. Keep unrelated process internals private.
   - Use the existing Windows binding strategy or add the narrowly required target dependency/features. Preserve the caller obligation to set standard streams explicitly; do not run the intentionally detached worker through sniff's bounded-child runner.
   - Migrate all callers and relevant tests, including consumers outside `playa` found by reference search. Remove the old implementation rather than maintaining two copies.
   - Update touched API/module docs, especially sniff's existing claim that every spawned process uses the bounded runner. Verify playback detachment behavior with existing hermetic tests.
 
-- [ ] **Implement PR storage** — parallel; owns `worktree/lib/src/pull_requests.rs` and its tests; requests manifest edits from integration owner.
+- [x] **Implement PR storage** — parallel; owns `worktree/lib/src/pull_requests.rs` and its tests; requests manifest edits from integration owner.
   - Load `biscuit-hash`; bump the PR format version and add the exact-origin digest. Treat corrupt/old/future-dated/mismatched entries as misses. Preserve valid cached empty results as answers.
   - Separate immediate cache selection from refresh execution. Matching fresh entries do not fetch or launch; matching stale entries return badges plus refresh intent; misses fetch under the existing deadline when a source exists.
   - Implement sidecar locking with `fs4` 0.13, reread origin and store under the lock, skip a now-fresh matching result, and atomically publish only a successful response whose origin still matches. Timestamp successful fetches consistently with the settled interface.
   - Preserve stored bytes after provider/authentication failure, identity changes, and failed publication; never turn failure into a successful empty result. Retain source-repository plus branch badge matching.
   - Add L1 clock/source-count/store tests covering the freshness boundary, origin changes even during a fresh cache hit, missing origin, empty answers, corrupt/old stores, future timestamps, failed requests, and changes during fetch.
 
-- [ ] **Implement local proof** — parallel; owns `worktree/lib/src/remove/safety.rs` and its tests.
+- [x] **Implement local proof** — parallel; owns `worktree/lib/src/remove/safety.rs` and its tests.
   - Add the narrow second-run assessment path agreed in Phase 1: fresh local default, another local branch, or tag containing the tip can prove deletion without constructing/calling network sources.
   - Exclude the branch being deleted, `origin/HEAD`, and the remote deletion destination from admissible protection. A Git failure produces unknown evidence, never safety.
   - When local proof is absent, retain live PR validation and verify remote-tracking protection, including `origin/<default>`, against current remote heads. Preserve the exact-tip/source-repository PR rules and `--force-remote` exclusions.
   - Use counting `PrSource` and `RemoteHeads` stubs to prove zero calls for local proof and required calls/refusal for missing, moved, or unavailable remote-only protection. Keep first-run reporting tests passing.
 
-- [ ] **Integrate foundations** — after the three parallel tasks; integration owner.
+- [x] **Integrate foundations** — after the three parallel tasks; integration owner.
   - Add `worktree -> fs4` in `worktree/lib/Cargo.toml`; consolidate dependency/feature changes and `Cargo.lock` once. Review the public helper's callers and the agreed cache/safety signatures.
   - Checkpoint: focused foundation tests pass, all consumers compile, and no new network access occurs in local-proof/cache-hit tests. The helper preserves playback behavior and only its intended API becomes public.
 

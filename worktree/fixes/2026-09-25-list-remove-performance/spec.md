@@ -26,25 +26,34 @@ reviewed_on: 2026-09-26
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 changed no source. Read the "## Phase 1" section of
-    implementation-log.md before starting: §4 fixes the interfaces
-    (PR store v2 with origin_digest = biscuit_hash::blake3_hash of the exact
-    `git_from(root, root, remote get-url origin)` value; select_cached ->
-    Fresh/Stale/Miss; fetch_and_publish; refresh under a persistent
-    `<repo hash>.prs.lock` sidecar; PrListing::stale removed, with the age line
-    computed at render time; safety::reconfirm with local proof admitting only
-    refs/heads and refs/tags, and every origin/* ref, origin/<default> included,
-    live-checked). §3 is the approved-action matrix and §2 the two gaps with
-    their regression cases. No handoff record version bump is needed.
-    For the sniff move: sniff uses the `windows` 0.62 crate, not windows-sys,
-    so add the `Win32_System_Console` feature and port the two calls. Make
-    `mod process` pub while its existing items stay pub(crate). Also migrate
-    biscuit-speaks/lib/src/detached.rs:192, a third caller outside playa.
-    fs4 gotcha: std's inherent File::unlock shadows the fs4 trait method, so
-    release the lock by dropping the File. The detach and lock lifecycle was
-    already proven on macOS and native Windows with a disposable spike (§5). The
-    fake local PR provider for worker tests (Gitea over plain HTTP via
-    HTTP_PROXY) is proven in §6.
+    Phase 2 is done; read "## Phase 2" in implementation-log.md. Key facts for
+    Phase 3:
+    1. INTERIM STALE BEHAVIOR TO REPLACE: worktree/cli/src/commands/list.rs
+       `gather_prs` still fetches a Stale entry in the foreground (falling back
+       to the stale listing on failure). That kept today's behavior so the
+       suite stays green. Phase 3 must change the Stale arm to "return the
+       listing + launch the detached worker", and add the launch seam.
+       `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` and
+       `list_prs::a_stalled_pr_request_stops_at_its_deadline_...` currently
+       pass only because of that interim wait; they need the planned rework
+       (keep a miss variant for the 300 ms deadline).
+    2. Library API as built: `origin_url(root)`, `origin_digest(origin)`,
+       `select_cached(store, Option<&str>, now) -> CachedPrs::{Fresh,Stale,Miss}`,
+       `fetch_and_publish(store, root, origin, now, &dyn OpenPrSource) ->
+       Option<PrListing>` (None = failed), `refresh(store, root, clock,
+       connect: FnOnce(&str) -> Box<dyn OpenPrSource>) -> RefreshOutcome`,
+       `pr_lock_path(store)`, `REFRESH_DEADLINE`, `PrListing::is_stale_at(now)`.
+       `PrListing::stale` and `SniffOpenPrSource::for_origin` are gone; build
+       `SniffOpenPrSource { remote_url, deadline }` directly.
+    3. Already done ahead of Phase 3: `PrConnect = fn(&str) -> Box<dyn
+       OpenPrSource>`; `list_table::pr_age_markup` uses `is_stale_at(now)`;
+       test seeders (perf_support, level2_list_verbose) write format 2.
+    4. `sniff::process::configure_detached_child` is public; worktree-cli
+       already depends on sniff. `safety::reconfirm(input, prs, heads) ->
+       Reconfirmation { tier, notes }` exists for the handoff.
+    5. cross-check: pass one substring filter per run (a `|` breaks the
+       remote shell). On Linux, add `--all-features` (stale kache hardlinks in
+       this clone's target/release break archive mode).
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-worktree-file
