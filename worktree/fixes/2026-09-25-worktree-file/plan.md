@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-25
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 related:
@@ -54,6 +54,23 @@ docs_updated_during_phase_3:
     - worktree/fixes/2026-09-25-worktree-file/spec.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4:
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
 ---
 
@@ -259,7 +276,7 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 6 — Library (2 concurrent agents)
 
-- [ ] **Included-file classification** (agent A: `lib/src/remove/inventory.rs`, new `lib/src/remove/included.rs`)
+- [x] **Included-file classification** (agent A: `lib/src/remove/inventory.rs`, new `lib/src/remove/included.rs`)
     - `classify_included(base, worktree, entries) -> Result<IncludedAssessment, WorktreeError>` does the following:
         - locates the worktree's own rules; only on `Missing` does it fall back to the base checkout's file, evaluated in the removed worktree (per S1). `Empty` never falls back. `Indeterminate` is `Err` (exit 1);
         - resolves the include set;
@@ -273,25 +290,25 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
         - `fingerprint()` replaces its `ignored\0` lines with `included\0<path>\0<mark>\0<digest-or-observation>` lines, plus the rules and baseline bindings;
         - dirty-file and full-index coverage are unchanged.
     - Update the module and method docs, whose current "Ignored entries count like dirty files" wording becomes wrong.
-- [ ] **Handoff format v3** (agent B: `lib/src/remove/handoff.rs`)
+- [x] **Handoff format v3** (agent B: `lib/src/remove/handoff.rs`)
     - Bump `HANDOFF_FORMAT_VERSION` to 3 and add the rules and baseline bindings to `HandoffState` (the fingerprint already covers content). `verify` re-resolves membership against the fresh state. Any rules or baseline difference is a `HandoffRefusal` (exit 3), even when a protected file left the selected set.
     - L1 tests: a v2 record is treated as missing; a rules change, a record change, or a changed no-record source each refuse; a new `target/` artifact does not refuse.
-- [ ] **Record deletion helper** (agent B)
+- [x] **Record deletion helper** (agent B)
     - Add `copy_record::delete_for(repo_root, worktree)`. It returns a warning string rather than failing.
 
 ### Wave 7 — CLI flow (single agent: `cli/src/commands/remove/{mod,policy,report}.rs`)
 
-- [ ] **Flow**
+- [x] **Flow**
     - `Facts::gather` passes `Indeterminate` and discovery errors up as exit 1 before any mutation.
     - `execute` deletes the copy record right after the directory is removed. A later branch or remote failure does not undo that deletion, and a record-deletion failure is a warning.
     - `run_handoff` compares the new bindings.
-- [ ] **Policy**
+- [x] **Policy**
     - Needing consent because of included files follows the same `policy::decide` path as dirty files (R9). Extend the pure matrix test with included-only, dirty+included, unknown-only, and unchanged-only (which asks nothing).
-- [ ] **Report**
+- [x] **Report**
     - Included files needing consent are listed with the dirty files and marked `new`, `changed`, or `unknown`, and they are named in the confirmation question.
     - One dim "Also deletes ignored files: target/, .DS_Store" line (R8) replaces the counted groups.
     - Update `refusal_markup`, which currently says "ignored files (listed above)".
-- [ ] **L1 CLI tests** (`cli/tests/remove.rs`)
+- [x] **L1 CLI tests** (`cli/tests/remove.rs`)
     - Cover every non-interactive row of the consent table with its exit code.
     - An unchanged `.env` plus `target/` is removed without a question.
     - Editing the source's `.env` after creation causes no question.
@@ -304,7 +321,7 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Checkpoint 4
 
-- [ ] `just test` and `just lint` pass. The existing `level2_remove` and `level2_powershell_remove` suites still pass. Their expectations about ignored files are updated deliberately, because the ruled policy change (Decision 3) makes some old "ignored needs consent" expectations wrong on purpose. Each changed assertion is listed in the implementation log.
+- [x] `just test` and `just lint` pass. The existing `level2_remove` and `level2_powershell_remove` suites still pass. Their expectations about ignored files are updated deliberately, because the ruled policy change (Decision 3) makes some old "ignored needs consent" expectations wrong on purpose. Each changed assertion is listed in the implementation log.
 
 ---
 
