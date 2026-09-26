@@ -74,6 +74,11 @@
   archive is streamed rather than read into memory, and no second hashing
   boundary enters the contract. `blake3` was already an optional `biscuit-hash`
   dependency; no crate was added.
+- `worktree` uses `reflink-copy` 0.1.30 for copy-on-write clones of included
+  files. It falls back to a byte copy when the filesystem cannot clone. The
+  dependency belongs in the worktree library because publication and consent
+  are specific to its copy policy. On Windows, `windows-sys` supplies
+  `MoveFileExW` for publication without replacing an existing destination.
 - `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
   root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
   Cargo package. It depends on `fast-xml-parser` (JUnit reports),

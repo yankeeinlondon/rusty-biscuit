@@ -38,6 +38,12 @@ Because every shared module compiles twice, its `#[cfg(test)]` unit tests also r
 
 `worktree::fork_origin` stores `{ base_branch, base_sha, created_at }` per branch in `<repo hash>.fork-origins.json`. The file sits beside the comparison cache (`cache::repo_cache_file`) and is keyed by the main worktree's path. `create_worktree(branch, base, from)` records only newly created branches, as a best-effort write that never fails a create. `--from` must name a local branch (`refs/heads/…`), and a detached HEAD requires `--from`. `ForkOriginStore::prune` drops records of deleted branches and keeps records whose parent was deleted.
 
+## Include building blocks
+
+`worktree::include` resolves `.worktreeinclude` membership through Git's byte-oriented `ls-files --others --ignored --exclude-from` and `check-ignore --stdin -z --verbose --non-matching` intersection. `IncludeRules::locate` distinguishes missing, empty, present, and indeterminate rules. `guarded_kind` rejects nested repositories, linked directories, and Windows reparse ancestors; paths remain Git's native bytes until filesystem access. Git for Windows rejects verbatim exclude paths, so the resolver passes a simplified canonical spelling.
+
+`worktree::compare` hashes every same-size included file with `biscuit_hash::blake3_hash_reader`; a size change avoids the read. A missing digest means the copy baseline is untrusted. `worktree::include::copy` clones into a temporary file where supported, byte-copies on unsupported clone errors, and publishes regular files without replacing existing destinations. `CopyOutcome::copied` carries `None` instead of an observation when the source changed mid-copy. `worktree::copy_record` persists per-worktree baselines under a 16-hex-digit canonical-path key, bound to a random marker in Git's admin directory. `record_path` resolves missing destination suffixes so its key is stable before and after `git worktree add`; `load` treats corruption and identity mismatch as untrusted. The library modules are present but create/remove/list do not call them until later phases of `2026-09-25-worktree-file`.
+
 ## `wt remove`
 
 The library half is `worktree::remove` (`lib/src/remove/`); the CLI half is `cli/src/commands/remove/` (`mod.rs` flow, `policy.rs`, `report.rs`).
