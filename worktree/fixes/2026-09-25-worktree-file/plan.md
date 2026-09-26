@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-25
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 related:
@@ -43,6 +43,17 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/os/windows.md
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/tests/create_include.rs
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
 ---
 
@@ -197,10 +208,10 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
 
 ### Wave 4 — Library (single agent: `lib/src/worktree.rs`)
 
-- [ ] **Copy source resolution**
+- [x] **Copy source resolution**
     - Add the pure `copy_source(entries: &[WorktreeEntry], fork_branch: Option<&str>) -> CopySource::{Worktree(entry), Base(entry), Ambiguous(Vec<entry>)}`. It is called *before* `git worktree add`, so a reused branch always resolves to the base checkout.
     - L1 tests cover forked-with-worktree, forked-without-worktree, reused, and ambiguous (R3).
-- [ ] **Extend `create_worktree`**
+- [x] **Extend `create_worktree`**
     - Order of work:
         1. validate (unchanged);
         2. resolve the copy source;
@@ -214,9 +225,9 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
         10. write the copy record with successful copies only.
     - Every failure after step 4 becomes a warning in `CreateResult.include: IncludeOutcome { source_label, copied, skipped, failed, warnings }` and never an `Err`.
     - Update the function's `///` docs (the Errors list is unchanged; add a paragraph on the copy).
-- [ ] **List prune**
+- [x] **List prune**
     - In `fill_worktree_statuses`, next to the fork-origin prune, call `copy_record::prune` with the canonical paths from the *successful* `worktree list`. A failed listing prunes nothing.
-- [ ] **L1 tests** (lib)
+- [x] **L1 tests** (lib)
     - Cover acceptance criterion 2 end to end against `TestRepo`:
         - a fork from a branch with a worktree gets that worktree's `.env`;
         - a fork from a branch without a worktree gets the base checkout's;
@@ -228,17 +239,17 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
 
 ### Wave 5 — CLI (single agent: `cli/src/commands/create.rs`, `cli/tests/`)
 
-- [ ] **Create report**
+- [x] **Create report**
     - After the existing "Created worktree" block, render one `Prose` line to stderr: "Copied from `<label>`: a, b, c". Filenames are escaped, control characters are made visible, and the line wraps. When nothing was copied, print nothing.
     - Warnings (per-file failures, skipped links, ambiguous source, indeterminate rules, record write failure) are an `UnorderedList` to stderr. They never include file contents.
-- [ ] **CLI tests** (`cli/tests/create_include.rs`, new)
+- [x] **CLI tests** (`cli/tests/create_include.rs`, new)
     - Assert stderr lines with `NO_COLOR=1`.
     - Assert stdout is exactly the existing protocol (`cd:` lines only under the wrapper, nothing otherwise), including partial success.
     - Filenames with spaces or control characters render escaped.
 
 ### Checkpoint 3
 
-- [ ] `just test` and `just lint` pass. Running `wt create` by hand in a scratch repository with `.env` + `.worktreeinclude` shows the copied line, and `wt list` shows no regression.
+- [x] `just test` and `just lint` pass. Running `wt create` by hand in a scratch repository with `.env` + `.worktreeinclude` shows the copied line, and `wt list` shows no regression.
 
 ---
 
