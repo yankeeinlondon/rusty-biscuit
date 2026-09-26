@@ -189,7 +189,7 @@ fn spawn_preparation(record: &Path) -> Result<(), TtsError> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    playa::detached::configure_detached_child(&mut command);
+    sniff::process::configure_detached_child(&mut command);
     command.spawn().map(|_| ()).map_err(|source| TtsError::ProcessSpawnFailed {
         provider: "detached preparation".into(),
         source,
