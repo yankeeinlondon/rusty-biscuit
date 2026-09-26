@@ -17,6 +17,7 @@ ground_truth: |-
             : 'review document' 
     }}
 plan: "{{ dirname(spec || review) + '/plan.md' }}"
+yolo: true
 initialize:
     stack:
         - when: "!spec && !review"
