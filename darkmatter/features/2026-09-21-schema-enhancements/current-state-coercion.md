@@ -47,7 +47,7 @@ and `replace` require actual strings. `first` and `last` require actual arrays.
 
 This is implemented by the shared `require_number`, `require_string`, and
 `require_array` helpers in
-[`functions/mod.rs`](../../../darkmatter/lib/src/markdown/compose/expression/functions/mod.rs).
+[`functions/mod.rs`](../../lib/src/markdown/compose/expression/functions/mod.rs).
 
 ## Null Handling
 
@@ -115,7 +115,7 @@ shapes. These operator rules matter when specifying a coherent language policy,
 but they should not be mistaken for the default function-call behavior.
 
 The conversion helpers are `to_number` and `to_number_coerce` in
-[`expression/mod.rs`](../../../darkmatter/lib/src/markdown/compose/expression/mod.rs).
+[`expression/mod.rs`](../../lib/src/markdown/compose/expression/mod.rs).
 
 ## Scalar Stringification
 
@@ -132,7 +132,7 @@ Some permissive functions use Darkmatter's scalar string representation:
 This is broader than a schema parameter of type `string`: it is an explicit
 conversion performed by selected functions. It is implemented by
 `scalar_string` in
-[`expression/mod.rs`](../../../darkmatter/lib/src/markdown/compose/expression/mod.rs).
+[`expression/mod.rs`](../../lib/src/markdown/compose/expression/mod.rs).
 
 The conversion appears in several distinct contracts:
 
@@ -246,9 +246,9 @@ example, schema coercion can turn `"4"` into a number when a property declares
 number check.
 
 The current schema behavior is documented in
-[`schema-definition.md`](../../../darkmatter/docs/topics/schema-definition.md#type-coercion).
+[`definition.md`](../../docs/topics/schemas/definition.md#type-coercion).
 The current expression-level contract is documented in
-[`darkmatter-expressions.md`](../../../darkmatter/docs/topics/darkmatter-expressions.md#function-contracts),
+[`darkmatter-expressions.md`](../../docs/topics/darkmatter-expressions.md#function-contracts),
 although that document does not yet contain the full function-level inventory
 recorded here.
 
