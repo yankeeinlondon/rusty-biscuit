@@ -67,6 +67,57 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/tests/level2_remove.rs
+
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+
+docs_created_during_phase_5: []
+
+skills_files_updated_during_phase_5: []
+
+source_code:
+    - worktree/fixes/2026-09-25-worktree-file/spike_git.py
+    - worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1
+    - worktree/cli/src/exit.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/compare.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/include/copy.rs
+    - worktree/lib/src/include/mod.rs
+    - worktree/lib/src/include/rules.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/tests/create_include.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/level2_remove.rs
+
+documentation:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spikes.md
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-25-worktree-file (5 phases)
@@ -138,3 +189,13 @@ skills_files_updated_during_phase_4:
 - Exact targeted L1 tests added to `cli/tests/remove.rs`: `unchanged_included_copy_and_other_ignored_files_remove_without_force`, `changed_included_copy_requires_force_and_preserves_state_on_refusal`, `same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes`, `no_record_uses_distinct_source_and_new_file_needs_consent`, `no_record_source_change_refuses_handoff`, `no_record_uses_the_checked_out_fork_parent_as_source`, `changed_include_rules_refuse_handoff_even_when_file_leaves_set`, `changed_copy_record_refuses_handoff_and_keeps_registration`, `changed_included_contents_refuse_handoff_even_when_classification_stays_changed`, `corrupt_copy_record_falls_back_to_source_without_consent`, `unavailable_distinct_source_marks_included_file_unknown`, and `invalid_include_rules_fail_before_removal`. Library `own_empty_rules_do_not_fall_back_to_base_and_bad_rules_refuse` tests own-rule precedence and errors. Existing `compare` tests prove size changes avoid reads and a large same-size file is read. `policy_matrix_follows_the_rules` now includes included-only, dirty-plus-included, unknown, and unchanged cases. These tests are compiled by declared targets, selected by L1, and use no feature gate.
 - Old expectations changed deliberately: `ignored_entries_need_consent_like_dirty_files` became `ordinary_ignored_entries_are_disposable` and now expects exit 0 and the summary; `a_new_ignored_entry_between_the_runs_refuses` became `a_new_disposable_ignored_entry_between_the_runs_does_not_refuse` and expects a successful handoff. Five existing dirty-content handoff assertions now look for “uncommitted or included files” instead of “uncommitted or ignored files”; their exit-3 and no-deletion assertions remain. The inventory ignored-entry fingerprint assertion now expects no change for a disposable ignored file. The old report grouped-count assertion now checks the one-line summary.
 - Verification: `just test` passed 388/388 L1 tests, with 17 tier-filtered tests skipped. `just check-tier-coverage worktree` found zero stranded tests. Native Windows cross-check passed 192/192 `worktree-cli` L1 tests before the final fork-parent test was added (26 tier-filtered skipped), 164/164 `worktree` L1 tests, and all three `level2_powershell_remove` tests (5.98–6.74 seconds each, so none was a skip). macOS `just test-l2 level2_remove` passed both existing removal tests. The full macOS `just test-l2` run stopped at an unrelated Kitty graph screenshot test because the screenshot contained no window contents; nine later tests were not reached in that run. `git diff --check` passed. `just lint` passed after the final source edits for both packages. No `cargo fmt`, staging, or commit was performed.
+
+## Phase 5
+
+- Before editing tests, mapped the remaining terminal behaviors to four observable L2 outcomes: a changed included file prompts and default No preserves file, worktree, and branch; an unknown included file does the same; an unchanged copied file removes without a prompt; and a `.env` edit between wrapper runs refuses the handoff and preserves the registration and edited content. All use the existing detached tmux harness in the declared `level2_remove` target, with the enabled `terminal-tests` feature. No production parser, schema, template, prompt implementation, or configuration behavior changed in this phase.
+- Added `level2_changed_included_file_defaults_to_no`, `level2_unknown_included_file_defaults_to_no`, `level2_unchanged_included_copy_removes_without_prompt`, and `level2_included_edit_between_handoff_runs_refuses_removal` in `cli/tests/level2_remove.rs`. The unknown case invalidates the record and names the target as its own fallback source, which cannot establish permission to delete. All four passed under `just test-l2 included` (4/4). Existing `level2_remove` questions (2/2), move-first wrappers (3/3), and list tests (3/3) passed separately; the dirty-tree L2 test passed before the full run stopped.
+- Requirement-to-test map: criterion 1 → `rules_states_and_git_intersection`, `global_nested_and_path_variants`; criterion 2 → `create_copies_ignored_file_and_persists_observation`, `create_reports_copied_paths_on_stderr_and_preserves_stdout_protocol`, and `create_reports_a_file_copy_failure_and_keeps_the_worktree`; criterion 3 → `changed_included_copy_requires_force_and_preserves_state_on_refusal`, `unchanged_included_copy_and_other_ignored_files_remove_without_force`, and the three new interactive consent tests; criterion 4 → `changed_included_contents_refuse_handoff_even_when_classification_stays_changed` and the new L2 handoff test; criterion 5 → `rules_states_and_git_intersection`, `source_ancestor_link_is_never_followed`, `repeated_round_trip_and_identity_failures`, and `unavailable_distinct_source_marks_included_file_unknown`; criterion 6 → `changed_include_rules_refuse_handoff_even_when_file_leaves_set`, `changed_copy_record_refuses_handoff_and_keeps_registration`, and the new L2 handoff test; criterion 7 → `size_change_avoids_read_and_same_size_edit_is_hashed`, `large_same_size_file_is_read`, the Phase 3 CLI stdout tests, and the Phase 4 removal report tests. The earlier phases recorded the full boundary and policy matrix.
+- Updated `worktree/README.md` with the shared convention, Git pattern example, copy sources, cloning, consent policy, full-content comparison, pattern edits, and last-copy caveat. The worktree skill already described `include`, `compare`, `copy_record`, and the v3 handoff; the OS skill already held the S2/S4 findings; `docs/dependencies.md` already listed `reflink-copy`. No skill or dependency file needed another change. Added the `compare.rs` contract handoff to `2026-09-25-list-remove-performance` without changing its code.
+- Local L1 and lint: `just test` passed 388/388 (17 tier-filtered skips), `just lint` passed both area packages, and `just check-tier-coverage worktree` found zero stranded tests. The full `just test-l2` run failed at the pre-existing `level2_graph_fits_a_narrow_kitty_window` screenshot assertion: the captured image contained no window contents and the test reported missing Screen Recording permission. It ran 1 passing test, 1 failing test, and stopped before 13 others. The affected remove, move-first, and list L2 groups were run separately and passed. No production failure was observed in this phase.
+- Cross-OS L1: Linux `worktree` 183/183 and `worktree-cli` 206/206 passed; native Windows `worktree` 164/164 and `worktree-cli` 193/193 passed; WSL2 `worktree` 183/183 and `worktree-cli` 206/206 passed. Native Windows `level2_powershell_remove` passed 3/3, each 5.6–6.5 seconds, confirming actual execution. WSL2 cross-checks published no reusable receipt because the local documentation tree changed while they ran; their archive-mode test results were still passes.
+- Skips were tier or platform selection, not hidden test failures: local L1 filtered 17 L2 tests; Linux and WSL2 CLI L1 each filtered 32 non-L1 tests; native Windows CLI L1 filtered 26. The focused Windows PowerShell run filtered 216 unrelated tests, and focused macOS L2 runs filtered other targets. The full macOS L2 run left 13 tests unrun after the Kitty failure; all affected tmux groups were rerun by name. No `cargo fmt`, Git staging, commit, or spec lifecycle move was performed. Implementation is ready for review, with the pre-existing Kitty screenshot environment issue recorded as the sole full-gate exception.

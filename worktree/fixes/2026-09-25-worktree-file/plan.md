@@ -1,8 +1,8 @@
 ---
 total_phases: 5
 created: 2026-09-25
-phase: 4
-agent: claude/opus
+phase: 5
+agent: codex/default
 yolo: true
 related:
     - 2026-09-25-worktree-file
@@ -72,6 +72,57 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/tests/level2_remove.rs
+
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+
+docs_created_during_phase_5: []
+
+skills_files_updated_during_phase_5: []
+
+source_code:
+    - worktree/fixes/2026-09-25-worktree-file/spike_git.py
+    - worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1
+    - worktree/cli/src/exit.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/compare.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/include/copy.rs
+    - worktree/lib/src/include/mod.rs
+    - worktree/lib/src/include/rules.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/tests/create_include.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/level2_remove.rs
+
+documentation:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spikes.md
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `.worktreeinclude` support
@@ -95,14 +146,14 @@ The working tree currently holds uncommitted `2026-09-24-ux-improvements` review
 
 ### Success looks like
 
-- [ ] Every acceptance criterion (1–7) in the spec has at least one named test, at the level the spec assigns (L1, or L2 for prompts).
+- [x] Every acceptance criterion (1–7) in the spec has at least one named test, at the level the spec assigns (L1, or L2 for prompts).
 - [ ] `just test`, `just test-l2`, and `just lint` pass in `worktree/` on macOS.
-- [ ] Linux evidence (L1) and native Windows evidence (L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows`) exist. WSL2 is covered by the nightly leg, or by an explicit cross-check when path/link code changed.
-- [ ] `wt create` stdout is byte-identical to today's shell protocol in every test, including partial copy failure.
-- [ ] No test observes deletion of a new, changed, or unknown included file without consent. No test observes a prompt for an unchanged copy or for `target/`.
-- [ ] Removal cost is proven by counted file reads, not wall-clock thresholds.
-- [ ] The README, the `worktree` skill, the `os` skill (for any new OS trap), and `docs/dependencies.md` (if a clone crate is added) match the code.
-- [ ] The implementation ends at "implementation complete, ready for review". The spec is never moved into `_completed`.
+- [x] Linux evidence (L1) and native Windows evidence (L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows`) exist. WSL2 is covered by the nightly leg, or by an explicit cross-check when path/link code changed.
+- [x] `wt create` stdout is byte-identical to today's shell protocol in every test, including partial copy failure.
+- [x] No test observes deletion of a new, changed, or unknown included file without consent. No test observes a prompt for an unchanged copy or for `target/`.
+- [x] Removal cost is proven by counted file reads, not wall-clock thresholds.
+- [x] The README, the `worktree` skill, the `os` skill (for any new OS trap), and `docs/dependencies.md` (if a clone crate is added) match the code.
+- [x] The implementation ends at "implementation complete, ready for review". The spec is never moved into `_completed`.
 
 ---
 
@@ -329,19 +380,19 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 8 (3 concurrent agents)
 
-- [ ] **L2 prompts** (`cli/tests/level2_remove.rs`)
+- [x] **L2 prompts** (`cli/tests/level2_remove.rs`)
     - Using the existing focus-preserving tmux harness, add:
         - a representative interactive prompt for a `changed` included file (default No keeps everything);
         - an `unknown` file;
         - an unchanged-copy removal with no prompt;
         - a handoff that refuses after a `WT_TEST_BETWEEN` edit of `.env`.
     - No window gains focus.
-- [ ] **Documentation**
+- [x] **Documentation**
     - `worktree/README.md`: the `.worktreeinclude` convention and its link to Claude Code and Worktrunk, syntax, the negated-child example, the copy source rules, copy-on-write, the consent table, that included files are always compared by full content (R1), the R2 "last copy" caveat, the consequence of editing patterns, and the advice to name files rather than `node_modules/`.
     - `.claude/skills/worktree/SKILL.md`: add `include`, `compare`, and `copy_record` sections, and rewrite the `wt remove` inventory bullet (ignored entries no longer all need consent; the handoff is v3).
     - `os` skill: add S2 and S4 findings.
     - `docs/dependencies.md`: add the clone crate.
-- [ ] **Cross-OS evidence**
+- [x] **Cross-OS evidence**
     - Linux L1 (`cross-check` or CI).
     - Native Windows L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell` (read the durations to confirm it ran and was not skipped).
     - WSL2 via cross-check, because link and path code changed.
@@ -349,11 +400,12 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 9 — Close-out (single agent)
 
-- [ ] **Performance spec handoff**
+- [x] **Performance spec handoff**
     - Add a note to `2026-09-25-list-remove-performance` that `compare.rs` exists and is the contract its dirty-file fingerprint must reuse (R10). Change only its text, not its code.
-- [ ] **Final validation**
+- [x] **Final validation**
     - Run `just test`, `just test-l2`, and `just lint` in `worktree/`. Walk the Success checklist above and check each item with its evidence.
-- [ ] **Status**
+    - The full `just test-l2` run remains red on the pre-existing Kitty screenshot capture issue; the separate tmux groups and Windows PowerShell L2 pass. See the Phase 5 implementation log. The full-gate Success item and Checkpoint 5 remain open until that environment issue is resolved.
+- [x] **Status**
     - Set the spec's frontmatter to `status: implemented`, `implemented: true`, `implemented_by: claude/opus`. Stop at "implementation complete, ready for review". Do not move the spec and do not run `just complete`.
 
 ### Checkpoint 5
