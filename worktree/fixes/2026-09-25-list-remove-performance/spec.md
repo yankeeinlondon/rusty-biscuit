@@ -24,6 +24,27 @@ reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-26
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+    Phase 1 changed no source. Read the "## Phase 1" section of
+    implementation-log.md before starting: §4 fixes the interfaces
+    (PR store v2 with origin_digest = biscuit_hash::blake3_hash of the exact
+    `git_from(root, root, remote get-url origin)` value; select_cached ->
+    Fresh/Stale/Miss; fetch_and_publish; refresh under a persistent
+    `<repo hash>.prs.lock` sidecar; PrListing::stale removed, with the age line
+    computed at render time; safety::reconfirm with local proof admitting only
+    refs/heads and refs/tags, and every origin/* ref, origin/<default> included,
+    live-checked). §3 is the approved-action matrix and §2 the two gaps with
+    their regression cases. No handoff record version bump is needed.
+    For the sniff move: sniff uses the `windows` 0.62 crate, not windows-sys,
+    so add the `Win32_System_Console` feature and port the two calls. Make
+    `mod process` pub while its existing items stay pub(crate). Also migrate
+    biscuit-speaks/lib/src/detached.rs:192, a third caller outside playa.
+    fs4 gotcha: std's inherent File::unlock shadows the fs4 trait method, so
+    release the lock by dropping the File. The detach and lock lifecycle was
+    already proven on macOS and native Windows with a disposable spike (§5). The
+    fake local PR provider for worker tests (Gitea over plain HTTP via
+    HTTP_PROXY) is proven in §6.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-worktree-file
