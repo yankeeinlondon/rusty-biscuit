@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use crate::discovery::detection::TerminalApp;
+use crate::discovery::fonts::CellSize;
 
 use super::cursor::{compute_cursor_rows, needs_scroll_compensation};
 use super::{TerminalImage, TerminalImageError};
@@ -111,19 +112,20 @@ impl TerminalImage {
             return Err(TerminalImageError::UnsupportedTerminal);
         }
 
-        let dims = self.resolve_dimensions(term.width());
+        let img = self.load_image()?;
+        let cell = term.cell_size();
+        let dims = self.resolve_dimensions_for_image(term.width(), cell, &img);
         let width_cells = dims.image_width;
         let x_offset = dims.x_offset;
 
-        let img = self.load_image()?;
-        let (cell_pixel_width, cell_pixel_height) = term
-            .cell_size()
+        let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
-            .unwrap_or((8u32, 16u32));
-        let image_aspect = img.height() as f32 / img.width() as f32;
-        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
-        let height_cells =
-            (((width_cells as f32) * image_aspect * cell_aspect).ceil() as u32).max(1);
+            .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
+        let height_cells = super::cursor::covered_rows(
+            width_cells,
+            (img.width(), img.height()),
+            (cell_pixel_width, cell_pixel_height),
+        );
 
         let png_data = self.encode_as_png(&img)?;
         let image = match term.image_support {

@@ -559,6 +559,33 @@ requests; redirects are disabled, with
 only the official GitHub and Bitbucket API-host mappings accepted as cross-host
 provider endpoints.
 
+`remote::blocking::pull_request_for_branch(remote_url, source_repo, branch,
+deadline)` answers "which PR came from this branch?" for callers without an
+async runtime. It builds its own current-thread Tokio runtime, so it must not be
+called from inside one. The deadline bounds the whole lookup. A PR counts
+only if it is open or merged and its head is `branch` in `source_repo`, so a
+fork's same-named branch never matches. An open PR outranks merged ones, and
+the most recent merged PR wins among several. The result carries the source
+head SHA exactly as the provider sent it (Bitbucket Cloud abbreviates it to 12
+characters), and Gitea's is read from the list endpoint, which freezes it at
+merge. Missing or rejected credentials, 403, a 404 on the list, rate limits,
+timeouts, and unsupported hosts are typed `PrUnavailable` errors, never
+`Ok(None)`. Only hosts the URL identifies without a probe are supported;
+`pull_request_for_branch_with` takes a client built after consented discovery.
+`PullRequestInfo` also carries `source_repo`, `source_repo_is_target`, and
+`source_head_sha`.
+
+`remote::blocking::open_pull_requests(remote_url, deadline)` lists every open PR
+against a repository as `PrSummary` records (number, URL, source repository,
+source branch, target branch), on the same runtime, deadline, host support,
+and error contract as `pull_request_for_branch`; `open_pull_requests_with`
+takes a prebuilt client. It follows pages up to the focused client's bound and
+reports more than that as an error rather than a truncated list. A 401, 403,
+or list 404 is a `PrUnavailable` error, never an empty list. Match a PR to a
+local branch on both source repository and branch, since a fork can reuse a
+branch name. A GitLab fork's project path costs one lookup per distinct fork;
+a fork the caller cannot see keeps `source_repo: None`.
+
 `FocusedProviderClient::from_pull_request_url` and
 `job_reference_from_url` accept a canonical provider **web or API** URL. Route
 grammars are matched per flavor rather than by scanning for a shared marker

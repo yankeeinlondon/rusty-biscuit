@@ -35,21 +35,23 @@ pub fn bt_command(args: &str) -> String {
 /// including inside the `bt` filename. Joining a bounded number of preceding
 /// rows keeps command-region assertions stable without selecting stale
 /// scrollback from an earlier test.
+///
+/// Matching ignores whitespace: when the wrap falls on the space before the
+/// subcommand, that space is indistinguishable from the row's blank padding.
 pub fn find_bt_command_end(lines: &[&str], subcommand: &str) -> Option<usize> {
+    let compact = |text: &str| text.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    let subcommand = compact(subcommand);
     let markers = [
-        format!("bt {subcommand}"),
-        format!("bt' {subcommand}"),
-        format!("bt.exe' {subcommand}"),
+        format!("bt{subcommand}"),
+        format!("bt'{subcommand}"),
+        format!("bt.exe'{subcommand}"),
     ];
 
     for end in (0..lines.len()).rev() {
         let start = end.saturating_sub(3);
-        let prefix = lines[start..end]
-            .iter()
-            .map(|line| line.trim())
-            .collect::<String>();
+        let prefix = lines[start..end].iter().map(|line| compact(line)).collect::<String>();
         let prefix_len = prefix.len();
-        let joined = format!("{prefix}{}", lines[end].trim());
+        let joined = format!("{prefix}{}", compact(lines[end]));
         if markers.iter().any(|marker| {
             joined
                 .match_indices(marker)
@@ -107,4 +109,26 @@ pub fn capture_until(
         }
     }
     last
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_bt_command_end;
+
+    #[test]
+    fn finds_a_command_wrapped_at_the_space_before_the_subcommand() {
+        let lines = [
+            "bash-3.2$ '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/target/ci-local/debug/bt' ",
+            "prose \"<hidden>x</hidden>\"",
+            "<hidden>x</hidden>",
+            "bash-3.2$",
+        ];
+        assert_eq!(find_bt_command_end(&lines, "prose"), Some(1));
+    }
+
+    #[test]
+    fn finds_a_command_wrapped_inside_the_binary_name() {
+        let lines = ["$ '/tmp/target/debug/b", "t' image --debug x.png", "out"];
+        assert_eq!(find_bt_command_end(&lines, "image --debug"), Some(1));
+    }
 }

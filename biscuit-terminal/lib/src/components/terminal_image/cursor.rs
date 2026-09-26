@@ -17,6 +17,21 @@ pub(super) fn compute_cursor_rows(app: &TerminalApp, raw_height: f32, height_cel
     }
 }
 
+/// Rows an image `image_size` pixels large covers when drawn `columns` wide
+/// with its aspect ratio kept: its scaled height over the cell height, rounded
+/// up, as Kitty computes it for a width-only placement.
+///
+/// Integer arithmetic on purpose: the `f32` product lands just above exact
+/// multiples (`13.000001`), and rounding that up reserves a blank row under
+/// the image.
+pub(super) fn covered_rows(columns: u32, image_size: (u32, u32), cell: (u32, u32)) -> u32 {
+    let (width, height) = image_size;
+    let (cell_width, cell_height) = cell;
+    let scaled_height = u64::from(columns) * u64::from(cell_width) * u64::from(height);
+    let rows = scaled_height.div_ceil(u64::from(width.max(1)) * u64::from(cell_height.max(1)));
+    u32::try_from(rows).unwrap_or(u32::MAX).max(1)
+}
+
 /// Detect whether the image render needs an extra `\n` to compensate for the
 /// terminal scrolling under the cursor when the image extends past the
 /// viewport bottom.

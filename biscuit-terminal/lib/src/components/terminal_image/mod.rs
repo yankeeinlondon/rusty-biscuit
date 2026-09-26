@@ -29,6 +29,7 @@ use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::{
     components::renderable::TerminalRenderable,
+    discovery::fonts::CellSize,
     render_tree::render::resolve_cells,
     terminal::Terminal,
     utils::layout::{Alignment, Layout, Length, TargetValue},
@@ -43,7 +44,8 @@ mod protocol;
 mod width;
 
 pub use self::width::{
-    ImageWidth, calculate_display_dimensions, parse_filepath_and_width, parse_width_spec,
+    ImageWidth, SCALE_REFERENCE_TEXT_UNITS, calculate_display_dimensions,
+    parse_filepath_and_width, parse_width_spec,
 };
 
 /// Error types for terminal image operations.
@@ -413,6 +415,23 @@ impl TerminalImage {
         Self::resolve_dimensions_for(&self.width, &self.layout, term_width)
     }
 
+    /// Resolves dimensions for a loaded raster, whose pixel width is the
+    /// natural width `ImageWidth::Scale` scales.
+    fn resolve_dimensions_for_image(
+        &self,
+        term_width: u32,
+        cell: Option<CellSize>,
+        img: &DynamicImage,
+    ) -> ResolvedDimensions {
+        Self::resolve_scaled_dimensions_for(
+            &self.width,
+            &self.layout,
+            term_width,
+            Some(img.width() as f32),
+            cell,
+        )
+    }
+
     /// Compute resolved image-area dimensions for an arbitrary `(width, layout)`
     /// pair without needing an existing image on disk.
     ///
@@ -424,6 +443,23 @@ impl TerminalImage {
         width: &ImageWidth,
         layout: &Layout,
         term_width: u32,
+    ) -> ResolvedDimensions {
+        Self::resolve_scaled_dimensions_for(width, layout, term_width, None, None)
+    }
+
+    /// [`resolve_dimensions_for`](Self::resolve_dimensions_for) for content that
+    /// knows its natural width, which `ImageWidth::Scale` needs.
+    ///
+    /// `natural_width` is in the content's own units (SVG user units, or pixels
+    /// for a raster image). A missing `cell` uses [`CellSize::FALLBACK`]. The
+    /// scaled width is clamped to the available columns, so only a terminal
+    /// too narrow for it shrinks the image.
+    pub fn resolve_scaled_dimensions_for(
+        width: &ImageWidth,
+        layout: &Layout,
+        term_width: u32,
+        natural_width: Option<f32>,
+        cell: Option<CellSize>,
     ) -> ResolvedDimensions {
         let term_width = term_width.max(1);
 
@@ -438,6 +474,14 @@ impl TerminalImage {
             ImageWidth::Fill => available_width,
             ImageWidth::Percent(pct) => ((term_width as f32) * pct).round() as u32,
             ImageWidth::Characters(chars) => *chars,
+            ImageWidth::Scale(scale) => match natural_width {
+                Some(natural) => ImageWidth::scaled_columns(
+                    *scale,
+                    natural,
+                    cell.unwrap_or(CellSize::FALLBACK),
+                ),
+                None => available_width,
+            },
         }
         .clamp(1, available_width);
 

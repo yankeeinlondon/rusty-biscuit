@@ -1199,3 +1199,31 @@ fn prefer_cursor_alignment_honors_margin_alignment_max_width() {
         );
     }
 }
+
+/// Pins the escape codes of a striped table with one highlighted data row on
+/// the default tree render path: the highlight replaces the stripe on data
+/// row 1, data row 3 keeps its stripe, and every painted span stays inside
+/// the outer borders.
+#[test]
+fn table_highlight_row_with_striping_snapshot() {
+    use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
+    use renderable::color::{BasicColor, Color, RgbColor};
+
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Branch"), TableColumn::new("Path")])
+        .with_data(vec![
+            vec!["main".into(), "/repo".into()],
+            vec!["fix/wt-ux".into(), "/wt/fix-wt-ux".into()],
+            vec!["feature/a".into(), "/wt/feature-a".into()],
+            vec!["feature/b".into(), "/wt/feature-b".into()],
+        ])
+        .with_stripe_bg(Color::BasicColor(BasicColor::Blue))
+        .highlight_row(1, Color::Rgb(RgbColor::new(40, 44, 64, BasicColor::Black)));
+    let mut term = test_terminal(80);
+    term.color_depth = ColorDepth::TrueColor;
+    term.color_mode = ColorMode::Dark;
+
+    let rendered = table.render(&term).replace('\x1b', "\\x1b");
+
+    insta::assert_snapshot!(rendered);
+}

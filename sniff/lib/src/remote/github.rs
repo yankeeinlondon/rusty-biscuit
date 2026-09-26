@@ -423,20 +423,30 @@ impl RemoteRepoProvider for GitHubRemote {
 
         let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
-            .map(|pr| PullRequestInfo {
-                number: pr.number,
-                title: pr.title,
-                state: pr.state,
-                author: pr.user.login,
-                draft: pr.draft.unwrap_or(false),
-                source_branch: Some(pr.head.ref_name),
-                target_branch: Some(pr.base.ref_name),
-                labels: pr.labels.into_iter().map(|l| l.name).collect(),
-                body: pr.body,
-                created_at: pr.created_at,
-                updated_at: Some(pr.updated_at),
-                merged_at: pr.merged_at,
-                html_url: pr.html_url,
+            .map(|pr| {
+                let source_repo = pr.head.repo.as_ref().map(|repo| repo.full_name.clone());
+                let source_repo_is_target = source_repo
+                    .as_ref()
+                    .zip(pr.base.repo.as_ref())
+                    .map(|(source, target)| source.eq_ignore_ascii_case(&target.full_name));
+                PullRequestInfo {
+                    number: pr.number,
+                    title: pr.title,
+                    state: pr.state,
+                    author: pr.user.login,
+                    draft: pr.draft.unwrap_or(false),
+                    source_branch: Some(pr.head.ref_name),
+                    target_branch: Some(pr.base.ref_name),
+                    labels: pr.labels.into_iter().map(|l| l.name).collect(),
+                    body: pr.body,
+                    created_at: pr.created_at,
+                    updated_at: Some(pr.updated_at),
+                    merged_at: pr.merged_at,
+                    html_url: pr.html_url,
+                    source_repo,
+                    source_repo_is_target,
+                    source_head_sha: Some(pr.head.sha).filter(|sha| !sha.is_empty()),
+                }
             })
             .collect();
 

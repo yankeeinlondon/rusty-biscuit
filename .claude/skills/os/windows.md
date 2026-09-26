@@ -37,6 +37,10 @@ helper that resolves it is named so it is not re-derived.
    Windows launch test names its roots instead: the provider selector (e.g.
    `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
    storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
+   `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
+   so a Windows test that seeds a cache file writes to the real per-user
+   path, keyed by its temporary repository, and deletes what it seeded
+   (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
 3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
    developer machine does.** Short-versus-long spelling bugs reproduce only
    on CI. `current_dir()` reports the spelling it was given; `canonicalize`
@@ -224,6 +228,105 @@ Compare against that, never against `to_string_lossy()`.
   via `cargo:rustc-link-arg-bin=<bin>=…`), as `darkmatter/cli`,
   `claudine/cli`, and `sniff/cli` do. It covers the main thread only; spawned
   threads keep Rust's 2 MiB default.
+- **Killing `git` at a deadline leaves the real git running.** `git.exe` on
+  `PATH` is the `Git\cmd\git.exe` launcher, which starts
+  `mingw64\bin\git.exe`; that in turn runs the transport (`git-remote-https`,
+  `ssh`). `Child::kill` ends only the launcher. The orphans keep the stderr
+  pipe open (a reader waiting for EOF blocks about 20 s) and hold their working
+  directory, so a git started inside a directory the tool then deletes locks
+  it. `taskkill /T /F /PID <pid>` released everything at the deadline, under
+  SSH too. Unix has the pipe half of this (the transport grandchild holds
+  stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
+  Measured on build-win-native, 2026-09-24
+  (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
+- **Windows PowerShell 5.1 re-encodes a native command's captured stdout** with
+  `[Console]::OutputEncoding`, which is the OEM code page (IBM437 on
+  build-win-native). A UTF-8 `café-ü日` arrived as `caf├⌐-├╝µùÑ`. A wrapper
+  that captures a Rust binary's output (`$out = & tool.exe`) must set
+  `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` around
+  the call and restore it in `finally`. stdin and stderr stay TTYs while
+  stdout is captured. Measured 2026-09-24 under `ssh -tt`
+  (`worktree/fixes/2026-09-24-ux-improvements/spike-s3.md`).
+
+## Current-directory locks
+
+Measured on `build-win-native` on 2026-09-24 (Windows PowerShell 5.1,
+git 2.55.0.windows.3) while designing `wt remove` for the worktree the shell
+is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
+
+- **A process's current directory cannot be deleted, moved, or renamed**
+  ("The process cannot access the file because it is being used by another
+  process"). Unix has no such lock, so code that removes a directory the user
+  may be standing in is untested until it runs here.
+- **Which shells actually hold the lock:**
+
+  | Shell state | Locks the directory? |
+  |---|---|
+  | Any process *launched* with the directory as its working directory (a terminal tab opened there, `Start-Process -WorkingDirectory`) | Yes |
+  | cmd.exe after `cd /d` | Yes |
+  | Windows PowerShell after `Set-Location`/`cd` | No: `Set-Location` does not change the process's Win32 current directory |
+  | Git Bash (MSYS) after `cd` | No |
+  | A `FileSystemWatcher` on it (Explorer, editors) | No |
+
+- **Child processes start in PowerShell's *location*, not its Win32 current
+  directory.** A `wt.exe` or `git` launched from a PowerShell that has
+  `cd`'d into a directory holds that directory itself, so a tool that deletes
+  it must first move its own current directory out
+  (`std::env::set_current_dir`) and address the repository with `git -C`.
+- **Releasing a PowerShell lock takes both moves:** `Set-Location` *and*
+  `[Environment]::CurrentDirectory = …`. Moving only the location left a
+  window that was launched inside the directory still holding it.
+- **`git worktree remove` fails late, not cleanly.** With the directory held,
+  it exits 255 with "failed to delete '…': Permission denied" *after* deleting
+  every file, removing `.git/worktrees/<name>`, and dropping the worktree from
+  `git worktree list`. Only the empty directory remains, and a following
+  `git branch -D` succeeds. Check for the lock before calling it.
+- **Detecting the lock without side effects:** rename the directory to a
+  sibling name and straight back (`std::fs::rename` twice). It fails exactly
+  for current-directory holders and open files, and leaves an unlocked
+  directory untouched. Cost on ReFS with 3,000 files inside: about 1.5 ms per
+  rename pair; a held directory fails on the *first* rename in about 2 ms, so
+  the rename back only fails if something takes the lock in between
+  (2026-09-24, `spike-s4.md` in the same fix directory).
+- **A test that needs a lock holder must spawn the holder directly.**
+  `Command::new("cmd").args(["/C", "ping -n 30 …"])` followed by `kill()`
+  kills `cmd` only. `ping` keeps running, holds the directory, and keeps
+  the inherited output pipe open, so nextest waits the full 30 s. Spawn
+  `ping` itself with `current_dir` set and null stdio
+  (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
+  2026-09-24).
+
+## A real console without a window: ConPTY
+
+Measured on `build-win-native` on 2026-09-25 through `just cross-check`
+(`worktree/cli/tests/level2_powershell_remove.rs`).
+
+- **A pseudoconsole is a Level 2 console that needs no backend.** `xpty`
+  (already in `Cargo.lock` for `unchained-ai`) opens ConPTY from inside the SSH
+  session's nextest process, with no window and no focus change. Interactive
+  Windows PowerShell 5.1 runs in it with PSReadLine, keystrokes are plain bytes
+  (`\r` for Enter), and a Rust prompt (inquire) sees a terminal. `xpty` leaves
+  out `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost sends no DSR that the test
+  would have to answer.
+- **The output stream is a repaint, not the text.** PSReadLine's echo of one
+  typed line arrived as `. 'C:\…\s. 'C:\…\sc. 'C:\…\sce…`. Wait for a single
+  word in the stream at most; assert on the console's own screen buffer,
+  which the session can dump with `$Host.UI.RawUI.GetBufferContents` (the
+  Windows counterpart of `tmux capture-pane`).
+- **Index that buffer with `GetValue`.** In a script, `$cells[$y, $x]` on the
+  `BufferCell[,]` it returns failed to parse ("Missing ']' after array index
+  expression"); `$cells.GetValue($y, $x).Character` works.
+- **The screen buffer hard-wraps at the column width, mid-word.** A long
+  error line (a temp path) split as `…': P` / `ermission denied`. Join a
+  full-width row to the next without a space before matching a phrase
+  (`unwrapped` in that test, 2026-09-25).
+- **`build-win-native` checks files out with CRLF** (`core.autocrlf`), so a
+  test that wrote `"guide\n"`, committed it, and read the file back from a
+  `git worktree add` checkout got `"guide\r\n"`. Normalize line endings
+  before comparing checked-out content (2026-09-25).
+- The process's working directory is the one passed to `CommandBuilder::cwd`,
+  so this is also how a test reproduces "a window launched inside the
+  directory" for the current-directory lock above.
 
 ## Attaching a console inside a nextest process
 

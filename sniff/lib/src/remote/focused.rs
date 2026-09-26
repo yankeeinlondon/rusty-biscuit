@@ -1,11 +1,16 @@
 //! Focused provider queries that preserve errors and item identity.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::time::{Duration, Instant};
+
 use biscuit_file::FetchPolicy;
 use serde_json::Value;
 
 use crate::SniffError;
 use crate::filesystem::git::{ApiFlavor, ResolvedRemote};
 
+use super::blocking::PrState;
 use super::provider_url::{ReferenceKind, parse_provider_url};
 use super::types::{at_or_after, at_or_before, optional_timestamp_order, timestamp_order};
 use super::web_link::trusted_web_link;
@@ -26,6 +31,11 @@ const MAX_JOBS_INSPECTED: usize = 2_000;
 /// page rather than just enough rows to fill one answer.
 const PAGE_SIZE: usize = 100;
 
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Per-request total timeout for a client without a caller deadline.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Provider client bound to one already-resolved configured remote.
 #[derive(Debug, Clone)]
 pub struct FocusedProviderClient {
@@ -35,6 +45,29 @@ pub struct FocusedProviderClient {
     api_base: url::Url,
     credential_scope: CredentialScope,
     original_reference: Option<String>,
+    /// Instant by which every remaining request must finish; replaces
+    /// [`REQUEST_TIMEOUT`] when set.
+    deadline: Option<Instant>,
+}
+
+/// How [`FocusedProviderClient::fetch_json`] reports a 404.
+///
+/// Exact lookups treat it as an authoritative absence. List endpoints cannot:
+/// GitHub, Gitea, and Bitbucket answer a query against a private repository
+/// the caller may not see with 404, so an empty answer there would turn a
+/// permission failure into "no pull requests".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotFound {
+    Absent,
+    Error,
+}
+
+/// One successful JSON response.
+struct JsonPage {
+    value: Value,
+    /// `Some(has rel="next")` when the response carried a `Link` header,
+    /// `None` when it carried none.
+    link_next: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,6 +201,7 @@ impl FocusedProviderClient {
             api_base,
             credential_scope: CredentialScope::Provider,
             original_reference: None,
+            deadline: None,
         })
     }
 
@@ -288,6 +322,194 @@ impl FocusedProviderClient {
             items: normalized,
             warnings: Vec::new(),
         })
+    }
+
+    /// Every open or merged PR whose head is `branch` in `source_repo`.
+    ///
+    /// Filters by branch server-side where the provider can (GitHub `head`,
+    /// GitLab `source_branch`, Bitbucket `q`, Forgejo `head`); upstream Gitea
+    /// cannot, so its whole `state=all` list is walked. Every row is then
+    /// checked locally against both the branch and the source repository,
+    /// because a fork can open a PR from a branch with the same name.
+    /// Closed-unmerged, declined, and superseded PRs are dropped. Returned
+    /// records always carry `source_repo`.
+    ///
+    /// ## Errors
+    ///
+    /// A 404 on the list, or on GitLab's source-project lookup, is an error
+    /// (see [`NotFound`]). [`SniffError::IncompleteRemoteDomain`] when
+    /// [`MAX_PAGES`] is reached first.
+    pub(crate) async fn branch_pull_requests(
+        &self,
+        source_repo: &str,
+        branch: &str,
+    ) -> Result<Vec<(PullRequestInfo, PrState)>, SniffError> {
+        let flavor = self.remote.api_flavor;
+        let Some((source_owner, _)) = source_repo.split_once('/') else {
+            return Err(SniffError::InvalidRemoteQuery {
+                field: "source_repo",
+                message: "must be an owner/repository path".to_string(),
+            });
+        };
+        if branch.is_empty() {
+            return Err(SniffError::InvalidRemoteQuery {
+                field: "branch",
+                message: "must not be empty".to_string(),
+            });
+        }
+        let target_repo = format!(
+            "{}/{}",
+            self.remote.namespace.as_deref().unwrap_or_default(),
+            self.remote.repository.as_deref().unwrap_or_default()
+        );
+        // GitLab names the source project only by ID, so a fork's ID has to be
+        // looked up; the same-project case compares source and target IDs.
+        let source_project_id =
+            if flavor == ApiFlavor::GitLab && !source_repo.eq_ignore_ascii_case(&target_repo) {
+                let path = format!("projects/{}", urlencoding::encode(source_repo));
+                let project = self
+                    .fetch_json(&path, &[], NotFound::Error)
+                    .await?
+                    .ok_or_else(|| malformed("missing source project"))?;
+                Some(value_u64(&project.value, &["id"])?)
+            } else {
+                None
+            };
+        let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
+        let filters = match flavor {
+            ApiFlavor::GitHub => vec![
+                pair("head", &format!("{source_owner}:{branch}")),
+                pair("state", "all"),
+            ],
+            ApiFlavor::GitLab => vec![pair("source_branch", branch), pair("state", "all")],
+            ApiFlavor::Gitea => vec![pair("state", "all")],
+            ApiFlavor::Forgejo => vec![pair("state", "all"), pair("head", branch)],
+            // Without `state`, Bitbucket returns OPEN PRs only.
+            ApiFlavor::Bitbucket => vec![
+                pair(
+                    "q",
+                    &format!("source.branch.name=\"{}\"", branch.replace('"', "\\\"")),
+                ),
+                pair("state", "OPEN"),
+                pair("state", "MERGED"),
+            ],
+            _ => return Err(unsupported("branch pull-request lookup", flavor)),
+        };
+        let mut matches = Vec::new();
+        for item in self.pr_list_rows(filters).await? {
+            let Some(state) = evidence_state(flavor, &item) else {
+                continue;
+            };
+            let item_source_project = item.get("source_project_id").and_then(Value::as_u64);
+            let mut record = self.normalize_pr(item)?.details;
+            if record.source_branch.as_deref() != Some(branch) {
+                continue;
+            }
+            let from_source = match (flavor, source_project_id) {
+                (ApiFlavor::GitLab, Some(id)) => item_source_project == Some(id),
+                (ApiFlavor::GitLab, None) => record.source_repo_is_target == Some(true),
+                _ => record
+                    .source_repo
+                    .as_deref()
+                    .is_some_and(|repo| repo.eq_ignore_ascii_case(source_repo)),
+            };
+            if !from_source {
+                continue;
+            }
+            record.source_repo = Some(source_repo.to_string());
+            matches.push((record, state));
+        }
+        Ok(matches)
+    }
+
+    /// Every open PR against this client's repository.
+    ///
+    /// A GitLab MR from a fork names its source project only by ID, so each
+    /// distinct fork costs one `projects/{id}` lookup to fill `source_repo`;
+    /// a fork that lookup cannot see (deleted, or private to the caller) keeps
+    /// `source_repo: None` rather than failing the whole list.
+    ///
+    /// ## Errors
+    ///
+    /// A 404 on the list is an error (see [`NotFound`]), never an empty list.
+    /// [`SniffError::IncompleteRemoteDomain`] when [`MAX_PAGES`] is reached
+    /// first.
+    pub(crate) async fn open_pull_requests(&self) -> Result<Vec<PullRequestInfo>, SniffError> {
+        let flavor = self.remote.api_flavor;
+        let state = match flavor {
+            ApiFlavor::GitHub | ApiFlavor::Gitea | ApiFlavor::Forgejo => "open",
+            ApiFlavor::GitLab => "opened",
+            ApiFlavor::Bitbucket => "OPEN",
+            _ => return Err(unsupported("open pull-request listing", flavor)),
+        };
+        let rows = self
+            .pr_list_rows(vec![("state".to_string(), state.to_string())])
+            .await?;
+        let mut fork_paths: HashMap<u64, Option<String>> = HashMap::new();
+        let mut open = Vec::new();
+        for item in rows {
+            if evidence_state(flavor, &item) != Some(PrState::Open) {
+                continue;
+            }
+            let fork_project = (flavor == ApiFlavor::GitLab)
+                .then(|| {
+                    let id = |name| item.get(name).and_then(Value::as_u64);
+                    id("source_project_id")
+                        .filter(|source| Some(*source) != id("target_project_id"))
+                })
+                .flatten();
+            let mut record = self.normalize_pr(item)?.details;
+            if let Some(project) = fork_project {
+                if let Entry::Vacant(slot) = fork_paths.entry(project) {
+                    let path = self
+                        .get_json(&format!("projects/{project}"), &[])
+                        .await?
+                        .and_then(|value| value_string(&value, &["path_with_namespace"]));
+                    slot.insert(path);
+                }
+                record.source_repo = fork_paths[&project].clone();
+            }
+            open.push(record);
+        }
+        Ok(open)
+    }
+
+    /// Raw rows of every page of this repository's PR list under `filters`,
+    /// each page at the provider's largest size.
+    ///
+    /// A 404 is an error (see [`NotFound`]); reaching [`MAX_PAGES`] first is
+    /// [`SniffError::IncompleteRemoteDomain`].
+    async fn pr_list_rows(&self, filters: Vec<(String, String)>) -> Result<Vec<Value>, SniffError> {
+        let flavor = self.remote.api_flavor;
+        let (size_key, size) = match flavor {
+            // Gitea and Forgejo ignore `per_page`, and cap `limit` at
+            // `MAX_RESPONSE_ITEMS` (50 by default).
+            ApiFlavor::Gitea | ApiFlavor::Forgejo => ("limit", 50),
+            ApiFlavor::Bitbucket => ("pagelen", 50),
+            _ => ("per_page", 100),
+        };
+        let path = self.pr_list_path()?;
+        let mut rows = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let mut params = filters.clone();
+            params.push(("page".to_string(), page.to_string()));
+            params.push((size_key.to_string(), size.to_string()));
+            let response = self
+                .fetch_json(&path, &params, NotFound::Error)
+                .await?
+                .ok_or_else(|| malformed("missing pull-request page"))?;
+            let (items, body_next) = page_items(response.value);
+            let count = items.len();
+            rows.extend(items);
+            let more = match flavor {
+                ApiFlavor::Bitbucket => body_next,
+                _ => response.link_next.unwrap_or(count >= size),
+            };
+            if !more {
+                return Ok(rows);
+            }
+        }
+        Err(incomplete_domain(flavor, "pull-request pages", MAX_PAGES))
     }
 
     /// Gets one exact CI/CD job. Authoritative 404 is `Ok(None)`.
@@ -501,11 +723,36 @@ impl FocusedProviderClient {
         Ok(jobs)
     }
 
+    /// A copy of this client whose requests share one overall deadline.
+    ///
+    /// Each request's timeout is the time left until `deadline`, and a request
+    /// that would start after it fails without being sent, so a multi-request
+    /// operation ends by `deadline` rather than after a per-request timeout
+    /// multiplied by its request count.
+    pub(crate) fn with_deadline(&self, deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+            ..self.clone()
+        }
+    }
+
     async fn get_json(
         &self,
         path: &str,
         params: &[(String, String)],
     ) -> Result<Option<Value>, SniffError> {
+        Ok(self
+            .fetch_json(path, params, NotFound::Absent)
+            .await?
+            .map(|page| page.value))
+    }
+
+    async fn fetch_json(
+        &self,
+        path: &str,
+        params: &[(String, String)],
+        not_found: NotFound,
+    ) -> Result<Option<JsonPage>, SniffError> {
         let mut endpoint =
             self.api_base
                 .join(path)
@@ -528,10 +775,23 @@ impl FocusedProviderClient {
                 host: endpoint_host.to_string(),
             });
         }
+        let (connect_timeout, timeout) = match self.deadline {
+            None => (CONNECT_TIMEOUT, REQUEST_TIMEOUT),
+            Some(deadline) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(SniffError::RemoteUnreachable {
+                        url: endpoint.to_string(),
+                        message: "deadline elapsed before the request was sent".to_string(),
+                    });
+                }
+                (CONNECT_TIMEOUT.min(remaining), remaining)
+            }
+        };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(connect_timeout)
+            .timeout(timeout)
             .build()
             .map_err(|error| transport(&endpoint, error))?;
         let (token, variable) = match self.credential_scope {
@@ -559,16 +819,26 @@ impl FocusedProviderClient {
             .map_err(|error| transport(&endpoint, error))?;
         let status = response.status().as_u16();
         match status {
-            200..=299 => response
-                .json()
-                .await
-                .map(Some)
-                .map_err(|error| SniffError::RemoteApi {
-                    provider: provider_name(self.remote.api_flavor),
-                    status,
-                    message: format!("malformed JSON response: {error}"),
-                }),
-            404 => Ok(None),
+            200..=299 => {
+                let link_next = link_has_next(response.headers());
+                match response.json().await {
+                    Ok(value) => Ok(Some(JsonPage { value, link_next })),
+                    // A body cut off by the timeout is a transport failure,
+                    // not a malformed provider answer.
+                    Err(error) if error.is_timeout() => Err(transport(&endpoint, error)),
+                    Err(error) => Err(SniffError::RemoteApi {
+                        provider: provider_name(self.remote.api_flavor),
+                        status,
+                        message: format!("malformed JSON response: {error}"),
+                    }),
+                }
+            }
+            404 if not_found == NotFound::Absent => Ok(None),
+            404 => Err(SniffError::RemoteApi {
+                provider: provider_name(self.remote.api_flavor),
+                status,
+                message: "not found or not permitted".to_string(),
+            }),
             401 if token.is_none() => Err(SniffError::MissingCredentials {
                 provider: provider_name(self.remote.api_flavor),
                 env_var: variable,
@@ -727,6 +997,7 @@ impl FocusedProviderClient {
                 .or_else(|| value_string(&value, &["html_url", "web_url"])),
             &host,
         );
+        let (source_repo, source_repo_is_target) = self.pr_source_identity(&value);
         let details = PullRequestInfo {
             number,
             title: value_string(&value, &["title"]).unwrap_or_default(),
@@ -743,11 +1014,7 @@ impl FocusedProviderClient {
             )
             .unwrap_or_else(|| "unknown".to_string()),
             draft: value_bool(&value, &["draft", "work_in_progress"]).unwrap_or(false),
-            source_branch: nested_string(
-                &value,
-                &[&["head", "ref"], &["source", "branch", "name"]],
-            )
-            .or_else(|| value_string(&value, &["source_branch"])),
+            source_branch: pr_source_branch(self.remote.api_flavor, &value),
             target_branch: nested_string(
                 &value,
                 &[&["base", "ref"], &["destination", "branch", "name"]],
@@ -773,6 +1040,9 @@ impl FocusedProviderClient {
             updated_at: value_string(&value, &["updated_at", "updated_on"]),
             merged_at: value_string(&value, &["merged_at"]),
             html_url: web_url.clone().unwrap_or_default(),
+            source_repo,
+            source_repo_is_target,
+            source_head_sha: pr_head_sha(self.remote.api_flavor, &value),
         };
         Ok(PullRequestRecord {
             identity: PullRequestReference {
@@ -790,6 +1060,42 @@ impl FocusedProviderClient {
             },
             details,
         })
+    }
+
+    /// Source repository identity and whether it is the target repository.
+    ///
+    /// A GitLab MR names both projects only by ID, so its source path is known
+    /// here only when it is this client's own project.
+    fn pr_source_identity(&self, value: &Value) -> (Option<String>, Option<bool>) {
+        let (source, target) = match self.remote.api_flavor {
+            ApiFlavor::GitLab => {
+                let id = |name| value.get(name).and_then(Value::as_u64);
+                let same = id("source_project_id")
+                    .zip(id("target_project_id"))
+                    .map(|(source, target)| source == target);
+                let path = same.filter(|same| *same).map(|_| {
+                    format!(
+                        "{}/{}",
+                        self.remote.namespace.as_deref().unwrap_or_default(),
+                        self.remote.repository.as_deref().unwrap_or_default()
+                    )
+                });
+                return (path, same);
+            }
+            ApiFlavor::Bitbucket => (
+                nested_string(value, &[&["source", "repository", "full_name"]]),
+                nested_string(value, &[&["destination", "repository", "full_name"]]),
+            ),
+            _ => (
+                nested_string(value, &[&["head", "repo", "full_name"]]),
+                nested_string(value, &[&["base", "repo", "full_name"]]),
+            ),
+        };
+        let is_target = source
+            .as_ref()
+            .zip(target.as_ref())
+            .map(|(source, target)| source.eq_ignore_ascii_case(target));
+        (source, is_target)
     }
 
     /// Projects one provider's job object onto the structured record.
@@ -1273,6 +1579,75 @@ fn pr_state_params(
     }
     let token = if tokens.len() == 1 { tokens[0] } else { "all" };
     vec![("state".to_string(), token.to_string())]
+}
+
+/// Open or merged, per the provider's definitive fields; `None` for every
+/// other state (closed-unmerged, locked, DECLINED, SUPERSEDED).
+///
+/// Bitbucket's focused `merged_at` is always absent, and GitHub's list
+/// endpoint returns no `merged` bool, so each provider is read from the field
+/// it actually populates.
+fn evidence_state(flavor: ApiFlavor, value: &Value) -> Option<PrState> {
+    let state = value_string(value, &["state"]).unwrap_or_default();
+    match flavor {
+        ApiFlavor::GitLab => match state.as_str() {
+            "opened" => Some(PrState::Open),
+            "merged" => Some(PrState::Merged),
+            _ => None,
+        },
+        ApiFlavor::Bitbucket => match state.to_ascii_uppercase().as_str() {
+            "OPEN" => Some(PrState::Open),
+            "MERGED" => Some(PrState::Merged),
+            _ => None,
+        },
+        _ => {
+            let merged = value_bool(value, &["merged"]) == Some(true)
+                || value.get("merged_at").is_some_and(|at| !at.is_null());
+            if merged {
+                Some(PrState::Merged)
+            } else if state == "open" {
+                Some(PrState::Open)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Head branch name.
+///
+/// Gitea and Forgejo rewrite `head.ref` to `refs/pull/N/head` once the head
+/// branch is deleted, while `head.label` keeps the branch name. A refname
+/// cannot contain `:`, so stripping an `owner:` prefix is lossless.
+fn pr_source_branch(flavor: ApiFlavor, value: &Value) -> Option<String> {
+    if matches!(flavor, ApiFlavor::Gitea | ApiFlavor::Forgejo)
+        && let Some(label) = nested_string(value, &[&["head", "label"]])
+    {
+        return Some(label.rsplit(':').next().unwrap_or_default().to_string());
+    }
+    nested_string(value, &[&["head", "ref"], &["source", "branch", "name"]])
+        .or_else(|| value_string(value, &["source_branch"]))
+}
+
+fn pr_head_sha(flavor: ApiFlavor, value: &Value) -> Option<String> {
+    nonempty(match flavor {
+        ApiFlavor::GitLab => value_string(value, &["sha"]),
+        ApiFlavor::Bitbucket => nested_string(value, &[&["source", "commit", "hash"]]),
+        _ => nested_string(value, &[&["head", "sha"]]),
+    })
+}
+
+/// Whether a `Link` header advertises `rel="next"`; `None` without one.
+fn link_has_next(headers: &reqwest::header::HeaderMap) -> Option<bool> {
+    let mut links = headers.get_all(reqwest::header::LINK).iter().peekable();
+    links.peek()?;
+    Some(links.filter_map(|value| value.to_str().ok()).any(|value| {
+        value.split(',').any(|link| {
+            link.split(';')
+                .skip(1)
+                .any(|param| matches!(param.trim(), "rel=\"next\"" | "rel=next"))
+        })
+    }))
 }
 
 fn page_items(value: Value) -> (Vec<Value>, bool) {

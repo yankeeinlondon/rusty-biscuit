@@ -2,6 +2,8 @@ pub mod block_quote;
 pub mod compose;
 pub mod filesystem;
 #[cfg(feature = "image")]
+pub mod git_graph;
+#[cfg(feature = "image")]
 pub mod graph_expression;
 pub mod horizontal_rule;
 pub mod image_options;

@@ -1,5 +1,6 @@
 use renderable::color::Color;
 use renderable::style::Style;
+use renderable::tree::TableRowHighlight;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::layout::Alignment;
@@ -15,13 +16,26 @@ use crate::utils::wrap_policy::WordWrap;
 ///
 /// ## Row striping
 ///
-/// Each toggle, when enabled, paints even data rows (0-indexed) with a stripe.
+/// Each toggle, when enabled, paints every second data row (0-indexed rows 1, 3, 5, ...) with a stripe.
 /// The stripe color is a typed [`Color`] slot — [`stripe_bg`](Self::stripe_bg)
 /// and [`stripe_text`](Self::stripe_text). When a slot is `None` the renderer
 /// picks a subtle default that adapts to the terminal's light or dark color
 /// mode. Either way the `Color` is lowered through the shared, capability-aware
 /// path, so striping degrades across truecolor, 256-color, and 16-color
 /// terminals instead of being silently disabled.
+///
+/// ## Row highlight
+///
+/// [`highlight_row`](Self::highlight_row) paints one data row's background.
+/// Its index counts data rows only (0-based, header excluded); an index past
+/// the last data row highlights nothing. On that row the highlight replaces
+/// the stripe — both the background and the text tint — while every other row
+/// keeps its striping. Cell styling composes with it: a cell's foreground and
+/// emphasis are kept, the highlight background is restored after every SGR
+/// reset inside the cell, and a background a cell sets itself still wins
+/// within that styled span. The highlight color degrades across color depths
+/// exactly like the stripe and is dropped when the terminal has no color
+/// support.
 ///
 /// ## Header and body slots
 ///
@@ -49,14 +63,18 @@ use crate::utils::wrap_policy::WordWrap;
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct TableStyle {
-    /// When `true`, even data rows receive a background stripe.
+    /// When `true`, every second data row receives a background stripe.
     pub striped_rows: bool,
-    /// When `true`, even data rows receive a text-color stripe.
+    /// When `true`, every second data row receives a text-color stripe.
     pub striped_text: bool,
     /// Explicit background stripe color. `None` selects the adaptive default.
     pub stripe_bg: Option<Color>,
     /// Explicit text stripe color. `None` selects the adaptive default.
     pub stripe_text: Option<Color>,
+    /// One data row painted with a highlight background; see
+    /// [Row highlight](Self#row-highlight).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_row: Option<TableRowHighlight>,
     /// Typed appearance slot applied to every header cell.
     ///
     /// A per-column override is merged on top via

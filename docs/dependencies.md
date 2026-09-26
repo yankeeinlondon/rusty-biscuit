@@ -2,6 +2,17 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-visualized` moves `mermaid-rs-renderer` from 0.2 (locked 0.2.1) to
+  0.3.1 (2026-09-24, worktree `2026-09-24-ux-improvements`), for 0.3's
+  `measure_svg_dimensions` (the natural SVG size that scale-based image widths
+  need) and its layout and theme fixes. The edge now sets
+  `default-features = false`: the crate's `png` feature pulled a second
+  `resvg`/`usvg` (0.46 under 0.2, 0.47 under 0.3) and `cli` pulled `clap`, and
+  biscuit rasterizes with its own `resvg` 0.45. The lockfile drops `resvg` 0.46,
+  `usvg` 0.46, `kurbo` 0.13, `svgtypes` 0.16, `roxmltree` 0.21, and `imagesize`
+  0.14. 0.3 derives its default pie palette as `hsl()`, which biscuit's
+  pie-label contrast fix now parses.
+
 - Every `reqwest` edge in the workspace sets `default-features = false` and
   re-lists `default-tls`, `charset`, and `http2`. The one default this drops is
   `system-proxy` (`hyper-util/client-proxy-system`), which removed
@@ -167,7 +178,26 @@
   nextest-archive leg. No new external crate was added.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
-  directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
+  directory, keyed by canonical repo-root xxHash plus the compared pair of tip
+  SHAs (target and branch). The fork-origin records
+  (`<repo hash>.fork-origins.json`) share that directory and key, as do
+  `wt list`'s 60-second open-PR store (`<repo hash>.prs.json`, fetched through
+  `sniff`'s blocking `open_pull_requests`) and `wt remove`'s one-minute handoff
+  records (`<repo hash>.handoff-<token>.json`). The handoff token is 128 bits from
+  `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
+  `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
+  `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
+  and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
+  No new external crate was added; each was already in the workspace graph.
+- `worktree/cli` uses `insta` as a development dependency to snapshot the shell
+  wrappers `wt --completions` generates and the `wt list` table, and
+  `serde_json` (development) to seed the PR store and edit a handoff record in
+  its tests. `base64` and `image` (PNG only), both development, decode the
+  graph image `wt` transmits and the Kitty window screenshot in
+  `level2_graph_in_kitty.rs`. No new external crate was added; both were
+  already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
+  dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
+  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
@@ -868,6 +898,12 @@ This is a Rust workspace with the following modules:
 
 ### Image Processing
 
+- [mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer) _v0.3.1_ [📄](https://docs.rs/mermaid-rs-renderer)
+
+    _Pure-Rust Mermaid parser, layout engine, and SVG renderer. Used by `biscuit-visualized` with `default-features = false` (SVG only; biscuit rasterizes with its own `resvg`)._
+
+    _Tags: image, diagrams, svg_
+
 - [image](https://github.com/image-rs/image) _v0.25_ [📄](https://docs.rs/image)
 
     _Imaging library providing basic image processing and native Rust encoders/decoders for common formats._
@@ -1060,7 +1096,7 @@ This is a Rust workspace with the following modules:
 
 - [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
 
-    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce._
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token._
 
     _Tags: random, csprng, system_
 

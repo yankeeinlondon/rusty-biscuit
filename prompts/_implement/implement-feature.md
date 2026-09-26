@@ -1,6 +1,6 @@
 ---
 description: |-
-    This prompt **implements** a _feature_ or _fix_ specification and _plan_. It can do this two ways:
+    This prompt **implements** a _feature_ or _fix_ specification from a _plan_. It can do this two ways:
 
     1. looping phase-by-phase of the plan
     2. a single agent acting as an _orchestrator_

@@ -34,7 +34,12 @@ fn repository(prompt: &str) -> (TempDir, PathBuf, PathBuf) {
     let root = dir.path();
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::create_dir_all(root.join("prompts/_reviews")).unwrap();
-    for transcluded in ["prompts/_senior-reviewer.md", "prompts/_ready.md", "prompts/_test-tiers.md"] {
+    for transcluded in [
+        "prompts/_senior-reviewer.md",
+        "prompts/_ready.md",
+        "prompts/_test-tiers.md",
+        "prompts/_writing-clearly.md",
+    ] {
         std::fs::copy(checkout().join(transcluded), root.join(transcluded)).unwrap();
     }
     let prompt_path = root.join("prompts/_reviews/feature-review.md");

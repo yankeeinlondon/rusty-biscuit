@@ -16,8 +16,11 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
@@ -128,6 +131,74 @@ impl MixedFixture {
         command
     }
 
+    /// Points `origin` at a GitHub URL, so `wt list` asks GitHub for open PRs.
+    /// Pair it with [`MixedFixture::wt_command_via`] so no request leaves the
+    /// host.
+    pub fn with_github_origin(self) -> Self {
+        run_git(&self.main, &["remote", "add", "origin", "https://github.com/owner/repo.git"]);
+        self
+    }
+
+    /// [`MixedFixture::wt_command`] with every HTTPS request sent through
+    /// `proxy`, and no provider token.
+    pub fn wt_command_via(&self, proxy: &ProxyStub) -> Command {
+        let mut command = self.wt_command();
+        for name in ["ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "GH_TOKEN", "GITHUB_TOKEN"] {
+            command.env_remove(name);
+        }
+        command
+            .env("HTTPS_PROXY", proxy.url())
+            .env("https_proxy", proxy.url())
+            .env_remove("TERM_PROGRAM")
+            .env_remove("KITTY_WINDOW_ID");
+        command
+    }
+
+    pub fn main(&self) -> &Path {
+        &self.main
+    }
+
+    /// The PR store the spawned `wt` reads and writes. The cache directory
+    /// follows `HOME` (macOS) or `XDG_CACHE_HOME` (Linux); on Windows it does
+    /// not, so the real per-user path (keyed by this temporary repository) is
+    /// used there.
+    pub fn pr_store(&self) -> PathBuf {
+        let real = worktree::pull_requests::pr_store_path(&self.main).expect("PR store path");
+        if cfg!(windows) {
+            return real;
+        }
+        let root = if cfg!(target_os = "macos") {
+            self.home.path().join("Library").join("Caches")
+        } else {
+            self.xdg_cache.path().to_path_buf()
+        };
+        root.join("worktree").join(real.file_name().expect("store file name"))
+    }
+
+    /// Writes a PR store fetched `age` ago holding one open PR from
+    /// `branch` into `main`.
+    pub fn seed_pr_store(&self, age: Duration, number: u64, branch: &str) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let store = self.pr_store();
+        fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
+        let json = serde_json::json!({
+            "format_version": 1,
+            "fetched_at": now - age.as_secs(),
+            "source_repo": "owner/repo",
+            "pull_requests": [{
+                "number": number,
+                "url": format!("https://github.com/owner/repo/pull/{number}"),
+                "source_repo": "owner/repo",
+                "source_branch": branch,
+                "target_branch": "main",
+            }],
+        });
+        fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
+    }
+
     /// Delete the worktree SHA-pair cache so the next run is a guaranteed miss.
     pub fn clear_worktree_cache(&self) {
         let _ = fs::remove_dir_all(self.home.path().join("Library").join("Caches").join("worktree"));
@@ -179,9 +250,62 @@ fn run_git(repo: &Path, args: &[&str]) {
 
 /// Extract the `list gather` stage duration from rendered `--perf` output.
 pub fn list_gather_from_perf(stderr: &str) -> Option<Duration> {
+    stage_from_perf(stderr, "list gather")
+}
+
+/// Extract a stage's duration from rendered `--perf` output.
+pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
     let clean = strip_ansi(stderr);
-    let line = clean.lines().find(|line| line.contains("list gather"))?;
+    let line = clean.lines().find(|line| line.contains(stage))?;
     line.split_whitespace().find_map(parse_perf_duration)
+}
+
+/// A local stand-in for an HTTPS proxy, so a PR request never leaves the host.
+pub struct ProxyStub {
+    port: u16,
+    connections: Arc<AtomicUsize>,
+}
+
+impl ProxyStub {
+    /// Accepts every connection and never answers, so each request runs into
+    /// its deadline. Connections are held open until the test process ends.
+    pub fn hanging() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
+        let port = listener.local_addr().expect("proxy stub address").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&connections);
+        let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                counter.fetch_add(1, Ordering::SeqCst);
+                held.lock().expect("held connections").push(stream);
+            }
+        });
+        Self { port, connections }
+    }
+
+    /// A port with nothing listening: every connection is refused at once,
+    /// as with the network down.
+    pub fn refusing() -> Self {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .expect("bind a free port")
+            .local_addr()
+            .expect("free port address")
+            .port();
+        Self {
+            port,
+            connections: Arc::default(),
+        }
+    }
+
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// Connections accepted so far (always 0 for a refusing stub).
+    pub fn connections(&self) -> usize {
+        self.connections.load(Ordering::SeqCst)
+    }
 }
 
 /// Parse a metrics-tree duration token such as `216.0ms`, `39.0µs`, or `1.2s`.

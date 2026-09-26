@@ -1,0 +1,12 @@
+---
+source: biscuit-terminal/lib/tests/l1/table_parity.rs
+expression: rendered
+---
+┌───────────┬───────────────┐
+│ Branch    │ Path          │
+├───────────┼───────────────┤
+│ main      │ /repo         │
+│\x1b[48;2;40;44;64m fix/wt-ux\x1b[48;2;40;44;64m │ /wt/fix-wt-ux\x1b[48;2;40;44;64m \x1b[49m│
+│ feature/a │ /wt/feature-a │
+│\x1b[44m feature/b\x1b[44m │ /wt/feature-b\x1b[44m \x1b[49m│
+└───────────┴───────────────┘

@@ -59,6 +59,18 @@ Each value is an SSH destination: an alias from the developer's
 ...` so a missing key fails fast instead of prompting. The `post-quantum`
 warnings SSH prints are noise.
 
+For an ad hoc PowerShell script on `BUILD_WIN`, copy it over and run it with
+`-File`; do not pipe it into `powershell -Command -`. Piped input is read
+line by line, and on 2026-09-24 a script with multi-line `foreach`/`switch`
+blocks printed nothing and reported no error. The remote shell is
+PowerShell, so `%TEMP%` stays literal; quote the command for your local shell
+and use `$env:TEMP`:
+
+```sh
+scp -q probe.ps1 "$BUILD_WIN":AppData/Local/Temp/probe.ps1
+ssh -o BatchMode=yes "$BUILD_WIN" 'powershell -NoProfile -ExecutionPolicy Bypass -File $env:TEMP\probe.ps1; Remove-Item $env:TEMP\probe.ps1'
+```
+
 `BUILD_WIN` and `BUILD_WSL` are commonly the same physical machine. If the
 WSL guest's sshd hangs while the distro is running, go through the Windows
 side: `ssh "$BUILD_WIN" 'wsl.exe -d <distro> -e <argv>'` and strip NULs from
@@ -130,6 +142,10 @@ directly; use your own worktree for ad hoc sessions.
   for `python3` finds one and then fails on use. A working 3.13 is reachable
   only as `py`. Anything that runs `scripts/ci/*.py` over SSH must spell `py`
   (measured 2026-09-15).
+- **`tar` on `BUILD_WIN`'s `PATH` is Cygwin's too** (`/usr/bin/tar`), and it
+  cannot open a `C:\...` path ("Cannot open: Input/output error"). To unpack an
+  archive copied over with `scp`, call Windows' own
+  `& "$env:SystemRoot\System32\tar.exe" -xzf <file> -C <dir>` (2026-09-24).
 - **`bash` on `BUILD_WIN`'s `PATH` is Cygwin's** (`C:\cygwin64\bin\bash.exe`,
   `uname -s` = `CYGWIN_NT`, drives under `/cygdrive/b`), not Git Bash. To run a
   repo shell script the way a Git Bash user would, call
@@ -226,6 +242,12 @@ Do not export `RUSTC_WRAPPER` in a session that touches them: in hardlink mode (
 ZFS without a working clone path; the WSL guest is ext4) a restored artifact is a read-only link
 into the store, and the next unwrapped rebuild fails with "output file ... is not writeable"
 (2026-09-09, 89 such files). Ruling per platform: `docs/kache-strategy.md`.
+On 2026-09-25 the `fix-wt-ux` standing clone on `build-linux` still carried such links:
+archive mode failed while compiling the release `ci-build` tool
+(`target/release/deps/librenderable-*.rmeta is not writeable`). Passing a build flag
+(`--features image`, `--all-features`) takes the native path, which builds only the debug
+profile, and that ran green. The stale links are still there until someone clears that clone's
+`target/release`.
 
 `unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
 `RUSTC_WRAPPER=""` does (measured 2026-09-21):

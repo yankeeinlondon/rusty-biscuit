@@ -9,7 +9,7 @@ use worktree::config::{config_path, considered_dirs, resolve_base_dir, save_conf
 use worktree::git::repo_info;
 use worktree::worktree::create_worktree;
 
-pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
+pub fn run(branch: &str, from: Option<&str>, stay: bool) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
 
     let base = match resolve_base_dir() {
@@ -29,7 +29,8 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
         Err(e) => return Err(e),
     };
 
-    let result = create_worktree(branch, &base)?;
+    let result = create_worktree(branch, &base, from)?;
+    let move_shell = !stay && crate::env::shell_wrapper_active();
 
     let relative = repo_info().map(|i| i.relative_path).unwrap_or_default();
     let location = if relative.as_os_str().is_empty() {
@@ -37,12 +38,21 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
     } else {
         format!("<dim>{}</dim>", relative.to_string_lossy())
     };
-    let msg = format!(
-        "\n<green>Created worktree</green> <bold>{}</bold> at <dim>{}</dim>\n  <dim>- you have been moved <i>into</i> the worktree at the same relative path ({})</dim>\n",
+    let forked = result
+        .forked_from
+        .as_deref()
+        .map(|base| format!(" <dim>(forked from <b>{base}</b>)</dim>"))
+        .unwrap_or_default();
+    let mut msg = format!(
+        "\n<green>Created worktree</green> <bold>{}</bold>{forked} at <dim>{}</dim>\n",
         result.branch,
         result.worktree_path.display(),
-        location,
     );
+    if move_shell {
+        msg.push_str(&format!(
+            "  <dim>- you have been moved <i>into</i> the worktree at the same relative path ({location})</dim>\n"
+        ));
+    }
     eprintln!("{}", Prose::new(msg).render(&terminal));
 
     if let Some(commit) = &result.reused_branch_at {
@@ -50,8 +60,14 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
         eprintln!("{}", Prose::new(notice).render(&terminal));
     }
 
-    if !stay {
+    if move_shell {
         println!("cd:{}", result.target_cwd.display());
+    } else if !stay {
+        let notice = format!(
+            "<yellow><b>Could not move your shell into the worktree:</b></yellow> the shell wrapper is not active.\n{}",
+            super::go::wrapper_setup_help()
+        );
+        eprintln!("{}", Prose::new(notice).render(&terminal));
     }
 
     Ok(())

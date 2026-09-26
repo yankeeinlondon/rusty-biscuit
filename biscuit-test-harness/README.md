@@ -187,7 +187,7 @@ to verify and the tooling available on the host.
 |---------|-----------|--------------------|----------|---------------|
 | **`TmuxHarness`** | ✅ fully headless | Multiplexer; portable | Default Level-2 choice. Chords via `send_key`. Runs anywhere `tmux` is installed. | Kitty keyboard-protocol bytes (tmux strips them); graphics protocols; truecolor display nuances. |
 | **`WezTermHarness`** | ⚠️ needs a running WezTerm | Full: SGR, OSC8, images, truecolor | SGR/OSC8/image/diagram rendering against a high-capability emulator. `pane_size()` geometry. | Anything when WezTerm isn't the host terminal (see *Environment prerequisites*). |
-| **`KittyHarness`** | ⚠️ needs a running Kitty | Full: SGR, OSC8, Kitty graphics protocol | Kitty graphics-protocol image tests; SGR/OSC8 cross-checks. `pane_cols()` geometry. | Anything when not run inside / pointed at a Kitty session. |
+| **`KittyHarness`** | ⚠️ needs a running Kitty, or a private `KittyInstance` (macOS) | Full: SGR, OSC8, Kitty graphics protocol | Kitty graphics-protocol image tests; SGR/OSC8 cross-checks. `pane_cols()` geometry. `KittyInstance`: fixed window size and window screenshots. | Anything when not run inside / pointed at a Kitty session and no `KittyInstance` can launch. |
 | **`AppleTerminalHarness`** | ❌ macOS GUI app | **Low**: no images, no OSC8, single underline only | Verifying `Prose` *graceful degradation* on a low-capability terminal. | Byte-level negative assertions — capture is plain-text only (`raw == plain`). |
 
 Rules of thumb:
@@ -359,6 +359,7 @@ required tooling is missing — the test then skips rather than fails.
 | `TmuxHarness` | `tmux` on `$PATH`. **Nothing else** — fully self-contained. |
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
+| `KittyInstance::can_launch()` | macOS, with `kitty`, `open`, and `screencapture` on `$PATH`. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, and `osascript` can address Terminal.app. |
 | `cliclick` (Level 3, macOS) | `cliclick` on `$PATH`. Gate *additionally* on `cliclick::accessibility_trusted()` — cliclick can be installed yet have every event dropped by the WindowServer when the runner lacks macOS Accessibility trust. |
 | `xdotool` (Level 3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland has no reachable XTEST equivalent, so a Wayland session reports unavailable and skips. |
@@ -403,6 +404,38 @@ KITTY_LISTEN_ON=unix:/tmp/kitty-l2 cargo test -p biscuit-terminal-cli --features
 Once the instance exists, the harness's `SpawnVisibility::Background`
 (`--keep-focus`) handles the *per-test* windows — the bootstrap step
 above only brings the terminal itself into existence.
+
+### A private Kitty per test (`KittyInstance`, macOS)
+
+A test that needs a known window size, or proof of what Kitty actually
+*drew*, can start its own Kitty instead of using the host's:
+
+```rust
+use biscuit_test_harness::kitty::KittyInstance;
+
+require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+let kitty = KittyInstance::launch(100, 32)?; // columns x lines, exact
+let mut pane = kitty.harness();              // rc-suppressed login shell
+// ... send_text / capture / capture_extent("all") ...
+kitty.screenshot(&png_path)?;                // `screencapture -l`, no focus
+```
+
+- It is started with `open -g -n -a kitty --config NONE -o
+  allow_remote_control=socket-only --listen-on unix:/tmp/biscuit-kitty-<pid>-…`
+  and never takes focus. Its window is **visible but unfocused**: a
+  `--start-as=hidden` window is never drawn, so its screenshot is black.
+- `--config NONE`: black background, no padding, no host `kitty.conf`. The
+  screenshot's pixels are Kitty's device pixels (the grid is `columns x
+  cell width`, centered between 1 px side borders and flush with the bottom
+  one). A pane shell can learn the cell size with `CSI 16 t`.
+- `open` passes the test's environment to the pane, including the host
+  terminal's `TERM_PROGRAM`; unset it where a program detects its terminal.
+- `Drop` quits the instance (`confirm_os_window_close=0`, so no "Quit
+  kitty?" window); the next launch quits any instance whose test process died.
+- `get-text` returns a soft-wrapped line whole (`--add-wrap-markers` does not
+  split it), so split long lines at the window width to get screen rows.
+- `screencapture` needs the Screen Recording permission for the terminal
+  running the tests; without it the capture has no window contents.
 
 ## Level 3 — OS keyboard injection
 
