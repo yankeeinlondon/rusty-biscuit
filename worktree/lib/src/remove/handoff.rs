@@ -65,6 +65,9 @@ pub struct RemoteApproval {
     /// repository can hold the same branch at the same commit.
     pub endpoint: Option<String>,
     /// The live head the report showed; the lease is taken against it.
+    /// `None` when origin had no such branch or could not be reached at
+    /// approval; either way the second run accepts only a verified absence,
+    /// so nothing is deleted on origin.
     pub observed_sha: Option<String>,
 }
 
