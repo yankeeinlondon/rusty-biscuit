@@ -36,6 +36,23 @@ skills_files_updated_during_phase_2:
     - .claude/skills/sniff/architecture.md
     - .claude/skills/os/windows.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_3:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/lib/src/remove/handoff.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - sniff
     - playa
@@ -127,14 +144,14 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 3 — Parallel CLI integration
 
-- [ ] **Wire PR refresh** — parallel; owns list rendering, hidden command dispatch, and PR CLI tests.
+- [x] **Wire PR refresh** — parallel; owns list rendering, hidden command dispatch, and PR CLI tests.
   - Add a hidden internal subcommand in `args.rs`/`main.rs` that receives the main checkout path explicitly and runs the bounded refresh operation. Register any shared module in both CLI targets as required.
   - Spawn the current executable with that explicit path and working directory, null stdin/stdout/stderr, and the shared detachment helper. Do not wait, join, or capture the worker; suppress normal output for the internal command. Spawn failure leaves stale results usable.
   - Change `commands/list.rs` to select cached results immediately and launch refresh only for stale matching entries. Preserve parallel graph/status gathering and foreground miss behavior. Keep `--perf` measuring the parent's work rather than worker completion.
   - Update `list_table.rs` to derive stale age at render time using the existing biscuit-terminal components. Cover successful cached empty results, boundary crossing, refresh failure, and unavailable first-run answers without fabricated badges.
   - Update `cli/tests/list_prs.rs`, table snapshots, and injected pipeline tests for the origin lookup on every cache hit. Check hidden-command help/completion behavior and absence of wrapper protocol output.
 
-- [ ] **Minimize handoff facts** — parallel; owns `commands/remove/` and removal CLI tests.
+- [x] **Minimize handoff facts** — parallel; owns `commands/remove/` and removal CLI tests.
   - Split local fact collection from optional safety/network assessment. Keep first-run reporting complete; select second-run facts using `Approvals.branch` and remote approval.
   - Consume the one-use token, retain 60-second expiry and exit semantics, verify the caller has left, and re-read the entry, tip/branch, effective include rules, copy baseline, and full fingerprint before any mutation. Release the target working directory as before.
   - For `Keep`, explicit `Delete`, or no local branch action, skip local-branch safety lookup. For `DeleteIfSafe`, use the fresh local proof and then the live fallback only when needed; refuse if protection cannot be established.
@@ -143,7 +160,7 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 4 — Integration checkpoint
 
-- [ ] **Verify command contracts** — integration owner.
+- [x] **Verify command contracts** — integration owner.
   - Run focused PR, removal policy/handoff, and shell-wrapper L1 tests through the package recipes. Confirm the new hidden command cannot recurse into list or open terminal windows.
   - Verify each action-matrix row's network count, remote refusal before filesystem/branch mutation, and unchanged first-run behavior. Inspect the final diff for accidental fingerprint, included-file observation, or Git status changes.
   - Checkpoint: both command paths are wired, compile together, and pass their focused behavioral tests; performance evidence and destructive race coverage follow in Phase 4.

@@ -26,34 +26,29 @@ reviewed_on: 2026-09-26
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 2 is done; read "## Phase 2" in implementation-log.md. Key facts for
-    Phase 3:
-    1. INTERIM STALE BEHAVIOR TO REPLACE: worktree/cli/src/commands/list.rs
-       `gather_prs` still fetches a Stale entry in the foreground (falling back
-       to the stale listing on failure). That kept today's behavior so the
-       suite stays green. Phase 3 must change the Stale arm to "return the
-       listing + launch the detached worker", and add the launch seam.
-       `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` and
-       `list_prs::a_stalled_pr_request_stops_at_its_deadline_...` currently
-       pass only because of that interim wait; they need the planned rework
-       (keep a miss variant for the 300 ms deadline).
-    2. Library API as built: `origin_url(root)`, `origin_digest(origin)`,
-       `select_cached(store, Option<&str>, now) -> CachedPrs::{Fresh,Stale,Miss}`,
-       `fetch_and_publish(store, root, origin, now, &dyn OpenPrSource) ->
-       Option<PrListing>` (None = failed), `refresh(store, root, clock,
-       connect: FnOnce(&str) -> Box<dyn OpenPrSource>) -> RefreshOutcome`,
-       `pr_lock_path(store)`, `REFRESH_DEADLINE`, `PrListing::is_stale_at(now)`.
-       `PrListing::stale` and `SniffOpenPrSource::for_origin` are gone; build
-       `SniffOpenPrSource { remote_url, deadline }` directly.
-    3. Already done ahead of Phase 3: `PrConnect = fn(&str) -> Box<dyn
-       OpenPrSource>`; `list_table::pr_age_markup` uses `is_stale_at(now)`;
-       test seeders (perf_support, level2_list_verbose) write format 2.
-    4. `sniff::process::configure_detached_child` is public; worktree-cli
-       already depends on sniff. `safety::reconfirm(input, prs, heads) ->
-       Reconfirmation { tier, notes }` exists for the handoff.
-    5. cross-check: pass one substring filter per run (a `|` breaks the
-       remote shell). On Linux, add `--all-features` (stale kache hardlinks in
-       this clone's target/release break archive mode).
+    Phase 3 is done; read "## Phase 3" in implementation-log.md. For Phase 4:
+    1. Stale path is now non-blocking: list.rs `gather_prs(store, main,
+       PrSeams { connect, launch })`; Stale -> listing + launch; only Miss
+       requests in the foreground. Worker = hidden `wt internal-refresh-prs
+       <main>` in cli/src/commands/pr_refresh.rs (ignores non-main paths).
+    2. `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` seeds no
+       store, so it is already the miss-path (300 ms) gate. The new stale
+       full-command gate still has to be added (plan Wave 5).
+    3. Worker lifecycle pattern already used in cli/tests/list_prs.rs:
+       ProxyStub::hanging + wait_for_connections(n, limit), then probe the
+       lock with `pull_requests::refresh(.., |_| NoRequest)` (Contended while
+       the worker holds it) and `finish_worker` (close_held + poll) so no
+       worker outlives its fixture. Reuse or promote it into perf_support.
+       Not yet covered: a successful worker publish visible to the next list
+       (needs an answering fake provider, e.g. the FakeGitea idea in Phase 1
+       §6), concurrent competing workers, crash release via a killed worker,
+       spawn failure, origin change during a worker fetch at binary level.
+    4. Handoff zero-network tests (remove.rs) use origin
+       http://gitea.test/o/r.git with every proxy env var aimed at a local
+       counting listener; the lease-failure test uses a sh pre-push hook with
+       repo-local core.hooksPath. Both passed on native Windows.
+    5. Docs not yet updated (Phase 5): README, performance-testing.md. The
+       worktree skill was updated for the hidden command and second-run rules.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-worktree-file

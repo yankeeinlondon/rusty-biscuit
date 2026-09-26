@@ -35,6 +35,23 @@ skills_files_updated_during_phase_2:
     - .claude/skills/sniff/architecture.md
     - .claude/skills/os/windows.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_3:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/lib/src/remove/handoff.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - sniff
     - playa
@@ -290,3 +307,76 @@ All the new tests are L1 in `worktree`'s lib unit-test target, which `just test`
   - A filter containing `|` breaks the remote shell (`syntax error near unexpected token '|'`), so pass one substring per run.
   - Linux archive mode failed twice with `target/release/deps/*.rmeta is not writeable`. These are the stale kache hardlinks in the `fix-wt-ux` clone already recorded in `os/build-hosts.md`. `--all-features` (the native path) ran green, and `build-hosts.md` now records that the links were still present on 2026-09-26.
 - No pre-existing failures were encountered.
+
+## Phase 3
+
+Both command paths are wired. The list/refresh track was done in the main session. The handoff track was delegated to one subagent, and its diff was reviewed in the main session. Nothing was committed.
+
+### 1. `wt list` → detached refresh
+
+- **New `cli/src/commands/pr_refresh.rs`**, declared in `commands/mod.rs`, so both CLI targets compile it:
+  - `launch(main)` spawns `current_exe() internal-refresh-prs <main>` with the main checkout as its working directory, null stdin, stdout, and stderr, and `WT_SHELL_WRAPPER`/`COMPLETE` removed. It applies `sniff::process::configure_detached_child` and drops the `Child`, so it never waits and never kills. A spawn error is ignored.
+  - `run(repo)` is the worker. It runs only when `repo` is the top level of a main checkout: `rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`, with the toplevel equal to the canonical `repo` and the git dir equal to the common dir. It then calls `pull_requests::refresh(store, main, unix_now, …)` with `REFRESH_DEADLINE`. It prints nothing, and its outcome is discarded.
+- **`args.rs`/`main.rs`**: a hidden `InternalRefreshPrs { repo }` subcommand, named by `pr_refresh::SUBCOMMAND`, dispatches straight to `pr_refresh::run` and never reaches list code. It does not appear in `--help` or in dynamic completion (tested).
+- **`list.rs`**:
+  - `gather_prs(store, main, PrSeams)`: `Fresh` returns the listing. `Stale` returns the listing and calls `launch(main)`. `Miss` with an origin runs `fetch_and_publish` under 300 ms, and a failure returns `PrListing::default()`. Without an origin it returns the default.
+  - `PrSeams { connect, launch }` replaced the separate `PrConnect` argument, keeping `run_pipeline` at 7 parameters for clippy.
+  - `--perf`'s "pr gather" now measures the origin lookup, plus the spawn when a launch happens.
+- **`list_table.rs`** needed no change: Phase 2 already decides the age line from `is_stale_at(now)` at render time. A stored empty answer that is stale shows no badges and still shows its age; an unavailable answer shows neither (new test).
+- **Test support**: `ProxyStub` holds its accepted streams in a shared list, gains `close_held()` and `wait_for_connections(n, limit)`, and counts a connection only after storing it. `MixedFixture::worktrees()` was added.
+
+### 2. Handoff second run (subagent)
+
+- `Facts::gather` split into `Facts::local`, which makes no network request, and `Facts::assess`, which runs the tiers and the `--force-remote` preflight. The first run calls both, so it is unchanged.
+- `run_handoff`:
+  1. Unchanged: token consumption, expiry, the caller-left check, re-reading the entry, tip, branch, rules, baseline, and full fingerprint, and the cwd release.
+  2. `DeleteIfSafe` → `reconfirm_branch`, which is `safety::reconfirm` with `force_remote = remote approval present`. Anything that does not allow deletion refuses with exit 3 before mutation.
+  3. A remote approval → one `preflight_remote_deletion` → `remote_changed`. That compares the destination and the endpoint, runs `unprovable_remote` (multiple push URLs or reinterpretation), and then requires `Present(sha) == approved` or `Absent` with approved `None`. `Unavailable` refuses (Gap 2).
+- Second-run refusals print only the reason, never the first-run report, which is what removes the misleading "Detached HEAD" heading. `DeleteIfSafe` refusals add reconfirm's notes.
+- `execute`'s "(N lost)" suffix requires assessed safety, so an explicit delete in the second run prints `Deleted branch X` without it (Phase 1 §3 decision).
+- `lib/src/remove/handoff.rs`: a doc comment only, on `RemoteApproval.observed_sha` (Phase 1 §2 "no record version bump").
+- How the zero-network proof works: origin is `http://gitea.test/o/r.git`, and every proxy variable points at a local listener that counts connections and closes them unanswered. Each test asserts that the first run reached the listener, so the proxy is honored, and that the second run added zero connections. A file-path bare origin could not prove this, because it never reaches the PR lookup.
+
+### 3. Wave 4 contract check
+
+- The hidden command dispatches only to `pr_refresh::run`. It has no list code path and no terminal: null stdio, and `CREATE_NO_WINDOW` on Windows through the helper.
+- `git diff` touches no fingerprint (`inventory.rs`), included-file observation (`compare.rs`), or git status code.
+- Action-matrix rows are covered below. Every refusal test asserts that the worktree directory, its registration, and the branch are intact.
+
+### Requirement-to-test mapping (Phase 3)
+
+| Requirement | Test(s) |
+|---|---|
+| Stale matching answer shown at once, one launch for the main checkout, no foreground request, parent writes nothing | `list::tests::gather::a_stale_answer_is_shown_at_once_and_refreshed_in_the_background` |
+| Stale empty answer is an answer (no miss request, refresh launched) | `gather::a_stale_empty_answer_is_still_an_answer`; render: `list_table::a_stored_empty_answer_shows_no_badges_but_keeps_its_age` |
+| Fresh: no request, no launch | `gather::a_fresh_answer_neither_requests_nor_refreshes`, `list_prs::a_fresh_pr_store_makes_no_request_and_shows_its_badges` |
+| Miss: foreground request, stored, next run reads it, never launches | `gather::a_miss_requests_in_the_foreground_and_stores_the_answer` |
+| Failed miss: no badges or age, nothing stored | `gather::a_failed_miss_shows_no_badges_and_stores_nothing`, `list_prs::with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored` |
+| Changed/missing origin never shows old badges | `gather::a_changed_origin_never_shows_the_old_badges`, `gather::without_an_origin_a_stored_answer_is_ignored_and_nothing_is_requested`, `list_prs::a_changed_origin_hides_the_stored_badges_and_starts_no_worker` |
+| Real binary: captured `.output()` returns while the worker is blocked (the worker holds the lock), with badges, age line, and pr gather < 300 ms; one request; failed refresh leaves bytes; next stale list retries | `list_prs::a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_request` |
+| Worker prints nothing; ignores a linked worktree; failed refresh preserves the store | `list_prs::the_worker_command_prints_nothing_and_ignores_a_linked_worktree`, `pr_refresh::tests::only_the_top_level_of_a_main_checkout_is_accepted` |
+| Hidden from help and completion | `list_prs::the_worker_command_is_hidden_from_help_and_completion` |
+| Gap 1 (origin/<default>-only proof re-verified live) | `remove::a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip`, `…_is_deleted_while_origin_still_has_it` |
+| Gap 2 (absent / unavailable / created / moved) | `remove::an_origin_branch_deleted_between_the_runs_refuses_with_nothing_removed`, `an_unreachable_origin_in_the_second_run_refuses_force_remote_with_nothing_removed`, `an_origin_branch_created_between_the_runs_refuses_with_nothing_removed`, `an_origin_branch_moved_between_the_runs_refuses_with_nothing_removed`, `an_origin_branch_still_absent_in_the_second_run_leaves_nothing_to_delete` |
+| Lease failure after preflight → partial result | `remove::a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result` |
+| Keep / explicit delete / local proof make no second-run network request | `remove::keeping_the_branch_makes_no_network_request_in_the_second_run`, `an_explicitly_deleted_branch_makes_no_network_request_in_the_second_run`, `automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_run` |
+| No "(N lost)" suffix without assessed safety | `remove::the_handoff_carries_force_flags_to_the_second_run` (updated), `an_explicitly_deleted_branch_…` |
+
+Tests that failed against the pre-phase code:
+- the stale `gather` test (it made a foreground request);
+- the `list_prs` stale test (pr gather took ≥ 300 ms against the hanging proxy);
+- the subagent confirmed 7 `remove.rs` tests failed on the old handoff: both gaps and the zero-network rows.
+
+All the new tests are L1. No segment carries a tier marker; `list_prs.rs`, `list_table.rs`, and `remove.rs` are auto-discovered test targets, and `worktree-cli` does not set `autotests = false`.
+
+### Gates run
+
+- macOS, `cd worktree`:
+  - `just test`: 441 passed, 17 skipped (the `perf_` tier).
+  - `just lint`: clean. The recipe runs clippy only, not `cargo fmt`.
+  - `just test-perf`: 17 passed. The stalled-request gate is now a miss-path gate, because no store is seeded (pr gather 309–322 ms, full 371 ms). The network-down gate measured cold 24.3 ms, warm 12.8 ms, and full 64.3 ms.
+- Native Windows, `./scripts/cross-check.sh --os windows worktree-cli <filter>`, one filter per run (`a_stale_store`, `worker_command`, `changed_origin`, `second_run`, `between_the_runs`, `origin_default`, `only_the_top_level`, `handoff`): 44 test runs, all passed. This includes the captured-parent stale test (4.7 s, a real run, not a skip), the `pre-push`-hook lease test, and the proxy-based zero-network tests.
+  - A filter on a binary name (`list_prs`) matches 0 tests, because the filter is a test-name substring.
+- Linux, `--os linux worktree-cli --all-features`: 271 passed.
+- WSL2, `--os wsl worktree-cli`: 238 passed, 33 skipped (tiers).
+- No pre-existing failures.
