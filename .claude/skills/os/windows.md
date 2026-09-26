@@ -150,10 +150,10 @@ Compare against that, never against `to_string_lossy()`.
   still passes the *parent's* pipe write ends along, and the parent's
   `.output()` waits for every holder to close. Symptom: Windows-only failure
   whose elapsed time equals some child's timeout while the exit status is
-  success. Fix: `playa::detached::configure_detached_child` clears
+  success. Fix: `sniff::process::configure_detached_child` clears
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
-  detached creation flags (needs `windows-sys` features `Win32_Foundation`
-  and `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+  detached creation flags (`windows` crate features `Win32_Foundation` and
+  `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
 - **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
   stub at `python3.exe` that *spawns successfully* and then exits non-zero with
   "Python was not found; run without arguments to install from the Microsoft
