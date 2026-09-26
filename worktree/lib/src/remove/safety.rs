@@ -12,6 +12,9 @@
 //! With `--force-remote`, the origin branch about to be deleted is evidence
 //! at no tier, even when it is `origin/<default>`.
 //!
+//! The second run of a move-first handoff uses [`reconfirm`] instead, which
+//! trusts no `origin/*` ref, `origin/<default>` included, without a live check.
+//!
 //! See item 3 of `2026-09-24-ux-improvements` for the full rules.
 
 use std::path::Path;
@@ -233,13 +236,83 @@ pub fn assess(input: &SafetyInput<'_>, prs: &dyn PrSource, heads: &dyn RemoteHea
     })
 }
 
+/// The second run's proof, made without trusting the first run's evidence.
+///
+/// A local ref (the default branch, another branch, or a tag) proves the tip
+/// with no PR lookup and no network. Otherwise an exact-tip PR proves it, and
+/// then only an `origin/*` ref whose live head is verified, `origin/<default>`
+/// included: unlike [`assess`], a tracking ref is never trusted as of the last
+/// fetch, because origin may have moved since the first run approved.
+pub fn reconfirm(input: &SafetyInput<'_>, prs: &dyn PrSource, heads: &dyn RemoteHeads) -> Reconfirmation {
+    let mut notes = Vec::new();
+    let tier = match containing_refs(input) {
+        Err(unknown) => unknown,
+        Ok(refs) => {
+            let default_local = format!("refs/heads/{}", input.default_branch);
+            if refs.contains(&default_local) {
+                Tier::Safe(Evidence::DefaultBranch(input.default_branch.to_string()))
+            } else if let Some(evidence) = local_branch_or_tag(&refs) {
+                Tier::PrettySafe(evidence)
+            } else if let Some(evidence) = pr_evidence(input, &prs.lookup(input.branch), &mut notes) {
+                Tier::Safe(evidence)
+            } else if let Some(evidence) = verified_remote_copy(input, &refs, heads, &mut notes) {
+                Tier::PrettySafe(evidence)
+            } else {
+                Tier::NotSafe
+            }
+        }
+    };
+    Reconfirmation { tier, notes }
+}
+
+/// The outcome of [`reconfirm`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reconfirmation {
+    pub tier: Tier,
+    /// Evidence that was considered and rejected, as in [`BranchSafety::notes`].
+    pub notes: Vec<String>,
+}
+
 fn classify(
     input: &SafetyInput<'_>,
     pr: &PrLookup,
     heads: &dyn RemoteHeads,
     notes: &mut Vec<String>,
 ) -> Tier {
-    let containing = match git_from(
+    let refs = match containing_refs(input) {
+        Ok(refs) => refs,
+        Err(unknown) => return unknown,
+    };
+
+    // Pass 1 -- Safe.
+    for default in [
+        format!("refs/heads/{}", input.default_branch),
+        format!("refs/remotes/origin/{}", input.default_branch),
+    ] {
+        if refs.contains(&default) {
+            return Tier::Safe(Evidence::DefaultBranch(short_ref(&default)));
+        }
+    }
+    if let Some(evidence) = pr_evidence(input, pr, notes) {
+        return Tier::Safe(evidence);
+    }
+
+    // Pass 2 -- Pretty safe. Local refs and tags need no network.
+    if let Some(evidence) = local_branch_or_tag(&refs) {
+        return Tier::PrettySafe(evidence);
+    }
+    match verified_remote_copy(input, &refs, heads, notes) {
+        Some(evidence) => Tier::PrettySafe(evidence),
+        None => Tier::NotSafe,
+    }
+}
+
+/// Every ref under `refs/heads`, `refs/remotes/origin`, and `refs/tags` that
+/// contains the tip, except the branch itself, `origin/HEAD`, and (with
+/// `force_remote`) the destination about to be deleted; `Err` is the
+/// [`Tier::Unknown`] to report when git cannot search.
+fn containing_refs(input: &SafetyInput<'_>) -> Result<Vec<String>, Tier> {
+    let containing = git_from(
         input.base,
         input.base,
         &[
@@ -251,49 +324,52 @@ fn classify(
             "refs/remotes/origin",
             "refs/tags",
         ],
-    ) {
-        Ok(out) => out,
-        Err(error) => return Tier::Unknown(format!("could not search refs: {error}")),
-    };
+    )
+    .map_err(|error| Tier::Unknown(format!("could not search refs: {error}")))?;
     let own_local = format!("refs/heads/{}", input.branch);
-    let own_remote = input
-        .remote_branch
-        .map(|name| format!("refs/remotes/origin/{name}"));
     // The destination `--force-remote` deletes is no evidence at any tier,
     // even when it is the default branch (an upstream of `origin/main`).
-    let doomed_remote = own_remote.as_deref().filter(|_| input.force_remote);
-    let default_local = format!("refs/heads/{}", input.default_branch);
-    let default_remote = format!("refs/remotes/origin/{}", input.default_branch);
-    let refs: Vec<&str> = containing
+    let doomed_remote = own_remote_ref(input).filter(|_| input.force_remote);
+    Ok(containing
         .lines()
         .filter(|name| {
-            *name != own_local && *name != "refs/remotes/origin/HEAD" && Some(*name) != doomed_remote
+            *name != own_local
+                && *name != "refs/remotes/origin/HEAD"
+                && Some(*name) != doomed_remote.as_deref()
         })
-        .collect();
+        .map(str::to_string)
+        .collect())
+}
 
-    // Pass 1 -- Safe.
-    for default in [&default_local, &default_remote] {
-        if refs.contains(&default.as_str()) {
-            return Tier::Safe(Evidence::DefaultBranch(short_ref(default)));
-        }
-    }
-    if let Some(evidence) = pr_evidence(input, pr, notes) {
-        return Tier::Safe(evidence);
-    }
+fn own_remote_ref(input: &SafetyInput<'_>) -> Option<String> {
+    input
+        .remote_branch
+        .map(|name| format!("refs/remotes/origin/{name}"))
+}
 
-    // Pass 2 -- Pretty safe. Local refs and tags need no network.
+fn local_branch_or_tag(refs: &[String]) -> Option<Evidence> {
     if let Some(branch) = refs.iter().find_map(|name| name.strip_prefix("refs/heads/")) {
-        return Tier::PrettySafe(Evidence::LocalBranch(branch.to_string()));
+        return Some(Evidence::LocalBranch(branch.to_string()));
     }
-    if let Some(tag) = refs.iter().find_map(|name| name.strip_prefix("refs/tags/")) {
-        return Tier::PrettySafe(Evidence::Tag(tag.to_string()));
-    }
+    refs.iter()
+        .find_map(|name| name.strip_prefix("refs/tags/"))
+        .map(|tag| Evidence::Tag(tag.to_string()))
+}
 
+/// The first `origin/*` ref in `refs` whose live head is the tip or its
+/// tracking SHA. A live check that cannot be made is never proof.
+fn verified_remote_copy(
+    input: &SafetyInput<'_>,
+    refs: &[String],
+    heads: &dyn RemoteHeads,
+    notes: &mut Vec<String>,
+) -> Option<Evidence> {
     // Remote-tracking refs are last-fetch observations; each must pass the
     // live check. The branch's own copy goes first, being the likeliest.
+    let own_remote = own_remote_ref(input);
     let mut remote_refs: Vec<&str> = refs
         .iter()
-        .copied()
+        .map(String::as_str)
         .filter(|name| name.starts_with("refs/remotes/origin/"))
         .collect();
     remote_refs.sort_by_key(|name| Some(*name) != own_remote.as_deref());
@@ -306,7 +382,7 @@ fn classify(
         // By name, so the fetch URL that produced the tracking ref answers.
         match heads.live_head("origin", name) {
             Ok(Some(live)) if live == input.tip || live == tracking => {
-                return Tier::PrettySafe(Evidence::RemoteBranch(format!("origin/{name}")));
+                return Some(Evidence::RemoteBranch(format!("origin/{name}")));
             }
             Ok(Some(_)) => notes.push(format!(
                 "origin/{name} has moved since your last fetch, so it could not be verified"
@@ -321,7 +397,7 @@ fn classify(
             }
         }
     }
-    Tier::NotSafe
+    None
 }
 
 /// A PR counts only when it is open (and not about to be closed by
@@ -452,14 +528,25 @@ fn lost_commits(input: &SafetyInput<'_>) -> Result<Vec<Commit>, String> {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
     use crate::remove::test_support::TestRepo;
 
-    struct StubPr(PrLookup);
+    /// Answers every PR lookup with the same result and counts the calls.
+    struct StubPr(PrLookup, AtomicUsize);
+    impl StubPr {
+        fn new(answer: PrLookup) -> Self {
+            Self(answer, AtomicUsize::new(0))
+        }
+        fn calls(&self) -> usize {
+            self.1.load(Ordering::SeqCst)
+        }
+    }
     impl PrSource for StubPr {
         fn lookup(&self, _branch: &str) -> PrLookup {
+            self.1.fetch_add(1, Ordering::SeqCst);
             self.0.clone()
         }
     }
@@ -478,8 +565,8 @@ mod tests {
         }
     }
     impl RemoteHeads for StubHeads {
-        fn live_head(&self, _remote: &str, branch: &str) -> Result<Option<String>, String> {
-            self.calls.lock().unwrap().push(branch.to_string());
+        fn live_head(&self, remote: &str, branch: &str) -> Result<Option<String>, String> {
+            self.calls.lock().unwrap().push(format!("{remote} {branch}"));
             self.answer.clone()
         }
     }
@@ -520,7 +607,7 @@ mod tests {
             force_remote,
             source_repo: Some(REPO),
         };
-        assess(&input, &StubPr(prs), heads)
+        assess(&input, &StubPr::new(prs), heads)
     }
 
     fn live(repo: &TestRepo) -> LsRemote<'static> {
@@ -734,7 +821,7 @@ mod tests {
             force_remote,
             source_repo: Some(REPO),
         };
-        assess(&input, &StubPr(PrLookup::NoneFound), &live(repo))
+        assess(&input, &StubPr::new(PrLookup::NoneFound), &live(repo))
     }
 
     #[test]
@@ -813,5 +900,144 @@ mod tests {
         let safety = assess_with(&repo, bogus, false, PrLookup::NoneFound, &heads);
         assert!(matches!(safety.tier, Tier::Unknown(_)), "{:?}", safety.tier);
         assert!(!safety.tier.allows_deletion());
+    }
+
+    fn reconfirm_with(
+        repo: &TestRepo,
+        tip: &str,
+        remote_branch: &str,
+        force_remote: bool,
+        prs: &StubPr,
+        heads: &StubHeads,
+    ) -> Reconfirmation {
+        let base = repo.path();
+        let input = SafetyInput {
+            base: &base,
+            branch: "feat/x",
+            tip,
+            default_branch: "main",
+            remote_branch: Some(remote_branch),
+            force_remote,
+            source_repo: Some(REPO),
+        };
+        reconfirm(&input, prs, heads)
+    }
+
+    fn live_calls(heads: &StubHeads) -> Vec<String> {
+        heads.calls.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn reconfirm_accepts_local_proof_without_pr_or_network() {
+        let repo = TestRepo::new();
+        let tip = feature(&repo);
+        let prs = StubPr::new(PrLookup::NoneFound);
+        let heads = StubHeads::new(Err("offline".into()));
+
+        repo.git(&["tag", "v1", &tip]);
+        let tagged = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+        assert_eq!(tagged.tier, Tier::PrettySafe(Evidence::Tag("v1".into())));
+
+        repo.git(&["branch", "feat/theme", &tip]);
+        let branched = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+        assert_eq!(branched.tier, Tier::PrettySafe(Evidence::LocalBranch("feat/theme".into())));
+
+        repo.git(&["merge", "-q", "--ff-only", "feat/x"]);
+        let merged = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+        assert_eq!(merged.tier, Tier::Safe(Evidence::DefaultBranch("main".into())));
+
+        assert_eq!(prs.calls(), 0);
+        assert!(live_calls(&heads).is_empty());
+    }
+
+    /// The tip is only in `origin/main`, which someone else advanced after
+    /// our fetch left it containing the tip; local `main` is older.
+    fn feature_only_in_origin_main(repo: &TestRepo) -> (String, String) {
+        let tip = feature(repo);
+        repo.git(&["push", "-q", "origin", "feat/x:main"]);
+        repo.push_commit_to_origin("main", "theirs.txt");
+        repo.git(&["fetch", "-q", "origin"]);
+        let tracking = repo.sha("refs/remotes/origin/main");
+        (tip, tracking)
+    }
+
+    #[test]
+    fn reconfirm_verifies_origin_default_live() {
+        let repo = TestRepo::with_origin();
+        let (tip, tracking) = feature_only_in_origin_main(&repo);
+        assert_ne!(tip, tracking);
+        let prs = StubPr::new(PrLookup::NoneFound);
+
+        let moved = StubHeads::new(Ok(Some(repo.sha("main"))));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &moved);
+        assert!(!result.tier.allows_deletion(), "{:?}", result.tier);
+        assert_eq!(live_calls(&moved), ["origin main"]);
+        assert!(result.notes.iter().any(|n| n.contains("moved since your last fetch")));
+
+        let offline = StubHeads::new(Err("offline".into()));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &offline);
+        assert!(!result.tier.allows_deletion(), "{:?}", result.tier);
+
+        let gone = StubHeads::new(Ok(None));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &gone);
+        assert!(!result.tier.allows_deletion(), "{:?}", result.tier);
+
+        let unchanged = StubHeads::new(Ok(Some(tracking)));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &unchanged);
+        assert_eq!(result.tier, Tier::PrettySafe(Evidence::RemoteBranch("origin/main".into())));
+    }
+
+    #[test]
+    fn reconfirm_accepts_an_exact_pr_before_any_live_check() {
+        let repo = TestRepo::with_origin();
+        let (tip, _) = feature_only_in_origin_main(&repo);
+        let heads = StubHeads::new(Ok(None));
+
+        let prs = StubPr::new(pr(true, Some(&tip), REPO));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+        assert!(matches!(result.tier, Tier::Safe(Evidence::PullRequest { merged: false, .. })));
+        assert_eq!(prs.calls(), 1);
+        assert!(live_calls(&heads).is_empty());
+
+        // The open PR closes with the forced deletion, so it proves nothing.
+        let result = reconfirm_with(&repo, &tip, "feat/x", true, &prs, &heads);
+        assert_eq!(result.tier, Tier::NotSafe);
+
+        let fork = StubPr::new(pr(false, Some(&tip), "mallory/widgets"));
+        let result = reconfirm_with(&repo, &tip, "feat/x", false, &fork, &heads);
+        assert_eq!(result.tier, Tier::NotSafe);
+    }
+
+    #[test]
+    fn reconfirm_never_counts_the_destination_the_own_ref_or_origin_head() {
+        let repo = TestRepo::with_origin();
+        let tip = feature(&repo);
+        repo.git(&["push", "-q", "origin", "feat/x:main"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        repo.git(&["remote", "set-head", "origin", "main"]);
+        let prs = StubPr::new(PrLookup::NoneFound);
+        let heads = StubHeads::new(Ok(Some(tip.clone())));
+
+        // `feat/x` (own ref) and `origin/HEAD` contain the tip, but the only
+        // other ref is the destination `--force-remote` deletes.
+        let forced = reconfirm_with(&repo, &tip, "main", true, &prs, &heads);
+        assert_eq!(forced.tier, Tier::NotSafe);
+        assert!(live_calls(&heads).is_empty());
+
+        let kept = reconfirm_with(&repo, &tip, "main", false, &prs, &heads);
+        assert_eq!(kept.tier, Tier::PrettySafe(Evidence::RemoteBranch("origin/main".into())));
+        assert_eq!(live_calls(&heads), ["origin main"]);
+    }
+
+    #[test]
+    fn reconfirm_is_unknown_when_git_fails() {
+        let repo = TestRepo::new();
+        let prs = StubPr::new(PrLookup::NoneFound);
+        let heads = StubHeads::new(Ok(None));
+        let bogus = "0123456789abcdef0123456789abcdef01234567";
+        let result = reconfirm_with(&repo, bogus, "feat/x", false, &prs, &heads);
+        assert!(matches!(result.tier, Tier::Unknown(_)), "{:?}", result.tier);
+        assert!(!result.tier.allows_deletion());
+        assert_eq!(prs.calls(), 0);
     }
 }
