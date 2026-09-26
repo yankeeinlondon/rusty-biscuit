@@ -2853,7 +2853,7 @@ _status_recent scope="area":
                     rows.append(
                         (kind, entry.name, entry.path, count, newest, newest_file)
                     )
-        rows.sort(key=lambda row: row[4], reverse=True)
+        rows.sort(key=lambda row: row[1])
         return rows
 
     def widths(rows):
