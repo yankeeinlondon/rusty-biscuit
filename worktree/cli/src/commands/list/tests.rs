@@ -254,23 +254,100 @@ fn run_pipeline_non_image_verbose_includes_verbose_gather_stage() {
     );
 }
 
+/// Test seam that proves the list and graph gathers overlap.
+///
+/// `run_pipeline` calls `arrive` as each gather starts. With a
+/// rendezvous installed, each side waits (bounded) for the other to arrive, so
+/// both succeed only when neither gather has to finish before the other
+/// starts. A sequential pipeline times out on one side instead of hanging.
+pub(super) mod overlap {
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::Duration;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(in crate::commands::list) enum Gather {
+        List,
+        Graph,
+    }
+
+    #[derive(Default)]
+    struct Arrivals {
+        list: bool,
+        graph: bool,
+        list_saw_graph: bool,
+        graph_saw_list: bool,
+    }
+
+    #[derive(Default)]
+    struct Rendezvous {
+        arrivals: Mutex<Arrivals>,
+        changed: Condvar,
+    }
+
+    /// Only a failing (sequential) pipeline waits this long; an overlapping
+    /// one is released as soon as the second gather starts.
+    const WAIT: Duration = Duration::from_secs(10);
+
+    static INSTALLED: Mutex<Option<Arc<Rendezvous>>> = Mutex::new(None);
+
+    /// Without an installed rendezvous this does nothing, so every other test
+    /// runs the pipeline unchanged.
+    pub(in crate::commands::list) fn arrive(side: Gather) {
+        let Some(rendezvous) = INSTALLED.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return;
+        };
+        let mut arrivals = rendezvous.arrivals.lock().unwrap_or_else(|e| e.into_inner());
+        match side {
+            Gather::List => arrivals.list = true,
+            Gather::Graph => arrivals.graph = true,
+        }
+        rendezvous.changed.notify_all();
+        let (mut arrivals, _) = rendezvous
+            .changed
+            .wait_timeout_while(arrivals, WAIT, |a| match side {
+                Gather::List => !a.graph,
+                Gather::Graph => !a.list,
+            })
+            .unwrap_or_else(|e| e.into_inner());
+        match side {
+            Gather::List => arrivals.list_saw_graph = arrivals.graph,
+            Gather::Graph => arrivals.graph_saw_list = arrivals.list,
+        }
+    }
+
+    /// Uninstalls on drop, so a failed assertion cannot leak the rendezvous
+    /// into a later test in the same process.
+    pub(in crate::commands::list) struct Installed(Arc<Rendezvous>);
+
+    impl Installed {
+        pub(in crate::commands::list) fn new() -> Self {
+            let rendezvous = Arc::new(Rendezvous::default());
+            *INSTALLED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&rendezvous));
+            Installed(rendezvous)
+        }
+
+        /// `(list gather saw the graph start, graph gather saw the list start)`.
+        pub(in crate::commands::list) fn outcome(&self) -> (bool, bool) {
+            let arrivals = self.0.arrivals.lock().unwrap_or_else(|e| e.into_inner());
+            (arrivals.list_saw_graph, arrivals.graph_saw_list)
+        }
+    }
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            *INSTALLED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+}
+
 #[test]
 #[serial_test::serial]
-fn run_pipeline_graph_git_calls_begin_before_list_gather_completes() {
+fn run_pipeline_gathers_the_graph_while_list_gather_is_unfinished() {
     let repo = temp_repo_with_feature_branch();
-    let repo_path = repo.path();
-    let feature_path = repo_path
-        .parent()
-        .expect("temp dir has a parent")
-        .join(format!(
-            "{}-feature",
-            repo_path.file_name().unwrap().to_string_lossy()
-        ));
-    run_git(repo_path, &["worktree", "add", feature_path.to_str().unwrap(), "feature-a"]);
-    let _guard = DirGuard::enter(repo_path);
+    let _guard = DirGuard::enter(repo.path());
     let terminal = Terminal::builder().width(120).build();
+    let rendezvous = overlap::Installed::new();
 
-    recorder::start_recording();
     let result = super::run_pipeline(
         None,
         false,
@@ -280,28 +357,13 @@ fn run_pipeline_graph_git_calls_begin_before_list_gather_completes() {
         &terminal,
         no_prs,
     );
-    let calls = recorder::finish_recording();
 
-    assert!(result.is_ok(), "run_pipeline should succeed");
-
-    let first_graph = calls.iter().position(|args| {
-        matches!(
-            args.first().map(String::as_str),
-            Some("merge-base") | Some("log")
-        )
-    });
-    let last_list = calls.iter().rposition(|args| {
-        matches!(
-            args.first().map(String::as_str),
-            Some("rev-list") | Some("merge-tree")
-        )
-    });
-
-    let first_graph = first_graph.expect("graph gather should issue git calls");
-    let last_list = last_list.expect("list gather should issue branch-comparison git calls");
-    assert!(
-        first_graph < last_list,
-        "expected graph git calls to begin before list gather completed, got {calls:?}"
+    assert!(result.is_ok(), "run_pipeline should succeed: {:?}", result.err());
+    assert_eq!(
+        rendezvous.outcome(),
+        (true, true),
+        "(list gather saw graph start, graph gather saw list start): \
+         each gather must start before the other finishes"
     );
 }
 

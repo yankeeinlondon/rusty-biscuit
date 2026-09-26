@@ -13,6 +13,7 @@ log: worktree/fixes/2026-09-24-ux-improvements/implementation-log.md
 description: "A **fix** review of `2026-09-24-ux-improvements/spec.md`"
 fix: 2026-09-24-ux-improvements/review-6.md
 previous: 2026-09-24-ux-improvements/review-5.md
+next: 2026-09-24-ux-improvements/review-7.md
 findings:
     - title: Changes inside an untracked nested repository escape the handoff check and are deleted
       priority: high

@@ -92,12 +92,16 @@ fn run_pipeline(
         });
         let graph_handle = (needs_graph || needs_verbose).then(|| {
             scope.spawn(|| {
+                #[cfg(test)]
+                tests::overlap::arrive(tests::overlap::Gather::Graph);
                 let t0 = perf.then(Instant::now);
                 let data = git_graph::gather(&gather_input, needs_graph, needs_verbose);
                 (data, t0.map(|start| start.elapsed()))
             })
         });
 
+        #[cfg(test)]
+        tests::overlap::arrive(tests::overlap::Gather::List);
         let t0 = perf.then(Instant::now);
         fill_worktree_statuses(&mut list)?;
         if let Some(start) = t0 {
