@@ -92,7 +92,10 @@
   them afterward.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
   `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
-  deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`
+  deadlines, and `windows-sys` for atomic replacement on Windows (its
+  detached-child setup moved to `sniff::process::configure_detached_child`,
+  so it no longer enables `Win32_System_Console`; `sniff`'s `windows`
+  dependency enables it instead). `playa-cli`
   uses the `biscuit-file` file-reference and portable-path authorities at the
   CLI boundary; the library remains independent of CLI path syntax.
 - `biscuit-speaks/lib`'s optional `playa` feature enables
@@ -193,7 +196,10 @@
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
   and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
-  No new external crate was added; each was already in the workspace graph.
+  It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
+  nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
+  refresh of the PR store make a request; the PR store binds its answer to a
+  `biscuit-hash` BLAKE3 digest of `origin`'s URL.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
