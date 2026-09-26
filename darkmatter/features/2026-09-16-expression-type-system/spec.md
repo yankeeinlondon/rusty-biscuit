@@ -85,12 +85,21 @@ Consequences:
   expression-engine function catalog's signatures in SimplifiedSchema,
   unifying the ad-hoc `ParamType` system; preserve the parity tests. Built-in
   and caller-supplied functions share the full declaration contract below.
+  Phase B's detail is specified by the child spec
+  [2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md),
+  whose compact `function(...)` grammar and shared coercion layer supersede
+  the prototype's per-parameter record format and per-parameter conversion
+  policies.
 - **Phase C — type-aware parsing/evaluation.** Untyped variables default to
   `unknown`; optional-but-typed properties carry `A | null`, with null as
   YAML's representation of undefined, under the translation model below.
   The declaration-layer design that feeds this phase — schema-derived
   variable declarations, strict root validation, host retention — is in
   the [declarations annex](declarations-design.md).
+  Function return types feed call analysis: rows f and i of the child
+  spec's [argument-type table](../2026-09-21-schema-enhancements/spec.md#worked-example-one-schema-nine-calls)
+  (`min(length(count), 5)`, `min(maybe || 0, 5)`) are required Phase C
+  test cases (added 2026-09-25).
 - **Phase D — flow-sensitive narrowing.** Inside conditional blocks
   (`::block when="x"` narrows `file | null` to `file`), in ternary
   truthiness branches (`x ? frontmatter(x, 'foo') : null` narrows `x` in
@@ -99,15 +108,31 @@ Consequences:
   contracts below replace today's narrower catalog signature. A true
   `is_file_type` result establishes suitability for a file parameter within
   the guarded branch, without changing the stored value.
+  Rows g and h of the child spec's
+  [argument-type table](../2026-09-21-schema-enhancements/spec.md#worked-example-one-schema-nine-calls)
+  (`is_number(foo) ? min(foo, 5) : 0` and `is_string(foo) ? 0 : min(foo, 5)`)
+  are required Phase D test cases (added 2026-09-25).
 - **Phase E — diagnostics.** Generalize the dasherized spec's interim
   suppression to "any parameter whose type admits null"; add parameter type
   diagnostics — a known-null passed to a non-null parameter is an error, a
-  known concrete union including null produces a warning. This does not
-  impose a blanket warning on permissive `unknown`; the opt-in `file_exists`
-  warning is specified separately. Check both conditional branches; by
-  default, stop execution only when it reaches an invalid call, before
-  invocation. The explicit CLI blocking policy below can stop it earlier.
-  The advisory `file_exists` exception is specified below. Landing this phase is the
+  known concrete union including null produces a warning. _(Superseded
+  2026-09-25: the child spec's
+  [argument-type categories](../2026-09-21-schema-enhancements/spec.md#argument-type-categories)
+  govern parameter diagnostics; a `T | null` argument to a `T` parameter is
+  silent by default and warns only in strict mode. Moving every catalog
+  function onto the shared coercion engine is done by the child spec, not
+  this phase. Revised 2026-09-25, round 5: the DMLS diagnostics for
+  function parameters and their strict-mode setting are also delivered by
+  the child spec. This phase retains the interim-suppression retirement,
+  `file_exists`'s always-false warning for provably malformed literals,
+  and the CLI policy and shared diagnostic-code work. Revised 2026-09-25
+  by child spec [2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md#file_exists-has-no-exception): the advisory
+  `file_exists` exception and its opt-in unknown-input warning are
+  retired; `unknown` arguments warn only under `expressions.strict`.)_
+  This does not impose a blanket warning on permissive `unknown`. Check
+  both conditional branches; by default, stop execution only when it
+  reaches an invalid call, before invocation. The explicit CLI blocking
+  policy below can stop it earlier. Landing this phase is the
   explicit retirement trigger for dasherized Decision 9's interim rule.
   The declaration-layer diagnostics distinctions are specified in the
   [declarations annex](declarations-design.md).
@@ -281,12 +306,16 @@ belong in `biscuit-file`, rather than a second grammar in Darkmatter.
 
 Darkmatter's existing existence predicate becomes
 `file_exists(value: string | file | null) -> boolean`. Null returns `false`.
-For a value of a known type outside this signature, DMLS emits a warning
-explaining that the result is always false; execution returns `false`
-without a type error. This is an explicit advisory exception to general
-invalid-call handling. A warning for an `unknown` argument is opt-in and disabled by default;
-this setting does not change execution. The known-unsupported-type warning
-remains enabled by default.
+Other arguments bind through the child spec's single coercion engine, with
+no exception for this function: a known number such as `42` converts to the
+text `"42"` (an always-safe conversion, so no DMLS warning) and
+`file_exists` checks for a file of that name. An `unknown` argument warns
+only when DMLS's `expressions.strict` setting is on, as for every function.
+_(Revised 2026-09-25 by child spec
+[2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md#file_exists-has-no-exception):
+the earlier advisory exception, which warned that a known unsupported type
+is always false and returned `false` without a type error, is retired, and
+so is the separate opt-in unknown-input warning.)_
 
 Malformed strings, including `https://` and the empty string, return `false`
 before filesystem or network access. Reuse the passive validity rules owned
@@ -329,11 +358,13 @@ access policy, and runtime failures. An unguarded `unknown` argument remains
 permitted; the guard improves static information rather than granting
 permission to use it.
 
-For `file_exists(source)` within this guard, the opt-in unknown-input
-warning is unnecessary because the guard removes that uncertainty.
-Darkmatter owns the diagnostic meaning and DMLS exposes the opt-in setting;
-its exact configuration surface remains a planning detail. The CLI policy
-verbs and diagnostic boundaries are defined below.
+For `file_exists(source)` within this guard, the `expressions.strict`
+unknown-input warning does not fire because the guard removes that
+uncertainty. _(Revised 2026-09-25 by child spec
+[2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md#file_exists-has-no-exception):
+the `file_exists`-specific opt-in warning and its configuration surface are
+replaced by `expressions.strict`.)_ The CLI policy verbs and diagnostic
+boundaries are defined below.
 
 ### One function contract for built-ins and host extensions
 
@@ -390,12 +421,12 @@ visibility. No expansion or removal of existing null insertion is authorized.
 | `is_file_type` receives string `42` or `hello world` | `true` |
 | `is_file_type` receives numeric `42`, an empty string, or malformed reference `https://` | `false` |
 | `file_exists` receives null | `false` |
-| `file_exists` receives known numeric `42` | DMLS warning that the result is always false; runtime returns `false` |
+| `file_exists` receives known numeric `42` | Converts to the text `"42"` and checks for that file; no DMLS warning _(revised 2026-09-25 by child spec 2026-09-21-schema-enhancements)_ |
 | `file_exists` receives known malformed `https://` or an empty string | Always-false DMLS warning; runtime `false` before filesystem/network access |
 | `file_exists` receives a dynamic string with contents not statically known | No always-false warning solely because its type is `string`; runtime checks structure |
 | Existing valid reference forms and normalizations are exercised | Existing resolution, access, and remote-runtime outcomes preserved |
-| `file_exists` receives an `unknown`-typed argument with default settings | No unknown-input warning; existing runtime behavior |
-| Same argument with the DMLS unknown-input warning enabled | Warning; unchanged execution |
+| `file_exists` receives an `unknown`-typed argument with default settings | No warning; governed by `expressions.strict` from the child spec _(revised 2026-09-25 by child spec 2026-09-21-schema-enhancements)_ |
+| Same argument with `expressions.strict` on | Category 4 warning; unchanged execution _(revised 2026-09-25 by child spec 2026-09-21-schema-enhancements)_ |
 | `is_file_type(source)` is true before a guarded file call | Argument is suitable for a file parameter; stored value unchanged |
 | A host predicate declares the same true-result fact | Same checking as the built-in guard; DMLS does not invoke the host function |
 | Declaration projection, root validation, type checking, or evaluation runs | No property inserted or replaced merely to supply names or types |
@@ -645,6 +676,12 @@ preserve actual behavior rather than introduce stricter rejection from the
 displayed type. Full-catalog parity and metadata validation remain required
 implementation evidence.
 
+> **Note (2026-09-25):** the child spec
+> [2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md)
+> deliberately changes some function-call behavior through its shared
+> coercion layer. Those changes are subject to that spec's rulings and take
+> precedence over the preserve-actual-behavior rule above.
+
 Independent clarity and risk review found no remaining blocking human
 rulings. The specification is ready for planning around the agreed type
 vocabulary, shared declarations, guarded calls, passive diagnostics, and
@@ -673,7 +710,7 @@ must hold on macOS, Linux, native Windows, and WSL2.
 | Phase | Required evidence |
 |---|---|
 | A — type vocabulary | Schema parser and validator cover `unknown`/`any`, null, required-null behavior, and inclusive/exclusive union cases above |
-| B — shared function declarations | Full catalog information and behavior parity, including parameter/result types, conversions, advisory behavior, and true-result facts; built-ins and host extensions use shared metadata without host-specific analysis |
+| B — shared function declarations | Full catalog information and behavior parity, including parameter/result types, conversions, advisory behavior, and true-result facts; built-ins and host extensions use shared metadata without host-specific analysis. _(Note 2026-09-25: the child spec [2026-09-21-schema-enhancements](../2026-09-21-schema-enhancements/spec.md) migrates every catalog function onto its shared coercion engine in one pass (revised 2026-09-25, round 4), intentionally changes conversions rather than preserving them, and moves frontmatter coercion onto the same shared engine; its rulings govern this row's conversion parity.)_ |
 | C — declarations and evaluation | All annex library and host-integration acceptance paths pass, including effective-schema projection and conservative raw JSON Schema coverage; any increment deferral is documented |
 | D — narrowing | Runtime and editor analysis agree for truthiness, conditional blocks, ternaries, guarded `&&` calls, and declared predicate facts, without stored-value mutation |
 | E — diagnostics and CLI | CLI/DMLS share diagnostic codes and source positions; null-admitting parameter handling replaces the interim suppression rule; all affected command surfaces, policies, output formats, and migration cases are covered |
@@ -719,8 +756,9 @@ planning work within the confirmed requirements.
 - Reconcile validation documentation that treats required null as absence
   with the confirmed new types; identify affected callers and tests. Check
   `required`/null consistency without universally excluding null.
-- Specify the DMLS configuration surface for its opt-in unknown-input
-  warning; its default and unchanged execution are settled.
+- ~~Specify the DMLS configuration surface for its opt-in unknown-input
+  warning.~~ _(Retired 2026-09-25 by child spec
+  2026-09-21-schema-enhancements: `expressions.strict` replaces it.)_
 - Complete the CLI identifier registry, explicit remote-host spelling, and
   mapping of `--strict-style`. Command coverage, severity boundaries,
   precedence, stopping behavior, and legacy-flag removal are settled. Do not
