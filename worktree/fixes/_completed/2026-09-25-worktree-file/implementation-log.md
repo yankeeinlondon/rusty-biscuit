@@ -118,6 +118,7 @@ documentation:
     - worktree/fixes/2026-09-25-list-remove-performance/spec.md
 completed_phase: 5
 implemented: true
+implementation_1: "2026-09-26T11:52:45-07:00"
 ---
 
 # Implementation Log for 2026-09-25-worktree-file (5 phases)
@@ -199,3 +200,36 @@ implemented: true
 - Local L1 and lint: `just test` passed 388/388 (17 tier-filtered skips), `just lint` passed both area packages, and `just check-tier-coverage worktree` found zero stranded tests. The full `just test-l2` run failed at the pre-existing `level2_graph_fits_a_narrow_kitty_window` screenshot assertion: the captured image contained no window contents and the test reported missing Screen Recording permission. It ran 1 passing test, 1 failing test, and stopped before 13 others. The affected remove, move-first, and list L2 groups were run separately and passed. No production failure was observed in this phase.
 - Cross-OS L1: Linux `worktree` 183/183 and `worktree-cli` 206/206 passed; native Windows `worktree` 164/164 and `worktree-cli` 193/193 passed; WSL2 `worktree` 183/183 and `worktree-cli` 206/206 passed. Native Windows `level2_powershell_remove` passed 3/3, each 5.6–6.5 seconds, confirming actual execution. WSL2 cross-checks published no reusable receipt because the local documentation tree changed while they ran; their archive-mode test results were still passes.
 - Skips were tier or platform selection, not hidden test failures: local L1 filtered 17 L2 tests; Linux and WSL2 CLI L1 each filtered 32 non-L1 tests; native Windows CLI L1 filtered 26. The focused Windows PowerShell run filtered 216 unrelated tests, and focused macOS L2 runs filtered other targets. The full macOS L2 run left 13 tests unrun after the Kitty failure; all affected tmux groups were rerun by name. No `cargo fmt`, Git staging, commit, or spec lifecycle move was performed. Implementation is ready for review, with the pre-existing Kitty screenshot environment issue recorded as the sole full-gate exception.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-26T11:52:45-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-25-worktree-file/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Copying can follow a source link created after path validation' at 11:53:15
+        - Replaced path-based source reads and destination writes with retained `cap-std` directory and file handles. Regular-file clones use open source handles (`fclonefileat` on macOS and `reflink-copy` block cloning on Linux and Windows); unsupported cloning falls back to a handle-based byte copy. Temporary-file cleanup and no-replacement publication also use the retained destination directory handle.
+        - Added deterministic Level 1 tests that replace a validated source file with a link to outside bytes and replace a destination parent with a link to an outside directory during the injected copy operation. The tests prove that outside bytes are not copied and no outside file is created. The source swap also leaves its copy observation untrusted. These unit tests are compiled by the `worktree` library target and selected by `just test`.
+        - Updated `docs/dependencies.md` and the worktree skill for the new `cap-std` dependency and handle-based copy contract; removed the unused direct `windows-sys` dependency from `worktree`.
+        - Local `just test` passed 390 tests with 17 Level 2 tests filtered; `just lint` passed both area packages; `just check-tier-coverage worktree` found zero stranded tests. Windows GNU cross-compilation of the library and its test targets passed.
+        - Native Windows cross-check could not reach `build-win-native` (`No route to host` on port 2222). Linux cross-check reached `build-linux` but its shared release target files were not writable during dependency compilation. Neither failure was a test result for this change.
+- work completed for 'Copying can follow a source link created after path validation' at 12:10:39
+- starting the work on 'The new create report lacks real-terminal verification' at 12:10:39
+        - Added `level2_create` as a declared `worktree-cli` test target behind the existing `terminal-tests` feature. Its headless tmux scene resizes the pane to 48 columns, creates three long ignored files, and reuses a branch that tracks a fourth file so the copy report includes a deterministic partial-copy warning.
+        - The pane capture proves every copied name remains visible across wrapped rows, the warning continues within the pane, and report rows fit the pane width. The scene captures stdout separately and asserts that it contains exactly the existing `cd:` shell protocol line; it also checks copied bytes and the untouched tracked destination file. Existing Level 1 output and escaping tests remain in place.
+        - The focused `just test-l2 level2_create` run passed. Area `just test` passed 390/390 Level 1 tests with 17 tier-filtered tests skipped; `just lint` passed for both area packages; `just check-tier-coverage worktree` found zero stranded tests; `git diff --check` passed. No `cargo fmt` was run.
+- work completed for 'The new create report lacks real-terminal verification' at 12:15:21
+- starting the work on 'The ignored-file summary can omit disposable files in a protected directory' at 12:15:21
+        - Git status collapses `config/` when a directory ignore rule matches it, so the original summary cannot distinguish `config/.env` from `config/cache.bin`. The inventory now asks Git for the actual ignored members only under a collapsed directory containing a protected file, then groups each disposable path at the nearest directory without protected descendants. Other ignored directories keep their one-name summary and are not traversed for display.
+        - The extra lookup runs during removal facts gathering, including a handoff verification, only when such a mixed directory exists. It adds one path-scoped `git ls-files` per mixed directory (a full listing fallback for a non-UTF-8 directory name) and does not add another `git status`; disposable names remain outside the handoff fingerprint.
+        - Added a library Level 1 test using a real temporary repository with mixed `config/` and ordinary `target/` entries, plus a CLI Level 1 report test that checks the protected `.env` and disposable `cache.bin` are both named while the refusal keeps both files. The library unit target and automatically discovered CLI `remove` test target compile these tests, and their names select Level 1.
+        - The change adds names to the existing one-line summary and uses its existing rendering shape, so it does not materially change terminal layout; no new Level 2 scene was needed.
+        - Local `just test` passed 392/392 Level 1 tests with 17 tier-filtered tests skipped; `just lint` passed for both worktree area packages; `just check-tier-coverage worktree` found zero stranded tests; `git diff --check` passed. No `cargo fmt` was run.
+- work completed for 'The ignored-file summary can omit disposable files in a protected directory' at 12:21:11
+
+### Successful Completion
+
+- The implementation of review cycle 1 has completed successfully in 28 minutes 26 seconds. During this implementation all 3 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 0 were deferred (see reasons below):
+        - No findings were deferred.
+- The files changed for this review cycle are `worktree/lib/src/include/copy.rs`, `worktree/lib/src/remove/inventory.rs`, `worktree/lib/Cargo.toml`, `worktree/cli/src/commands/remove/mod.rs`, `worktree/cli/tests/remove.rs`, `worktree/cli/tests/level2_create.rs`, `worktree/cli/Cargo.toml`, `Cargo.lock`, `docs/dependencies.md`, `.claude/skills/worktree/SKILL.md`, this log, and `review-1.md`.
+- Local verification passed: `just test` (392 Level 1 tests), `just lint` (both worktree packages), focused `just test-l2 level2_create` (1 test), and `just check-tier-coverage worktree` (zero stranded tests). Native Windows and Linux rig checks could not complete because the Windows host was unreachable and the Linux build target was unwritable. Windows GNU library and CLI test targets cross-compiled successfully.

@@ -22,7 +22,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-25
-review_iterations: 0
+review_iterations: 2
+completed: true
 human_review: false
 status: implemented
 implemented: true
