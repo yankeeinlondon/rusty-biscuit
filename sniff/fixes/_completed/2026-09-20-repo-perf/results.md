@@ -1,31 +1,34 @@
 # Results: parallelize the nested-marker walk
 
-**State: implementation complete, ready for review. The performance verdict
-is pending the author's decision on the open R7 escalation** (the spec's
-`human_review_items`). No option has been chosen as of 2026-09-25, so this
-file does not record the change as accepted.
+**State: implementation complete; review closed as production ready on
+2026-09-26.** The author resolved the R7 escalation by choosing option 2: the
+walk caps its workers at `min(available_parallelism, 4)` and accepts the
+remaining small-tree cost. The cap was measured and verified in review cycle 2
+([`evidence/worker-cap/`](evidence/worker-cap/README.md)).
 
 - Spec: [`spec.md`](spec.md). Plan: [`plan.md`](plan.md). Log:
   [`implementation-log.md`](implementation-log.md). Evidence: [`evidence/`](evidence/).
 - Production change: `walk_for_nested_markers` in
   `sniff/lib/src/filesystem/repo/nested.rs` now runs `ignore`'s
-  `build_parallel()` with the pre-change builder settings. It keeps
+  `build_parallel()` with the pre-change builder settings and at most four
+  workers (`MAX_NESTED_WALK_WORKERS`; fewer on a host with fewer CPUs). It keeps
   per-visitor marker buffers, merges each buffer once when its visitor drops,
   propagates the `WorkerCollector` to every visitor, and projects candidates
   once through the unchanged `candidates_from_marker_paths`.
 - Commits (non-test lib code): harness `43a08f94e` (baseline side),
-  implementation `f9af74815`, and parity/fixture suite `2d886cd98`.
+  implementation `f9af74815`, and parity/fixture suite `2d886cd98`. Review
+  cycles 1–2 added the full-output fixture test and the worker cap.
 
 ## Acceptance criteria
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | AC1 | Test-only serial reference, complete ordered candidate comparison, independent expected candidates, existing root-marker and supplied-evidence tests kept | Met | `serial_reference_paths` and `assert_parity` in `nested.rs` tests; every fixture test asserts independently spelled candidates; the pre-existing `nested.rs` and `detection.rs` tests are unmodified (log § Phase 3) |
-| AC2 | Fixture matrix (all 12 names, `.sln`/`.slnx`, many-to-one, one-to-many, depths, empty/root-only), 20× wide-tree repeat, one-worker and multi-worker runs through a private seam | Met | `every_marker_name_registers_its_standards_at_any_depth`, `empty_root_only_and_missing_roots_register_no_candidates`, `wide_tree_parity_holds_across_repeats_and_worker_counts` (`Some(1)`, default, `Some(4)`) |
+| AC2 | Fixture matrix (all 12 names, `.sln`/`.slnx`, many-to-one, one-to-many, depths, empty/root-only), 20× wide-tree repeat, one-worker and multi-worker runs through a private seam | Met | `every_marker_name_registers_its_standards_at_any_depth`, `empty_root_only_and_missing_roots_register_no_candidates`, `wide_tree_parity_holds_across_repeats_and_worker_counts` (`Some(1)`, the production policy, `Some(4)`) |
 | AC3 | Git and non-Git roots, ignore rules with isolated Git config, hidden, pruned, and marker-named directories, missing roots, case rules, symlinks, privilege-aware permission test | Met | `git_ignore_rules_apply_under_an_isolated_git_configuration`, `prune_hidden_and_marker_named_directories_keep_their_semantics`, `non_directory_symlinks_are_admitted_and_directory_links_are_not_followed`, `a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling`, `walked_marker_names_follow_the_platform_case_rules`, `non_unicode_basenames_are_not_markers`, `an_unreadable_directory_is_skipped_and_the_walk_continues` (Unix only; R6) |
 | AC4 | One `FS_READ_DIRS` and one `REPO_NESTED_MARKER_WALKS` per fallback; zero fallback walks with supplied evidence (including `Some(&[])`); worker propagation proven with a test-only counter | Met | `fallback_walk_records_one_logical_walk_per_invocation`, `a_missing_root_keeps_the_callers_counters`, `an_empty_root_records_one_logical_walk`, `supplied_evidence_starts_no_fallback_walk`, `every_visitor_flushes_its_work_into_the_request` (522 of 522 on the fixture; 12,908 of 12,908 on the checkout) |
-| AC5 | Complete detection output before and after, on a controlled fixture and on this checkout | Met | Fixture: `supplied_evidence_starts_no_fallback_walk` and the parity suite. Checkout: [`evidence/detection-output/`](evidence/detection-output/README.md), where the full `detect_repo_structure` JSON is byte-identical at `43a08f94e` and `9d2d39c6d` (77 packages, 2 standards, 2 layers; added in Phase 6) |
-| AC6 | `just test` and `just lint` in `sniff/`; focused parity tests on all four operating systems; no CI cells or timing gates added | Met | macOS: 2874 passed / 32 skipped, lint clean (Phase 6 rerun). Linux 22/22, native Windows 20/20, WSL2 22/22: [`evidence/cross-os/`](evidence/cross-os/cross-check-nested-tests.txt). CI configuration is unchanged (log § Phase 5) |
+| AC5 | Complete detection output before and after, on a controlled fixture and on this checkout | Met | Fixture: `public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture` compares the complete public JSON from serial and parallel fallbacks (review cycle 1). Checkout: [`evidence/detection-output/`](evidence/detection-output/README.md), where the full `detect_repo_structure` JSON is byte-identical at `43a08f94e` and `9d2d39c6d` (77 packages, 2 standards, 2 layers; added in Phase 6) |
+| AC6 | `just test` and `just lint` in `sniff/`; focused parity tests on all four operating systems; no CI cells or timing gates added | Met | macOS: 2875 passed / 32 skipped, lint and `--all-targets -D warnings` clippy clean (review cycle 2, with the worker cap). Linux 22/22, native Windows 20/20, WSL2 22/22: [`evidence/cross-os/`](evidence/cross-os/cross-check-nested-tests.txt). CI configuration is unchanged (log § Phase 5) |
 | AC7 | `just test` in `darkmatter/` with the three observation-boundary tests | Met for this fix; the suite is red for an unrelated reason | 8,496 of 8,498 passed, and all three boundary tests passed. The 2 failures are a known issue from another change (see Remaining risks) |
 
 ## Performance
@@ -72,15 +75,31 @@ bracket medians, then the min–max of all samples. Full tables:
   them are idle. That gives every call a floor of about 3 ms with 12 workers
   (0.27 ms with 1 worker, 1.70 ms with 4).
 
-### Decision rule (R7): triggered, awaiting the author
+The table above measures the original 12-worker policy. The production code
+now caps workers at four; see the next section.
 
-The latency and sequential-throughput regressions on tiny trees are material,
-so the plan's R7 required stopping and escalating rather than widening scope.
-The options, with their trade-offs and the recommendation (accept as
-implemented), are in the spec's `human_review_items`. Phase 5 and Phase 6
-evidence is valid as-is under option 1 ("accept as implemented"). Under
-option 2 (a fixed smaller worker count) or option 3 (serial first, then
-parallel), the production code changes, and Phases 3–5 must be rerun on it.
+### Decision rule (R7): triggered, resolved with a four-worker cap
+
+The latency and sequential-throughput regressions on tiny trees were
+material, so R7 stopped the work and escalated. On 2026-09-26 the author chose
+option 2. They judged the 8-file tree unrepresentatively small and a few
+milliseconds an acceptable price for the large-repository gain, and capped the
+worker count at `min(available_parallelism, 4)`. Re-measured on the same host,
+with only the cap differing between sides (release;
+[`evidence/worker-cap/`](evidence/worker-cap/README.md)):
+
+| Measure | 12 workers | 4 workers | Serial baseline (Phase 4) |
+|---|---:|---:|---:|
+| Checkout `detect_repo_structure` | 34.25 ms | 38.79 ms | 79.40 ms |
+| Tiny tree `detect_repo_structure` | 3.1–3.3 ms | 2.0–2.1 ms | 0.49 ms |
+| Tiny tree, 1 thread: throughput | ≈320 req/s | ≈500 req/s | ≈1,940 req/s |
+| Checkout, 14 threads: p95 latency | 381–427 ms | 315–333 ms | 285–296 ms |
+| Checkout, 14 threads: peak RSS | 170–201 MB | 130–157 MB | 150–152 MB |
+
+The command stays about 2× faster on this checkout. The tiny-tree penalty is
+about 1.5 ms instead of 2.9 ms, and the concurrent tail-latency and memory
+regressions are mostly gone. Work counters are unchanged. The nested parity
+tests were rerun with the cap on macOS, Linux, native Windows, and WSL2.
 
 ## Work counters
 
@@ -121,11 +140,12 @@ reference's entry count.
 
 ## Remaining risks and follow-ups
 
-- **The tiny-tree floor (R7).** Every structure-only caller pays about 3 ms
-  per call on small trees. These callers include the `sniff repo` commands,
-  claudine completion and composition, darkmatter compose, and sniff
-  recent-commits. Under heavy concurrency, large-tree tail latency and memory
-  also rise. This is pending the author's decision.
+- **The tiny-tree floor (R7), accepted.** With the four-worker cap, every
+  structure-only caller still pays about 1.5 ms more per call on small trees.
+  These callers include the `sniff repo` commands, claudine completion and
+  composition, darkmatter compose, and sniff recent-commits. The author
+  accepted this cost on 2026-09-26. Serial-first (adaptive) scheduling remains
+  a possible future fix.
 - **Darkmatter L1 is red on this branch for an unrelated reason.** Two
   `feature_review_incident` tests fail with
   `File not found: ../_writing-clearly.md`. Prompts commit `6c682a7fd` caused

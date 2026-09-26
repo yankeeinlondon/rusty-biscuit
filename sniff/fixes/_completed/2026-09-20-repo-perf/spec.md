@@ -1,6 +1,6 @@
 ---
 area: sniff
-status: planned
+status: implemented
 created: 2026-09-20
 reviewed: true
 reviewed_by: "codex/gpt-6-astra"
@@ -29,118 +29,23 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-human_review: true
-human_review_items:
+human_review: false
+human_decisions:
     - |-
-        **Accept or change the parallel walk, given a measured slowdown on small folders**
-
-        **Why this must be decided before the fix is closed.** All six
-        phases are done, and the results are in
-        `sniff/fixes/2026-09-20-repo-perf/results.md`. That report lists the
-        final verdict as "pending your decision", because the plan says that if
-        small folders or concurrent use get noticeably slower, the work stops
-        and you decide. That condition was met. If you choose option 1, nothing
-        needs to be rerun: the tests on every operating system already passed
-        on this exact code, and the fix is ready for review. If you choose
-        option 2 or 3, the code changes, so the equivalence tests, the timing
-        measurements, and the operating-system runs must all be repeated on
-        the new code before the fix is reviewed.
-
-        **What was measured on your Mac.** The host was heavily loaded by other
-        sessions. The full numbers are in
-        `sniff/fixes/2026-09-20-repo-perf/evidence/after/README.md`.
-
-        - On this monorepo, finding the nested projects is about 2.2× faster
-          end to end: 79 → 36 ms (release) and 244 → 107 ms (debug). The folder
-          scan alone is about 3× faster.
-        - On a tiny folder (8 files), every call is about 3 ms slower: 0.5 →
-          3.4 ms in release, 5–7× the old cost. Running such calls one after
-          another gives about 84% fewer per second.
-        - With 14 calls at once (your normal test concurrency), overall
-          throughput is unchanged. For large folders, though, the slowest 5% of
-          calls take 42% longer, and the process uses 15% more CPU and up to 31%
-          more memory.
-        - The cause is inside the `ignore` library. Each parallel scan starts
-          12 new threads, and idle threads check for more work every 1 ms. That
-          gives every scan a floor of about 3 ms, however small the folder.
-          With 4 threads the floor is about 1.7 ms. With 1 thread there is no
-          floor, but also no speedup.
-        - Who pays the 3 ms: every caller that asks only for repository
-          structure. That includes `sniff repo` commands, claudine completion and
-          composition, darkmatter compose, and sniff recent-commits.
-
-        **Options**
-
-        1. **Accept as implemented** (12 threads, the library default).
-           - Pros:
-             - biggest gain on real repositories;
-             - matches the spec exactly;
-             - no more work: the fix goes straight to review;
-             - the 3 ms is far below what a person notices on a command line,
-               and test suites run at 14-way concurrency, where throughput was
-               unchanged.
-           - Cons:
-             - tiny folders are 5–7× slower per call;
-             - code that calls this in a tight loop on small folders slows
-               noticeably;
-             - under heavy concurrency, large-folder tail latency and memory
-               use rise.
-        2. **Use a fixed, smaller thread count, such as 4.**
-           - Pros:
-             - keeps most of the gain: the scan takes 23 ms against 19 ms with
-               12 threads;
-             - roughly halves the small-folder penalty, to about 1.5 ms;
-             - starts far fewer threads when many calls run at once (56
-               against 168 for 14 calls).
-           - Cons:
-             - still about 7× slower on a tiny folder;
-             - the "4" is tuned on one machine;
-             - the spec says to keep the library default, so the spec must be
-               amended;
-             - the tests, measurements, and operating-system runs must be
-               repeated.
-        3. **Scan serially first, and switch to parallel only once the folder
-           proves large.**
-           - Pros: removes the small-folder penalty and keeps the large-folder
-             gain.
-           - Cons:
-             - the spec explicitly puts "adaptive scheduling" out of scope, so
-               this needs a new spec or phase;
-             - more code, with a new threshold to choose;
-             - the equivalence tests must be extended.
-        4. **Revert to the serial scan.**
-           - Pros: no risk at all; nothing gets slower.
-           - Cons: gives up 44 ms (release) and 137 ms (debug) per call on real
-             repositories, which was the whole purpose of the fix.
-
-        **Recommendation: option 1 (accept as implemented).** The 3 ms cost is
-        real but small in absolute terms. Throughput at your normal test
-        concurrency did not change, and real repositories, where the time
-        actually hurt, get a 2× end-to-end gain. Options 2 and 3 each change the
-        agreed design on the strength of one noisy machine, and they add
-        re-measurement or a new spec. If you are worried specifically about
-        many large scans running at once (the tail-latency and memory rise),
-        option 2 is the reasonable fallback. Option 3 is better treated as a
-        separate future fix.
+        2026-09-26, R7 escalation: option 2, a smaller worker count. The
+        fallback walk uses `min(available_parallelism, 4)` workers instead of
+        `ignore`'s default of 12. The author judged the 8-file probe tree
+        unrepresentatively small and a few milliseconds per small request an
+        acceptable price for the large-repository gain. The remaining
+        small-tree cost (about +1.5 ms against the serial walk) is accepted.
+        Evidence: `evidence/worker-cap/`.
 message_to_agent: |-
-    Phase 6 of 6 (claude/default) is done. The plan is fully implemented; the terminal state is
-    "implementation complete, ready for review". No source or test code changed in Phase 6.
-    STILL OPEN: the Phase 4 R7 escalation (human_review_items) has no recorded author answer.
-    results.md therefore reports the performance verdict as "pending the author's decision", not
-    "accepted". If the author picks option 1, update results.md's status line and the
-    "Decision rule (R7)" section to "accepted"; nothing needs rerunning. If they pick 2 or 3, the
-    production code changes and Phases 3-5 must be rerun (tests, measurements, OS legs), then
-    results.md must be rewritten.
-    Phase 6 facts a reviewer or fixer needs:
-    (a) Final gates: sniff `just test` 2874 passed / 32 skipped; `just lint` clean.
-    (b) AC5 gap closed: complete detect_repo_structure JSON on this checkout is byte-identical at
-    43a08f94e (baseline) and 9d2d39c6d (after); evidence/detection-output/.
-    (c) Drift sweep clean inside sniff. One stale line in another area, not edited:
-    claudine/features/2026-08-01-faster-compose/plan.md:125 still says "serial WalkBuilder".
-    (d) Darkmatter L1 stays red on this branch until fe209ae0f (origin/fix/wt-ux) or an equivalent
-    lands; it is unrelated to this fix.
-    (e) Do not move the fix to _completed; that is the author's action.
+    Review cycle 2 closed the fix as production ready on 2026-09-26. The author resolved the R7
+    escalation with option 2 (worker cap of min(available_parallelism, 4)); the cap is
+    implemented, measured (evidence/worker-cap/), and verified on all four operating systems.
+    Do not move the fix to _completed; that is the author's action.
 implemented: true
+review_iterations: 2
 ---
 
 # Parallelize the nested-marker walk
@@ -236,11 +141,11 @@ focused regression tests and performance evidence. `ignore` is already a
    walk chokepoint, once per invocation, including an empty or missing root.
    Their current meaning is a logical walk invocation, not physical directory
    reads. Add no counter merely to make the optimization look like less work.
-6. Use the locked `ignore` default worker policy. In `ignore` 0.4.25 it is
-   available parallelism capped at 12, falling back to one. Do not equate a
-   16-core host with 16 walker workers. This follows existing parallel walkers
-   without adding a public tuning knob or a new pool. Verify small trees and
-   concurrent callers because this is a per-walk cap, not a process-wide cap.
+6. Use available parallelism capped at four workers, falling back to one
+   (amended 2026-09-26 by the R7 decision; the original step used `ignore`'s
+   default cap of 12). Do not equate a 16-core host with 16 walker workers.
+   Add no public tuning knob or new pool. Verify small trees and concurrent
+   callers because this is a per-walk cap, not a process-wide cap.
 7. Call `candidates_from_marker_paths` once after collection. Keep grouping,
    standards matching/deduplication, detector dispatch, and manifest parsing
    unchanged and outside the parallel callbacks.

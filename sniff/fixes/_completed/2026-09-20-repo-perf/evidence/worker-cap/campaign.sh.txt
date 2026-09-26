@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+S=/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-fix-sniff/ab83f312-87ae-445d-807a-1247cb1c02fa/scratchpad/p7
+B=$S/bin; P=$S/probes; R=$S/raw; mkdir -p $P $R
+C=/Volumes/coding/wt/rusty-biscuit/fix-sniff
+ld() { sysctl -n vm.loadavg; }
+probe() { run=$1; shift
+  for side in "$@"; do
+    for prof in release debug; do
+      out="$P/$side-$prof-$run-tiny-latency.txt"
+      { echo "start: $(date -u +%FT%TZ) load: $(ld)"; "$B/$side-$prof-probe" tiny-latency; echo "end: $(date -u +%FT%TZ) load: $(ld)"; } > "$out"
+    done
+    for spec in "tiny 1 400" "tiny 14 400" "$C 1 20" "$C 14 10"; do
+      set -- $spec
+      name=$( [ "$1" = tiny ] && echo tiny || echo corpus )
+      out="$P/$side-release-$run-concurrent-$name-t$2.txt"
+      { echo "start: $(date -u +%FT%TZ) load: $(ld)"; /usr/bin/time -l "$B/$side-release-probe" concurrent "$1" "$2" "$3" 2>&1; echo "end: $(date -u +%FT%TZ) load: $(ld)"; } > "$out"
+    done
+  done
+}
+bracket() { run=$1; shift
+  export CRITERION_HOME=$S/criterion SNIFF_BENCH_NESTED_CORPUS=$C
+  cd $C/sniff/lib
+  for side in "$@"; do
+    log="$R/$side-release-$run.log"
+    { echo "start: $(date -u +%FT%TZ) load: $(ld)"; "$B/$side-release-perf" --bench --save-baseline "$side-$run" '^nested_marker_walk_corpus/' 2>&1; echo "end: $(date -u +%FT%TZ) load: $(ld)"; } > "$log"
+    for case in serial_reference production detect_repo_structure; do
+      cp "$CRITERION_HOME/nested_marker_walk_corpus/$case/$side-$run/sample.json" "$R/$side-release-$run-$case.sample.json"
+    done
+  done
+}
+"$B/w4-release-probe" counters "$C" > $P/w4-counters-corpus.txt
+"$B/w4-release-probe" counters tiny > $P/w4-counters-tiny.txt
+probe p1 w12 w4
+probe p2 w4 w12
+bracket r1 w12 w4
+bracket r2 w4 w12
+bracket r3 w12 w4
+echo CAMPAIGN DONE

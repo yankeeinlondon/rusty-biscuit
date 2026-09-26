@@ -1,6 +1,30 @@
 ---
 area: sniff
-status: draft
+status: draft-spec
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: codex/gpt-6-sol
+reviewed_on: 2026-09-26
+review_iterations: 1
 created: 2026-09-21
 owner: Ken Snyder <ken@ken.net>
 origin: darkmatter slow-test investigation on feat/dark-fixes, 2026-09-21
@@ -15,9 +39,9 @@ packages:
 ## Outcome
 
 A caller that asks Sniff for repository **structure** and never reads lockfile
-provenance does not pay to compute it, and a caller that does read it pays a
-cost proportional to the question asked rather than to the size of the
-lockfile. No change to what `RepoInfo` reports for a caller that requests
+provenance does not pay to compute it, and a caller that does read it avoids
+retaining unrelated lockfile fields. Parsing still takes time proportional to
+the lockfile's size. No change to what `RepoInfo` reports for a caller that requests
 provenance, on macOS, Linux, native Windows, and WSL2.
 
 This spec is the complement of `2026-09-20-repo-perf`, not a replacement. That
@@ -64,7 +88,9 @@ This checkout's `Cargo.lock` is 398,485 bytes, 17,250 lines, and 1,497
 `toml::Value`, then builds a `HashMap<String, Vec<String>>` of every package's
 versions. `cargo_lockfile_matches` then asks one question of it — does each
 workspace member's name resolve — for a member count two orders of magnitude
-smaller than the lockfile.
+smaller than the lockfile. Unlike the pnpm and uv checks, Cargo does not compare
+exact member sets: dependencies add many lockfile packages, and the current
+check also accepts stale extra workspace member entries.
 
 ### Who pays, and for what
 
@@ -111,48 +137,77 @@ Measured consequences on this checkout, debug build:
 ## Scope and design decisions
 
 Two independent changes. Either is worth shipping alone; decide their order by
-measurement after `2026-09-20-repo-perf` lands.
+measurement after `2026-09-20-repo-perf` lands. The request change intentionally
+changes structure-tier provenance; full and explicit provenance requests retain
+the existing result.
 
 ### 1. Make lockfile provenance something a request asks for
 
 Lockfile corroboration becomes demand-driven: a request that does not ask for
 it leaves `MonorepoLayer::provenance` at its manifest-derived value and
-`lockfile_match` at `None`, and reads no lockfile.
+`lockfile_match` at `None`. A structure-only request then reads no lockfile;
+requests for dependency versions can still read one for that separate purpose.
 
-Open design question, to be ruled before implementation — **what is the
-default?**
+### Open question: should structure detection retain the old default?
 
-- **Option A — opt-in.** `RepoRequest::structure()` stops computing it; a new
-  request knob turns it on; `RepoRequest::full()` keeps it. Cheapest for every
-  existing structure caller, but it silently changes what `structure()`
-  returns: `provenance` would read `Manifest` where it reads `Lockfile` today.
-  Every consumer of `provenance`/`lockfile_match` must be audited first
-  (`sniff repo` CLI output, serialized `RepoInfo`, Claudine, the CI planner's
-  inputs if any).
+This changes a public result, so the author should choose the compatibility
+policy before implementation.
+
+- **Option A — opt-in.** `RepoRequest::structure()` and the public
+  `detect_repo_structure` convenience function stop computing it; an explicit
+  request turns it on; `RepoRequest::full()` and `detect_repo` keep it. This
+  saves work for existing structure callers, including Darkmatter, but changes
+  their serialized `RepoInfo`: a confirmed layer retains its membership-derived
+  provenance and omits `lockfile_match`. Audit consumers first, including the
+  Sniff CLI, Claudine, Darkmatter, and any CI planner inputs.
 - **Option B — opt-out.** Behavior is unchanged by default; Darkmatter's capture
-  passes a request that declines it. Zero risk to other callers, but every
-  future structure caller keeps paying until it learns to decline, which is how
-  Darkmatter ended up here.
+  passes `detect_repo_with_request` with a request that declines it. Existing
+  output stays stable, but the default continues to charge other structure
+  callers; direct convenience calls need a separate way to decline.
 
 Recommendation: **A, gated on the consumer audit.** "Structure" is the tier a
 caller picks when it wants topology cheaply, and corroborating a lockfile is
 not topology. If the audit finds a structure-tier consumer that depends on
-`Lockfile` provenance, fall back to B for that release and record why.
+`Lockfile` provenance, move that caller to an explicit request where possible;
+if a stable public output cannot be preserved that way, choose B and record why.
+
+**Request and compatibility contract if A is chosen:** add an optional
+lockfile-corroboration setting to the Sniff library's
+[`RepoRequest`](../../lib/src/request.rs). `structure()` sets it to false,
+`full()` sets it to true, and `focused(...)` defaults to false unless its caller
+explicitly asks. The public `detect_repo_structure` convenience function uses
+`structure()`; callers needing corroboration use `detect_repo_with_request`.
+On deserialization, an absent setting means the old behavior (corroboration
+enabled), so persisted request plans do not silently change. A newly
+constructed request sets the value explicitly. Update struct literals,
+request round-trip tests, and API documentation with this distinction. The
+setting controls only corroboration: a request for dependency versions may
+still read `Cargo.lock` when corroboration is declined.
 
 Whichever is chosen, Sniff's existing request-tier vocabulary and work counters
-apply (load the `sniff` skill before designing the knob): a declined lockfile
-read must show up as **zero** lockfile reads under a fresh collector, not as a
-cheaper read.
+apply. A structure-only request that declines corroboration must perform zero
+lockfile read attempts and zero parses. The current
+`filesystem.repo.lockfile_parses` counter measures parse attempts, while the
+general file-open counter cannot isolate lockfiles. Add one stable lockfile
+read-attempt counter at the shared lockfile read site and at
+`CargoLockVersions::parse`; do not infer reads by subtracting unrelated file
+opens.
 
-`None` for `lockfile_match` already means "no lockfile, or unparseable". Under
-this change it would also mean "not asked". If any consumer distinguishes
-those, that is a second open question; do not overload `None` silently — decide
-it in review.
+`None` for `lockfile_match` already means "no lockfile, or unparseable"; its
+field documentation also says no lockfile was parsed. Under this change it
+additionally means "not requested". Preserve the existing wire shape and
+document the ambiguity in the field and request API. Consumers that must
+distinguish these cases should request corroboration and inspect the result;
+adding a serialized state solely for a skipped check would expand the public
+model without supplying lockfile evidence.
 
 ### 2. Make the Cargo lockfile check proportional to the question
 
 Independently of who asks, `CargoLockVersions::parse` should not build a generic
-value tree of 1,497 packages to answer name membership.
+value tree of 1,497 packages to answer name membership. A typed parser must
+still scan the whole input and retain every package name and version because
+other callers resolve versions; the expected saving is allocation and generic
+value construction, not sublinear parsing.
 
 Direction, not a mandated implementation: deserialize into a typed struct that
 keeps only `package[].name` and `package[].version`, letting `serde` skip
@@ -162,8 +217,11 @@ format is stable in practice but not a contract, and a scanner trades a
 measurable cost for a silent-wrongness risk.
 
 `CargoLockVersions::resolve` has other callers (version resolution for
-workspace-inherited versions). Preserve its full contract: every package name,
-every version, same ordering of versions for a name.
+workspace-inherited versions). Preserve its actual contract: it returns the
+first version recorded for a name. The parsed index must therefore retain
+every name and its versions in lockfile order. Preserve malformed-input
+behavior too: entries with absent or non-string names or versions were skipped
+by the generic parser, not grounds for rejecting the whole lockfile.
 
 The `pnpm-lock.yaml` path has the same shape (whole-document generic YAML parse
 to read `importers:` keys) and the same remedy. Include it only if measurement
@@ -185,31 +243,46 @@ layer and is not representative.
 
 ## Acceptance criteria
 
-1. A consumer audit is recorded in the implementation log: every reader of
+1. A consumer audit is recorded in the implementation log: readers of
    `MonorepoLayer::provenance`, `PackageSeed`/`Package` provenance, and
-   `lockfile_match` across the workspace, with the request tier each uses. The
-   Option A/B ruling cites it.
+   `lockfile_match`, plus callers that serialize complete `RepoInfo` values
+   across the workspace. Record each caller's request tier and whether it
+   depends on the old value. The chosen default cites this audit. Check both
+   explicit request plans and direct `detect_repo_structure` calls.
 2. Under a fresh work collector, a structure detection that declines lockfile
-   provenance reports zero lockfile reads and zero lockfile parses; one that
-   requests it reports exactly the reads it does today. An absent counter means
-   zero.
+   corroboration reports zero lockfile read attempts and zero lockfile parses;
+   one that requests it performs the same lockfile checks as today. A focused
+   request for dependency versions may still read a lockfile, so it must not
+   claim zero reads solely because corroboration is off. An absent counter
+   means zero.
 3. For a request that asks for provenance, complete `RepoInfo` output is
    unchanged on a controlled fixture covering: Cargo, pnpm, and uv authorities;
-   a matching lockfile; a stale lockfile (extra and missing members); an absent
-   lockfile; an unparseable lockfile. Assert independently expected values, not
-   only before/after equality.
+   a matching lockfile; extra and missing members; an absent lockfile; an
+   unparseable lockfile. Assert independently expected values, not only
+   before/after equality. Cargo's existing name-presence check accepts extra
+   lockfile entries; pnpm and uv require exact member sets. Confirm that
+   difference explicitly instead of treating all extra entries as stale.
 4. `CargoLockVersions` parity: for this checkout's `Cargo.lock` and for a fixture
    with duplicate package names at multiple versions, the typed parse resolves
    the same names to the same ordered versions as the current implementation.
    Keep the current implementation as a test-only reference for this comparison.
-5. Darkmatter's capture uses the cheaper request, and `just test` in
-   `darkmatter/` passes, including the three observation-boundary tests named
+5. With option A, Darkmatter's existing `detect_repo_structure` capture
+   automatically gets the cheaper result; with option B, migrate that call to
+   an explicit request. `just test` in `darkmatter/` passes, including the
+   three observation-boundary tests named
    in `2026-09-20-repo-perf`. The `REPOSITORY_DISCOVERY_COUNT` expectations are
    unchanged: this spec changes the cost of a discovery, never the count.
-6. `just test` and `just lint` pass in `sniff/` with the recipe's `remote`
-   feature coverage. No new CI matrix cell or timing gate is added; exercise the
-   fixtures through existing test workflows on all four environments and reuse
-   qualifying evidence.
+6. Request serialization tests prove that legacy plans without the new setting
+   retain lockfile corroboration, while newly constructed structure and focused
+   requests use their documented defaults. Public function and field docs,
+   Sniff's request-cost skill text, and README descriptions of structure output
+   are updated where behavior changes. The CLI's JSON output remains valid and
+   accurately reflects the chosen request tier.
+7. `just test` and `just lint` pass in `sniff/` with the recipe's `remote`
+   feature coverage. Run affected Darkmatter and Claudine tests. No new CI
+   matrix cell or timing gate is added; exercise the fixtures through existing
+   test workflows on macOS, Linux, native Windows, and WSL2, reusing qualifying
+   evidence for each environment.
 
 ## Performance verification
 

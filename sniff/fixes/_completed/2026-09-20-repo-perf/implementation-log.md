@@ -105,6 +105,7 @@ documentation:
     - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/
 completed_phase: 6
 implemented: true
+implementation_1: "2026-09-26T12:01:22-07:00"
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -817,3 +818,61 @@ spec, plan, log, `results.md`, and `evidence/`:
 - `spike.md` and `environment.md`.
 
 The fix directory stays where it is; moving it is the author's action.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-26T12:01:22-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-sniff/sniff/fixes/2026-09-20-repo-perf/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'High — Small repositories pay a measured parallel-walk startup cost' at 12:01:33
+        - this finding is explicitly blocked on the author's choice among the four options in the spec's `human_review_items`; the review itself says so
+        - this session is non-interactive and no author answer is recorded in the spec, review, or `results.md`, so an agent cannot choose an option on the author's behalf
+        - no code was changed for this finding; the current 12-thread implementation, its tests, and its evidence remain as they were
+        - deferred: awaiting the author's decision (not a CPU-load measurement deferral, so `deferred_perf_measurement` is not set)
+- work completed for 'High — Small repositories pay a measured parallel-walk startup cost' at 12:01:33 (deferred)
+- starting the work on 'Medium — Controlled fixture lacks a complete before-and-after repository comparison' at 12:01:43
+        - discovery: public `detect_repo_structure` always takes the nested fallback (`RepoEvidence::default()` for structure-only requests), and the fallback's downstream (`candidates_from_marker_paths`, dispatch, projection) is unchanged from `main`; the old walker equals the existing frozen `serial_reference_paths` plus `candidates_from_marker_paths` (it differs only by skipping the depth-0 root entry, which is a directory in this fixture)
+        - added a test-only seam in `discover_nested_workspace_outcomes` (`sniff/lib/src/filesystem/repo/nested.rs`): a `#[cfg(test)]` match arm routes the `None` evidence case to `tests::serial_baseline_walk` when a thread-local flag is set; the production build keeps its single `walk_for_nested_markers` arm
+        - added `public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture` in the same file's unit-test module, with the fixture builder `build_nested_workspace_fixture`: root Cargo workspace (`crates/*`), nested pnpm (`web/`), Go (`services/go.work`), and npm (`tools/js/`) workspaces, a same-standard nested Cargo workspace (`vendor/inner`, suppressed by `ForbidsNested`), and a pruned `node_modules` workspace; the fixture is not a Git repository, so host global excludes cannot apply
+        - the test runs public `detect_repo_structure` once through the serial baseline and once through the production parallel walk, and asserts the complete pretty-printed `RepoInfo` JSON is identical
+        - fallback entry is confirmed per request with fresh `testing::measure` collectors: the baseline run records `test.nested_walk.serial_baseline_walks = 1` and `repo.nested_marker_walks = 0`; the changed run records the reverse
+        - independent expectations: the seven package `(relative, name)` pairs and the four layer `(root, authority)` pairs (Cargo at root, Go at `services`, npm at `tools/js`, pnpm at `web`) are spelled out by hand, so both sides cannot be equally wrong
+        - mutation check: dropping `go.work` markers from the production visitor alone fails the test at the full-JSON equality assertion; the mutation was reverted
+        - the candidate-level tests are unchanged
+        - `just test nested::tests`: 23 passed; `just test`: 2875 passed, 32 skipped; `just lint` clean; `cargo clippy -p sniff --all-targets -- -D warnings` (with and without `--features remote`) and `cargo clippy -p sniff-cli --all-targets -- -D warnings` clean; `just check-tier-coverage sniff`: 0 stranded
+        - `rustfmt --check` (read-only) shows no diff in the new code; four hunks elsewhere in `nested.rs` were already there and were left alone
+- work completed for 'Medium — Controlled fixture lacks a complete before-and-after repository comparison' at 12:07:57
+        - cross-OS runs not repeated: the change adds only a `#[cfg(test)]` seam and a platform-neutral, non-Git fixture test; CI covers the other OS legs
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 6m 35s. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 1 were deferred (see reasons below):
+
+- **High — Small repositories pay a measured parallel-walk startup cost** — deferred because the review explicitly blocks it on the author's choice among the four options in the spec's `human_review_items` (accept 12 threads, a smaller fixed count, serial-then-parallel, or revert). No author answer is recorded, and this non-interactive session cannot make that policy decision. If the author chooses option 1, nothing needs to be rerun. If they choose option 2 or 3, the parity tests, the new fixture regression, the measurements, and the OS runs must be repeated on the new code.
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-26T12:17:10-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-sniff/sniff/fixes/2026-09-20-repo-perf/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- items evaluated: the one formal finding (blocked) plus the two nonblocking corrections from the review's "Documentation observations" section
+- starting the work on 'High — Small repositories pay a measured parallel-walk startup cost' at 12:18:05
+        - the review marks this finding blocked on the author's choice among the four options in the spec's `human_review_items`; neither the spec, `results.md`, nor either review records an author answer
+        - this session is non-interactive, so an agent cannot make that policy choice; no code changed for this finding
+        - deferred: awaiting the author's decision (not a CPU-load measurement deferral, so `deferred_perf_measurement` is not set)
+- work completed for 'High — Small repositories pay a measured parallel-walk startup cost' at 12:18:05 (deferred)
+- author decision received in an interactive session on 2026-09-26: option 2, a smaller fixed worker count, applied as `min(available_parallelism, 4)`; the author judged the 8-file probe tree unrepresentatively small and a few milliseconds an acceptable price for the large-repository gain
+- restarting the work on 'High — Small repositories pay a measured parallel-walk startup cost' (code change built at 12:29)
+        - `nested.rs`: added `MAX_NESTED_WALK_WORKERS = 4` and `nested_walk_worker_count()`; `walk_for_nested_markers_with_threads(root, None)` now passes that count to `WalkBuilder::threads` instead of leaving `ignore`'s default (`min(available_parallelism, 12)`); the function docs and the `WORKER_CONFIGS` comment were updated, and `every_visitor_flushes_its_work_into_the_request` now bounds the production run by `nested_walk_worker_count()` rather than 12
+        - drift fixed: the `build_nested_workspace_fixture` comment said `vendor/inner` is suppressed by `ForbidsNested`; the walker prunes `vendor` first, so the comment now says both `vendor` and `node_modules` are pruned (review-2 documentation observation)
+        - measured: `w12` vs `w4` builds of the same tree, alternated, load 4–18; results in `evidence/worker-cap/README.md`. Release checkout `detect_repo_structure` 34.25 → 38.79 ms (serial baseline 79.40 ms); tiny tree 3.1–3.3 → 2.0–2.1 ms; tiny sequential throughput +55%; 14-way checkout p95 about −20% and peak RSS about −22%. Work counters on the checkout unchanged
+        - gates: `just test` 2875 passed / 32 skipped; `just lint`, `cargo clippy -p sniff --all-targets [--features remote] -- -D warnings` and `cargo clippy -p sniff-cli --all-targets -- -D warnings` clean; `just check-tier-coverage sniff` 0 stranded; `rustfmt --check` on `nested.rs` shows only the four pre-existing hunks
+        - cross-OS `just cross-check sniff --os <os> nested::tests`: Windows 21/21, Linux 23/23, WSL2 23/23 (`evidence/cross-os/cross-check-worker-cap.txt`). The first Linux attempt failed on 372 stale read-only kache links in the standing clone's `target/release` (cleared), and the first WSL attempt on a stopped guest (booted); both recorded in the `os` skill's `build-hosts.md`
+        - `results.md`, `spec.md` (decision recorded, step 6 amended, `human_review: false`), and the `sniff` skill's `performance.md` updated; `results.md` now cites the full-output fixture test for AC5 (review-2 documentation observation)
+- work completed for 'High — Small repositories pay a measured parallel-walk startup cost' at 12:49
+
+### Successful Completion
+
+Review cycle 2 is complete. The one formal finding was resolved by the author's decision and implemented, and both documentation observations were fixed. `review-2.md` is closed as production ready. The fix directory stays where it is; moving it is the author's action.
