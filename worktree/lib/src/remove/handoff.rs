@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
+use super::included::{BaselineBinding, RulesBinding};
 
-pub const HANDOFF_FORMAT_VERSION: u32 = 2;
+pub const HANDOFF_FORMAT_VERSION: u32 = 3;
 
 /// How long a record stays valid.
 pub const HANDOFF_TTL: Duration = Duration::from_secs(60);
@@ -36,6 +37,8 @@ pub struct HandoffState {
     pub branch: Option<String>,
     /// [`crate::remove::Inventory::fingerprint`] of the worktree.
     pub fingerprint: String,
+    pub rules: RulesBinding,
+    pub baseline: BaselineBinding,
     /// Where the wrapper moves the caller, canonical.
     pub landing: PathBuf,
 }
@@ -68,7 +71,7 @@ pub struct RemoteApproval {
 /// The caller's approvals from the first run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Approvals {
-    /// Discard the dirty and ignored entries (`--force-worktree` or an answer).
+    /// Discard the dirty and protected included entries (`--force-worktree` or an answer).
     pub discard_files: bool,
     /// `None` for a detached worktree.
     pub branch: Option<BranchAction>,
@@ -184,7 +187,13 @@ pub fn verify(record: &HandoffRecord, fresh: &HandoffState, cwd: &Path) -> Resul
         changed.push("branch");
     }
     if stored.fingerprint != fresh.fingerprint {
-        changed.push("uncommitted or ignored files");
+        changed.push("uncommitted or included files");
+    }
+    if stored.rules != fresh.rules {
+        changed.push("include rules");
+    }
+    if stored.baseline != fresh.baseline {
+        changed.push("copy baseline");
     }
     if !same_path(&stored.landing, &fresh.landing) {
         changed.push("landing directory");
@@ -227,6 +236,8 @@ mod tests {
             head: "1111111111111111111111111111111111111111".into(),
             branch: Some("feat/x".into()),
             fingerprint: "f".repeat(64),
+            rules: super::super::included::IncludedAssessment::default().rules,
+            baseline: BaselineBinding::None,
             landing,
         }
     }
@@ -306,7 +317,7 @@ mod tests {
         assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
 
         let mut record = HandoffRecord::new(state(dir.path()), approvals(), 0);
-        record.format_version += 1;
+        record.format_version = 2;
         write_record(&path, &record).unwrap();
         assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
     }
@@ -329,7 +340,11 @@ mod tests {
             ("checked-out commit", Box::new(|s| s.head = "3".repeat(40))),
             ("branch", Box::new(|s| s.branch = Some("feat/y".into()))),
             ("branch", Box::new(|s| s.branch = None)),
-            ("uncommitted or ignored files", Box::new(|s| s.fingerprint = "0".repeat(64))),
+            ("uncommitted or included files", Box::new(|s| s.fingerprint = "0".repeat(64))),
+            ("include rules", Box::new(|s| s.rules.presence = "changed".into())),
+            ("copy baseline", Box::new(|s| s.baseline = BaselineBinding::Record {
+                identity: "new".into(), content_digest: "digest".into(),
+            })),
             ("landing directory", Box::new(|s| s.landing = elsewhere.clone())),
         ];
         for (field, change) in cases {

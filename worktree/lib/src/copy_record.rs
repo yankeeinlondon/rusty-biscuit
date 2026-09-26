@@ -121,6 +121,13 @@ pub fn delete(path: &Path) -> Result<(), WorktreeError> {
     }
 }
 
+/// Deletes the copy record after a worktree is removed. Cache failures are
+/// warnings because the worktree has already gone.
+pub fn delete_for(repo_root: &Path, worktree: &Path) -> Option<String> {
+    record_path(repo_root, worktree).and_then(|path| delete(&path))
+        .err().map(|error| error.to_string())
+}
+
 pub fn load(repo_root: &Path, worktree: &Path, expected: &Registration) -> LoadedRecord {
     let path = match record_path(repo_root, worktree) {
         Ok(path) => path,

@@ -1,5 +1,5 @@
-//! What removing a worktree's directory would delete: its dirty entries
-//! (modified, staged, untracked) and its ignored entries.
+//! What removing a worktree's directory would delete, with consent required
+//! for dirty entries and selected ignored files that differ from their baseline.
 
 use std::collections::BTreeMap;
 #[cfg(unix)]
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::WorktreeError;
 use crate::git::git_from_bytes;
+use super::included::IncludedAssessment;
 
 /// One modified, staged, or untracked path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,46 +29,33 @@ pub struct Inventory {
     /// directory ends with `/` and is listed once only when a directory
     /// pattern matches it; otherwise its ignored children are listed.
     pub ignored: Vec<PathBuf>,
-}
-
-/// One line of the grouped ignored-entry display.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IgnoredGroup {
-    /// The first path component; a directory ends with `/`.
-    pub name: String,
-    /// How many ignored entries sit under `name` (1 for a lone file).
-    pub entries: usize,
+    pub included: IncludedAssessment,
 }
 
 impl Inventory {
-    /// Whether removing the directory needs consent: any dirty or ignored
-    /// entry. Ignore rules keep files out of version control; they do not
-    /// make their contents disposable.
+    /// Whether removal needs consent for dirty or protected included files.
     pub fn needs_consent(&self) -> bool {
-        !self.dirty.is_empty() || !self.ignored.is_empty()
+        !self.dirty.is_empty() || !self.included.needs_consent.is_empty()
     }
 
     pub fn has_source(&self) -> bool {
         self.dirty.iter().any(|entry| entry.is_source)
     }
 
-    /// The ignored entries grouped by their first path component, in path
-    /// order: `target/` with 6 entries rather than six `target/...` lines.
-    /// For display only: names are decoded lossily.
-    pub fn ignored_groups(&self) -> Vec<IgnoredGroup> {
-        let mut groups: BTreeMap<String, usize> = BTreeMap::new();
+    /// Ignored names outside the protected included set, grouped for display.
+    pub fn disposable_ignored_names(&self) -> Vec<String> {
+        let protected: Vec<&PathBuf> = self.included.needs_consent.iter().map(|(path, _)| path).collect();
+        let mut names = BTreeMap::<String, ()>::new();
         for entry in &self.ignored {
-            let entry = entry.to_string_lossy();
-            let name = match entry.split_once('/') {
-                Some((first, _)) => format!("{first}/"),
-                None => entry.into_owned(),
+            if protected.contains(&entry) { continue; }
+            let value = entry.to_string_lossy();
+            let name = match value.split_once('/') {
+                Some((first, _)) => format!("{first}/"), None => value.into_owned(),
             };
-            *groups.entry(name).or_default() += 1;
+            names.insert(name, ());
         }
-        groups
-            .into_iter()
-            .map(|(name, entries)| IgnoredGroup { name, entries })
-            .collect()
+        names.retain(|name, _| !protected.iter().any(|path| path.starts_with(name)));
+        names.into_keys().collect()
     }
 
     /// Parses `git status --porcelain=v1 -z --ignored=matching` output,
@@ -103,7 +91,7 @@ impl Inventory {
     }
 
     /// A BLAKE3 digest over each dirty path, its status, and its working
-    /// content; over the set of ignored entries; and over every index entry's
+    /// content; over the effective include bindings; and over every index entry's
     /// mode, object ID, stage, and path (`git ls-files --stage`).
     ///
     /// A dirty entry that is a directory (git lists an untracked nested
@@ -116,7 +104,7 @@ impl Inventory {
     /// restaged version that keeps both the status and the working bytes, a
     /// new untracked file (including one inside such a directory), a changed
     /// symlink target, a regular file's executable bit (Unix only), or a new
-    /// ignored entry all change it. Changes inside ignored entries do not,
+    /// protected included entry all change it. Disposable ignored entries do not,
     /// nor do timestamps or permission bits git ignores.
     ///
     /// Paths and symlink targets enter as their exact OS bytes
@@ -136,8 +124,6 @@ impl Inventory {
         // By bytes: `Path` ordering compares components and ignores a
         // trailing `/`.
         dirty.sort_by(|a, b| a.path.as_os_str().as_encoded_bytes().cmp(b.path.as_os_str().as_encoded_bytes()));
-        let mut ignored: Vec<&PathBuf> = self.ignored.iter().collect();
-        ignored.sort_by(|a, b| a.as_os_str().as_encoded_bytes().cmp(b.as_os_str().as_encoded_bytes()));
 
         let mut record = Record::default();
         for entry in dirty {
@@ -148,8 +134,13 @@ impl Inventory {
                 .field(entry.path.as_os_str().as_encoded_bytes())
                 .field(&content);
         }
-        for entry in ignored {
-            record.field(b"ignored").field(entry.as_os_str().as_encoded_bytes());
+        record.field(b"rules").field(&serde_json::to_vec(&self.included.rules)?);
+        record.field(b"baseline").field(&serde_json::to_vec(&self.included.baseline)?);
+        for (path, mark) in &self.included.selected {
+            if !mark.needs_consent() { continue; }
+            let observation = crate::compare::observe(&worktree.join(path), &crate::compare::FilesystemReader)?;
+            record.field(b"included").field(path.as_os_str().as_encoded_bytes())
+                .field(mark.label().as_bytes()).field(&serde_json::to_vec(&observation)?);
         }
         // The whole index rather than a pathspec of the dirty paths, which
         // pathspec magic and command-line length limits make fragile.
@@ -352,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn ignored_entries_group_by_first_component() {
+    fn disposable_ignored_entries_group_by_first_component() {
         let inventory = Inventory {
             dirty: Vec::new(),
             ignored: [
@@ -365,15 +356,11 @@ mod tests {
             ]
             .map(PathBuf::from)
             .to_vec(),
+            included: IncludedAssessment::default(),
         };
         assert_eq!(
-            inventory.ignored_groups(),
-            vec![
-                IgnoredGroup { name: ".env".into(), entries: 1 },
-                IgnoredGroup { name: "logs/".into(), entries: 1 },
-                IgnoredGroup { name: "notes.md".into(), entries: 1 },
-                IgnoredGroup { name: "target/".into(), entries: 3 },
-            ]
+            inventory.disposable_ignored_names(),
+            vec![".env", "logs/", "notes.md", "target/"]
         );
     }
 
@@ -416,15 +403,15 @@ mod tests {
         ignored.sort();
         // A directory pattern lists `target/` once; `**/build/*` lists children.
         assert_eq!(ignored, [".env", "build/CACHE", "build/out/", "target/"]);
-        let groups: Vec<_> = inventory.ignored_groups().into_iter().map(|g| (g.name, g.entries)).collect();
+        let groups = inventory.disposable_ignored_names();
         assert_eq!(
             groups,
-            vec![(".env".into(), 1), ("build/".into(), 2), ("target/".into(), 1)]
+            vec![".env", "build/", "target/"]
         );
     }
 
     #[test]
-    fn fingerprint_changes_with_content_status_new_paths_and_ignored_entries() {
+    fn fingerprint_changes_with_content_status_new_paths_but_not_disposable_ignored_entries() {
         let repo = TestRepo::new();
         fs::write(repo.path().join(".gitignore"), "*.log\n").unwrap();
         repo.git(&["add", ".gitignore"]);
@@ -452,9 +439,9 @@ mod tests {
         let untracked = print();
         assert_ne!(staged, untracked);
 
-        // A new ignored entry.
+        // A disposable ignored entry does not affect removal consent.
         fs::write(wt.join("debug.log"), "x\n").unwrap();
-        assert_ne!(untracked, print());
+        assert_eq!(untracked, print());
     }
 
     /// A worktree whose only dirty entry is an untracked nested repository,
