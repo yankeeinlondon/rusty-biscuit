@@ -1,10 +1,12 @@
 //! Copy included entries without replacing destination content.
 
 use std::collections::HashSet;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Seek};
 use std::path::{Path, PathBuf};
-use crate::compare::{observe, FilesystemReader, Observation};
+use cap_std::fs::{Dir, OpenOptions};
+use cap_std::ambient_authority;
+use crate::compare::{Kind, Observation};
 use super::{EntryKind, IncludeSet, guarded_kind, relative_path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,67 +21,99 @@ pub struct CopyOutcome {
 }
 
 pub trait CopyOps {
-    fn clone_file(&self, source: &Path, dest: &Path) -> io::Result<()>;
-    fn byte_copy(&self, source: &Path, dest: &Path) -> io::Result<()>;
-    fn symlink(&self, target: &Path, dest: &Path) -> io::Result<()>;
-    fn publish(&self, temp: &Path, dest: &Path) -> io::Result<()>;
+    fn clone_file(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File>;
+    fn byte_copy(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File>;
+    fn symlink(&self, target: &Path, parent: &Dir, dest: &Path) -> io::Result<()>;
+    fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()>;
 }
 
 pub struct RealCopyOps;
 impl CopyOps for RealCopyOps {
-    fn clone_file(&self, source: &Path, dest: &Path) -> io::Result<()> {
-        reflink_copy::reflink(source, dest)
+    fn clone_file(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::ffi::CString;
+            use std::os::fd::AsRawFd;
+            use std::os::unix::ffi::OsStrExt;
+            unsafe extern "C" {
+                fn fclonefileat(source: std::ffi::c_int, parent: std::ffi::c_int,
+                    name: *const std::ffi::c_char, flags: std::ffi::c_int) -> std::ffi::c_int;
+            }
+            let name = CString::new(temp.as_os_str().as_bytes())?;
+            if unsafe { fclonefileat(source.as_raw_fd(), parent.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(parent.open(temp)?.into_std())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let dest = create_temp(parent, temp)?;
+            let len = source.metadata()?.len();
+            let Some(len) = std::num::NonZeroU64::new(len) else {
+                return Err(io::ErrorKind::Unsupported.into());
+            };
+            #[cfg(windows)] dest.set_len(len.get())?;
+            reflink_copy::ReflinkBlockBuilder::new(source, &dest, len).reflink_block()?;
+            Ok(dest)
+        }
     }
-    fn byte_copy(&self, source: &Path, dest: &Path) -> io::Result<()> {
-        fs::copy(source, dest).map(|_| ())
+    fn byte_copy(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File> {
+        let mut source = source.try_clone()?;
+        source.rewind()?;
+        let mut dest = create_temp(parent, temp)?;
+        io::copy(&mut source, &mut dest)?;
+        Ok(dest)
     }
-    fn symlink(&self, target: &Path, dest: &Path) -> io::Result<()> {
-        #[cfg(unix)] { std::os::unix::fs::symlink(target, dest) }
-        #[cfg(windows)] { std::os::windows::fs::symlink_file(target, dest) }
+    fn symlink(&self, target: &Path, parent: &Dir, dest: &Path) -> io::Result<()> {
+        #[cfg(unix)] { parent.symlink_contents(target, dest) }
+        #[cfg(windows)] { parent.symlink_file(target, dest) }
     }
-    fn publish(&self, temp: &Path, dest: &Path) -> io::Result<()> {
+    fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> {
         #[cfg(unix)]
-        { fs::hard_link(temp, dest) }
+        { parent.hard_link(temp, parent, dest) }
         #[cfg(windows)]
         {
-            use std::os::windows::ffi::OsStrExt;
-            use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
-            let from: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
-            let to: Vec<u16> = dest.as_os_str().encode_wide().chain(Some(0)).collect();
-            if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
-                Err(io::Error::last_os_error())
-            } else { Ok(()) }
+            parent.hard_link(temp, parent, dest)
         }
     }
 }
 
-fn temp_path(dest: &Path) -> io::Result<PathBuf> {
+fn create_temp(parent: &Dir, name: &Path) -> io::Result<File> {
+    parent.open_with(name, OpenOptions::new().read(true).write(true).create_new(true))
+        .map(|file| file.into_std())
+}
+
+fn temp_path() -> io::Result<PathBuf> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
     let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok(dest.with_file_name(format!(".wt-copy-{name}.tmp")))
+    Ok(PathBuf::from(format!(".wt-copy-{name}.tmp")))
 }
 
-fn exists_even_dangling(path: &Path) -> bool { fs::symlink_metadata(path).is_ok() }
+fn exists_even_dangling(parent: &Dir, name: &Path) -> bool {
+    parent.symlink_metadata(name).is_ok()
+}
 
-fn safe_parent(root: &Path, relative: &Path) -> io::Result<bool> {
-    let Some(parent) = relative.parent() else { return Ok(true); };
-    let mut current = root.to_path_buf();
+fn safe_parent(root: &Dir, relative: &Path, create: bool) -> io::Result<Option<Dir>> {
+    let Some(parent) = relative.parent() else { return root.try_clone().map(Some); };
+    let mut current = root.try_clone()?;
     for part in parent.components() {
-        current.push(part);
-        match fs::symlink_metadata(&current) {
+        let name = Path::new(part.as_os_str());
+        match current.symlink_metadata(name) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                 #[cfg(windows)] {
-                    use std::os::windows::fs::MetadataExt;
-                    if metadata.file_attributes() & 0x400 != 0 { return Ok(false); }
+                    use cap_std::fs::MetadataExt;
+                    if metadata.file_attributes() & 0x400 != 0 { return Ok(None); }
                 }
             }
-            Ok(_) => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&current)?,
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound && create => current.create_dir(name)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         }
+        current = current.open_dir(name)?;
     }
-    Ok(true)
+    Ok(Some(current))
 }
 
 fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
@@ -100,9 +134,83 @@ fn link_unsupported(error: &io::Error) -> bool {
         || error.raw_os_error() == Some(1314)
 }
 
+fn source_file(parent: &Dir, name: &Path) -> io::Result<File> {
+    let before = parent.symlink_metadata(name)?;
+    if !before.is_file() || before.file_type().is_symlink() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "source is no longer a regular file"));
+    }
+    #[cfg(windows)]
+    let opened = {
+        use cap_std::fs::OpenOptionsExt;
+        let mut options = OpenOptions::new();
+        options.read(true).custom_flags(0x0020_0000);
+        parent.open_with(name, &options)?
+    };
+    #[cfg(not(windows))]
+    let opened = parent.open(name)?;
+    let file = opened.into_std();
+    let after = file.metadata()?;
+    if !after.is_file() || !same_file(&before, &after) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "source changed while opening"));
+    }
+    #[cfg(windows)] {
+        use std::os::windows::fs::MetadataExt;
+        if after.file_attributes() & 0x400 != 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "source is a reparse point"));
+        }
+    }
+    Ok(file)
+}
+
+fn open_checked_root(path: &Path) -> io::Result<Dir> {
+    let before = fs::symlink_metadata(path)?;
+    if !before.is_dir() || before.file_type().is_symlink() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "copy root is not a directory"));
+    }
+    #[cfg(windows)] {
+        use std::os::windows::fs::MetadataExt;
+        if before.file_attributes() & 0x400 != 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "copy root is a reparse point"));
+        }
+    }
+    let dir = Dir::open_ambient_dir(path, ambient_authority())?;
+    #[cfg(unix)] {
+        use cap_std::fs::MetadataExt as _;
+        use std::os::unix::fs::MetadataExt as _;
+        let after = dir.dir_metadata()?;
+        if before.dev() != after.dev() || before.ino() != after.ino() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "copy root changed while opening"));
+        }
+    }
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn same_file(before: &cap_std::fs::Metadata, after: &fs::Metadata) -> bool {
+    use cap_std::fs::MetadataExt as _;
+    use std::os::unix::fs::MetadataExt as _;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(windows)]
+fn same_file(before: &cap_std::fs::Metadata, after: &fs::Metadata) -> bool {
+    before.len() == after.len()
+        && before.modified().ok().map(cap_std::time::SystemTime::into_std) == after.modified().ok()
+}
+
 pub fn copy_include_set(source_root: &Path, dest_root: &Path, set: &IncludeSet,
     dest_index: &HashSet<Vec<u8>>, ops: &dyn CopyOps) -> CopyOutcome {
     let mut outcome = CopyOutcome::default();
+    let roots = open_checked_root(source_root)
+        .and_then(|source| open_checked_root(dest_root)
+            .map(|dest| (source, dest)));
+    let (source_dir, dest_dir) = match roots {
+        Ok(roots) => roots,
+        Err(error) => {
+            for entry in &set.entries { outcome.failed.push((entry.path.clone(), error.to_string())); }
+            return outcome;
+        }
+    };
     for entry in &set.entries {
         let path = &entry.path;
         if dest_index.contains(path) {
@@ -112,30 +220,34 @@ pub fn copy_include_set(source_root: &Path, dest_root: &Path, set: &IncludeSet,
             Ok(relative) => relative,
             Err(error) => { outcome.failed.push((path.clone(), error.to_string())); continue; }
         };
-        let source = source_root.join(&relative);
-        let dest = dest_root.join(&relative);
+        let name = Path::new(relative.file_name().expect("validated relative path has a filename"));
         match guarded_kind(source_root, &relative) {
             Ok(Some(kind)) if kind == entry.kind => {},
             Ok(_) => { outcome.skipped.push((path.clone(), SkipReason::UnsafePath)); continue; },
             Err(error) => { outcome.failed.push((path.clone(), error.to_string())); continue; },
         }
-        match safe_parent(dest_root, &relative) {
-            Ok(true) => {},
-            Ok(false) => { outcome.skipped.push((path.clone(), SkipReason::UnsafePath)); continue; },
+        let source_parent = match safe_parent(&source_dir, &relative, false) {
+            Ok(Some(parent)) => parent,
+            Ok(None) => { outcome.skipped.push((path.clone(), SkipReason::UnsafePath)); continue; },
             Err(error) => { outcome.failed.push((path.clone(), error.to_string())); continue; },
-        }
-        if exists_even_dangling(&dest) {
+        };
+        let dest_parent = match safe_parent(&dest_dir, &relative, true) {
+            Ok(Some(parent)) => parent,
+            Ok(None) => { outcome.skipped.push((path.clone(), SkipReason::UnsafePath)); continue; },
+            Err(error) => { outcome.failed.push((path.clone(), error.to_string())); continue; },
+        };
+        if exists_even_dangling(&dest_parent, name) {
             outcome.skipped.push((path.clone(), SkipReason::Existing)); continue;
         }
         match entry.kind {
             EntryKind::Symlink => {
-                let target = fs::read_link(&source);
+                let target = source_parent.read_link_contents(name);
                 let result = target.as_ref().map_err(|error| io::Error::new(error.kind(), error.to_string()))
-                    .and_then(|target| ops.symlink(target, &dest));
+                    .and_then(|target| ops.symlink(target, &dest_parent, name));
                 match result {
-                    Ok(()) => match observe(&dest, &FilesystemReader) {
+                    Ok(()) => match dest_parent.read_link_contents(name).and_then(|target| link_observation(&target)) {
                         Ok(observation) => {
-                            let stable = fs::read_link(&source).ok().as_ref() == target.as_ref().ok();
+                            let stable = source_parent.read_link_contents(name).ok().as_ref() == target.as_ref().ok();
                             if !stable { outcome.warnings.push(format!("source changed while copying {}", relative.display())); }
                             outcome.copied.push((path.clone(), if stable { Some(observation) } else { None }));
                         }
@@ -149,7 +261,8 @@ pub fn copy_include_set(source_root: &Path, dest_root: &Path, set: &IncludeSet,
                 }
             }
             EntryKind::File => {
-                let result = copy_file(&source, &dest, ops);
+                let result = source_file(&source_parent, name)
+                    .and_then(|source_file| copy_file(&source_file, &source_parent, &dest_parent, name, ops));
                 match result {
                     Ok((observation, stable)) => {
                         if !stable { outcome.warnings.push(format!("source changed while copying {}", relative.display())); }
@@ -166,24 +279,54 @@ pub fn copy_include_set(source_root: &Path, dest_root: &Path, set: &IncludeSet,
     outcome
 }
 
-fn copy_file(source: &Path, dest: &Path, ops: &dyn CopyOps) -> io::Result<(Observation, bool)> {
-    let before = fs::symlink_metadata(source)?;
-    let mut temp = temp_path(dest)?;
+fn copy_file(source: &File, source_parent: &Dir, parent: &Dir, dest: &Path,
+    ops: &dyn CopyOps) -> io::Result<(Observation, bool)> {
+    let before = source.metadata()?;
+    let mut temp = temp_path()?;
     let result = (|| {
-        if let Err(error) = ops.clone_file(source, &temp) {
-            if !unsupported_clone(&error) { return Err(error); }
-            let _ = fs::remove_file(&temp);
-            temp = temp_path(dest)?;
-            ops.byte_copy(source, &temp)?;
-        }
-        fs::set_permissions(&temp, before.permissions())?;
-        let observation = observe(&temp, &FilesystemReader)?;
-        let after = fs::symlink_metadata(source)?;
-        ops.publish(&temp, dest)?;
-        Ok((observation, metadata_stable(&before, &after)))
+        let copied = match ops.clone_file(source, parent, &temp) {
+            Ok(file) => file,
+            Err(error) if unsupported_clone(&error) => {
+                let _ = parent.remove_file(&temp);
+                temp = temp_path()?;
+                ops.byte_copy(source, parent, &temp)?
+            }
+            Err(error) => return Err(error),
+        };
+        copied.set_permissions(before.permissions())?;
+        let observation = observe_open_file(&copied)?;
+        let after = source.metadata()?;
+        let still_named = source_parent.symlink_metadata(dest).is_ok_and(|entry| same_file(&entry, &after));
+        ops.publish(parent, &temp, dest)?;
+        Ok((observation, still_named && metadata_stable(&before, &after)))
     })();
-    let _ = fs::remove_file(&temp);
+    let _ = parent.remove_file(&temp);
     result
+}
+
+fn observe_open_file(file: &File) -> io::Result<Observation> {
+    let mut file = file.try_clone()?;
+    file.rewind()?;
+    let hex = biscuit_hash::blake3_hash_reader(&mut file)?;
+    let mut digest = [0_u8; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    }
+    Ok(Observation { kind: Kind::File, size: file.metadata()?.len(), digest: Some(digest) })
+}
+
+fn link_observation(target: &Path) -> io::Result<Observation> {
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        target.as_os_str().as_bytes().to_vec()
+    };
+    #[cfg(windows)]
+    let bytes = target.as_os_str().to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "link target is not UTF-8"))?
+        .as_bytes().to_vec();
+    Ok(Observation { kind: Kind::Symlink { target_bytes: bytes.clone() }, size: bytes.len() as u64, digest: None })
 }
 
 #[cfg(test)]
@@ -192,10 +335,10 @@ mod tests {
 
     struct Fallback;
     impl CopyOps for Fallback {
-        fn clone_file(&self, _: &Path, _: &Path) -> io::Result<()> { Err(io::ErrorKind::Unsupported.into()) }
-        fn byte_copy(&self, source: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.byte_copy(source, dest) }
-        fn symlink(&self, target: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.symlink(target, dest) }
-        fn publish(&self, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(temp, dest) }
+        fn clone_file(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { Err(io::ErrorKind::Unsupported.into()) }
+        fn byte_copy(&self, source: &File, parent: &Dir, dest: &Path) -> io::Result<File> { RealCopyOps.byte_copy(source, parent, dest) }
+        fn symlink(&self, target: &Path, parent: &Dir, dest: &Path) -> io::Result<()> { RealCopyOps.symlink(target, parent, dest) }
+        fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(parent, temp, dest) }
     }
 
     #[test]
@@ -219,13 +362,13 @@ mod tests {
     fn failed_clone_cleans_partial_temp_and_keeps_destination_absent() {
         struct PartialFailure;
         impl CopyOps for PartialFailure {
-            fn clone_file(&self, _: &Path, dest: &Path) -> io::Result<()> {
-                fs::write(dest, b"partial")?;
+            fn clone_file(&self, _: &File, parent: &Dir, dest: &Path) -> io::Result<File> {
+                parent.write(dest, b"partial")?;
                 Err(io::Error::other("failed clone"))
             }
-            fn byte_copy(&self, _: &Path, _: &Path) -> io::Result<()> { panic!("no fallback") }
-            fn symlink(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn publish(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { panic!("no fallback") }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, _: &Dir, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source"); let dest = dir.path().join("dest");
@@ -279,10 +422,10 @@ mod tests {
     fn clone_success_does_not_call_byte_copy() {
         struct CloneSuccess;
         impl CopyOps for CloneSuccess {
-            fn clone_file(&self, source: &Path, dest: &Path) -> io::Result<()> { fs::copy(source, dest).map(|_| ()) }
-            fn byte_copy(&self, _: &Path, _: &Path) -> io::Result<()> { panic!("unneeded byte copy") }
-            fn symlink(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn publish(&self, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(temp, dest) }
+            fn clone_file(&self, source: &File, parent: &Dir, dest: &Path) -> io::Result<File> { RealCopyOps.byte_copy(source, parent, dest) }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { panic!("unneeded byte copy") }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(parent, temp, dest) }
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source"); let dest = dir.path().join("dest");
@@ -332,22 +475,23 @@ mod tests {
 
     #[test]
     fn source_change_during_copy_has_no_trusted_baseline() {
-        struct ChangingSource;
+        struct ChangingSource(PathBuf);
         impl CopyOps for ChangingSource {
-            fn clone_file(&self, source: &Path, dest: &Path) -> io::Result<()> {
-                fs::copy(source, dest)?;
-                fs::write(source, b"newer-longer")
+            fn clone_file(&self, source: &File, parent: &Dir, dest: &Path) -> io::Result<File> {
+                let copied = RealCopyOps.byte_copy(source, parent, dest)?;
+                fs::write(&self.0, b"newer-longer")?;
+                Ok(copied)
             }
-            fn byte_copy(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn symlink(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn publish(&self, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(temp, dest) }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { unreachable!() }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(parent, temp, dest) }
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source"); let dest = dir.path().join("dest");
         fs::create_dir(&source).unwrap(); fs::create_dir(&dest).unwrap();
         fs::write(source.join(".env"), b"secret").unwrap();
         let set = IncludeSet { entries: vec![super::super::IncludedEntry { path: b".env".to_vec(), kind: EntryKind::File }], unsupported: vec![] };
-        let outcome = copy_include_set(&source, &dest, &set, &HashSet::new(), &ChangingSource);
+        let outcome = copy_include_set(&source, &dest, &set, &HashSet::new(), &ChangingSource(source.join(".env")));
         assert_eq!(outcome.copied, vec![(b".env".to_vec(), None)]);
         assert_eq!(fs::read(dest.join(".env")).unwrap(), b"secret");
         assert_eq!(outcome.warnings.len(), 1);
@@ -359,12 +503,12 @@ mod tests {
         use std::os::unix::fs::symlink;
         struct DeniedLink;
         impl CopyOps for DeniedLink {
-            fn clone_file(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn byte_copy(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
-            fn symlink(&self, _: &Path, _: &Path) -> io::Result<()> {
+            fn clone_file(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { unreachable!() }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { unreachable!() }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> {
                 Err(io::Error::from_raw_os_error(1314))
             }
-            fn publish(&self, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, _: &Dir, _: &Path, _: &Path) -> io::Result<()> { unreachable!() }
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source"); let dest = dir.path().join("dest");
@@ -391,5 +535,65 @@ mod tests {
         let outcome = copy_include_set(&source, &dest, &set, &HashSet::new(), &Fallback);
         assert_eq!(outcome.skipped, vec![(b"nested/.env".to_vec(), SkipReason::UnsafePath)]);
         assert!(!outside.join(".env").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_swap_after_validation_copies_only_opened_file() {
+        use std::os::unix::fs::symlink;
+        struct SwapSource { path: PathBuf, outside: PathBuf }
+        impl CopyOps for SwapSource {
+            fn clone_file(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File> {
+                fs::rename(&self.path, self.path.with_extension("original"))?;
+                symlink(&self.outside, &self.path)?;
+                RealCopyOps.byte_copy(source, parent, temp)
+            }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { unreachable!() }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(parent, temp, dest) }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source"); let dest = dir.path().join("dest");
+        let outside = dir.path().join("outside-secret");
+        fs::create_dir(&source).unwrap(); fs::create_dir(&dest).unwrap();
+        fs::write(source.join(".env"), b"inside").unwrap();
+        fs::write(&outside, b"outside").unwrap();
+        let set = IncludeSet { entries: vec![super::super::IncludedEntry { path: b".env".to_vec(), kind: EntryKind::File }], unsupported: vec![] };
+        let outcome = copy_include_set(&source, &dest, &set, &HashSet::new(),
+            &SwapSource { path: source.join(".env"), outside: outside.clone() });
+        assert!(outcome.failed.is_empty(), "{outcome:?}");
+        assert_eq!(outcome.copied, vec![(b".env".to_vec(), None)]);
+        assert_eq!(outcome.warnings.len(), 1);
+        assert_eq!(fs::read(dest.join(".env")).unwrap(), b"inside");
+        assert_eq!(fs::read(outside).unwrap(), b"outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_parent_swap_never_creates_an_outside_file() {
+        use std::os::unix::fs::symlink;
+        struct SwapParent { parent: PathBuf, outside: PathBuf }
+        impl CopyOps for SwapParent {
+            fn clone_file(&self, source: &File, parent: &Dir, temp: &Path) -> io::Result<File> {
+                fs::rename(&self.parent, self.parent.with_file_name("moved"))?;
+                symlink(&self.outside, &self.parent)?;
+                RealCopyOps.byte_copy(source, parent, temp)
+            }
+            fn byte_copy(&self, _: &File, _: &Dir, _: &Path) -> io::Result<File> { unreachable!() }
+            fn symlink(&self, _: &Path, _: &Dir, _: &Path) -> io::Result<()> { unreachable!() }
+            fn publish(&self, parent: &Dir, temp: &Path, dest: &Path) -> io::Result<()> { RealCopyOps.publish(parent, temp, dest) }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source"); let dest = dir.path().join("dest");
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::create_dir_all(dest.join("nested")).unwrap(); fs::create_dir(&outside).unwrap();
+        fs::write(source.join("nested/.env"), b"inside").unwrap();
+        let set = IncludeSet { entries: vec![super::super::IncludedEntry { path: b"nested/.env".to_vec(), kind: EntryKind::File }], unsupported: vec![] };
+        let outcome = copy_include_set(&source, &dest, &set, &HashSet::new(),
+            &SwapParent { parent: dest.join("nested"), outside: outside.clone() });
+        assert!(outcome.failed.is_empty(), "{outcome:?}");
+        assert!(!outside.join(".env").exists());
+        assert_eq!(fs::read(dest.join("moved/.env")).unwrap(), b"inside");
     }
 }
