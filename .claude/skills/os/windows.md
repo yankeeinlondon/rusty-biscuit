@@ -24,6 +24,14 @@ helper that resolves it is named so it is not re-derived.
    `canonical_path` that strips the prefix for a drive-qualified path under 260
    characters and leaves a long or UNC one alone. Anywhere else, use
    `biscuit_file`.
+
+   Git for Windows also rejects a verbatim absolute path passed to
+   `ls-files --exclude-from=`. The include resolver uses
+   `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
+   paths remain inside the copy record's identity comparison.
+   `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
+   shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
+   The worktree copy fallback recognizes that form and byte-copies instead.
 2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
    a Windows test reads the machine's real `~/.claudine`. Use
