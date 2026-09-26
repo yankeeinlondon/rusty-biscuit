@@ -63,6 +63,15 @@ docs_created_during_phase_4:
     - sniff/fixes/2026-09-20-repo-perf/evidence/counters/README.md
 skills_files_updated_during_phase_4:
     - .claude/skills/sniff/performance.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_5:
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt
+skills_files_updated_during_phase_5: []
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -543,3 +552,121 @@ worker count.
 - Gates re-run: `just test` 2874 passed, 32 skipped; `just lint` exit 0 with
   no warnings.
 - The R7 escalation stands. Phase 5 waits on the author's decision.
+
+## Phase 5
+
+### Starting state and the pending decision (2026-09-25)
+
+- HEAD `b064c9b57` with a clean tree. `git diff HEAD -- sniff/lib Cargo.lock`
+  is empty, so Phase 5 validates the Phase 3 implementation exactly as Phase 4
+  measured it.
+- The Phase 4 R7 escalation (`human_review: true` on the spec) had **no
+  recorded author answer** when this phase was requested. Phase 5 ran anyway,
+  on explicit instruction, because it is validation only and changes no
+  production code. Its evidence holds under option 1 ("accept as
+  implemented", the recommendation). Under option 2 or 3 the production code
+  changes, and Phase 5 must be rerun on the new code. The escalation stays
+  open on the spec.
+
+### OS legs
+
+All four legs ran the same tree, `e13cb10e` (the local HEAD tree). The remote
+legs ran through `./scripts/cross-check.sh sniff --os all nested::tests
+--no-capture` (cross-check revision `cbddb64fe`, archive mode). The trimmed
+output is in `evidence/cross-os/cross-check-nested-tests.txt`.
+
+| Environment | Host | Focused `nested::tests` | Lint |
+|---|---|---|---|
+| macOS (aarch64) | this host | 22/22 inside full `just test` | `just lint` clean; strict clippy clean |
+| Linux | `build-linux` | 22/22 | `just lint` clean (throwaway worktree at `cbddb64fe`, same tree) |
+| Native Windows | `build-win-native` | 20/20 | not run (not required by the plan) |
+| WSL2 | `build-win` guest | 22/22 | — |
+
+- **macOS:** `just test` 2874 passed, 32 skipped (same as Phases 3 and 4).
+  `just lint` exit 0. `cargo clippy -p sniff --all-targets --features
+  remote,bench-internals -- -D warnings` and `cargo clippy -p sniff-cli
+  --all-targets -- -D warnings` are clean.
+- **Linux and WSL2:** `walked_marker_names_follow_the_platform_case_rules`
+  passed with the Unix branch in force, so byte-exact fixed marker names and
+  case-sensitive `.sln`/`.slnx` held under the real walk. WSL2 ran CI's
+  archive mode (built on the Ubuntu target, builder target directory hidden),
+  so it follows the Linux path; it is not evidence for native Windows.
+- **Native Windows:** the same test passed with the `cfg!(windows)` branch in
+  force, so ASCII case-insensitive fixed marker names held.
+  - The symlink tests (`a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling`,
+    `non_directory_symlinks_are_admitted_and_directory_links_are_not_followed`)
+    ran without printing a `SKIP` line, so the host granted symlink creation
+    (Developer Mode). No R5 skip happened on this run.
+  - Two tests are `#[cfg(unix)]` and do not compile on Windows, which is why
+    it runs 20 tests instead of 22. This is by design and recorded here as the
+    R5/R6 platform skips:
+    - `an_unreadable_directory_is_skipped_and_the_walk_continues` (R6): a
+      mode-000 directory is the unprivileged read denial on Unix. Windows would
+      need ACL editing.
+    - `a_marker_named_symlinked_root_registers_no_candidate_outside_the_root`
+      (R5): its fixture is Unix-specific.
+- No `SKIP` line appeared on any leg, so no run was privileged or on a
+  filesystem that refused non-Unicode names.
+
+### Evidence bookkeeping
+
+- Behavioral runtime evidence (not cross-compilation) for the focused set now
+  exists for `{sniff, macos-latest, L1}` (full suite),
+  `{sniff, ubuntu-latest, L1}`, `{sniff, windows-latest, L1}`, and
+  `{sniff, wsl2-ubuntu, L1}`, in all three cases focused only.
+- **No CI receipt was published.** `cross-check` refuses to publish a filtered
+  run ("a filtered run does not cover the cell it would be published as"), and
+  this phase did not run the full remote L1 suites. Those cells stay
+  `execute ci pending` in `just ci-local --plan`, which is correct: the focused
+  runs are this fix's parity evidence, not a substitute for the package cells.
+- CI scope is unchanged by this fix. `git diff --name-only
+  origin/main...HEAD -- .github scripts/ci sniff/**/Cargo.toml .config` is
+  empty. The sniff cells in `just ci-local --plan` are the package's standard
+  tier declarations. No matrix cell or timing gate was added.
+
+### Darkmatter regression
+
+`just test` in `darkmatter/` was run with `--no-fail-fast` to get complete
+counts, because the default run cancelled about 2,100 tests after the first
+failure.
+
+- **8498 run: 8496 passed (4 slow), 2 failed, 12 skipped.**
+- The three observation-boundary tests passed:
+  - `the_observation_is_fixed_at_request_creation`
+  - `a_child_reads_the_observation_fixed_at_request_creation`
+  - `an_older_constructor_request_is_fixed_at_the_root_entry_not_by_the_child`
+- **The 2 failures are not caused by this fix and existed before this phase:**
+  - `feature_review_incident::the_shipped_feature_review_composes_and_names_its_spec`
+    and `feature_review_incident::the_typo_is_one_identifier_under_the_current_grammar`
+    both fail with `File not found: ../_writing-clearly.md`.
+  - Commit `6c682a7fd` on this branch (a prompts-only change) added
+    `::file ../_writing-clearly.md` to `prompts/_reviews/feature-review.md`.
+    The test fixture copies only that prompt, so the include cannot resolve.
+    No sniff code is involved.
+  - It is already fixed on `origin/fix/wt-ux` by `fe209ae0f`
+    ("test(darkmatter): stage _writing-clearly.md for the feature-review
+    incident tests"). It was not cherry-picked here, to keep this fix's diff
+    confined to sniff.
+  - Darkmatter L1 is in this branch's CI scope, so those two tests will be red
+    in CI until `fe209ae0f` (or an equivalent) reaches this branch.
+- The boundary tests were not weakened, and observation timing is untouched.
+
+### Requirement → test mapping
+
+No tests were added or renamed in this phase. The phase re-ran existing tests
+on each OS.
+
+| Requirement | Tests / gate | Result |
+|---|---|---|
+| AC6 macOS: `just test` + `just lint` | sniff `just test`, `just lint`, strict clippy | 2874 passed / 32 skipped; clean |
+| AC6 Linux runtime parity | 22 `nested::tests` on `build-linux` + `just lint` | 22/22; clean |
+| AC6 native Windows runtime parity, case-insensitive markers | 20 `nested::tests` on `build-win-native` | 20/20; 2 Unix-only tests by design |
+| AC6 WSL2 runtime parity | 22 `nested::tests` in archive mode on `build-win` | 22/22 |
+| AC6 no new CI cells or timing gates | `just ci-local --plan`; CI-config diff | unchanged |
+| AC7 darkmatter suite + 3 boundary tests | darkmatter `just test --no-fail-fast` | 8496/8498; boundary 3/3; 2 unrelated failures |
+
+### Skill update
+
+None. No architecture or workflow changed. The cross-check facts used here
+(filtered runs publish no receipt; use plain substring filters) are already in
+the `os` skill.

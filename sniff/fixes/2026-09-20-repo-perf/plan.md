@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-20
-phase: 4
+phase: 5
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-20-repo-perf
@@ -66,6 +66,15 @@ docs_created_during_phase_4:
     - sniff/fixes/2026-09-20-repo-perf/evidence/counters/README.md
 skills_files_updated_during_phase_4:
     - .claude/skills/sniff/performance.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_5:
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt
+skills_files_updated_during_phase_5: []
 ---
 
 # Parallelize the nested-marker walk — implementation plan
@@ -506,21 +515,21 @@ environment ban.
 **Work-group — OS legs** (macOS, Linux, native Windows, WSL2 run concurrently
 on their respective hosts):
 
-- [ ] **macOS leg**
+- [x] **macOS leg**
     - Confirm and record the full `just test` + `just lint` pass from Phase 3
       on this host as the macOS evidence cell.
-- [ ] **Linux leg**
+- [x] **Linux leg**
     - Run the focused parity/semantics/counter tests and `just lint` on a
       Linux host through existing workflows; record byte-exact marker-name
       assertions passing.
-- [ ] **Native Windows leg**
+- [x] **Native Windows leg**
     - Same focused set on native Windows: case-insensitive fixed-marker
       assertions are meaningful here; record any R5/R6 privilege-dependent
       skips (symlink elevation, permission denial) with rationale.
-- [ ] **WSL2 leg**
+- [x] **WSL2 leg**
     - Run the focused set inside WSL2 following the established reproduction
       path from the `os` skill; results join the Linux-path evidence.
-- [ ] **Evidence bookkeeping**
+- [x] **Evidence bookkeeping**
     - Record the `{package, environment, tier}` cells each run or reused
       evidence satisfies; cross-compilation alone is not runtime parity; no
       new CI matrix cells or timing gates are introduced — confirm the CI
@@ -528,13 +537,16 @@ on their respective hosts):
 
 **Work-group — downstream** (concurrent with the OS legs):
 
-- [ ] **Darkmatter regression**
+- [x] **Darkmatter regression**
     - `just test` in `darkmatter/` passes, explicitly including
       `the_observation_is_fixed_at_request_creation`,
       `a_child_reads_the_observation_fixed_at_request_creation`, and
       `an_older_constructor_request_is_fixed_at_the_root_entry_not_by_the_child`.
       Report the actual selected and passed test counts; do not weaken those
       tests or change observation timing to meet a performance goal.
+    - Phase 5 result: the three boundary tests pass; 8496/8498 pass, and the
+      2 failures (`feature_review_incident`) are unrelated to this fix and
+      already fixed on `fix/wt-ux` by `fe209ae0f` (see the Phase 5 log).
 
 **Validation checkpoint 5** — every OS leg has green focused parity evidence
 (fresh or qualifying reuse) with skips recorded; darkmatter suite green with

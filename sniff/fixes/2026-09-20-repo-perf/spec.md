@@ -34,11 +34,15 @@ human_review_items:
     - |-
         **Accept or change the parallel walk, given a measured slowdown on small folders**
 
-        **Why this must be decided before Phase 5.** Phase 5 tests the change on
-        every operating system and assumes the implementation is final. The plan
-        says that if small folders or concurrent use get noticeably slower, the
-        work stops and you decide. That condition was met. If you choose a
-        different design, Phase 5 would have to be run again on the new code.
+        **Why this must be decided before Phase 6.** Phase 6 writes the final
+        results and hands the fix over for review, so it needs to know which
+        design is final. The plan says that if small folders or concurrent use
+        get noticeably slower, the work stops and you decide. That condition was
+        met in Phase 4. Phase 5 (testing on every operating system) has since
+        been run on the current design and passed. If you choose option 1,
+        nothing needs to be rerun. If you choose option 2 or 3, the code changes,
+        so the Phase 3 tests, the Phase 4 measurements, and the Phase 5
+        operating-system runs must all be repeated on the new code.
 
         **What was measured on your Mac.** The host was heavily loaded by other
         sessions. The full numbers are in
@@ -116,23 +120,26 @@ human_review_items:
         option 2 is the reasonable fallback. Option 3 is better treated as a
         separate future fix.
 message_to_agent: |-
-    Phase 4 (claude/default) is done (measurement only; no source files changed, uncommitted docs/evidence
-    in the fix directory). It triggered plan ruling R7: tiny-tree single-request latency regressed
-    ~5-7x (+~3 ms per detect_repo_structure, caused by ignore 0.4.25's 1 ms idle-worker sleep poll plus
-    12 fresh threads per run; see evidence/after/worker-diagnostics.md). The spec's human_review_items
-    asks the author to choose: (1) accept as implemented, (2) fixed smaller worker cap, (3) adaptive
-    serial->parallel, (4) revert. Do NOT start Phase 5 until the author has answered. If they pick 1,
-    Phase 5 proceeds unchanged. If they pick 2 or 3, the production code changes: rerun the Phase 3
-    parity suite and the Phase 4 campaign (reuse evidence/after/bracket.sh.txt and
-    probes/probes.sh.txt; build each side in a fresh fixed-path worktree and measure against the
-    fix-sniff checkout as the corpus) before Phase 5.
-    What Phase 5 still needs from earlier phases:
-    (a) Run the OS legs with `just cross-check sniff --os <os> nested::tests`, using plain substring
-    filters (the remote shell breaks -E quoting) and --no-capture to see SKIP lines. Native Windows
-    (20/20) and Linux (22/22) passed in Phase 3. WSL2 has never been run.
-    (b) Lint with `--features remote,bench-internals`, because `--features network` alone has
-    pre-existing dead-code errors.
-    (c) Phase 4 gates: just test 2874 passed / 32 skipped; just lint and strict clippy are clean.
+    Phase 5 (claude/default) is done: validation only, no source files changed.
+    STILL OPEN: the Phase 4 R7 escalation (human_review_items) had no recorded author answer when
+    Phase 5 was requested. Phase 5 ran anyway because it changes no code. Do NOT write Phase 6's
+    results.md verdict as "accepted" unless the author has picked option 1. If they pick 2 or 3, the
+    production code changes and Phases 3, 4, and 5 must be rerun on it before Phase 6.
+    Phase 5 results (details in the implementation log, "## Phase 5"):
+    (a) Focused nested::tests passed on the same tree e13cb10e: Linux 22/22, native Windows 20/20
+    (2 tests are #[cfg(unix)] by design, R5/R6), WSL2 archive mode 22/22, and macOS inside full
+    `just test` (2874 passed / 32 skipped). No SKIP lines on any leg; Windows granted symlinks.
+    Output is in evidence/cross-os/cross-check-nested-tests.txt. Filtered cross-check runs publish
+    no CI receipt, so the CI sniff cells still show as pending; that is expected.
+    (b) `just lint` is clean on macOS and Linux; strict clippy (`--all-targets -D warnings`,
+    features remote,bench-internals) is clean for sniff and sniff-cli.
+    (c) darkmatter `just test --no-fail-fast`: 8496/8498 passed, 12 skipped, and the three
+    observation-boundary tests passed. The 2 failures (feature_review_incident::*, "File not found:
+    ../_writing-clearly.md") are unrelated to this fix: prompts commit 6c682a7fd broke the fixture,
+    and it is already fixed on origin/fix/wt-ux by fe209ae0f. It was not cherry-picked. Mention it in
+    results.md as a known issue from another change: darkmatter L1 will be red in CI until that fix
+    lands on this branch.
+    (d) CI scope is unchanged: no .github/ or scripts/ci or Cargo.toml changes on the branch.
 ---
 
 # Parallelize the nested-marker walk
