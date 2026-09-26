@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-20
-phase: 3
+phase: 4
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-20-repo-perf
@@ -45,6 +45,26 @@ docs_updated_during_phase_3:
     - sniff/fixes/2026-09-20-repo-perf/spec.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+    - .claude/skills/sniff/performance.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/environment.md
+docs_created_during_phase_4:
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/README.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/summary-table.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/worker-diagnostics.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/binaries.sha256
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/bracket.sh.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/summarize.py.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/raw/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/probes/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/README.md
+skills_files_updated_during_phase_4:
     - .claude/skills/sniff/performance.md
 ---
 
@@ -430,42 +450,42 @@ Depends on Phase 3 (so the measured code is the tested code). All timing tasks
 run serialized on the Phase 1 host; no concurrent workloads during timed
 regions. Alternation is mandatory to expose drift.
 
-- [ ] **Isolated walk A/B**
+- [x] **Isolated walk A/B**
     - Same-process alternation of the serial reference and the parallel walk
       (identical build, profile, host, fixture): debug and release, ≥3
       warmups, ≥20 samples per case, median and range, warmed-cache labeled.
       Corpus = the fixed-path worktree checkout of this monorepo. Record the
       observed worker count and worker policy alongside.
-- [ ] **End-to-end A/B**
+- [x] **End-to-end A/B**
     - In the fixed-path worktree, alternate `git switch` between the harness
       commit (baseline side) and the implementation commit (after side),
       rebuilding between switches; measure public
       `detect_repo_structure(<repo root>)` with the same sampling protocol
       and identical root spelling. Verify each measured request enters the
       fallback (counter check), never supplied evidence.
-- [ ] **Re-attribute composition**
+- [x] **Re-attribute composition**
     - Remeasure the attribution of `detect_repo_structure` elapsed time
       (walk vs other work) on the after side; compare against the historical
       ~60 ms-of-232 ms debug split rather than assuming it.
-- [ ] **Compare counters**
+- [x] **Compare counters**
     - Separately from timing, compare stable work counters before/after
       (fallback walks, manifest reads/parses, metadata probes): unchanged is
       expected — the mechanism is concurrent traversal plus retaining fewer
       paths, not fewer logical walks. Disappearing worker counts are a
       defect, not an optimization.
-- [ ] **Probe small and concurrent**
+- [x] **Probe small and concurrent**
     - Measure a tiny tree's single-request latency and concurrent detections
       at the normal local test-runner concurrency: throughput, resource use,
       and latency versus baseline. Report regressions and uncertainty
       explicitly; never hide them behind the large-checkout average.
-- [ ] **Apply the decision rule**
+- [x] **Apply the decision rule**
     - The claimed gain must exceed observed run-to-run variation on this
       checkout; compare against the historical 172→30 ms debug / 61→18 ms
       release walk-only figures as context only. Keep the walk's speedup,
       the command's speedup, and any compose claims strictly separate (no
       compose-suite claim without measuring that suite — out of scope here).
       If R7's material-regression condition triggers, stop and escalate.
-- [ ] **Preserve the evidence**
+- [x] **Preserve the evidence**
     - Store commands, raw samples, provenance (commits, environment, cache
       treatment, alternation order) under `evidence/after/` and
       `evidence/counters/`.

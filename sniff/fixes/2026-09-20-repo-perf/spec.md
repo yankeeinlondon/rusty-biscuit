@@ -29,27 +29,110 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-human_review: false
+human_review: true
+human_review_items:
+    - |-
+        **Accept or change the parallel walk, given a measured slowdown on small folders**
+
+        **Why this must be decided before Phase 5.** Phase 5 tests the change on
+        every operating system and assumes the implementation is final. The plan
+        says that if small folders or concurrent use get noticeably slower, the
+        work stops and you decide. That condition was met. If you choose a
+        different design, Phase 5 would have to be run again on the new code.
+
+        **What was measured on your Mac.** The host was heavily loaded by other
+        sessions. The full numbers are in
+        `sniff/fixes/2026-09-20-repo-perf/evidence/after/README.md`.
+
+        - On this monorepo, finding the nested projects is about 2.2× faster
+          end to end: 79 → 36 ms (release) and 244 → 107 ms (debug). The folder
+          scan alone is about 3× faster.
+        - On a tiny folder (8 files), every call is about 3 ms slower: 0.5 →
+          3.4 ms in release, 5–7× the old cost. Running such calls one after
+          another gives about 84% fewer per second.
+        - With 14 calls at once (your normal test concurrency), overall
+          throughput is unchanged. For large folders, though, the slowest 5% of
+          calls take 42% longer, and the process uses 15% more CPU and up to 31%
+          more memory.
+        - The cause is inside the `ignore` library. Each parallel scan starts
+          12 new threads, and idle threads check for more work every 1 ms. That
+          gives every scan a floor of about 3 ms, however small the folder.
+          With 4 threads the floor is about 1.7 ms. With 1 thread there is no
+          floor, but also no speedup.
+        - Who pays the 3 ms: every caller that asks only for repository
+          structure. That includes `sniff repo` commands, claudine completion and
+          composition, darkmatter compose, and sniff recent-commits.
+
+        **Options**
+
+        1. **Accept as implemented** (12 threads, the library default).
+           - Pros:
+             - biggest gain on real repositories;
+             - matches the spec exactly;
+             - no more work: Phase 5 proceeds now;
+             - the 3 ms is far below what a person notices on a command line,
+               and test suites run at 14-way concurrency, where throughput was
+               unchanged.
+           - Cons:
+             - tiny folders are 5–7× slower per call;
+             - code that calls this in a tight loop on small folders slows
+               noticeably;
+             - under heavy concurrency, large-folder tail latency and memory
+               use rise.
+        2. **Use a fixed, smaller thread count, such as 4.**
+           - Pros:
+             - keeps most of the gain: the scan takes 23 ms against 19 ms with
+               12 threads;
+             - roughly halves the small-folder penalty, to about 1.5 ms;
+             - starts far fewer threads when many calls run at once (56
+               against 168 for 14 calls).
+           - Cons:
+             - still about 7× slower on a tiny folder;
+             - the "4" is tuned on one machine;
+             - the spec says to keep the library default, so the spec must be
+               amended;
+             - the measurements (this phase) must be rerun before Phase 5.
+        3. **Scan serially first, and switch to parallel only once the folder
+           proves large.**
+           - Pros: removes the small-folder penalty and keeps the large-folder
+             gain.
+           - Cons:
+             - the spec explicitly puts "adaptive scheduling" out of scope, so
+               this needs a new spec or phase;
+             - more code, with a new threshold to choose;
+             - the equivalence tests must be extended.
+        4. **Revert to the serial scan.**
+           - Pros: no risk at all; nothing gets slower.
+           - Cons: gives up 44 ms (release) and 137 ms (debug) per call on real
+             repositories, which was the whole purpose of the fix.
+
+        **Recommendation: option 1 (accept as implemented).** The 3 ms cost is
+        real but small in absolute terms. Throughput at your normal test
+        concurrency did not change, and real repositories, where the time
+        actually hurt, get a 2× end-to-end gain. Options 2 and 3 each change the
+        agreed design on the strength of one noisy machine, and they add
+        re-measurement or a new spec. If you are worried specifically about
+        many large scans running at once (the tail-latency and memory rise),
+        option 2 is the reasonable fallback. Option 3 is better treated as a
+        separate future fix.
 message_to_agent: |-
-    Phase 3 (claude/default) is done, uncommitted in the working tree. The only non-test change is a
-    #[cfg(test)] hook in the nested.rs parallel callback (R2): the skip condition is split so that
-    tests::record_admitted_entry() runs for every entry past the depth-0/directory filters. Non-test
-    builds compile to the same logic Phase 2 committed. What Phase 4+ needs to know:
-    (1) The parity/semantics/counter suite lives in the nested.rs tests module (14 new tests, 13 run in
-    L1; git_ignore_rules_child is an #[ignore]d subprocess fixture launched by
-    git_ignore_rules_apply_under_an_isolated_git_configuration with HOME/USERPROFILE set to a temp home,
-    because ignore reads global excludes from the process home). It is inert when run by hand.
-    (2) For the Phase 5 OS legs, run `just cross-check sniff --os <os> nested::tests`. Native Windows
-    (20/20) and Linux (22/22) already passed in Phase 3. Windows really created symlinks (Developer
-    Mode is on, no R5 skip) and ran the non-Unicode walk half. Linux ran the mode-000 denial. WSL2 has
-    not been run. cross-check cannot take a nextest -E filterset with parentheses (the remote shell
-    breaks the quoting), so use plain substring filters, and pass --no-capture to see SKIP lines.
-    (3) Worker-count evidence (wide 522-entry fixture, default policy) is already recorded in the
-    Phase 3 log: 10 threads on this Mac, 12 on Linux and on Windows. Phase 4 still needs the corpus
-    worker count.
-    (4) Unchanged: lint with bench-internals or remote,bench-internals, because --features network
-    alone has pre-existing dead-code errors. ManifestIndex::build's latent activate-first pattern is
-    still deliberately out of scope.
+    Phase 4 (claude/default) is done (measurement only; no source files changed, uncommitted docs/evidence
+    in the fix directory). It triggered plan ruling R7: tiny-tree single-request latency regressed
+    ~5-7x (+~3 ms per detect_repo_structure, caused by ignore 0.4.25's 1 ms idle-worker sleep poll plus
+    12 fresh threads per run; see evidence/after/worker-diagnostics.md). The spec's human_review_items
+    asks the author to choose: (1) accept as implemented, (2) fixed smaller worker cap, (3) adaptive
+    serial->parallel, (4) revert. Do NOT start Phase 5 until the author has answered. If they pick 1,
+    Phase 5 proceeds unchanged. If they pick 2 or 3, the production code changes: rerun the Phase 3
+    parity suite and the Phase 4 campaign (reuse evidence/after/bracket.sh.txt and
+    probes/probes.sh.txt; build each side in a fresh fixed-path worktree and measure against the
+    fix-sniff checkout as the corpus) before Phase 5.
+    What Phase 5 still needs from earlier phases:
+    (a) Run the OS legs with `just cross-check sniff --os <os> nested::tests`, using plain substring
+    filters (the remote shell breaks -E quoting) and --no-capture to see SKIP lines. Native Windows
+    (20/20) and Linux (22/22) passed in Phase 3. WSL2 has never been run.
+    (b) Lint with `--features remote,bench-internals`, because `--features network` alone has
+    pre-existing dead-code errors.
+    (c) Phase 4 gates: just test 2874 passed / 32 skipped; just lint and strict clippy are clean.
 ---
 
 # Parallelize the nested-marker walk

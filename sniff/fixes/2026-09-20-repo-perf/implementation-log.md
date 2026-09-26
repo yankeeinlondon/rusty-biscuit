@@ -43,6 +43,26 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/sniff/performance.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/environment.md
+docs_created_during_phase_4:
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/README.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/summary-table.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/worker-diagnostics.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/binaries.sha256
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/bracket.sh.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/summarize.py.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/raw/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/probes/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/README.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/performance.md
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -386,3 +406,140 @@ shared projection bug cannot pass.
   `increment_counter_dynamic` cannot;
 - the trap that `ignore`'s global excludes come from the process's
   `HOME`/`USERPROFILE`, and the child-process isolation pattern.
+
+## Phase 4
+
+### Starting state (2026-09-25)
+
+- Phase 3 is committed. `HEAD` is `2f4eb5264`, and the working tree was clean.
+- Commits now exist for both sides, so the A/B could follow ruling R3
+  properly:
+  - baseline side = harness commit `43a08f94e` (serial walk);
+  - after side = `2f4eb5264`, the tested code. Its non-test lib code equals
+    implementation commit `f9af74815`.
+- `git diff --stat 43a08f94e 2f4eb5264 -- sniff/lib Cargo.lock` touches
+  `nested.rs` only.
+
+### Method
+
+- **Measurement worktree.** A fixed-path worktree,
+  `/Volumes/coding/wt/rusty-biscuit/repo-perf-measure`, was detached at each
+  side in turn. For each side it built the `perf` bench (release and dev),
+  `work_counts`, and a disposable probe example (untracked, deleted after
+  each build). The binaries were copied to `/tmp` and hashed. The worktree
+  was removed afterwards.
+- **Deviation from R3.** Both sides were measured against **this** checkout
+  as the corpus, instead of each side's switched checkout. The corpus
+  therefore stayed byte-identical: 12,908 entries in every bracket. Evidence
+  was written to `/tmp` during timing and copied in afterwards, so the
+  corpus never changed mid-campaign.
+- **Timing.**
+  - Three alternated Criterion brackets (r1, r2 reversed, r3), four
+    invocations each, with 3 s warm-up and 20 flat samples.
+  - Two alternated probe rounds covering tiny-tree latency (20 samples ×
+    200 iterations, case order rotated) and concurrent detections at 1 and
+    14 threads (nextest concurrency). Resource use came from
+    `/usr/bin/time -l`.
+- **Host load.** It was heavy and uncontrolled, with a 1-minute load average
+  of 11–90 from other sessions. Every log records it.
+- **Worker diagnostics.** Two temporary `#[ignore]`d tests ran in the
+  measurement worktree only, then were reverted: the corpus worker count
+  (R2 counter), and a latency sweep by worker count through the R1 seam.
+  The fix branch's sources were not touched in this phase.
+
+### Results (medians of bracket medians; full tables in `evidence/after/README.md`)
+
+| Measure | Baseline | After | Change |
+|---|---:|---:|---|
+| Walk, release (same-process serial reference → parallel) | 66.53 ms | 22.57 ms | 2.95× |
+| Walk, debug | 173.83 ms | 53.00 ms | 3.28× |
+| `detect_repo_structure(<repo root>)`, release | 79.40 ms | 35.71 ms | 2.22× |
+| `detect_repo_structure(<repo root>)`, debug | 243.66 ms | 106.91 ms | 2.28× |
+| Tiny tree `detect_repo_structure`, release | 0.49 ms | 3.36 ms | **+2.9 ms (≈6.8×)** |
+| Tiny tree `detect_repo_structure`, debug | 0.80 ms | 4.05 ms | **+3.2 ms (≈5×)** |
+| Tiny, 1 thread × 400 requests, throughput | ≈1,940 req/s | ≈300 req/s | **−84%** |
+| Tiny, 14 threads, throughput | ≈4,160 req/s | ≈4,075 req/s | −2% (noise) |
+| Corpus, 14 threads, throughput | ≈53 req/s | ≈52 req/s | −2% (noise) |
+| Corpus, 14 threads, p95 latency / CPU / peak RSS | 285–296 ms / 33–35 s / 150–152 MB | 419–420 ms / 38–40 s / 174–196 MB | +42% / +15% / +14–31% |
+
+- **Corpus worker count:** all 12 default workers visited entries on 5 of 5
+  runs, in debug and release. The R2 counter matched the serial reference
+  exactly (12,908).
+- **Counters:** byte-identical for baseline against after, in both
+  profiles. They also match the Phase 1 snapshot
+  (`evidence/counters/README.md`). The fallback is entered in every measured
+  request (`nested_marker_walks = 1`).
+- **Attribution (after side):**
+  - Release "other work" is unchanged (≈13.6 → ≈13.1 ms).
+  - The debug subtraction is noisy (±11 ms), because the after-side isolated
+    debug walk ranged from 42 to 65 ms under load.
+- **Tiny-tree floor mechanism:** confirmed in the `ignore` 0.4.25 source.
+  - Idle workers poll with `thread::sleep(1 ms)` (`walk.rs:1848`), the walk
+    ends only once every worker is idle, and every `run` spawns fresh
+    threads (`walk.rs:1410`).
+  - Floor by worker count on the tiny tree: 1 worker 0.27 ms, 2 workers
+    1.58 ms, 4 workers 1.70 ms, 8 workers 2.18 ms, 12 workers 3.01 ms.
+  - On the corpus, 4 workers give 23.1 ms against 19.3 ms for 12.
+
+### Decision rule
+
+- **Gain versus variation:** the gain far exceeds run-to-run variation. Even
+  the worst after-side bracket beats the best baseline bracket by more than
+  40 ms (release) and more than 100 ms (debug). The walk and command
+  speedups are reported separately. No compose claim is made.
+- **R7 (material regression): triggered.**
+  - Tiny-tree single-request latency is about 5–7× worse (+3 ms per call).
+  - Sequential small-request throughput is down 84%.
+  - Concurrent large requests show worse tail latency and resource use.
+- **Scope of the regression:** every structure-only caller hits the fallback
+  and pays the floor. Those callers are `RepoRequest::structure()`, the
+  `sniff repo` commands, claudine completion and composition, darkmatter's
+  compose snapshot, and sniff recent-commits. Only `repo_full` requests
+  reuse the shared walk's evidence.
+- **Escalation:**
+  - Per the spec and R7, this phase stops and escalates: `human_review` is
+    set on the spec, with options.
+  - The implementation is unchanged. No worker cap, adaptive scheduling, or
+    pool was added.
+  - Phase 5, which assumes a frozen implementation, should wait for the
+    author's decision.
+
+### Gates
+
+- `just test` (sniff): **2874 passed, 32 skipped**. Identical to Phase 3; no
+  source changed in this phase.
+- `just lint`: clean.
+- `cargo clippy -p sniff --features remote,bench-internals --all-targets -- -D warnings`:
+  clean.
+- No tests were added or renamed: this phase is measurement only. The
+  temporary diagnostic tests lived only in the removed measurement worktree.
+- No cross-OS runs were made. Timing is a single-host (macOS) campaign by
+  design, and the cross-OS parity legs are Phase 5.
+
+### Requirement → evidence mapping
+
+| Plan task | Evidence |
+|---|---|
+| Isolated walk A/B (alternated, debug + release, ≥3 warmups, 20 samples, worker count) | `evidence/after/README.md`, `summary-table.md`, `raw/*.sample.json` + logs, `worker-diagnostics.md` |
+| End-to-end A/B (both commits, same root spelling, fallback verified) | same files; `probes/counters-mode.txt`; `evidence/counters/` |
+| Re-attribute composition | `evidence/after/README.md` § Re-attributed composition |
+| Compare counters | `evidence/counters/README.md` + four `work_counts-*.md` |
+| Probe small and concurrent | `evidence/after/probes/` (raw, probe source, script); README § Tiny tree and concurrent detections |
+| Apply the decision rule | README § Decision rule and escalation; spec `human_review_items` |
+| Preserve the evidence | `evidence/after/` (commands in `bracket.sh.txt`, `probes/probes.sh.txt`, `summarize.py.txt`; `binaries.sha256`), `evidence/counters/`, `evidence/environment.md` Phase 4 re-check |
+
+### Skill update
+
+`.claude/skills/sniff/performance.md` gained one trap bullet: the fixed
+per-walk cost of `ignore`'s `build_parallel()`, with the measured floor by
+worker count.
+
+### Re-verification (2026-09-25, later session)
+
+- A later session was asked to carry out Phase 4 and found it already done:
+  all plan tasks checked, evidence under `evidence/after/` and
+  `evidence/counters/`, and the escalation recorded in the spec.
+- No work was repeated. `git diff HEAD -- sniff/lib Cargo.lock` is empty.
+- Gates re-run: `just test` 2874 passed, 32 skipped; `just lint` exit 0 with
+  no warnings.
+- The R7 escalation stands. Phase 5 waits on the author's decision.
