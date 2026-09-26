@@ -1,7 +1,7 @@
 //! What removing a worktree's directory would delete, with consent required
 //! for dirty entries and selected ignored files that differ from their baseline.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 #[cfg(unix)]
 use std::ffi::OsStr;
 use std::fs;
@@ -43,19 +43,41 @@ impl Inventory {
     }
 
     /// Ignored names outside the protected included set, grouped for display.
+    /// A directory with a protected child is named through its disposable
+    /// descendants instead of hiding the whole directory.
     pub fn disposable_ignored_names(&self) -> Vec<String> {
         let protected: Vec<&PathBuf> = self.included.needs_consent.iter().map(|(path, _)| path).collect();
         let mut names = BTreeMap::<String, ()>::new();
         for entry in &self.ignored {
             if protected.contains(&entry) { continue; }
             let value = entry.to_string_lossy();
-            let name = match value.split_once('/') {
-                Some((first, _)) => format!("{first}/"), None => value.into_owned(),
-            };
+            let name = value.match_indices('/').map(|(index, _)| &value[..=index])
+                .find(|directory| !protected.iter().any(|path| path.starts_with(directory)))
+                .map_or_else(|| value.to_string(), str::to_owned);
             names.insert(name, ());
         }
-        names.retain(|name, _| !protected.iter().any(|path| path.starts_with(name)));
         names.into_keys().collect()
+    }
+
+    /// Expand Git's collapsed ignored directories only where a protected file
+    /// requires a more precise deletion summary.
+    pub fn expand_mixed_ignored(&mut self, base: &Path, worktree: &Path) -> Result<(), WorktreeError> {
+        let directories: BTreeSet<PathBuf> = self.ignored.iter()
+            .filter(|entry| entry.to_string_lossy().ends_with('/')
+                && self.included.needs_consent.iter().any(|(path, _)| path.starts_with(entry)))
+            .cloned().collect();
+        for directory in directories {
+            let pathspec = directory.to_str().map(|value| format!(":(literal){value}"));
+            let mut args = vec!["ls-files", "--others", "--ignored", "--exclude-standard", "-z"];
+            if let Some(pathspec) = &pathspec { args.extend(["--", pathspec.as_str()]); }
+            let output = git_from_bytes(base, worktree, &args, None)?;
+            self.ignored.retain(|entry| entry != &directory);
+            for bytes in output.split(|&byte| byte == 0).filter(|bytes| !bytes.is_empty()) {
+                let path = path_from_git(bytes)?;
+                if path.starts_with(&directory) { self.ignored.push(path); }
+            }
+        }
+        Ok(())
     }
 
     /// Parses `git status --porcelain=v1 -z --ignored=matching` output,
@@ -362,6 +384,27 @@ mod tests {
             inventory.disposable_ignored_names(),
             vec![".env", "logs/", "notes.md", "target/"]
         );
+    }
+
+    #[test]
+    fn mixed_ignored_directory_names_only_disposable_descendants() {
+        let repo = TestRepo::new();
+        let base = repo.path();
+        fs::write(base.join(".gitignore"), b"config/\ntarget/\n").unwrap();
+        repo.git(&["add", ".gitignore"]);
+        repo.git(&["commit", "-q", "-m", "ignore"]);
+        let wt = repo.add_linked_worktree("mixed");
+        fs::create_dir_all(wt.join("config/build")).unwrap();
+        fs::create_dir_all(wt.join("target")).unwrap();
+        for name in ["config/.env", "config/cache.bin", "config/build/output", "target/app"] {
+            fs::write(wt.join(name), b"local").unwrap();
+        }
+        let mut inventory = collect_inventory(&base, &wt).unwrap();
+        assert!(inventory.ignored.contains(&PathBuf::from("config/")));
+        inventory.included.needs_consent.push(("config/.env".into(), super::super::included::Mark::New));
+        inventory.expand_mixed_ignored(&base, &wt).unwrap();
+        assert_eq!(inventory.disposable_ignored_names(),
+            vec!["config/build/", "config/cache.bin", "target/"]);
     }
 
     #[test]

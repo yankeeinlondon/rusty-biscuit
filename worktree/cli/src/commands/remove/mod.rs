@@ -68,6 +68,7 @@ impl Facts {
     fn gather(base: &Path, entry: WorktreeEntry, force_remote: bool) -> Result<Self, WorktreeError> {
         let mut inventory = collect_inventory(base, &entry.path)?;
         inventory.included = classify_included(base, &entry.path, entry.branch.as_deref())?;
+        inventory.expand_mixed_ignored(base, &entry.path)?;
         let head = match &entry.branch {
             Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")])?,
             None => entry

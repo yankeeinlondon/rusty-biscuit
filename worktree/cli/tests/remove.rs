@@ -604,6 +604,26 @@ fn ordinary_ignored_entries_are_disposable() {
 }
 
 #[test]
+fn mixed_ignored_directory_report_names_disposable_files() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b"config/\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b"config/.env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::create_dir_all(wt.join("config")).unwrap();
+    fs::write(wt.join("config/.env"), b"secret").unwrap();
+    fs::write(wt.join("config/cache.bin"), b"cache").unwrap();
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
+        .assert().code(3)
+        .stderr(predicate::str::contains("config/.env (new)"))
+        .stderr(predicate::str::contains("Also deletes ignored files: config/cache.bin"));
+    assert!(wt.join("config/.env").exists());
+    assert!(wt.join("config/cache.bin").exists());
+}
+
+#[test]
 fn force_branch_on_a_dirty_worktree_without_force_worktree_is_a_conflict() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/x", "feat-x");
