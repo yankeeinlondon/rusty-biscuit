@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-25
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 related:
@@ -19,7 +19,31 @@ docs_created_during_phase_1:
     - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
 skills_files_updated_during_phase_1:
     - .claude/skills/os/windows.md
-packages: []
+packages:
+    - worktree
+    - worktree-cli
+source_files_during_phase_2:
+    - worktree/cli/src/exit.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/compare.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/include/copy.rs
+    - worktree/lib/src/include/mod.rs
+    - worktree/lib/src/include/rules.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/test_support.rs
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/os/windows.md
+    - .claude/skills/worktree/SKILL.md
 ---
 
 # Plan: `.worktreeinclude` support
@@ -114,24 +138,24 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
 
 ### Wave 2 — Shared scaffolding (single agent, small)
 
-- [ ] **Byte-exact git helper**
+- [x] **Byte-exact git helper**
     - Add `git::git_from_bytes(base, dir, args, stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError>`. It runs `git -C` from `base` like `git_from_raw`, and keeps the `count-git` recording.
-- [ ] **Error variants**
+- [x] **Error variants**
     - Add `IncludeRulesIndeterminate { path, reason }` and `IncludeSetDiscovery(String)` (exit 1), plus any variants S1–S4 showed are needed. Map them in `cli/src/exit.rs` (see R12).
-- [ ] **Test fixtures**
+- [x] **Test fixtures**
     - Extend `remove::test_support::TestRepo` with helpers: `write_ignored`, `write_include_rules`, `add_linked_worktree(branch)`, `with_global_excludes`, and a fixture-owned `XDG_CACHE_HOME` / `HOME` for the user cache.
     - The Windows user-cache caveat from the skill applies. Tests that seed a store use a fixture-owned directory, passed through an injectable store path rather than the real per-user path, where the API allows it.
-- [ ] **Clone dependency**
+- [x] **Clone dependency**
     - Add the dependency S2 chose to `lib/Cargo.toml`, and document it in `docs/dependencies.md`.
 
 ### Wave 3 — Modules (4 concurrent agents; disjoint files)
 
-- [ ] **Include set** (`lib/src/include/mod.rs`, `rules.rs`)
+- [x] **Include set** (`lib/src/include/mod.rs`, `rules.rs`)
     - `IncludeRules::locate(root) -> Present(PathBuf) | Empty | Missing | Indeterminate(reason)`, per R7.
     - `resolve_include_set(base, worktree, rules_file) -> Result<IncludeSet, WorktreeError>` implements the two-step pipeline from S1, with native-byte paths (R5). Reject non-file candidates and check every ancestor for links or reparse points: Git for Windows can enumerate through a junction.
     - `IncludeSet` holds `entries: Vec<IncludedEntry { path: Vec<u8>, kind }>` and `unsupported: Vec<(path, kind)>`. It never contains `.git` administrative files or empty directories.
     - L1 tests cover acceptance criterion 1, plus from criterion 5: empty versus missing rules, unreadable rules, a directory in place of the file, a symlinked rules file outside the checkout, ordered negation, the negated-child-under-excluded-parent example, global and nested excludes, filenames with spaces and newlines, nested repositories, submodules, and linked directories.
-- [ ] **Comparison contract** (`lib/src/compare.rs`)
+- [x] **Comparison contract** (`lib/src/compare.rs`)
     - `Observation { kind: File | Symlink { target_bytes }, size, digest: Option<[u8; 32]> }`, and a `Policy` enum: `Included` (R1) and `DirtyHandoff` (reserved for `2026-09-25-list-remove-performance`, which adds `mtime` and `HASH_ALWAYS_BELOW` when it lands).
     - `observe(path, reader: &dyn ReadCounter) -> Result<Observation>` reads with `symlink_metadata` and never follows links.
     - `compare(baseline: &Observation, path, reader) -> Unchanged | Changed | Missing | Unknown(reason)`, with these rules:
@@ -142,12 +166,12 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
     - `digest_file` uses `biscuit_hash::blake3_hash_reader`.
     - The injected `ReadCounter` lets tests count full-content reads (acceptance criterion 7).
     - L1 tests cover: a same-size edit that restores mtime, for a small and a large file (both detected); a size change classified without a read; a large same-size file that is read; symlink target changes; a kind change; an unreadable file.
-- [ ] **Copy record store** (`lib/src/copy_record.rs`)
+- [x] **Copy record store** (`lib/src/copy_record.rs`)
     - A versioned `CopyRecord { format_version, worktree: canonical path, admin_dir, registration: <S3 field>, source: canonical path + label, files: Vec<(path_hex, Observation)> }`.
     - `record_path(repo_root, worktree)`, `write_atomic` (via `cache::atomic_write`, with mode `0600` on Unix set *before* rename), `delete`, and `load(repo_root, worktree, expected_identity) -> Trusted(record) | Absent | Untrusted(reason)`. A corrupt, incompatible, or identity-mismatched record is always `Untrusted`, never an error.
     - `prune(repo_root, live_worktrees: &HashSet<PathBuf>)` scans only this repository's `copy-*` files.
     - L1 tests cover: round trip, corruption, a version bump, identity mismatch, two concurrent writers for different worktrees not clobbering each other, prune leaving live records alone, and unreadable-directory behavior.
-- [ ] **Copy engine** (`lib/src/include/copy.rs`)
+- [x] **Copy engine** (`lib/src/include/copy.rs`)
     - `copy_include_set(source_root, dest_root, set, dest_index: &HashSet<Vec<u8>>, ops: &dyn CopyOps) -> CopyOutcome { copied: Vec<(path, Observation)>, skipped: Vec<(path, SkipReason)>, failed: Vec<(path, String)> }`.
     - `CopyOps` is the injectable seam (clone / byte-copy / symlink / publish-no-replace). `RealCopyOps` uses the S2 API and falls back to byte copy on "unsupported" or cross-volume errors.
     - Rules:
@@ -162,8 +186,8 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
 
 ### Checkpoint 2
 
-- [ ] `just test` and `just lint` pass in `worktree/`. The new modules have no callers yet, apart from tests.
-- [ ] Code review of the four modules against R1–R12 happens before integration starts, because every later phase depends on these contracts.
+- [x] `just test` and `just lint` pass in `worktree/`. The new modules have no callers yet, apart from tests.
+- [x] Code review of the four modules against R1–R12 happens before integration starts, because every later phase depends on these contracts.
 
 ---
 
