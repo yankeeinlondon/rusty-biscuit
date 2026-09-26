@@ -161,9 +161,10 @@ Each layer has one membership authority and zero or more task orchestrators.
 An orchestrator alone is not a monorepo. Package `standard` and `provenance`
 identify the membership authority and discovery method.
 
-Structure requests collect membership and minimum identity only. Use a focused
-request for selected manifest facts and full mode for inventory-backed
-enrichment.
+Structure requests collect membership and minimum identity only and read no
+lockfile, so provenance stays manifest-derived. Use a focused request for
+selected manifest facts and full mode for inventory-backed enrichment and
+lockfile corroboration; `with_lockfile_provenance` opts any tier in or out.
 
 ## Programs and subprocesses
 

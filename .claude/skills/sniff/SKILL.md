@@ -76,10 +76,12 @@ plans.
 | `minimal()` / `summary()` | Branch and dirty flag; no commits or worktrees |
 | `full()` | Commits, per-file stats, worktrees; no unified diffs or network |
 | `deep()` | Adds unified diffs, branch detail, containment, and explicit remote refresh |
-| `RepoRequest::structure()` | Membership and minimum package identity only |
-| `RepoRequest::focused(...)` | Selected manifest-backed facts without full inventory |
-| `RepoRequest::full()` | Inventory-backed enrichment and repository-wide observations |
+| `RepoRequest::structure()` | Membership and minimum package identity only; no lockfile corroboration |
+| `RepoRequest::focused(...)` | Selected manifest-backed facts without full inventory or lockfile corroboration |
+| `RepoRequest::full()` | Inventory-backed enrichment, lockfile corroboration, and repository-wide observations |
 
+`RepoRequest::with_lockfile_provenance(bool)` sets layer lockfile
+corroboration on any tier; a serialized request without the field keeps it.
 `GitMetadataRequest` narrows legacy coarse requests; it never widens them.
 `metadata: None` derives legacy behavior and is required for serialized-plan
 compatibility.

@@ -70,6 +70,22 @@ the execution report correctly shows zero `GIT_DISCOVERIES`; use the caller's
 request-local accounting for the already completed acquisition rather than
 inventing a second Sniff increment.
 
+### Lockfile corroboration is a request option
+
+`RepoRequest::lockfile_provenance` decides whether each workspace layer is
+corroborated against its `Cargo.lock`, `pnpm-lock.yaml`, or `uv.lock`.
+`structure()` and `focused(..)` decline it, `full()` requests it, and
+`with_lockfile_provenance(bool)` overrides either. A serialized request without
+the field deserializes as `true`. Declining keeps provenance manifest-derived
+and `lockfile_match` `None`; it does not stop a dependency request from
+reading `Cargo.lock` for versions.
+
+`REPO_LOCKFILE_READS` (`filesystem.repo.lockfile_reads`) counts read
+*attempts*, including an absent lockfile; `REPO_LOCKFILE_PARSES` counts only
+reads that succeeded. A structure request that reads no lockfile shows neither
+counter. Both lockfile read sites (`read_counted_lockfile` and
+`CargoLockVersions::parse`) must increment both counters.
+
 ## Known baseline boundaries
 
 - Early filesystem baselines undercount manifest-index file opens and bytes.
@@ -115,5 +131,11 @@ inventing a second Sniff increment.
   against 0.23 ms for a serial `build()` walk. Benchmark tiny trees and
   concurrent callers, not just a large checkout, before converting a
   per-request walker (`2026-09-20-repo-perf` `evidence/after/`).
+- The nested-marker fallback walk therefore caps its workers at
+  `min(available_parallelism, 4)` (`MAX_NESTED_WALK_WORKERS`), not
+  `ignore`'s default of 12. Against 12 workers, this cost about 4.5 ms on this
+  checkout but cut the 8-file tree from about 3.2 to 2.0 ms, 14-way concurrent
+  p95 by about 20%, and peak memory by about 22%
+  (`2026-09-20-repo-perf` `evidence/worker-cap/`).
 - The previously evaluated small hot-path changes were below the project
   threshold. Revisit them only with new counter or profile evidence.
