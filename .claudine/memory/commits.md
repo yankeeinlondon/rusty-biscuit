@@ -450,17 +450,44 @@ belong here.
   the superseded specs were already tracked at HEAD and only their
   `status:` flipped.
 - `planning(<area>): close <fix> as invalidated` is distinct from
-  `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
-  (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
-  <date>` to the frontmatter and prepends a viability-review section
-  that names the upstream work that pre-empted the fix and the
-  contracts the proposed boundary would have violated. The original
-  investigation is retained as historical evidence; requirements and
-  success criteria are explicitly marked superseded by the review. Do
-  not confuse with supersession (consolidation entry above): invalidation
-  has no successor spec and no `superseded_by:` pointer — the proposed
-  work is simply no longer needed. Example: `planning(sniff): close
-  2026-07-22-inefficient-calling fix as invalidated` (`1881b7919`).
+    `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
+    (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
+    <date>` to the frontmatter and prepends a viability-review section
+    that names the upstream work that pre-empted the fix and the
+    contracts the proposed boundary would have violated. The original
+    investigation is retained as historical evidence; requirements and
+    success criteria are explicitly marked superseded by the review. Do
+    not confuse with supersession (consolidation entry above): invalidation
+    has no successor spec and no `superseded_by:` pointer — the proposed
+    work is simply no longer needed. Example: `planning(sniff): close
+    2026-07-22-inefficient-calling fix as invalidated` (`1881b7919`).
+- A cross-area feature directory relocation
+  (`<source-area>/features/<name>/` → `<dest-area>/features/<name>/`) ships
+  as one atomic `planning(repo): relocate <name> feature from <source-area>
+  to <dest-area>` commit because no single area owns the relocation event
+  (the source area is releasing the spec, the destination area is adopting
+  it, and the spec is being rewritten, not preserved — neither old nor new
+  `planning(<area>):` fits cleanly). The index pattern is `D + R + A`, not
+  pure renames: the source `spec.md` becomes a `D + A` pair when its
+  content changes substantially (e.g., a 223-line draft → 996-line
+  normative spec, well below git's 50% rename threshold), while the rest
+  of the directory's files (drafts, design notes) are `R`'s at 50%+ similarity.
+  Use the inline `-- <path>` pathspec form (per the rename-batch entry
+  above) so the rename destinations actually land; for N renames that's
+  `2N + 2` paths (N old + N new + 1 D + 1 A), well under the ~40-pair
+  inline limit. Verify with `git ls-tree HEAD <new-dir>/` (file count
+  matches the original directory) and `git ls-tree HEAD <old-dir>/`
+  (empty). Downstream doc references in parent specs, sibling features,
+  docs topics, area design notes, and the repo-wide kind catalog that
+  point at the old path belong in follow-up `docs(<area>):` (or
+  `planning(<area>):` for the parent spec) commits — splitting them
+  ships broken inter-doc links between the relocation and the path-fix
+  commits, and the parent spec's revision typically cites the new child
+  by path so it must land after the directory exists. See `fd43046c2`
+  for the `claudine` → `darkmatter` move of `2026-09-21-schema-enhancements`
+  (7 R + 1 D + 1 A = 16 paths inline; parent spec at
+  `darkmatter/features/2026-09-16-expression-type-system/spec.md` and 3
+  doc references in follow-up commits).
 
 - An in-design.md supersede (a decision `D{N}` confirmed and then explicitly
   replaced by `D{N+1}` within the same human review checkpoint, e.g. when
