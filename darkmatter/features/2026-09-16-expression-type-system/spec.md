@@ -1,10 +1,13 @@
 ---
 created: 2026-09-16
 status: draft
-clarified: true
-needs_rulings: false
+clarified: false
+needs_rulings: true
 clarified_by: codex/gpt-6-astra
 references:
+  merge-decisions.md: >-
+    Confirmed decisions and remaining questions while absorbing
+    2026-09-21-schema-enhancements.
   spikes/function-declarations-findings.md: >-
     Findings from the completed passive function-declaration representation
     prototype, including parser evidence, compatibility gaps, and limits.
@@ -21,14 +24,21 @@ supersedes:
 Chartered by the dasherized-identifiers feature's ratified "ship now +
 charter" split ([2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md),
 Resolved Decision 16). This clarified document combines a phased charter, confirmed requirements,
-and implementation-planning details; it is ready for planning. The
+and implementation-planning details. Its schema-enhancement consolidation is
+under clarification; the earlier planning-ready assessment applies to the
+pre-consolidation scope. The
 2026-09-16 clarification session settled the three-way disposition of the
 earlier drafts (see [Lineage](#lineage)) and re-homed the July draft's
 design into the [declarations annex](declarations-design.md), which now carries the Phase C/E detail.
 
 ## Status
 
-Clarification and risk review are complete; no human rulings remain. The
+The original charter completed clarification and risk review. Consolidation
+with `2026-09-21-schema-enhancements` is now in progress, favoring the newer
+proposal where compatible. Confirmed merge decisions are recorded in
+[merge-decisions.md](merge-decisions.md) and take precedence over inherited
+compatibility requirements. Remaining conflicts are being resolved one at a
+time before the merged charter is ready for planning. The
 phases below are a charter, not an implementation plan;
 Phase C/E design detail lives in the
 [declarations annex](declarations-design.md). Splitting into per-increment
@@ -83,7 +93,9 @@ Consequences:
   unknown values or remove existing runtime checks.
 - **Phase B — function schemas in SimplifiedSchema.** Express the
   expression-engine function catalog's signatures in SimplifiedSchema,
-  unifying the ad-hoc `ParamType` system; preserve the parity tests. Built-in
+  unifying the ad-hoc `ParamType` system. Retain coverage of the existing
+  catalog, updating behavioral expectations for explicitly approved changes
+  rather than requiring preservation of inconsistent legacy conversions. Built-in
   and caller-supplied functions share the full declaration contract below.
 - **Phase C — type-aware parsing/evaluation.** Untyped variables default to
   `unknown`; optional-but-typed properties carry `A | null`, with null as
@@ -336,6 +348,20 @@ its exact configuration surface remains a planning detail. The CLI policy
 verbs and diagnostic boundaries are defined below.
 
 ### One function contract for built-ins and host extensions
+
+**Merge decision M1 (2026-09-25):** adopt the newer shared argument-conversion
+rules, rather than preserving each function's historical conversion policy.
+Functions declare the values their implementations need; Darkmatter validates
+and performs permitted conversions before invocation. For example,
+`min("4", 5)` accepts a numeric-string conversion, while `is_positive(true)`
+rejects a boolean instead of treating it as one. Inspecting predicates such as
+`is_number` still receive their `unknown`/`any` argument unchanged. Do not add
+per-function legacy modes or a separate rule set for old functions.
+
+Every changed behavior must be documented and tested through normal dispatch.
+This decision does not settle missing/null values, explicit conversion
+fallbacks, or other open function contracts; see the merge decision record.
+It does not change frontmatter presence rules or expression operators.
 
 Darkmatter's function declarations must describe parameter and result
 types, supported conversions, advisory handling of unsupported inputs, and
@@ -641,15 +667,20 @@ does not validate all nested definitions or the meaning of behavior
 metadata. No generic checker, editor integration, argument conversion,
 overload dispatcher, or function execution was proven. Catalog types alone
 also do not capture every runtime conversion and fallback: migration must
-preserve actual behavior rather than introduce stricter rejection from the
-displayed type. Full-catalog parity and metadata validation remain required
+inventory actual behavior rather than infer it from the displayed type.
+Preserve it except where merge decisions explicitly adopt a new contract;
+M1 replaces inconsistent per-function conversion with shared rules.
+Full-catalog coverage and metadata validation remain required
 implementation evidence.
 
 Independent clarity and risk review found no remaining blocking human
-rulings. The specification is ready for planning around the agreed type
+rulings for the original scope. That review established planning readiness
+around the agreed type
 vocabulary, shared declarations, guarded calls, passive diagnostics, and
-CLI policy migration. No further prototype is required; the limits above
-are explicit planning and validation work.
+CLI policy migration. The subsequent schema-enhancement merge reopens only
+its identified conflicts; see the merge decision record. No further prototype
+is required by the original review; the limits above remain explicit planning
+and validation work.
 
 ## Performance and Completion Criteria
 
@@ -673,7 +704,7 @@ must hold on macOS, Linux, native Windows, and WSL2.
 | Phase | Required evidence |
 |---|---|
 | A — type vocabulary | Schema parser and validator cover `unknown`/`any`, null, required-null behavior, and inclusive/exclusive union cases above |
-| B — shared function declarations | Full catalog information and behavior parity, including parameter/result types, conversions, advisory behavior, and true-result facts; built-ins and host extensions use shared metadata without host-specific analysis |
+| B — shared function declarations | Full catalog coverage, including parameter/result types, conversions, advisory behavior, and true-result facts; preserved behavior and approved changes have explicit tests; built-ins and host extensions use shared metadata without host-specific analysis |
 | C — declarations and evaluation | All annex library and host-integration acceptance paths pass, including effective-schema projection and conservative raw JSON Schema coverage; any increment deferral is documented |
 | D — narrowing | Runtime and editor analysis agree for truthiness, conditional blocks, ternaries, guarded `&&` calls, and declared predicate facts, without stored-value mutation |
 | E — diagnostics and CLI | CLI/DMLS share diagnostic codes and source positions; null-admitting parameter handling replaces the interim suppression rule; all affected command surfaces, policies, output formats, and migration cases are covered |
@@ -707,9 +738,11 @@ approved or added by this clarification.
 
 ### Human rulings
 
-No human rulings remain after clarification, independent review, and the
-completed representation prototype. The details below are implementation
-planning work within the confirmed requirements.
+The original clarification and representation prototype resolved the original
+scope. The schema-enhancement merge introduces additional decisions tracked in
+[merge-decisions.md](merge-decisions.md). M1 is confirmed; remaining conflicts
+must be settled before consolidation is complete. The details below remain
+implementation-planning work except where that record identifies a conflict.
 
 ### Implementation-planning details
 
