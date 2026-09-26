@@ -126,6 +126,241 @@ impl Drop for Fixture {
     }
 }
 
+#[test]
+fn unchanged_included_copy_and_other_ignored_files_remove_without_force() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\ntarget/\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+    let created = fixture.wt(&fixture.repo()).args(["create", "included"])
+        .env("WT", fixture.root.path().join("wts")).output().unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let target = fixture.root.path().join("wts/repo/included");
+    let record = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    assert!(record.exists());
+    fs::create_dir_all(target.join("target")).unwrap();
+    fs::write(target.join("target/build"), b"generated").unwrap();
+    fs::write(fixture.repo().join(".env"), b"SECRET=new\n").unwrap();
+    let removed = fixture.wt(&fixture.repo()).args(["remove", "included"])
+        .output().unwrap();
+    assert!(removed.status.success(), "{}", String::from_utf8_lossy(&removed.stderr));
+    assert!(!target.exists());
+    assert!(!record.exists());
+}
+
+fn setup_included(fixture: &Fixture) -> PathBuf {
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["create", "included"])
+        .env("WT", fixture.root.path().join("wts")).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    fixture.root.path().join("wts/repo/included")
+}
+
+#[test]
+fn changed_included_copy_requires_force_and_preserves_state_on_refusal() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    fs::write(target.join(".env"), b"SECRET=new\n").unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let report = String::from_utf8_lossy(&output.stderr);
+    assert!(report.contains(".env") && report.contains("changed"), "{report}");
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+    fixture.wt(&fixture.repo()).args(["remove", "included", "--force-worktree"])
+        .assert().code(0);
+    assert!(!target.exists());
+}
+
+#[test]
+fn same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes() {
+    for size in [11, 2_000_000] {
+        let fixture = Fixture::new();
+        fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+        fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+        git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+        git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+        fs::write(fixture.repo().join(".env"), vec![b'a'; size]).unwrap();
+        fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+        let created = fixture.wt(&fixture.repo()).args(["create", "included"])
+            .env("WT", fixture.root.path().join("wts")).output().unwrap();
+        assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+        let target = fixture.root.path().join("wts/repo/included");
+        let path = target.join(".env");
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, vec![b'b'; size]).unwrap();
+        fs::File::options().write(true).open(&path).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
+        let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+        assert_eq!(output.status.code(), Some(3), "size={size}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("changed"));
+        assert_eq!(fs::read(path).unwrap(), vec![b'b'; size]);
+    }
+}
+
+#[test]
+fn no_record_uses_distinct_source_and_new_file_needs_consent() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).assert().code(0);
+    assert!(!target.exists());
+
+    let target = fixture.add_worktree("feat/y", "feat-y");
+    fs::write(target.join(".env"), b"SECRET=new\n").unwrap();
+    fs::remove_file(fixture.repo().join(".env")).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-y"]).assert().code(3)
+        .stderr(predicate::str::contains(".env"))
+        .stderr(predicate::str::contains("new"));
+    assert!(target.join(".env").exists());
+}
+
+#[test]
+fn no_record_source_change_refuses_handoff() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    let (landing, token) = first_run(&fixture, &target, &[]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=new\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("copy baseline"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn no_record_uses_the_checked_out_fork_parent_as_source() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"BASE=1\n").unwrap();
+    let parent = fixture.add_worktree("feat/parent", "parent");
+    fs::write(parent.join(".env"), b"PARENT=1\n").unwrap();
+    let target = fixture.add_worktree("feat/child", "child");
+    fs::write(target.join(".env"), b"PARENT=1\n").unwrap();
+    let path = worktree::fork_origin::fork_origin_path(&fixture.repo()).unwrap();
+    worktree::fork_origin::record(&path, "feat/child", worktree::fork_origin::ForkOrigin {
+        base_branch: "feat/parent".into(), base_sha: git(&fixture.repo(), &["rev-parse", "HEAD"]), created_at: 0,
+    }).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "child"]).assert().code(0);
+    assert!(!target.exists());
+    assert!(parent.join(".env").exists());
+}
+
+#[test]
+fn changed_include_rules_refuse_handoff_even_when_file_leaves_set() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included"]).assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    fs::write(target.join(".worktreeinclude"), b"other.env\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("include rules"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn changed_copy_record_refuses_handoff_and_keeps_registration() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included"]).assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    let path = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    value["source_label"] = serde_json::Value::String("changed source label".into());
+    fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("copy baseline"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn changed_included_contents_refuse_handoff_even_when_classification_stays_changed() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    fs::write(target.join(".env"), b"SECRET=one\n").unwrap();
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included", "--force-worktree"])
+        .assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    fs::write(target.join(".env"), b"SECRET=two\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("included files"));
+    assert_eq!(fs::read(target.join(".env")).unwrap(), b"SECRET=two\n");
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn corrupt_copy_record_falls_back_to_source_without_consent() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let path = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    fs::write(&path, b"{not json").unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("copy record is untrusted"));
+    assert!(!target.exists());
+    assert!(!path.exists());
+}
+
+#[test]
+fn unavailable_distinct_source_marks_included_file_unknown() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    let path = worktree::fork_origin::fork_origin_path(&fixture.repo()).unwrap();
+    worktree::fork_origin::record(&path, "feat/x", worktree::fork_origin::ForkOrigin {
+        base_branch: "feat/x".into(), base_sha: git(&fixture.repo(), &["rev-parse", "HEAD"]), created_at: 0,
+    }).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).assert().code(3)
+        .stderr(predicate::str::contains("unknown"));
+    assert!(target.join(".env").exists());
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"])
+        .assert().code(0);
+    assert!(!target.exists());
+}
+
+#[test]
+fn invalid_include_rules_fail_before_removal() {
+    let fixture = Fixture::new();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::create_dir(target.join(".worktreeinclude")).unwrap();
+    fs::write(target.join(".worktreeinclude/entry"), b"secret").unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"])
+        .assert().code(1);
+    assert!(target.join(".worktreeinclude/entry").exists());
+    assert!(fixture.branch_exists("feat/x"));
+    assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
+}
+
 // --- Flag surface -----------------------------------------------------------
 
 #[test]
@@ -345,7 +580,7 @@ fn example_all_three_flags_remove_worktree_branch_and_origin_branch() {
 // --- Ignored entries, conflicts, and remote failures -------------------------
 
 #[test]
-fn ignored_entries_need_consent_like_dirty_files() {
+fn ordinary_ignored_entries_are_disposable() {
     for (ignore, make) in [(".env", ".env"), ("target/", "target/debug/app")] {
         let fixture = Fixture::new();
         fs::write(fixture.repo().join(".gitignore"), format!("{ignore}\n")).unwrap();
@@ -360,17 +595,10 @@ fn ignored_entries_need_consent_like_dirty_files() {
             .wt(&fixture.repo())
             .args(["remove", "feat-x"])
             .assert()
-            .code(3)
-            .stderr(predicate::str::contains("Ignored files"))
+            .code(0)
+            .stderr(predicate::str::contains("Also deletes ignored files"))
             .stderr(predicate::str::contains("deletes"))
             .stderr(predicate::str::contains(ignore));
-        assert!(file.exists(), "{ignore}");
-
-        fixture
-            .wt(&fixture.repo())
-            .args(["remove", "feat-x", "--force-worktree"])
-            .assert()
-            .code(0);
         assert!(!wt.exists(), "{ignore}");
     }
 }
@@ -740,7 +968,7 @@ fn a_changed_branch_tip_between_the_runs_refuses_with_nothing_removed() {
 }
 
 #[test]
-fn a_new_ignored_entry_between_the_runs_refuses() {
+fn a_new_disposable_ignored_entry_between_the_runs_does_not_refuse() {
     let fixture = Fixture::new();
     fs::write(fixture.repo().join(".gitignore"), ".env\n").unwrap();
     git(&fixture.repo(), &["add", ".gitignore"]);
@@ -753,9 +981,8 @@ fn a_new_ignored_entry_between_the_runs_refuses() {
         .wt(&landing)
         .args(["remove", "--handoff", &token])
         .assert()
-        .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"));
-    assert!(wt.join(".env").exists());
+        .code(0);
+    assert!(!wt.exists());
 }
 
 /// Restaging keeps the status (`MM`) and the working bytes, even with
@@ -779,7 +1006,7 @@ fn a_restaged_version_between_the_runs_refuses_with_nothing_removed() {
         .args(["remove", "--handoff", &token])
         .assert()
         .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"))
+        .stderr(predicate::str::contains("uncommitted or included files"))
         .stderr(predicate::str::contains("Removed").not());
     assert_eq!(fs::read_to_string(wt.join("README.md")).unwrap(), "working copy\n");
     assert_eq!(git(&wt, &["show", ":README.md"]), "new staged work");
@@ -813,7 +1040,7 @@ fn changes_inside_an_untracked_nested_repo_between_the_runs_refuse_with_nothing_
         .args(["remove", "--handoff", &token])
         .assert()
         .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"))
+        .stderr(predicate::str::contains("uncommitted or included files"))
         .stderr(predicate::str::contains("Removed").not());
     assert_eq!(fs::read_to_string(wt.join("nested/notes")).unwrap(), "new work after approval\n");
     assert_eq!(fs::read_to_string(wt.join("nested/new-file")).unwrap(), "new work\n");
@@ -904,7 +1131,7 @@ mod non_utf8_paths {
             .args(["remove", "--handoff", token])
             .assert()
             .code(3)
-            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("uncommitted or included files"))
             .stderr(predicate::str::contains("Removed").not());
         assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
         assert!(fixture.branch_exists("feat/x"));
@@ -1032,7 +1259,7 @@ mod executable_bit {
             .args(["remove", "--handoff", &token])
             .assert()
             .code(3)
-            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("uncommitted or included files"))
             .stderr(predicate::str::contains("Removed").not());
         assert_eq!(fs::read_to_string(&script).unwrap(), "echo edited\n");
         assert_eq!(mode_of(&script), 0o755);

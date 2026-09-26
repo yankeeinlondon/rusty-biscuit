@@ -35,6 +35,7 @@ use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, SafetyInput, SniffPrSource, assess,
 };
 use worktree::remove::{Inventory, collect_inventory, remove_local_branch, remove_worktree};
+use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
 
 pub use policy::Flags;
@@ -65,7 +66,8 @@ struct Facts {
 
 impl Facts {
     fn gather(base: &Path, entry: WorktreeEntry, force_remote: bool) -> Result<Self, WorktreeError> {
-        let inventory = collect_inventory(base, &entry.path)?;
+        let mut inventory = collect_inventory(base, &entry.path)?;
+        inventory.included = classify_included(base, &entry.path, entry.branch.as_deref())?;
         let head = match &entry.branch {
             Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")])?,
             None => entry
@@ -265,7 +267,7 @@ fn refusal_markup(refusal: Refusal, display: &str) -> String {
     match refusal {
         Refusal::FilesNeedForce => format!(
             "\n<red><b>Nothing was removed.</b></red> Worktree <blue>{}</blue> has uncommitted or \
-            ignored files (listed above), and there is no terminal to confirm discarding them.\n  \
+            protected included files (listed above), and there is no terminal to confirm discarding them.\n  \
             <dim>Add <i>--force-worktree</i> to discard them.</dim>",
             esc(display)
         ),
@@ -281,9 +283,12 @@ fn ask(terminal: &Terminal, facts: &Facts, question: Question) -> Result<bool, W
     match question {
         Question::DiscardFiles => {
             eprintln!();
+            let included = facts.inventory.included.needs_consent.iter()
+                .map(|(path, _)| report::visible_include_path(path)).collect::<Vec<_>>();
+            let names = if included.is_empty() { "the files listed above".to_string() }
+                else { format!("the files listed above, including {}", included.join(", ")) };
             let label = Prose::new(format!(
-                "Discard the files listed above and remove worktree <blue>{}</blue>?",
-                esc(&facts.display_name)
+                "Discard {names} and remove worktree <blue>{}</blue>?", esc(&facts.display_name)
             ))
             .render(terminal);
             Confirm::new(&label)
@@ -334,6 +339,9 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
 /// branch on origin.
 fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
     remove_worktree(&facts.base, &facts.entry.path, actions.discard_files)?;
+    if let Some(warning) = worktree::copy_record::delete_for(&facts.base, &facts.entry.path) {
+        print(terminal, format!("<yellow>Warning:</yellow> could not delete copy record: {}", esc(&warning)));
+    }
     let mut removed = vec![format!("worktree {}", facts.display_name)];
     print(
         terminal,
@@ -497,6 +505,8 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
         fingerprint: fingerprint(facts)?,
+        rules: facts.inventory.included.rules.clone(),
+        baseline: facts.inventory.included.baseline.clone(),
         landing: canonical(&landing),
     };
     let token = handoff::new_token()?;
@@ -630,6 +640,8 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
         fingerprint: fingerprint(&facts)?,
+        rules: facts.inventory.included.rules.clone(),
+        baseline: facts.inventory.included.baseline.clone(),
         landing: canonical(&cwd),
     };
     match handoff::verify(&record, &fresh, &cwd) {
