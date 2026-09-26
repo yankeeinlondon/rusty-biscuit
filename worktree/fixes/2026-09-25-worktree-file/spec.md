@@ -23,6 +23,9 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-25
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+    Phase 1 selected a random marker in each Git worktree admin directory as the copy-record registration identity. Git reused the admin directory name after remove/prune/re-add on macOS, Linux, and Windows, but removed the marker on all three. See spikes.md and the amended R4 in plan.md. Git may return directory entries such as foreign/ for a directory-matching include pattern, and Git for Windows traverses junctions; reject non-file candidates and inspect every ancestor for links or reparse points before copying. On Windows, use byte streams for NUL-delimited Git I/O; PowerShell's text pipeline inserted a BOM in the probe. The Windows build host allowed symlink creation, so test raw OS error 1314 through an injected operation in Phase 2.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance

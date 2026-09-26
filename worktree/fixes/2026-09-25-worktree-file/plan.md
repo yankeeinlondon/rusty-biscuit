@@ -8,6 +8,18 @@ related:
     - 2026-09-25-worktree-file
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance
+source_files_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/spike_git.py
+    - worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1
+docs_updated_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/spikes.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+skills_files_updated_during_phase_1:
+    - .claude/skills/os/windows.md
+packages: []
 ---
 
 # Plan: `.worktreeinclude` support
@@ -52,47 +64,47 @@ Each rule carries a **provisional ruling** that implementation follows under `yo
 
 - [x] **R1 — Large-file shortcut (spec open question 1).** *Confirmed by the author 2026-09-25 (spec Decision 7), overturning the provisional ruling:* included files are never judged unchanged from metadata. A size difference is `Changed` without reading; every same-size included file is hashed in full with `biscuit_hash::blake3_hash_reader`, at any size, at removal and in the handoff. Modification time is not recorded for included files. The size-and-mtime shortcut survives only as the dirty-file policy owned by `2026-09-25-list-remove-performance`.
 - [x] **R2 — Unchanged copy whose source is gone (spec open question 2).** *Confirmed by the author 2026-09-25 (spec Decision 8):* keep creation-baseline semantics. The README must never say deletion "loses nothing". It must say that an unchanged copy may be the last copy of the original contents.
-- [ ] **R3 — Ambiguous copy source.** "Fail source selection with a warning" means `wt create` still creates the worktree (exit 0), copies nothing, and prints one warning naming the checkouts it found. It does not fail the create.
-- [ ] **R4 — Record identity.** A copy record is keyed by the worktree's canonical path (the file name is `<repo hash>.copy-<blake3(canonical path)[..16]>.json` via `cache::repo_cache_file`). It is bound to:
+- [x] **R3 — Ambiguous copy source.** "Fail source selection with a warning" means `wt create` still creates the worktree (exit 0), copies nothing, and prints one warning naming the checkouts it found. It does not fail the create.
+- [x] **R4 — Record identity.** A copy record is keyed by the worktree's canonical path (the file name is `<repo hash>.copy-<blake3(canonical path)[..16]>.json` via `cache::repo_cache_file`). It is bound to:
     - the worktree's admin directory (`git rev-parse --git-dir` run in the worktree, canonical);
-    - a registration fingerprint chosen by spike S3.
+    - a random 128-bit registration nonce in a `wt-copy-registration` marker under that admin directory, created with `create_new` and stored in the record. A missing, unreadable, or different marker makes the record untrusted. Git removes this marker with its admin directory; the marker avoids depending on birthtime precision or unstable Windows file-ID APIs.
 
   On load, a mismatch in either field makes the record *untrusted*. `wt create` deletes any record at the destination's key before it runs `git worktree add`.
-- [ ] **R5 — Path representation.** The include set, the copy record, and the handoff carry repository-relative paths as git's `-z` bytes (`Vec<u8>`). Records serialize them as lowercase hex, never as lossy UTF-8. Conversion to `PathBuf` goes through `OsStr::from_bytes` on Unix, and through UTF-8 on Windows, where Git for Windows emits UTF-8. A Windows path that is not valid UTF-8 is reported as an unsupported entry, never guessed.
-- [ ] **R6 — mtime encoding.** Included files do not record or use modification time (R1). Where the dirty-file policy from `2026-09-25-list-remove-performance` needs it, it is stored as `(secs: i64, nanos: u32)` from `Metadata::modified()`, and a platform or filesystem without mtime takes the hash path, never the shortcut.
-- [ ] **R7 — Missing versus unreadable rules.** Missing means `NotFound` on `symlink_metadata` of `<root>/.worktreeinclude`. Every other state is *indeterminate*: a directory, a symlink resolving outside the checkout, a read error, or non-UTF-8 content, since git reads the file as bytes and that alone is fine. A symlink inside the checkout is read through. Creation treats *indeterminate* as "warn and skip copying". Removal treats it as "exit 1 before mutation". An existing zero-byte file is an empty set and suppresses the removal fallback.
-- [ ] **R8 — Summary line contents.** The dim "Also deletes ignored files:" line lists the first path components of every ignored entry from the existing `git status --ignored=matching` inventory, minus the entries that need consent (those are listed with the dirty files). An unchanged included file therefore appears in the summary line. The line shows names only and never counts files. It replaces the current `IgnoredGroup` count display.
-- [ ] **R9 — Exit codes.** A new, changed, or unknown included file behaves exactly like a dirty file in `policy::decide`: interactive mode asks (default No), and non-interactive mode requires `--force-worktree` or exits 3. An include set that cannot be determined exits 1 before mutation. In the handoff, a content or policy mismatch exits 3 (even with `--force-worktree`), and discovery errors exit 1.
-- [ ] **R10 — Scope boundary with `2026-09-25-list-remove-performance`.** This plan creates the shared comparison contract (`lib/src/compare.rs`) and uses it for *included files* in the copy record, the removal classification, and the handoff. Dirty-file fingerprint changes and PR/live-remote reuse stay in the performance spec, which will adopt `compare.rs` rather than re-implement it.
-- [ ] **R11 — Copy source label.** "Copied from `X`" uses the copy source's branch name, or `base` for the main checkout, escaped through `Prose::escape_text`.
-- [ ] **R12 — Where new error variants live.** Every new `WorktreeError` variant (for example `IncludeRulesIndeterminate`, `IncludeSetDiscovery`) is added in Wave 2. This keeps `error.rs` and `cli/src/exit.rs` out of the parallel waves.
+- [x] **R5 — Path representation.** The include set, the copy record, and the handoff carry repository-relative paths as git's `-z` bytes (`Vec<u8>`). Records serialize them as lowercase hex, never as lossy UTF-8. Conversion to `PathBuf` goes through `OsStr::from_bytes` on Unix, and through UTF-8 on Windows, where Git for Windows emits UTF-8. A Windows path that is not valid UTF-8 is reported as an unsupported entry, never guessed.
+- [x] **R6 — mtime encoding.** Included files do not record or use modification time (R1). Where the dirty-file policy from `2026-09-25-list-remove-performance` needs it, it is stored as `(secs: i64, nanos: u32)` from `Metadata::modified()`, and a platform or filesystem without mtime takes the hash path, never the shortcut.
+- [x] **R7 — Missing versus unreadable rules.** Missing means `NotFound` on `symlink_metadata` of `<root>/.worktreeinclude`. Every other state is *indeterminate*: a directory, a symlink resolving outside the checkout, or a read error. Non-UTF-8 rule content is valid input to Git's byte-oriented matcher and is not rejected for its encoding alone. A symlink inside the checkout is read through. Creation treats *indeterminate* as "warn and skip copying". Removal treats it as "exit 1 before mutation". An existing zero-byte file is an empty set and suppresses the removal fallback.
+- [x] **R8 — Summary line contents.** The dim "Also deletes ignored files:" line lists the first path components of every ignored entry from the existing `git status --ignored=matching` inventory, minus the entries that need consent (those are listed with the dirty files). An unchanged included file therefore appears in the summary line. The line shows names only and never counts files. It replaces the current `IgnoredGroup` count display.
+- [x] **R9 — Exit codes.** A new, changed, or unknown included file behaves exactly like a dirty file in `policy::decide`: interactive mode asks (default No), and non-interactive mode requires `--force-worktree` or exits 3. An include set that cannot be determined exits 1 before mutation. In the handoff, a content or policy mismatch exits 3 (even with `--force-worktree`), and discovery errors exit 1.
+- [x] **R10 — Scope boundary with `2026-09-25-list-remove-performance`.** This plan creates the shared comparison contract (`lib/src/compare.rs`) and uses it for *included files* in the copy record, the removal classification, and the handoff. Dirty-file fingerprint changes and PR/live-remote reuse stay in the performance spec, which will adopt `compare.rs` rather than re-implement it.
+- [x] **R11 — Copy source label.** "Copied from `X`" uses the copy source's branch name, or `base` for the main checkout, escaped through `Prose::escape_text`.
+- [x] **R12 — Where new error variants live.** Every new `WorktreeError` variant (for example `IncludeRulesIndeterminate`, `IncludeSetDiscovery`) is added in Wave 2. This keeps `error.rs` and `cli/src/exit.rs` out of the parallel waves.
 
 ### Spikes (Wave 1, all concurrent)
 
 Each spike produces a runnable probe (a throwaway `#[test] #[ignore]` or a shell script) and a short entry in `spikes.md`. No production code comes out of this wave.
 
-- [ ] **S1 — Git matching semantics** (`git` 2.4x on macOS; repeated on Linux and Windows through `cross-check`)
+- [x] **S1 — Git matching semantics** (`git` 2.4x on macOS; repeated on Linux and Windows through `cross-check`)
     - Confirm the two-step pipeline. `ls-files --others --ignored --exclude-from=<file> -z` gives the candidates. `check-ignore --stdin -z --verbose --non-matching` gives the standard-rule test. Confirm that `check-ignore` reports a file inside an ignored *parent directory* as ignored. If it does not, find the working alternative (for example, filtering candidates against `status --ignored=matching` output) and record it.
     - Confirm the behavior of: nested `.gitignore`, `.git/info/exclude`, `core.excludesFile`, ordered negation, a negated child under an excluded parent, `**/` into a wholly ignored directory, and a leading-`/` anchor.
     - Confirm what `ls-files --others` emits for a nested repository, a submodule, a nested linked worktree, a symlink to a directory, and (on Windows) a junction. Decide the boundary filter from that output.
     - Confirm that `--exclude-from=<absolute path of base checkout's file>` run in another worktree resolves patterns relative to that worktree's root. The removal fallback depends on this.
-- [ ] **S2 — Copy-on-write API**
+- [x] **S2 — Copy-on-write API**
     - Evaluate the `reflink-copy` crate (`reflink` without fallback) against direct calls (`clonefile` on macOS, `FICLONE` on Linux, `FSCTL_DUPLICATE_EXTENTS_TO_FILE` on ReFS).
     - Check three questions. Can it clone into a caller-created temporary path, then publish without replacement (`link`+`unlink` on Unix, `MoveFileExW` without `REPLACE_EXISTING` on Windows, or `renameat2(RENAME_NOREPLACE)` / `renamex_np(RENAME_EXCL)`)? Does a clone preserve mode or reset it? Which errors mean "unsupported" versus "failed"?
     - Record the chosen crate, its license, and its dependency cost. Decide whether it belongs in `worktree` or in `biscuit-file`.
-- [ ] **S3 — Registration identity**
+- [x] **S3 — Registration identity**
     - Decide what distinguishes a recreated worktree at the same path from its predecessor, given that git may reuse the admin directory name after `worktree prune`.
     - Candidates: the file ID (`dev`+`ino` / Windows file index) plus the birth or modification time of `<admin>/gitdir`; or a nonce stored in the record and cross-checked against `<admin>/gitdir`'s identity.
     - Prove the chosen field changes across remove → prune → re-add at the same path, on macOS, Linux, and Windows.
-- [ ] **S4 — Windows links and junctions**
+- [x] **S4 — Windows links and junctions**
     - Find how symlink creation fails without Developer Mode or the right privilege. Determine the error kind, so the plan's "warn and skip" can match it.
     - Find how to detect junctions and directory reparse points through `std` metadata (`FileTypeExt`, `file_attributes()`), so neither traversal nor ancestor checks follow them.
     - Add every non-obvious finding to the `os` skill (`windows.md`).
 
 ### Checkpoint 1
 
-- [ ] `spikes.md` records outcomes S1–S4. R1–R12 are confirmed or amended in this file.
-- [ ] If S1 shows `check-ignore` cannot express the intersection, the include-set design in Phase 2 is amended before Wave 2 starts.
+- [x] `spikes.md` records outcomes S1–S4. R1–R12 are confirmed or amended in this file.
+- [x] S1 confirms `check-ignore` can express the intersection. Phase 2 rejects directory candidates and checks *every ancestor* for links or reparse points before copying; Git for Windows traverses junctions during candidate discovery.
 
 ---
 
@@ -116,7 +128,7 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
 
 - [ ] **Include set** (`lib/src/include/mod.rs`, `rules.rs`)
     - `IncludeRules::locate(root) -> Present(PathBuf) | Empty | Missing | Indeterminate(reason)`, per R7.
-    - `resolve_include_set(base, worktree, rules_file) -> Result<IncludeSet, WorktreeError>` implements the two-step pipeline from S1, with the boundary filter and native-byte paths (R5).
+    - `resolve_include_set(base, worktree, rules_file) -> Result<IncludeSet, WorktreeError>` implements the two-step pipeline from S1, with native-byte paths (R5). Reject non-file candidates and check every ancestor for links or reparse points: Git for Windows can enumerate through a junction.
     - `IncludeSet` holds `entries: Vec<IncludedEntry { path: Vec<u8>, kind }>` and `unsupported: Vec<(path, kind)>`. It never contains `.git` administrative files or empty directories.
     - L1 tests cover acceptance criterion 1, plus from criterion 5: empty versus missing rules, unreadable rules, a directory in place of the file, a symlinked rules file outside the checkout, ordered negation, the negated-child-under-excluded-parent example, global and nested excludes, filenames with spaces and newlines, nested repositories, submodules, and linked directories.
 - [ ] **Comparison contract** (`lib/src/compare.rs`)

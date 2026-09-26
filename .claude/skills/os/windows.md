@@ -422,3 +422,25 @@ because overlapping host-network detections fail-fast the test process
 
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
+# Worktree include links and junctions
+
+For `.worktreeinclude` traversal, treat any directory with
+`FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) as a boundary. A native Windows probe
+created a junction whose attributes were `Directory, ReparsePoint`; Git for
+Windows **traversed it** during `ls-files` and returned a file underneath.
+Check every candidate ancestor, not only the final file. A file
+symlink reported `Archive, ReparsePoint`. `std::os::windows::fs::FileTypeExt`
+distinguishes file and directory symlinks, while
+`std::os::windows::fs::MetadataExt::file_attributes()` exposes the reparse bit
+needed to catch junctions too. Check `symlink_metadata` before entering an
+ancestor. The stable Windows metadata API does not expose file index; do not
+use it as a copy-record registration ID.
+
+The native build host allowed `mklink` to create a file symlink, so it does
+not exercise the denial path. A machine without symlink privilege can return
+Win32 `ERROR_PRIVILEGE_NOT_HELD` (1314); match `raw_os_error() == Some(1314)`
+for the warning-and-skip path instead of assuming a particular Rust
+`ErrorKind`. Developer Mode can permit unprivileged creation. Git reused the
+same worktree admin-directory name after remove, prune, and re-add, but removed
+a marker stored inside the old admin directory. See the runnable
+`worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1` probe.
