@@ -724,14 +724,39 @@ fn test_pnpm_workspace_topology_layer() {
     );
 }
 
+/// Structure detection that opts in to lockfile corroboration.
+fn detect_structure_with_lockfile_provenance(path: &std::path::Path) -> sniff::filesystem::RepoInfo {
+    let request = sniff::request::RepoRequest::structure().with_lockfile_provenance(true);
+    sniff::filesystem::repo::detect_repo_with_request(path, &request)
+        .unwrap()
+        .expect("workspace should be detected")
+}
+
+/// A plain structure call reads no lockfile, so every layer and package keeps
+/// `expected` manifest-derived provenance and no layer has a lockfile answer.
+fn assert_plain_structure_skips_corroboration(
+    path: &std::path::Path,
+    expected: sniff::filesystem::PackageProvenance,
+) {
+    let repo = sniff::filesystem::detect_repo_structure(path)
+        .unwrap()
+        .expect("workspace should be detected");
+    assert!(!repo.monorepo_layers.is_empty());
+    for layer in &repo.monorepo_layers {
+        assert_eq!(layer.provenance, expected, "{layer:?}");
+        assert_eq!(layer.lockfile_match, None, "{layer:?}");
+    }
+    for package in repo.packages.as_deref().expect("packages should be present") {
+        assert_eq!(package.provenance, expected, "{package:?}");
+    }
+}
+
 #[test]
 fn test_pnpm_lockfile_parity_upgrades_provenance() {
     use sniff::filesystem::{MonorepoStandard, PackageProvenance};
 
     let (_dir, path) = fixtures::create_pnpm_workspace_with_lockfile();
-    let repo = sniff::filesystem::detect_repo_structure(&path)
-        .unwrap()
-        .expect("pnpm workspace should be detected");
+    let repo = detect_structure_with_lockfile_provenance(&path);
 
     assert_eq!(repo.monorepo_layers.len(), 1);
     let layer = &repo.monorepo_layers[0];
@@ -753,6 +778,8 @@ fn test_pnpm_lockfile_parity_upgrades_provenance() {
             "package {key:?} should inherit Lockfile provenance"
         );
     }
+
+    assert_plain_structure_skips_corroboration(&path, PackageProvenance::Globbed);
 }
 
 #[test]
@@ -760,9 +787,7 @@ fn test_pnpm_lockfile_drift_records_mismatch() {
     use sniff::filesystem::{MonorepoStandard, PackageProvenance};
 
     let (_dir, path) = fixtures::create_pnpm_workspace_with_drifted_lockfile();
-    let repo = sniff::filesystem::detect_repo_structure(&path)
-        .unwrap()
-        .expect("pnpm workspace should be detected");
+    let repo = detect_structure_with_lockfile_provenance(&path);
 
     assert_eq!(repo.monorepo_layers.len(), 1);
     let layer = &repo.monorepo_layers[0];
@@ -770,6 +795,8 @@ fn test_pnpm_lockfile_drift_records_mismatch() {
     // Manifest remains the authority; lockfile mismatch is recorded.
     assert_eq!(layer.provenance, PackageProvenance::Globbed);
     assert_eq!(layer.lockfile_match, Some(false));
+
+    assert_plain_structure_skips_corroboration(&path, PackageProvenance::Globbed);
 }
 
 #[test]
@@ -780,9 +807,7 @@ fn test_pnpm_lockfile_superset_is_recorded_as_mismatch() {
     use sniff::filesystem::{MonorepoStandard, PackageProvenance};
 
     let (_dir, path) = fixtures::create_pnpm_workspace_with_stale_lockfile();
-    let repo = sniff::filesystem::detect_repo_structure(&path)
-        .unwrap()
-        .expect("pnpm workspace should be detected");
+    let repo = detect_structure_with_lockfile_provenance(&path);
 
     assert_eq!(repo.monorepo_layers.len(), 1);
     let layer = &repo.monorepo_layers[0];
@@ -797,6 +822,8 @@ fn test_pnpm_lockfile_superset_is_recorded_as_mismatch() {
         Some(false),
         "stale extra importer must be reported as drift"
     );
+
+    assert_plain_structure_skips_corroboration(&path, PackageProvenance::Globbed);
 }
 
 #[test]
@@ -804,15 +831,15 @@ fn test_uv_lockfile_parity_upgrades_provenance() {
     use sniff::filesystem::{MonorepoStandard, PackageProvenance};
 
     let (_dir, path) = fixtures::create_uv_workspace_with_lockfile();
-    let repo = sniff::filesystem::detect_repo_structure(&path)
-        .unwrap()
-        .expect("uv workspace should be detected");
+    let repo = detect_structure_with_lockfile_provenance(&path);
 
     assert_eq!(repo.monorepo_layers.len(), 1);
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
     assert_eq!(layer.provenance, PackageProvenance::Lockfile);
     assert_eq!(layer.lockfile_match, Some(true));
+
+    assert_plain_structure_skips_corroboration(&path, PackageProvenance::Globbed);
 }
 
 #[test]
@@ -820,15 +847,15 @@ fn test_uv_lockfile_superset_is_recorded_as_mismatch() {
     use sniff::filesystem::{MonorepoStandard, PackageProvenance};
 
     let (_dir, path) = fixtures::create_uv_workspace_with_stale_lockfile();
-    let repo = sniff::filesystem::detect_repo_structure(&path)
-        .unwrap()
-        .expect("uv workspace should be detected");
+    let repo = detect_structure_with_lockfile_provenance(&path);
 
     assert_eq!(repo.monorepo_layers.len(), 1);
     let layer = &repo.monorepo_layers[0];
     assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
     assert_eq!(layer.provenance, PackageProvenance::Globbed);
     assert_eq!(layer.lockfile_match, Some(false));
+
+    assert_plain_structure_skips_corroboration(&path, PackageProvenance::Globbed);
 }
 
 #[test]
@@ -1002,9 +1029,7 @@ fn test_rusty_biscuit_repo_topology_parity() {
         return;
     };
 
-    let repo = sniff::filesystem::detect_repo_structure(&repo_root)
-        .unwrap()
-        .expect("rusty-biscuit should be detected as a monorepo");
+    let repo = detect_structure_with_lockfile_provenance(&repo_root);
 
     assert!(repo.is_monorepo);
     assert!(
@@ -1043,6 +1068,30 @@ fn test_rusty_biscuit_repo_topology_parity() {
         pnpm_pkg.provenance,
         PackageProvenance::Lockfile,
         "pnpm package should be lockfile-derived"
+    );
+
+    let plain = sniff::filesystem::detect_repo_structure(&repo_root)
+        .unwrap()
+        .expect("rusty-biscuit should be detected as a monorepo");
+    assert!(
+        plain
+            .monorepo_layers
+            .iter()
+            .all(|layer| layer.lockfile_match.is_none()),
+        "a plain structure call reads no lockfile: {:?}",
+        plain.monorepo_layers
+    );
+    let plain_pnpm_pkg = plain
+        .packages
+        .as_deref()
+        .expect("packages should be present")
+        .iter()
+        .find(|p| p.relative == "homelab/server/frontend")
+        .expect("homelab/server/frontend should be detected");
+    assert_ne!(
+        plain_pnpm_pkg.provenance,
+        PackageProvenance::Lockfile,
+        "a plain structure call keeps manifest-derived provenance"
     );
 
     // Every package is either cargo, pnpm, or a manifest-scan fallback.

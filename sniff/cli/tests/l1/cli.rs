@@ -976,6 +976,226 @@ fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
     );
 }
 
+/// [`create_cli_monorepo`] plus a committed `Cargo.lock` that names both
+/// members, so a corroborating request reports lockfile provenance.
+fn create_cli_monorepo_with_matching_cargo_lock() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_cli_monorepo();
+    test_commit_file(
+        &path,
+        "Cargo.lock",
+        "version = 4\n\n\
+         [[package]]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n\
+         [[package]]\nname = \"pkg-b\"\nversion = \"0.1.0\"\n",
+    );
+    (dir, path)
+}
+
+/// Run `sniff --base <path> <args>` and parse its stdout, which must be one
+/// JSON document and nothing else.
+fn sniff_json_at(path: &Path, args: &[&str]) -> Value {
+    let output = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap()])
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("run sniff {args:?}: {e}"));
+    assert!(
+        output.status.success(),
+        "sniff {args:?} must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    serde_json::from_str(stdout).unwrap_or_else(|e| {
+        panic!("sniff {args:?} stdout must be JSON only: {e}\n---\n{stdout}\n---")
+    })
+}
+
+#[test]
+fn repo_structure_tier_json_is_json_only_with_a_lockfile_present() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+
+    assert_eq!(
+        sniff_json_at(&path, &["repo", "is-monorepo", "--json"]),
+        serde_json::json!({ "authority": "cargo-workspace", "is_monorepo": true })
+    );
+    assert_eq!(
+        sniff_json_at(&path, &["repo", "packages", "--json"]),
+        serde_json::json!(["pkg-a", "pkg-b"])
+    );
+}
+
+/// `repo structure` runs the full request, which keeps lockfile corroboration.
+#[test]
+fn repo_structure_json_reports_lockfile_provenance_for_matching_lockfile() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+    let json = sniff_json_at(&path, &["repo", "structure", "--json"]);
+
+    let layers = json["monorepo_layers"]
+        .as_array()
+        .expect("monorepo_layers array");
+    assert_eq!(layers.len(), 1, "{json}");
+    assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
+    assert_eq!(layers[0]["provenance"], "lockfile", "{json}");
+    assert_eq!(layers[0]["lockfile_match"], true, "{json}");
+    assert_eq!(
+        layers[0]["packages"],
+        serde_json::json!(["pkg-a/lib", "pkg-b/lib"]),
+        "{json}"
+    );
+
+    let packages: Vec<(&str, &str)> = json["packages"]
+        .as_array()
+        .expect("packages array")
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap(),
+                p["provenance"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        [("pkg-a", "lockfile"), ("pkg-b", "lockfile")],
+        "{json}"
+    );
+
+    assert_eq!(
+        normalized_structure_json(&json, &path),
+        expected_lockfile_structure_json(),
+        "{json}"
+    );
+}
+
+/// `sniff repo structure --json` output with its reported root replaced by
+/// `<root>` and `\` separators turned into `/`. The acting-binary lookup reads
+/// the fixture's minimal system `PATH`, which no fixture file controls, so it
+/// becomes `<host PATH lookup>` once any binary it found is checked to be
+/// `cargo`.
+fn normalized_structure_json(json: &Value, fixture_root: &Path) -> Value {
+    fn normalize(value: &mut Value, root: &str) {
+        match value {
+            Value::String(text) => *text = text.replace(root, "<root>").replace('\\', "/"),
+            Value::Array(items) => items.iter_mut().for_each(|item| normalize(item, root)),
+            Value::Object(fields) => fields.values_mut().for_each(|item| normalize(item, root)),
+            _ => {}
+        }
+    }
+
+    // The CLI reports the canonical root (`/private/var/...` for a macOS
+    // temporary directory), so the placeholder follows the reported spelling
+    // after checking it names the fixture.
+    let root = json["root"].as_str().expect("root string").to_owned();
+    assert_eq!(
+        std::fs::canonicalize(&root).expect("canonical reported root"),
+        std::fs::canonicalize(fixture_root).expect("canonical fixture root"),
+    );
+    let mut value = json.clone();
+    for standard in value["monorepo_standards"]
+        .as_array_mut()
+        .expect("monorepo_standards array")
+    {
+        let binary = standard["binary"].take();
+        if !binary.is_null() {
+            assert_eq!(binary["name"], "cargo", "{binary}");
+        }
+        standard["binary"] = Value::from("<host PATH lookup>");
+    }
+    normalize(&mut value, &root);
+    value
+}
+
+/// The complete `repo structure --json` document for
+/// [`create_cli_monorepo_with_matching_cargo_lock`], written out field by
+/// field.
+fn expected_lockfile_structure_json() -> Value {
+    let package = |name: &str| {
+        let relative = format!("{name}/lib");
+        let manifest = format!("{relative}/Cargo.toml");
+        let source = format!("{relative}/src/lib.rs");
+        serde_json::json!({
+            "path": format!("<root>/{relative}"),
+            "relative": relative,
+            "package_area": name,
+            "name": name,
+            "ecosystem": "cargo",
+            "standard": "cargo-workspace",
+            "provenance": "lockfile",
+            "primary_language": "rust",
+            "languages": [{
+                "language": "rust",
+                "language_type": "compiled_binary",
+                "percentage": 100.0,
+                "signal": 1.0,
+                "direct_file_count": 1,
+                "direct_files": [source],
+                "framework_file_count": 0,
+                "framework_files": [],
+                "total_file_count": 1,
+            }],
+            "file_associations": [
+                {
+                    "association": "configuration",
+                    "file_count": 1,
+                    "percentage": 50.0,
+                    "files": [manifest],
+                },
+                {
+                    "association": "programming_language",
+                    "file_count": 1,
+                    "percentage": 50.0,
+                    "files": [source],
+                },
+            ],
+            // Pre-existing behavior pinned as the pre-change contract, not
+            // endorsed: `configuration` prefixes the package's relative path
+            // onto an already repository-relative file path.
+            "configuration": [format!("{relative}/{manifest}")],
+            "package_managers": ["cargo"],
+            "test_runners": [{
+                "runner": "CargoTest",
+                "source": { "kind": "ecosystem_default" },
+            }],
+            "version": "0.1.0",
+        })
+    };
+    serde_json::json!({
+        "is_monorepo": true,
+        "root": "<root>",
+        "packages": [package("pkg-a"), package("pkg-b")],
+        "monorepo_standards": [{
+            "standard": "cargo-workspace",
+            "root": "<root>",
+            "matched_markers": ["<root>/Cargo.toml"],
+            "binary": "<host PATH lookup>",
+            "confidence": "marker-confirmed",
+        }],
+        "monorepo_layers": [{
+            "root": "<root>",
+            "authority": "cargo-workspace",
+            "orchestrators": [],
+            "provenance": "lockfile",
+            "lockfile_match": true,
+            "root_is_package": false,
+            "packages": ["pkg-a/lib", "pkg-b/lib"],
+        }],
+    })
+}
+
+/// Bare `sniff repo` opts its aggregate request in to lockfile provenance.
+#[test]
+fn repo_aggregate_json_reports_lockfile_provenance_for_matching_lockfile() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+    let json = sniff_json_at(&path, &["repo", "--json"]);
+
+    let layers = json["structure"]["monorepo_layers"]
+        .as_array()
+        .expect("structure.monorepo_layers array");
+    assert_eq!(layers.len(), 1, "{json}");
+    assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
+    assert_eq!(layers[0]["provenance"], "lockfile", "{json}");
+    assert_eq!(layers[0]["lockfile_match"], true, "{json}");
+}
+
 #[test]
 fn repo_aggregate_json_scope_buckets_have_stable_shape() {
     let output = repo_aggregate_json_output();

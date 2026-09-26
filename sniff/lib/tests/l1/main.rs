@@ -20,6 +20,7 @@ mod focused_provider;
 mod git_parity;
 mod host_capability_cache;
 mod integration;
+mod lockfile_provenance;
 mod merge_conflict_prediction;
 mod network_primitives;
 #[cfg(feature = "remote")]
