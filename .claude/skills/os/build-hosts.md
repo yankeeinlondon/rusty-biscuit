@@ -108,6 +108,17 @@ a `cfg`-gated test ran. To show that a Windows-only test compiled and ran, tee
 the output (`./scripts/cross-check.sh <pkg> --os windows 2>&1 | tee <file>`)
 and cite its PASS line.
 
+`--os` takes one value (`linux`, `windows`, `wsl`, `macos`, or `all`); a
+comma list is rejected. A `wsl` leg that fails with `ssh: connect to host ...
+port 22: Operation timed out` while the Windows host answers means the guest
+is stopped, not unreachable: `ssh $BUILD_WIN 'wsl.exe -l -v'` shows `Stopped`,
+and `ssh $BUILD_WIN 'wsl.exe -d Ubuntu-26.04 -e true'` boots it with sshd up
+within seconds (2026-09-26). The linux leg's archive build also hit the stale
+read-only kache links described below in a *different* standing clone
+(`<host>--fix-sniff`, 372 files); clearing only the read-only multiply-linked
+files (`find target/release -type f ! -perm -u+w -links +1 -delete`) fixed it
+without a cold rebuild.
+
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
 before any host is contacted. Call `./scripts/cross-check.sh` directly for a
