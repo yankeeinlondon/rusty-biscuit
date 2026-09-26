@@ -1264,4 +1264,17 @@ belong here.
     "cycle close into _completed/ is valid even when the moved spec
     still shows `implemented: false`" rule governs the canonical
     pattern; this entry governs the deferred-move variant.
+- A phase-based fix's **terminal** close (Phase N of N) transforms spec.md
+    in a way the canonical "mid-phase close rewrites message_to_agent"
+    rule does not cover. Because there is no Phase N+1, `message_to_agent`
+    is REMOVED entirely rather than rewritten — its forward-pointing
+    narrative is folded into the `## Phase N` block of
+    implementation-log.md, and spec.md's frontmatter gains
+    `status: implemented`, `implemented: true`, and `implemented_by: <agent>`.
+    plan.md gains the matching `completed_phase: "<N>"` and
+    `implemented: true`. Earlier phases that DID point at later work kept
+    `message_to_agent` and appended to it (Phase 4 of
+    2026-09-25-worktree-file ended with "Phase 5 still owns ..."); the
+    terminal Phase 5 removed it because the hand-off was complete. See
+    `ed0db5743` for the 2026-09-25-worktree-file Phase 5 of 5 close.
 
