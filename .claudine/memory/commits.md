@@ -1277,4 +1277,28 @@ belong here.
     2026-09-25-worktree-file ended with "Phase 5 still owns ..."); the
     terminal Phase 5 removed it because the hand-off was complete. See
     `ed0db5743` for the 2026-09-25-worktree-file Phase 5 of 5 close.
+- A parallel wave's plan.md ticks can ship FEWER ticks than tests in
+    the wave's commits. When a Wave has N parallel tasks committed as N
+    separate `test(<area>):` commits, the implementer may stage plan.md
+    with only N-1 box ticks — leaving one (or more) intentionally
+    unchecked because the author reserves that tick for the
+    post-implementation verification cycle ("the Wave 5 plan checkbox
+    stays unchecked in this commit because the author reserves it for
+    the post-implementation verification cycle per the Wave 5 plan
+    language"). The planning commit's body MUST name which sibling test
+    commits cover the ticked boxes AND explicitly call out the unchecked
+    boxes with the reason, so reviewers know the unchecked state is
+    intentional and not drift. The body becomes the bridge between the
+    implementer's parallel batch and the author's review cycle; without
+    the callout, the unchecked box looks like a missed task in
+    `git diff -- plan.md`. The rule is distinct from
+    "blocked on human input" (no progress at all, no ticks) and from
+    "closed-with-rationale" (measurement-disproved, ticks with "not
+    built" inline rationale): here the work IS in HEAD and the wave IS
+    complete, the author just prefers the tick to follow a verification
+    step. See `b76e3893a` for the 2026-09-25-list-remove-performance
+    Wave 5 partial-tick example (refresh-lifecycle and stale-latency
+    ticked, handoff-safety deliberately left unchecked despite its
+    sibling `test(worktree): prove handoff safety` commit landing in the
+    same batch).
 
