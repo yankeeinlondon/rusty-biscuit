@@ -209,6 +209,9 @@
   already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
   dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
   runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
+  `sysinfo` 0.38 (development) finds the detached `wt internal-refresh-prs`
+  worker in `list_prs.rs` and reads its working directory on every OS;
+  `sniff` already builds the same version.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that
