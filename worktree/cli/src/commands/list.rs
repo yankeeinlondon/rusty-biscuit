@@ -30,22 +30,43 @@ fn origin_pr_source(origin: &str) -> Box<dyn OpenPrSource> {
     })
 }
 
-/// The open PRs for the repository whose main checkout is `main`: the stored
-/// answer for the current `origin`, or a request when that answer is missing
-/// or stale. A failed request falls back to the stale answer.
-fn gather_prs(store: &Path, main: &Path, connect: PrConnect) -> PrListing {
+/// Starts the background refresh for the repository whose main checkout is
+/// the argument, without waiting for it.
+pub type PrLaunch = fn(&Path);
+
+/// How the PR stage reaches the network: a foreground request on a miss, a
+/// background refresh on a stale answer. Tests replace both.
+#[derive(Clone, Copy)]
+pub struct PrSeams {
+    pub connect: PrConnect,
+    pub launch: PrLaunch,
+}
+
+const PRODUCTION_SEAMS: PrSeams = PrSeams {
+    connect: origin_pr_source,
+    launch: super::pr_refresh::launch,
+};
+
+/// The open PRs for the repository whose main checkout is `main`.
+///
+/// A stored answer for the current `origin` is shown at once; a stale one
+/// also starts a background refresh, whose answer the next run shows. Only a
+/// miss makes the request here, under [`LIST_DEADLINE`], and a failed request
+/// shows no badges.
+fn gather_prs(store: &Path, main: &Path, seams: PrSeams) -> PrListing {
     let origin = origin_url(main);
-    let stored = match select_cached(store, origin.as_deref(), unix_now()) {
+    match select_cached(store, origin.as_deref(), unix_now()) {
         CachedPrs::Fresh(listing) => return listing,
-        CachedPrs::Stale(listing) => Some(listing),
-        CachedPrs::Miss => None,
-    };
+        CachedPrs::Stale(listing) => {
+            (seams.launch)(main);
+            return listing;
+        }
+        CachedPrs::Miss => {}
+    }
     let Some(origin) = origin else {
         return PrListing::default();
     };
-    fetch_and_publish(store, main, &origin, unix_now(), connect(&origin).as_ref())
-        .or(stored)
-        .unwrap_or_default()
+    fetch_and_publish(store, main, &origin, unix_now(), (seams.connect)(&origin).as_ref()).unwrap_or_default()
 }
 
 pub fn run(
@@ -68,7 +89,7 @@ pub fn run(
         process_start,
         image_support,
         &terminal,
-        origin_pr_source,
+        PRODUCTION_SEAMS,
     )?;
     if let Some(c) = collector {
         c.emit();
@@ -83,7 +104,7 @@ fn run_pipeline(
     process_start: Instant,
     image_support: ImageSupport,
     terminal: &Terminal,
-    pr_connect: PrConnect,
+    pr_seams: PrSeams,
 ) -> Result<Option<perf::PerfCollector>, WorktreeError> {
     let mut collector = if perf {
         Some(perf::PerfCollector::new(process_start))
@@ -104,12 +125,13 @@ fn run_pipeline(
     let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
 
     std::thread::scope(|scope| {
-        // The PR request runs beside the git work under its own deadline, so
-        // the network never holds the table up for longer than that.
+        // A PR request (only on a miss) runs beside the git work under its
+        // own deadline, so the network never holds the table up for longer
+        // than that.
         let pr_handle = scope.spawn(|| {
             let t0 = perf.then(Instant::now);
             let prs = match (&pr_store, &main_checkout) {
-                (Some(store), Some(main)) => gather_prs(store, main, pr_connect),
+                (Some(store), Some(main)) => gather_prs(store, main, pr_seams),
                 _ => PrListing::default(),
             };
             (prs, t0.map(|start| start.elapsed()))

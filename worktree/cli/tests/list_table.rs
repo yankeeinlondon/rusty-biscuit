@@ -409,3 +409,19 @@ fn the_pr_age_line_appears_once_the_badges_are_60_seconds_old() {
     assert!(with(Some(NOW + 60)).starts_with("Branch"), "a future fetch time has no age");
     assert!(with(None).starts_with("Branch"), "no answer has no age");
 }
+
+#[test]
+fn a_stored_empty_answer_shows_no_badges_but_keeps_its_age() {
+    let mut example = Example::new();
+    example.prs.pull_requests.clear();
+    example.prs.fetched_at = Some(NOW - 5 * 60);
+    let rendered = plain(&example);
+    assert!(!rendered.contains("PR #"), "{rendered}");
+    assert_eq!(rendered.lines().last().unwrap().trim(), "PRs as of 5 min ago");
+
+    // An unavailable first answer (nothing stored, the request failed) is
+    // not an empty answer: no badges and no age.
+    example.prs = Default::default();
+    let rendered = plain(&example);
+    assert!(!rendered.contains("PR #") && !rendered.contains("PRs as of"), "{rendered}");
+}

@@ -158,6 +158,11 @@ impl MixedFixture {
         &self.main
     }
 
+    /// The linked worktrees, one per branch.
+    pub fn worktrees(&self) -> &[PathBuf] {
+        &self.worktrees
+    }
+
     /// The PR store the spawned `wt` reads and writes. The cache directory
     /// follows `HOME` (macOS) or `XDG_CACHE_HOME` (Linux); on Windows it does
     /// not, so the real per-user path (keyed by this temporary repository) is
@@ -266,24 +271,47 @@ pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
 pub struct ProxyStub {
     port: u16,
     connections: Arc<AtomicUsize>,
+    held: Arc<Mutex<Vec<TcpStream>>>,
 }
 
 impl ProxyStub {
     /// Accepts every connection and never answers, so each request runs into
-    /// its deadline. Connections are held open until the test process ends.
+    /// its deadline. Connections are held open until
+    /// [`ProxyStub::close_held`] or the test process ends.
     pub fn hanging() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
         let port = listener.local_addr().expect("proxy stub address").port();
         let connections = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&connections);
         let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
+        let holder = Arc::clone(&held);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
+                holder.lock().expect("held connections").push(stream);
                 counter.fetch_add(1, Ordering::SeqCst);
-                held.lock().expect("held connections").push(stream);
             }
         });
-        Self { port, connections }
+        Self { port, connections, held }
+    }
+
+    /// Closes every connection held so far, so a request blocked on one
+    /// fails at once instead of waiting for its deadline.
+    pub fn close_held(&self) {
+        for stream in self.held.lock().expect("held connections").drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// Waits up to `limit` for at least `count` accepted connections.
+    pub fn wait_for_connections(&self, count: usize, limit: Duration) -> bool {
+        let deadline = std::time::Instant::now() + limit;
+        while self.connections() < count {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
     }
 
     /// A port with nothing listening: every connection is refused at once,
@@ -297,6 +325,7 @@ impl ProxyStub {
         Self {
             port,
             connections: Arc::default(),
+            held: Arc::default(),
         }
     }
 

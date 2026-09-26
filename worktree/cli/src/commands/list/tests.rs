@@ -17,6 +17,16 @@ fn no_prs(origin: &str) -> Box<dyn OpenPrSource> {
     panic!("no request expected without an origin, got one for {origin}")
 }
 
+/// Without an origin there is no stored answer to refresh either.
+fn no_launch(main: &Path) {
+    panic!("no refresh expected without an origin, got one for {}", main.display())
+}
+
+const NO_PRS: super::PrSeams = super::PrSeams {
+    connect: no_prs,
+    launch: no_launch,
+};
+
 fn run_git(repo: &Path, args: &[&str]) {
     let status = Command::new("git")
         .current_dir(repo)
@@ -195,7 +205,7 @@ fn run_pipeline_without_perf_produces_no_collector() {
         std::time::Instant::now(),
         ImageSupport::None,
         &terminal,
-        no_prs,
+        NO_PRS,
     )
     .expect("run_pipeline should succeed");
 
@@ -228,7 +238,7 @@ fn run_pipeline_non_image_verbose_includes_verbose_gather_stage() {
         std::time::Instant::now(),
         ImageSupport::None,
         &terminal,
-        no_prs,
+        NO_PRS,
     )
     .expect("run_pipeline should succeed");
 
@@ -356,7 +366,7 @@ fn run_pipeline_gathers_the_graph_while_list_gather_is_unfinished() {
         std::time::Instant::now(),
         ImageSupport::Kitty,
         &terminal,
-        no_prs,
+        NO_PRS,
     );
 
     assert!(result.is_ok(), "run_pipeline should succeed: {:?}", result.err());
@@ -384,7 +394,7 @@ fn run_pipeline_gathers_the_graph_on_a_narrow_image_terminal() {
         std::time::Instant::now(),
         ImageSupport::Kitty,
         &narrow,
-        no_prs,
+        NO_PRS,
     )
     .expect("run_pipeline should succeed");
 
@@ -415,7 +425,7 @@ fn run_pipeline_without_image_support_or_verbose_gathers_no_graph() {
         std::time::Instant::now(),
         ImageSupport::None,
         &terminal,
-        no_prs,
+        NO_PRS,
     )
     .expect("run_pipeline should succeed");
     let calls = recorder::finish_recording();
@@ -476,4 +486,207 @@ fn perf_subprocess_counts_meet_sla() {
     assert_eq!(count(&base_calls, "merge-base"), graph.lines.len(), "got {base_calls:?}");
     assert_eq!(count(&base_calls, "log"), 1 + graph.lines.len(), "got {base_calls:?}");
     eprintln!("base view gather: {base_elapsed:.2?}, {} git calls", base_calls.len());
+}
+
+/// `gather_prs` against a real repository and store, with counting seams in
+/// place of the provider and the background launch.
+mod gather {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrListing, fetch_and_publish, unix_now};
+
+    use super::{run_git, temp_repo};
+
+    const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
+
+    static REQUESTS: AtomicUsize = AtomicUsize::new(0);
+    static LAUNCHES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    struct Answer(Result<u64, String>);
+
+    impl OpenPrSource for Answer {
+        fn source_repo(&self) -> Option<String> {
+            Some("owner/repo".into())
+        }
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+            self.0.clone().map(|number| {
+                vec![OpenPullRequest {
+                    number,
+                    url: None,
+                    source_repo: Some("owner/repo".into()),
+                    source_branch: "feat".into(),
+                    target_branch: "main".into(),
+                }]
+            })
+        }
+    }
+
+    fn answering(_origin: &str) -> Box<dyn OpenPrSource> {
+        REQUESTS.fetch_add(1, Ordering::SeqCst);
+        Box::new(Answer(Ok(7)))
+    }
+
+    fn failing(_origin: &str) -> Box<dyn OpenPrSource> {
+        REQUESTS.fetch_add(1, Ordering::SeqCst);
+        Box::new(Answer(Err("401 unauthorized".into())))
+    }
+
+    fn counting_launch(main: &Path) {
+        LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).push(main.to_path_buf());
+    }
+
+    struct Fixture {
+        repo: tempfile::TempDir,
+        _cache: tempfile::TempDir,
+        store: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            REQUESTS.store(0, Ordering::SeqCst);
+            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            let repo = temp_repo();
+            run_git(repo.path(), &["remote", "add", "origin", ORIGIN]);
+            let cache = tempfile::tempdir().expect("cache dir");
+            let store = cache.path().join("prs.json");
+            Self { repo, _cache: cache, store }
+        }
+
+        fn main(&self) -> &Path {
+            self.repo.path()
+        }
+
+        /// Stores PR `number` for the current origin, fetched `age` seconds ago.
+        fn seed(&self, age: u64, number: u64) {
+            fetch_and_publish(&self.store, self.main(), ORIGIN, unix_now() - age, &Answer(Ok(number)))
+                .expect("seeded answer");
+        }
+
+        fn gather(&self, connect: super::super::PrConnect) -> PrListing {
+            let seams = super::super::PrSeams {
+                connect,
+                launch: counting_launch,
+            };
+            super::super::gather_prs(&self.store, self.main(), seams)
+        }
+    }
+
+    fn numbers(listing: &PrListing) -> Vec<u64> {
+        listing.pull_requests.iter().map(|pr| pr.number).collect()
+    }
+
+    fn launches() -> Vec<PathBuf> {
+        LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_stale_answer_is_shown_at_once_and_refreshed_in_the_background() {
+        let fixture = Fixture::new();
+        fixture.seed(12 * 60, 99);
+        let stored = std::fs::read(&fixture.store).expect("store");
+
+        let listing = fixture.gather(answering);
+
+        assert_eq!(numbers(&listing), [99], "the stored badges, not a new answer");
+        assert!(listing.is_stale_at(unix_now()), "shown with its age");
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 0, "no request in the foreground");
+        assert_eq!(launches(), [fixture.main().to_path_buf()], "one refresh, for the main checkout");
+        assert_eq!(std::fs::read(&fixture.store).expect("store"), stored, "the parent writes nothing");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_stale_empty_answer_is_still_an_answer() {
+        let fixture = Fixture::new();
+        struct Empty;
+        impl OpenPrSource for Empty {
+            fn source_repo(&self) -> Option<String> {
+                Some("owner/repo".into())
+            }
+            fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+                Ok(Vec::new())
+            }
+        }
+        fetch_and_publish(&fixture.store, fixture.main(), ORIGIN, unix_now() - 120, &Empty).expect("seeded");
+
+        let listing = fixture.gather(answering);
+
+        assert!(listing.pull_requests.is_empty());
+        assert!(listing.is_stale_at(unix_now()));
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 0, "an empty answer is not a miss");
+        assert_eq!(launches().len(), 1);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_fresh_answer_neither_requests_nor_refreshes() {
+        let fixture = Fixture::new();
+        fixture.seed(10, 99);
+
+        let listing = fixture.gather(answering);
+
+        assert_eq!(numbers(&listing), [99]);
+        assert!(!listing.is_stale_at(unix_now()));
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 0);
+        assert!(launches().is_empty());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_miss_requests_in_the_foreground_and_stores_the_answer() {
+        let fixture = Fixture::new();
+
+        let listing = fixture.gather(answering);
+
+        assert_eq!(numbers(&listing), [7]);
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 1);
+        assert!(launches().is_empty(), "a miss never starts a worker");
+        // The next run reads the stored answer without a request.
+        assert_eq!(numbers(&fixture.gather(answering)), [7]);
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_failed_miss_shows_no_badges_and_stores_nothing() {
+        let fixture = Fixture::new();
+
+        let listing = fixture.gather(failing);
+
+        assert_eq!(listing, PrListing::default(), "an unavailable answer has no badges and no age");
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 1);
+        assert!(!fixture.store.exists(), "a failure is never stored");
+        assert!(launches().is_empty());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_changed_origin_never_shows_the_old_badges() {
+        let fixture = Fixture::new();
+        fixture.seed(12 * 60, 99);
+        run_git(fixture.main(), &["remote", "set-url", "origin", "https://prs.example.invalid/other/repo.git"]);
+
+        let listing = fixture.gather(failing);
+
+        assert_eq!(listing, PrListing::default(), "the old answer belongs to another origin");
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 1, "a miss for the new origin requests");
+        assert!(launches().is_empty());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn without_an_origin_a_stored_answer_is_ignored_and_nothing_is_requested() {
+        let fixture = Fixture::new();
+        fixture.seed(12 * 60, 99);
+        run_git(fixture.main(), &["remote", "remove", "origin"]);
+
+        let listing = fixture.gather(answering);
+
+        assert_eq!(listing, PrListing::default());
+        assert_eq!(REQUESTS.load(Ordering::SeqCst), 0);
+        assert!(launches().is_empty());
+    }
 }
