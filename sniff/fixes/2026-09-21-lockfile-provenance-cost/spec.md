@@ -24,7 +24,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-26
-review_iterations: 1
+review_iterations: 3
 created: 2026-09-21
 owner: Ken Snyder <ken@ken.net>
 origin: darkmatter slow-test investigation on feat/dark-fixes, 2026-09-21
@@ -171,6 +171,14 @@ not topology. If the audit finds a structure-tier consumer that depends on
 `Lockfile` provenance, move that caller to an explicit request where possible;
 if a stable public output cannot be preserved that way, choose B and record why.
 
+**Decision (2026-09-26, review cycle 2): A.** The consumer audit in the
+implementation log found no structure-tier caller that reads or serializes
+`provenance` or `lockfile_match`. Every public output that serializes a
+complete `RepoInfo` runs on `full()` and is unchanged. Bare `sniff repo --json`
+serializes both fields from a `focused(...)` request, so it opts in explicitly
+and its output stays byte-stable. The default is confined to the `RepoRequest`
+constructors, so reversing it to B changes only `structure()` and `focused(...)`.
+
 **Request and compatibility contract if A is chosen:** add an optional
 lockfile-corroboration setting to the Sniff library's
 [`RepoRequest`](../../lib/src/request.rs). `structure()` sets it to false,
@@ -228,6 +236,14 @@ to read `importers:` keys) and the same remedy. Include it only if measurement
 on a pnpm-authoritative fixture shows it matters; this checkout's 186 samples
 suggest it does, but this is a Cargo-authoritative repo with an incidental pnpm
 layer and is not representative.
+
+**Owner decision, 2026-09-26: the pnpm parser moves out of this fix.** The
+measurement met the plan's threshold (`results.md` § 5), and review 3 found the
+parser missing. The owner then ruled that lockfile corroboration as a whole
+covers an arbitrary set of ecosystems and must be redesigned in
+`2026-09-26-lockfile-corroboration`. The typed pnpm parser and its parity tests
+were written and then moved to that feature, which owns every lockfile parser
+from here on. This fix does not change pnpm parsing.
 
 ### Out of scope
 

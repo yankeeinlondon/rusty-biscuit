@@ -1,0 +1,46 @@
+// Scratch probe for 2026-09-21-lockfile-provenance-cost: what would a typed pnpm
+// lockfile parser save? Not a proposed implementation.
+// usage: lpc_pnpm_probe <case> <lockfile> <in-process-warmups>
+//   value-parse:     read + serde_yaml_ng::from_str::<Value> (what ManifestStore::pnpm_lock does)
+//   typed-importers: read + typed deserialize keeping only the importer keys
+// stdout: elapsed ns of one timed call after the warmups; stderr: importer count.
+use biscuit_file::serde_yaml_ng;
+use serde::Deserialize;
+use serde::de::IgnoredAny;
+use std::collections::BTreeMap;
+use std::time::Instant;
+
+#[derive(Deserialize)]
+struct ImportersOnly {
+    #[serde(default)]
+    importers: BTreeMap<String, IgnoredAny>,
+}
+
+fn run(case: &str, path: &str) -> usize {
+    let text = std::fs::read_to_string(path).expect("read");
+    match case {
+        "value-parse" => {
+            let v: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).expect("parse");
+            v.get("importers").and_then(|i| i.as_mapping()).map_or(0, |m| m.len())
+        }
+        "typed-importers" => {
+            let v: ImportersOnly = serde_yaml_ng::from_str(&text).expect("parse");
+            v.importers.len()
+        }
+        other => panic!("unknown case {other}"),
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let warmups: usize = args[3].parse().expect("warmups");
+    for _ in 0..warmups {
+        std::hint::black_box(run(&args[1], &args[2]));
+    }
+    let start = Instant::now();
+    let n = std::hint::black_box(run(&args[1], &args[2]));
+    let ns = start.elapsed().as_nanos();
+    assert!(n > 0);
+    eprintln!("importers={n}");
+    println!("{ns}");
+}

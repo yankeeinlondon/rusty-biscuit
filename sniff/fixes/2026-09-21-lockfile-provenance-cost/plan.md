@@ -98,7 +98,8 @@ collects the evidence that Phase 3 depends on.
 These rulings bind implementation. If a ruling is reversed, record the reversal
 in `implementation-log.md`.
 
-- [ ] **R1 — Default policy: Option A, provisionally, gated on the audit.**
+- [x] **R1 — Default policy: Option A, gated on the audit.** Adopted in review
+  cycle 2 (see the spec's "Decision" note and `implementation-log.md`).
     - The spec recommends A and `review-1.md` asks the author to confirm it. This
       plan runs under `yolo: true`, so it adopts **A** as long as the Phase 1
       audit finds no structure-tier consumer that depends on `Lockfile`
@@ -150,6 +151,10 @@ in `implementation-log.md`.
       least 10% of `upgrade_provenance_with_lockfile` time on a
       pnpm-authoritative fixture in a release build.
     - Otherwise, record the measurement and leave it out.
+    - **Superseded, 2026-09-26.** The threshold was met, but the owner moved the
+      typed pnpm parser to `2026-09-26-lockfile-corroboration`, which
+      redesigns corroboration for every workspace standard. This fix leaves
+      pnpm parsing unchanged; see the specification's owner decision.
 - [ ] **R7 — Worktree hygiene.**
     - The worktree already contains uncommitted changes from other streams, such
       as `nested.rs` worker-cap work and the `2026-09-20-repo-perf` docs. Never
@@ -374,7 +379,8 @@ because nothing reads the new setting yet.
 
 ### Wave 7 — parallel
 
-- [ ] **Typed pnpm parse (only if R6 says so)**
+- [x] **Typed pnpm parse (only if R6 says so)** — moved to
+  `2026-09-26-lockfile-corroboration` per the owner's 2026-09-26 decision (R6)
     - In `ManifestStore::pnpm_lock`, deserialize only the `importers:` key set
       (for example, a struct with `importers: IndexMap<String, IgnoredAny>`) and
       keep the current root-key normalization.

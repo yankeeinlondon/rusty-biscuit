@@ -26,9 +26,12 @@ blocked: false
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-26T12:52:46-07:00
 spec: 2026-09-21-lockfile-provenance-cost/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: sniff/fixes/2026-09-21-lockfile-provenance-cost/implementation-log.md
 description: "A **fix** review of `2026-09-21-lockfile-provenance-cost/spec.md`"
 fix: 2026-09-21-lockfile-provenance-cost/review-1.md
+next: 2026-09-21-lockfile-provenance-cost/review-2.md
 ---
 
 # Review 1 — Lockfile provenance cost
