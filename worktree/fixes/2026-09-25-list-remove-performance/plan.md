@@ -59,6 +59,52 @@ packages:
     - biscuit-speaks
     - worktree
     - worktree-cli
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - sniff/lib/src/process.rs
+    - sniff/lib/src/lib.rs
+    - sniff/lib/Cargo.toml
+    - playa/lib/src/detached/mod.rs
+    - playa/lib/src/detached/tests.rs
+    - playa/lib/Cargo.toml
+    - biscuit-speaks/lib/src/detached.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - Cargo.lock
+documentation:
+    - docs/dependencies.md
+    - sniff/docs/dependencies.md
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 ---
 
 # List and remove performance implementation plan
@@ -175,7 +221,7 @@ The revised specification is authoritative for this implementation. It is still 
   - Verify the worker's working directory is the main checkout, including invocation from a linked checkout. Run the inherited-pipe regression on native Windows. Test spawn failure, failed/authentication refresh, origin changes during fetch, and preservation of stored bytes.
   - Reuse fixture command builders and relocatable binary lookup from the Test Toolkit conventions. Isolate repository/cache state, including native Windows' cache location. Own and terminate/reap workers and local servers even when assertions fail; no nextest leaks or live network calls.
 
-- [ ] **Prove handoff safety** — parallel; owns removal regression tests.
+- [x] **Prove handoff safety** — parallel; owns removal regression tests.
   - Count PR/live-head calls after moving out for keep, explicit delete, local default proof, other local branch proof, tag proof, remote-only proof, and PR-only proof; cross relevant cases with remote approval. Only remote deletion preflight may add network work to the otherwise zero-call cases.
   - Use local bare remotes to remove/move the last remote protection, including remote-default-only proof. Verify refusal leaves worktree files, registration, and branch intact.
   - Cover remote destination/endpoint changes, reinterpretation, live-head changes/absence/unavailability, and a concurrent push after preflight that fails the approved lease with the expected partial result.
@@ -192,14 +238,14 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 6 — Final evidence and documentation
 
-- [ ] **Run platform gates** — parallel with documentation; one test coordinator avoids conflicting builds and timing contention.
+- [x] **Run platform gates** — parallel with documentation; one test coordinator avoids conflicting builds and timing contention.
   - Run `just -d worktree test`, then `just -d worktree test-perf`; run affected `sniff` and `playa` L1 suites through their area recipes. Include other direct consumers actually changed by the helper move, not the entire workspace.
   - Run area lint recipes after checking their expansion against the prohibition on running `cargo fmt`; if a recipe invokes it, run its Clippy/check components directly and record that limitation. Do not format or commit without explicit authorization.
   - Use the OS skill's supported cross-check workflow for Linux, native Windows, and WSL2 in addition to macOS, with non-interactive commands. Confirm executed tests and durations, not merely successful skips; WSL2 must exercise relocatable archive paths. Record exact package, environment, command/filter, result, and unresolved gaps.
   - Reuse qualifying evidence; obtain missing evidence for required cases. No speculative CI matrix changes or full-scope CI run. If wrapper/terminal behavior changed, run relevant existing `just -d worktree test-l2` coverage through its harness without raising focus; all new acceptance tests above remain hermetic L1.
   - Fix failures in their owning track, rerun affected checks, and retain no leaked workers. Do not declare cross-platform verification complete while evidence is missing.
 
-- [ ] **Update behavior docs** — parallel; owns documentation and skill edits after interfaces settle.
+- [x] **Update behavior docs** — parallel; owns documentation and skill edits after interfaces settle.
   - Update `worktree/README.md` for immediate stale badges, foreground misses, age display, and the conditional handoff speedup. Avoid implying every removal becomes network-free.
   - Update `worktree/docs/performance-testing.md` with the stale full-command gate, deterministic no-wait proof, measured fresh/stale results, the added origin Git call, and the investigated Git status CPU/no-watcher findings.
   - Update root `docs/dependencies.md` for `worktree -> fs4` and any actual Windows dependency changes; update existing per-area dependency docs where affected.
@@ -208,7 +254,7 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 7 — Review handoff
 
-- [ ] **Audit acceptance** — integration owner; depends on all prior work.
+- [x] **Audit acceptance** — integration owner; depends on all prior work.
   - Map every specification acceptance bullet to passing test names and platform evidence, including the two Phase 1 safety gaps, native Windows pipe handling, worker crash recovery, and same-size/same-time dirty-file edits.
   - Review dependency/API changes, hidden-command behavior, documentation, and timing evidence together. Confirm no raw origin URL was added to the PR store or worker arguments, no cached list answer influences removal safety, and no unapproved metadata shortcut or daemon was introduced.
   - Check off only verified tasks and report any remaining evidence limitation explicitly. End at “implementation complete, ready for review”; leave the fix in place and do not run `just complete`.

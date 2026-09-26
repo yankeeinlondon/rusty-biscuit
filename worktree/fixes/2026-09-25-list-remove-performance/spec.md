@@ -24,34 +24,26 @@ reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-26
 review_iterations: 0
-human_review: false
-message_to_agent: |-
-    Phase 3 is done; read "## Phase 3" in implementation-log.md. For Phase 4:
-    1. Stale path is now non-blocking: list.rs `gather_prs(store, main,
-       PrSeams { connect, launch })`; Stale -> listing + launch; only Miss
-       requests in the foreground. Worker = hidden `wt internal-refresh-prs
-       <main>` in cli/src/commands/pr_refresh.rs (ignores non-main paths).
-    2. `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` seeds no
-       store, so it is already the miss-path (300 ms) gate. The new stale
-       full-command gate still has to be added (plan Wave 5).
-    3. Worker lifecycle pattern already used in cli/tests/list_prs.rs:
-       ProxyStub::hanging + wait_for_connections(n, limit), then probe the
-       lock with `pull_requests::refresh(.., |_| NoRequest)` (Contended while
-       the worker holds it) and `finish_worker` (close_held + poll) so no
-       worker outlives its fixture. Reuse or promote it into perf_support.
-       Not yet covered: a successful worker publish visible to the next list
-       (needs an answering fake provider, e.g. the FakeGitea idea in Phase 1
-       §6), concurrent competing workers, crash release via a killed worker,
-       spawn failure, origin change during a worker fetch at binary level.
-    4. Handoff zero-network tests (remove.rs) use origin
-       http://gitea.test/o/r.git with every proxy env var aimed at a local
-       counting listener; the lease-failure test uses a sh pre-push hook with
-       repo-local core.hooksPath. Both passed on native Windows.
-    5. Docs not yet updated (Phase 5): README, performance-testing.md. The
-       worktree skill was updated for the hidden command and second-run rules.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-worktree-file
+human_review: false
+implemented: true
+message_to_agent: |-
+    All 5 phases are implemented; read "## Phase 5" in implementation-log.md
+    for the gates, the cross-OS evidence, and the acceptance-to-test map.
+    For the reviewer:
+    1. Run perf gates serially only. nextest runs each test in its own
+       process, so #[serial] does not stop the three perf_pr_request gates
+       from overlapping. The first native-Windows run of them overlapped and
+       failed perf_list_meets_sla_when_the_pr_request_hits_its_deadline
+       (warm list gather 120.7 ms > 120 ms); the serial rerun passed at
+       95.3 ms. Windows' warm list gather (92-95 ms) has little headroom
+       under the 120 ms bound. That margin predates this fix.
+    2. Phase 4 has no log section of its own; its commits are ae03b5381,
+       143bb2c50, 156978301, and c43a286d2. Phase 5 verified "Prove handoff
+       safety" on all four OSes and ticked it.
+    3. The spec status is still draft-spec; this phase did not change it.
 ---
 
 # `wt list` and `wt remove` performance

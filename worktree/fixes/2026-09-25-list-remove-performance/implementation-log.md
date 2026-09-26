@@ -58,6 +58,52 @@ packages:
     - biscuit-speaks
     - worktree
     - worktree-cli
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - sniff/lib/src/process.rs
+    - sniff/lib/src/lib.rs
+    - sniff/lib/Cargo.toml
+    - playa/lib/src/detached/mod.rs
+    - playa/lib/src/detached/tests.rs
+    - playa/lib/Cargo.toml
+    - biscuit-speaks/lib/src/detached.rs
+    - worktree/lib/Cargo.toml
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - Cargo.lock
+documentation:
+    - docs/dependencies.md
+    - sniff/docs/dependencies.md
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-25-list-remove-performance (5 phases)
@@ -380,3 +426,105 @@ All the new tests are L1. No segment carries a tier marker; `list_prs.rs`, `list
 - Linux, `--os linux worktree-cli --all-features`: 271 passed.
 - WSL2, `--os wsl worktree-cli`: 238 passed, 33 skipped (tiers).
 - No pre-existing failures.
+
+## Phase 5
+
+Validation and documentation only; no source code changed in this phase. The main session ran every gate itself (one test coordinator, so timing gates never overlapped other builds) and wrote the docs. Nothing was committed or staged.
+
+### Note on Phase 4
+
+The log has no `## Phase 4` section: Phase 4 landed as commits `ae03b5381` (handoff safety), `143bb2c50` (refresh lifecycle), `156978301` (stale latency) and `c43a286d2` (`sysinfo` dev dependency), and `b76e3893a` ticked two of its three tasks. "Prove handoff safety" was left unchecked for verification. This phase verified it (every row below passes on all four OSes) and ticked it.
+
+### Documentation
+
+- `worktree/README.md`: the PR badge bullet now describes immediate stored answers bound to `origin`, the age line after 60 s, the background refresh, and the foreground 300 ms request only on a first run. A new sub-bullet under "standing in the worktree" describes the conditional handoff speedup without implying every removal is network-free, and states that dirty files are still read in full.
+- `worktree/docs/cli/list.md`: the "PR badges" paragraph was drift. It said a stored answer is used only for 60 s and that the request always runs otherwise. Rewritten for stale-while-revalidate, `origin` binding, and single-request refresh.
+- `worktree/docs/performance-testing.md`:
+  - The "PR Request" section was drift: it claimed a fresh answer runs without the `git remote get-url` call. It now states the origin lookup on every hit, the detached worker and its lock, and the miss-only foreground request.
+  - Added the 2026-09-26 measurement table including the new stale gate, its method (reseeded stale store, stays-stale check, per-sample `pr gather` < 300 ms), the deterministic no-join tests, and the fresh/stale comparison.
+  - Added "`git status` Cost (Investigated, Not Changed)" with the spec's §3 findings and the no-watcher ruling.
+  - `last_updated` and the `md hash` value were refreshed (the hash is stable on recompute).
+- `docs/dependencies.md` (`worktree -> fs4`, `sysinfo` dev) and `sniff/docs/dependencies.md` (the `Win32_System_Console` feature) were already current from Phases 2 and 4; no change needed.
+- The sniff, playa, and os skills already name `sniff::process::configure_detached_child` (Phase 2); a grep found no remaining reference to the old playa helper.
+- `.claude/skills/worktree/SKILL.md`:
+  - names the stale timing gate and the deterministic no-join proof;
+  - records a new trap: `just test-l2 <substring>` matches test names only, and `just test-l2 -E '<filterset>'` fails with a bash syntax error inside `_test_l2`. The skill gives the direct `cargo nextest … -E 'binary(level2_remove)'` form with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`.
+- Code-comment drift audit: `pull_requests.rs` module and constant docs, `list.rs::gather_prs`, `pr_refresh.rs`, and the `perf_pr_request.rs` docs all match the code. No code comment needed a change.
+
+### Gates run
+
+macOS (dev host):
+
+| Command | Result |
+|---|---|
+| `cd worktree && just test` | 456 passed, 18 skipped (`perf_` tier) |
+| `cd worktree && just test-perf` (alone, `-j 1`) | 18 passed |
+| `cd worktree && just lint` | clean (clippy only; the recipe runs no `cargo fmt`) |
+| `cd sniff && just test` | 2858 passed, 31 skipped |
+| `cd playa && just test` | 194 passed, 8 skipped |
+| `cargo nextest run -p biscuit-speaks detached` | 1 passed |
+| `just lint` in sniff, playa, biscuit-speaks | clean |
+| `BISCUIT_TEST_REQUIRED_BACKENDS=tmux BISCUIT_TEST_LEVEL_REQUIRED=2 cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_remove)'` | 9 passed, 1.3–11.2 s each (real tmux runs, no focus) |
+
+sniff, playa, and biscuit-speaks have had no commits since Phase 2, whose native Windows `detached_process` / `publication` evidence still qualifies for them.
+
+Cross-OS (`./scripts/cross-check.sh`, local tree including this phase's uncommitted docs):
+
+| OS | Package | Args | Result |
+|---|---|---|---|
+| Linux (build-linux) | `worktree-cli` | `--all-features` | 285/285 passed. This includes the perf tier and the tmux `level2_remove` tests (0.6–3.1 s, real runs). |
+| Linux | `worktree` | `--all-features` | 206/206 passed |
+| native Windows (build-win-native) | `worktree-cli` | (L1) | 238 passed, 28 skipped (tiers); every `list_prs` lifecycle test ran 6.6–12 s; the handoff rows ran 5–13 s |
+| native Windows | `worktree` | (L1) | 186/186 passed |
+| native Windows | `worktree-cli` | `--all-features --no-capture perf_list_meets_sla` | 3/3 passed (serial) |
+| WSL2 (build-win, archive mode) | `worktree-cli` | (L1) | 251 passed, 34 skipped; relocatable nextest archive extracted and run |
+| WSL2 | `worktree` | (L1) | 206/206 passed |
+| WSL2 | `worktree-cli` | `--all-features --no-capture perf_list_meets_sla` | 3/3 passed |
+
+Same-host fresh-versus-stale full-command measurements (best of 5, from `perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh`):
+
+| Host | Fresh full / `pr gather` | Stale (blocked refresh) full / `pr gather` range |
+|---|---|---|
+| macOS | 63.3 ms / 6.9 ms | 62.4 ms / 6.7–11.0 ms |
+| native Windows | 244.6 ms / 38.2 ms | 242.7 ms / 45.5–57.3 ms |
+| WSL2 | 21.4 ms / 2.3 ms | 21.6 ms / 2.7–6.0 ms |
+
+**One failure, from running the gates in parallel, then a clean serial rerun.** The first native-Windows perf run (`--all-features perf_list_meets_sla`, without `--no-capture`) failed `perf_list_meets_sla_when_the_pr_request_hits_its_deadline`: warm `list gather` was 120.7 ms against its 120 ms bound, with `pr gather` 351–452 ms.
+
+- nextest ran the three perf tests at once. It runs each test in its own process, so `#[serial]` does not serialize them.
+- The serial rerun (`--no-capture` forces one at a time) passed. It measured warm `list gather` 95.3 ms and `pr gather` 347–367 ms.
+- That test and the `list gather` stage are not changed by this fix.
+- Windows' serial warm `list gather` (92–95 ms) leaves little headroom under 120 ms. That is a pre-existing Windows margin, recorded here for review. It is not a regression from this fix.
+- Run Windows perf gates only serially (`just test-perf` does `-j 1`; through cross-check pass `--no-capture` or `-j 1`).
+
+No other failures, pre-existing or new. No leaked `internal-refresh-prs` workers were observed; every lifecycle test reaps its worker, and the `Reaper`/`finish_worker` guards run on failure too.
+
+### Acceptance audit (spec "Acceptance criteria and testing")
+
+| Spec criterion | Tests | Platforms that executed them |
+|---|---|---|
+| 1a. Stale answer renders at once, age line, detached refresh | `list_prs::a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_request`, `list::tests::gather::a_stale_answer_is_shown_at_once_and_refreshed_in_the_background` | macOS, Linux, native Windows, WSL2 |
+| 1a. Concurrent lists make at most one request; recheck under lock | `list_prs::concurrent_lists_and_workers_make_one_request_and_a_fresh_answer_stops_the_next`, lib `a_refresh_skips_the_request_when_the_answer_is_already_fresh` | all four |
+| 1a. Worker crash releases the lock | `list_prs::a_killed_worker_releases_its_lock_and_a_later_worker_refreshes` | all four |
+| 1a. Successful refresh visible on next list | `list_prs::a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` | all four |
+| 1b. Miss / other / missing origin → foreground request; changed origin never shows old badges; old format a miss | `gather::a_miss_requests_in_the_foreground_and_stores_the_answer`, `gather::a_changed_origin_never_shows_the_old_badges`, `list_prs::a_changed_origin_hides_the_stored_badges_and_starts_no_worker`, lib `corrupt_old_format_other_version_and_future_stores_are_misses` | all four |
+| 1c. Failed refresh / origin change during request leaves store; future timestamp not fresh | `list_prs::a_failed_or_unauthorized_refresh_keeps_the_stored_answer`, `list_prs::an_origin_change_during_a_workers_request_discards_its_answer`, lib `staleness_needs_a_known_past_fetch_time` | all four |
+| 1d. No wait on any platform, including Windows handle inheritance; worker cwd is main checkout, linked worktree not held | captured `.output()` tests above; `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` (cwd check and rename of the linked worktree); `the_worker_command_prints_nothing_and_ignores_a_linked_worktree` | all four, including native Windows |
+| 1e. Stale full-command performance gate plus deterministic no-join proof | `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh` plus the `list_prs` captured-output tests | macOS, Linux, native Windows, WSL2 |
+| 2. Keep / explicit delete make no second-run request | `remove::keeping_the_branch_makes_no_network_request_in_the_second_run`, `…an_explicitly_deleted_branch_makes_no_network_request_in_the_second_run` | all four |
+| 2. Local default / other branch / tag proof make none | `remove::automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_run`, lib `reconfirm_accepts_local_proof_without_pr_or_network` | all four |
+| 2. PR-only / remote-only proof is rechecked and refuses when lost (Gap 1) | `remove::automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_run`, `…proved_only_by_another_origin_branch_asks_origin_again…`, `a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip`, lib `reconfirm_verifies_origin_default_live`, `reconfirm_verifies_another_origin_branch_live` | all four |
+| 2. `--force-remote` refuses when the live head changes, is absent, or is unavailable (Gap 2); only the preflight request; lease failure is a partial result | `remove::an_origin_branch_{deleted,moved,created}_between_the_runs_…`, `an_unreachable_origin_in_the_second_run_refuses_force_remote_with_nothing_removed`, `a_force_remote_second_run_makes_only_the_preflight_request`, `a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result`, plus the endpoint and reinterpretation rows | all four |
+| 3. Same-size, same-mtime edit of a large file and inside a nested repository refuses; read error refuses | `remove::a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit`, `an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept`, `an_unreadable_file_inside_a_nested_repo_refuses_the_handoff_with_exit_4`, Windows-only `inventory::fingerprint_fails_when_a_dirty_file_is_held_open_exclusively` | all four (the held-open test on Windows only) |
+
+Plan Wave 7 checks:
+- no raw origin URL in the store (`StoreFile` holds `origin_digest` only; `the_store_records_only_a_digest_of_the_origin`) or the worker's arguments (`internal-refresh-prs <main checkout>` only);
+- no removal code reads `pull_requests` or the `.prs.json` store (grep of `lib/src/remove` and `cli/src/commands/remove`); the second run's PR proof is `SniffPrSource::for_origin`, a live request;
+- no metadata fingerprint shortcut and no daemon; `inventory.rs` gained only the Windows-only test.
+
+### Remaining evidence limitations
+
+- Linux's perf numbers were not printed, because that run had no `--no-capture`. It passed with every tier in parallel, which is a stricter condition than the serial gate.
+- The Windows-only held-open read-failure test and the Linux-only non-UTF-8 name tests run only where their platform allows, as designed.
+
+Implementation complete, ready for review. The fix directory was left in place; `just complete` was not run.
