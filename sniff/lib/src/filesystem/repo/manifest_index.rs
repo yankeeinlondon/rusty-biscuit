@@ -6,9 +6,12 @@
 //! - Package discovery helpers that build [`Package`] values from manifest paths.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::toml_crate;
+use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use tracing::debug;
 
 use crate::performance;
@@ -25,7 +28,17 @@ pub(crate) struct CargoLockVersions {
 
 impl CargoLockVersions {
     /// Parse a Cargo.lock file and extract package versions.
+    ///
+    /// Only `package[].name` and `package[].version` are retained, with every
+    /// version of a name kept in lockfile order. Entries that are not tables,
+    /// or whose `name` or `version` is absent or not a string, are skipped; a
+    /// missing or non-array `package` yields an empty index.
+    ///
+    /// ## Returns
+    ///
+    /// `None` only when the file cannot be read or is not valid TOML.
     pub fn parse(lock_path: &Path) -> Option<Self> {
+        performance::increment_counter(counters::REPO_LOCKFILE_READS, 1);
         performance::increment_counter(counters::FS_FILE_OPENS, 1);
         let content = std::fs::read_to_string(lock_path)
             .map_err(|e| {
@@ -35,7 +48,27 @@ impl CargoLockVersions {
             .ok()?;
         performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
         performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
-        let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+        Self::from_lock_str(&content)
+    }
+
+    fn from_lock_str(content: &str) -> Option<Self> {
+        let lock: CargoLockDocument = toml_crate::from_str(content).ok()?;
+
+        let mut versions: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in lock.package.0 {
+            if let (Some(name), Some(version)) = (entry.name, entry.version) {
+                versions.entry(name).or_default().push(version);
+            }
+        }
+
+        Some(Self { versions })
+    }
+
+    /// The generic `toml::Value` parser that [`Self::from_lock_str`] replaced,
+    /// kept as the parity oracle.
+    #[cfg(test)]
+    fn parse_reference(content: &str) -> Option<Self> {
+        let parsed: toml_crate::Value = toml_crate::from_str(content).ok()?;
 
         let mut versions: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -61,6 +94,176 @@ impl CargoLockVersions {
     /// Returns the first resolved version if available.
     pub fn resolve(&self, name: &str) -> Option<String> {
         self.versions.get(name).and_then(|v| v.first()).cloned()
+    }
+}
+
+/// The part of a `Cargo.lock` document that [`CargoLockVersions`] retains.
+///
+/// Every other key (`version`, `metadata`, and each entry's `source`,
+/// `checksum`, and `dependencies`) is skipped through `IgnoredAny` rather than
+/// allocated. Each level is lenient, matching the generic parser this replaced:
+/// a value of the wrong shape becomes an absent value instead of an error.
+#[derive(Deserialize)]
+struct CargoLockDocument {
+    #[serde(default)]
+    package: LockedPackages,
+}
+
+#[derive(Default)]
+struct LockedPackages(Vec<LockedPackage>);
+
+#[derive(Deserialize)]
+struct LockedPackage {
+    #[serde(default, deserialize_with = "string_or_none")]
+    name: Option<String>,
+    #[serde(default, deserialize_with = "string_or_none")]
+    version: Option<String>,
+}
+
+/// One `package` array element; `None` when the element is not a table.
+struct LockedPackageEntry(Option<LockedPackage>);
+
+fn string_or_none<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    struct StringOrNone;
+
+    impl<'de> Visitor<'de> for StringOrNone {
+        type Value = Option<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("any TOML value")
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            Ok(Some(value.to_owned()))
+        }
+
+        fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+            Ok(Some(value))
+        }
+
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+            IgnoredAny.visit_seq(seq)?;
+            Ok(None)
+        }
+
+        // Also reached by TOML datetimes, which serde sees as a map.
+        fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            IgnoredAny.visit_map(map)?;
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrNone)
+}
+
+impl<'de> Deserialize<'de> for LockedPackageEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EntryVisitor;
+
+        impl<'de> Visitor<'de> for EntryVisitor {
+            type Value = LockedPackageEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("any TOML value")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                LockedPackage::deserialize(de::value::MapAccessDeserializer::new(map))
+                    .map(|package| LockedPackageEntry(Some(package)))
+            }
+
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(LockedPackageEntry(None))
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(LockedPackageEntry(None))
+            }
+
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(LockedPackageEntry(None))
+            }
+
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(LockedPackageEntry(None))
+            }
+
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(LockedPackageEntry(None))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                IgnoredAny.visit_seq(seq)?;
+                Ok(LockedPackageEntry(None))
+            }
+        }
+
+        deserializer.deserialize_any(EntryVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for LockedPackages {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PackagesVisitor;
+
+        impl<'de> Visitor<'de> for PackagesVisitor {
+            type Value = LockedPackages;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("any TOML value")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut packages = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(LockedPackageEntry(entry)) = seq.next_element()? {
+                    packages.extend(entry);
+                }
+                Ok(LockedPackages(packages))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                IgnoredAny.visit_map(map)?;
+                Ok(LockedPackages::default())
+            }
+
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(LockedPackages::default())
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(LockedPackages::default())
+            }
+
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(LockedPackages::default())
+            }
+
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(LockedPackages::default())
+            }
+
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(LockedPackages::default())
+            }
+        }
+
+        deserializer.deserialize_any(PackagesVisitor)
     }
 }
 
@@ -548,5 +751,139 @@ mod tests {
 
         assert_eq!(versions.resolve("serde"), Some("1.0.0".to_string()));
         assert_eq!(versions.resolve("missing"), None);
+    }
+
+    type VersionIndex = HashMap<String, Vec<String>>;
+
+    fn typed_and_reference(content: &str) -> (Option<VersionIndex>, Option<VersionIndex>) {
+        (
+            CargoLockVersions::from_lock_str(content).map(|lock| lock.versions),
+            CargoLockVersions::parse_reference(content).map(|lock| lock.versions),
+        )
+    }
+
+    fn expected_map(entries: &[(&str, &[&str])]) -> VersionIndex {
+        entries
+            .iter()
+            .map(|(name, versions)| {
+                (
+                    (*name).to_string(),
+                    versions.iter().map(|v| (*v).to_string()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cargo_lock_typed_parse_keeps_duplicate_name_versions_in_lockfile_order() {
+        let content = r#"
+version = 4
+
+[[package]]
+name = "syn"
+version = "2.0.100"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abc"
+dependencies = ["proc-macro2", "quote"]
+
+[[package]]
+name = "serde"
+version = "1.0.200"
+
+[[package]]
+name = "syn"
+version = "1.0.109"
+
+[[package]]
+name = "syn"
+version = "2.0.50"
+
+[metadata]
+"checksum syn 1.0.109" = "def"
+"#;
+
+        let (typed, reference) = typed_and_reference(content);
+
+        let expected = expected_map(&[
+            ("syn", &["2.0.100", "1.0.109", "2.0.50"]),
+            ("serde", &["1.0.200"]),
+        ]);
+        assert_eq!(typed.as_ref(), Some(&expected));
+        assert_eq!(reference.as_ref(), Some(&expected));
+        let typed_lock = CargoLockVersions::from_lock_str(content).expect("valid TOML");
+        assert_eq!(typed_lock.resolve("syn"), Some("2.0.100".to_string()));
+    }
+
+    #[test]
+    fn cargo_lock_typed_parse_skips_malformed_entries_like_reference() {
+        let content = r#"
+package = [
+    { version = "1.0.0" },
+    { name = "int-version", version = 3 },
+    { name = 7, version = "1.0.0" },
+    { name = "table-version", version = { major = 1 } },
+    { name = "date-version", version = 1979-05-27 },
+    "not-a-table",
+    42,
+    ["nested", "array"],
+    1979-05-27,
+    { name = "no-version" },
+    { name = "kept", version = "0.1.0", checksum = "abc" },
+]
+"#;
+
+        let (typed, reference) = typed_and_reference(content);
+
+        let expected = expected_map(&[("kept", &["0.1.0"])]);
+        assert_eq!(typed.as_ref(), Some(&expected));
+        assert_eq!(reference.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn cargo_lock_typed_parse_treats_non_array_package_as_empty_like_reference() {
+        for content in [
+            "version = 4\n",
+            "package = \"serde\"\n",
+            "package = 1\n",
+            "package = 1979-05-27\n",
+            "[package]\nname = \"serde\"\nversion = \"1.0.0\"\n",
+        ] {
+            let (typed, reference) = typed_and_reference(content);
+
+            assert_eq!(typed, Some(HashMap::new()), "typed parse of {content:?}");
+            assert_eq!(
+                reference,
+                Some(HashMap::new()),
+                "reference parse of {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cargo_lock_typed_parse_rejects_invalid_toml_like_reference() {
+        for content in [
+            "[[package]\nname = \"serde\"\n",
+            "[[package]]\nname = \"serde\"\nname = \"dup\"\n",
+            "package = [",
+        ] {
+            let (typed, reference) = typed_and_reference(content);
+
+            assert_eq!(typed, None, "typed parse of {content:?}");
+            assert_eq!(reference, None, "reference parse of {content:?}");
+        }
+    }
+
+    #[test]
+    fn cargo_lock_typed_parse_matches_reference_on_workspace_lockfile() {
+        let content = include_str!("../../../../../Cargo.lock");
+
+        let (typed, reference) = typed_and_reference(content);
+
+        let typed = typed.expect("workspace Cargo.lock parses");
+        assert!(
+            typed.contains_key("sniff"),
+            "workspace member missing from typed index"
+        );
+        assert_eq!(Some(typed), reference);
     }
 }

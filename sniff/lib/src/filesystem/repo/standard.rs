@@ -378,9 +378,20 @@ pub struct MonorepoLayer {
     /// Orchestrators riding on top (role [`Role::OrchestratesTasks`] only).
     pub orchestrators: Vec<MonorepoStandard>,
     /// How this layer's package list was derived. Packages inherit it.
+    ///
+    /// [`PackageProvenance::Lockfile`] appears only when the request
+    /// [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance)
+    /// and the lockfile corroborates the manifest; otherwise this stays
+    /// manifest-derived.
     pub provenance: PackageProvenance,
     /// Whether the committed lockfile agrees with the manifest-derived package
-    /// set, if a lockfile was consulted. `None` when no lockfile was parsed.
+    /// set.
+    ///
+    /// `None` means no lockfile answer: corroboration was not requested (the
+    /// [`RepoRequest::structure`](crate::request::RepoRequest::structure) and
+    /// [`RepoRequest::focused`](crate::request::RepoRequest::focused)
+    /// defaults), the lockfile is absent or unparseable, or the authority has
+    /// no lockfile corroboration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lockfile_match: Option<bool>,
     /// Whether the layer's root manifest also declares a package, when the

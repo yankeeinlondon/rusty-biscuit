@@ -494,6 +494,9 @@ pub(crate) struct PackageScanResult {
 
 /// Detect repository configuration in the given directory.
 ///
+/// Runs [`RepoRequest::full`](crate::request::RepoRequest::full), which includes lockfile corroboration of each
+/// workspace layer.
+///
 /// ## Examples
 ///
 /// ```no_run
@@ -522,18 +525,28 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 
 /// Shallow repository detection for topology and package identity.
 ///
-/// Package managers, dependencies, test runners, features, languages,
-/// frameworks, and file lists are empty. Call [`detect_repo_with_request`]
-/// with [`RepoRequest::focused`] for selected manifest-backed details, or
+/// Runs [`RepoRequest::structure`]: package managers, dependencies, test
+/// runners, features, languages, frameworks, and file lists are empty, and no
+/// lockfile is read, so layer and package provenance stay manifest-derived and
+/// [`MonorepoLayer::lockfile_match`] is `None`. Call
+/// [`detect_repo_with_request`] with [`RepoRequest::focused`] for selected
+/// manifest-backed details or with
+/// [`RepoRequest::with_lockfile_provenance`] for lockfile corroboration, or
 /// [`detect_repo`] for complete enrichment.
 ///
 /// [`RepoRequest::structure`]: crate::request::RepoRequest::structure
+/// [`RepoRequest::focused`]: crate::request::RepoRequest::focused
+/// [`RepoRequest::with_lockfile_provenance`]: crate::request::RepoRequest::with_lockfile_provenance
+/// [`MonorepoLayer::lockfile_match`]: crate::filesystem::repo::MonorepoLayer::lockfile_match
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
 }
 
 /// Detect a repository using a caller-selected detail request.
+///
+/// Workspace layers are corroborated against their lockfiles only when
+/// `request` [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance).
 pub fn detect_repo_with_request(
     root: &Path,
     request: &crate::request::RepoRequest,
@@ -547,9 +560,9 @@ pub fn detect_repo_with_request(
 /// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
 /// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
 /// `package.json`, `pyproject.toml`, or `go.mod`). This function preserves the
-/// shallow semantics of [`detect_repo_structure`]. Use
-/// [`detect_repo_with_request_or_root_package`] when selected package details
-/// are required.
+/// shallow semantics of [`detect_repo_structure`], which reads no lockfile
+/// for corroboration. Use [`detect_repo_with_request_or_root_package`]
+/// when selected package details or lockfile corroboration are required.
 ///
 /// ## Returns
 ///

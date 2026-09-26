@@ -781,36 +781,74 @@ pub struct RepoRequest {
     /// not inventory-backed full repository detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<RepoDetailRequest>,
+    /// Corroborate each workspace layer's membership against its lockfile
+    /// (`Cargo.lock`, `pnpm-lock.yaml`, or `uv.lock`).
+    ///
+    /// When false, no layer's lockfile is read for corroboration: layer and
+    /// package provenance stay manifest-derived and
+    /// [`MonorepoLayer::lockfile_match`](crate::filesystem::repo::MonorepoLayer::lockfile_match)
+    /// is `None`. This controls corroboration only; a request that
+    /// [wants dependencies](Self::wants_dependencies) still reads `Cargo.lock`
+    /// to resolve versions.
+    ///
+    /// A serialized request that omits the field deserializes as `true`, so
+    /// plans written before the field existed keep corroboration.
+    #[serde(default = "lockfile_provenance_default")]
+    pub lockfile_provenance: bool,
+}
+
+/// Legacy value for a serialized [`RepoRequest`] without `lockfile_provenance`.
+fn lockfile_provenance_default() -> bool {
+    true
 }
 
 impl RepoRequest {
     /// Workspace topology and minimum package identity only.
     ///
     /// Package managers, dependencies, test runners, features, languages,
-    /// frameworks, and file lists are empty. Use [`Self::focused`] for one of
-    /// the inexpensive manifest-backed detail sets, or [`Self::full`] for all
-    /// enriched fields.
+    /// frameworks, and file lists are empty, and lockfile corroboration is
+    /// off. Use [`Self::focused`] for one of the inexpensive manifest-backed
+    /// detail sets, [`Self::full`] for all enriched fields, or
+    /// [`Self::with_lockfile_provenance`] to corroborate layers.
     pub fn structure() -> Self {
         Self {
             structure_only: true,
             details: None,
+            lockfile_provenance: false,
         }
     }
 
-    /// Full repo detection with per-package language and framework scanning.
+    /// Full repo detection with per-package language and framework scanning
+    /// and lockfile corroboration.
     pub fn full() -> Self {
         Self {
             structure_only: false,
             details: None,
+            lockfile_provenance: true,
         }
     }
 
     /// Structure plus selected manifest-backed package details.
+    ///
+    /// Lockfile corroboration is off unless the caller opts in with
+    /// [`Self::with_lockfile_provenance`].
     pub fn focused(details: RepoDetailRequest) -> Self {
         Self {
             structure_only: true,
             details: Some(details),
+            lockfile_provenance: false,
         }
+    }
+
+    /// Set whether workspace layers are corroborated against their lockfiles.
+    pub fn with_lockfile_provenance(mut self, corroborate: bool) -> Self {
+        self.lockfile_provenance = corroborate;
+        self
+    }
+
+    /// Whether lockfile corroboration of workspace layers is requested.
+    pub fn wants_lockfile_provenance(&self) -> bool {
+        self.lockfile_provenance
     }
 
     /// Whether package-manager detection is requested.
@@ -1284,6 +1322,68 @@ mod tests {
             serde_json::from_value(serde_json::to_value(focused).unwrap()).unwrap();
         assert!(roundtrip.wants_dependencies());
         assert!(!roundtrip.wants_package_managers());
+        assert!(!roundtrip.wants_lockfile_provenance());
+
+        let opted_in = RepoRequest::focused(RepoDetailRequest::dependencies())
+            .with_lockfile_provenance(true);
+        let roundtrip: RepoRequest =
+            serde_json::from_value(serde_json::to_value(opted_in).unwrap()).unwrap();
+        assert!(roundtrip.wants_dependencies());
+        assert!(roundtrip.wants_lockfile_provenance());
+    }
+
+    #[test]
+    fn legacy_repo_request_json_without_lockfile_provenance_corroborates() {
+        for legacy_json in [
+            r#"{"structure_only":true}"#,
+            r#"{"structure_only":false}"#,
+            r#"{"structure_only":true,"details":{"package_managers":false,"dependencies":true,"test_runners":false}}"#,
+        ] {
+            let legacy: RepoRequest = serde_json::from_str(legacy_json).unwrap();
+            assert!(legacy.wants_lockfile_provenance(), "{legacy_json}");
+        }
+    }
+
+    #[test]
+    fn repo_request_constructors_set_lockfile_provenance_defaults() {
+        assert!(!RepoRequest::structure().wants_lockfile_provenance());
+        assert!(RepoRequest::full().wants_lockfile_provenance());
+        assert!(!RepoRequest::focused(RepoDetailRequest::all()).wants_lockfile_provenance());
+    }
+
+    #[test]
+    fn lockfile_provenance_builder_opts_in_and_out() {
+        assert!(
+            RepoRequest::structure()
+                .with_lockfile_provenance(true)
+                .wants_lockfile_provenance()
+        );
+        assert!(
+            RepoRequest::focused(RepoDetailRequest::package_managers())
+                .with_lockfile_provenance(true)
+                .wants_lockfile_provenance()
+        );
+        assert!(
+            !RepoRequest::full()
+                .with_lockfile_provenance(false)
+                .wants_lockfile_provenance()
+        );
+    }
+
+    #[test]
+    fn lockfile_provenance_is_always_serialized() {
+        for (request, expected) in [
+            (RepoRequest::structure(), false),
+            (RepoRequest::full(), true),
+            (RepoRequest::focused(RepoDetailRequest::dependencies()), false),
+            (RepoRequest::structure().with_lockfile_provenance(true), true),
+        ] {
+            let value = serde_json::to_value(request).unwrap();
+            assert_eq!(
+                value.get("lockfile_provenance"),
+                Some(&serde_json::Value::Bool(expected))
+            );
+        }
     }
 
     #[test]
@@ -1304,7 +1404,9 @@ mod tests {
         assert!(parsed.network.is_none());
         let fs = parsed.filesystem.unwrap();
         assert_eq!(fs.git.unwrap().commit_count, 5);
-        assert!(fs.repo.unwrap().structure_only);
+        let repo = fs.repo.unwrap();
+        assert!(repo.structure_only);
+        assert!(!repo.wants_lockfile_provenance());
     }
 
     #[test]

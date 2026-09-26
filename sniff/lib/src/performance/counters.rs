@@ -61,6 +61,12 @@ pub const FS_CANONICALIZATIONS: &str = "filesystem.io.canonicalizations";
 /// `go.mod`, and peers).
 pub const REPO_MANIFEST_PARSES: &str = "filesystem.repo.manifest_parses";
 
+/// Lockfile read attempts (`Cargo.lock`, `pnpm-lock.yaml`, `uv.lock`).
+///
+/// Counted before the read, so an absent or unreadable lockfile still counts
+/// one attempt. Zero proves that detection did not touch a lockfile.
+pub const REPO_LOCKFILE_READS: &str = "filesystem.repo.lockfile_reads";
+
 /// Lockfiles parsed (`Cargo.lock`, `pnpm-lock.yaml`, and peers).
 pub const REPO_LOCKFILE_PARSES: &str = "filesystem.repo.lockfile_parses";
 

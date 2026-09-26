@@ -474,6 +474,7 @@ fn read_counted_manifest(path: &Path) -> Option<String> {
 }
 
 fn read_counted_lockfile(path: &Path) -> Option<String> {
+    performance::increment_counter(counters::REPO_LOCKFILE_READS, 1);
     performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let content = std::fs::read_to_string(path).ok()?;
     performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
@@ -743,10 +744,12 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
             resolve_acting_binary(standard.standard, &standard.root, &executable_index);
     }
 
-    // Upgrade provenance to `Lockfile` for ecosystems where the committed
-    // lockfile is a high-fidelity membership source.
-    for layer in &mut monorepo_layers {
-        upgrade_provenance_with_lockfile(layer, &mut seeds, &manifests);
+    // Lockfile corroboration is request-driven: a declining request reads no
+    // lockfile here and keeps manifest-derived provenance.
+    if request.wants_lockfile_provenance() {
+        for layer in &mut monorepo_layers {
+            upgrade_provenance_with_lockfile(layer, &mut seeds, &manifests);
+        }
     }
 
     if !request.structure_only {
@@ -887,6 +890,8 @@ fn collect_outcomes(
 ///
 /// The manifest remains the authority when lockfile and manifest disagree; the
 /// mismatch is recorded in `lockfile_match` so consumers can spot stale lockfiles.
+/// Runs only for a request that
+/// [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance).
 fn upgrade_provenance_with_lockfile(
     layer: &mut MonorepoLayer,
     seeds: &mut [PackageSeed],
@@ -3098,10 +3103,27 @@ mod observation_index {
         );
         assert_eq!(
             counts.get(counters::FS_FILE_OPENS),
-            MEMBERS as u64 + 2,
-            "unique manifests plus the one absent Cargo.lock observation: {:?}",
+            MEMBERS as u64 + 1,
+            "unique manifests only; structure reads no Cargo.lock: {:?}",
             counts.all()
         );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0);
+    }
+
+    #[test]
+    fn absent_cargo_lock_counts_one_read_attempt_and_no_parse() {
+        let dir = inherited_cargo_workspace(2, false);
+        let request = RepoRequest::structure().with_lockfile_provenance(true);
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0, "{:?}", counts.all());
+        assert_eq!(repo.monorepo_layers.len(), 1);
+        assert_eq!(repo.monorepo_layers[0].lockfile_match, None);
     }
 
     #[test]
@@ -3117,14 +3139,18 @@ mod observation_index {
              [[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n",
         )
         .expect("write Cargo.lock");
-        let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+        let request = RepoRequest::focused(RepoDetailRequest::dependencies())
+            .with_lockfile_provenance(true);
 
         let (result, counts) =
             testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
         let (repo, _) = result.expect("detection should succeed");
         let repo = repo.expect("fixture is a Cargo workspace");
 
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1);
         assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
+        assert_eq!(repo.monorepo_layers[0].provenance, PackageProvenance::Lockfile);
+        assert_eq!(repo.monorepo_layers[0].lockfile_match, Some(true));
         assert!(
             repo.packages
                 .as_deref()
@@ -3139,6 +3165,154 @@ mod observation_index {
                     })
                 )
         );
+    }
+
+    #[test]
+    fn declined_corroboration_still_resolves_dependency_versions_from_cargo_lock() {
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(2, false);
+        fs::write(
+            dir.path().join("Cargo.lock"),
+            "version = 3\n\n\
+             [[package]]\nname = \"member-0\"\nversion = \"9.9.9\"\n\n\
+             [[package]]\nname = \"member-1\"\nversion = \"9.9.9\"\n\n\
+             [[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n",
+        )
+        .expect("write Cargo.lock");
+        let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+        assert!(!request.wants_lockfile_provenance());
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1, "{:?}", counts.all());
+        let layer = &repo.monorepo_layers[0];
+        assert_eq!(layer.provenance, PackageProvenance::Globbed);
+        assert_eq!(layer.lockfile_match, None);
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_eq!(package.provenance, PackageProvenance::Globbed);
+            assert!(
+                package
+                    .dependencies
+                    .as_deref()
+                    .is_some_and(|dependencies| dependencies.iter().any(|dependency| {
+                        dependency.name == "serde"
+                            && dependency.actual_version.as_deref() == Some("1.0.0")
+                    })),
+                "{} must resolve serde from Cargo.lock",
+                package.name
+            );
+        }
+    }
+
+    /// A root carrying a Cargo, a pnpm, and a uv workspace, each with a
+    /// lockfile that corroborates its members.
+    fn three_lockfile_workspace() -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let write = |relative: &str, content: &str| {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+            fs::write(path, content).expect("write fixture file");
+        };
+
+        write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n",
+        );
+        for name in ["alpha", "beta"] {
+            write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            );
+        }
+        write(
+            "Cargo.lock",
+            "version = 3\n\n\
+             [[package]]\nname = \"alpha\"\nversion = \"0.1.0\"\n\n\
+             [[package]]\nname = \"beta\"\nversion = \"0.1.0\"\n",
+        );
+
+        write("package.json", r#"{"name":"root","private":true}"#);
+        write("pnpm-workspace.yaml", "packages:\n  - \"packages/*\"\n");
+        for name in ["web", "ui"] {
+            write(
+                &format!("packages/{name}/package.json"),
+                &format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+            );
+        }
+        write(
+            "pnpm-lock.yaml",
+            "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  packages/web: {}\n  packages/ui: {}\n",
+        );
+
+        write(
+            "pyproject.toml",
+            "[project]\nname = \"root-py\"\nversion = \"0.1.0\"\n\n\
+             [tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+        );
+        for name in ["lib-a", "lib-b"] {
+            write(
+                &format!("py/{name}/pyproject.toml"),
+                &format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            );
+        }
+        write(
+            "uv.lock",
+            "version = 1\n\n[manifest]\nmembers = [\"root-py\", \"lib-a\", \"lib-b\"]\n\n\
+             [workspace]\nmembers = [\".\", \"py/lib-a\", \"py/lib-b\"]\n",
+        );
+        dir
+    }
+
+    #[test]
+    fn declining_structure_request_reads_and_parses_no_lockfile() {
+        let dir = three_lockfile_workspace();
+        let request = RepoRequest::structure();
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0, "{:?}", counts.all());
+        assert!(
+            !counts.all().contains_key(counters::REPO_LOCKFILE_READS),
+            "an absent counter is the zero-read proof: {:?}",
+            counts.all()
+        );
+        assert_eq!(repo.monorepo_layers.len(), 3, "{:?}", repo.monorepo_layers);
+        for layer in &repo.monorepo_layers {
+            assert_eq!(layer.lockfile_match, None, "{layer:?}");
+            assert_ne!(layer.provenance, PackageProvenance::Lockfile, "{layer:?}");
+        }
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_ne!(package.provenance, PackageProvenance::Lockfile, "{package:?}");
+        }
+    }
+
+    #[test]
+    fn opted_in_structure_request_corroborates_every_lockfile_once() {
+        let dir = three_lockfile_workspace();
+        let request = RepoRequest::structure().with_lockfile_provenance(true);
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 3, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 3, "{:?}", counts.all());
+        assert_eq!(repo.monorepo_layers.len(), 3, "{:?}", repo.monorepo_layers);
+        for layer in &repo.monorepo_layers {
+            assert_eq!(layer.lockfile_match, Some(true), "{layer:?}");
+            assert_eq!(layer.provenance, PackageProvenance::Lockfile, "{layer:?}");
+        }
     }
 
     #[test]
