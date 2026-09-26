@@ -169,7 +169,7 @@ The revised specification is authoritative for this implementation. It is still 
 
 ### Wave 5 — Parallel regression suites
 
-- [ ] **Prove refresh lifecycle** — parallel; owns PR subprocess tests and dedicated fixture support.
+- [x] **Prove refresh lifecycle** — parallel; owns PR subprocess tests and dedicated fixture support.
   - Use real subprocesses and a blocking local source with readiness/release synchronization. Assert the stale parent renders and exits with captured output before the worker is released; separately assert the worker was started and eventually publishes an answer visible to the next list.
   - Start concurrent list/worker processes; while one request is blocked, prove competitors exit without requests. After success, prove the under-lock freshness recheck skips another request. Kill the lock holder, then prove a later worker refreshes.
   - Verify the worker's working directory is the main checkout, including invocation from a linked checkout. Run the inherited-pipe regression on native Windows. Test spawn failure, failed/authentication refresh, origin changes during fetch, and preservation of stored bytes.
@@ -182,7 +182,7 @@ The revised specification is authoritative for this implementation. It is still 
   - Add end-to-end handoff regressions for a dirty file larger than 1 MiB and a file inside an untracked nested repository: change bytes while preserving size and restoring modification time, then assert refusal and retained contents.
   - Prove unreadable dirty content refuses deletion using a reliable injected read failure where permissions are insufficient on a platform. Retain index/mode/symlink/rules/baseline mutation, expiry, replay, and caller-still-inside coverage. Do not alter the fingerprint or included-file observation contracts to make tests cheaper.
 
-- [ ] **Prove stale latency** — parallel; owns `cli/tests/perf_pr_request.rs` and performance-only fixture changes.
+- [x] **Prove stale latency** — parallel; owns `cli/tests/perf_pr_request.rs` and performance-only fixture changes.
   - Add the agreed full non-image stale-cache gate using `MixedFixture` and the local blocked refresh. Reseed/verify stale matching state for each sample so warm-up or worker success cannot turn it into a fresh-cache test.
   - Assert cached badges and age output as well as the generous full-command bound. Pair timing with the deterministic blocked-worker test; a 1-second ceiling alone would not detect a reintroduced 300 ms wait.
   - Retain foreground-miss deadline, offline, warm/cold `list gather`, and full-command gates. Update seeded stores and subprocess-count expectations for the deliberate origin lookup without relaxing unrelated bounds.
