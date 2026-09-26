@@ -1110,6 +1110,179 @@ fn an_unreadable_file_inside_a_nested_repo_refuses_the_handoff_with_exit_4() {
     assert!(fixture.branch_exists("feat/x"));
 }
 
+/// 1.5 MiB of varied bytes: past the 1 MiB size a metadata shortcut was once
+/// proposed for.
+fn large_contents() -> Vec<u8> {
+    (0..1_572_864_u32).map(|index| (index % 251) as u8).collect()
+}
+
+/// Flips bytes at the start, middle, and end of `path` and then restores
+/// its modification time, so neither its size nor its time shows the edit.
+/// Returns the new contents.
+fn edit_keeping_size_and_mtime(path: &Path) -> Vec<u8> {
+    let before = fs::metadata(path).unwrap();
+    let modified = before.modified().unwrap();
+    let mut bytes = fs::read(path).unwrap();
+    let last = bytes.len() - 1;
+    for index in [0, bytes.len() / 2, last] {
+        bytes[index] ^= 0x01;
+    }
+    fs::write(path, &bytes).unwrap();
+    // A separate handle, so no later write through it can move the time.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    let after = fs::metadata(path).unwrap();
+    assert_eq!(after.len(), before.len(), "{path:?} kept its size");
+    assert_eq!(after.modified().unwrap(), modified, "{path:?} kept its modification time");
+    bytes
+}
+
+/// The spec's fingerprint scenario: an edit that keeps both size and
+/// modification time, to a large dirty file and to files inside an untracked
+/// nested repository, refuses the handoff and keeps the edit. The consumed
+/// token cannot then be replayed.
+#[test]
+fn a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit() {
+    for case in [
+        "a large untracked file",
+        "a large modified tracked file",
+        "a file inside an untracked nested repo",
+        "a large file inside an untracked nested repo",
+    ] {
+        let fixture = Fixture::new();
+        let (wt, edited) = match case {
+            "a large untracked file" => {
+                let wt = fixture.add_worktree("feat/x", "feat-x");
+                fs::write(wt.join("big.bin"), large_contents()).unwrap();
+                (wt.clone(), wt.join("big.bin"))
+            }
+            "a large modified tracked file" => {
+                fs::write(fixture.repo().join("big.bin"), large_contents()).unwrap();
+                git(&fixture.repo(), &["add", "big.bin"]);
+                git(&fixture.repo(), &["commit", "-q", "-m", "big"]);
+                let wt = fixture.add_worktree("feat/x", "feat-x");
+                let mut dirty = large_contents();
+                dirty[10] ^= 0x02;
+                fs::write(wt.join("big.bin"), dirty).unwrap();
+                assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "M big.bin");
+                (wt.clone(), wt.join("big.bin"))
+            }
+            "a file inside an untracked nested repo" => {
+                let wt = worktree_with_nested_repo(&fixture);
+                (wt.clone(), wt.join("nested/notes"))
+            }
+            _ => {
+                let wt = worktree_with_nested_repo(&fixture);
+                fs::write(wt.join("nested/big.bin"), large_contents()).unwrap();
+                (wt.clone(), wt.join("nested/big.bin"))
+            }
+        };
+        let status = git(&wt, &["status", "--porcelain=v1", "-uall"]);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        let new_bytes = edit_keeping_size_and_mtime(&edited);
+        assert_eq!(git(&wt, &["status", "--porcelain=v1", "-uall"]), status, "{case}: git sees no change");
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains("uncommitted or included files"))
+            .stderr(predicate::str::contains("Removed").not());
+        assert!(fs::read(&edited).unwrap() == new_bytes, "{case}: the edit is kept");
+        assert_nothing_removed(&fixture, &wt);
+
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(4)
+            .stderr(predicate::str::contains("no pending removal"));
+        assert!(fs::read(&edited).unwrap() == new_bytes, "{case}: a replay removes nothing");
+        assert_nothing_removed(&fixture, &wt);
+    }
+}
+
+/// Keeps `path` unreadable while alive: mode 000 on Unix, an exclusive open
+/// on Windows, where mode bits cannot deny a read.
+struct Unreadable {
+    #[cfg(unix)]
+    path: PathBuf,
+    #[cfg(windows)]
+    _held: fs::File,
+}
+
+impl Unreadable {
+    /// `None` when the file stays readable (root ignores mode bits).
+    fn new(path: &Path) -> Option<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+            let this = Self { path: path.to_path_buf() };
+            fs::File::open(path).is_err().then_some(this)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let held = fs::OpenOptions::new().read(true).share_mode(0).open(path).unwrap();
+            assert!(fs::File::open(path).is_err(), "the exclusive open denies other readers");
+            Some(Self { _held: held })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            None
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o644));
+    }
+}
+
+/// A dirty file the second run cannot read, at the top level or inside an
+/// untracked nested repository, refuses the handoff (exit 4, as every
+/// `WorktreeError::Io` does) and keeps the file.
+#[test]
+fn an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept() {
+    for case in ["an untracked file", "a file inside an untracked nested repo"] {
+        let fixture = Fixture::new();
+        let (wt, dirty, contents) = if case == "an untracked file" {
+            let wt = fixture.add_worktree("feat/x", "feat-x");
+            fs::write(wt.join("scratch.txt"), "approved scratch\n").unwrap();
+            (wt.clone(), wt.join("scratch.txt"), "approved scratch\n")
+        } else {
+            let wt = worktree_with_nested_repo(&fixture);
+            (wt.clone(), wt.join("nested/notes"), "approved content\n")
+        };
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        let Some(unreadable) = Unreadable::new(&dirty) else {
+            eprintln!("skipping {case}: the file stays readable to this user");
+            continue;
+        };
+        let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+        drop(unreadable);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(4), "{case}: {stderr}");
+        assert!(stderr.contains("Could not read everything"), "{case}: {stderr}");
+        assert!(stderr.contains("Nothing was removed"), "{case}: {stderr}");
+        assert!(!stderr.contains("Removed"), "{case}: {stderr}");
+        assert_eq!(fs::read_to_string(&dirty).unwrap(), contents, "{case}");
+        assert_nothing_removed(&fixture, &wt);
+    }
+}
+
 /// Paths that are not UTF-8. `\xff` and `\xfe` both decode lossily to
 /// U+FFFD, so only a byte-faithful fingerprint tells them apart.
 #[cfg(unix)]
@@ -1661,28 +1834,58 @@ const PROXIED_ORIGIN: &str = "http://gitea.test/o/r.git";
 
 /// Stands in for every HTTP host: origin is `http://gitea.test/o/r.git` and
 /// the proxy variables point at a local port, so each request the PR lookup
-/// or a git transport makes arrives here as one connection, which is closed
-/// unanswered (origin is unreachable).
+/// or a git transport makes arrives here as one connection. It is closed
+/// unanswered (origin is unreachable), except that a PR list request gets
+/// [`CountingProxy::answer_pulls`]'s body when one is set.
 struct CountingProxy {
     address: std::net::SocketAddr,
-    peers: std::sync::mpsc::Receiver<std::net::SocketAddr>,
+    requests: std::sync::mpsc::Receiver<(std::net::SocketAddr, String)>,
+    pulls: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl CountingProxy {
     fn start() -> Self {
+        use std::io::{Read, Write};
+
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let (sender, peers) = std::sync::mpsc::channel();
+        let (sender, requests) = std::sync::mpsc::channel();
+        let pulls = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let answer = std::sync::Arc::clone(&pulls);
         std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                if let Ok(peer) = stream.peer_addr()
-                    && sender.send(peer).is_err()
+            for mut stream in listener.incoming().flatten() {
+                let Ok(peer) = stream.peer_addr() else { continue };
+                // Every client here (reqwest, git's curl, the sentinel) sends
+                // its request at once; the timeout only bounds a silent one.
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut head = Vec::new();
+                let mut chunk = [0_u8; 4096];
+                while !head.windows(4).any(|window| window == b"\r\n\r\n") && head.len() < 65_536 {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => head.extend_from_slice(&chunk[..read]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
+                if is_pr_lookup(&line)
+                    && let Some(body) = answer.lock().unwrap().clone()
                 {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+                if sender.send((peer, line)).is_err() {
                     return;
                 }
             }
         });
-        Self { address, peers }
+        Self {
+            address,
+            requests,
+            pulls,
+        }
     }
 
     fn apply(&self, cmd: &mut assert_cmd::Command) {
@@ -1691,26 +1894,59 @@ impl CountingProxy {
             cmd.env(name, &url);
         }
         cmd.env_remove("NO_PROXY").env_remove("no_proxy");
-    }
-
-    /// Connections since the previous call. A sentinel connection is
-    /// accepted after every earlier one, so none still in the backlog is
-    /// missed.
-    fn connections(&self) -> usize {
-        let sentinel = std::net::TcpStream::connect(self.address).unwrap();
-        let sentinel = sentinel.local_addr().unwrap();
-        let mut count = 0;
-        loop {
-            let peer = self
-                .peers
-                .recv_timeout(std::time::Duration::from_secs(30))
-                .expect("the proxy accepts the sentinel");
-            if peer == sentinel {
-                return count;
-            }
-            count += 1;
+        // A developer's real provider token never reaches the stand-in.
+        for name in [
+            "GITEA_TOKEN",
+            "FORGEJO_TOKEN",
+            "CODEBERG_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GITLAB_TOKEN",
+            "GITLAB_PRIVATE_TOKEN",
+            "BITBUCKET_TOKEN",
+        ] {
+            cmd.env_remove(name);
         }
     }
+
+    /// Serves `body` to every later PR list request; `None` leaves them
+    /// unanswered, like every other request.
+    fn answer_pulls(&self, body: Option<String>) {
+        *self.pulls.lock().unwrap() = body;
+    }
+
+    /// The request line of each connection since the previous call. A
+    /// sentinel connection is accepted after every earlier one, so none
+    /// still in the backlog is missed.
+    fn requests(&self) -> Vec<String> {
+        use std::io::Write;
+
+        let mut sentinel = std::net::TcpStream::connect(self.address).unwrap();
+        sentinel.write_all(b"SENTINEL / HTTP/1.1\r\n\r\n").unwrap();
+        let sentinel_address = sentinel.local_addr().unwrap();
+        let mut lines = Vec::new();
+        loop {
+            let (peer, line) = self
+                .requests
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("the proxy accepts the sentinel");
+            if peer == sentinel_address {
+                return lines;
+            }
+            lines.push(line);
+        }
+    }
+
+    /// Connections since the previous call (see [`CountingProxy::requests`]).
+    fn connections(&self) -> usize {
+        self.requests().len()
+    }
+}
+
+/// sniff's Gitea PR list (`GET http://gitea.test/api/v1/repos/o/r/pulls?…`);
+/// every other request through the proxy is a git transport's.
+fn is_pr_lookup(request_line: &str) -> bool {
+    request_line.contains("/api/v1/")
 }
 
 /// Runs the first run (which asks origin about PRs) and the second run with
@@ -1782,6 +2018,214 @@ fn automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_ru
         let stderr = second_run_without_network(&fixture, &wt, &[]);
         assert!(stderr.contains("Deleted branch feat/x"), "{proof}: {stderr}");
         assert!(!fixture.branch_exists("feat/x"), "{proof}");
+    }
+}
+
+/// A merged Gitea PR from `o/r`'s own `feat/x` whose head is `head`, as
+/// sniff's PR list reads it.
+fn merged_pr_list(head: &str) -> String {
+    serde_json::json!([{
+        "number": 7,
+        "title": "feat/x",
+        "state": "closed",
+        "user": {"login": "dev"},
+        "head": {"ref": "feat/x", "label": "feat/x", "sha": head, "repo": {"full_name": "o/r"}},
+        "base": {"ref": "main", "repo": {"full_name": "o/r"}},
+        "created_at": "2026-01-01T00:00:00Z",
+        "merged": true,
+        "merged_at": "2026-01-02T00:00:00Z",
+        "html_url": "http://gitea.test/o/r/pulls/7",
+    }])
+    .to_string()
+}
+
+/// Only a merged PR holds the tip, so the second run must ask the provider
+/// again: it deletes while the PR still answers, and refuses before
+/// removing anything once the PR is gone or the provider does not answer.
+#[test]
+fn automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_run() {
+    for (second_answer, expected_code) in [("the same PR", 0), ("no PR", 3), ("no answer", 3)] {
+        let fixture = Fixture::new();
+        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let tip = fixture.commit(&wt, "only-here.txt");
+        let proxy = CountingProxy::start();
+        proxy.answer_pulls(Some(merged_pr_list(&tip)));
+
+        let mut first = fixture.wt(&wt);
+        proxy.apply(&mut first);
+        let out = first
+            .env("WT_SHELL_WRAPPER", "1")
+            .args(["remove", "feat-x"])
+            .assert()
+            .code(0)
+            .stderr(predicate::str::contains("PR #7"))
+            .get_output()
+            .stdout
+            .clone();
+        let (landing, token) = protocol(&out);
+        assert!(proxy.requests().iter().any(|line| is_pr_lookup(line)), "{second_answer}");
+
+        proxy.answer_pulls(match second_answer {
+            "the same PR" => Some(merged_pr_list(&tip)),
+            "no PR" => Some("[]".to_string()),
+            _ => None,
+        });
+        let mut second = fixture.wt(&landing);
+        proxy.apply(&mut second);
+        let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let requests = proxy.requests();
+        assert!(
+            requests.iter().any(|line| is_pr_lookup(line)),
+            "{second_answer}: the second run asked the provider: {requests:?}"
+        );
+        assert_eq!(output.status.code(), Some(expected_code), "{second_answer}: {stderr}");
+        if expected_code == 0 {
+            assert!(stderr.contains("Deleted branch feat/x"), "{second_answer}: {stderr}");
+            assert!(!wt.exists());
+            assert!(!fixture.branch_exists("feat/x"));
+        } else {
+            assert!(stderr.contains("no longer safe"), "{second_answer}: {stderr}");
+            assert!(!stderr.contains("Removed"), "{second_answer}: {stderr}");
+            assert_nothing_removed(&fixture, &wt);
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
+        }
+    }
+}
+
+/// `feat/x` has a commit of its own that only `origin/backup` holds (not the
+/// default branch), and the first run approved automatic deletion on that
+/// proof after checking origin live.
+fn approved_on_another_origin_branch(fixture: &Fixture) -> (PathBuf, PathBuf, String, String) {
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let tip = fixture.commit(&wt, "only-here.txt");
+    git(&wt, &["push", "-q", "origin", "feat/x:refs/heads/backup"]);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip);
+    let out = fixture
+        .wt(&wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("origin/backup"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&out);
+    (wt, landing, token, tip)
+}
+
+/// The last remote protection is taken away on origin itself; the tracking
+/// ref still holds the tip, so only a live check can notice.
+#[test]
+fn a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it() {
+    for change in ["unchanged", "deleted on origin", "moved on origin"] {
+        let fixture = Fixture::with_origin();
+        let old_main = git(&fixture.repo(), &["rev-parse", "main"]);
+        let (wt, landing, token, tip) = approved_on_another_origin_branch(&fixture);
+
+        if change != "unchanged" {
+            let pusher = pusher(&fixture);
+            match change {
+                "deleted on origin" => git(&pusher, &["push", "-q", "origin", "--delete", "backup"]),
+                _ => git(&pusher, &["push", "-q", "--force", "origin", &format!("{old_main}:refs/heads/backup")]),
+            };
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip, "{change}");
+        }
+
+        let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if change == "unchanged" {
+            assert_eq!(output.status.code(), Some(0), "{change}: {stderr}");
+            assert!(stderr.contains("Deleted branch feat/x"), "{change}: {stderr}");
+            assert!(!fixture.branch_exists("feat/x"), "{change}");
+        } else {
+            assert_eq!(output.status.code(), Some(3), "{change}: {stderr}");
+            assert!(stderr.contains("no longer safe"), "{change}: {stderr}");
+            assert!(!stderr.contains("Removed"), "{change}: {stderr}");
+            assert_nothing_removed(&fixture, &wt);
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip, "{change}");
+        }
+    }
+}
+
+/// The same approval, but origin now answers only through the network,
+/// where nothing answers: the second run asks rather than trusting the
+/// first run's live check, and an unanswered question refuses.
+#[test]
+fn automatic_deletion_proved_only_by_another_origin_branch_asks_origin_again_in_the_second_run() {
+    let fixture = Fixture::with_origin();
+    let (wt, landing, token, tip) = approved_on_another_origin_branch(&fixture);
+    git(&fixture.repo(), &["remote", "set-url", "origin", PROXIED_ORIGIN]);
+
+    let proxy = CountingProxy::start();
+    let mut second = fixture.wt(&landing);
+    proxy.apply(&mut second);
+    let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let requests = proxy.requests();
+    assert!(
+        requests.iter().any(|line| !is_pr_lookup(line)),
+        "the second run checked origin's head live: {requests:?}"
+    );
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("no longer safe"), "{stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
+    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
+}
+
+/// With `--force-remote` the second run makes one preflight of the
+/// destination's live head, and nothing else: no PR lookup, whether the
+/// branch is kept, explicitly deleted, or proved by a tag. Origin does not
+/// answer, so every row refuses before removing anything. The preflight is
+/// asserted as "at least one git request" because git's smart-HTTP client
+/// may open more than one connection for one `ls-remote`.
+#[test]
+fn a_force_remote_second_run_makes_only_the_preflight_request() {
+    for (approval, extra) in [
+        ("keep", &["--force-remote"][..]),
+        ("explicit delete", &["--force-remote", "--force-branch"][..]),
+        ("tag proof", &["--force-remote"][..]),
+    ] {
+        let fixture = Fixture::new();
+        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let tip = fixture.commit(&wt, "only-here.txt");
+        if approval == "tag proof" {
+            git(&fixture.repo(), &["update-ref", "refs/tags/v1", &tip]);
+        }
+        let proxy = CountingProxy::start();
+
+        let mut first = fixture.wt(&wt);
+        proxy.apply(&mut first);
+        let out = first
+            .env("WT_SHELL_WRAPPER", "1")
+            .args(["remove", "feat-x"])
+            .args(extra)
+            .assert()
+            .code(0)
+            .get_output()
+            .stdout
+            .clone();
+        let (landing, token) = protocol(&out);
+        assert!(proxy.connections() > 0, "{approval}: the first run reaches the proxy");
+
+        let mut second = fixture.wt(&landing);
+        proxy.apply(&mut second);
+        let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let requests = proxy.requests();
+        assert!(
+            !requests.iter().any(|line| is_pr_lookup(line)),
+            "{approval}: no PR lookup in the second run: {requests:?}"
+        );
+        assert!(!requests.is_empty(), "{approval}: the preflight asked origin: {stderr}");
+        assert_eq!(output.status.code(), Some(3), "{approval}: {stderr}");
+        assert!(stderr.contains("could not be reached"), "{approval}: {stderr}");
+        assert!(!stderr.contains("Removed"), "{approval}: {stderr}");
+        assert_nothing_removed(&fixture, &wt);
     }
 }
 

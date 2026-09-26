@@ -545,6 +545,29 @@ mod tests {
         }
     }
 
+    /// Mode bits cannot deny a read on Windows; an exclusive open can.
+    #[cfg(windows)]
+    #[test]
+    fn fingerprint_fails_when_a_dirty_file_is_held_open_exclusively() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let repo = TestRepo::new();
+        let wt = worktree_with_nested_repo(&repo);
+        let base = repo.path();
+        fs::write(wt.join("scratch.txt"), "work\n").unwrap();
+        for held in [wt.join("scratch.txt"), wt.join("nested/notes")] {
+            let inventory = collect_inventory(&base, &wt).unwrap();
+            let handle = fs::OpenOptions::new().read(true).share_mode(0).open(&held).unwrap();
+            let result = inventory.fingerprint(&base, &wt);
+            drop(handle);
+            let name = held.file_name().unwrap().to_string_lossy().into_owned();
+            match result {
+                Err(WorktreeError::Io(error)) => assert!(error.to_string().contains(&name), "{error}"),
+                other => panic!("expected an I/O error naming {name}, got {other:?}"),
+            }
+        }
+    }
+
     /// `\xff` and `\xfe` both decode lossily to U+FFFD, so only exact bytes
     /// tell these symlink targets and names apart.
     #[cfg(unix)]

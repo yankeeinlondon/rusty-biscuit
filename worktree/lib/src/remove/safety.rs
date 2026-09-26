@@ -1009,6 +1009,47 @@ mod tests {
     }
 
     #[test]
+    fn reconfirm_verifies_another_origin_branch_live() {
+        let repo = TestRepo::with_origin();
+        let tip = feature(&repo);
+        repo.git(&["push", "-q", "origin", "feat/x:refs/heads/backup"]);
+        let prs = StubPr::new(PrLookup::NoneFound);
+        let answers = [
+            (Ok(Some(tip.clone())), true),
+            (Ok(Some(repo.sha("main"))), false),
+            (Ok(None), false),
+            (Err("offline".to_string()), false),
+        ];
+        for (answer, allowed) in answers {
+            let heads = StubHeads::new(answer.clone());
+            let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+            assert_eq!(result.tier.allows_deletion(), allowed, "{answer:?}: {:?}", result.tier);
+            assert_eq!(live_calls(&heads), ["origin backup"], "{answer:?}");
+        }
+        assert_eq!(prs.calls(), 4, "each reconfirmation asks for a PR first");
+    }
+
+    #[test]
+    fn reconfirm_with_only_a_pr_asks_the_provider_again() {
+        let repo = TestRepo::with_origin();
+        let tip = feature(&repo);
+        let heads = StubHeads::new(Ok(Some(tip.clone())));
+        let answers = [
+            (pr(false, Some(&tip), REPO), true),
+            (PrLookup::NoneFound, false),
+            (PrLookup::Unavailable("offline".into()), false),
+            (pr(false, Some(&repo.sha("main")), REPO), false),
+        ];
+        for (answer, allowed) in answers {
+            let prs = StubPr::new(answer.clone());
+            let result = reconfirm_with(&repo, &tip, "feat/x", false, &prs, &heads);
+            assert_eq!(result.tier.allows_deletion(), allowed, "{answer:?}: {:?}", result.tier);
+            assert_eq!(prs.calls(), 1, "{answer:?}");
+        }
+        assert!(live_calls(&heads).is_empty(), "no origin ref holds the tip");
+    }
+
+    #[test]
     fn reconfirm_never_counts_the_destination_the_own_ref_or_origin_head() {
         let repo = TestRepo::with_origin();
         let tip = feature(&repo);
