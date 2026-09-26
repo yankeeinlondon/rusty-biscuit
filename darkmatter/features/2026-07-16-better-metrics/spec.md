@@ -1,5 +1,5 @@
 ---
-status: draft
+status: needs-refresh
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-07-16
@@ -17,6 +17,27 @@ inputs:
 related:
   - ../_completed/2026-07-15-reference-graph
   - ../2026-07-15-performance-followup
+---
+
+## Refresh Comments
+
+This is partially implemented:
+
+The durable darkmatter/benchmarks/ evidence home exists.
+Fixture identity, retained observations, and statistical recomputation exist.
+The proposed profile/workload registry and general command runner do not.
+The timing defect remains: build_options (darkmatter/cli/src/commands/compose.rs:308) starts before reference validation and ends afterward, while validation is also reported separately.
+
+Updates needed:
+
+- Mark evidence-directory promotion complete.
+- Prioritize non-overlapping --perf timing and representative command comparisons.
+- Build on the existing manifest and runners rather than recreating them.
+- Refresh benchmark counts, test paths, and context-construction assumptions.
+- Reconsider making successful reconstruction of two July revisions a mandatory acceptance gate. Preserve that historical experiment, but validate the instrument with controlled cases too.
+- Keep the broader baseline-management platform optional until its maintenance cost is justified.
+
+
 ---
 
 # Better Metrics
