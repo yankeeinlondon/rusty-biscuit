@@ -1277,6 +1277,24 @@ belong here.
     2026-09-25-worktree-file ended with "Phase 5 still owns ..."); the
     terminal Phase 5 removed it because the hand-off was complete. See
     `ed0db5743` for the 2026-09-25-worktree-file Phase 5 of 5 close.
+- A phase-based terminal close can keep `message_to_agent` (rewritten
+    for reviewer notes) and leave `status:` unchanged (still
+    `draft-spec`) when the author reserves both the spec status
+    transition AND the directory move. The canonical terminal close
+    removes `message_to_agent` and sets `status: implemented`; this
+    variant signals "implementation complete, awaiting review" without
+    claiming the spec has reached its terminal-implemented status. The
+    new `message_to_agent` body carries reviewer notes (e.g. "Run
+    perf gates serially only", "Phase 4 had no log section of its own
+    (commits X, Y, Z)"), not the forward-pointing phase narrative the
+    canonical rule expects to fold into `## Phase N`. `implemented:
+    true` IS set on spec.md (work landed) and `completed_phase: "<N>"`
+    plus `implemented: true` are set on plan.md (implementation
+    signal); only `status:` and the move are author-controlled. The
+    spec body explicitly says "The spec status is still draft-spec;
+    this phase did not change it" so reviewers see the reservation.
+    See `1aa7ce95b` for the 2026-09-25-list-remove-performance Phase 5
+    of 5 example.
 - A parallel wave's plan.md ticks can ship FEWER ticks than tests in
     the wave's commits. When a Wave has N parallel tasks committed as N
     separate `test(<area>):` commits, the implementer may stage plan.md
