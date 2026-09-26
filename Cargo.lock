@@ -16780,6 +16780,7 @@ dependencies = [
  "cap-std",
  "criterion",
  "dirs",
+ "fs4",
  "getrandom 0.4.2",
  "reflink-copy",
  "serde",

@@ -175,17 +175,19 @@ impl MixedFixture {
         root.join("worktree").join(real.file_name().expect("store file name"))
     }
 
-    /// Writes a PR store fetched `age` ago holding one open PR from
-    /// `branch` into `main`.
+    /// Writes a PR store for the current `origin`, fetched `age` ago,
+    /// holding one open PR from `branch` into `main`.
     pub fn seed_pr_store(&self, age: Duration, number: u64, branch: &str) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_secs();
+        let origin = worktree::pull_requests::origin_url(&self.main).expect("the fixture has an origin");
         let store = self.pr_store();
         fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
         let json = serde_json::json!({
-            "format_version": 1,
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now - age.as_secs(),
             "source_repo": "owner/repo",
             "pull_requests": [{

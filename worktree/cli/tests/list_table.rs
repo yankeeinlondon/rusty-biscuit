@@ -164,8 +164,7 @@ impl Example {
                     // A fork's same-named branch must not get a badge.
                     pr(120, "someone/fork", "feat/theme", "main"),
                 ],
-                fetched_at: Some(NOW - 12 * 60),
-                stale: false,
+                fetched_at: Some(NOW),
             },
         }
     }
@@ -396,16 +395,17 @@ fn the_legend_explains_both_columns() {
 }
 
 #[test]
-fn the_pr_age_line_appears_only_for_stored_results() {
-    let with = |stale: bool, age_secs: u64| {
+fn the_pr_age_line_appears_once_the_badges_are_60_seconds_old() {
+    let with = |fetched_at: Option<u64>| {
         let mut example = Example::new();
-        example.prs.stale = stale;
-        example.prs.fetched_at = Some(NOW - age_secs);
+        example.prs.fetched_at = fetched_at;
         plain(&example).lines().last().unwrap().trim().to_string()
     };
-    assert_eq!(with(true, 12 * 60 + 30), "PRs as of 12 min ago");
-    assert_eq!(with(true, 30), "PRs as of less than a minute ago");
-    assert_eq!(with(true, 3 * 3600), "PRs as of 3 h ago");
-    assert_eq!(with(true, 5 * 86_400), "PRs as of 5 days ago");
-    assert!(with(false, 12 * 60).starts_with("Branch"), "fresh results need no age line");
+    assert_eq!(with(Some(NOW - (12 * 60 + 30))), "PRs as of 12 min ago");
+    assert_eq!(with(Some(NOW - 60)), "PRs as of 1 min ago");
+    assert_eq!(with(Some(NOW - 3 * 3600)), "PRs as of 3 h ago");
+    assert_eq!(with(Some(NOW - 5 * 86_400)), "PRs as of 5 days ago");
+    assert!(with(Some(NOW - 59)).starts_with("Branch"), "fresh badges need no age line");
+    assert!(with(Some(NOW + 60)).starts_with("Branch"), "a future fetch time has no age");
+    assert!(with(None).starts_with("Branch"), "no answer has no age");
 }

@@ -348,10 +348,12 @@ impl DesignFixture {
             .save_atomic(&self.store_path(fork_origin_path(main).expect("fork-origin path")))
             .expect("write fork-origin store");
 
-        // Fetched just now, so `wt` makes no request.
+        // Fetched just now for this origin, so `wt` makes no request.
         let now = worktree::pull_requests::unix_now();
+        let origin = worktree::pull_requests::origin_url(main).expect("the fixture has an origin");
         let prs = serde_json::json!({
-            "format_version": 1,
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now,
             "source_repo": "owner/repo",
             "pull_requests": [{

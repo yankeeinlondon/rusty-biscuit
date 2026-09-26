@@ -11,9 +11,10 @@ use worktree::worktree::{list_worktrees, parse_worktree_state};
 
 use crate::commands::git_graph;
 
-/// No origin: the PR stage returns at once without a request.
-fn no_prs() -> Option<Box<dyn OpenPrSource>> {
-    None
+/// These repositories have no origin, so the PR stage returns at once
+/// without asking for a source.
+fn no_prs(origin: &str) -> Box<dyn OpenPrSource> {
+    panic!("no request expected without an origin, got one for {origin}")
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
