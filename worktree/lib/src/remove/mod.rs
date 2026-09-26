@@ -8,6 +8,7 @@
 //! item 3 of `2026-09-24-ux-improvements`.
 
 pub mod handoff;
+pub mod included;
 pub mod inventory;
 pub mod live_remote;
 pub mod remote;
@@ -21,7 +22,7 @@ use std::path::Path;
 use crate::error::WorktreeError;
 use crate::git::git_from;
 
-pub use inventory::{DirtyEntry, IgnoredGroup, Inventory, collect_inventory};
+pub use inventory::{DirtyEntry, Inventory, collect_inventory};
 
 /// Removes the worktree at `path` (`git worktree remove`, with `--force` when
 /// its files may be discarded).

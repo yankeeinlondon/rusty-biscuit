@@ -1,13 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{InquireError, Select, Text};
 use worktree::WorktreeError;
 use worktree::config::{config_path, considered_dirs, resolve_base_dir, save_config};
 use worktree::git::repo_info;
-use worktree::worktree::create_worktree;
+use worktree::include::copy::SkipReason;
+use worktree::worktree::{IncludeOutcome, create_worktree};
 
 pub fn run(branch: &str, from: Option<&str>, stay: bool) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
@@ -59,6 +61,7 @@ pub fn run(branch: &str, from: Option<&str>, stay: bool) -> Result<(), WorktreeE
         let notice = build_reuse_notice(&result.branch, commit);
         eprintln!("{}", Prose::new(notice).render(&terminal));
     }
+    render_include_report(&terminal, &result.include);
 
     if move_shell {
         println!("cd:{}", result.target_cwd.display());
@@ -71,6 +74,44 @@ pub fn run(branch: &str, from: Option<&str>, stay: bool) -> Result<(), WorktreeE
     }
 
     Ok(())
+}
+
+fn display_include_path(path: &[u8]) -> String {
+    let mut visible = String::new();
+    for byte in path {
+        if *byte == b' ' { visible.push_str("\\ "); }
+        else { visible.extend(std::ascii::escape_default(*byte).map(char::from)); }
+    }
+    Prose::escape_text(&visible)
+}
+
+fn render_include_report(terminal: &Terminal, include: &IncludeOutcome) {
+    if !include.copied.is_empty() {
+        let names = include.copied.iter().map(|path| display_include_path(path)).collect::<Vec<_>>().join(", ");
+        let source = Prose::escape_text(&include.source_label);
+        eprintln!("{}", Prose::new(format!("Copied from <b>{source}</b>: {names}")).render(terminal));
+    }
+    let mut warnings = UnorderedList::empty();
+    let mut has_warnings = false;
+    for (path, reason) in &include.skipped {
+        let reason = match reason {
+            SkipReason::Existing => "already exists in the destination",
+            SkipReason::IndexTracked => "tracked in the destination",
+            SkipReason::LinkUnsupported => "symbolic link could not be created",
+            SkipReason::UnsafePath => "path is unsafe to copy",
+        };
+        warnings.add(Prose::new(format!("Skipped {}: {reason}", display_include_path(path))));
+        has_warnings = true;
+    }
+    for (path, reason) in &include.failed {
+        warnings.add(Prose::new(format!("Could not copy {}: {}", display_include_path(path), Prose::escape_text(reason))));
+        has_warnings = true;
+    }
+    for warning in &include.warnings {
+        warnings.add(Prose::new(Prose::escape_text(warning)));
+        has_warnings = true;
+    }
+    if has_warnings { eprintln!("{}", warnings.render(terminal)); }
 }
 
 /// Notice shown when `create` re-attached a pre-existing branch instead of

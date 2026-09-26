@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::cache::{Cache, cache_path};
+use crate::copy_record::{self, CopyRecord, RecordFile};
 use crate::default_target::{DefaultTarget, choose_default_target};
 use crate::error::WorktreeError;
 use crate::fork_origin::ForkOriginStore;
@@ -10,6 +11,7 @@ use crate::listing::{
     BranchComparisons, Caption, ParentComparison, RefTips, TreeRow, build_tree, compare_cached,
 };
 use crate::git::{git_command, git_command_in, repo_info};
+use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
 use crate::util::dasherize;
 
 #[derive(Debug, Clone)]
@@ -61,6 +63,38 @@ pub struct CreateResult {
     /// The local branch a fresh branch was forked from. `None` when an
     /// existing branch was reused.
     pub forked_from: Option<String>,
+    /// Best-effort copy results. Creation succeeds even when this has warnings.
+    pub include: IncludeOutcome,
+}
+
+#[derive(Debug, Default)]
+pub struct IncludeOutcome {
+    pub source_label: String,
+    pub copied: Vec<Vec<u8>>,
+    pub skipped: Vec<(Vec<u8>, SkipReason)>,
+    pub failed: Vec<(Vec<u8>, String)>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum CopySource {
+    Worktree(WorktreeEntry),
+    Base(WorktreeEntry),
+    Ambiguous(Vec<WorktreeEntry>),
+}
+
+/// Pick the checkout whose ignored files belong to the fork source.
+/// A reused branch has no fork source and always copies from the main checkout.
+pub fn copy_source(entries: &[WorktreeEntry], fork_branch: Option<&str>) -> CopySource {
+    if let Some(branch) = fork_branch {
+        let matching: Vec<_> = entries.iter().filter(|entry| entry.branch.as_deref() == Some(branch)).cloned().collect();
+        if matching.len() > 1 { return CopySource::Ambiguous(matching); }
+        if let Some(entry) = matching.into_iter().next() { return CopySource::Worktree(entry); }
+    }
+    match entries.iter().find(|entry| entry.is_main).cloned() {
+        Some(entry) => CopySource::Base(entry),
+        None => CopySource::Ambiguous(Vec::new()),
+    }
 }
 
 /// Detect the default branch name (main or master).
@@ -236,7 +270,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
 /// Populate dirty status, the caption, the default-branch target, the fork
 /// tree, and every branch comparison for a parsed worktree state.
 ///
-/// Records of deleted branches are pruned from the fork-origin store here.
+/// Records of deleted branches and removed worktrees are pruned here.
 pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeError> {
     let cache = Mutex::new(
         list.cache_file
@@ -304,6 +338,10 @@ pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeErr
         if list.forks.prune(&live) > 0 {
             let _ = list.forks.save_atomic(path);
         }
+    }
+    if let Some(repo_root) = entries.iter().find(|entry| entry.is_main).map(|entry| &entry.path) {
+        let live = entries.iter().filter_map(|entry| std::fs::canonicalize(&entry.path).ok()).collect();
+        let _ = copy_record::prune(repo_root, &live);
     }
 
     list.statuses = statuses;
@@ -443,6 +481,10 @@ fn porcelain_path(line: &str) -> Option<&str> {
 /// [`crate::fork_origin`]). An existing branch is reused as-is and records
 /// nothing.
 ///
+/// After Git adds the checkout, ignored files selected by the source's
+/// `.worktreeinclude` are copied and recorded. Copy and record failures are
+/// returned as warnings; the newly created worktree remains usable.
+///
 /// ## Errors
 ///
 /// - [`WorktreeError::WorktreeAlreadyExists`] when the directory exists.
@@ -451,7 +493,8 @@ fn porcelain_path(line: &str) -> Option<&str> {
 /// - [`WorktreeError::FromBranchNotFound`] when `from` is not a local branch.
 /// - [`WorktreeError::DetachedHeadWithoutFrom`] when a new branch is requested
 ///   from a detached HEAD without `from`.
-/// - Any git failure.
+/// - Git failures before the worktree is added. Later Git failures become
+///   include warnings.
 pub fn create_worktree(
     branch: &str,
     base: &Path,
@@ -476,6 +519,7 @@ pub fn create_worktree(
                 from: from.to_string(),
             });
         }
+        let (source, mut include) = prepare_include_source(None, &target_path)?;
         git_command(&[
             "worktree",
             "add",
@@ -486,12 +530,14 @@ pub fn create_worktree(
         // is NOT forked from the current HEAD. Report the commit so callers can
         // warn about silently resurrecting a stale branch.
         let reused_branch_at = git_command(&["rev-parse", "--short", branch]).ok();
+        finish_include_copy(&source, &target_path, &mut include);
         return Ok(CreateResult {
             target_cwd: target_path.join(&info.relative_path),
             worktree_path: target_path,
             branch: branch.to_string(),
             reused_branch_at,
             forked_from: None,
+            include,
         });
     }
 
@@ -512,6 +558,7 @@ pub fn create_worktree(
     };
 
     let target = target_path.display().to_string();
+    let (source, mut include) = prepare_include_source(Some(&fork_base), &target_path)?;
     let mut add_args = vec!["worktree", "add", target.as_str(), "-b", branch];
     // The full ref keeps a same-named tag from shadowing the branch.
     let start_point = format!("refs/heads/{fork_base}");
@@ -537,6 +584,7 @@ pub fn create_worktree(
         };
         let _ = crate::fork_origin::record(&path, branch, origin);
     }
+    finish_include_copy(&source, &target_path, &mut include);
 
     Ok(CreateResult {
         target_cwd: target_path.join(&info.relative_path),
@@ -544,7 +592,73 @@ pub fn create_worktree(
         branch: branch.to_string(),
         reused_branch_at: None,
         forked_from: Some(fork_base),
+        include,
     })
+}
+
+fn prepare_include_source(fork_branch: Option<&str>, destination: &Path)
+    -> Result<(Option<WorktreeEntry>, IncludeOutcome), WorktreeError> {
+    let entries = parse_worktree_list(&git_command(&["worktree", "list", "--porcelain"])?);
+    let mut outcome = IncludeOutcome::default();
+    let source = match copy_source(&entries, fork_branch) {
+        CopySource::Worktree(entry) => { outcome.source_label = entry.branch.clone().unwrap_or_default(); Some(entry) },
+        CopySource::Base(entry) => { outcome.source_label = "base".into(); Some(entry) },
+        CopySource::Ambiguous(entries) => {
+            outcome.warnings.push(format!("copy source is ambiguous across {} worktrees", entries.len()));
+            None
+        }
+    };
+    if let Some(repo_root) = entries.iter().find(|entry| entry.is_main).map(|entry| &entry.path) {
+        match copy_record::record_path(repo_root, destination).and_then(|path| copy_record::delete(&path)) {
+            Ok(()) => {},
+            Err(error) => outcome.warnings.push(format!("could not clear old copy record: {error}")),
+        }
+    }
+    Ok((source, outcome))
+}
+
+fn finish_include_copy(source: &Option<WorktreeEntry>, destination: &Path, outcome: &mut IncludeOutcome) {
+    let Some(source) = source else { return; };
+    let rules = match IncludeRules::locate(&source.path) {
+        IncludeRules::Present(path) => path,
+        IncludeRules::Missing | IncludeRules::Empty => return,
+        IncludeRules::Indeterminate(reason) => {
+            outcome.warnings.push(format!("cannot read .worktreeinclude: {reason}")); return;
+        }
+    };
+    let repo_root = match crate::cache::main_worktree_path() {
+        Some(path) => path,
+        None => { outcome.warnings.push("cannot find the main checkout for the copy record".into()); return; }
+    };
+    let set = match crate::include::resolve_include_set(&repo_root, &source.path, &rules) {
+        Ok(set) => set,
+        Err(error) => { outcome.warnings.push(format!("cannot resolve .worktreeinclude: {error}")); return; }
+    };
+    for (path, _) in &set.unsupported {
+        outcome.warnings.push(format!("unsupported included path: {}", String::from_utf8_lossy(path)));
+    }
+    let index = match crate::git::git_from_bytes(&repo_root, destination, &["ls-files", "-z"], None) {
+        Ok(bytes) => bytes.split(|byte| *byte == 0).filter(|path| !path.is_empty()).map(<[u8]>::to_vec).collect(),
+        Err(error) => { outcome.warnings.push(format!("cannot read destination index: {error}")); return; }
+    };
+    let copied = copy::copy_include_set(&source.path, destination, &set, &index, &RealCopyOps);
+    let files: Vec<_> = copied.copied.iter().filter_map(|(path, observation)| observation.as_ref().map(|observation| RecordFile {
+        path_hex: copy_record::path_hex(path), observation: observation.clone(),
+    })).collect();
+    outcome.copied = copied.copied.into_iter().map(|(path, _)| path).collect();
+    outcome.skipped = copied.skipped;
+    outcome.failed = copied.failed;
+    outcome.warnings.extend(copied.warnings);
+    let result = (|| -> Result<(), WorktreeError> {
+        let admin = crate::git::git_from(&repo_root, destination, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
+        let registration = copy_record::registration(Path::new(&admin))?;
+        let record = CopyRecord { format_version: copy_record::FORMAT_VERSION,
+            worktree: std::fs::canonicalize(destination)?, admin_dir: registration.admin_dir,
+            registration: registration.nonce, source: source.path.clone(),
+            source_label: outcome.source_label.clone(), files };
+        copy_record::write_atomic(&copy_record::record_path(&repo_root, destination)?, &record)
+    })();
+    if let Err(error) = result { outcome.warnings.push(format!("cannot write copy record: {error}")); }
 }
 
 /// Find a worktree by name; see [`resolve_worktree`] for the rules.
@@ -1368,6 +1482,159 @@ branch refs/heads/fix/bug-42
         commit_file(repo.path(), "theme.txt");
         run_git(repo.path(), &["checkout", "main"]);
         repo
+    }
+
+    #[test]
+    fn copy_source_prefers_checkout_and_handles_reuse_and_ambiguity() {
+        let entry = |path: &str, branch: &str, is_main| WorktreeEntry {
+            path: PathBuf::from(path), branch: Some(branch.into()), head_sha: None,
+            is_main, is_current: false,
+        };
+        let base = entry("/base", "main", true);
+        let theme = entry("/theme", "feat/theme", false);
+        let entries = [base.clone(), theme.clone()];
+        assert!(matches!(copy_source(&entries, Some("feat/theme")), CopySource::Worktree(found) if found.path == theme.path));
+        assert!(matches!(copy_source(&entries, Some("missing")), CopySource::Base(found) if found.path == base.path));
+        assert!(matches!(copy_source(&entries, None), CopySource::Base(found) if found.path == base.path));
+        let duplicate = [base, theme.clone(), entry("/other", "feat/theme", false)];
+        assert!(matches!(copy_source(&duplicate, Some("feat/theme")), CopySource::Ambiguous(found) if found.len() == 2));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_copies_ignored_file_and_persists_observation() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        fs::write(repo.path().join(".gitignore"), "*.env\n").unwrap();
+        fs::write(repo.path().join(".worktreeinclude"), "*.env\n").unwrap();
+        fs::write(repo.path().join("secret.env"), b"base secret").unwrap();
+        let _guard = DirGuard::enter(repo.path());
+        let result = create_worktree("fix/copy", base.path(), Some("feat/theme")).unwrap();
+        assert_eq!(fs::read(result.worktree_path.join("secret.env")).unwrap(), b"base secret");
+        assert_eq!(result.include.copied, vec![b"secret.env".to_vec()]);
+        let path = crate::copy_record::record_path(repo.path(), &result.worktree_path).unwrap();
+        let record: crate::copy_record::CopyRecord = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(record.files.len(), 1);
+        assert_eq!(record.files[0].observation.size, 11);
+        assert!(record.files[0].observation.digest.is_some());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_uses_checked_out_fork_source_and_base_for_reuse() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        fs::write(repo.path().join(".gitignore"), "*.env\n").unwrap();
+        fs::write(repo.path().join(".worktreeinclude"), "*.env\n").unwrap();
+        fs::write(repo.path().join("secret.env"), b"base").unwrap();
+        let theme = repo.path().parent().unwrap().join("theme-checkout");
+        run_git(repo.path(), &["worktree", "add", theme.to_str().unwrap(), "feat/theme"]);
+        fs::write(theme.join(".gitignore"), "*.env\n").unwrap();
+        fs::write(theme.join(".worktreeinclude"), "*.env\n").unwrap();
+        fs::write(theme.join("secret.env"), b"theme").unwrap();
+        let _guard = DirGuard::enter(repo.path());
+        let fork = create_worktree("fix/fork", base.path(), Some("feat/theme")).unwrap();
+        assert_eq!(fs::read(fork.worktree_path.join("secret.env")).unwrap(), b"theme");
+        assert_eq!(fork.include.source_label, "feat/theme");
+        let fork_record = crate::copy_record::record_path(repo.path(), &fork.worktree_path).unwrap();
+        fs::remove_file(fork_record).unwrap();
+        run_git(repo.path(), &["worktree", "remove", "--force", theme.to_str().unwrap()]);
+        let reused = create_worktree("feat/theme", base.path(), None).unwrap();
+        assert_eq!(fs::read(reused.worktree_path.join("secret.env")).unwrap(), b"base");
+        assert_eq!(reused.include.source_label, "base");
+        let reused_record = crate::copy_record::record_path(repo.path(), &reused.worktree_path).unwrap();
+        fs::remove_file(reused_record).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_returns_ok_when_rules_are_indeterminate_and_clears_stale_record() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        let target = base.path().join(repo.path().file_name().unwrap()).join("fix-warning");
+        let record = crate::copy_record::record_path(repo.path(), &target).unwrap();
+        fs::create_dir_all(record.parent().unwrap()).unwrap();
+        fs::write(&record, b"stale").unwrap();
+        fs::create_dir(repo.path().join(".worktreeinclude")).unwrap();
+        let _guard = DirGuard::enter(repo.path());
+        let result = create_worktree("fix/warning", base.path(), None).unwrap();
+        assert!(result.worktree_path.exists());
+        assert!(result.include.warnings.iter().any(|warning| warning.contains(".worktreeinclude")));
+        assert!(!record.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_reuses_path_with_a_new_registration_and_list_prunes_removed_record() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        fs::write(repo.path().join(".gitignore"), "*.env\n").unwrap();
+        fs::write(repo.path().join(".worktreeinclude"), "*.env\n").unwrap();
+        fs::write(repo.path().join("secret.env"), b"first").unwrap();
+        let _guard = DirGuard::enter(repo.path());
+        let first = create_worktree("fix/reuse", base.path(), None).unwrap();
+        let path = crate::copy_record::record_path(repo.path(), &first.worktree_path).unwrap();
+        let old: CopyRecord = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        run_git(repo.path(), &["worktree", "remove", "--force", first.worktree_path.to_str().unwrap()]);
+        fs::write(repo.path().join("secret.env"), b"second").unwrap();
+        let second = create_worktree("fix/reuse", base.path(), None).unwrap();
+        let fresh: CopyRecord = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_ne!(old.registration, fresh.registration);
+        assert_eq!(fs::read(second.worktree_path.join("secret.env")).unwrap(), b"second");
+        run_git(repo.path(), &["worktree", "remove", "--force", second.worktree_path.to_str().unwrap()]);
+        let _ = list_worktrees().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn create_keeps_checkout_when_record_cannot_be_written() {
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        fs::write(repo.path().join(".gitignore"), "*.env\n").unwrap();
+        fs::write(repo.path().join(".worktreeinclude"), "*.env\n").unwrap();
+        fs::write(repo.path().join("secret.env"), b"secret").unwrap();
+        let target = base.path().join(repo.path().file_name().unwrap()).join("fix-record-error");
+        let record = crate::copy_record::record_path(repo.path(), &target).unwrap();
+        fs::create_dir_all(&record).unwrap();
+        let _guard = DirGuard::enter(repo.path());
+        let result = create_worktree("fix/record-error", base.path(), None).unwrap();
+        assert_eq!(fs::read(result.worktree_path.join("secret.env")).unwrap(), b"secret");
+        assert!(result.include.warnings.iter().any(|warning| warning.contains("copy record")));
+        fs::remove_dir(record).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn create_keeps_checkout_when_a_source_file_cannot_be_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = repo_with_theme_branch();
+        let base = tempfile::tempdir().unwrap();
+        let (_store, _cleanup) = fork_store(repo.path());
+        fs::write(repo.path().join(".gitignore"), "*.env\n").unwrap();
+        fs::write(repo.path().join(".worktreeinclude"), "*.env\n").unwrap();
+        let secret = repo.path().join("secret.env");
+        fs::write(&secret, b"secret").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::File::open(&secret).is_ok() {
+            fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
+            return;
+        }
+        let _guard = DirGuard::enter(repo.path());
+        let result = create_worktree("fix/unreadable", base.path(), None).unwrap();
+        assert!(result.worktree_path.exists());
+        assert!(!result.worktree_path.join("secret.env").exists());
+        assert_eq!(result.include.failed.len(), 1);
+        fs::set_permissions(secret, fs::Permissions::from_mode(0o600)).unwrap();
+        let path = crate::copy_record::record_path(repo.path(), &result.worktree_path).unwrap();
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

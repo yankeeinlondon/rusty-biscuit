@@ -14,7 +14,7 @@ pub mod network;
 pub mod os;
 pub mod package;
 pub mod performance;
-pub(crate) mod process;
+pub mod process;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;

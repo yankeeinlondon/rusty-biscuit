@@ -74,6 +74,11 @@
   archive is streamed rather than read into memory, and no second hashing
   boundary enters the contract. `blake3` was already an optional `biscuit-hash`
   dependency; no crate was added.
+- `worktree` uses `cap-std` 4 to keep source and destination directory handles
+  through included-file copying, so a link swap cannot redirect a copy outside
+  either checkout. It uses `reflink-copy` 0.1.30 for handle-based block clones
+  on Linux and Windows, and the macOS `fclonefileat` API for cloning from an
+  open source handle. Filesystems without cloning support use a byte copy.
 - `tools/test-audit` is a TypeScript pnpm-workspace member (registered in the
   root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`), not a
   Cargo package. It depends on `fast-xml-parser` (JUnit reports),
@@ -87,7 +92,10 @@
   them afterward.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,
   `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
-  deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`
+  deadlines, and `windows-sys` for atomic replacement on Windows (its
+  detached-child setup moved to `sniff::process::configure_detached_child`,
+  so it no longer enables `Win32_System_Console`; `sniff`'s `windows`
+  dependency enables it instead). `playa-cli`
   uses the `biscuit-file` file-reference and portable-path authorities at the
   CLI boundary; the library remains independent of CLI path syntax.
 - `biscuit-speaks/lib`'s optional `playa` feature enables
@@ -188,7 +196,10 @@
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
   and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
-  No new external crate was added; each was already in the workspace graph.
+  It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
+  nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
+  refresh of the PR store make a request; the PR store binds its answer to a
+  `biscuit-hash` BLAKE3 digest of `origin`'s URL.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
@@ -198,6 +209,9 @@
   already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
   dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
   runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
+  `sysinfo` 0.38 (development) finds the detached `wt internal-refresh-prs`
+  worker in `list_prs.rs` and reads its working directory on every OS;
+  `sniff` already builds the same version.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that

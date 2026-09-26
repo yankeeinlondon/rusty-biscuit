@@ -150,6 +150,15 @@ pub fn repo_cache_file(repo_root: &Path, suffix: &str) -> Result<PathBuf, Worktr
 /// The replacement uses write-temp-then-rename, so concurrent writers have
 /// last-rename-wins semantics without torn reads.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), WorktreeError> {
+    atomic_write_with_mode(path, bytes, false)
+}
+
+/// Write a cache record with owner-only permissions before it becomes visible.
+pub fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), WorktreeError> {
+    atomic_write_with_mode(path, bytes, true)
+}
+
+fn atomic_write_with_mode(path: &Path, bytes: &[u8], private: bool) -> Result<(), WorktreeError> {
     let parent = path.parent().ok_or_else(|| {
         WorktreeError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -172,8 +181,24 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), WorktreeError> {
         std::process::id(),
         std::thread::current().id()
     ));
-    fs::write(&temp, bytes)?;
-    fs::rename(temp, path)?;
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut file = options.open(&temp)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() { let _ = fs::remove_file(&temp); }
+    result?;
     Ok(())
 }
 

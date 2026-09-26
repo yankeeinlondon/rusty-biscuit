@@ -52,6 +52,7 @@ phase: |-
     {{
         frontmatter(log, "phase_completed") + 1 || frontmatter(plan, "starting_phase") || 1
     }}
+yolo: true
 initialize:
     - stack:
         - when: "!orchestration"

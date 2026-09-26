@@ -1,13 +1,128 @@
 ---
 total_phases: 5
 created: 2026-09-25
-phase: 1
-agent: claude/opus
+phase: 5
+agent: codex/default
 yolo: true
 related:
     - 2026-09-25-worktree-file
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance
+source_files_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/spike_git.py
+    - worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1
+docs_updated_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_1:
+    - worktree/fixes/2026-09-25-worktree-file/spikes.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+skills_files_updated_during_phase_1:
+    - .claude/skills/os/windows.md
+packages:
+    - worktree
+    - worktree-cli
+source_files_during_phase_2:
+    - worktree/cli/src/exit.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/compare.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/include/copy.rs
+    - worktree/lib/src/include/mod.rs
+    - worktree/lib/src/include/rules.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/test_support.rs
+docs_updated_during_phase_2:
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/os/windows.md
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/tests/create_include.rs
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4:
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/tests/level2_remove.rs
+
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+
+docs_created_during_phase_5: []
+
+skills_files_updated_during_phase_5: []
+
+source_code:
+    - worktree/fixes/2026-09-25-worktree-file/spike_git.py
+    - worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1
+    - worktree/cli/src/exit.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/compare.rs
+    - worktree/lib/src/copy_record.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/git.rs
+    - worktree/lib/src/include/copy.rs
+    - worktree/lib/src/include/mod.rs
+    - worktree/lib/src/include/rules.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/inventory.rs
+    - worktree/lib/src/remove/test_support.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/create.rs
+    - worktree/cli/tests/create_include.rs
+    - worktree/lib/src/remove/included.rs
+    - worktree/lib/src/remove/handoff.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/src/commands/remove/policy.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/remove.rs
+    - worktree/cli/tests/level2_remove.rs
+
+documentation:
+    - worktree/fixes/2026-09-25-worktree-file/plan.md
+    - worktree/fixes/2026-09-25-worktree-file/spec.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-25-worktree-file/implementation-log.md
+    - worktree/fixes/2026-09-25-worktree-file/spikes.md
+    - worktree/README.md
+    - worktree/fixes/2026-09-25-list-remove-performance/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `.worktreeinclude` support
@@ -31,14 +146,14 @@ The working tree currently holds uncommitted `2026-09-24-ux-improvements` review
 
 ### Success looks like
 
-- [ ] Every acceptance criterion (1–7) in the spec has at least one named test, at the level the spec assigns (L1, or L2 for prompts).
+- [x] Every acceptance criterion (1–7) in the spec has at least one named test, at the level the spec assigns (L1, or L2 for prompts).
 - [ ] `just test`, `just test-l2`, and `just lint` pass in `worktree/` on macOS.
-- [ ] Linux evidence (L1) and native Windows evidence (L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows`) exist. WSL2 is covered by the nightly leg, or by an explicit cross-check when path/link code changed.
-- [ ] `wt create` stdout is byte-identical to today's shell protocol in every test, including partial copy failure.
-- [ ] No test observes deletion of a new, changed, or unknown included file without consent. No test observes a prompt for an unchanged copy or for `target/`.
-- [ ] Removal cost is proven by counted file reads, not wall-clock thresholds.
-- [ ] The README, the `worktree` skill, the `os` skill (for any new OS trap), and `docs/dependencies.md` (if a clone crate is added) match the code.
-- [ ] The implementation ends at "implementation complete, ready for review". The spec is never moved into `_completed`.
+- [x] Linux evidence (L1) and native Windows evidence (L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows`) exist. WSL2 is covered by the nightly leg, or by an explicit cross-check when path/link code changed.
+- [x] `wt create` stdout is byte-identical to today's shell protocol in every test, including partial copy failure.
+- [x] No test observes deletion of a new, changed, or unknown included file without consent. No test observes a prompt for an unchanged copy or for `target/`.
+- [x] Removal cost is proven by counted file reads, not wall-clock thresholds.
+- [x] The README, the `worktree` skill, the `os` skill (for any new OS trap), and `docs/dependencies.md` (if a clone crate is added) match the code.
+- [x] The implementation ends at "implementation complete, ready for review". The spec is never moved into `_completed`.
 
 ---
 
@@ -52,47 +167,47 @@ Each rule carries a **provisional ruling** that implementation follows under `yo
 
 - [x] **R1 — Large-file shortcut (spec open question 1).** *Confirmed by the author 2026-09-25 (spec Decision 7), overturning the provisional ruling:* included files are never judged unchanged from metadata. A size difference is `Changed` without reading; every same-size included file is hashed in full with `biscuit_hash::blake3_hash_reader`, at any size, at removal and in the handoff. Modification time is not recorded for included files. The size-and-mtime shortcut survives only as the dirty-file policy owned by `2026-09-25-list-remove-performance`.
 - [x] **R2 — Unchanged copy whose source is gone (spec open question 2).** *Confirmed by the author 2026-09-25 (spec Decision 8):* keep creation-baseline semantics. The README must never say deletion "loses nothing". It must say that an unchanged copy may be the last copy of the original contents.
-- [ ] **R3 — Ambiguous copy source.** "Fail source selection with a warning" means `wt create` still creates the worktree (exit 0), copies nothing, and prints one warning naming the checkouts it found. It does not fail the create.
-- [ ] **R4 — Record identity.** A copy record is keyed by the worktree's canonical path (the file name is `<repo hash>.copy-<blake3(canonical path)[..16]>.json` via `cache::repo_cache_file`). It is bound to:
+- [x] **R3 — Ambiguous copy source.** "Fail source selection with a warning" means `wt create` still creates the worktree (exit 0), copies nothing, and prints one warning naming the checkouts it found. It does not fail the create.
+- [x] **R4 — Record identity.** A copy record is keyed by the worktree's canonical path (the file name is `<repo hash>.copy-<blake3(canonical path)[..16]>.json` via `cache::repo_cache_file`). It is bound to:
     - the worktree's admin directory (`git rev-parse --git-dir` run in the worktree, canonical);
-    - a registration fingerprint chosen by spike S3.
+    - a random 128-bit registration nonce in a `wt-copy-registration` marker under that admin directory, created with `create_new` and stored in the record. A missing, unreadable, or different marker makes the record untrusted. Git removes this marker with its admin directory; the marker avoids depending on birthtime precision or unstable Windows file-ID APIs.
 
   On load, a mismatch in either field makes the record *untrusted*. `wt create` deletes any record at the destination's key before it runs `git worktree add`.
-- [ ] **R5 — Path representation.** The include set, the copy record, and the handoff carry repository-relative paths as git's `-z` bytes (`Vec<u8>`). Records serialize them as lowercase hex, never as lossy UTF-8. Conversion to `PathBuf` goes through `OsStr::from_bytes` on Unix, and through UTF-8 on Windows, where Git for Windows emits UTF-8. A Windows path that is not valid UTF-8 is reported as an unsupported entry, never guessed.
-- [ ] **R6 — mtime encoding.** Included files do not record or use modification time (R1). Where the dirty-file policy from `2026-09-25-list-remove-performance` needs it, it is stored as `(secs: i64, nanos: u32)` from `Metadata::modified()`, and a platform or filesystem without mtime takes the hash path, never the shortcut.
-- [ ] **R7 — Missing versus unreadable rules.** Missing means `NotFound` on `symlink_metadata` of `<root>/.worktreeinclude`. Every other state is *indeterminate*: a directory, a symlink resolving outside the checkout, a read error, or non-UTF-8 content, since git reads the file as bytes and that alone is fine. A symlink inside the checkout is read through. Creation treats *indeterminate* as "warn and skip copying". Removal treats it as "exit 1 before mutation". An existing zero-byte file is an empty set and suppresses the removal fallback.
-- [ ] **R8 — Summary line contents.** The dim "Also deletes ignored files:" line lists the first path components of every ignored entry from the existing `git status --ignored=matching` inventory, minus the entries that need consent (those are listed with the dirty files). An unchanged included file therefore appears in the summary line. The line shows names only and never counts files. It replaces the current `IgnoredGroup` count display.
-- [ ] **R9 — Exit codes.** A new, changed, or unknown included file behaves exactly like a dirty file in `policy::decide`: interactive mode asks (default No), and non-interactive mode requires `--force-worktree` or exits 3. An include set that cannot be determined exits 1 before mutation. In the handoff, a content or policy mismatch exits 3 (even with `--force-worktree`), and discovery errors exit 1.
-- [ ] **R10 — Scope boundary with `2026-09-25-list-remove-performance`.** This plan creates the shared comparison contract (`lib/src/compare.rs`) and uses it for *included files* in the copy record, the removal classification, and the handoff. Dirty-file fingerprint changes and PR/live-remote reuse stay in the performance spec, which will adopt `compare.rs` rather than re-implement it.
-- [ ] **R11 — Copy source label.** "Copied from `X`" uses the copy source's branch name, or `base` for the main checkout, escaped through `Prose::escape_text`.
-- [ ] **R12 — Where new error variants live.** Every new `WorktreeError` variant (for example `IncludeRulesIndeterminate`, `IncludeSetDiscovery`) is added in Wave 2. This keeps `error.rs` and `cli/src/exit.rs` out of the parallel waves.
+- [x] **R5 — Path representation.** The include set, the copy record, and the handoff carry repository-relative paths as git's `-z` bytes (`Vec<u8>`). Records serialize them as lowercase hex, never as lossy UTF-8. Conversion to `PathBuf` goes through `OsStr::from_bytes` on Unix, and through UTF-8 on Windows, where Git for Windows emits UTF-8. A Windows path that is not valid UTF-8 is reported as an unsupported entry, never guessed.
+- [x] **R6 — mtime encoding.** Included files do not record or use modification time (R1). Where the dirty-file policy from `2026-09-25-list-remove-performance` needs it, it is stored as `(secs: i64, nanos: u32)` from `Metadata::modified()`, and a platform or filesystem without mtime takes the hash path, never the shortcut.
+- [x] **R7 — Missing versus unreadable rules.** Missing means `NotFound` on `symlink_metadata` of `<root>/.worktreeinclude`. Every other state is *indeterminate*: a directory, a symlink resolving outside the checkout, or a read error. Non-UTF-8 rule content is valid input to Git's byte-oriented matcher and is not rejected for its encoding alone. A symlink inside the checkout is read through. Creation treats *indeterminate* as "warn and skip copying". Removal treats it as "exit 1 before mutation". An existing zero-byte file is an empty set and suppresses the removal fallback.
+- [x] **R8 — Summary line contents.** The dim "Also deletes ignored files:" line lists the first path components of every ignored entry from the existing `git status --ignored=matching` inventory, minus the entries that need consent (those are listed with the dirty files). An unchanged included file therefore appears in the summary line. The line shows names only and never counts files. It replaces the current `IgnoredGroup` count display.
+- [x] **R9 — Exit codes.** A new, changed, or unknown included file behaves exactly like a dirty file in `policy::decide`: interactive mode asks (default No), and non-interactive mode requires `--force-worktree` or exits 3. An include set that cannot be determined exits 1 before mutation. In the handoff, a content or policy mismatch exits 3 (even with `--force-worktree`), and discovery errors exit 1.
+- [x] **R10 — Scope boundary with `2026-09-25-list-remove-performance`.** This plan creates the shared comparison contract (`lib/src/compare.rs`) and uses it for *included files* in the copy record, the removal classification, and the handoff. Dirty-file fingerprint changes and PR/live-remote reuse stay in the performance spec, which will adopt `compare.rs` rather than re-implement it.
+- [x] **R11 — Copy source label.** "Copied from `X`" uses the copy source's branch name, or `base` for the main checkout, escaped through `Prose::escape_text`.
+- [x] **R12 — Where new error variants live.** Every new `WorktreeError` variant (for example `IncludeRulesIndeterminate`, `IncludeSetDiscovery`) is added in Wave 2. This keeps `error.rs` and `cli/src/exit.rs` out of the parallel waves.
 
 ### Spikes (Wave 1, all concurrent)
 
 Each spike produces a runnable probe (a throwaway `#[test] #[ignore]` or a shell script) and a short entry in `spikes.md`. No production code comes out of this wave.
 
-- [ ] **S1 — Git matching semantics** (`git` 2.4x on macOS; repeated on Linux and Windows through `cross-check`)
+- [x] **S1 — Git matching semantics** (`git` 2.4x on macOS; repeated on Linux and Windows through `cross-check`)
     - Confirm the two-step pipeline. `ls-files --others --ignored --exclude-from=<file> -z` gives the candidates. `check-ignore --stdin -z --verbose --non-matching` gives the standard-rule test. Confirm that `check-ignore` reports a file inside an ignored *parent directory* as ignored. If it does not, find the working alternative (for example, filtering candidates against `status --ignored=matching` output) and record it.
     - Confirm the behavior of: nested `.gitignore`, `.git/info/exclude`, `core.excludesFile`, ordered negation, a negated child under an excluded parent, `**/` into a wholly ignored directory, and a leading-`/` anchor.
     - Confirm what `ls-files --others` emits for a nested repository, a submodule, a nested linked worktree, a symlink to a directory, and (on Windows) a junction. Decide the boundary filter from that output.
     - Confirm that `--exclude-from=<absolute path of base checkout's file>` run in another worktree resolves patterns relative to that worktree's root. The removal fallback depends on this.
-- [ ] **S2 — Copy-on-write API**
+- [x] **S2 — Copy-on-write API**
     - Evaluate the `reflink-copy` crate (`reflink` without fallback) against direct calls (`clonefile` on macOS, `FICLONE` on Linux, `FSCTL_DUPLICATE_EXTENTS_TO_FILE` on ReFS).
     - Check three questions. Can it clone into a caller-created temporary path, then publish without replacement (`link`+`unlink` on Unix, `MoveFileExW` without `REPLACE_EXISTING` on Windows, or `renameat2(RENAME_NOREPLACE)` / `renamex_np(RENAME_EXCL)`)? Does a clone preserve mode or reset it? Which errors mean "unsupported" versus "failed"?
     - Record the chosen crate, its license, and its dependency cost. Decide whether it belongs in `worktree` or in `biscuit-file`.
-- [ ] **S3 — Registration identity**
+- [x] **S3 — Registration identity**
     - Decide what distinguishes a recreated worktree at the same path from its predecessor, given that git may reuse the admin directory name after `worktree prune`.
     - Candidates: the file ID (`dev`+`ino` / Windows file index) plus the birth or modification time of `<admin>/gitdir`; or a nonce stored in the record and cross-checked against `<admin>/gitdir`'s identity.
     - Prove the chosen field changes across remove → prune → re-add at the same path, on macOS, Linux, and Windows.
-- [ ] **S4 — Windows links and junctions**
+- [x] **S4 — Windows links and junctions**
     - Find how symlink creation fails without Developer Mode or the right privilege. Determine the error kind, so the plan's "warn and skip" can match it.
     - Find how to detect junctions and directory reparse points through `std` metadata (`FileTypeExt`, `file_attributes()`), so neither traversal nor ancestor checks follow them.
     - Add every non-obvious finding to the `os` skill (`windows.md`).
 
 ### Checkpoint 1
 
-- [ ] `spikes.md` records outcomes S1–S4. R1–R12 are confirmed or amended in this file.
-- [ ] If S1 shows `check-ignore` cannot express the intersection, the include-set design in Phase 2 is amended before Wave 2 starts.
+- [x] `spikes.md` records outcomes S1–S4. R1–R12 are confirmed or amended in this file.
+- [x] S1 confirms `check-ignore` can express the intersection. Phase 2 rejects directory candidates and checks *every ancestor* for links or reparse points before copying; Git for Windows traverses junctions during candidate discovery.
 
 ---
 
@@ -102,24 +217,24 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
 
 ### Wave 2 — Shared scaffolding (single agent, small)
 
-- [ ] **Byte-exact git helper**
+- [x] **Byte-exact git helper**
     - Add `git::git_from_bytes(base, dir, args, stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError>`. It runs `git -C` from `base` like `git_from_raw`, and keeps the `count-git` recording.
-- [ ] **Error variants**
+- [x] **Error variants**
     - Add `IncludeRulesIndeterminate { path, reason }` and `IncludeSetDiscovery(String)` (exit 1), plus any variants S1–S4 showed are needed. Map them in `cli/src/exit.rs` (see R12).
-- [ ] **Test fixtures**
+- [x] **Test fixtures**
     - Extend `remove::test_support::TestRepo` with helpers: `write_ignored`, `write_include_rules`, `add_linked_worktree(branch)`, `with_global_excludes`, and a fixture-owned `XDG_CACHE_HOME` / `HOME` for the user cache.
     - The Windows user-cache caveat from the skill applies. Tests that seed a store use a fixture-owned directory, passed through an injectable store path rather than the real per-user path, where the API allows it.
-- [ ] **Clone dependency**
+- [x] **Clone dependency**
     - Add the dependency S2 chose to `lib/Cargo.toml`, and document it in `docs/dependencies.md`.
 
 ### Wave 3 — Modules (4 concurrent agents; disjoint files)
 
-- [ ] **Include set** (`lib/src/include/mod.rs`, `rules.rs`)
+- [x] **Include set** (`lib/src/include/mod.rs`, `rules.rs`)
     - `IncludeRules::locate(root) -> Present(PathBuf) | Empty | Missing | Indeterminate(reason)`, per R7.
-    - `resolve_include_set(base, worktree, rules_file) -> Result<IncludeSet, WorktreeError>` implements the two-step pipeline from S1, with the boundary filter and native-byte paths (R5).
+    - `resolve_include_set(base, worktree, rules_file) -> Result<IncludeSet, WorktreeError>` implements the two-step pipeline from S1, with native-byte paths (R5). Reject non-file candidates and check every ancestor for links or reparse points: Git for Windows can enumerate through a junction.
     - `IncludeSet` holds `entries: Vec<IncludedEntry { path: Vec<u8>, kind }>` and `unsupported: Vec<(path, kind)>`. It never contains `.git` administrative files or empty directories.
     - L1 tests cover acceptance criterion 1, plus from criterion 5: empty versus missing rules, unreadable rules, a directory in place of the file, a symlinked rules file outside the checkout, ordered negation, the negated-child-under-excluded-parent example, global and nested excludes, filenames with spaces and newlines, nested repositories, submodules, and linked directories.
-- [ ] **Comparison contract** (`lib/src/compare.rs`)
+- [x] **Comparison contract** (`lib/src/compare.rs`)
     - `Observation { kind: File | Symlink { target_bytes }, size, digest: Option<[u8; 32]> }`, and a `Policy` enum: `Included` (R1) and `DirtyHandoff` (reserved for `2026-09-25-list-remove-performance`, which adds `mtime` and `HASH_ALWAYS_BELOW` when it lands).
     - `observe(path, reader: &dyn ReadCounter) -> Result<Observation>` reads with `symlink_metadata` and never follows links.
     - `compare(baseline: &Observation, path, reader) -> Unchanged | Changed | Missing | Unknown(reason)`, with these rules:
@@ -130,12 +245,12 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
     - `digest_file` uses `biscuit_hash::blake3_hash_reader`.
     - The injected `ReadCounter` lets tests count full-content reads (acceptance criterion 7).
     - L1 tests cover: a same-size edit that restores mtime, for a small and a large file (both detected); a size change classified without a read; a large same-size file that is read; symlink target changes; a kind change; an unreadable file.
-- [ ] **Copy record store** (`lib/src/copy_record.rs`)
+- [x] **Copy record store** (`lib/src/copy_record.rs`)
     - A versioned `CopyRecord { format_version, worktree: canonical path, admin_dir, registration: <S3 field>, source: canonical path + label, files: Vec<(path_hex, Observation)> }`.
     - `record_path(repo_root, worktree)`, `write_atomic` (via `cache::atomic_write`, with mode `0600` on Unix set *before* rename), `delete`, and `load(repo_root, worktree, expected_identity) -> Trusted(record) | Absent | Untrusted(reason)`. A corrupt, incompatible, or identity-mismatched record is always `Untrusted`, never an error.
     - `prune(repo_root, live_worktrees: &HashSet<PathBuf>)` scans only this repository's `copy-*` files.
     - L1 tests cover: round trip, corruption, a version bump, identity mismatch, two concurrent writers for different worktrees not clobbering each other, prune leaving live records alone, and unreadable-directory behavior.
-- [ ] **Copy engine** (`lib/src/include/copy.rs`)
+- [x] **Copy engine** (`lib/src/include/copy.rs`)
     - `copy_include_set(source_root, dest_root, set, dest_index: &HashSet<Vec<u8>>, ops: &dyn CopyOps) -> CopyOutcome { copied: Vec<(path, Observation)>, skipped: Vec<(path, SkipReason)>, failed: Vec<(path, String)> }`.
     - `CopyOps` is the injectable seam (clone / byte-copy / symlink / publish-no-replace). `RealCopyOps` uses the S2 API and falls back to byte copy on "unsupported" or cross-volume errors.
     - Rules:
@@ -150,8 +265,8 @@ Goal: four independent, fully unit-tested library modules with no CLI or flow ch
 
 ### Checkpoint 2
 
-- [ ] `just test` and `just lint` pass in `worktree/`. The new modules have no callers yet, apart from tests.
-- [ ] Code review of the four modules against R1–R12 happens before integration starts, because every later phase depends on these contracts.
+- [x] `just test` and `just lint` pass in `worktree/`. The new modules have no callers yet, apart from tests.
+- [x] Code review of the four modules against R1–R12 happens before integration starts, because every later phase depends on these contracts.
 
 ---
 
@@ -161,10 +276,10 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
 
 ### Wave 4 — Library (single agent: `lib/src/worktree.rs`)
 
-- [ ] **Copy source resolution**
+- [x] **Copy source resolution**
     - Add the pure `copy_source(entries: &[WorktreeEntry], fork_branch: Option<&str>) -> CopySource::{Worktree(entry), Base(entry), Ambiguous(Vec<entry>)}`. It is called *before* `git worktree add`, so a reused branch always resolves to the base checkout.
     - L1 tests cover forked-with-worktree, forked-without-worktree, reused, and ambiguous (R3).
-- [ ] **Extend `create_worktree`**
+- [x] **Extend `create_worktree`**
     - Order of work:
         1. validate (unchanged);
         2. resolve the copy source;
@@ -178,9 +293,9 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
         10. write the copy record with successful copies only.
     - Every failure after step 4 becomes a warning in `CreateResult.include: IncludeOutcome { source_label, copied, skipped, failed, warnings }` and never an `Err`.
     - Update the function's `///` docs (the Errors list is unchanged; add a paragraph on the copy).
-- [ ] **List prune**
+- [x] **List prune**
     - In `fill_worktree_statuses`, next to the fork-origin prune, call `copy_record::prune` with the canonical paths from the *successful* `worktree list`. A failed listing prunes nothing.
-- [ ] **L1 tests** (lib)
+- [x] **L1 tests** (lib)
     - Cover acceptance criterion 2 end to end against `TestRepo`:
         - a fork from a branch with a worktree gets that worktree's `.env`;
         - a fork from a branch without a worktree gets the base checkout's;
@@ -192,17 +307,17 @@ Goal: creation copies the include set, writes the record, and reports on stderr.
 
 ### Wave 5 — CLI (single agent: `cli/src/commands/create.rs`, `cli/tests/`)
 
-- [ ] **Create report**
+- [x] **Create report**
     - After the existing "Created worktree" block, render one `Prose` line to stderr: "Copied from `<label>`: a, b, c". Filenames are escaped, control characters are made visible, and the line wraps. When nothing was copied, print nothing.
     - Warnings (per-file failures, skipped links, ambiguous source, indeterminate rules, record write failure) are an `UnorderedList` to stderr. They never include file contents.
-- [ ] **CLI tests** (`cli/tests/create_include.rs`, new)
+- [x] **CLI tests** (`cli/tests/create_include.rs`, new)
     - Assert stderr lines with `NO_COLOR=1`.
     - Assert stdout is exactly the existing protocol (`cd:` lines only under the wrapper, nothing otherwise), including partial success.
     - Filenames with spaces or control characters render escaped.
 
 ### Checkpoint 3
 
-- [ ] `just test` and `just lint` pass. Running `wt create` by hand in a scratch repository with `.env` + `.worktreeinclude` shows the copied line, and `wt list` shows no regression.
+- [x] `just test` and `just lint` pass. Running `wt create` by hand in a scratch repository with `.env` + `.worktreeinclude` shows the copied line, and `wt list` shows no regression.
 
 ---
 
@@ -212,7 +327,7 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 6 — Library (2 concurrent agents)
 
-- [ ] **Included-file classification** (agent A: `lib/src/remove/inventory.rs`, new `lib/src/remove/included.rs`)
+- [x] **Included-file classification** (agent A: `lib/src/remove/inventory.rs`, new `lib/src/remove/included.rs`)
     - `classify_included(base, worktree, entries) -> Result<IncludedAssessment, WorktreeError>` does the following:
         - locates the worktree's own rules; only on `Missing` does it fall back to the base checkout's file, evaluated in the removed worktree (per S1). `Empty` never falls back. `Indeterminate` is `Err` (exit 1);
         - resolves the include set;
@@ -226,25 +341,25 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
         - `fingerprint()` replaces its `ignored\0` lines with `included\0<path>\0<mark>\0<digest-or-observation>` lines, plus the rules and baseline bindings;
         - dirty-file and full-index coverage are unchanged.
     - Update the module and method docs, whose current "Ignored entries count like dirty files" wording becomes wrong.
-- [ ] **Handoff format v3** (agent B: `lib/src/remove/handoff.rs`)
+- [x] **Handoff format v3** (agent B: `lib/src/remove/handoff.rs`)
     - Bump `HANDOFF_FORMAT_VERSION` to 3 and add the rules and baseline bindings to `HandoffState` (the fingerprint already covers content). `verify` re-resolves membership against the fresh state. Any rules or baseline difference is a `HandoffRefusal` (exit 3), even when a protected file left the selected set.
     - L1 tests: a v2 record is treated as missing; a rules change, a record change, or a changed no-record source each refuse; a new `target/` artifact does not refuse.
-- [ ] **Record deletion helper** (agent B)
+- [x] **Record deletion helper** (agent B)
     - Add `copy_record::delete_for(repo_root, worktree)`. It returns a warning string rather than failing.
 
 ### Wave 7 — CLI flow (single agent: `cli/src/commands/remove/{mod,policy,report}.rs`)
 
-- [ ] **Flow**
+- [x] **Flow**
     - `Facts::gather` passes `Indeterminate` and discovery errors up as exit 1 before any mutation.
     - `execute` deletes the copy record right after the directory is removed. A later branch or remote failure does not undo that deletion, and a record-deletion failure is a warning.
     - `run_handoff` compares the new bindings.
-- [ ] **Policy**
+- [x] **Policy**
     - Needing consent because of included files follows the same `policy::decide` path as dirty files (R9). Extend the pure matrix test with included-only, dirty+included, unknown-only, and unchanged-only (which asks nothing).
-- [ ] **Report**
+- [x] **Report**
     - Included files needing consent are listed with the dirty files and marked `new`, `changed`, or `unknown`, and they are named in the confirmation question.
     - One dim "Also deletes ignored files: target/, .DS_Store" line (R8) replaces the counted groups.
     - Update `refusal_markup`, which currently says "ignored files (listed above)".
-- [ ] **L1 CLI tests** (`cli/tests/remove.rs`)
+- [x] **L1 CLI tests** (`cli/tests/remove.rs`)
     - Cover every non-interactive row of the consent table with its exit code.
     - An unchanged `.env` plus `target/` is removed without a question.
     - Editing the source's `.env` after creation causes no question.
@@ -257,7 +372,7 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Checkpoint 4
 
-- [ ] `just test` and `just lint` pass. The existing `level2_remove` and `level2_powershell_remove` suites still pass. Their expectations about ignored files are updated deliberately, because the ruled policy change (Decision 3) makes some old "ignored needs consent" expectations wrong on purpose. Each changed assertion is listed in the implementation log.
+- [x] `just test` and `just lint` pass. The existing `level2_remove` and `level2_powershell_remove` suites still pass. Their expectations about ignored files are updated deliberately, because the ruled policy change (Decision 3) makes some old "ignored needs consent" expectations wrong on purpose. Each changed assertion is listed in the implementation log.
 
 ---
 
@@ -265,19 +380,19 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 8 (3 concurrent agents)
 
-- [ ] **L2 prompts** (`cli/tests/level2_remove.rs`)
+- [x] **L2 prompts** (`cli/tests/level2_remove.rs`)
     - Using the existing focus-preserving tmux harness, add:
         - a representative interactive prompt for a `changed` included file (default No keeps everything);
         - an `unknown` file;
         - an unchanged-copy removal with no prompt;
         - a handoff that refuses after a `WT_TEST_BETWEEN` edit of `.env`.
     - No window gains focus.
-- [ ] **Documentation**
+- [x] **Documentation**
     - `worktree/README.md`: the `.worktreeinclude` convention and its link to Claude Code and Worktrunk, syntax, the negated-child example, the copy source rules, copy-on-write, the consent table, that included files are always compared by full content (R1), the R2 "last copy" caveat, the consequence of editing patterns, and the advice to name files rather than `node_modules/`.
     - `.claude/skills/worktree/SKILL.md`: add `include`, `compare`, and `copy_record` sections, and rewrite the `wt remove` inventory bullet (ignored entries no longer all need consent; the handoff is v3).
     - `os` skill: add S2 and S4 findings.
     - `docs/dependencies.md`: add the clone crate.
-- [ ] **Cross-OS evidence**
+- [x] **Cross-OS evidence**
     - Linux L1 (`cross-check` or CI).
     - Native Windows L1, plus `level2_powershell` via `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell` (read the durations to confirm it ran and was not skipped).
     - WSL2 via cross-check, because link and path code changed.
@@ -285,11 +400,12 @@ Goal: consent covers only new, changed, or unknown included files, and the hando
 
 ### Wave 9 — Close-out (single agent)
 
-- [ ] **Performance spec handoff**
+- [x] **Performance spec handoff**
     - Add a note to `2026-09-25-list-remove-performance` that `compare.rs` exists and is the contract its dirty-file fingerprint must reuse (R10). Change only its text, not its code.
-- [ ] **Final validation**
+- [x] **Final validation**
     - Run `just test`, `just test-l2`, and `just lint` in `worktree/`. Walk the Success checklist above and check each item with its evidence.
-- [ ] **Status**
+    - The full `just test-l2` run remains red on the pre-existing Kitty screenshot capture issue; the separate tmux groups and Windows PowerShell L2 pass. See the Phase 5 implementation log. The full-gate Success item and Checkpoint 5 remain open until that environment issue is resolved.
+- [x] **Status**
     - Set the spec's frontmatter to `status: implemented`, `implemented: true`, `implemented_by: claude/opus`. Stop at "implementation complete, ready for review". Do not move the spec and do not run `just complete`.
 
 ### Checkpoint 5

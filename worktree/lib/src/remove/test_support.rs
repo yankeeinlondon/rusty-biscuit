@@ -62,6 +62,29 @@ impl TestRepo {
         self.dir.path().join("repo")
     }
 
+    pub fn cache_path(&self) -> PathBuf {
+        self.dir.path().join("cache")
+    }
+
+    pub fn write_ignored(&self, name: &str, contents: &[u8]) {
+        fs::write(self.path().join(name), contents).unwrap();
+    }
+
+    pub fn write_include_rules(&self, contents: &[u8]) {
+        fs::write(self.path().join(".worktreeinclude"), contents).unwrap();
+    }
+
+    pub fn add_linked_worktree(&self, branch: &str) -> PathBuf {
+        self.add_worktree(branch, branch, "main")
+    }
+
+    pub fn with_global_excludes(&self, contents: &[u8]) -> PathBuf {
+        let path = self.dir.path().join("global-excludes");
+        fs::write(&path, contents).unwrap();
+        self.git(&["config", "core.excludesFile", path.to_str().unwrap()]);
+        path
+    }
+
     pub fn origin_path(&self) -> PathBuf {
         self.dir.path().join("origin.git")
     }

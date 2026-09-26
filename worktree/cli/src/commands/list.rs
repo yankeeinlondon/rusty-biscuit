@@ -1,4 +1,5 @@
 use std::io::IsTerminal as _;
+use std::path::Path;
 use std::time::Instant;
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -9,7 +10,8 @@ use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
 use worktree::WorktreeError;
 use worktree::pull_requests::{
-    OpenPrSource, PrListing, SniffOpenPrSource, open_pull_requests, pr_store_path, unix_now,
+    CachedPrs, LIST_DEADLINE, OpenPrSource, PrListing, SniffOpenPrSource, fetch_and_publish, origin_url,
+    pr_store_path, select_cached, unix_now,
 };
 use worktree::worktree::{fill_worktree_statuses, parse_worktree_state};
 
@@ -17,12 +19,54 @@ use super::git_graph;
 use super::list_table::{self, TableFacts};
 use crate::perf;
 
-/// Builds the open-PR source when a request is due; `None` shows no badges.
-pub type PrConnect = fn() -> Option<Box<dyn OpenPrSource>>;
+/// Builds the open-PR source for an `origin` URL when a request is due.
+pub type PrConnect = fn(&str) -> Box<dyn OpenPrSource>;
 
 /// The production source: sniff's provider client for `origin`.
-fn origin_pr_source() -> Option<Box<dyn OpenPrSource>> {
-    SniffOpenPrSource::for_origin().map(|source| Box::new(source) as Box<dyn OpenPrSource>)
+fn origin_pr_source(origin: &str) -> Box<dyn OpenPrSource> {
+    Box::new(SniffOpenPrSource {
+        remote_url: origin.to_string(),
+        deadline: LIST_DEADLINE,
+    })
+}
+
+/// Starts the background refresh for the repository whose main checkout is
+/// the argument, without waiting for it.
+pub type PrLaunch = fn(&Path);
+
+/// How the PR stage reaches the network: a foreground request on a miss, a
+/// background refresh on a stale answer. Tests replace both.
+#[derive(Clone, Copy)]
+pub struct PrSeams {
+    pub connect: PrConnect,
+    pub launch: PrLaunch,
+}
+
+const PRODUCTION_SEAMS: PrSeams = PrSeams {
+    connect: origin_pr_source,
+    launch: super::pr_refresh::launch,
+};
+
+/// The open PRs for the repository whose main checkout is `main`.
+///
+/// A stored answer for the current `origin` is shown at once; a stale one
+/// also starts a background refresh, whose answer the next run shows. Only a
+/// miss makes the request here, under [`LIST_DEADLINE`]; a failed request, or
+/// one during which `origin` changed, shows no badges.
+fn gather_prs(store: &Path, main: &Path, seams: PrSeams) -> PrListing {
+    let origin = origin_url(main);
+    match select_cached(store, origin.as_deref(), unix_now()) {
+        CachedPrs::Fresh(listing) => return listing,
+        CachedPrs::Stale(listing) => {
+            (seams.launch)(main);
+            return listing;
+        }
+        CachedPrs::Miss => {}
+    }
+    let Some(origin) = origin else {
+        return PrListing::default();
+    };
+    fetch_and_publish(store, main, &origin, unix_now(), (seams.connect)(&origin).as_ref()).unwrap_or_default()
 }
 
 pub fn run(
@@ -45,7 +89,7 @@ pub fn run(
         process_start,
         image_support,
         &terminal,
-        origin_pr_source,
+        PRODUCTION_SEAMS,
     )?;
     if let Some(c) = collector {
         c.emit();
@@ -60,7 +104,7 @@ fn run_pipeline(
     process_start: Instant,
     image_support: ImageSupport,
     terminal: &Terminal,
-    pr_connect: PrConnect,
+    pr_seams: PrSeams,
 ) -> Result<Option<perf::PerfCollector>, WorktreeError> {
     let mut collector = if perf {
         Some(perf::PerfCollector::new(process_start))
@@ -77,16 +121,18 @@ fn run_pipeline(
     let needs_graph = image_support != ImageSupport::None;
     let gather_input = git_graph::GatherInput::from_list(&list);
     let needs_verbose = verbose && gather_input.has_verbose();
-    let pr_store = list.entries().first().and_then(|main| pr_store_path(&main.path).ok());
+    let main_checkout = list.entries().first().map(|main| main.path.clone());
+    let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
 
     std::thread::scope(|scope| {
-        // The PR request runs beside the git work under its own deadline, so
-        // the network never holds the table up for longer than that.
+        // A PR request (only on a miss) runs beside the git work under its
+        // own deadline, so the network never holds the table up for longer
+        // than that.
         let pr_handle = scope.spawn(|| {
             let t0 = perf.then(Instant::now);
-            let prs = match &pr_store {
-                Some(store) => open_pull_requests(store, unix_now(), pr_connect),
-                None => PrListing::default(),
+            let prs = match (&pr_store, &main_checkout) {
+                (Some(store), Some(main)) => gather_prs(store, main, pr_seams),
+                _ => PrListing::default(),
             };
             (prs, t0.map(|start| start.elapsed()))
         });

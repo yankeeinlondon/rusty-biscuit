@@ -1,8 +1,11 @@
 //! Bounded subprocess execution.
 //!
-//! Every child process sniff spawns goes through [`run_with_timeout`]. It is the
+//! Every child process sniff spawns goes through `run_with_timeout`. It is the
 //! single place that owns the deadline, the pipe draining, and process-tree
 //! termination/reaping, so a wedged or verbose child can never wedge a detection.
+//!
+//! The one public item, [`configure_detached_child`], serves the opposite case:
+//! a caller's intentionally detached child that nothing waits on or bounds.
 //!
 //! See `sniff/features/2026-07-16-performance/phases/_completed/06-remote-network-and-subprocess/spec.md`
 //! for the contract this module implements.
@@ -45,7 +48,7 @@
 //! `tests::a_descendant_that_detaches_between_samples_escapes_containment` is
 //! the executable record of this residual: it is the assertion that flips if a
 //! future change ever closes the gap. It manufactures the escape through
-//! [`sample_hook`], a test-only callback on the sampler, so the window it
+//! `sample_hook`, a test-only callback on the sampler, so the window it
 //! exploits is an interval boundary by construction and not by timing estimate.
 
 use std::ffi::OsStr;
@@ -761,9 +764,86 @@ where
     String::from_utf8(out.stdout).ok()
 }
 
+/// Configure a command so its child outlives the caller and shares neither its
+/// process group nor the pipes a parent may be reading from.
+///
+/// This is for a caller's intentionally detached, unbounded child, which
+/// `run_with_timeout` must not supervise. Callers must still give the child
+/// `Stdio::null()` (or their own handles); this only prevents the caller's
+/// inherited stdio from leaking into it.
+pub fn configure_detached_child(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        stop_inheriting_std_handles();
+        command.creation_flags(detached_creation_flags());
+    }
+}
+
+/// Windows children inherit every inheritable handle in the parent, and the
+/// stdio handles a parent handed this process stay inheritable even when the
+/// child is given `Stdio::null()`. A caller capturing this process's output
+/// would then wait for the detached child to exit before its read returned.
+/// Clearing the flag on this process's own copies is safe because
+/// `Stdio::inherit()` duplicates the handle with inheritance re-enabled.
+#[cfg(windows)]
+fn stop_inheriting_std_handles() {
+    use windows::Win32::Foundation::{HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation};
+    use windows::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: both calls only inspect or flag a handle this process owns;
+        // a null or invalid handle is skipped rather than passed through.
+        unsafe {
+            let Ok(handle) = GetStdHandle(id) else {
+                continue;
+            };
+            if handle.0.is_null() {
+                continue;
+            }
+            let _ = SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0));
+        }
+    }
+}
+
+#[cfg(windows)]
+const fn detached_creation_flags() -> u32 {
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_process_uses_a_new_process_group() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "printf '%s %s' \"$$\" \"$(ps -o pgid= -p $$ | tr -d ' ')\""])
+            .stdout(Stdio::piped());
+        configure_detached_child(&mut command);
+        let output = command.output().expect("process-group fixture should run");
+        assert!(output.status.success());
+        let ids = String::from_utf8(output.stdout).expect("fixture output should be UTF-8");
+        let mut ids = ids.split_whitespace();
+        assert_eq!(ids.next(), ids.next(), "child PID should equal its new PGID");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn detached_process_combines_all_required_windows_flags() {
+        assert_eq!(detached_creation_flags(), 0x0800_0208);
+    }
 
     const LARGE_OUTPUT_CHILD: &str = "process::tests::child_writes_large_output";
     const PIPE_HOLDING_CHILD: &str = "process::tests::child_spawns_pipe_holding_descendant";

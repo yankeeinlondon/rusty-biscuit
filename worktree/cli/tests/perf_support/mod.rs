@@ -1,4 +1,6 @@
-//! Shared fixtures and `--perf` parsing for the cache SLA integration tests.
+//! Shared fixtures and `--perf` parsing for the cache SLA and PR integration
+//! tests, plus the local network stand-ins ([`ProxyStub`], [`FakeGitea`]) and
+//! refresh-worker helpers the PR tests use.
 //!
 //! Both `cache_warm_path.rs` and `cache_cold_path.rs` build the same mixed
 //! multi-worktree repo and assert on the `list gather` stage timing parsed
@@ -19,11 +21,15 @@ use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
+use worktree::pull_requests::{
+    OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
+};
 
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
@@ -139,23 +145,64 @@ impl MixedFixture {
         self
     }
 
+    /// Points `origin` at [`FakeGitea::ORIGIN`]. Pair it with
+    /// [`MixedFixture::wt_command_via_gitea`].
+    pub fn with_gitea_origin(self) -> Self {
+        run_git(&self.main, &["remote", "add", "origin", FakeGitea::ORIGIN]);
+        self
+    }
+
     /// [`MixedFixture::wt_command`] with every HTTPS request sent through
     /// `proxy`, and no provider token.
     pub fn wt_command_via(&self, proxy: &ProxyStub) -> Command {
+        let mut command = self.wt_command_without_network();
+        command.env("HTTPS_PROXY", proxy.url()).env("https_proxy", proxy.url());
+        command
+    }
+
+    /// [`MixedFixture::wt_command`] with every plain-HTTP request sent to
+    /// `gitea`, and no provider token.
+    pub fn wt_command_via_gitea(&self, gitea: &FakeGitea) -> Command {
+        let mut command = self.wt_command_without_network();
+        command.env("HTTP_PROXY", gitea.url()).env("http_proxy", gitea.url());
+        command
+    }
+
+    /// `wt internal-refresh-prs <main>`, as `wt list` starts it, but owned by
+    /// the test: it can be waited for or killed.
+    pub fn refresh_worker_via_gitea(&self, gitea: &FakeGitea) -> Command {
+        let mut command = self.wt_command_via_gitea(gitea);
+        command.arg("internal-refresh-prs").arg(&self.main);
+        command
+    }
+
+    /// `wt` with no proxy, no provider token, and no image terminal; the
+    /// caller adds the one proxy its requests go to.
+    fn wt_command_without_network(&self) -> Command {
         let mut command = self.wt_command();
-        for name in ["ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "GH_TOKEN", "GITHUB_TOKEN"] {
+        for name in [
+            "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY",
+            "http_proxy", "GH_TOKEN", "GITHUB_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "CODEBERG_TOKEN",
+        ] {
             command.env_remove(name);
         }
-        command
-            .env("HTTPS_PROXY", proxy.url())
-            .env("https_proxy", proxy.url())
-            .env_remove("TERM_PROGRAM")
-            .env_remove("KITTY_WINDOW_ID");
+        for (name, _) in std::env::vars_os() {
+            let name = name.to_string_lossy();
+            if name.starts_with("SNIFF_") && name.ends_with("_TOKEN") {
+                command.env_remove(name.as_ref());
+            }
+        }
+        command.env_remove("TERM_PROGRAM").env_remove("KITTY_WINDOW_ID");
         command
     }
 
     pub fn main(&self) -> &Path {
         &self.main
+    }
+
+    /// The linked worktrees, one per branch.
+    pub fn worktrees(&self) -> &[PathBuf] {
+        &self.worktrees
     }
 
     /// The PR store the spawned `wt` reads and writes. The cache directory
@@ -175,28 +222,55 @@ impl MixedFixture {
         root.join("worktree").join(real.file_name().expect("store file name"))
     }
 
-    /// Writes a PR store fetched `age` ago holding one open PR from
-    /// `branch` into `main`.
+    /// Writes a PR store for the current `origin`, fetched `age` ago,
+    /// holding one open PR from `branch` into `main`.
     pub fn seed_pr_store(&self, age: Duration, number: u64, branch: &str) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_secs();
+        let origin = worktree::pull_requests::origin_url(&self.main).expect("the fixture has an origin");
+        let source_repo = SniffOpenPrSource { remote_url: origin.clone(), deadline: Duration::ZERO }
+            .source_repo()
+            .expect("the origin names a repository");
         let store = self.pr_store();
         fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
         let json = serde_json::json!({
-            "format_version": 1,
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now - age.as_secs(),
-            "source_repo": "owner/repo",
+            "source_repo": source_repo,
             "pull_requests": [{
                 "number": number,
-                "url": format!("https://github.com/owner/repo/pull/{number}"),
-                "source_repo": "owner/repo",
+                "url": format!("https://example.invalid/{source_repo}/pull/{number}"),
+                "source_repo": source_repo,
                 "source_branch": branch,
                 "target_branch": "main",
             }],
         });
         fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
+    }
+
+    /// Runs a refresh the way a competing worker would, with a source that
+    /// must never be asked: `Contended` while a worker holds the lock.
+    pub fn probe_refresh(&self) -> RefreshOutcome {
+        refresh(&self.pr_store(), &self.main, unix_now, |_| Box::new(NoRequest))
+    }
+
+    /// Waits up to `limit` until no worker holds the refresh lock, calling
+    /// `nudge` before each probe (to unblock the worker's request).
+    pub fn wait_until_unlocked(&self, limit: Duration, mut nudge: impl FnMut()) -> bool {
+        let deadline = Instant::now() + limit;
+        loop {
+            nudge();
+            if self.probe_refresh() != RefreshOutcome::Contended {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Delete the worktree SHA-pair cache so the next run is a guaranteed miss.
@@ -233,6 +307,79 @@ impl Default for MixedFixture {
     }
 }
 
+/// Removes a PR store and its lock sidecar, which on Windows live in the real
+/// user cache (see [`MixedFixture::pr_store`]).
+pub struct RemoveOnDrop(pub PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+        let _ = fs::remove_file(pr_lock_path(&self.0));
+    }
+}
+
+/// A source that must never be asked.
+pub struct NoRequest;
+
+impl OpenPrSource for NoRequest {
+    fn source_repo(&self) -> Option<String> {
+        None
+    }
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+        Err("the probe makes no request".into())
+    }
+}
+
+/// A running `wt internal-refresh-prs` for one repository.
+#[derive(Debug)]
+pub struct RefreshWorker {
+    pub pid: u32,
+    /// `None` where the OS would not say.
+    pub cwd: Option<PathBuf>,
+}
+
+/// The running refresh workers for the repository whose main checkout is
+/// `main`, whoever started them.
+pub fn refresh_workers(main: &Path) -> Vec<RefreshWorker> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let main = fs::canonicalize(main).expect("canonical main checkout");
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_cwd(UpdateKind::Always),
+    );
+    system
+        .processes()
+        .iter()
+        .filter(|(_, process)| {
+            let cmd = process.cmd();
+            let position = cmd.iter().position(|arg| arg == "internal-refresh-prs");
+            position
+                .and_then(|at| cmd.get(at + 1))
+                .and_then(|repo| fs::canonicalize(repo).ok())
+                .is_some_and(|repo| repo == main)
+        })
+        .map(|(pid, process)| RefreshWorker {
+            pid: pid.as_u32(),
+            cwd: process.cwd().map(Path::to_path_buf),
+        })
+        .collect()
+}
+
+/// Waits up to `limit` until exactly `count` refresh workers run for `main`.
+pub fn wait_for_refresh_workers(main: &Path, count: usize, limit: Duration) -> Vec<RefreshWorker> {
+    let deadline = Instant::now() + limit;
+    loop {
+        let workers = refresh_workers(main);
+        if workers.len() == count || Instant::now() >= deadline {
+            return workers;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn commit(repo: &Path, file: &str, contents: &str, message: &str) {
     fs::write(repo.join(file), format!("{contents}\n")).expect("write commit file");
     run_git(repo, &["add", "."]);
@@ -264,24 +411,47 @@ pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
 pub struct ProxyStub {
     port: u16,
     connections: Arc<AtomicUsize>,
+    held: Arc<Mutex<Vec<TcpStream>>>,
 }
 
 impl ProxyStub {
     /// Accepts every connection and never answers, so each request runs into
-    /// its deadline. Connections are held open until the test process ends.
+    /// its deadline. Connections are held open until
+    /// [`ProxyStub::close_held`] or the test process ends.
     pub fn hanging() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
         let port = listener.local_addr().expect("proxy stub address").port();
         let connections = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&connections);
         let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
+        let holder = Arc::clone(&held);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
+                holder.lock().expect("held connections").push(stream);
                 counter.fetch_add(1, Ordering::SeqCst);
-                held.lock().expect("held connections").push(stream);
             }
         });
-        Self { port, connections }
+        Self { port, connections, held }
+    }
+
+    /// Closes every connection held so far, so a request blocked on one
+    /// fails at once instead of waiting for its deadline.
+    pub fn close_held(&self) {
+        for stream in self.held.lock().expect("held connections").drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// Waits up to `limit` for at least `count` accepted connections.
+    pub fn wait_for_connections(&self, count: usize, limit: Duration) -> bool {
+        let deadline = std::time::Instant::now() + limit;
+        while self.connections() < count {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
     }
 
     /// A port with nothing listening: every connection is refused at once,
@@ -295,6 +465,7 @@ impl ProxyStub {
         Self {
             port,
             connections: Arc::default(),
+            held: Arc::default(),
         }
     }
 
@@ -306,6 +477,184 @@ impl ProxyStub {
     pub fn connections(&self) -> usize {
         self.connections.load(Ordering::SeqCst)
     }
+}
+
+/// What [`FakeGitea`] answers a PR-list request with.
+#[derive(Debug, Clone)]
+pub enum GiteaReply {
+    /// Open PRs `(number, source branch)` from `o/r` into `main`.
+    Open(Vec<(u64, &'static str)>),
+    /// An HTTP error status, such as 401 or 500.
+    Status(u16),
+}
+
+#[derive(Debug)]
+struct GiteaState {
+    requests: usize,
+    waiting: usize,
+    held: bool,
+    reply: GiteaReply,
+}
+
+/// A local plain-HTTP Gitea stand-in. `wt` reaches it as
+/// [`FakeGitea::ORIGIN`] through `HTTP_PROXY` (sniff maps a `gitea.` host to
+/// the Gitea API), so no request leaves the host and no TLS is involved.
+///
+/// While [`FakeGitea::hold`] is in effect every request waits unanswered,
+/// which is how a test blocks a detached worker mid-request with its lock
+/// held. Dropping the server answers every waiting request with 503.
+pub struct FakeGitea {
+    port: u16,
+    shared: Arc<(Mutex<GiteaState>, Condvar)>,
+    before_reply: BeforeReply,
+}
+
+type BeforeReply = Arc<Mutex<Option<Box<dyn Fn() + Send>>>>;
+
+/// How long a held request waits before the server gives up on the test.
+const GITEA_HOLD_LIMIT: Duration = Duration::from_secs(60);
+
+impl FakeGitea {
+    pub const ORIGIN: &'static str = "http://gitea.test/o/r.git";
+
+    pub fn new(reply: GiteaReply) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake gitea");
+        let port = listener.local_addr().expect("fake gitea address").port();
+        let shared = Arc::new((
+            Mutex::new(GiteaState { requests: 0, waiting: 0, held: false, reply }),
+            Condvar::new(),
+        ));
+        let before_reply: BeforeReply = Arc::new(Mutex::new(None));
+        let server = Arc::clone(&shared);
+        let server_before_reply = Arc::clone(&before_reply);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let shared = Arc::clone(&server);
+                let before_reply = Arc::clone(&server_before_reply);
+                std::thread::spawn(move || serve(stream, &shared, &before_reply));
+            }
+        });
+        Self { port, shared, before_reply }
+    }
+
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// Makes every request from now on wait until [`FakeGitea::release`].
+    pub fn hold(&self) {
+        self.state().held = true;
+    }
+
+    /// Runs `action` for every later request after it is received and before
+    /// it is answered, while the requester waits.
+    ///
+    /// A foreground `wt list` request gives up after its 300 ms deadline, too
+    /// short for the test thread to observe a held request, act, and release
+    /// it; `action` runs on the server thread instead.
+    pub fn before_reply(&self, action: impl Fn() + Send + 'static) {
+        *self.before_reply.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(action));
+    }
+
+    /// Answers waiting and later requests with `reply`.
+    pub fn release(&self, reply: GiteaReply) {
+        let mut state = self.state();
+        state.held = false;
+        state.reply = reply;
+        self.shared.1.notify_all();
+    }
+
+    /// Requests received so far, answered or not.
+    pub fn requests(&self) -> usize {
+        self.state().requests
+    }
+
+    /// Requests received and not yet answered.
+    pub fn waiting(&self) -> usize {
+        self.state().waiting
+    }
+
+    /// Waits up to `limit` until `count` requests are waiting unanswered.
+    pub fn wait_for_waiting(&self, count: usize, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        let mut state = self.state();
+        while state.waiting < count {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            state = self.shared.1.wait_timeout(state, left).expect("fake gitea state").0;
+        }
+        true
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, GiteaState> {
+        self.shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl Drop for FakeGitea {
+    fn drop(&mut self) {
+        self.release(GiteaReply::Status(503));
+    }
+}
+
+fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_reply: &Mutex<Option<Box<dyn Fn() + Send>>>) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let mut head = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+        match stream.read(&mut buffer) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => head.extend_from_slice(&buffer[..read]),
+        }
+    }
+    let reply = {
+        let (lock, changed) = shared;
+        let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.requests += 1;
+        state.waiting += 1;
+        changed.notify_all();
+        let deadline = Instant::now() + GITEA_HOLD_LIMIT;
+        while state.held {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            state = changed.wait_timeout(state, left).unwrap_or_else(|poisoned| poisoned.into_inner()).0;
+        }
+        state.waiting -= 1;
+        changed.notify_all();
+        state.reply.clone()
+    };
+    if let Some(action) = before_reply.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        action();
+    }
+    let (status, body) = match reply {
+        GiteaReply::Open(prs) => (200, gitea_pulls_json(&prs)),
+        GiteaReply::Status(status) => (status, r#"{"message":"fake gitea error"}"#.to_string()),
+    };
+    let response = format!(
+        "HTTP/1.1 {status} Fake\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    // The requester may be gone (killed, or past its deadline).
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn gitea_pulls_json(prs: &[(u64, &str)]) -> String {
+    let pulls: Vec<serde_json::Value> = prs
+        .iter()
+        .map(|(number, branch)| {
+            serde_json::json!({
+                "number": number,
+                "title": format!("PR {number}"),
+                "state": "open",
+                "html_url": format!("http://gitea.test/o/r/pulls/{number}"),
+                "head": { "ref": branch, "sha": "0123456789abcdef0123456789abcdef01234567", "repo": { "full_name": "o/r" } },
+                "base": { "ref": "main", "repo": { "full_name": "o/r" } },
+            })
+        })
+        .collect();
+    serde_json::Value::Array(pulls).to_string()
 }
 
 /// Parse a metrics-tree duration token such as `216.0ms`, `39.0µs`, or `1.2s`.

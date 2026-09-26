@@ -92,6 +92,14 @@ pub enum Commands {
         )]
         handoff: Option<String>,
     },
+
+    /// Refresh the stored open-PR answer for a main checkout (internal; `wt
+    /// list` starts it in the background)
+    #[command(name = crate::commands::pr_refresh::SUBCOMMAND, hide = true)]
+    InternalRefreshPrs {
+        /// The repository's main checkout
+        repo: std::path::PathBuf,
+    },
 }
 
 fn complete_worktree_names(_current: &std::ffi::OsStr) -> Vec<clap_complete::CompletionCandidate> {

@@ -32,11 +32,17 @@ insta = "1"
 predicates = "3"
 serde_json = "1.0"
 serial_test = "3"
+# Finds the detached `wt internal-refresh-prs` worker and its working directory.
+sysinfo = "0.38.2"
 tempfile = "3"
 
 # ConPTY for the PowerShell move-first L2 test; already built for unchained-ai.
 [target.'cfg(windows)'.dev-dependencies]
 xpty = "0.3.6"
+
+[[test]]
+name = "level2_create"
+required-features = ["terminal-tests"]
 
 [[test]]
 name = "level2_dirty_tree"
