@@ -935,8 +935,35 @@ belong here.
   as the prior entry's Phase 3 — Phase 4 is measurement-only with
   `source_files_during_phase_4: []`, the re-run is identical to
   Phase 1's numbers, `implemented: true` is now accurate, and the
-  two `human_review_items` still gate the option B follow-on and the
+  two   `human_review_items` still gate the option B follow-on and the
   move to `_completed/`).
+- A `planning(<area>):` phase close that completes its measurement campaign
+  but escalates the implementation decision via `human_review_items` is a
+  third shape distinct from "blocked on required human input" (no wave
+  ticks, no evidence shipped) and from "closed-with-rationale" (wave ticks
+  but no work shipped because a prior measurement disproved it). The new
+  shape: ALL wave checkboxes ARE ticked, `source_files_during_phase_N: []`
+  (no production change), `docs_created_during_phase_N: [...]` IS
+  extensive (the measurement evidence ships), spec.md flips
+  `human_review: false → true` and adds a new `human_review_items`
+  entry listing the trade-off options with the agent's recommendation,
+  and `message_to_agent` is rewritten to say "Phase N+1 must NOT start
+  until the author picks an option; option K means re-run Phases M + N
+  against the new code". Commit subject still reads
+  `planning(<area>): record Phase N close for <fix>` (a `(blocked on
+  human input)` suffix is the cue that Phase N+1 is gated rather than
+  just sequenced). The skill-surface findings ship in a separate
+  `docs(<area>):` commit keyed on the relevant SKILL section, like the
+  canonical blocked-on-input shape. See `69e914d9d` for the
+  2026-09-20-repo-perf Phase 4 example: walk 2.95× / 3.28× faster
+  release/debug, `detect_repo_structure` 2.22× / 2.28× faster, but tiny
+  tree +3 ms (~6.8×) release and +3 ms (~5×) debug, plus 14-way
+  concurrent corpus p95 latency +42% and peak RSS +14–31%; spec lists
+  four options (accept as implemented, fixed 4-thread cap, adaptive
+  serial→parallel, revert) with recommendation = option 1,
+  `message_to_agent` says Phase 5 must NOT start until the author picks,
+  and the parallel skill-surface commit `c2c176f51` ships the
+  `ignore` parallel-walk fixed-cost bullet.
 - Pre-flight a `docs(repo):` rename by listing BOTH endpoints in
   `git ls-files -s <old> <new>` — the rename is a single index fact
   but the index holds independent `D` + `A` entries, and the
