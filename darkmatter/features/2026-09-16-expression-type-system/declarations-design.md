@@ -30,6 +30,12 @@ integration contract serve **Phase C** (type-aware parsing/evaluation) and
 depend on Phase A's `null` vocabulary. The diagnostics distinctions serve
 **Phase E**. Acceptance criteria are grouped by phase at the end.
 
+The consolidation decisions in [merge-decisions.md](merge-decisions.md)
+override inherited behavior-parity language: M1 adopts shared function-argument
+conversion rules, and M2 removes implicit null propagation from ordinary
+functions. Neither changes this annex's separation of declared names, static
+types, runtime values, and document-property presence.
+
 ## The Ratified Translation Model
 
 Optionality is a **default constraint** (`optional` unless `required`),

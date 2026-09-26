@@ -359,9 +359,28 @@ rejects a boolean instead of treating it as one. Inspecting predicates such as
 per-function legacy modes or a separate rule set for old functions.
 
 Every changed behavior must be documented and tested through normal dispatch.
-This decision does not settle missing/null values, explicit conversion
-fallbacks, or other open function contracts; see the merge decision record.
-It does not change frontmatter presence rules or expression operators.
+M1 does not itself settle null handling or explicit conversion fallbacks.
+M2 below settles null handling; other open contracts remain in the merge
+decision record. These decisions do not change frontmatter presence rules or
+expression operators.
+
+**Merge decision M2 (2026-09-26):** ordinary math, string, and collection
+functions reject null unless accepting it is part of their declared purpose.
+`lower(null)`, `min(null, 5)`, and `first(null)` fail argument validation before
+the handler runs; no shared rule silently returns null for these calls.
+Authors handle optional inputs explicitly, for example
+`name ? lower(name) : null`. Inspecting predicates accepting `unknown`/`any`,
+`is_null`, and the explicitly nullable `file_exists` contract retain their
+declared behavior. Null is not implicitly converted to zero, false, an empty
+string, or an omitted argument. Optional argument presence does not imply
+acceptance of a supplied null, and all supplied arguments are checked.
+
+M2 changes input acceptance, not valid-input outcomes such as `first([])`.
+Record each affected signature's accepted inputs and possible results; do not
+make a return type non-null merely because its parameters reject null. Update
+shipped documents and examples relying on implicit null propagation, and test
+the new behavior through ordinary dispatch. Existing schema optionality,
+materialized document nulls, and short-circuit execution remain unchanged.
 
 Darkmatter's function declarations must describe parameter and result
 types, supported conversions, advisory handling of unsupported inputs, and
@@ -740,7 +759,7 @@ approved or added by this clarification.
 
 The original clarification and representation prototype resolved the original
 scope. The schema-enhancement merge introduces additional decisions tracked in
-[merge-decisions.md](merge-decisions.md). M1 is confirmed; remaining conflicts
+[merge-decisions.md](merge-decisions.md). M1 and M2 are confirmed; remaining conflicts
 must be settled before consolidation is complete. The details below remain
 implementation-planning work except where that record identifies a conflict.
 
