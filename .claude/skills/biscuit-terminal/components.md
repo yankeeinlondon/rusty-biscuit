@@ -19,9 +19,10 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `BlockQuote` | `block_quote.rs` | Yes | Quoted text with left border and attribution |
 | `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
 | `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
+| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule and fits the terminal by trimming commits and lanes (`image` feature) |
 | `GraphExpression` | `graph_expression.rs` | Yes | Graph diagrams via biscuit-visualized with terminal image display |
 | `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
-| `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized |
+| `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG before rasterizing |
 | `OrderedList` | `list.rs` | Yes | Numbered list with nested renderable support |
 | `UnorderedList` | `list.rs` | Yes | Bullet list with custom bullets, hanging indent |
 | `PadLeft` | `pad.rs` | No | Right-align content by padding with spaces on the left |
@@ -140,6 +141,7 @@ Key features:
 - Data via `with_data(vec![vec!["cell".into()]])` or `add_row()` (`&mut self`, returns `()`)
 - Extra cells beyond defined columns are rendered as additional columns
 - Alignment defaults come from `ColumnType` (text left, numeric right); wrapping is resolved per cell/column strategy
+- Striping via `alternate_background_color()` / `with_stripe_bg(Color)` and `alternate_text_color()` / `with_stripe_text(Color)`; `highlight_row(row, Color)` paints one data row (0-based, header excluded; out-of-range is a no-op) and wins over the stripe on that row. Stripe and highlight are terminal-only (`TableTerminalHints`), degrade with color depth, and are ignored by Browser/Markdown
 - `TableCellContent::StyledProse(Box<Prose>)` (`Prose::new(...).into()`) embeds capability-aware inline styling, links, and emphasis in a cell. The tree path projects Prose's semantic inline nodes; the terminal bespoke path resolves each cell to `Text(prose.render(term))` once before width planning. The table owns cell geometry — Prose's own `Layout` is not applied.
 
 ## Lists (OrderedList, UnorderedList)

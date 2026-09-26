@@ -552,6 +552,9 @@ mod tests {
             updated_at: Some(format!("2024-02-{number:02}T00:00:00Z")),
             merged_at: None,
             html_url: format!("https://github.com/owner/repo/pull/{number}"),
+            source_repo: None,
+            source_repo_is_target: None,
+            source_head_sha: None,
         }
     }
 

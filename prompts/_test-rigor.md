@@ -14,6 +14,8 @@ banned from this review unless you can pair each user-facing requirement with a 
   SGR styling, and scrolling render correctly through the real terminal. Input is still byte-level
   injected via the terminal's CLI, so the terminal's input encoder is NOT exercised.
 
+    > **Note:** always make that your Level 2 tests open application windows _without_ focus and ideally hidden. Not doing this will result in flakey tests because your tests will be getting stray input from host's users. This is made easy to do, just be sure you're using the provided test framework correctly.
+
 - **Level 3 (OS keyboard injection).** Real OS keyboard events (`cliclick` on macOS, `xdotool` on
   Linux) injected into the spawned terminal window. The terminal's input encoder fires — this is
   the only level that can verify "what bytes does the terminal actually emit when the user presses
@@ -23,3 +25,5 @@ banned from this review unless you can pair each user-facing requirement with a 
 A feature MAY be marked production-ready only when each user-observable requirement has at minimum
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
 test is at the wrong level under "Findings" with severity at least "high".
+
+> **Note:** this monorepo provides a test framework at tools/test-toolkit and you are expected to use it

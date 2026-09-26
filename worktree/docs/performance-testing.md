@@ -11,8 +11,9 @@ This document defines the worktree-owned performance surfaces for `wt list` and 
 
 The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktree.rs), which produces the status table.
 
-- It runs `git worktree list --porcelain` and resolves the default branch once.
-- Per-worktree work (`git status --porcelain`, `git rev-list --count`, and `git merge-tree --write-tree` when histories diverge) is dispatched in parallel via `std::thread::scope`.
+- It runs `git worktree list --porcelain`, resolves the default branch once, and reads every branch tip with one `git for-each-ref refs/heads refs/remotes`.
+- The caption compares the local default branch with `origin/<default>` (cached like any other pair). Its counts also choose the default-branch target, so a warm run makes no `merge-base` call.
+- Per-worktree `git status --porcelain` and per-branch comparisons (`git rev-list --left-right --count` plus a speculative `git merge-tree --write-tree`, against the target and, for a branch whose fork parent is another branch, against the parent) are dispatched in parallel via `std::thread::scope`.
 - `git status` is passed `-c core.untrackedCache=true`; benchmarks assume a warm untracked-cache so the measurement reflects steady-state behavior rather than the first cold walk.
 - The intended Criterion surface benchmarks `list_worktrees()` end-to-end in the `rusty-biscuit` monorepo, using the Phase 1 `count-git` recorder to assert subprocess counts in addition to wall-clock time.
 
@@ -20,16 +21,23 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 
 The second owned cost center is graph data collection in [`worktree/cli/src/commands/git_graph.rs`](../../worktree/cli/src/commands/git_graph.rs).
 
-- [`gather_branch`](../../worktree/cli/src/commands/git_graph.rs) collects the selected merge-base, shared context commits, and commits unique to each tip for a single feature branch.
-- [`gather_base_graph`](../../worktree/cli/src/commands/git_graph.rs) collects the selected merge-base and branch-tip-unique commits for every active worktree branch concurrently, then sorts results deterministically before rendering.
-- Graph data is only gathered when the terminal reports inline-image support **and** the parsed width fits the minimum terminal width threshold. On non-image terminals the entire graph-data path is skipped.
-- The intended Criterion surface benchmarks both `gather_branch` (focused-branch scenario) and `gather_base_graph` (base-overview scenario), again using the Phase 1 `count-git` recorder to verify one `merge-base` per branch and zero `rev-parse --short` calls.
+- [`gather`](../../worktree/cli/src/commands/git_graph.rs) collects, for the focused view, the current branch (and its recorded fork parent) with one `merge-base` each, and, for the base view, one `merge-base` and one `git log` per worktree branch, concurrently. See [git-graph.md](./git-graph.md).
+- Graph data is only gathered when the terminal reports inline-image support. On non-image terminals the entire graph-data path is skipped.
+- `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph image render` stage, never in `list gather` or the table.
+
+## PR Request
+
+`wt list` makes one repository-wide open-PR request on its own thread, beside the git work ([`pull_requests.rs`](../lib/src/pull_requests.rs)).
+
+- Stored results younger than 60 s are used without a request (and without the `git remote get-url` call).
+- Otherwise the request has a 300 ms deadline. On failure or timeout the stored results are shown with their age; a failure is never stored.
+- The `--perf` stage is `pr gather`. It never adds to `list gather`, and it bounds how long the table can wait for the network.
 
 ## Ahead/Behind + Merge Result Cache
 
-`list_worktrees()` caches the expensive deterministic branch-comparison result described in the feature spec's [Approach (decided: cache + concurrency)](../features/2026-06-16-two-problems/spec.md#approach-decided-cache--concurrency): `(default_tip_sha, branch_tip_sha, CACHE_FORMAT_VERSION) -> { ahead, behind, is_clean }`.
+`list_worktrees()` caches the expensive deterministic branch-comparison result described in the feature spec's [Approach (decided: cache + concurrency)](../features/2026-06-16-two-problems/spec.md#approach-decided-cache--concurrency): `(target_tip_sha, branch_tip_sha, CACHE_FORMAT_VERSION) -> { ahead, behind, is_clean }`. One cache serves the `-> {default}` column, the `-> parent` column, and the caption (format version 2, since `2026-09-24-ux-improvements`).
 
-- The SHA-pair key is deterministic and self-invalidating. If the default branch tip or worktree branch tip moves, the next lookup uses a different key and recomputes the result.
+- The SHA-pair key is deterministic and self-invalidating. If the target tip or the branch tip moves, the next lookup uses a different key and recomputes the result.
 - Cache files live under `dirs::cache_dir()/worktree/<repo-root-hash>.json`, where the hash is derived from the canonical repo root path with `biscuit-hash` xxHash.
 - Cache writes use write-temp-then-rename atomic replacement. Concurrent writers have last-rename-wins semantics, and readers never observe torn JSON.
 - `CACHE_FORMAT_VERSION` is part of each key and the persisted file header; bump it when the on-disk shape or semantics change.
@@ -41,7 +49,7 @@ The second owned cost center is graph data collection in [`worktree/cli/src/comm
 The third owned cost center is the verbose commit block rendered by `wt list -v`.
 
 - Verbose details are gathered independently of image support: they render as text on non-image terminals and accompany the graph on image-capable terminals.
-- When both graph and verbose data are needed for the current branch, a single `gather_branch(..., verbose = true)` call populates both surfaces.
+- When both graph and verbose data are needed for the current branch, one `gather(..., needs_graph, needs_verbose)` call populates both surfaces from a single `merge-base`.
 - The intended Criterion surface benchmarks the verbose-only gather path on a non-image terminal, asserting that exactly one `merge-base` and the expected number of `git log` calls are issued for the current branch.
 
 ## Excluded Surfaces
@@ -90,13 +98,12 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 
 Asserts the subprocess-count bounds the optimization guarantees. Runs in the ambient `rusty-biscuit` checkout so the counts reflect real worktree scale:
 
-- `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call). Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
-- `gather_base_graph()` issues exactly one `merge-base` per branch and one unique-tip `git log` per branch plus one for main commits — no discarded default-context or default-unique logs.
-- `gather_branch()` wall-clock is printed for observability when the ambient checkout is a feature branch (skipped on main). The binding SLA + subprocess-count assertions for the image-terminal `wt list -v` data-gather path live in `gather_branch_uses_one_merge_base_and_no_short_sha` below, which runs on a controlled fixture so it always asserts regardless of the ambient checkout.
+- `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
+- The base-view `gather` issues exactly one `merge-base` per branch and one unique-tip `git log` per branch plus one for the default lane.
 
-### `gather_branch_uses_one_merge_base_and_no_short_sha` (unit test, `git_graph.rs`)
+### `graph_and_verbose_share_one_merge_base` (unit test, `git_graph/tests.rs`)
 
-Binding SLA guard for the image-terminal `wt list -v` data-gather path (graph IDs + verbose details). Runs `gather_branch(default, feature, verbose=true)` on a temporary non-main fixture so the path always executes — never skipped on a main checkout. Asserts exactly one `merge-base`, zero `rev-parse --short`, and completion under the 1-second SLA with rasterization excluded (this test never invokes `MermaidDiagram::render`).
+Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one `merge-base` and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
 
 ### `perf_full_command_non_image_meets_sla` (integration test, `tests/perf_command_sla.rs`)
 
@@ -127,6 +134,18 @@ Ratified on 2026-06-17 against the mixed fixture (4 divergent + 3 fast-forward +
 | Warm-cache `list gather` | `perf_cache_warm_list_gather_meets_sla` | 19 ms | 120 ms |
 | Cold-cache `list gather` | `perf_cache_cold_list_gather_meets_sla` | 38 ms | 300 ms |
 | Ambient checkout, non-image full `wt list` | `perf_full_command_non_image_meets_sla` | 254.20 ms | 1 s |
+
+Re-measured on 2026-09-25 after the list redesign (`2026-09-24-ux-improvements`), same fixture, on the macOS development host, plus the two PR cases in `tests/perf_pr_request.rs`. Every PR request goes to a local proxy stub; nothing leaves the host.
+
+| Surface | Test | Achieved best-of-5 | Asserted bound |
+| --- | --- | ---: | ---: |
+| Warm-cache `list gather` | `perf_cache_warm_list_gather_meets_sla` | 12.8 ms | 120 ms |
+| Cold-cache `list gather` | `perf_cache_cold_list_gather_meets_sla` | 23.6 ms | 300 ms |
+| Mixed fixture, non-image full `wt list` | `perf_full_command_non_image_meets_sla` | 55.7 ms | 1 s |
+| Network down (connection refused): cold / warm `list gather`, full `wt list` | `perf_list_meets_sla_with_the_network_down` | 21.0 ms / 10.5 ms / 52.9 ms | 300 ms / 120 ms / 1 s |
+| PR request stalled until its 300 ms deadline: warm `list gather`, full `wt list` | `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` | 11.6 ms / 359.7 ms | 120 ms / 1 s |
+
+In the stalled case every run's `pr gather` stage was 309–317 ms, and the test asserts it is at least the deadline, which proves the request was made and waited for. A fresh store making no request is an L1 behavior test (`tests/list_prs.rs`), not a timing gate. The Criterion `list_status/warm` bench measured 79 ms per `list_worktrees()` on the ambient `rusty-biscuit` checkout.
 
 The warm gate also asserts that warm `list gather` is below a cold reference measured in the same run, proving the cache collapses the divergent-branch recompute rather than the host merely being fast. Bounds are looser than the ratified measurements so ordinary host variance does not fail CI, yet tight enough to catch regressions that reintroduce serial branch comparison, skip the cache, or let the cold-path speculative `merge-tree` blow the budget. Deterministic subprocess-count assertions for cache hit/miss behavior live in the recorder-backed unit tests.
 

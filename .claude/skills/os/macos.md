@@ -83,6 +83,17 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 
 ## Host conditions that look like repo failures
 
+- **`CDPATH` sends a relative `cd` from a linked worktree into the main
+  checkout.** Agent shells on this host inherit a `CDPATH` that lists
+  `/Users/ken/coding/personal/rusty-biscuit` and does not start with `.`. In
+  Bash, `cd sniff` from a worktree root therefore lands in the **main
+  checkout's** `sniff/`, prints that path, and exits 0. A gate script that
+  loops `cd "$area" && just test` then tests and lints the wrong tree and
+  reports green. On 2026-09-25 all 12 Phase 4 gates of the worktree fix
+  `2026-09-24-ux-improvements` ran against the main checkout this way. The
+  giveaways were a first log line naming `/Users/ken/coding/...` and
+  test counts that did not match the branch. In scripts, `unset CDPATH` and
+  `cd` to absolute paths (or `./area`), and log `pwd` first.
 - **Claudine currently shadows the login home for agent sessions on this
   host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
   login home and OpenPGP keyring are under `/Users/ken`. A signed Git command
@@ -100,6 +111,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   unmigrated base too, and the failing set varied between runs. Treat such a
   run as no evidence either way. It also ignores `SIGTERM`: stop it with
   `kitty @ --to unix:<sock> close-window --match all`.
+  What does work (2026-09-25): a *normal* (not minimized, not hidden)
+  instance per test, `open -g -n -a kitty --args --config NONE -o
+  allow_remote_control=socket-only -o initial_window_width=<N>c …`, which
+  stays unfocused, has exactly the cells asked for, and can be screenshotted
+  with `screencapture -x -o -l <platform_window_id from kitty @ ls>`. That is
+  `biscuit_test_harness::kitty::KittyInstance`. A hidden instance's
+  screenshot is black (never drawn). Stop an instance with `kitty @ --to …
+  action quit`; without `confirm_os_window_close=0` that opens a "Quit
+  kitty?" window instead.
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
   spawns an interactive login shell, so anything the host's shell startup
   does interactively lands in the pane. A first-run tool prompt (seen with

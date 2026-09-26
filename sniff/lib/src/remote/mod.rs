@@ -42,6 +42,7 @@
 //! ```
 
 mod bitbucket;
+pub mod blocking;
 mod focused;
 mod gitea;
 mod github;

@@ -21,7 +21,9 @@ resvg = { version = "0.45", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-mermaid-rs-renderer = { version = "0.2", optional = true }
+# `default-features = false`: we rasterize with our own resvg, so the crate's
+# `png` (a second resvg/usvg) and `cli` (clap) features are unused.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false, optional = true }
 layout-rs = "0.1"
 
 [dev-dependencies]

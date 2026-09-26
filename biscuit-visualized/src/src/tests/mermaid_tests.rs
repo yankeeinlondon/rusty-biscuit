@@ -436,15 +436,21 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
         "Legend text should use dominant-baseline=\"central\" for vertical alignment"
     );
 
-    // Verify contrast-aware text: the Python slice (#FFFFFF, white) should get
-    // dark text (#1a1a1a), while darker slices keep light text (#e2e8f0)
+    // Each label takes the text color with the higher WCAG contrast ratio.
+    // The Python slice uses mermaid-rs-renderer 0.3's default third color,
+    // `hsl(0, 0%, 60%)` (mid gray), and the TypeScript blue is marginally
+    // better with dark text (3.9:1 vs 3.6:1); only the Rust red keeps light text.
     assert!(
-        svg.contains("fill=\"#1a1a1a\">20%"),
-        "Light pie slice (Python/white) should have dark text for contrast"
+        svg.contains("fill=\"hsl(0.0000000000, 0.0000000000%, 60.0000000000%)\""),
+        "Python slice should use the renderer's default hsl() gray"
     );
     assert!(
-        svg.contains("fill=\"#e2e8f0\">45%"),
-        "Dark pie slice (TypeScript) should keep light text"
+        svg.contains("fill=\"#1a1a1a\">20%"),
+        "Gray pie slice (Python) should have dark text for contrast"
+    );
+    assert!(
+        svg.contains("fill=\"#1a1a1a\">45%"),
+        "TypeScript blue should have dark text"
     );
     assert!(
         svg.contains("fill=\"#e2e8f0\">35%"),
@@ -514,4 +520,48 @@ fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
         let svg = std::fs::read_to_string(artifact.path).unwrap();
         assert!(svg.contains("<svg"), "{name} should produce SVG output");
     }
+}
+
+#[test]
+#[serial]
+fn mermaid_natural_size_matches_the_rendered_viewbox() {
+    let _cache_dir = isolated_cache_dir();
+
+    let instructions = "gitGraph\n    commit id: \"a1\"\n    branch feat/theme\n    checkout feat/theme\n    commit id: \"b2\"";
+    for theme in [MermaidTheme::Default, MermaidTheme::Dark] {
+        let diagram = MermaidDiagram::new(instructions).with_theme(theme);
+        let size = diagram.natural_size().expect("gitGraph measures");
+        let artifact = diagram
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                scale: 1,
+                target_width: None,
+                transparent_background: true,
+            })
+            .unwrap();
+        let svg = std::fs::read_to_string(artifact.path).unwrap();
+        let viewbox = svg
+            .split("viewBox=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("root viewBox");
+        let values: Vec<f32> = viewbox.split_whitespace().map(|v| v.parse().unwrap()).collect();
+        assert!((values[2] - size.width).abs() < 0.01, "{theme:?}: {viewbox} vs {size:?}");
+        assert!((values[3] - size.height).abs() < 0.01, "{theme:?}: {viewbox} vs {size:?}");
+    }
+}
+
+#[test]
+fn mermaid_natural_size_rejects_unparseable_input() {
+    let diagram = MermaidDiagram::new("not a diagram header\n    A --> B");
+    assert!(diagram.natural_size().is_err());
+}
+
+#[test]
+fn mermaid_natural_size_grows_with_commits() {
+    let short = MermaidDiagram::new("gitGraph\n    commit id: \"a\"").natural_size().unwrap();
+    let long = MermaidDiagram::new("gitGraph\n    commit id: \"a\"\n    commit id: \"b\"\n    commit id: \"c\"")
+        .natural_size()
+        .unwrap();
+    assert!(long.width > short.width, "{long:?} vs {short:?}");
 }

@@ -1,4 +1,8 @@
 ---
+description: |-
+    Implements a plan phase by phase.
+
+    - if an appropriately named _specification_ or _design_ file is found in the same directory then they will be referenced to in the log's frontmatter as well as the prose content 
 $schema:
     phase: number(required;default(1)) -> the phase of the plan to start with
     total_phases: number(required) -> the total number of phases the plan has
@@ -8,10 +12,6 @@ $schema:
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
     is_last: boolean -> a boolean flag based on 
-description: |-
-    Provide either a `plan` or `spec` filepath as a parameter and this
-    prompt will detect the number of phases in the plan and then implement
-    the project phase by phase.
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"

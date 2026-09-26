@@ -16,7 +16,6 @@ You are performing a **senior-level Rust code review** on the **{{ctx.area}}** p
 
 ::shell sniff repo packages --package-area {{ctx.area}}
 
-
 Your job is to produce a review that is:
 
 - technically rigorous

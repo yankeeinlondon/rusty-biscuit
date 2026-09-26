@@ -114,3 +114,42 @@ global provider token to an unidentified host.
 Unsupported provider/version operations fail before provider I/O. Do not
 convert malformed, missing, authorization, rate-limit, capability, or transport
 errors into empty results.
+
+### Blocking PR-for-branch lookup
+
+`remote::blocking::pull_request_for_branch` (and `_with`, for a prebuilt
+client) runs a focused branch query on its own current-thread runtime. Never
+call it from inside a Tokio runtime. The `deadline` replaces the client's 5 s
+per-request timeout for every request in the lookup. Keep new blocking entry
+points on the shared `run_with_deadline` helper.
+
+- Filter by branch server-side (GitHub `head=owner:branch`, GitLab
+  `source_branch`, Bitbucket `q=` plus `state=OPEN&state=MERGED`, Forgejo
+  `head`). Upstream Gitea has no head filter, so page it with `limit`, because
+  Gitea ignores `per_page`.
+- Always re-check the branch and source repository locally. GitLab compares
+  `source_project_id`, which costs one `projects/{path}` lookup for a fork.
+- Derive state per provider (GitLab `opened`/`merged`, Bitbucket
+  `OPEN`/`MERGED`, and `merged_at` or Gitea `merged` elsewhere).
+  Closed-unmerged, DECLINED, and SUPERSEDED PRs never count.
+- Take the Gitea head SHA and branch from the list payload (`head.label`),
+  never from the single-PR endpoint, which reports the live branch tip.
+- Store the head SHA as received. Bitbucket's 12-character value is a prefix.
+- A list 404 is `PrUnavailable::NotFoundOrNotPermitted`, because providers hide
+  private repositories behind 404. Only the exact lookup `get_pull_request`
+  keeps "404 means absent". `query_pull_requests` still treats a list 404 as
+  exhaustion.
+
+### Blocking open-PR listing
+
+`remote::blocking::open_pull_requests` (and `_with`) lists a repository's open
+PRs as `PrSummary` through the same `run_with_deadline` helper and error
+contract. Both entry points page through the focused client's private
+`pr_list_rows`, which uses `NotFound::Error`; keep new PR list walks on it.
+
+- Filter server-side by the open state (GitHub/Gitea `open`, GitLab `opened`,
+  Bitbucket `OPEN`) and re-check locally with the same per-provider state rule.
+- A GitLab fork MR names its source project only by ID. Resolve each distinct
+  fork once with `projects/{id}`; a 404 there leaves `source_repo: None`
+  instead of failing the list.
+- Callers match a PR to a local branch on source repository *and* branch.

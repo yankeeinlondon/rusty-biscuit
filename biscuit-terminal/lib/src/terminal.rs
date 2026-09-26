@@ -499,7 +499,8 @@ impl Terminal {
     /// Get the cell size in pixels.
     ///
     /// Returns the cached cell size if available (set during detection or via builder),
-    /// otherwise falls back to a live terminal query via CSI 14t.
+    /// otherwise queries live: the `TIOCGWINSZ` pixel fields first, then CSI 14t.
+    /// Always `None` on native Windows.
     pub fn cell_size(&self) -> Option<CellSize> {
         self.cell_size.or_else(cell_size)
     }

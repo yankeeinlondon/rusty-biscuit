@@ -283,6 +283,27 @@ pub struct PullRequestInfo {
     pub merged_at: Option<String>,
     /// HTML URL to the PR.
     pub html_url: String,
+    /// Identity of the repository the PR's head branch lives in: GitHub,
+    /// Gitea, and Bitbucket `full_name`, or the GitLab project path.
+    ///
+    /// `None` when the payload carries no identity (a deleted fork) or only an
+    /// opaque ID that cannot be named without another request (a GitLab MR
+    /// from a different project).
+    #[serde(default)]
+    pub source_repo: Option<String>,
+    /// Whether the head branch lives in the target repository rather than a
+    /// fork; `None` when the payload does not identify both sides.
+    #[serde(default)]
+    pub source_repo_is_target: Option<bool>,
+    /// The PR's head commit exactly as the provider returned it.
+    ///
+    /// Bitbucket Cloud abbreviates it (12 characters in practice, 7 or more
+    /// by schema), so a value shorter than the local object ID is a prefix,
+    /// never a full ID. A Gitea or Forgejo value is trustworthy for a merged
+    /// PR only when it came from the list endpoint: the single-PR endpoint
+    /// reports the live branch tip.
+    #[serde(default)]
+    pub source_head_sha: Option<String>,
 }
 
 /// Repository-qualified identity of a pull or merge request.

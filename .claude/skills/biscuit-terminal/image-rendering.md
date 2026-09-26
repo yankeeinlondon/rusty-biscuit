@@ -32,6 +32,8 @@ Width input is validated by `parse_width_spec()`:
 - `80` or `80ch` -> `ImageWidth::Characters(80)`
 - `fill` -> `ImageWidth::Fill`
 
+`ImageWidth::Scale(f32)` has no string form. It sizes content from its natural width relative to terminal text (pixels per unit = scale × cell height ÷ 16, columns rounded up, clamped to the available columns). Resolve it with `TerminalImage::resolve_scaled_dimensions_for(width, layout, term_width, natural_width, cell)`. The plain `resolve_dimensions_for` has no natural width, so there it behaves like `Fill`. Use `CellSize::FALLBACK` (8×16) for an unknown cell size rather than a new literal.
+
 ```rust
 use biscuit_terminal::components::terminal_image::{parse_width_spec, TerminalImage};
 use std::path::Path;

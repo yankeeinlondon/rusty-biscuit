@@ -1,0 +1,29 @@
+---
+source: worktree/cli/tests/wrapper_protocol.rs
+expression: "wrapper(Shell::Fish, exe).unwrap()"
+---
+function wt
+    set -l out (WT_SHELL_WRAPPER=1 command wt $argv)
+    set -l rc $status
+    set -l dest
+    set -l token
+    for line in $out
+        switch $line
+            case 'cd:*'
+                set dest (string replace -r '^cd:' '' -- $line)
+            case 'remove-handoff:*'
+                set token (string replace -r '^remove-handoff:' '' -- $line)
+            case '*'
+                printf '%s\n' $line
+        end
+    end
+    test $rc -eq 0; or return $rc
+    if test -n "$dest"
+        builtin cd -- $dest; or return 1
+    end
+    if test -n "$token"
+        WT_SHELL_WRAPPER=1 command wt remove --handoff $token
+        return
+    end
+    return 0
+end

@@ -41,8 +41,14 @@ let diagram = MermaidDiagram::new("pie\n    \"A\" : 40\n    \"B\" : 60")
 | `.with_theme(MermaidTheme)` | Set rendering theme (Dark, Forest, etc.) |
 | `.with_title(str)` | Add a diagram title |
 | `.with_config(MermaidConfig)` | Customize rendering config |
+| `.with_width(ImageWidth)` | Display width; the default is `ImageWidth::Scale(1.0)` |
+| `.resolve_dimensions(term_width, cell)` | The columns the image will occupy, measuring the diagram for `Scale` |
 | `.try_render(&Terminal)` | Fallible render returning `MermaidRenderResult` |
 | `.render(&Terminal)` | Infallible render (falls back to code block) |
+
+### Sizing
+
+The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text is one terminal line tall, so nodes and text are the same size in every diagram whatever its content. The natural width comes from `mermaid-rs-renderer`'s `measure_svg_dimensions` (the root `viewBox` width), measured with the same theme as the render. The result is clamped to the available columns, so only a terminal too narrow for the diagram shrinks it. `Percent`, `Characters`, and `Fill` still work as before.
 
 ### Error Handling
 

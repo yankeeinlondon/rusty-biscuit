@@ -114,6 +114,19 @@ belong here.
   `git show :Cargo.lock | grep '"<dep>"'` against the staged manifest; a lock
   entry with no declaring manifest in the same commit is an orphan. In a
   parallel batch the manifest's group commits first, or absorbs the lock.
+- `Cargo.lock` can SHRINK when a dep bump turns off default features. Most
+  bump audits assume additive growth; a manifest that sets
+  `default-features = false` (or removes a feature from a feature list) can
+  drop transitive crates from the lockfile, e.g. `mermaid-rs-renderer` from
+  0.2.1 to 0.3.1 with `default-features = false` lost resvg 0.46, usvg 0.46,
+  kurbo 0.13, svgtypes 0.16, roxmltree 0.21, imagesize 0.14, and the clap
+  transitive of the `cli` feature — seven removals and no additions because
+  the package already rasterizes with its own resvg 0.45. Verification is
+  still `git diff --cached -- Cargo.lock`, but the audit is "every dropped
+  crate is one we are certain nothing downstream needs" rather than "no new
+  crates leaked in". List the dropped crates in the commit body so a
+  reviewer scanning the body sees the shrink is intentional, not a
+  surprise from the version bump.
 - A workflow `BISCUIT_REQUIRE_<TOOL>: "1"` declaration on a step is coupled
   to a `require_tools("<tool>", ...)` call in the Python suite that step
   runs: the env var only does work when the guard reads it, and the guard
@@ -617,6 +630,27 @@ belong here.
   (silent intermediate breakage) or returns failure and the
   orchestrator re-dispatches it as wasted work. The pre-flight is the
   small cost; the silent breakage is the expensive one to debug later.
+- A sub-agent briefed with a precise message body that ALSO makes file
+    changes beyond the staged snapshot (e.g., the brief says "substitute
+    literal 16 in `rows_for` doc comment" and the agent also substitutes 16
+    in a *different* doc comment in the same file because it sees the
+    pattern and decides to "complete the job") commits a polluted tree
+    whose diff does not match the body. Recovery: `git update-ref HEAD
+    HEAD~1` rolls the commit back, but the index now holds the polluted
+    blob — the original staged snapshot is gone from the index. Recover
+    it with `git fsck --dangling | awk '/dangling blob/ {print $3}'`,
+    pipe each through `git cat-file -p <hash>` until you find the file's
+    content (the staged snapshot is identifiable by its `git diff
+    --cached` output, which the brief must record verbatim), then
+    `git cat-file -p <blob> > <path>` to restore the working tree,
+    `git add <path>` to update the index, and `git commit --only -F
+    <msg> -- <paths>` to recommit. Verify by `git diff <parent> <hash>`
+    showing exactly the hunk list the body describes. The pre-flight is
+    simpler: the brief's `git diff --cached <path>` output must list
+    every hunk the message body enumerates, and the sub-agent must
+    refuse to commit (and report back) if either side lists a hunk the
+    other does not. Inventing extra hunks to "complete" a brief that
+    does not enumerate them is the failure mode.
 
 ## Verification
 

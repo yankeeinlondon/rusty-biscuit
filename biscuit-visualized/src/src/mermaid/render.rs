@@ -6,6 +6,13 @@ use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
 use super::config::{MermaidConfig, MermaidTheme};
 use super::error::MermaidError;
 
+/// A diagram's natural size in SVG user units (1 unit = 1 px at scale 1.0).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NaturalSize {
+    pub width: f32,
+    pub height: f32,
+}
+
 /// A Mermaid diagram for rendering.
 ///
 /// This struct handles rendering Mermaid diagrams to SVG or PNG format with
@@ -209,11 +216,40 @@ impl MermaidDiagram {
         .unwrap_or_else(|_| "{}".to_string())
     }
 
-    fn render_svg(&self, request: &RenderRequest) -> Result<String, MermaidError> {
+    /// Measures the diagram's natural size in SVG user units without rendering it.
+    ///
+    /// The width is the root `viewBox` width, which is what the rasterizer
+    /// scales from (see `rasterize_svg_to_png`). Layout depends on the theme's
+    /// font size, so this measures with the same theme and `%%{init}%%`
+    /// overrides that [`render`](Self::render) uses.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `MermaidError::RenderFailed` when the instructions do not parse.
+    pub fn natural_size(&self) -> Result<NaturalSize, MermaidError> {
+        let (layout, _theme, layout_config) = self.compute_layout(false)?;
+        let dimensions = mermaid_rs_renderer::measure_svg_dimensions(&layout, &layout_config, None);
+        Ok(NaturalSize {
+            width: dimensions.viewbox_width,
+            height: dimensions.viewbox_height,
+        })
+    }
+
+    fn compute_layout(
+        &self,
+        transparent_background: bool,
+    ) -> Result<
+        (
+            mermaid_rs_renderer::Layout,
+            mermaid_rs_renderer::Theme,
+            mermaid_rs_renderer::LayoutConfig,
+        ),
+        MermaidError,
+    > {
         let parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
             .map_err(|err| MermaidError::RenderFailed(err.to_string()))?;
 
-        let mut theme = self.build_theme(request.transparent_background);
+        let mut theme = self.build_theme(transparent_background);
 
         // Apply %%{init: {'themeVariables': {'pie1': '#xxx', ...}}}%% overrides
         if let Some(ref init) = parsed.init_config {
@@ -222,6 +258,11 @@ impl MermaidDiagram {
 
         let layout_config = mermaid_rs_renderer::LayoutConfig::default();
         let layout = mermaid_rs_renderer::compute_layout(&parsed.graph, &theme, &layout_config);
+        Ok((layout, theme, layout_config))
+    }
+
+    fn render_svg(&self, request: &RenderRequest) -> Result<String, MermaidError> {
+        let (layout, theme, layout_config) = self.compute_layout(request.transparent_background)?;
         let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &layout_config);
 
         Ok(self.apply_svg_overrides(svg))
@@ -491,8 +532,8 @@ fn replace_circle_radius(svg: &str, radius: u32) -> String {
 ///
 /// The mermaid-rs-renderer uses a single `pie_section_text_color` for all slice
 /// labels, which can produce unreadable text on light-colored slices. This
-/// post-processes the SVG to set each label's fill based on its slice's relative
-/// luminance (WCAG formula), using dark text on light slices.
+/// post-processes the SVG to give each label the text color with the higher WCAG
+/// contrast ratio against its slice.
 fn fix_pie_text_contrast(svg: &str) -> String {
     // Collect pie slice fill colors from <path> elements (in order)
     let slice_fills: Vec<&str> = svg
@@ -545,9 +586,9 @@ fn fix_pie_text_contrast(svg: &str) -> String {
         let tag = &rest[..tag_end];
 
         let desired_fill = if is_light_color(slice_fills[i]) {
-            "#1a1a1a"
+            PIE_TEXT_DARK
         } else {
-            "#e2e8f0"
+            PIE_TEXT_LIGHT
         };
 
         // Replace the fill attribute in this text tag
@@ -563,17 +604,75 @@ fn fix_pie_text_contrast(svg: &str) -> String {
     output
 }
 
-/// Returns true if a hex color is perceptually light (relative luminance > 0.5).
-fn is_light_color(hex: &str) -> bool {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() < 6 {
-        return false;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0) as f64 / 255.0;
-    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0) as f64 / 255.0;
-    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0) as f64 / 255.0;
+/// Label colors for pie slices; each label takes whichever has the higher
+/// WCAG contrast ratio against its slice.
+const PIE_TEXT_DARK: &str = "#1a1a1a";
+const PIE_TEXT_LIGHT: &str = "#e2e8f0";
 
-    // sRGB to linear
+/// Returns true if dark label text contrasts better than light text on `color`.
+///
+/// Unparseable colors return false, keeping the renderer's light text.
+fn is_light_color(color: &str) -> bool {
+    let Some(slice) = parse_css_color(color).map(relative_luminance) else {
+        return false;
+    };
+    let contrast = |text: &str| {
+        let text = parse_css_color(text).map_or(0.0, relative_luminance);
+        (slice.max(text) + 0.05) / (slice.min(text) + 0.05)
+    };
+    contrast(PIE_TEXT_DARK) > contrast(PIE_TEXT_LIGHT)
+}
+
+/// Parses `#rgb`, `#rrggbb`, and `hsl(h, s%, l%)` into sRGB channels in `0.0..=1.0`.
+///
+/// mermaid-rs-renderer 0.3 derives its default pie palette as `hsl()`.
+fn parse_css_color(color: &str) -> Option<(f64, f64, f64)> {
+    let color = color.trim();
+    if let Some(hex) = color.strip_prefix('#') {
+        let channel = |digits: &str| u8::from_str_radix(digits, 16).ok().map(f64::from);
+        let (r, g, b) = match hex.len() {
+            6 => (channel(&hex[0..2])?, channel(&hex[2..4])?, channel(&hex[4..6])?),
+            3 => (
+                channel(&hex[0..1])? * 17.0,
+                channel(&hex[1..2])? * 17.0,
+                channel(&hex[2..3])? * 17.0,
+            ),
+            _ => return None,
+        };
+        return Some((r / 255.0, g / 255.0, b / 255.0));
+    }
+
+    let args = color.strip_prefix("hsl(")?.strip_suffix(')')?;
+    let mut parts = args.split(',').map(str::trim);
+    let hue: f64 = parts.next()?.trim_end_matches("deg").parse().ok()?;
+    let saturation: f64 = parts.next()?.strip_suffix('%')?.parse().ok()?;
+    let lightness: f64 = parts.next()?.strip_suffix('%')?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(hsl_to_rgb(hue, saturation / 100.0, lightness / 100.0))
+}
+
+fn hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (f64, f64, f64) {
+    let saturation = saturation.clamp(0.0, 1.0);
+    let lightness = lightness.clamp(0.0, 1.0);
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let sector = hue.rem_euclid(360.0) / 60.0;
+    let second = chroma * (1.0 - (sector % 2.0 - 1.0).abs());
+    let (r, g, b) = match sector as u32 {
+        0 => (chroma, second, 0.0),
+        1 => (second, chroma, 0.0),
+        2 => (0.0, chroma, second),
+        3 => (0.0, second, chroma),
+        4 => (second, 0.0, chroma),
+        _ => (chroma, 0.0, second),
+    };
+    let offset = lightness - chroma / 2.0;
+    (r + offset, g + offset, b + offset)
+}
+
+/// WCAG relative luminance of an sRGB color.
+fn relative_luminance((r, g, b): (f64, f64, f64)) -> f64 {
     let to_linear = |c: f64| -> f64 {
         if c <= 0.04045 {
             c / 12.92
@@ -581,9 +680,7 @@ fn is_light_color(hex: &str) -> bool {
             ((c + 0.055) / 1.055).powf(2.4)
         }
     };
-
-    let luminance = 0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b);
-    luminance > 0.4
+    0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b)
 }
 
 fn dark_theme() -> mermaid_rs_renderer::Theme {
@@ -658,4 +755,40 @@ fn neutral_theme() -> mermaid_rs_renderer::Theme {
     theme.sequence_activation_border = "#737373".to_string();
     theme.text_color = "#171717".to_string();
     theme
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_hex_and_hsl_colors() {
+        assert_eq!(parse_css_color("#FFFFFF"), Some((1.0, 1.0, 1.0)));
+        assert_eq!(parse_css_color("#000"), Some((0.0, 0.0, 0.0)));
+        let gray = parse_css_color("hsl(0.0000000000, 0.0000000000%, 60.0000000000%)").unwrap();
+        assert!((gray.0 - 0.6).abs() < 1e-9 && gray == (gray.0, gray.0, gray.0));
+        let (r, g, b) = parse_css_color("hsl(240, 100%, 50%)").unwrap();
+        assert!(r.abs() < 1e-9 && g.abs() < 1e-9 && (b - 1.0).abs() < 1e-9);
+        let (r, g, b) = parse_css_color("hsl(-60deg, 100%, 50%)").unwrap();
+        assert!((r - 1.0).abs() < 1e-9 && g.abs() < 1e-9 && (b - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rejects_malformed_colors() {
+        for color in ["", "#12", "#GGGGGG", "hsl(1, 2, 3)", "hsl(1, 2%)", "hsl(1, 2%, 3%, 4%)", "rgb(0,0,0)"] {
+            assert_eq!(parse_css_color(color), None, "{color}");
+            assert!(!is_light_color(color), "{color}");
+        }
+    }
+
+    #[test]
+    fn label_color_follows_the_higher_contrast_ratio() {
+        // White and the 0.3 renderer's default mid-gray third slice take dark text.
+        assert!(is_light_color("#FFFFFF"));
+        assert!(is_light_color("hsl(0.0000000000, 0.0000000000%, 60.0000000000%)"));
+        // Saturated dark slices keep light text.
+        assert!(!is_light_color("#A72145"));
+        assert!(!is_light_color("hsl(240, 100%, 25%)"));
+        assert!(!is_light_color("#000000"));
+    }
 }

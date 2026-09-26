@@ -264,6 +264,15 @@ pub struct CellSize {
     pub height: u32,
 }
 
+impl CellSize {
+    /// The cell size assumed when the terminal cannot report one (native
+    /// Windows, CI, or every standard stream redirected).
+    pub const FALLBACK: CellSize = CellSize {
+        width: 8,
+        height: 16,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

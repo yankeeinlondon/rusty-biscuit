@@ -142,7 +142,8 @@ pay for the box:
   GFM checkbox in Markdown.
 - **`Table(TableHints)`** — grouped table hints: `columns` (a
   `BTreeMap<usize, TableColumnHints>` keyed per column index), `terminal`
-  (`TableTerminalHints` striping / cursor preference), and `title`. The
+  (`TableTerminalHints` striping, the single-row `TableRowHighlight`, and
+  cursor preference), and `title`. The
   per-column, terminal, and title setters are co-resident — setting one does not
   clobber the others.
 - **`TableCell(TableCellHints)`** — per-cell typed value and alignment.

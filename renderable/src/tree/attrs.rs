@@ -726,6 +726,29 @@ pub struct TableTerminalHints {
     /// Explicit text stripe color. `None` selects the adaptive default. Opaque
     /// — see [`stripe_bg`](Self::stripe_bg).
     pub stripe_text: Option<crate::color::Color>,
+    /// A single data row painted with a highlight background.
+    ///
+    /// On its row the highlight replaces the stripe (background and text
+    /// tint); every other row keeps its striping. Omitted from the serialized
+    /// form when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_row: Option<TableRowHighlight>,
+}
+
+/// A terminal-only highlight for one data row of a [`NodeKind::Table`] node.
+///
+/// `row` is the 0-based **data** row index: the header row is not counted, so
+/// `row: 0` is the first row below the header separator. An index past the
+/// last data row highlights nothing.
+///
+/// [`NodeKind::Table`]: crate::tree::NodeKind::Table
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableRowHighlight {
+    /// 0-based data row index (header excluded).
+    pub row: usize,
+    /// Opaque background color, degraded across terminal color depths like
+    /// [`TableTerminalHints::stripe_bg`].
+    pub bg: crate::color::Color,
 }
 
 /// A [`NodeKind::Table`] node's hints, grouped together.
@@ -3162,6 +3185,10 @@ mod tests {
                 crate::color::BasicColor::Blue,
             )),
             stripe_text: None,
+            highlight_row: Some(TableRowHighlight {
+                row: 2,
+                bg: crate::color::Color::BasicColor(crate::color::BasicColor::Black),
+            }),
         });
         let hints = attrs.table_terminal_hints();
         assert!(hints.prefer_cursor_alignment);
@@ -3174,6 +3201,16 @@ mod tests {
             ))
         );
         assert_eq!(hints.stripe_text, None);
+        assert_eq!(hints.highlight_row.map(|h| h.row), Some(2));
+    }
+
+    #[test]
+    fn table_terminal_hints_omit_absent_highlight_when_serialized() {
+        let json = serde_json::to_value(TableTerminalHints::default()).unwrap();
+
+        assert!(json.get("highlight_row").is_none(), "{json}");
+        let back: TableTerminalHints = serde_json::from_value(json).unwrap();
+        assert_eq!(back.highlight_row, None);
     }
 
     #[test]

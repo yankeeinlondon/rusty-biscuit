@@ -2,6 +2,10 @@ pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::compose::Compose;
 pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError, MetricKind};
 #[cfg(feature = "image")]
+pub use crate::components::git_graph::{
+    GitGraph, GitGraphPlan, GraphLine, GraphPullRequest, GraphViewport, LaneEntry,
+};
+#[cfg(feature = "image")]
 pub use crate::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
 };
