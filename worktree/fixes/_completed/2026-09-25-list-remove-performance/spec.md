@@ -23,7 +23,8 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-26
-review_iterations: 0
+review_iterations: 2
+completed: true
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-worktree-file

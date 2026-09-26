@@ -104,6 +104,7 @@ documentation:
     - worktree/docs/performance-testing.md
 completed_phase: 5
 implemented: true
+implementation_1: "2026-09-26T15:31:55-07:00"
 ---
 
 # Implementation Log for 2026-09-25-list-remove-performance (5 phases)
@@ -528,3 +529,57 @@ Plan Wave 7 checks:
 - The Windows-only held-open read-failure test and the Linux-only non-UTF-8 name tests run only where their platform allows, as designed.
 
 Implementation complete, ready for review. The fix directory was left in place; `just complete` was not run.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-26T15:31:55-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-25-list-remove-performance/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'A foreground PR request can show badges from a previous origin' at 15:32:09
+        - discovered: `fetch_and_publish` (`worktree/lib/src/pull_requests.rs`) declined to save but still returned the old listing after an `origin` change; `gather_prs` rendered it
+        - fixed: `fetch_and_publish` now returns `None` when `origin` no longer matches after the request (store untouched); doc comment updated; `gather_prs` (`worktree/cli/src/commands/list.rs`) already maps `None` to no badges, so only its doc changed
+        - unit test renamed to `a_foreground_answer_is_discarded_when_origin_changed_during_the_request` and now asserts `None`, one request, and no store
+        - discovered: the 300 ms `LIST_DEADLINE` makes a hold/change/release sequence from the test thread racy
+                - added `FakeGitea::before_reply` in `worktree/cli/tests/perf_support/mod.rs`, so the stub server changes `origin` while the request waits, then replies with a PR that would produce a badge
+        - added L1 regression `list_prs::an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin`
+                - a control run first requires `PR #7` to appear, so the later absence of badges cannot be a timeout
+                - asserts two requests, no `PR #`, no "PRs as of" line, and no store
+                - negative proof: this test failed when the old `fetch_and_publish` body was temporarily restored
+        - drift fix: the `pull_requests` bullet in `.claude/skills/worktree/SKILL.md` now states this contract
+        - results: `just test` (worktree) 457 passed, 18 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'A foreground PR request can show badges from a previous origin' at 15:35:24
+- starting the work on 'The stale PR age line has no real-terminal style verification' at 15:35:24
+        - discovered: the L2 tmux pane passes env as an inline `K='v' cmd` prefix, so the detached `internal-refresh-prs` worker inherits `HTTPS_PROXY`, `HOME`, and `XDG_CACHE_HOME`, and its lock sidecar lands in the fixture's cache
+        - added L2 test `level2_list_verbose::level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` (`worktree/cli/tests/level2_list_verbose.rs`)
+                - seeds a stale answer (12 min 5 s) bound to the current origin; asserts the `PR #99` badge still shows, "PRs as of 12 min ago" is the row directly after the legend, and every cell of it is dim (SGR)
+                - the worker's request goes to `ProxyStub::hanging`; the test closes it, waits for the lock to be free and for no worker process, then asserts one connection and an unchanged store
+                - fixture: `DesignFixture::with_pr_age`, `seed_stores(pr_age)`, `list_until`, and `probe_refresh`; the file now includes `mod perf_support`
+        - extended `level2_list_styles_follow_the_design_in_tmux` to assert no age line for a fresh answer (control)
+        - negative proof: with the dim tags removed from `pr_age_markup`, the new test failed on the dim assertion; `list_table.rs` was restored and has no diff
+        - drift fix: one sentence added to the `wt list` styling bullet in `.claude/skills/worktree/SKILL.md`
+        - results:
+                - L2 binary with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`: 6/6 passed across 4 runs
+                - `just test` (worktree): 457 passed, 18 skipped
+                - `just lint`: clean; `cargo clippy -p worktree-cli --features terminal-tests --all-targets -- -D warnings`: clean
+                - `just check-tier-coverage worktree`: 0 stranded
+- work completed for 'The stale PR age line has no real-terminal style verification' at 15:41:51
+- cross-OS check of the new L1 regression (`just cross-check` with the name filter `foreground`)
+        - native Windows: 3/3 passed, including `an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin` (5.4 s), which uses the real per-user cache path there
+        - the first Windows attempt used the binary name `list_prs` as the filter and ran 0 tests; the filter matches test names only
+        - Linux (build-linux): blocked by the environment, twice; rustc reported that files under `target/release/deps` in the standing clone are not writable, so no test ran; this needs a manual fix on that host and is unrelated to this change; CI's Linux leg will cover it
+        - the new L2 test uses tmux and skips on Windows, as designed
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 10 minutes. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- no performance measurement was deferred, so `deferred_perf_measurement` stays unset
+- the files changed in this cycle:
+        - `worktree/lib/src/pull_requests.rs`
+        - `worktree/cli/src/commands/list.rs` (doc only)
+        - `worktree/cli/tests/list_prs.rs`
+        - `worktree/cli/tests/perf_support/mod.rs`
+        - `worktree/cli/tests/level2_list_verbose.rs`
+        - `.claude/skills/worktree/SKILL.md`
