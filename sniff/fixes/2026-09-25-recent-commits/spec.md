@@ -1,3 +1,48 @@
+---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+status: planned
+implemented: false
+implemented_by: claude/opus
+review_iterations: 0
+human_review: false
+message_to_agent: |-
+    Phase 1 changed no source. Read "Wave 1 Decision Record" and "Wave 1
+    Regression Blueprint" in plan.md before coding. Key points: (1) do not
+    reuse RepoInfo::package_area_for_dir_with_index as-is per file -- its
+    HashSet fallback is nondeterministic for nested areas, allocates per call,
+    and treats a file whose path equals an area directory as inside it;
+    (2) add one crate-private area index in repo/ownership.rs built from the
+    ownership index's already-canonical root, and route both
+    PackageCatalog::matches and ::attribute through a single per-path resolver
+    (package-first area for owned files, else deepest strictly-containing
+    non-empty area); (3) switch package_area_for_dir_with_index's fallback to
+    the same index (inclusive lookup for directories); (4) the existing test
+    monorepo_commits_carry_deepest_package_arrays_and_area_files_stay_unattributed
+    encodes the old contract and must be renamed and re-expected, not deleted.
+    Baseline before Phase 2: sniff `just test` 2894 passed / 32 skipped,
+    `just lint` clean. The working tree carries unrelated uncommitted edits
+    from 2026-09-21-lockfile-provenance-cost; preserve them.
+---
+
 # Recent Commits: Package-Area Filtering
 
 ## Problem
