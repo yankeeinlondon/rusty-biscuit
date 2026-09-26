@@ -10644,6 +10644,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflink-copy"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9dd7ab4af0363d5ccfd2838d782a28196cf32a5cc2e4fe3c5dc83f2be588b8b"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "rustix 1.1.4",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16679,6 +16691,7 @@ dependencies = [
  "criterion",
  "dirs",
  "getrandom 0.4.2",
+ "reflink-copy",
  "serde",
  "serde_json",
  "serial_test",
@@ -16686,6 +16699,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "which 8.0.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
