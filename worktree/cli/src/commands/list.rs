@@ -51,8 +51,8 @@ const PRODUCTION_SEAMS: PrSeams = PrSeams {
 ///
 /// A stored answer for the current `origin` is shown at once; a stale one
 /// also starts a background refresh, whose answer the next run shows. Only a
-/// miss makes the request here, under [`LIST_DEADLINE`], and a failed request
-/// shows no badges.
+/// miss makes the request here, under [`LIST_DEADLINE`]; a failed request, or
+/// one during which `origin` changed, shows no badges.
 fn gather_prs(store: &Path, main: &Path, seams: PrSeams) -> PrListing {
     let origin = origin_url(main);
     match select_cached(store, origin.as_deref(), unix_now()) {

@@ -205,8 +205,9 @@ pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs 
 /// Makes the request for `origin` and stores a successful answer, stamped
 /// `now`, while `repo_root`'s `origin` still matches.
 ///
-/// `None` when the request failed; the store is then untouched. A successful
-/// answer is returned even when `origin` changed and it was not stored.
+/// `None` when the request failed or `origin` changed during it; the store is
+/// then untouched. An answer for a previous `origin` is never returned, so
+/// this run cannot show badges from another repository.
 pub fn fetch_and_publish(
     store: &Path,
     repo_root: &Path,
@@ -215,9 +216,10 @@ pub fn fetch_and_publish(
     source: &dyn OpenPrSource,
 ) -> Option<PrListing> {
     let file = fetch(origin, now, source).ok()?;
-    if origin_url(repo_root).as_deref() == Some(origin) {
-        let _ = save(store, &file);
+    if origin_url(repo_root).as_deref() != Some(origin) {
+        return None;
     }
+    let _ = save(store, &file);
     Some(listing(&file))
 }
 
@@ -568,14 +570,18 @@ mod tests {
     }
 
     #[test]
-    fn a_foreground_answer_is_not_stored_when_origin_changed_during_the_request() {
+    fn a_foreground_answer_is_discarded_when_origin_changed_during_the_request() {
         let (_dir, root, store) = repo(Some(ORIGIN));
-        let (_, mut source) = stub(Ok(vec![pr(7, Some("o/r"), "fix/x", "main")]));
+        let (calls, mut source) = stub(Ok(vec![pr(7, Some("o/r"), "fix/x", "main")]));
         let moved = root.clone();
         source.during = Some(Box::new(move || git(&moved, &["remote", "set-url", "origin", "https://prs.example.invalid/o/new.git"])));
 
-        let listing = fetch_and_publish(&store, &root, ORIGIN, NOW, &source).expect("the request succeeded");
-        assert_eq!(numbers(&listing), [7], "this run may still show what it fetched");
+        assert_eq!(
+            fetch_and_publish(&store, &root, ORIGIN, NOW, &source),
+            None,
+            "this run must not show badges from the previous origin"
+        );
+        assert_eq!(calls.get(), 1);
         assert!(!store.exists(), "an answer for the old origin must not be bound to the new one");
     }
 

@@ -7,7 +7,8 @@
 //! The worker's lifecycle runs against [`FakeGitea`], which holds a request
 //! until the test releases it: the parent returns while its worker is
 //! blocked, concurrent workers make one request, a killed worker releases its
-//! lock, and a failed or misbound answer is never stored.
+//! lock, and a failed or misbound answer is never stored. A foreground
+//! request during which `origin` changes shows no badges at all.
 //!
 //! Timing bounds live in `perf_pr_request.rs`; these tests check behavior.
 
@@ -432,4 +433,35 @@ fn an_origin_change_during_a_workers_request_discards_its_answer() {
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     assert!(!stderr.contains("PR #99"), "{stderr}");
     assert!(!stderr.contains("PRs as of"), "{stderr}");
+}
+
+#[test]
+#[serial]
+fn an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin() {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
+
+    // Control: with no stored answer the foreground request's answer is
+    // shown, so the absence below is the discarded answer, not a timeout.
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    assert!(row(&stderr, "divergent-1").contains("PR #7"), "{stderr}");
+    fs::remove_file(fixture.pr_store()).expect("forget the stored answer");
+
+    let main = fixture.main().to_path_buf();
+    gitea.before_reply(move || {
+        let status = Command::new("git")
+            .current_dir(&main)
+            .args(["remote", "set-url", "origin", "http://gitea.example.invalid/o/other.git"])
+            .status()
+            .expect("git");
+        assert!(status.success());
+    });
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+
+    assert_eq!(gitea.requests(), 2, "the second list made its request in the foreground");
+    assert!(row(&stderr, "divergent-1").contains("divergent-1"));
+    assert!(!stderr.contains("PR #"), "badges from the previous origin:\n{stderr}");
+    assert!(!stderr.contains("PRs as of"), "{stderr}");
+    assert!(!fixture.pr_store().exists(), "an answer for the old origin is not stored");
 }

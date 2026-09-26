@@ -506,7 +506,10 @@ struct GiteaState {
 pub struct FakeGitea {
     port: u16,
     shared: Arc<(Mutex<GiteaState>, Condvar)>,
+    before_reply: BeforeReply,
 }
+
+type BeforeReply = Arc<Mutex<Option<Box<dyn Fn() + Send>>>>;
 
 /// How long a held request waits before the server gives up on the test.
 const GITEA_HOLD_LIMIT: Duration = Duration::from_secs(60);
@@ -521,14 +524,17 @@ impl FakeGitea {
             Mutex::new(GiteaState { requests: 0, waiting: 0, held: false, reply }),
             Condvar::new(),
         ));
+        let before_reply: BeforeReply = Arc::new(Mutex::new(None));
         let server = Arc::clone(&shared);
+        let server_before_reply = Arc::clone(&before_reply);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let shared = Arc::clone(&server);
-                std::thread::spawn(move || serve(stream, &shared));
+                let before_reply = Arc::clone(&server_before_reply);
+                std::thread::spawn(move || serve(stream, &shared, &before_reply));
             }
         });
-        Self { port, shared }
+        Self { port, shared, before_reply }
     }
 
     pub fn url(&self) -> String {
@@ -538,6 +544,16 @@ impl FakeGitea {
     /// Makes every request from now on wait until [`FakeGitea::release`].
     pub fn hold(&self) {
         self.state().held = true;
+    }
+
+    /// Runs `action` for every later request after it is received and before
+    /// it is answered, while the requester waits.
+    ///
+    /// A foreground `wt list` request gives up after its 300 ms deadline, too
+    /// short for the test thread to observe a held request, act, and release
+    /// it; `action` runs on the server thread instead.
+    pub fn before_reply(&self, action: impl Fn() + Send + 'static) {
+        *self.before_reply.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(action));
     }
 
     /// Answers waiting and later requests with `reply`.
@@ -582,7 +598,7 @@ impl Drop for FakeGitea {
     }
 }
 
-fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar)) {
+fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_reply: &Mutex<Option<Box<dyn Fn() + Send>>>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let mut head = Vec::new();
     let mut buffer = [0_u8; 1024];
@@ -609,6 +625,9 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar)) {
         changed.notify_all();
         state.reply.clone()
     };
+    if let Some(action) = before_reply.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref() {
+        action();
+    }
     let (status, body) = match reply {
         GiteaReply::Open(prs) => (200, gitea_pulls_json(&prs)),
         GiteaReply::Status(status) => (status, r#"{"message":"fake gitea error"}"#.to_string()),
