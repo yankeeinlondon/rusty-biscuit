@@ -2,6 +2,7 @@
 //! (modified, staged, untracked) and its ignored entries.
 
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -152,7 +153,7 @@ impl Inventory {
         }
         // The whole index rather than a pathspec of the dirty paths, which
         // pathspec magic and command-line length limits make fragile.
-        let index = git_from_bytes(base, worktree, &["ls-files", "--stage", "-z"])?;
+        let index = git_from_bytes(base, worktree, &["ls-files", "--stage", "-z"], None)?;
         record.field(b"index").field(&index);
         Ok(record.digest())
     }
@@ -178,6 +179,7 @@ pub fn collect_inventory(base: &Path, worktree: &Path) -> Result<Inventory, Work
             "--untracked-files=all",
             "--ignored=matching",
         ],
+        None,
     )?;
     Inventory::from_status_z(&output)
 }

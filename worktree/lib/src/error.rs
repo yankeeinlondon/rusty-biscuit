@@ -102,6 +102,12 @@ pub enum WorktreeError {
     #[error("failed to parse git output: {0}")]
     GitParse(String),
 
+    #[error("cannot read include rules at {}: {reason}", path.display())]
+    IncludeRulesIndeterminate { path: std::path::PathBuf, reason: String },
+
+    #[error("cannot discover included files: {0}")]
+    IncludeSetDiscovery(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

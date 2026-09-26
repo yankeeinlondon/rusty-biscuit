@@ -57,6 +57,8 @@ mod tests {
                 candidates: Vec::new(),
             },
             WorktreeError::FromBranchNotFound("nope".into()),
+            WorktreeError::IncludeRulesIndeterminate { path: "rules".into(), reason: "unreadable".into() },
+            WorktreeError::IncludeSetDiscovery("git failed".into()),
             WorktreeError::LockProbeRenameBack {
                 original: "a".into(),
                 temporary: "b".into(),
