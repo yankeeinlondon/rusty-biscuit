@@ -462,6 +462,27 @@ belong here.
   Contrast with the existing 5-file consolidation at `4616e9aec`, where
   the superseded specs were already tracked at HEAD and only their
   `status:` flipped.
+- A cross-package-area spec consolidation where BOTH specs already exist
+  at HEAD — only their frontmatter cross-references change — splits
+  safely into per-area commits, even though the same-area multi-spec
+  consolidation rule above is one atomic commit. The test is whether
+  the cross-references resolve at HEAD (or in a prior commit) vs within
+  the commit's tree: the new spec's `supersedes:` references paths
+  tracked at HEAD (the old spec exists), so its commit is
+  self-contained; the old spec's `consolidated-into:` references a path
+  that exists in a prior commit (the new spec ships first). Distinct
+  from the supersede-banner rule above (NEW files where neither path
+  exists at HEAD) and from the cross-area enum-variant coupling rule in
+  Concurrency (must compile atomically, drop scope). Apply only when the
+  OLD side has no structural references — markdown links, frontmatter
+  cross-references — to the NEW side's new annexes; prose mentions of
+  annex filenames are fine because they don't break link checkers, but a
+  `[text](../path.md)` link from the OLD side forces that commit to
+  land after the annex does. Verified with `8a9bd7a9e` (claudine
+  `consolidated-into:` back-pointer) following `78eb141d1` (darkmatter
+  consolidation with new annexes `function-contracts.md`,
+  `number-contract.md`, `catalog-audit.md`) for the cross-area,
+  both-exist-at-HEAD shape.
 - `planning(<area>): close <fix> as invalidated` is distinct from
   `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
   (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
