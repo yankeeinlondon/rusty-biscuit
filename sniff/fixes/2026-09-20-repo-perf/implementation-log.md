@@ -72,6 +72,39 @@ docs_created_during_phase_5:
     - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
     - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_6:
+    - sniff/fixes/2026-09-20-repo-perf/results.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/README.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/ac5_dump.rs.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/detect_repo_structure-corpus.json
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/sha256.txt
+skills_files_updated_during_phase_6: []
+source_code:
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/benches/cases/repo.rs
+    - sniff/lib/examples/work_counts.rs
+documentation:
+    - sniff/lib/benches/README.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/results.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/spike.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/environment.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-09-20-repo-perf (6 phases)
@@ -670,3 +703,117 @@ on each OS.
 None. No architecture or workflow changed. The cross-check facts used here
 (filtered runs publish no receipt; use plain substring filters) are already in
 the `os` skill.
+
+## Phase 6
+
+### Starting state and the pending decision (2026-09-25)
+
+- HEAD `9d2d39c6d` with a clean tree. `git diff HEAD -- sniff/lib Cargo.lock`
+  is empty, so Phase 6 closes out the implementation that Phases 3–5 tested,
+  measured, and validated.
+- The Phase 4 R7 escalation still has **no recorded author answer**. Phase 6
+  changes no production or test code, so it proceeded. `results.md` reports
+  the verdict as "pending the author's decision", not "accepted", as the
+  Phase 5 message required. `human_review` stays `true` on the spec.
+
+### Consolidated results
+
+- Wrote `results.md`. It covers:
+  - each acceptance criterion (AC1–AC7) mapped to its tests or evidence file;
+  - the performance table (median of bracket medians, bracket-median range,
+    and sample min–max, cross-checked against `evidence/after/summary-table.md`);
+  - the counter comparison;
+  - the five deviations from the plan;
+  - remaining risks.
+
+### AC5 gap closed: full detection output on the checkout
+
+- Earlier phases recorded candidate parity on the checkout (spike), identical
+  counters, and fixture-level outcome parity. None recorded a before/after
+  comparison of the complete `detect_repo_structure` output on this checkout,
+  which AC5 asks for.
+- **Method.**
+  - A temporary detached worktree built a disposable, untracked release
+    example at `43a08f94e` (baseline) and at `9d2d39c6d` (after).
+  - The example prints `RepoInfo` as JSON under a fresh `PerformanceCollector`.
+  - Both sides read this checkout with the Phase 4 root spelling, alternating
+    three times.
+  - The worktree was removed afterwards; nothing was added to the fix branch's
+    sources.
+- **Result: byte-identical on every run** (one SHA-256 across 7 outputs):
+  77 packages, 2 standards, 2 layers, and `nested_marker_walks = 1` on every
+  run.
+- Evidence is in `evidence/detection-output/` (README, probe source, output
+  JSON, hashes).
+
+### Drift sweep
+
+- `nested.rs` module, function, and inline docs match the code:
+  - builder settings;
+  - default worker policy (available parallelism capped at 12);
+  - root-entry rule;
+  - activation order;
+  - join/merge invariant;
+  - the serial reference's documented single difference.
+  No edits were needed.
+- `sniff/docs/sniff-library-architecture.md` (counter still 1 per
+  structure-only request), `sniff/lib/benches/README.md`, the
+  `benches/cases/repo.rs` and `examples/work_counts.rs` docs, and the
+  `tests/fixtures.rs` root-marker comment are all accurate.
+- **Dependencies:** the fix's commits (`43a08f94e`, `f9af74815`, `2d886cd98`)
+  touch no `Cargo.lock` or `Cargo.toml`, so `docs/dependencies.md` is
+  unaffected. The branch-wide `Cargo.lock` and `docs/dependencies.md` diff
+  against `main` comes from other merged work on this branch.
+- **Cross-area drift, not edited:**
+  `claudine/features/2026-08-01-faster-compose/plan.md:125` still calls the
+  walk a "serial `WalkBuilder`". It sits in a dated source review of another
+  area's active plan. It is recorded in `results.md` for that plan's next
+  revision.
+- **Sniff skill:** not changed. The architecture and workflow did not change,
+  and `performance.md` already carries the parallel-walk facts from
+  Phases 1–4.
+
+### Final gates
+
+- `just test` (sniff): **2874 passed, 32 skipped**, identical to Phases 3–5.
+- `just lint` (sniff): exit 0, no warnings.
+- **Production diff is confined as planned:**
+  - `nested.rs`;
+  - the `cfg(any(test, feature = "bench-internals"))` `doc(hidden)`
+    re-export in `repo/mod.rs`;
+  - the env-gated bench row in `benches/cases/repo.rs`;
+  - the `work_counts` example.
+- **Graph change analysis:** GitNexus `detect_changes` gave no usable signal
+  for this fix:
+  - the compare range included about 4,500 files of merged branch history;
+  - none of this fix's `nested.rs` symbols appeared, so the index looks stale
+    for them.
+  Following the repo guidance for an unresolved result, a text search
+  confirmed the blast radius instead: `walk_for_nested_markers`,
+  `serial_reference_paths`, and `nested_benchmark` are referenced only from
+  `nested.rs`, `repo/mod.rs`, and `benches/cases/repo.rs`. No caller outside
+  sniff exists.
+
+### Requirement → test mapping
+
+This phase added and renamed no tests; it re-ran existing gates and added one
+evidence comparison.
+
+| Requirement | Test / gate / evidence | Result |
+|---|---|---|
+| Final `just test` + `just lint` in `sniff/` | both recipes | 2874 passed / 32 skipped; lint clean |
+| AC5 complete output on the checkout | `evidence/detection-output/` | byte-identical before/after |
+| Production diff confined | per-commit `git show --stat` plus text caller census | confined |
+| Results consistent with evidence | `results.md` numbers checked against `evidence/after/summary-table.md` and the log | consistent (two transcription errors fixed before hand-off) |
+
+### Hand-off
+
+The implementation is complete and ready for review. The one open item is the
+author's R7 decision (spec `human_review_items`). The fix directory holds the
+spec, plan, log, `results.md`, and `evidence/`:
+- `baseline/`, `after/`, and `counters/` for measurements and counters;
+- `cross-os/` for the four OS legs;
+- `detection-output/` for the AC5 checkout comparison;
+- `spike.md` and `environment.md`.
+
+The fix directory stays where it is; moving it is the author's action.

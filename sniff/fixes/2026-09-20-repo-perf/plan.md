@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-09-20
-phase: 5
+phase: 6
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-20-repo-perf
@@ -75,6 +75,39 @@ docs_created_during_phase_5:
     - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
     - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+docs_created_during_phase_6:
+    - sniff/fixes/2026-09-20-repo-perf/results.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/README.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/ac5_dump.rs.txt
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/detect_repo_structure-corpus.json
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/sha256.txt
+skills_files_updated_during_phase_6: []
+source_code:
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/benches/cases/repo.rs
+    - sniff/lib/examples/work_counts.rs
+documentation:
+    - sniff/lib/benches/README.md
+    - sniff/fixes/2026-09-20-repo-perf/spec.md
+    - sniff/fixes/2026-09-20-repo-perf/plan.md
+    - sniff/fixes/2026-09-20-repo-perf/implementation-log.md
+    - sniff/fixes/2026-09-20-repo-perf/results.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/spike.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/environment.md
+    - sniff/fixes/2026-09-20-repo-perf/evidence/baseline/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/after/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/counters/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/
+    - sniff/fixes/2026-09-20-repo-perf/evidence/detection-output/
+completed_phase: 6
+implemented: true
 ---
 
 # Parallelize the nested-marker walk — implementation plan
@@ -556,23 +589,23 @@ the three boundary tests confirmed and counts reported; CI scope unchanged.
 
 Depends on all prior phases. No new production or test behavior.
 
-- [ ] **Consolidate results**
+- [x] **Consolidate results**
     - Write `sniff/fixes/2026-09-20-repo-perf/results.md`: outcome vs the
       spec's acceptance criteria (each criterion mapped to its evidence
       file), the performance verdict with medians/ranges, counter
       comparison, deviations from this plan, and remaining risks.
-- [ ] **Drift sweep**
+- [x] **Drift sweep**
     - Re-run the doc/comment drift pass over `nested.rs` and check every
       document that mentions the walk or its counters — including
       `sniff/docs/sniff-library-architecture.md` and
       `docs/dependencies.md` (no crate changes expected; verify none
       happened). Update the `sniff` skill only if architecture or workflow
       actually changed (it should not have).
-- [ ] **Final gates**
+- [x] **Final gates**
     - One last `just test` + `just lint` in `sniff/` on this host; verify the
       production diff is confined to `nested.rs` plus the measurement seam;
       run the repo's pre-commit graph change analysis before handing off.
-- [ ] **Hand off for review**
+- [x] **Hand off for review**
     - Terminal state is "implementation complete, ready for review": summarize
       evidence locations for the reviewer. Moving the fix to `_completed` is
       the author's action, never the agent's.

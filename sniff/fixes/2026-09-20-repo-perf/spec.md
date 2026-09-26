@@ -34,15 +34,17 @@ human_review_items:
     - |-
         **Accept or change the parallel walk, given a measured slowdown on small folders**
 
-        **Why this must be decided before Phase 6.** Phase 6 writes the final
-        results and hands the fix over for review, so it needs to know which
-        design is final. The plan says that if small folders or concurrent use
-        get noticeably slower, the work stops and you decide. That condition was
-        met in Phase 4. Phase 5 (testing on every operating system) has since
-        been run on the current design and passed. If you choose option 1,
-        nothing needs to be rerun. If you choose option 2 or 3, the code changes,
-        so the Phase 3 tests, the Phase 4 measurements, and the Phase 5
-        operating-system runs must all be repeated on the new code.
+        **Why this must be decided before the fix is closed.** All six
+        phases are done, and the results are in
+        `sniff/fixes/2026-09-20-repo-perf/results.md`. That report lists the
+        final verdict as "pending your decision", because the plan says that if
+        small folders or concurrent use get noticeably slower, the work stops
+        and you decide. That condition was met. If you choose option 1, nothing
+        needs to be rerun: the tests on every operating system already passed
+        on this exact code, and the fix is ready for review. If you choose
+        option 2 or 3, the code changes, so the equivalence tests, the timing
+        measurements, and the operating-system runs must all be repeated on
+        the new code before the fix is reviewed.
 
         **What was measured on your Mac.** The host was heavily loaded by other
         sessions. The full numbers are in
@@ -73,7 +75,7 @@ human_review_items:
            - Pros:
              - biggest gain on real repositories;
              - matches the spec exactly;
-             - no more work: Phase 5 proceeds now;
+             - no more work: the fix goes straight to review;
              - the 3 ms is far below what a person notices on a command line,
                and test suites run at 14-way concurrency, where throughput was
                unchanged.
@@ -95,7 +97,8 @@ human_review_items:
              - the "4" is tuned on one machine;
              - the spec says to keep the library default, so the spec must be
                amended;
-             - the measurements (this phase) must be rerun before Phase 5.
+             - the tests, measurements, and operating-system runs must be
+               repeated.
         3. **Scan serially first, and switch to parallel only once the folder
            proves large.**
            - Pros: removes the small-folder penalty and keeps the large-folder
@@ -120,26 +123,24 @@ human_review_items:
         option 2 is the reasonable fallback. Option 3 is better treated as a
         separate future fix.
 message_to_agent: |-
-    Phase 5 (claude/default) is done: validation only, no source files changed.
-    STILL OPEN: the Phase 4 R7 escalation (human_review_items) had no recorded author answer when
-    Phase 5 was requested. Phase 5 ran anyway because it changes no code. Do NOT write Phase 6's
-    results.md verdict as "accepted" unless the author has picked option 1. If they pick 2 or 3, the
-    production code changes and Phases 3, 4, and 5 must be rerun on it before Phase 6.
-    Phase 5 results (details in the implementation log, "## Phase 5"):
-    (a) Focused nested::tests passed on the same tree e13cb10e: Linux 22/22, native Windows 20/20
-    (2 tests are #[cfg(unix)] by design, R5/R6), WSL2 archive mode 22/22, and macOS inside full
-    `just test` (2874 passed / 32 skipped). No SKIP lines on any leg; Windows granted symlinks.
-    Output is in evidence/cross-os/cross-check-nested-tests.txt. Filtered cross-check runs publish
-    no CI receipt, so the CI sniff cells still show as pending; that is expected.
-    (b) `just lint` is clean on macOS and Linux; strict clippy (`--all-targets -D warnings`,
-    features remote,bench-internals) is clean for sniff and sniff-cli.
-    (c) darkmatter `just test --no-fail-fast`: 8496/8498 passed, 12 skipped, and the three
-    observation-boundary tests passed. The 2 failures (feature_review_incident::*, "File not found:
-    ../_writing-clearly.md") are unrelated to this fix: prompts commit 6c682a7fd broke the fixture,
-    and it is already fixed on origin/fix/wt-ux by fe209ae0f. It was not cherry-picked. Mention it in
-    results.md as a known issue from another change: darkmatter L1 will be red in CI until that fix
-    lands on this branch.
-    (d) CI scope is unchanged: no .github/ or scripts/ci or Cargo.toml changes on the branch.
+    Phase 6 of 6 (claude/default) is done. The plan is fully implemented; the terminal state is
+    "implementation complete, ready for review". No source or test code changed in Phase 6.
+    STILL OPEN: the Phase 4 R7 escalation (human_review_items) has no recorded author answer.
+    results.md therefore reports the performance verdict as "pending the author's decision", not
+    "accepted". If the author picks option 1, update results.md's status line and the
+    "Decision rule (R7)" section to "accepted"; nothing needs rerunning. If they pick 2 or 3, the
+    production code changes and Phases 3-5 must be rerun (tests, measurements, OS legs), then
+    results.md must be rewritten.
+    Phase 6 facts a reviewer or fixer needs:
+    (a) Final gates: sniff `just test` 2874 passed / 32 skipped; `just lint` clean.
+    (b) AC5 gap closed: complete detect_repo_structure JSON on this checkout is byte-identical at
+    43a08f94e (baseline) and 9d2d39c6d (after); evidence/detection-output/.
+    (c) Drift sweep clean inside sniff. One stale line in another area, not edited:
+    claudine/features/2026-08-01-faster-compose/plan.md:125 still says "serial WalkBuilder".
+    (d) Darkmatter L1 stays red on this branch until fe209ae0f (origin/fix/wt-ux) or an equivalent
+    lands; it is unrelated to this fix.
+    (e) Do not move the fix to _completed; that is the author's action.
+implemented: true
 ---
 
 # Parallelize the nested-marker walk
