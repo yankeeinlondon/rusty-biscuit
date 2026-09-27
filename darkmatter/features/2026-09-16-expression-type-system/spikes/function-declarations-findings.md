@@ -5,6 +5,10 @@ status: prototype
 
 # Shared Function Declaration Representation
 
+> Historical prototype. The consolidated grammar and behavior are specified
+> in [function-contracts.md](../function-contracts.md). The parser results below
+> concern the old metadata envelope, not the replacement function grammar.
+
 One candidate can separate ordered call arguments, schema value types, and
 function behavior metadata without a special case keyed to a function name.
 The existing passive parser accepts the candidate's metadata envelope and

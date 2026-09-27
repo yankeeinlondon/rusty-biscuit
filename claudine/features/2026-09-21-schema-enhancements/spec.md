@@ -1,16 +1,23 @@
 ---
-parent: ./schema.md
+consolidated-into: 2026-09-16-expression-type-system
+consolidated: 2026-09-26
 peers: ./coercion-design.md 
 research:
     - ./current-state-coercion.md 
 ---
 # Schema Enhancements
 
+> Consolidated into `2026-09-16-expression-type-system`. Its specification and
+> `function-contracts.md`, `number-contract.md`, and `declarations-design.md`
+> annexes are authoritative. This original proposal remains as design history;
+> incomplete examples and superseded suggestions below are not open decisions.
+> Specification consolidation does not mean runtime implementation is complete.
+
 The current `SimplifiedSchema` is very helpful but it has some constraints that make it less capable and ergonomic than it could be. This specification tries to address that as well as some impacts to how Darkmatter and DMLS build their internal model for function types.
 
 > For Reference, here is the most authoritative document we currently have for our schema support: 
 >
-> - [schema definition](darkmatter/docs/topics/schema-definition.md)
+> - [schema definition](../../../darkmatter/docs/topics/schemas/definition.md)
 
 
 ## Types Added
@@ -53,7 +60,7 @@ The **type** will be called `tuple` and through it's constraint system we will s
 
     ```yaml
     my_tuple: tuple([string, ...number[]])
-    ```yaml
+    ```
 
 - as you can see the `...` prefix operator indications that the _type_ it is operating on is _spread_ into the type definition.
 - to keep complexity within bounds the grammar will only allow for _one_ spread per property
@@ -146,7 +153,13 @@ The document @claudine/docs/schemas/partials/functions.yaml has a full list of f
 
 ### Using Function Schemas during Generation
 
-We currently use the YAML doc @darkmatter/docs/schemas/expression-functions.yaml during the code generation stage of building Darkmatter. As a part of this specification we want to move away from this definition and start using @claudine/docs/schemas/partials/functions.yaml in it's place.
+Darkmatter currently embeds `darkmatter/docs/schemas/expression-functions.yaml`
+and parses it into its runtime catalog. The original proposal selected the
+Claudine draft as its replacement. The consolidated decision instead places
+the authoritative declarations at `darkmatter/schemas/partials/functions.yaml`;
+Claudine consumes Darkmatter's definitions. The existing Claudine file is
+migration material. Switch consumers when the new grammar is implemented,
+then retire the old independent catalog.
 
 - the new function catalog doesn't have an "order" property but we shouldn't need it:
     - in documentation generation -- like what we do for `claudine context --expressions` we should group by "category" and sort alphabetically within the group.
