@@ -4,6 +4,12 @@ created: 2026-09-26
 phase: 1
 agent: claude/opus
 yolo: true
+packages: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: `wt list` caption trusts a stale `origin/<default>`
@@ -111,23 +117,23 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Spikes
 
-- [ ] **S1 — Git HTTP hold and 401 on loopback** (about 30 min, macOS; Windows via `./scripts/cross-check.sh` if the host is reachable; load the `os` skill first)
+- [x] **S1 — Git HTTP hold and 401 on loopback** (about 30 min, macOS; Windows via `./scripts/cross-check.sh` if the host is reachable; load the `os` skill first)
     - Confirm that `git ls-remote http://127.0.0.1:<port>/r.git refs/heads/main` connects to a holding listener and blocks until killed, and that `run_noninteractive` with a 500 ms deadline returns `Err` quickly and the listener sees the connection close (process-tree kill of `git-remote-http`).
     - Confirm a `401` responder produces a fast `Err` with no prompt under the transport's env.
     - Output: a short note in the implementation log with elapsed times and the minimal HTTP response bytes that work. This decides whether the fixtures in Rules 13 and 14 need anything beyond a raw `TcpListener`.
-- [ ] **S2 — Inventory of affected tests** (about 20 min, read-only)
+- [x] **S2 — Inventory of affected tests** (about 20 min, read-only)
     - List every test that runs `wt list` or the worker with an origin configured: `list_prs.rs`, `perf_pr_request.rs`, `level2_list_verbose.rs`, `perf_support/mod.rs`, and any `MixedFixture::with_*_origin` user.
     - For each, record whether it asserts worker count, request count, or "no launch", and whether it needs `seed_remote_head_store` or a cleanup change.
     - Also list every `internal-refresh-prs` or `pr_refresh` reference in active code, tests, docs, and skills. Exclude `fixes/_completed/**` and other historical specs.
     - Output: a table in the implementation log that Phase 4 works through.
-- [ ] **S3 — Absent-branch exit semantics** (about 10 min)
+- [x] **S3 — Absent-branch exit semantics** (about 10 min)
     - Confirm that `git ls-remote origin refs/heads/<missing>` exits 0 with empty stdout on a local bare origin and over HTTP. Confirm that `refs/heads/main` does not also match `refs/heads/foo/main`, since the parser keeps its exact-name comparison.
 
 ### Tasks
 
-- [ ] **Baseline green**
+- [x] **Baseline green**
     - Run `just test` and `just lint` in `worktree/` on the unmodified branch. Record any pre-existing failures in `implementation-log.md` so they are not attributed to this fix.
-- [ ] **Log setup**
+- [x] **Log setup**
     - Create `implementation-log.md` in this fix directory, containing the rulings accepted and the spike results.
 
 **Checkpoint 1:** the spikes are recorded, no ruling is contradicted (or each conflict is written up), and the baseline is known.
