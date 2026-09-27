@@ -483,11 +483,13 @@ impl PackageCatalog {
     /// The deepest package owning a root-relative `path`, and the package
     /// area the path belongs to.
     ///
-    /// An owned path belongs to its owner's declared area, even where that
-    /// package's directory is itself another package's area. An unowned path
-    /// belongs to the deepest area directory strictly containing it, and the
-    /// root area `""` is never reached that way. Resolution is lexical, so
-    /// deleted and moved paths resolve too.
+    /// Area membership follows location, independently of ownership: a path
+    /// belongs to the deepest area directory strictly containing it, even
+    /// where its owning package declares a shallower area (a package whose
+    /// directory is also a nested package's area). Only when no area
+    /// directory contains the path does it fall back to its owner's area,
+    /// which is how a top-level package's files reach the root area `""`.
+    /// Resolution is lexical, so deleted and moved paths resolve too.
     fn resolve(&self, path: &Path) -> (Option<usize>, Option<&str>) {
         let Some((info, owners, areas)) = &self.monorepo else {
             return (None, None);
@@ -495,7 +497,10 @@ impl PackageCatalog {
         let packages = info.packages.as_deref().unwrap_or_default();
         let absolute = owners.normalize_relative(path);
         let owner = owners.lookup_normalized(&absolute);
-        let area = owner.or_else(|| areas.lookup_normalized(absolute.parent()?));
+        let area = absolute
+            .parent()
+            .and_then(|dir| areas.lookup_normalized(dir))
+            .or(owner);
         (owner, area.map(|index| packages[index].package_area.as_str()))
     }
 
