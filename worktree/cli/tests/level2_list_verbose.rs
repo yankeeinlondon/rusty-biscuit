@@ -28,7 +28,7 @@ use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
 use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
-use worktree::remote_head::remote_head_store_path;
+use worktree::remote_head::{refresh_remote_head, remote_head_store_path};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -716,6 +716,7 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     }
     let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
     assert!(left.is_empty(), "the worker outlived its request: {left:?}");
+    assert_ne!(probe_head_refresh(&fixture), RefreshOutcome::Contended, "the live-head lock is free");
     assert_eq!(proxy.connections(), 1, "one worker request, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
 }
@@ -723,6 +724,12 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
 /// A refresh that makes no request: `Contended` while a worker holds the lock.
 fn probe_refresh(fixture: &DesignFixture) -> RefreshOutcome {
     refresh(&fixture.pr_store(), &fixture.main, unix_now, |_| Box::new(NoRequest))
+}
+
+/// [`probe_refresh`] for the live-head lock.
+fn probe_head_refresh(fixture: &DesignFixture) -> RefreshOutcome {
+    let store = fixture.store_path(remote_head_store_path(&fixture.main).expect("remote-head store path"));
+    refresh_remote_head(&store, &fixture.main, unix_now, &NoRequest)
 }
 
 

@@ -14,6 +14,10 @@
 //! lock, and a failed or misbound answer is never stored. A foreground
 //! request during which `origin` changes shows no badges at all.
 //!
+//! The live head is never asked in the foreground: with a missing or stale
+//! answer, `wt list` returns while its worker's `ls-remote` is still held by a
+//! loopback `origin`.
+//!
 //! Timing bounds live in `perf_pr_request.rs`; these tests check behavior.
 
 mod perf_support;
@@ -23,11 +27,12 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    FakeGitea, GiteaReply, MixedFixture, ProxyStub, RemoveOnDrop, refresh_workers,
+    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, refresh_workers,
     wait_for_refresh_workers,
 };
 use serial_test::serial;
 use worktree::pull_requests::{RefreshOutcome, pr_lock_path};
+use worktree::remote_head::remote_head_lock_path;
 
 /// How long a test waits for the detached worker to act before failing.
 const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -215,11 +220,14 @@ fn a_changed_origin_hides_the_stored_badges_and_starts_no_worker() {
 
 #[test]
 #[serial]
-fn the_worker_command_prints_nothing_and_ignores_a_linked_worktree() {
+fn the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout() {
     let fixture = MixedFixture::new().with_github_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
+    fixture.seed_remote_head_store(Duration::from_secs(12 * 60 + 5), Some(HEAD_SHA));
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
+    let stored_head = fs::read(fixture.remote_head_store()).expect("seeded head");
+    let head_lock = remote_head_lock_path(&fixture.remote_head_store());
     let proxy = ProxyStub::refusing();
     let run_worker = |repo: &std::path::Path| {
         let output = fixture
@@ -231,12 +239,20 @@ fn the_worker_command_prints_nothing_and_ignores_a_linked_worktree() {
         assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
     };
 
-    run_worker(&fixture.worktrees()[0]);
-    assert!(!pr_lock_path(&fixture.pr_store()).exists(), "a linked worktree is not a main checkout");
+    let subdirectory = fixture.main().join("nested");
+    fs::create_dir(&subdirectory).expect("create a subdirectory");
+    let missing = fixture.main().join("no-such-directory");
+    for ignored in [fixture.worktrees()[0].as_path(), subdirectory.as_path(), missing.as_path()] {
+        run_worker(ignored);
+        assert!(!pr_lock_path(&fixture.pr_store()).exists(), "{ignored:?} is not a main checkout");
+        assert!(!head_lock.exists(), "{ignored:?} is not a main checkout");
+    }
 
     run_worker(fixture.main());
-    assert!(pr_lock_path(&fixture.pr_store()).exists(), "the main checkout's worker took its lock");
-    assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "its failed refresh stored nothing");
+    assert!(pr_lock_path(&fixture.pr_store()).exists(), "the main checkout's worker took its PR lock");
+    assert!(head_lock.exists(), "and its live-head lock");
+    assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "its failed PR refresh stored nothing");
+    assert_eq!(fs::read(fixture.remote_head_store()).expect("head"), stored_head, "nor its failed live-head refresh");
 }
 
 #[test]
@@ -489,4 +505,66 @@ fn an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_ori
     assert!(!stderr.contains("PRs as of"), "{stderr}");
     assert!(!fixture.pr_store().exists(), "an answer for the old origin is not stored");
     assert!(refresh_workers(fixture.main()).is_empty(), "a PR miss alone starts no worker");
+}
+
+/// On drop, closes every request `origin` holds and waits until the fixture's
+/// worker exited and released both locks, so none outlives the fixture, even
+/// when an assertion failed first. Declare it after the fixture, `origin`, and
+/// [`RemoveOnDrop`].
+struct ReleaseOnDrop<'a> {
+    fixture: &'a MixedFixture,
+    origin: &'a HoldingOrigin,
+}
+
+impl Drop for ReleaseOnDrop<'_> {
+    fn drop(&mut self) {
+        let finished = self.fixture.wait_until_unlocked(WORKER_WAIT, || self.origin.close_held());
+        if !std::thread::panicking() {
+            assert!(finished, "the worker never exited or released its locks");
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn a_missing_or_stale_live_head_never_holds_up_the_listing() {
+    for head_age in [None, Some(Duration::from_secs(12 * 60 + 5))] {
+        let origin = HoldingOrigin::new();
+        let fixture = MixedFixture::new().with_origin(&origin.url());
+        let _cleanup = RemoveOnDrop(fixture.pr_store());
+        let _release = ReleaseOnDrop { fixture: &fixture, origin: &origin };
+        fixture.seed_empty_pr_store(Duration::ZERO);
+        let status = Command::new("git")
+            .current_dir(fixture.main())
+            .args(["update-ref", "refs/remotes/origin/main", "main"])
+            .status()
+            .expect("git");
+        assert!(status.success());
+        if let Some(age) = head_age {
+            fixture.seed_remote_head_store(age, Some(HEAD_SHA));
+        }
+        let stored_head = fs::read(fixture.remote_head_store()).ok();
+
+        // `.output()` returns only once every holder of stdout and stderr has
+        // exited, so it returning while `origin` still holds the worker's
+        // request proves `wt list` neither waited for nor joined it.
+        let (_, stderr) = list_with(fixture.wt_command_direct());
+
+        assert!(origin.wait_for_requests(1, WORKER_WAIT), "{head_age:?}: the worker never asked origin");
+        assert_eq!(fixture.probe_head_refresh(), RefreshOutcome::Contended, "{head_age:?}: the request is still held");
+        assert_eq!(refresh_workers(fixture.main()).len(), 1, "{head_age:?}: one worker");
+        let caption = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        match head_age {
+            None => assert!(caption.contains("Remote state has not been verified."), "{caption}"),
+            Some(_) => assert!(caption.contains("differs from the remote head observed 12 min ago"), "{caption}"),
+        }
+
+        let requests = origin.requests();
+        assert_eq!(requests.len(), 1, "{head_age:?}: one live request and no PR request: {requests:?}");
+        assert!(
+            requests[0].starts_with("GET /r.git/info/refs?service=git-upload-pack"),
+            "{head_age:?}: the only request is git's: {requests:?}"
+        );
+        assert_eq!(fs::read(fixture.remote_head_store()).ok(), stored_head, "{head_age:?}: nothing stored yet");
+    }
 }

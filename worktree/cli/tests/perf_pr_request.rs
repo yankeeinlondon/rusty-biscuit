@@ -1,5 +1,6 @@
 //! `wt list` performance with the network down, with a PR request that hits
-//! its deadline, and with a stale stored answer whose refresh is blocked,
+//! its deadline, with a stale stored answer whose refresh is blocked, and with
+//! a stale live head whose refresh is blocked,
 //! against the ratified targets in `worktree/docs/performance-testing.md`
 //! (warm `list gather` 120 ms, cold 300 ms, full non-image `wt list` 1 s).
 //! Every request goes to a local proxy stub, so nothing leaves the host.
@@ -9,7 +10,9 @@ mod perf_support;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use perf_support::{MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf, stage_from_perf};
+use perf_support::{
+    HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf, stage_from_perf,
+};
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, origin_url, select_cached, unix_now};
 
@@ -189,4 +192,45 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh() {
         assert!(*pr < PR_DEADLINE, "a stale answer waits for no request, got {pr:?}");
     }
     assert!(stale_full < FULL_COMMAND_BOUND, "full wt list with a stale answer {stale_full:.2?}");
+}
+
+/// A stale live head launches the worker and never waits for its request:
+/// every sample's `remote select` stage (live-head selection plus the launch)
+/// stays under the foreground request deadline while `origin` holds the
+/// worker's `ls-remote`. The deterministic no-wait proof is
+/// `list_prs::a_missing_or_stale_live_head_never_holds_up_the_listing`.
+#[test]
+#[serial]
+fn perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh() {
+    let origin = HoldingOrigin::new();
+    let fixture = MixedFixture::new().with_origin(&origin.url());
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    fixture.seed_empty_pr_store(Duration::ZERO);
+    fixture.warm_untracked_cache();
+
+    let mut samples = Vec::new();
+    for _ in 0..5 {
+        fixture.seed_remote_head_store(Duration::from_secs(12 * 60 + 5), Some("0123456789abcdef0123456789abcdef01234567"));
+        let t0 = Instant::now();
+        let output = fixture
+            .wt_command_direct()
+            .args(["list", "--perf"])
+            .output()
+            .expect("wt list --perf should run");
+        let full = t0.elapsed();
+        assert!(output.status.success(), "wt list --perf failed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        samples.push((stage_from_perf(&stderr, "remote select").expect("remote select stage"), full));
+    }
+    let blocked = origin.wait_for_requests(1, Duration::from_secs(20));
+    let released = fixture.wait_until_unlocked(Duration::from_secs(20), || origin.close_held());
+
+    eprintln!("stale live head, blocked refresh: (remote select, full) {samples:.2?}");
+    assert!(blocked, "a worker made the blocked request");
+    assert!(released, "the worker exited and released its locks");
+    for (select, _) in &samples {
+        assert!(*select < PR_DEADLINE, "remote select waits for no request, got {select:?}");
+    }
+    let best_full = samples.iter().map(|(_, full)| *full).min().expect("samples");
+    assert!(best_full < FULL_COMMAND_BOUND, "full wt list with a stale live head {best_full:.2?}");
 }
