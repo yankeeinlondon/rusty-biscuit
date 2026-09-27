@@ -63,7 +63,7 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 
 ## Discovery Rules
 
-When no explicit flag is given, Claudine searches for a standard `system-prompt.md` based on the launch CWD, not the composition source file path.
+When no explicit flag is given, Claudine searches for a standard `system-prompt.md` based on the launch CWD, not the composition source file path. Deriving a source context for a prompt in another repository does not move automatic `system-prompt.md` or non-interactive appendix discovery there.
 
 Inside a detected repo/monorepo the search order is:
 
@@ -110,6 +110,8 @@ Current preparation behavior:
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition
 - if the composed body is empty or whitespace-only, Claudine treats that as an explicit disable for the selected scope
+
+File resolution and shell execution deliberately use different roots. References authored inside a prompt resolve from that prompt's source context, including when it lives in a sibling repository or outside Git, while `::shell` directives in both the primary prompt and a file-backed appendix stay pinned to the launch root. The built-in appendix has no file source and composes without a file-resolution context.
 
 Important disable rule:
 

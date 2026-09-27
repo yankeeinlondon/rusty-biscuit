@@ -138,7 +138,7 @@ dynamic proxy traversal, so generated includes can still be missing. Sequences
 retain static preflight over the complete graph: create includes before
 starting the sequence, not in an earlier sequence task. See
 [composition](topics/composition.md#documents-that-declare-initialize) and
-[lifecycle](topics/lifecycle.md#lifecycle-properties).
+[lifecycle](topics/flow-control/lifecycle.md#lifecycle-properties).
 
 
 The composition pipeline pre-approves shell-expansion commands found in

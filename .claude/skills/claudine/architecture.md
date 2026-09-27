@@ -734,7 +734,7 @@ mutate only the state family it owns.
 
 ## Error Handling — the audit before you commit
 
-Full model in [error-architecture.md](error-architecture.md). The rules a change
+Full model in [error-architecture.md](topics/error-architecture.md). The rules a change
 to any error path must satisfy, and the guards that check them (`just test`,
 `just lint-transport`):
 

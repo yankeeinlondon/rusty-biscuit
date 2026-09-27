@@ -426,7 +426,7 @@ sensitivity`, and `Populated` states.
 3. **`docs/schemas/episodic-entry.schema.json`** (new). The
    authoritative JSON Schema for the `episodic.jsonl` entry shape.
 
-The existing `claudine/docs/topics/lifecycle.md` is the claudine
+The existing `claudine/docs/topics/flow-control/lifecycle.md` is the claudine
 *runtime* lifecycle (events / hooks); it is unrelated and stays where
 it is.
 

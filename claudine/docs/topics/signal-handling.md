@@ -381,14 +381,14 @@ The console handler must be a plain `extern "system" fn` (no captured
 state), so the press counter it consults is a process-global atomic reset
 at the top of each `windows_wait_loop` call.
 
-> **Verification gap (all-OS rule).** The development host is macOS. The
-> Windows path is **cross-compile-checked**
-> (`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --features terminal-tests --test level3`).
-> The package now exposes a Windows-host runtime gate,
-> `just test-windows-ctrl-c`, and the path-filtered CI workflow
-> `.github/workflows/claudine-windows-ctrl-c.yml` runs the same ignored
-> console-control test by exact name. Full parity is not claimed until the
-> Windows-host gate has a recorded green run.
+> **Verification (all-OS rule).** The development host is macOS, so the Windows
+> path is not exercised locally. It is exercised by CI: since 2026-07-27 the
+> Windows Ctrl+C tests are ordinary `#[cfg(windows)]` tests
+> (`wrap_ctrl_c_windows.rs`, `sequence_ctrl_c_windows.rs`) that run on the
+> Windows leg of the normal matrix — no tier prefix, no `#[ignore]`, no bespoke
+> workflow. Before that they were `level3_`/`level2_`-prefixed and unreachable by
+> every canonical recipe, which is why a one-off workflow existed; it never
+> passed and has been removed.
 
 #### Verification record
 
@@ -400,7 +400,7 @@ at the top of each `windows_wait_loop` call.
 | Unix — multiplexer Ctrl+C terminates even with a wall-clock `timeout` configured | **Verified on macOS** | `level2_wrap_ctrl_c_tmux.rs::level2_ctrl_c_terminates_wrapped_child_with_timeout_configured` (L2 multiplexer injection) |
 | Unix — visible per-press feedback line renders in a real terminal | **Verified on macOS** | `level2_interrupt_feedback_capture.rs::level2_interrupt_feedback_renders_in_tmux` (L2, asserts the `interrupt received` substring in `frame.raw`) |
 | Unix — process-signal SIGINT during prep exits 130 with notice | **Verified on macOS** | `wrap_sigint.rs::slow_compose_sigint_during_prep_exits_130_with_notice` (lower-level, retained) |
-| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Real automated test with path-filtered Windows CI plus manual Windows-host gate; cross-compile-checked for `x86_64-pc-windows-gnu` on macOS; no recorded green Windows runtime run in this repo yet** | `level3_wrap_ctrl_c.rs::windows_ctrl_c_verification_record` (`#[cfg(windows)]`, `#[ignore]`d — needs an attached console); gates: `.github/workflows/claudine-windows-ctrl-c.yml`, `just test-windows-ctrl-c` |
+| Windows — console Ctrl+Break to the wrapped child's process group terminates the Job-Object child | **Verified on `windows-latest`** — CI run `34173378609` (`main` @ `444213eb5`, 2026-09-08) ran it green in 1.25 s, alongside `sequence_ctrl_c_windows` (4.02 s); cross-compile-checked for `x86_64-pc-windows-gnu` on macOS via `just check-windows` | `wrap_ctrl_c_windows.rs::ctrl_c_terminates_wrapped_child_on_windows` (`#[cfg(windows)]`, ordinary L1); runs on the Windows leg of `just test` |
 
 Ctrl+C termination is verified at two distinct injection levels. The genuine
 **L3** proof (`level3_wrap_ctrl_c.rs`) synthesises a real OS Ctrl+C chord with
@@ -436,9 +436,9 @@ with `just test-l2`.
 Honest scope: the macOS host validates the Unix arm of the unified wait loop.
 The Windows arm (`windows_wait_loop`) shares the loop's structure but uses a
 distinct `#[cfg(not(unix))]` implementation. Its parity is exercised by
-`windows_ctrl_c_verification_record` — a **real automated integration test**
-(not a panic placeholder), mirroring the Unix L3 proof: it builds a
-Windows-executable fake `opencode` provider (`opencode.cmd` on `PATH`), spawns
+`ctrl_c_terminates_wrapped_child_on_windows` — a **real automated integration test**
+(not a panic placeholder), mirroring the Unix L3 proof: it compiles a native
+fake `opencode` provider (`opencode.exe` on `PATH`), spawns
 the real `claudine compose --opencode` wrapper in its own process group
 (`CREATE_NEW_PROCESS_GROUP`), polls for the wrapped child's readiness marker,
 injects `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)`, and asserts the
@@ -446,25 +446,19 @@ wrapper child terminates within 15s. Ctrl+Break (not Ctrl+C) is used because
 only `CTRL_BREAK_EVENT` can target a specific process group; the child runs in
 its own group so the event never reaches the test runner.
 
-On the macOS dev host this test is **cross-compile-checked** for
-`x86_64-pc-windows-gnu`
-(`cargo check --target x86_64-pc-windows-gnu -p claudine-cli --features terminal-tests --test level3`)
-but its **runtime pass has not yet been recorded**. The test stays `#[ignore]`d
-in normal suites because it needs a Windows host with an attached console. The
-path-filtered CI gate runs it for relevant PRs and pushes to `main`; run the
-package-level Windows gate manually to reproduce or close the gap outside CI:
+On the macOS dev host this test is only **cross-compile-checked** (`just
+check-windows`); its runtime pass comes from CI's Windows leg, which runs it as
+part of `just test` like any other test. To reproduce on a Windows host:
 
 ```text
-just test-windows-ctrl-c
+just test
 ```
 
 Expected environment: Windows runner/host, stable Rust toolchain, repository
 checkout, and an attached console for `GenerateConsoleCtrlEvent`. A passing run
-means the fake `opencode.cmd` reached its loop, Claudine delivered
+means the fake `opencode.exe` reached its loop, Claudine delivered
 `CTRL_BREAK_EVENT` to the wrapper child's process group, the Windows wait loop
-terminated the Job Object tree, and the wrapper process exited within 15s. Until
-that green run is recorded, the status is **Windows runtime-verification
-available, not Windows runtime-verified**.
+terminated the Job Object tree, and the wrapper process exited within 15s.
 
 ### Spawn × wait × timeout matrix
 
@@ -527,7 +521,7 @@ pattern the user-interrupt guard uses.
 
 - [Timeouts](timeouts.md) — wall-clock and stream-silence rules that
   drive wrapper-initiated SIGTERM / SIGKILL.
-- [Lifecycle](lifecycle.md) — the `Start` / `Success` / `Blocked` /
+- [Lifecycle](flow-control/lifecycle.md) — the `Start` / `Success` / `Blocked` /
   `Failure` signals whose post-execute side effects are gated on the
   user-interrupt flag.
 - [Execution Flow](execution-flow.md) — where the compose interrupt guard

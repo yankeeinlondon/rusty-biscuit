@@ -128,7 +128,7 @@ served by the invocation's refresh capability: a key that capability does not
 hold renders `null` with a `PartialRuntimeCapture` diagnostic rather than
 probing the host. Their primary use is inside lifecycle events, where state may
 have changed since launch — see
-[Lifecycle — Binding Time: Early vs Late](../lifecycle.md#binding-time-early-vs-late)
+[Lifecycle — Binding Time: Early vs Late](../flow-control/lifecycle.md#binding-time-early-vs-late)
 and
 [Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context).
 

@@ -36,7 +36,7 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **{{ as_of }}**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **{{ as_of }}**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 

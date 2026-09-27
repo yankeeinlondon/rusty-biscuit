@@ -49,7 +49,7 @@ Webhook URLs embed a secret token in the path, so they are never surfaced raw:
 Message delivery is invoked two ways, both routing through the same `send` layer:
 
 - **Lifecycle actions** — the `message` communication channel in a composition
-  document's lifecycle stacks. See [Lifecycle](lifecycle.md).
+  document's lifecycle stacks. See [Lifecycle](flow-control/lifecycle.md).
 - **Hook actions** — the `message` action fired on a normalized event (see the
   Supported Actions reference). When running inside `claudine handle`, messenger
   actions carry a hard **3-second timeout** by default (overridable via
