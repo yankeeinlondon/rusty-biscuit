@@ -27,7 +27,7 @@ fixture and a row here in the same change.
 | npm `npm-shrinkwrap.json`, else `package-lock.json` | `lockfileVersion` `2`, `3` | npm 11.6.4 (`npm-11.6.4/workspace`, `workspace-lockfile-v2`, `shrinkwrap`) | non-`node_modules/` keys of `packages` (other than `""`) matched by the locked declarations `packages[""].workspaces`; `link: true` records whose `resolved` matches corroborate | `1` (npm 6.14.18, `npm-6.14.18/single-project`: no `packages` object) and any other value | none needed |
 | Yarn Berry `yarn.lock` | `__metadata.version` `6`, `8`, `10` | Yarn 3.8.7 (`yarn-3.8.7/workspace`), 4.0.2 (`yarn-4.0.2/workspace`), 4.18.1 (`yarn-4.18.1/workspace`) | every top-level entry's `resolution` of the form `<name>@workspace:<path>`, split at the last `@workspace:`; `<path>` `.` is the root | any other `__metadata.version` | Yarn Classic: the header line `# yarn lockfile v1` (Yarn 1.22.22, `yarn-1.22.22/workspace`) → `unsupported_version`, checked before parsing |
 | Bun `bun.lock`, else `bun.lockb` | `bun.lock` `lockfileVersion` `1` (`configVersion` optional) | Bun 1.2.0 (`bun-1.2.0/workspace`, no `configVersion`), Bun 1.3.3 (`bun-1.3.3/workspace`) | keys of top-level `workspaces`; `""` is the root | any other `lockfileVersion` (for example `0` from pre-1.2 builds) | `bun.lockb` (`bun-1.3.3/workspace-binary`) is selected by filename, never read, and reports `unverifiable` + `no_membership_data` |
-| uv `uv.lock` | `version` `1` with `revision` `3` | uv 0.9.5 (`uv-0.9.5/workspace`, `virtual-root`, `root-only-workspace`, `single-project`) | `[manifest].members` names, each mapped through that package's `source.editable` or `source.virtual` path; path `.` is the root. No `[manifest]` = the root is the only member | any other `version`, or `version` `1` with a `revision` other than `3` | none needed |
+| uv `uv.lock` | `version` `1` with `revision` `3` | uv 0.9.5 (`uv-0.9.5/workspace`, `virtual-root`, `root-only-workspace`, `single-project`) | `[manifest].members` names, each mapped through that package's `source.editable` or `source.virtual` path; path `.` is the root. No `[manifest]` = the root is the only member, but only when the root (`.`) is the sole `editable`, `virtual`, or `directory` package; otherwise `unverifiable` with `no_membership_data`. A `[manifest]` without `members` is `parse_failed` | any other `version`, or `version` `1` with a `revision` other than `3` | none needed |
 | Cargo `Cargo.lock` | `version` `3`, `4`; v2 by signature | cargo 1.98.1 (`cargo-1.98.1/workspace`, v4), cargo 1.77.2 (`cargo-1.77.2/workspace-v3`), cargo 1.52.0 (`cargo-1.52.0/workspace-v2`) | none: `[[package]]` entries with `name`, `version`, and no `source` (ruling R1: `members_present` / `members_missing`, never `match` / `mismatch`) | any other numeric `version`; v1 | v2: no top-level `version` key **and** no `[metadata]` table (registry entries carry an inline `checksum`). v1: no `version` key **and** a `[metadata]` table → `unsupported_version` (no fixture exists, so v1 is not accepted) |
 | Rush (pnpm layout) `common/config/rush/pnpm-lock.yaml` | as pnpm | Rush 5.179.0 running pnpm 9.15.9 (`rush-5.179.0/pnpm-workspace`) | pnpm `importers` keys resolved against `<repo>/common/temp`; `.` is the synthetic `common/temp` project and is excluded (`../../packages/alpha` → `packages/alpha`) | as pnpm | not a lockfile version: the layout is classified from `rush.json` (`pnpmVersion`), `pnpm-config.json` (`useWorkspaces`), `subspaces.json` (`subspacesEnabled`), and `variants/` per ruling R3 |
 
@@ -50,7 +50,7 @@ variant changes only the lockfile, as described in its `PROVENANCE.md`.
 | `bun-1.2.0/workspace`, `bun-1.3.3/workspace` | `match` | `null` | `[]` | `[]` |
 | `bun-1.3.3/workspace-edited-comments-trailing-commas` | `match` | `null` | `[]` | `[]` |
 | `uv-0.9.5/workspace`, `uv-0.9.5/virtual-root` | `match` | `null` | `[]` | `[]` |
-| `uv-0.9.5/root-only-workspace` | `match` (both sets empty) at the parser and engine level; through detection there is no `UvWorkspace` layer, because the uv detector requires a non-empty `members` (Phase 2 finding) | `null` | `[]` | `[]` |
+| `uv-0.9.5/root-only-workspace` | `match` (both sets empty): the declared `members = []` gets a root-only `UvWorkspace` layer, and the repository is still not a monorepo | `null` | `[]` | `[]` |
 | `cargo-1.98.1/workspace`, `cargo-1.77.2/workspace-v3`, `cargo-1.52.0/workspace-v2` | `members_present` | `subset_only` | `[]` | `[]` |
 | `rush-5.179.0/pnpm-workspace` | `match` | `null` | `[]` | `[]` |
 | `npm-6.14.18/single-project` | `unverifiable` | `unsupported_version` | `[]` | `[]` |
@@ -65,7 +65,7 @@ variant changes only the lockfile, as described in its `PROVENANCE.md`.
 | `*-edited-duplicate-key` (pnpm, npm, Yarn, Bun) | `unreadable` | `parse_failed` | `[]` | `[]` |
 | `*-edited-unknown-version` (all six formats) | `unverifiable` (never `mismatch`) | `unsupported_version` | `[]` | `[]` |
 | `*-edited-missing-required-field` for pnpm, npm, Yarn, Bun, Cargo | `unreadable` | `parse_failed` | `[]` | `[]` |
-| `uv-0.9.5/workspace-edited-missing-required-field` | `mismatch` (an absent `[manifest]` means "root only") | `null` | `[]` | `[".tools/hidden", "packages/alpha", "packages/beta"]` |
+| `uv-0.9.5/workspace-edited-missing-required-field` | `unverifiable` (no `[manifest]`, and local packages other than the root make root-only membership unestablished) | `no_membership_data` | `[]` | `[]` |
 
 Notes on the table:
 
@@ -112,10 +112,10 @@ produce no entry.
 
 ### Detection notes from Phase 3
 
-- **Composer:** Sniff recognizes no PHP-only package, so a project with only
-  `composer.json` yields no repository result, and no observation. The L1 test
-  adds a `package.json` to the Composer fixture (a common PHP-plus-JS
-  layout).
+- **Composer:** a project with only `composer.json` is a single root package
+  (ecosystem `unknown`, named by `composer.json`), so the unmodified fixture
+  yields the observation. Review 3 closed the gap in which such a project had
+  no repository result.
 - **Bazel:** the Bazel detector needs leaf `BUILD` packages, which the
   `bazel-8.4.2/bzlmod` fixture does not ship. The L1 test adds two empty
   `BUILD.bazel` files to its temporary copy. A Bazel root without
@@ -128,10 +128,16 @@ produce no entry.
   install. Without `pnpm-config.json`, the legacy `rush.json`
   `pnpmOptions.useWorkspaces` decides.
 - **npm without locked declarations:** a root record with no `workspaces` is
-  `ambiguous_membership` when the lockfile records any local package path
-  (it could be a workspace or a `file:` dependency), and an empty member set
-  otherwise. A declaration that is not a valid glob is also
-  `ambiguous_membership`.
+  `ambiguous_membership` when the lockfile records any local package path or
+  `link: true` target (it could be a workspace or a `file:` dependency), and
+  `no_membership_data` otherwise: every npm 11.6.4 workspace fixture copies
+  the declarations into the root record, so their absence records no member
+  set rather than an empty one. A present `workspaces: []` is a recorded empty
+  set. A declaration that is not a valid glob is also `ambiguous_membership`.
+  An explicit `workspaces: null` (or `link: null` on a record, or
+  `resolved: null` on a `link: true` record) is a mistyped membership field,
+  not an omitted one: `unreadable` + `parse_failed`. `resolved: null` on any
+  other record is not membership evidence and is ignored.
 
 ## JSONC parser choice (spike S2)
 
