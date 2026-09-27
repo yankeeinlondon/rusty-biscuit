@@ -72,19 +72,24 @@ inventing a second Sniff increment.
 
 ### Lockfile corroboration is a request option
 
-`RepoRequest::lockfile_provenance` decides whether each workspace layer is
-corroborated against its `Cargo.lock`, `pnpm-lock.yaml`, or `uv.lock`.
-`structure()` and `focused(..)` decline it, `full()` requests it, and
-`with_lockfile_provenance(bool)` overrides either. A serialized request without
-the field deserializes as `true`. Declining keeps provenance manifest-derived
-and `lockfile_match` `None`; it does not stop a dependency request from
-reading `Cargo.lock` for versions.
+`RepoRequest::lockfile_provenance` decides whether each workspace layer's
+lockfile is read for corroboration. `structure()` and `focused(..)` decline
+it, `full()` requests it, and `with_lockfile_provenance(bool)` overrides
+either. A serialized request without the field deserializes as `true`.
+Declining keeps provenance manifest-derived and reports a present lockfile as
+`not_requested`; it does not stop a dependency request from reading
+`Cargo.lock` for versions, through the same request cache.
 
-`REPO_LOCKFILE_READS` (`filesystem.repo.lockfile_reads`) counts read
-*attempts*, including an absent lockfile; `REPO_LOCKFILE_PARSES` counts only
-reads that succeeded. A structure request that reads no lockfile shows neither
-counter. Both lockfile read sites (`read_counted_lockfile` and
-`CargoLockVersions::parse`) must increment both counters.
+Every layer's lockfile candidates are probed even when corroboration is
+declined. `REPO_LOCKFILE_PROBES` (`filesystem.repo.lockfile_probes`) counts
+unique probed lockfile paths through `ManifestStore::lockfile_presence`,
+including the Yarn and Bun detectors' marker probes, which share the cache.
+Reads are gated on presence: `REPO_LOCKFILE_READS` counts content-read
+attempts of present files only (a directory in place of the file still counts
+one), and `REPO_LOCKFILE_PARSES` counts only reads that succeeded. A structure
+request that reads no lockfile shows neither counter. The only lockfile read
+site is `read_counted_lockfile`, behind `ManifestStore::lockfile` and
+`ManifestStore::cargo_lock`.
 
 ## Known baseline boundaries
 

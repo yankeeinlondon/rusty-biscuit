@@ -82,6 +82,11 @@ plans.
 
 `RepoRequest::with_lockfile_provenance(bool)` sets layer lockfile
 corroboration on any tier; a serialized request without the field keeps it.
+Every `MonorepoLayer` carries a required `lockfile: LockfileObservation`
+(`filesystem/repo/lockfile/`, which replaced `lockfile_match`). Its candidates
+are always probed through `ManifestStore::lockfile_presence`, and contents
+are read only when corroboration is on. Only an exact `match` upgrades
+provenance; Cargo reports `members_present`/`members_missing`.
 `GitMetadataRequest` narrows legacy coarse requests; it never widens them.
 `metadata: None` derives legacy behavior and is required for serialized-plan
 compatibility.
