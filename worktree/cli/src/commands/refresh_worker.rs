@@ -119,7 +119,7 @@ mod tests {
 
     use worktree::live_remote::RemoteHeads;
     use worktree::pull_requests::{CachedPrs, OpenPullRequest, RefreshOutcome, select_cached};
-    use worktree::remote_head::{CachedRemoteHead, select_cached_head};
+    use worktree::remote_head::{CachedRemoteHead, PrFailure, select_cached_head};
 
     use super::*;
 
@@ -224,11 +224,11 @@ mod tests {
                 _ => Some("owner/repo".into()),
             }
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
             match self {
                 Pr::Answer => Ok(Vec::new()),
-                Pr::Fail => Err("401 unauthorized".into()),
-                Pr::Unsupported => Err("unsupported provider".into()),
+                Pr::Fail => Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }),
+                Pr::Unsupported => Err(PrFailure::Other),
             }
         }
     }
@@ -344,10 +344,10 @@ mod tests {
             fn source_repo(&self) -> Option<String> {
                 Some("owner/repo".into())
             }
-            fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
                 let _ = self.entered.send(());
                 let _ = self.released.lock().unwrap().recv_timeout(WAIT);
-                Err("released".into())
+                Err(PrFailure::Other)
             }
         }
 

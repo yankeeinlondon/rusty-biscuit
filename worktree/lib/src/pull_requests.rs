@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use crate::cache::{atomic_write, repo_cache_file, try_lock_sidecar};
 use crate::error::WorktreeError;
 use crate::git::git_from;
+use crate::remote_head::PrFailure;
+use sniff::remote::blocking::PrUnavailable;
 
 pub const PR_STORE_FORMAT_VERSION: u32 = 2;
 
@@ -50,7 +52,7 @@ pub trait OpenPrSource {
     fn source_repo(&self) -> Option<String>;
     /// Every open PR, or why there is no answer. Never an empty list for a
     /// failure.
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, String>;
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure>;
 }
 
 /// [`OpenPrSource`] through sniff's blocking provider client.
@@ -65,9 +67,9 @@ impl OpenPrSource for SniffOpenPrSource {
         sniff::filesystem::git::repository_link(&self.remote_url).map(|link| link.owner_repo)
     }
 
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
         let summaries = sniff::remote::blocking::open_pull_requests(&self.remote_url, self.deadline)
-            .map_err(|reason| reason.to_string())?;
+            .map_err(|reason| PrFailure::from_unavailable(&reason))?;
         Ok(summaries
             .into_iter()
             .filter_map(|summary| {
@@ -80,6 +82,24 @@ impl OpenPrSource for SniffOpenPrSource {
                 })
             })
             .collect())
+    }
+}
+
+impl PrFailure {
+    /// The confirmed credentials conditions sniff establishes, by kind; every
+    /// other reason (a timeout, a network failure, an unsupported remote) is
+    /// [`PrFailure::Other`], since it names nothing a key would fix.
+    pub fn from_unavailable(reason: &PrUnavailable) -> Self {
+        match reason {
+            PrUnavailable::CredentialsRequired { .. } => Self::CredentialsRequired,
+            PrUnavailable::CredentialsRejected { key } => Self::CredentialsRejected { key: Some(key.clone()) },
+            PrUnavailable::CredentialsInsufficient { key } => Self::CredentialsInsufficient { key: Some(key.clone()) },
+            PrUnavailable::RateLimited { authenticated, key } => {
+                Self::RateLimited { authenticated: *authenticated, key: key.clone() }
+            }
+            PrUnavailable::NotFoundOrNotPermitted { .. } => Self::NotFoundOrNotPermitted,
+            _ => Self::Other,
+        }
     }
 }
 
@@ -205,22 +225,23 @@ pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs 
 /// Makes the request for `origin` and stores a successful answer, stamped
 /// `now`, while `repo_root`'s `origin` still matches.
 ///
-/// `None` when the request failed or `origin` changed during it; the store is
-/// then untouched. An answer for a previous `origin` is never returned, so
-/// this run cannot show badges from another repository.
+/// `Err` is why the request failed and `Ok(None)` means `origin` changed
+/// during it; either way the store is untouched. An answer for a previous
+/// `origin` is never returned, so this run cannot show badges from another
+/// repository.
 pub fn fetch_and_publish(
     store: &Path,
     repo_root: &Path,
     origin: &str,
     now: u64,
     source: &dyn OpenPrSource,
-) -> Option<PrListing> {
-    let file = fetch(origin, now, source).ok()?;
+) -> Result<Option<PrListing>, PrFailure> {
+    let file = fetch(origin, now, source)?;
     if origin_url(repo_root).as_deref() != Some(origin) {
-        return None;
+        return Ok(None);
     }
     let _ = save(store, &file);
-    Some(listing(&file))
+    Ok(Some(listing(&file)))
 }
 
 /// Why a [`refresh`] ended.
@@ -309,7 +330,7 @@ pub fn unix_now() -> u64 {
         .unwrap_or_default()
 }
 
-fn fetch(origin: &str, fetched_at: u64, source: &dyn OpenPrSource) -> Result<StoreFile, String> {
+fn fetch(origin: &str, fetched_at: u64, source: &dyn OpenPrSource) -> Result<StoreFile, PrFailure> {
     Ok(StoreFile {
         format_version: PR_STORE_FORMAT_VERSION,
         origin_digest: origin_digest(origin),
@@ -385,7 +406,7 @@ mod tests {
 
     /// A scripted source that counts its requests and can act mid-request.
     struct Stub {
-        answer: Result<Vec<OpenPullRequest>, String>,
+        answer: Result<Vec<OpenPullRequest>, PrFailure>,
         calls: Rc<Cell<usize>>,
         during: Option<Box<dyn Fn()>>,
     }
@@ -394,7 +415,7 @@ mod tests {
         fn source_repo(&self) -> Option<String> {
             Some("o/r".to_string())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
             self.calls.set(self.calls.get() + 1);
             if let Some(during) = &self.during {
                 during();
@@ -403,7 +424,7 @@ mod tests {
         }
     }
 
-    fn stub(answer: Result<Vec<OpenPullRequest>, String>) -> (Rc<Cell<usize>>, Stub) {
+    fn stub(answer: Result<Vec<OpenPullRequest>, PrFailure>) -> (Rc<Cell<usize>>, Stub) {
         let calls = Rc::new(Cell::new(0));
         (Rc::clone(&calls), Stub { answer, calls, during: None })
     }
@@ -424,7 +445,9 @@ mod tests {
     /// Stores `prs` for `origin`, fetched at `at`.
     fn seed(store: &Path, root: &Path, origin: &str, at: u64, prs: Vec<OpenPullRequest>) {
         let (_, source) = stub(Ok(prs));
-        fetch_and_publish(store, root, origin, at, &source).expect("seeding fetch succeeds");
+        fetch_and_publish(store, root, origin, at, &source)
+            .expect("seeding fetch succeeds")
+            .expect("origin is unchanged");
     }
 
     fn numbers(listing: &PrListing) -> Vec<u64> {
@@ -544,16 +567,66 @@ mod tests {
     #[test]
     fn a_failed_foreground_request_leaves_the_store_untouched() {
         let (_dir, root, store) = repo(Some(ORIGIN));
-        let (calls, source) = stub(Err("timeout".into()));
-        assert_eq!(fetch_and_publish(&store, &root, ORIGIN, NOW, &source), None);
+        let (calls, source) = stub(Err(PrFailure::Other));
+        assert_eq!(fetch_and_publish(&store, &root, ORIGIN, NOW, &source), Err(PrFailure::Other));
         assert_eq!(calls.get(), 1);
         assert!(!store.exists(), "an unavailable answer must never be cached as an empty list");
 
         seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
         let before = fs::read(&store).unwrap();
-        let (_, source) = stub(Err("provider denied the query: 401".into()));
-        assert_eq!(fetch_and_publish(&store, &root, ORIGIN, NOW + 600, &source), None);
+        let rejected = PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) };
+        let (_, source) = stub(Err(rejected.clone()));
+        assert_eq!(fetch_and_publish(&store, &root, ORIGIN, NOW + 600, &source), Err(rejected));
         assert_eq!(fs::read(&store).unwrap(), before);
+    }
+
+    #[test]
+    fn every_sniff_reason_maps_to_its_credentials_condition_or_other() {
+        let key = || "GH_TOKEN".to_string();
+        let cases = [
+            (PrUnavailable::CredentialsRequired { key: None }, PrFailure::CredentialsRequired),
+            (PrUnavailable::CredentialsRejected { key: key() }, PrFailure::CredentialsRejected { key: Some(key()) }),
+            (
+                PrUnavailable::CredentialsInsufficient { key: key() },
+                PrFailure::CredentialsInsufficient { key: Some(key()) },
+            ),
+            (
+                PrUnavailable::RateLimited { authenticated: false, key: None },
+                PrFailure::RateLimited { authenticated: false, key: None },
+            ),
+            (
+                PrUnavailable::RateLimited { authenticated: true, key: Some(key()) },
+                PrFailure::RateLimited { authenticated: true, key: Some(key()) },
+            ),
+            (PrUnavailable::NotFoundOrNotPermitted { message: "404".into() }, PrFailure::NotFoundOrNotPermitted),
+            (PrUnavailable::Timeout { deadline: Duration::from_millis(300) }, PrFailure::Other),
+            (PrUnavailable::Network { message: "refused".into() }, PrFailure::Other),
+            (PrUnavailable::Unsupported { message: "local path".into() }, PrFailure::Other),
+            (PrUnavailable::Other { message: "bad json".into() }, PrFailure::Other),
+        ];
+        for (reason, expected) in cases {
+            assert_eq!(PrFailure::from_unavailable(&reason), expected, "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn each_credentials_failure_reaches_the_foreground_caller_and_is_never_stored() {
+        let key = || Some("GITHUB_TOKEN".to_string());
+        for failure in [
+            PrFailure::CredentialsRequired,
+            PrFailure::CredentialsRejected { key: key() },
+            PrFailure::CredentialsInsufficient { key: key() },
+            PrFailure::RateLimited { authenticated: false, key: None },
+            PrFailure::RateLimited { authenticated: true, key: key() },
+            PrFailure::NotFoundOrNotPermitted,
+        ] {
+            let (_dir, root, store) = repo(Some(ORIGIN));
+            let (calls, source) = stub(Err(failure.clone()));
+            assert_eq!(fetch_and_publish(&store, &root, ORIGIN, NOW, &source), Err(failure.clone()));
+            assert_eq!(calls.get(), 1);
+            assert!(!store.exists(), "{failure:?} must never be stored");
+            assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "{failure:?}");
+        }
     }
 
     #[test]
@@ -565,7 +638,7 @@ mod tests {
 
         assert_eq!(
             fetch_and_publish(&store, &root, ORIGIN, NOW, &source),
-            None,
+            Ok(None),
             "this run must not show badges from the previous origin"
         );
         assert_eq!(calls.get(), 1);
@@ -676,12 +749,12 @@ mod tests {
         let (_dir, root, store) = repo(Some(ORIGIN));
         seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
         let before = fs::read(&store).unwrap();
-        for reason in ["offline", "provider denied the query: 401"] {
-            let (calls, source) = stub(Err(reason.into()));
+        for reason in [PrFailure::Other, PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }] {
+            let (calls, source) = stub(Err(reason.clone()));
             let (_, connect) = connector(source);
             assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::Failed);
             assert_eq!(calls.get(), 1);
-            assert_eq!(fs::read(&store).unwrap(), before, "{reason} must not replace the answer");
+            assert_eq!(fs::read(&store).unwrap(), before, "{reason:?} must not replace the answer");
         }
         let CachedPrs::Stale(listing) = select_cached(&store, Some(ORIGIN), NOW + 600) else {
             panic!("still the stale answer");

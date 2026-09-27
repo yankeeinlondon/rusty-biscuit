@@ -31,7 +31,7 @@ use worktree::live_remote::RemoteHeads;
 use worktree::pull_requests::{
     OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
-use worktree::remote_head::{refresh_remote_head, remote_head_lock_path, remote_head_store_path};
+use worktree::remote_head::{PrFailure, refresh_remote_head, remote_head_lock_path, remote_head_store_path};
 
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
@@ -436,8 +436,8 @@ impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
         None
     }
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
-        Err("the probe makes no request".into())
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+        Err(PrFailure::Other)
     }
 }
 

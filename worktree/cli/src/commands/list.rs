@@ -92,6 +92,8 @@ fn gather_remote(stores: Stores<'_>, main: &Path, default_branch: &str, seams: L
                 .as_deref()
                 .and_then(|origin| {
                     fetch_and_publish(stores.prs, main, origin, unix_now(), (seams.connect)(origin).as_ref())
+                        .ok()
+                        .flatten()
                 })
                 .unwrap_or_default();
             (listing, false)

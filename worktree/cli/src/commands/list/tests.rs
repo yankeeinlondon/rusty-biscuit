@@ -495,6 +495,7 @@ mod gather {
     use std::sync::Mutex;
 
     use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrListing, fetch_and_publish, origin_digest, unix_now};
+    use worktree::remote_head::PrFailure;
     use worktree::remote_head::CachedRemoteHead;
 
     use super::{recorder, run_git, temp_repo};
@@ -535,7 +536,7 @@ mod gather {
             .collect()
     }
 
-    struct Answer(Result<u64, String>);
+    struct Answer(Result<u64, PrFailure>);
 
     fn open_pr(number: u64) -> Vec<OpenPullRequest> {
         vec![OpenPullRequest {
@@ -551,7 +552,7 @@ mod gather {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
             record(Event::Fetch);
             self.0.clone().map(open_pr)
         }
@@ -564,7 +565,7 @@ mod gather {
         fn source_repo(&self) -> Option<String> {
             Some("owner/repo".into())
         }
-        fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
             Ok(open_pr(self.0))
         }
     }
@@ -576,7 +577,7 @@ mod gather {
 
     fn failing(_origin: &str) -> Box<dyn OpenPrSource> {
         record(Event::Connect);
-        Box::new(Answer(Err("401 unauthorized".into())))
+        Box::new(Answer(Err(PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) })))
     }
 
     fn counting_launch(main: &Path) {
@@ -612,7 +613,9 @@ mod gather {
 
         /// Stores PR `number` for the current origin, fetched `age` seconds ago.
         fn seed(&self, age: u64, number: u64) {
-            fetch_and_publish(&self.store, self.main(), ORIGIN, unix_now() - age, &Seed(number)).expect("seeded answer");
+            fetch_and_publish(&self.store, self.main(), ORIGIN, unix_now() - age, &Seed(number))
+                .expect("seeded answer")
+                .expect("origin is unchanged");
         }
 
         /// Stores a live head of `main` on the current origin, checked `age`
@@ -689,11 +692,13 @@ mod gather {
             fn source_repo(&self) -> Option<String> {
                 Some("owner/repo".into())
             }
-            fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
+            fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
                 Ok(Vec::new())
             }
         }
-        fetch_and_publish(&fixture.store, fixture.main(), ORIGIN, unix_now() - 120, &Empty).expect("seeded");
+        fetch_and_publish(&fixture.store, fixture.main(), ORIGIN, unix_now() - 120, &Empty)
+            .expect("seeded")
+            .expect("origin is unchanged");
         fixture.seed_head(10);
 
         let listing = fixture.gather_prs(answering);
