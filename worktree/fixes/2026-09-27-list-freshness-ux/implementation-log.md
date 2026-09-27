@@ -150,6 +150,131 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_5:
+    - worktree/cli/tests/perf_command_sla.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/default_target.rs
+    - .config/nextest.toml
+docs_updated_during_phase_5:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/bitbucket/types/mod.rs
+    - schematic/definitions/src/bitbucket/types/branches.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/gitea/types.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/github/types/releases.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/gitlab/types.rs
+    - schematic/definitions/src/gitlab/types/branches.rs
+    - schematic/definitions/src/gitlab/endpoints/mod.rs
+    - schematic/definitions/src/gitlab/endpoints/branches.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/gitlab.postman_collection.json
+    - sniff/lib/src/credentials.rs
+    - sniff/lib/src/filesystem/git/commit_links.rs
+    - sniff/lib/src/filesystem/git/mod.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/branch_head.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - biscuit-terminal/lib/src/components/spinner.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_update.rs
+    - worktree/lib/src/remote_update/tests.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/lib/src/fast_forward.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/remote_fixture/mod.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+    - worktree/cli/tests/snapshots/list_table__caption_every_row_in_every_comparison_state.snap
+    - worktree/cli/tests/snapshots/list_table__caption_reasons.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_timestamps.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+    - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+    - worktree/cli/tests/snapshots/list_table__output_order.snap
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+    - worktree/cli/tests/perf_command_sla.rs
+    - worktree/lib/src/default_target.rs
+    - .config/nextest.toml
+documentation:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - schematic/README.md
+    - schematic/definitions/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/spinner.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 packages:
     - schematic-definitions
     - schematic-schema
@@ -895,3 +1020,101 @@ Fewer tests broke than S4 predicted (12, not about 25), because Phase 3 had alre
 - A first Windows run with substring filters (`list_flags`, `list_remote_head`, …) selected only 110 tests, because nextest filters match test **names**, not binary names; the whole-package run above is the evidence.
 - `remote_fixture::UploadPackGate`'s `sh` script works under Git for Windows (the gate tests passed there).
 - Only `worktree/` changed in this phase, so the other three areas' gates were not rerun.
+
+## Phase 5
+
+Phase 5 closes the fix: the performance gates, the L2 styling and spinner proofs, the documentation, a drift pass, cross-OS runs, and the final gates. A subagent wrote the `list.md` and README changes; the orchestrator did everything else and reviewed that diff against the code.
+
+### Performance gates (Rule 19)
+
+- **1 s bound with a worker that answers at once.** `perf_command_sla::perf_full_command_non_image_meets_sla` previously ran on a fixture with **no `origin`**, so no worker ran at all and it measured the pre-fix path. It now uses `MixedFixture::with_local_origin()` (new; a bare copy beside `HOME`, fetched, so the check answers from local Git and finds nothing to fetch) and `wt_command_direct()`. Every run must print `main is in sync with origin/main (checked just now)`, so a run that skipped or outwaited the worker cannot pass.
+- **Held check and held fetch, ordinary listing.** The held check was already `perf_a_held_live_head_check_costs_the_listing_only_its_wait` (`HoldingOrigin`). New: `perf_a_held_fetch_costs_the_listing_only_its_wait` (`remote_fixture::Fixture` plus `UploadPackGate` holding run 1, the fetch): `remote wait` in [3 s, 3.3 s), full < 4 s, the row reads "pulling remote updates in the background", and, after `.output()` returned, the worker process still runs and `upload-pack` has started exactly twice (the no-join proof).
+- **`-r` and `--ff` against a held origin.** `perf_refresh_against_a_held_check_reports_within_the_check_deadline` (`HoldingOrigin`, `wt list -r`): elapsed in [10 s, 13 s), "origin didn't answer within 10 s". `perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline` (`UploadPackGate` on the fetch, `wt --ff`): elapsed in [60 s, 63 s), "fetch didn't finish within 60 s", `main` unmoved, two `upload-pack` runs. Both import the deadlines from the library (`REMOTE_HEAD_REFRESH_DEADLINE`, `FETCH_DEADLINE`), so a changed deadline changes the bound.
+- **nextest override (config change).** The 60 s test exceeded the default 30 s termination (`5s × 6`), so `.config/nextest.toml` gains one `[[profile.default.overrides]]` for exactly that test (`30s × 3`). The CI profile's global ceiling is already 90 s. `perf_` tests run only in `just test-perf` (serially), never in `just test`. `just ci-local --plan` classifies the file as configuration and schedules nothing for it.
+- `worktree/docs/performance-testing.md`: the PR and Live Remote Head sections rewritten for the always-launch/wait flow (the old ones described "listing makes one launch decision", `remote select`, and a test that no longer exists); a new "full-command contract" table (1 s local gather plus render; 3 s plus 1 s stalled; 10 s and 60 s for `-r`/`--ff`); a 2026-09-27 measurement table. `hash` frontmatter refreshed with `md hash`.
+
+Measured (`just -d worktree test-perf`, run alone, 26 passed):
+
+| Gate | Result |
+|---|---|
+| Worker answering at once, full `wt list` (best of 5) | 143.4 ms (1 s) |
+| Held check: `remote wait`, full (two listings) | 3.00 s, 3.11–3.13 s |
+| Held fetch: `remote wait`, full | 3.00 s, 3.10 s |
+| `-r`, held check | 10.19 s |
+| `--ff`, held fetch | 60.20 s |
+| Network down: cold / warm `list gather`, full | 22.1 ms / 12.1 ms / 161.4 ms |
+| PR request past its deadline: full | 886.7 ms (1 s + 300 ms) |
+| Fresh / stale answer, full; stale `pr gather` | 154.0 / 150.0 ms; 4.1–4.3 ms |
+
+### L2 (`level2_list_verbose.rs`)
+
+- **Styling as the spec rules it.** The plan's task reads "dim italic on the caption suffix, the hint, and a credentials warning". The spec makes only the caption suffix dim italic (§4); §5 and §6 are "one dim line", and the code renders them `<dim>` only. The tests assert the spec: suffix `dim && italic` (first and last word, across the wrap), the comparison word `behind` neither; warning and hint `dim && !italic`.
+- **Credentials warning, deterministic.** Per the Phase 4 message, a seeded `ApiNote` is overwritten by the run's own attempt, so the run's own worker must observe it. `DesignFixture::with_gitea_origin()` (new; `build` takes the origin) points at `FakeGitea`, whose `/branches/` 404 without a key plus the refused `ls-remote` fallback gives `NotVisible`. `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` asserts the exact Gitea line naming `GITEA_TOKEN`, that it is the row directly after the caption's last row and before the table, no hint (the worker finished), no `GITEA_TOKEN=`, no PR request, and no worker left.
+- **Spinner cleared, hint dim, deterministic.** A hanging HTTPS proxy races sniff's 3 s connect timeout against the 3 s wait (the Phase 4 message), so the check is held on plain HTTP instead: new `FakeGitea::hold_branch_heads()` holds branch-head requests until `release` (or drop). `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` uses the new `DesignFixture::start_in_pane` to see the pane **during** the wait (a spinner frame and "updating" must be visible, so the test cannot pass without a spinner), then asserts the finished pane has no frame glyph and no "updating", the caption starts its own row, the row is "still checking in the background", and the hint row after the legend is dim. It releases the hold and waits for the worker and the lock.
+- The pane now also sets `HTTP_PROXY` (to the same stand-in) and unsets `GITEA_TOKEN`, `FORGEJO_TOKEN`, and `CODEBERG_TOKEN`.
+- Run: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_list_verbose)'`: 11 of 11. tmux is headless; no window gained focus.
+
+### Documentation
+
+- `worktree/docs/cli/list.md` (subagent, reviewed): new "Checking origin" (API then `ls-remote`, 10 s; fetch only on variance with the **actual** `fetch_argv`, including `--no-recurse-submodules --refmap=`, 60 s; 3 s wait and spinner texts; gather after), the §4 table with the code's wording, reasons, last-known, missing refs; §5 table; §6 hint; closing notes (§9, `--ff` refusals, §8); the three flags and `~/.wt.json`. "never fetches" removed.
+- `worktree/README.md` `wt list`: listing checks and fetches, one-sentence caption, notes, flags.
+- `.claude/skills/worktree/SKILL.md`: already current from Phase 4 (store format 2, attempt and receipt, worker flow, wait/adopt, flags, fixtures). Added the new perf gates, `MixedFixture::with_local_origin`, `FakeGitea::hold_branch_heads`, `DesignFixture::with_gitea_origin`/`start_in_pane`, and the two new L2 tests.
+- No OS fact was learned in this phase (S3's were recorded in Phase 1 and the Windows loopback fact in Phase 4), so `.claude/skills/os/` is unchanged.
+- `docs/dependencies.md`: no crate was added on this branch (`git diff main -- '*Cargo.toml'` is empty); unchanged.
+
+### Drift and comment pass
+
+Reviewed the `//!`/`///` docs of `remote_head`, `live_remote`, `pull_requests`, `refresh_worker`, `list` (`gather_remote`, `remote_status`, `credential_line`, `fallback_notice`, `unfinished`), `list_table`, `remote_update`, and sniff `blocking` (`branch_head`, `branch_head_with`). Drift found, code taken as correct:
+
+- `worktree::remote_head` module doc said the store lets "the caption say whether that tracking ref still matched the remote and how long ago that was checked", the old two-sentence model. Rewritten: the worker fetches on variance, and the store lets the listing follow its own attempt and date the last answer when the attempt has none.
+- `worktree::default_target` module doc said "`wt` never fetches". Rewritten: `origin/<default>` is as of the last fetch, `wt list`'s own (only that ref, only on variance) or the user's.
+- `worktree/docs/performance-testing.md` described the removed launch decision, the `remote select` stage, and a deleted test; rewritten (above).
+- No other "never fetches" or "never waits" statement remains: `refresh_worker`'s "launches and never joins" is still true (the wait polls the store and `try_wait`, and never joins or kills).
+
+### Cross-OS validation
+
+| Host | Run | Result |
+|---|---|---|
+| native Windows (`build-win-native`) | `./scripts/cross-check.sh --os windows worktree-cli` | 367 of 367 (44 skipped) |
+| native Windows | `./scripts/cross-check.sh --os windows worktree` | 276 of 276 |
+| WSL2 (`build-win`, nextest archive) | `./scripts/cross-check.sh --os wsl worktree-cli` / `worktree` | 384 of 384 / 295 of 295 |
+| build-linux | `./scripts/cross-check.sh --os linux …` | **not run**: the same host defect as Phases 3 and 4. The standing clone's `target/release/deps/*.rmeta` are not writable, so nothing compiles. WSL2 stands in for Linux |
+
+The Windows runs cover the lock and polling (`wait` tests, `list_remote_head`, `list_flags`), `try_wait` on a detached child (`a_launched_process_reports_its_exit`, every listing test), `%USERPROFILE%` resolution (the `api_preference` lib test), and `LC_ALL=C` on Git for Windows (`fast_forward` and `live_remote` lib tests). No red result. The `perf_` tests were not run off macOS (`just test` and `cross-check` exclude them by design).
+
+### Requirement → test mapping (Phase 5 scope)
+
+| Requirement | Tests |
+|---|---|
+| Local gather plus render ≤ 1 s with an immediately answering worker | `perf_command_sla::perf_full_command_non_image_meets_sla` |
+| Held check: ≤ 3 s + 1 s, `.output()` returns while held | `perf_a_held_live_head_check_costs_the_listing_only_its_wait`; `list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline` |
+| Held fetch: ≤ 3 s + 1 s, `.output()` returns while held | `perf_a_held_fetch_costs_the_listing_only_its_wait`; `list_remote_head::a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_the_listing` |
+| `-r` against a held origin within the 10 s check deadline | `perf_refresh_against_a_held_check_reports_within_the_check_deadline` |
+| `--ff` against a held origin within the 60 s fetch deadline | `perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline` |
+| Caption suffix dim italic in a real terminal | `level2_list_styles_follow_the_design_in_tmux` |
+| §5 warning dim, directly beneath the caption | `level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux` |
+| §6 hint dim, after the legend, only while unfinished | `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` (shown), the credentials test (absent) |
+| Spinner drawn on a terminal and cleared before the caption | `level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux` |
+
+### Final gates (macOS)
+
+| Gate | Result |
+|---|---|
+| `just test` (worktree) | 678 passed, 26 skipped |
+| `just lint` (worktree) | pass |
+| `just test-l2` (worktree, `BISCUIT_TEST_REQUIRED_BACKENDS=tmux`) | 22 passed |
+| `just test-perf` (worktree) | 26 passed |
+| `just test` / `just lint` (schematic) | 1708 passed / pass |
+| `just test` / `just lint` (sniff) | 2872 passed / pass |
+| `just test` / `just lint` (biscuit-terminal) | 3324 passed / pass |
+| `just check-tier-coverage worktree` | nothing stranded |
+| Leaked workers after all runs (`pgrep -f internal-refresh`) | none |
+| `just ci-local --plan` | 36 execute cells; worktree-cli L2 on ubuntu and macOS, the Windows and WSL2 L2 cells an accepted gap; `.config/nextest.toml` schedules nothing |
+
+No pre-existing failure was skipped, and nothing failed.
+
+### Checkpoint 5
+
+Every Definition of Done item is checked. The spec's lifecycle directory is untouched: the spec stays in `fixes/`, not `_completed/`. Its frontmatter is updated only as this phase's instructions require (`implemented`, `human_review`, `message_to_agent`).
+
+**Final state: implementation complete, ready for review.**

@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -151,6 +151,131 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_5:
+    - worktree/cli/tests/perf_command_sla.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/default_target.rs
+    - .config/nextest.toml
+docs_updated_during_phase_5:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/bitbucket/types/mod.rs
+    - schematic/definitions/src/bitbucket/types/branches.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/gitea/types.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/github/types/releases.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/gitlab/types.rs
+    - schematic/definitions/src/gitlab/types/branches.rs
+    - schematic/definitions/src/gitlab/endpoints/mod.rs
+    - schematic/definitions/src/gitlab/endpoints/branches.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/gitlab.postman_collection.json
+    - sniff/lib/src/credentials.rs
+    - sniff/lib/src/filesystem/git/commit_links.rs
+    - sniff/lib/src/filesystem/git/mod.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/branch_head.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - biscuit-terminal/lib/src/components/spinner.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_update.rs
+    - worktree/lib/src/remote_update/tests.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/lib/src/fast_forward.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/remote_fixture/mod.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+    - worktree/cli/tests/snapshots/list_table__caption_every_row_in_every_comparison_state.snap
+    - worktree/cli/tests/snapshots/list_table__caption_reasons.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_timestamps.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+    - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+    - worktree/cli/tests/snapshots/list_table__output_order.snap
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+    - worktree/cli/tests/perf_command_sla.rs
+    - worktree/lib/src/default_target.rs
+    - .config/nextest.toml
+documentation:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - schematic/README.md
+    - schematic/definitions/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/components/index.md
+    - biscuit-terminal/docs/components/spinner.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - worktree/docs/performance-testing.md
+completed_phase: 5
+implemented: true
 packages:
     - schematic-definitions
     - schematic-schema
@@ -207,13 +332,13 @@ Code locations this plan relies on (verified 2026-09-27):
 - [x] Every `wt list` with an `origin` and a resolvable default branch launches, or adopts, one worker attempt. It waits for a terminal outcome for at most 3 s, then gathers refs, counts, and the graph *after* the wait.
 - [x] The worker checks through the provider API (or `ls-remote` when the remote is unsupported, the API call fails, or the repository is ignored), all within one 10 s budget. It publishes the check before fetching, and fetches only `refs/remotes/origin/<default>` with the exact spec command and a 60 s deadline. `FETCH_HEAD`, tags, and other refs stay unchanged.
 - [x] A 404 is never treated as absence. Only a complete `ls-remote` answer that lacks the ref proves absence. No failure erases the last successful answer, and a fetch failure keeps the newly checked answer.
-- [ ] The caption is one sentence in every §4 row, with a dim italic suffix. §5 warnings, the §6 hint, the §9 suggestion, and the §8 notice appear only under their stated conditions and in their stated positions.
+- [x] The caption is one sentence in every §4 row, with a dim italic suffix. §5 warnings, the §6 hint, the §9 suggestion, and the §8 notice appear only under their stated conditions and in their stated positions.
 - [x] `-r`, `--ignore-api`, and `--ff` work as `wt …` and `wt list …`, are rejected with `create`, `go`, and `remove`, and appear in help and in the completion snapshot.
-- [ ] The spinner is never written when stderr is not a terminal, and its line is cleared before the caption is drawn (L2).
-- [ ] The performance contract holds: local gather plus render stays within 1 s, and ordinary listing with a stalled worker returns within 3 s plus render time. `worktree/docs/performance-testing.md` states the new full-command bound.
-- [ ] `just test` and `just lint` pass in `schematic/`, `sniff/`, `biscuit-terminal/`, and `worktree/`. `just test-l2` passes for `worktree/` on macOS. No detached worker outlives any test fixture.
-- [ ] The docs and skills listed in the spec's "Packages and documentation" section are updated.
-- [ ] The spec's frontmatter and lifecycle directory are left for the author. The terminal state is "implementation complete, ready for review".
+- [x] The spinner is never written when stderr is not a terminal, and its line is cleared before the caption is drawn (L2).
+- [x] The performance contract holds: local gather plus render stays within 1 s, and ordinary listing with a stalled worker returns within 3 s plus render time. `worktree/docs/performance-testing.md` states the new full-command bound.
+- [x] `just test` and `just lint` pass in `schematic/`, `sniff/`, `biscuit-terminal/`, and `worktree/`. `just test-l2` passes for `worktree/` on macOS. No detached worker outlives any test fixture.
+- [x] The docs and skills listed in the spec's "Packages and documentation" section are updated.
+- [x] The spec's frontmatter and lifecycle directory are left for the author. The terminal state is "implementation complete, ready for review".
 
 ## Phase 1 — Rulings, Spikes, and Baseline
 
@@ -614,16 +739,16 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 1 (parallel)
 
-- [ ] **Performance gates** (`cli/tests/perf_command_sla.rs`, `cli/tests/perf_pr_request.rs`, `worktree/docs/performance-testing.md`)
+- [x] **Performance gates** (`cli/tests/perf_command_sla.rs`, `cli/tests/perf_pr_request.rs`, `worktree/docs/performance-testing.md`)
     - Implement Rule 19:
         - local gather plus render within 1 s, with an immediately answering worker;
         - with the check held and, separately, with the fetch held, the command returns within 3 s plus the render bound, and the captured `.output()` returns while the worker is still held (the `list_prs` no-join pattern);
         - `-r` and `--ff` against a held origin finish or report within the 10 s and 60 s deadlines.
     - Record the measurements and the new full-command bound in `performance-testing.md`.
-- [ ] **L2** (`cli/tests/level2_list_verbose.rs`)
+- [x] **L2** (`cli/tests/level2_list_verbose.rs`)
     - Update the caption assertion. Assert dim italic on the caption suffix, the hint, and a credentials warning (seeded `ApiNote` store), using `styled_capture`. Assert that the spinner line is cleared before the caption: with a held origin, the captured pane contains no spinner glyph and no "updating" text once the command finishes.
     - Run with `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_list_verbose)'`. Windows must not gain focus.
-- [ ] **Documentation** (keep each file's existing style and US English)
+- [x] **Documentation** (keep each file's existing style and US English)
     - `worktree/docs/cli/list.md`: the §4 table, §5, §6, §8, §9, the flags, and `~/.wt.json`.
     - The `worktree/README.md` `wt list` description: listing now checks and fetches.
     - `.claude/skills/worktree/SKILL.md` `wt list` section:
@@ -634,15 +759,15 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Drift and comment pass**
+- [x] **Drift and comment pass**
     - Review the `///`/`//!` docs of every behavior-changed symbol:
         - `remote_head`, `live_remote`, `pull_requests`, `refresh_worker`, `list`, `list_table`, and sniff `blocking`;
         - drop statements that the listing never fetches or never waits.
     - Record detected drift and its resolution in the log.
-- [ ] **Cross-OS validation** (load the `os` skill)
+- [x] **Cross-OS validation** (load the `os` skill)
     - Run `just test` for `worktree` on Linux and on native Windows (`./scripts/cross-check.sh --os windows worktree-cli`, and `worktree`), covering the lock and polling, `try_wait` on a detached child, `%USERPROFILE%` resolution, and `LC_ALL=C` on Git for Windows.
     - Record the results in the log. A red result on one OS is fixed forward here, not deferred.
-- [ ] **Final gate**
+- [x] **Final gate**
     - Run `just test` and `just lint` in `schematic/`, `sniff/`, `biscuit-terminal/`, and `worktree/`, and `just test-l2` in `worktree/`. Review `just ci-local --plan`.
     - Tick the Definition of Done, and set the log's final state to "implementation complete, ready for review". Do not edit the spec's lifecycle, and do not move the directory.
 

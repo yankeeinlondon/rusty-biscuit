@@ -25,42 +25,28 @@ reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-27
 review_iterations: 0
 clarified: true
-implemented: false
+implemented: true
+implemented_by: claude/opus
 related:
     - 2026-09-26-stale-remote-caption
 human_review: false
 message_to_agent: |-
-    Phase 4 is done: every Phase 4 task is checked off. worktree `just test` (678 passed), `just lint`, and
-    `just test-l2` (20, macOS) pass; native Windows ran all of worktree-cli (one timing-dependent assertion
-    fixed and re-verified) and the fast_forward lib tests. Read "## Phase 4" in implementation-log.md for
-    APIs and deviations. What Phase 5 needs:
+    All five phases are implemented; the terminal state is "implementation complete, ready for review"
+    (see "## Phase 5" in implementation-log.md). Final gates on macOS: worktree `just test` 678 passed,
+    `just lint`, `just test-l2` 22 passed, `just test-perf` 26 passed; schematic, sniff, and
+    biscuit-terminal `just test` and `just lint` pass. Native Windows (worktree-cli 367/367, worktree
+    276/276) and WSL2 (384/384, 295/295) are green. build-linux could not compile (its standing clone's
+    target/release/deps/*.rmeta are not writable, a host problem also seen in Phases 3 and 4); WSL2
+    stands in for Linux.
 
-    - Perf gates: perf_pr_request.rs was migrated only far enough to stay green. Its tests are now
-      `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh` (renamed from `…blocked_refresh`) and
-      `perf_a_held_live_head_check_costs_the_listing_only_its_wait` (replaces `perf_remote_select_…`; the
-      perf stage `remote select` is now `remote wait`, plus a `fast-forward` stage). A held FETCH bound and
-      `-r`/`--ff` bounds are not written yet. performance-testing.md is untouched.
-    - sniff's provider client has a 3 s CONNECT timeout, equal to the listing's 3 s wait. Against a
-      hanging proxy both of the worker's requests fail at ~3 s, racing the wait. Use
-      `perf_support::ProxyStub::closing_after(hold)` (counts, then drops each connection) or
-      `list_prs::close_after`, never a plain hanging proxy, when a test needs a deterministic listing.
-      Real-world effect: with a black-holed API the ls-remote fallback starts at ~3 s, so an ordinary
-      listing reads "still checking".
-    - L2: only the caption WORDING in level2_list_verbose was updated. Still to add: dim italic on the
-      suffix, the hint, the credentials warning, and the spinner-cleared check. Caution: the foreground
-      shows a §5 line only from THIS run's attempt ApiNote (list::credential_line), so a seeded store's
-      ApiNote is overwritten by the run's own attempt and never shown. To get a warning in L2, make the
-      run's own worker observe it: FakeGitea currently answers every /branches/ request 404, which
-      without a key plus a refused ls-remote gives the NotVisible line; add a reply option if another
-      condition (401/429) is wanted.
-    - A local-origin hold for L2/perf exists: `remote_fixture::UploadPackGate::install(&fixture, n)`
-      (cli/tests/remote_fixture/mod.rs) holds the n-th upload-pack run (0 = the check, 1 = the fetch).
-    - Docs not yet updated (Phase 5): worktree/docs/cli/list.md still describes the old two-sentence
-      caption and "wt never fetches"; README; performance-testing.md; the spec's Rule 10 argv amendment.
-      The worktree skill's `wt list` section WAS updated in Phase 4.
-    - `--ff` is a visible alias: help lists it, clap's dynamic completion offers only `--fast-forward`.
-    - Unrelated working-tree changes under worktree/fixes/2026-09-27-graph-merged-branch/ are not from
-      this fix; leave them alone.
+    For a reviewer:
+    - Rule 19's perf gates are in perf_command_sla.rs and perf_pr_request.rs; they run only under
+      `just test-perf`. The `--ff` held-fetch gate takes 60 s by design and has a scoped 90 s nextest
+      override in .config/nextest.toml.
+    - The L2 tests assert the hint and the credentials warning as dim (not italic), as spec §5 and §6
+      say, rather than the plan task's looser "dim italic"; only the caption suffix is dim italic.
+    - Two doc-comment drifts were fixed (worktree::remote_head and worktree::default_target module docs).
+    - The spec directory was not moved; that is the author's step.
 ---
 
 # `wt list` should know, not guess, whether `origin/<default>` is current
