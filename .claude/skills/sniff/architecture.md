@@ -111,8 +111,9 @@ Committed-tree diffs have two paths:
   `<remote>/<name>` over *configured* remotes. Nothing is fetched.
 
 `git/commit_links.rs` is the only remote URL and containment authority.
-`repository_link` and `commit_url` build browser URLs. Do not add another URL
-parser; `remote::parse_remote_url` is feature-gated and unusable here. Linking
+`repository_link` and `commit_url` build browser URLs, and `remote_identity`
+exposes the raw `RemoteIdentity { scheme, host, port, path }` (host lowercased,
+no userinfo, no port policy). Do not add another URL parser; `remote::parse_remote_url` is feature-gated and unusable here. Linking
 rules:
 
 - Linking walks remote-tracking tips in `preferred_remote_order`. Within a

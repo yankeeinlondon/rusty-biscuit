@@ -50,6 +50,53 @@ pub struct CommitLink {
     pub commit_url: Option<String>,
 }
 
+/// Transport identity of a remote URL, with no port or scheme policy applied.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RemoteIdentity {
+    /// URL scheme; an SCP-style `user@host:path` remote is `ssh`.
+    pub scheme: String,
+    /// ASCII-lowercased host, without userinfo.
+    pub host: String,
+    /// The port the URL spells. `None` when it spells none, and for an
+    /// `http`/`https` URL that spells its scheme's default; an SCP-style
+    /// remote cannot spell one.
+    pub port: Option<u16>,
+    /// `namespace/repository`, or the repository alone, in the URL's case
+    /// and encoding, without a `.git` suffix or surrounding slashes.
+    pub path: String,
+}
+
+/// The [`RemoteIdentity`] of a configured remote URL, or `None` when it
+/// names no host or no repository (a local path or `file://` URL, for
+/// example).
+///
+/// ## Examples
+///
+/// ```
+/// use sniff::filesystem::git::remote_identity;
+///
+/// let identity = remote_identity("git@GitHub.com:Acme/Project.git").unwrap();
+/// assert_eq!(
+///     (identity.scheme.as_str(), identity.host.as_str(), identity.port),
+///     ("ssh", "github.com", None)
+/// );
+/// assert_eq!(identity.path, "Acme/Project");
+/// ```
+pub fn remote_identity(url: &str) -> Option<RemoteIdentity> {
+    let (endpoint, namespace, repository) = parse_remote_identity(url);
+    let endpoint = endpoint?;
+    let repository = repository.filter(|repository| !repository.is_empty())?;
+    Some(RemoteIdentity {
+        scheme: endpoint.scheme,
+        host: endpoint.host.to_ascii_lowercase(),
+        port: endpoint.port,
+        path: match namespace {
+            Some(namespace) => format!("{namespace}/{repository}"),
+            None => repository,
+        },
+    })
+}
+
 /// Parse a remote URL into its transport endpoint, namespace, and repository
 /// name.
 ///
@@ -831,6 +878,70 @@ mod tests {
                 testing::measure(|| link_commits(&gix_repo(&dir), &[]).unwrap());
             assert!(links.is_empty());
             assert_eq!(snapshot.get(counters::GIT_REF_WALKS), 0);
+        }
+    }
+
+    fn identity(url: &str) -> Option<(String, String, Option<u16>, String)> {
+        remote_identity(url)
+            .map(|identity| (identity.scheme, identity.host, identity.port, identity.path))
+    }
+
+    #[test]
+    fn remote_identity_drops_userinfo_and_lowercases_only_the_host() {
+        let expected = |scheme: &str, port| {
+            Some((
+                scheme.to_string(),
+                "github.com".to_string(),
+                port,
+                "Acme/Project".to_string(),
+            ))
+        };
+
+        assert_eq!(
+            identity("https://user:secret@GitHub.COM/Acme/Project.git/"),
+            expected("https", None)
+        );
+        assert_eq!(
+            identity("git@GitHub.com:/Acme/Project.git"),
+            expected("ssh", None)
+        );
+        assert_eq!(
+            identity("ssh://git@GitHub.com:22/Acme/Project"),
+            expected("ssh", Some(22))
+        );
+    }
+
+    #[test]
+    fn remote_identity_keeps_explicit_ports_and_nested_namespaces() {
+        assert_eq!(
+            identity("https://git.example:8443/group/sub/repo.git"),
+            Some((
+                "https".to_string(),
+                "git.example".to_string(),
+                Some(8443),
+                "group/sub/repo".to_string()
+            ))
+        );
+        // `url` drops a spelled scheme-default port for `https`.
+        assert_eq!(
+            identity("https://git.example:443/acme/repo").map(|identity| identity.2),
+            Some(None)
+        );
+        assert_eq!(
+            identity("https://git.example/repo").map(|identity| identity.3),
+            Some("repo".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_identity_is_none_without_a_host_or_repository() {
+        for url in [
+            "/srv/git/project.git",
+            "file:///srv/git/project.git",
+            "https://git.example/",
+            "not a url",
+        ] {
+            assert_eq!(identity(url), None, "{url}");
         }
     }
 }

@@ -22,7 +22,9 @@ pub use api::{
 pub use remote_observation::{branch_exists_on_remote_at, remote_vendor_at};
 pub use remote_resolver::{ApiFlavor, RemoteEndpoint, ResolvedRemote, resolve_remote_at};
 
-pub use commit_links::{CommitLink, RepositoryLink, commit_url, repository_link};
+pub use commit_links::{
+    CommitLink, RemoteIdentity, RepositoryLink, commit_url, remote_identity, repository_link,
+};
 pub use discovery::{
     DEFAULT_PATH_HISTORY_SCAN_LIMIT, DeltaKind, PathHistoryOptions, PathHistoryResult, detect_git,
     detect_git_with_request, get_commit_by_sha, get_commit_files, get_commit_files_with_cache,

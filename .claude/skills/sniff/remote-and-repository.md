@@ -153,3 +153,41 @@ contract. Both entry points page through the focused client's private
   fork once with `projects/{id}`; a 404 there leaves `source_repo: None`
   instead of failing the list.
 - Callers match a PR to a local branch on source repository *and* branch.
+
+### Blocking branch head
+
+`remote::blocking::branch_head` (and `_with`) returns `BranchHead { sha }`
+through the same `run_with_deadline` helper, from the focused client's
+`branch_head` request (GitHub singular `git/ref/heads/{branch}`, since the
+plural `refs` prefix-matches and can answer an array; Gitea/Forgejo
+`branches/{branch}`; GitLab `repository/branches/{branch}`; Bitbucket
+`refs/branches/{branch}`).
+
+- The branch goes through `path_segment`, so `/`, space, `?`, `#`, and
+  Unicode stay inside one segment. GitLab rejects a raw `/`.
+- It uses `NotFound::Error`: a 404 is `NotFoundOrNotPermitted`, never absence.
+- The SHA must be 40 or 64 lowercase hex digits, or the lookup is `Other`.
+- There is no anonymous retry on any blocking path (the schematic-backed
+  provider modules have one; the focused client does not). A rejected or
+  insufficient token is reported, and the caller decides on a fallback.
+
+### Blocking credentials classification
+
+`focused.rs` splits a 403 while the headers and body are still available;
+`blocking::classify` sees only the `SniffError` plus the `key` that
+`run_with_deadline` resolved from `FocusedProviderClient::credential_key`.
+
+- 429, or a 403 with `x-ratelimit-remaining: 0` or a "rate limit" body, is
+  `SniffError::RateLimited` → `RateLimited { authenticated, key }`.
+- A 403 with a token whose body names a missing permission or scope is
+  `RemoteForbidden` carrying `INSUFFICIENT_CREDENTIALS_MESSAGE` →
+  `CredentialsInsufficient { key }`. `classify` keys on that exact text; any
+  other 403 carries a different message and becomes `NotFoundOrNotPermitted`.
+- 401 is `CredentialsRequired { key: None }` without a token and
+  `CredentialsRejected { key }` with one.
+- `credentials::provider_token_variables` is the one list of candidate names:
+  `provider_token` sends the first set one and `credential_env` reports them in
+  that order. It differs from schematic's `env_auth` (GitHub order, and
+  Bitbucket's `BITBUCKET_TOKEN` versus username/app password).
+- No `PrUnavailable` message may carry a token: `client_for_url` never echoes
+  the remote URL, whose userinfo may hold one.
