@@ -1196,6 +1196,7 @@ fn expected_lockfile_structure_json() -> Value {
             "root_is_package": false,
             "packages": ["pkg-a/lib", "pkg-b/lib"],
         }],
+        "standalone_lockfiles": [],
     })
 }
 
