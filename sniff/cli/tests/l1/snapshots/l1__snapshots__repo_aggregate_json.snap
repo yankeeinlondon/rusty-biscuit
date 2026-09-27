@@ -302,6 +302,13 @@ expression: stable
     "monorepo_layers": [
       {
         "authority": "cargo-workspace",
+        "lockfile": {
+          "extra": [],
+          "missing": [],
+          "paths": [],
+          "reason": null,
+          "status": "absent"
+        },
         "orchestrators": [],
         "packages": [
           "area-a/alpha",

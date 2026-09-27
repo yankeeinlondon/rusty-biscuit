@@ -1024,8 +1024,10 @@ fn repo_structure_tier_json_is_json_only_with_a_lockfile_present() {
 }
 
 /// `repo structure` runs the full request, which keeps lockfile corroboration.
+/// A `Cargo.lock` holding every member yields subset evidence only, which
+/// never upgrades provenance (ruling R1 of `2026-09-26-lockfile-corroboration`).
 #[test]
-fn repo_structure_json_reports_lockfile_provenance_for_matching_lockfile() {
+fn repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile() {
     let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
     let json = sniff_json_at(&path, &["repo", "structure", "--json"]);
 
@@ -1034,8 +1036,18 @@ fn repo_structure_json_reports_lockfile_provenance_for_matching_lockfile() {
         .expect("monorepo_layers array");
     assert_eq!(layers.len(), 1, "{json}");
     assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
-    assert_eq!(layers[0]["provenance"], "lockfile", "{json}");
-    assert_eq!(layers[0]["lockfile_match"], true, "{json}");
+    assert_eq!(layers[0]["provenance"], "globbed", "{json}");
+    assert_eq!(
+        layers[0]["lockfile"],
+        serde_json::json!({
+            "status": "members_present",
+            "paths": ["Cargo.lock"],
+            "reason": "subset_only",
+            "extra": [],
+            "missing": [],
+        }),
+        "{json}"
+    );
     assert_eq!(
         layers[0]["packages"],
         serde_json::json!(["pkg-a/lib", "pkg-b/lib"]),
@@ -1055,7 +1067,7 @@ fn repo_structure_json_reports_lockfile_provenance_for_matching_lockfile() {
         .collect();
     assert_eq!(
         packages,
-        [("pkg-a", "lockfile"), ("pkg-b", "lockfile")],
+        [("pkg-a", "globbed"), ("pkg-b", "globbed")],
         "{json}"
     );
 
@@ -1119,7 +1131,7 @@ fn expected_lockfile_structure_json() -> Value {
             "name": name,
             "ecosystem": "cargo",
             "standard": "cargo-workspace",
-            "provenance": "lockfile",
+            "provenance": "globbed",
             "primary_language": "rust",
             "languages": [{
                 "language": "rust",
@@ -1173,8 +1185,14 @@ fn expected_lockfile_structure_json() -> Value {
             "root": "<root>",
             "authority": "cargo-workspace",
             "orchestrators": [],
-            "provenance": "lockfile",
-            "lockfile_match": true,
+            "provenance": "globbed",
+            "lockfile": {
+                "status": "members_present",
+                "paths": ["Cargo.lock"],
+                "reason": "subset_only",
+                "extra": [],
+                "missing": [],
+            },
             "root_is_package": false,
             "packages": ["pkg-a/lib", "pkg-b/lib"],
         }],
@@ -1183,7 +1201,7 @@ fn expected_lockfile_structure_json() -> Value {
 
 /// Bare `sniff repo` opts its aggregate request in to lockfile provenance.
 #[test]
-fn repo_aggregate_json_reports_lockfile_provenance_for_matching_lockfile() {
+fn repo_aggregate_json_reports_cargo_subset_evidence_for_matching_lockfile() {
     let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
     let json = sniff_json_at(&path, &["repo", "--json"]);
 
@@ -1192,8 +1210,18 @@ fn repo_aggregate_json_reports_lockfile_provenance_for_matching_lockfile() {
         .expect("structure.monorepo_layers array");
     assert_eq!(layers.len(), 1, "{json}");
     assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
-    assert_eq!(layers[0]["provenance"], "lockfile", "{json}");
-    assert_eq!(layers[0]["lockfile_match"], true, "{json}");
+    assert_eq!(layers[0]["provenance"], "globbed", "{json}");
+    assert_eq!(
+        layers[0]["lockfile"],
+        serde_json::json!({
+            "status": "members_present",
+            "paths": ["Cargo.lock"],
+            "reason": "subset_only",
+            "extra": [],
+            "missing": [],
+        }),
+        "{json}"
+    );
 }
 
 #[test]
