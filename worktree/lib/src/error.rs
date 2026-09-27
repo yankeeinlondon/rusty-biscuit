@@ -96,6 +96,10 @@ pub enum WorktreeError {
     )]
     DetachedHeadWithoutFrom(String),
 
+    /// `~/.wt.json` could not be updated; an existing file is left as it was.
+    #[error("cannot record the preference in {}: {reason}", path.display())]
+    PreferenceUnwritable { path: std::path::PathBuf, reason: String },
+
     #[error("failed to execute git command: {0}")]
     GitCommand(String),
 

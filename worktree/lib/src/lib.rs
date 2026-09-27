@@ -1,3 +1,4 @@
+pub mod api_preference;
 pub mod cache;
 pub mod compare;
 pub mod config;
