@@ -150,7 +150,11 @@ pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod review_router;
+#[cfg(unix)]
+pub(crate) mod signal;
 pub(crate) mod source_scan;
+#[cfg(unix)]
+pub(crate) mod terminal_interrupt;
 pub(crate) mod wrap;
 
 // Re-exported so a call site keeps saying `common::helper_command`.

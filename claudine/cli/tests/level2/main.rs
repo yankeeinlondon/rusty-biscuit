@@ -40,6 +40,8 @@ mod level2_lifecycle_action_forms;
 #[cfg(unix)]
 mod level2_lifecycle_control;
 #[cfg(unix)]
+mod level2_lifecycle_ctrl_c_tmux;
+#[cfg(unix)]
 mod level2_lifecycle_dispatch;
 #[cfg(unix)]
 mod level2_lifecycle_loop;

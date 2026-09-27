@@ -262,6 +262,17 @@ fn kill_process_group(child: &mut Child) {
     // so the two termination paths stay consistent.
     let kill_grace = timeouts::TimeoutConfig::resolve(None, None).kill_grace;
     let _wait_loop_active = crate::output::WaitLoopActiveGuard::new();
+    terminate_process_group(pgid, kill_grace);
+    // After `terminate_process_group` however it ended, so the held window
+    // does not depend on whether the group outlived its SIGTERM.
+    #[cfg(feature = "terminal-tests")]
+    hold_teardown_for_terminal_tests();
+}
+
+/// `SIGTERM`, then `SIGKILL` once `kill_grace` elapses or a user interrupt is
+/// observed; returns early once the group is empty.
+#[cfg(unix)]
+fn terminate_process_group(pgid: i32, kill_grace: Duration) {
     // SAFETY: kill(2) with a negative pid signals the whole process group; a
     // failure (no surviving member) means there is nothing left to reap.
     if unsafe { libc::kill(-pgid, libc::SIGTERM) } != 0 {
@@ -286,6 +297,38 @@ fn kill_process_group(child: &mut Child) {
 
 #[cfg(not(unix))]
 fn kill_process_group(_child: &mut Child) {}
+
+/// Test seam, compiled only with the `terminal-tests` feature (never into a
+/// default or installed build): with `CLAUDINE_TEST_TEARDOWN_HOLD=<path>` set,
+/// the teardown creates `<path>.reached` once its signalling has ended — by
+/// the final `SIGKILL`, by the group emptying, or by `SIGTERM` finding no
+/// member — and then stays inside its wait-loop guard until `<path>.release`
+/// exists, for at most 60 s.
+///
+/// The first Ctrl+C ends the real teardown within one 50 ms poll, and a group
+/// that exits on `SIGTERM` ends it with no press at all, so without this no
+/// keypress can be aimed at the window in which a repeat press must defer.
+/// The terminal-tier `…_repeat_ctrl_c_during_orphan_teardown_…` tests hold
+/// the teardown here to land their second press inside it.
+#[cfg(all(unix, feature = "terminal-tests"))]
+fn hold_teardown_for_terminal_tests() {
+    let Some(hold) = std::env::var_os("CLAUDINE_TEST_TEARDOWN_HOLD") else {
+        return;
+    };
+    let marker = |suffix: &str| {
+        let mut path = hold.clone();
+        path.push(suffix);
+        std::path::PathBuf::from(path)
+    };
+    let release = marker(".release");
+    if std::fs::write(marker(".reached"), b"").is_err() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !release.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 /// Cooperative cancellation with an interruptible sleep for the wrap
 /// ticker threads.
@@ -382,5 +425,115 @@ mod tests {
         assert_eq!(perf.launches, 1);
         assert_eq!(perf.provider_api_duration, None);
         assert_eq!(perf.first_response_latency, None);
+    }
+
+    /// A process group that ignores `SIGTERM`, `SIGKILL`ed on drop so a failed
+    /// assertion cannot leak the survivor.
+    #[cfg(unix)]
+    struct TermSurvivingGroup {
+        pgid: i32,
+    }
+
+    #[cfg(unix)]
+    impl TermSurvivingGroup {
+        /// Spawn the group, returning once its `SIGTERM` disposition is in
+        /// place so the teardown's `SIGTERM` cannot empty it.
+        fn spawn() -> (Self, Child) {
+            use std::io::BufRead as _;
+            use std::os::unix::process::CommandExt as _;
+
+            let mut leader = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "trap '' TERM; echo ready; while :; do /bin/sleep 0.05; done",
+                ])
+                .process_group(0)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn TERM-surviving group");
+            let group = Self {
+                pgid: leader.id() as i32,
+            };
+            let mut ready = String::new();
+            std::io::BufReader::new(leader.stdout.take().expect("piped stdout"))
+                .read_line(&mut ready)
+                .expect("read readiness line");
+            assert_eq!(ready.trim(), "ready");
+            (group, leader)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for TermSurvivingGroup {
+        fn drop(&mut self) {
+            // SAFETY: `kill(2)` on the group this fixture created; ESRCH means
+            // it is already gone.
+            unsafe {
+                libc::kill(-self.pgid, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// For the whole post-exit teardown a repeat Ctrl+C must defer rather than
+    /// force-exit past the run's `failure`/`finalize` events. The first press
+    /// ends the teardown within one poll, so no subprocess test can reliably
+    /// land a second press inside it; this observes the flag the SIGINT
+    /// handler reads while a `SIGTERM`-surviving group holds the teardown open.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn kill_process_group_defers_repeat_interrupts_until_ctrl_c_ends_it() {
+        use crate::commands::compose::interrupt::{PressRung, press_rung};
+        use std::os::unix::process::ExitStatusExt as _;
+
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _kill_grace = unsafe { test_toolkit::EnvGuard::set("CLAUDINE_KILL_GRACE", "60s") };
+        let (_group, mut leader) = TermSurvivingGroup::spawn();
+        let teardown = thread::spawn(move || {
+            kill_process_group(&mut leader);
+            leader
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !crate::output::wait_loop_active() {
+            assert!(
+                !teardown.is_finished(),
+                "the teardown returned while its group was still alive"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "the teardown never marked itself as an active wait loop"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            press_rung(
+                2,
+                crate::output::wait_loop_active(),
+                claudine::interrupt::terminal_lifecycle_active()
+            ),
+            PressRung::Defer,
+            "a repeat press during the teardown must be deferred"
+        );
+        assert!(!teardown.is_finished());
+
+        crate::output::mark_user_interrupted();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !teardown.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "Ctrl+C must cut the 60s kill grace short"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let mut leader = teardown.join().expect("teardown thread");
+        crate::output::clear_user_interrupt_for_tests();
+
+        assert!(
+            !crate::output::wait_loop_active(),
+            "the teardown must release the wait-loop flag when it returns"
+        );
+        let status = leader.wait().expect("reap group leader");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 }
