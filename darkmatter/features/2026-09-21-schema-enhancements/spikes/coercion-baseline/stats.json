@@ -1,0 +1,687 @@
+{
+  "records": 3575,
+  "functions": 110,
+  "functions_fully_preserved": 26,
+  "functions_changed": 84,
+  "missing_signature": [
+    "recent_commits",
+    "package_area",
+    "package",
+    "ipv4",
+    "ipv6",
+    "ping",
+    "ping_under",
+    "has_binary",
+    "has_alias",
+    "has_builtin_function",
+    "has_user_function",
+    "can_execute",
+    "has_agentic_cli",
+    "as_markdown"
+  ],
+  "diff_classes": [
+    [
+      "preserved",
+      1553
+    ],
+    [
+      "preserved-rejection",
+      566
+    ],
+    [
+      "newly accepted via conversion: number->text",
+      212
+    ],
+    [
+      "preserved: content validation stays in handler (needs refined type or `fallible`)",
+      186
+    ],
+    [
+      "preserved (same non-ok outcome)",
+      132
+    ],
+    [
+      "newly accepted via conversion: boolean->text",
+      106
+    ],
+    [
+      "missing-signature | preserved-rejection",
+      92
+    ],
+    [
+      "null: propagates today -> type error",
+      75
+    ],
+    [
+      "missing-signature | preserved",
+      73
+    ],
+    [
+      "missing-signature | preserved (same non-ok outcome)",
+      70
+    ],
+    [
+      "draft signature wider than code (engine binds, handler still rejects)",
+      55
+    ],
+    [
+      "missing-signature | preserved: content validation stays in handler (needs refined type or `fallible`)",
+      51
+    ],
+    [
+      "newly accepted via conversion: text->number",
+      48
+    ],
+    [
+      "type error today -> content error after conversion (number->text)",
+      44
+    ],
+    [
+      "newly rejected: expected object, got text; no conversion",
+      28
+    ],
+    [
+      "missing-signature | newly accepted via conversion: text->number",
+      25
+    ],
+    [
+      "preserved (via conversion text->number)",
+      22
+    ],
+    [
+      "type error today -> content error after conversion (boolean->text)",
+      22
+    ],
+    [
+      "missing-signature | newly accepted via conversion: number->text",
+      20
+    ],
+    [
+      "missing-signature | preserved (via conversion number->text)",
+      20
+    ],
+    [
+      "missing-signature | newly rejected: container/null to text (handler stringified it)",
+      20
+    ],
+    [
+      "newly rejected: text the handler parsed itself fails the spec number grammar",
+      18
+    ],
+    [
+      "newly rejected: container/null to text (handler stringified it)",
+      14
+    ],
+    [
+      "preserved (via conversion number->text)",
+      12
+    ],
+    [
+      "missing-signature | type error today -> content error after conversion (number->text)",
+      12
+    ],
+    [
+      "missing-signature | newly accepted via conversion: boolean->text",
+      10
+    ],
+    [
+      "null: consumed as a value today -> type error",
+      9
+    ],
+    [
+      "newly rejected: expected object, got number; no conversion",
+      8
+    ],
+    [
+      "newly rejected: boolean->number",
+      6
+    ],
+    [
+      "newly rejected: expected number, got list; no conversion",
+      6
+    ],
+    [
+      "newly rejected: expected number, got object; no conversion",
+      6
+    ],
+    [
+      "missing-signature | type error today -> content error after conversion (boolean->text)",
+      6
+    ],
+    [
+      "missing-signature | preserved (via conversion boolean->text)",
+      6
+    ],
+    [
+      "missing-signature | type error today -> content error after conversion (text->number)",
+      5
+    ],
+    [
+      "missing-signature | null: consumed as a value today -> type error",
+      5
+    ],
+    [
+      "newly rejected: expected object, got boolean; no conversion",
+      4
+    ],
+    [
+      "newly rejected: expected object, got list; no conversion",
+      4
+    ],
+    [
+      "preserved (via conversion boolean->text)",
+      4
+    ],
+    [
+      "changed result (conversion boolean->text)",
+      4
+    ],
+    [
+      "type error today -> content error after conversion (text->number)",
+      4
+    ],
+    [
+      "missing-signature | changed result (conversion boolean->text)",
+      4
+    ],
+    [
+      "changed result (conversion text->number)",
+      2
+    ],
+    [
+      "missing-signature | draft signature wider than code (engine binds, handler still rejects)",
+      2
+    ],
+    [
+      "missing-signature | null: reaches domain/io today -> type error",
+      2
+    ],
+    [
+      "missing-signature | null: propagates today -> type error",
+      2
+    ]
+  ],
+  "cause_records": [
+    [
+      "newly accepted: number/boolean -> text",
+      348
+    ],
+    [
+      "error class: type error today -> converted, then content/domain error",
+      93
+    ],
+    [
+      "null: propagates today (returns null) -> type error",
+      77
+    ],
+    [
+      "newly accepted: numeric text -> number",
+      73
+    ],
+    [
+      "draft signature wider than code (engine binds, handler still type-checks)",
+      57
+    ],
+    [
+      "newly rejected: non-object to an object parameter (handler tolerated it)",
+      44
+    ],
+    [
+      "newly rejected: list/object to a text parameter (handler stringified it)",
+      34
+    ],
+    [
+      "newly rejected: unparseable text the handler turned into 0/fallback",
+      18
+    ],
+    [
+      "null: consumed as a value today (e.g. 0, false) -> type error",
+      14
+    ],
+    [
+      "newly rejected: list/object to a number parameter (handler fell back to 0)",
+      12
+    ],
+    [
+      "changed result: boolean now read as its text (\"true\")",
+      8
+    ],
+    [
+      "newly rejected: boolean -> number",
+      6
+    ],
+    [
+      "changed result: lenient number grammar (\" 4 \", \"1_000\")",
+      2
+    ],
+    [
+      "null: treated as 'absent' today -> type error",
+      2
+    ]
+  ],
+  "cause_functions": {
+    "draft signature wider than code (engine binds, handler still type-checks)": [
+      "cicd_list",
+      "ensure_leading",
+      "ensure_trailing",
+      "is_negative",
+      "is_positive",
+      "pr_list",
+      "predict_conflicts",
+      "recent_commits"
+    ],
+    "null: propagates today (returns null) -> type error": [
+      "abs",
+      "absolute",
+      "as_csv",
+      "as_json",
+      "as_json5",
+      "as_line_separated",
+      "as_ordered_list",
+      "as_space_separated",
+      "as_tsv",
+      "as_unordered_list",
+      "basename",
+      "basename_without_index",
+      "camel_case",
+      "capitalize",
+      "date",
+      "date_delta",
+      "decrement_file_index",
+      "dir_leading",
+      "dirname",
+      "ends_with",
+      "ext",
+      "file_index",
+      "file_trailing",
+      "find_first_index",
+      "find_last_index",
+      "first",
+      "frontmatter",
+      "has_local_skill",
+      "has_skill",
+      "increment_file_index",
+      "is_indexed_file",
+      "join",
+      "kebab_case",
+      "last",
+      "link",
+      "lower",
+      "markdown_body_empty",
+      "markdown_title",
+      "max",
+      "min",
+      "newer_than",
+      "older_than",
+      "parent_dir",
+      "pascal_case",
+      "ping",
+      "ping_under",
+      "predict_conflicts",
+      "relative",
+      "replace",
+      "replace_first",
+      "replace_last",
+      "snake_case",
+      "starts_with",
+      "terminal",
+      "title_case",
+      "upper",
+      "validate_schema",
+      "without_date"
+    ],
+    "newly accepted: numeric text -> number": [
+      "abs",
+      "cicd_list",
+      "max",
+      "min",
+      "ping",
+      "ping_under",
+      "pr_list",
+      "recent_commits"
+    ],
+    "null: consumed as a value today (e.g. 0, false) -> type error": [
+      "can_execute",
+      "file_exists",
+      "has_alias",
+      "has_binary",
+      "has_builtin_function",
+      "has_command",
+      "has_key",
+      "has_user_function",
+      "length",
+      "number",
+      "round",
+      "validate_schema"
+    ],
+    "newly rejected: boolean -> number": [
+      "number",
+      "round"
+    ],
+    "changed result: lenient number grammar (\" 4 \", \"1_000\")": [
+      "round"
+    ],
+    "newly rejected: unparseable text the handler turned into 0/fallback": [
+      "number",
+      "round"
+    ],
+    "newly rejected: list/object to a number parameter (handler fell back to 0)": [
+      "number",
+      "round"
+    ],
+    "newly rejected: non-object to an object parameter (handler tolerated it)": [
+      "has_key",
+      "validate_schema"
+    ],
+    "newly rejected: list/object to a text parameter (handler stringified it)": [
+      "can_execute",
+      "file_exists",
+      "has_alias",
+      "has_binary",
+      "has_builtin_function",
+      "has_command",
+      "has_key",
+      "has_user_function",
+      "length"
+    ],
+    "changed result: boolean now read as its text (\"true\")": [
+      "can_execute",
+      "has_binary",
+      "has_command",
+      "length"
+    ],
+    "newly accepted: number/boolean -> text": [
+      "absolute",
+      "as_markdown",
+      "basename",
+      "basename_without_index",
+      "branch_exists_on_remote",
+      "camel_case",
+      "capitalize",
+      "decrement_file_index",
+      "dir_leading",
+      "dirname",
+      "ends_with",
+      "ext",
+      "file_index",
+      "file_trailing",
+      "find_first_index",
+      "find_last_index",
+      "frontmatter",
+      "has_local_skill",
+      "has_skill",
+      "increment_file_index",
+      "ipv4",
+      "ipv6",
+      "is_indexed_file",
+      "join",
+      "kebab_case",
+      "link",
+      "lower",
+      "markdown_body_empty",
+      "markdown_title",
+      "package",
+      "package_area",
+      "parent_dir",
+      "pascal_case",
+      "predict_conflicts",
+      "relative",
+      "remote_vendor",
+      "replace",
+      "replace_first",
+      "replace_last",
+      "snake_case",
+      "starts_with",
+      "terminal",
+      "title_case",
+      "upper",
+      "validate_schema",
+      "without_date"
+    ],
+    "error class: type error today -> converted, then content/domain error": [
+      "cicd_list",
+      "date",
+      "date_delta",
+      "has_agentic_cli",
+      "newer_than",
+      "older_than",
+      "ping",
+      "ping_under",
+      "pr_list"
+    ],
+    "null: treated as 'absent' today -> type error": [
+      "ipv4",
+      "ipv6"
+    ]
+  },
+  "null_today": {
+    "consumed as a value": [
+      "and",
+      "can_execute",
+      "contains",
+      "file_exists",
+      "has_alias",
+      "has_binary",
+      "has_builtin_function",
+      "has_command",
+      "has_key",
+      "has_user_function",
+      "is_array",
+      "is_date",
+      "is_date_time",
+      "is_date_time_utc",
+      "is_date_utc",
+      "is_empty",
+      "is_integer",
+      "is_null",
+      "is_number",
+      "is_object",
+      "is_string",
+      "is_this_month",
+      "is_this_month_utc",
+      "is_this_year",
+      "is_this_year_utc",
+      "is_today",
+      "is_today_utc",
+      "is_tomorrow",
+      "is_tomorrow_utc",
+      "is_yesterday",
+      "is_yesterday_utc",
+      "length",
+      "number",
+      "or",
+      "round",
+      "validate_schema"
+    ],
+    "rejected": [
+      "as_markdown",
+      "branch_exists_on_remote",
+      "cicd",
+      "cicd_list",
+      "frontmatter",
+      "has_agentic_cli",
+      "is_negative",
+      "is_positive",
+      "package",
+      "package_area",
+      "ping",
+      "ping_under",
+      "pr",
+      "pr_list",
+      "recent_commits",
+      "remote_vendor"
+    ],
+    "propagates (returns null)": [
+      "abs",
+      "absolute",
+      "as_csv",
+      "as_json",
+      "as_json5",
+      "as_line_separated",
+      "as_ordered_list",
+      "as_space_separated",
+      "as_tsv",
+      "as_unordered_list",
+      "basename",
+      "basename_without_index",
+      "camel_case",
+      "capitalize",
+      "date",
+      "date_delta",
+      "decrement_file_index",
+      "dir_leading",
+      "dirname",
+      "ends_with",
+      "ensure_leading",
+      "ensure_trailing",
+      "ext",
+      "file_index",
+      "file_trailing",
+      "find_first_index",
+      "find_last_index",
+      "first",
+      "frontmatter",
+      "has_local_skill",
+      "has_skill",
+      "increment_file_index",
+      "is_indexed_file",
+      "join",
+      "kebab_case",
+      "last",
+      "link",
+      "lower",
+      "markdown_body_empty",
+      "markdown_title",
+      "max",
+      "min",
+      "newer_than",
+      "older_than",
+      "parent_dir",
+      "pascal_case",
+      "ping",
+      "ping_under",
+      "predict_conflicts",
+      "relative",
+      "replace",
+      "replace_first",
+      "replace_last",
+      "snake_case",
+      "starts_with",
+      "terminal",
+      "title_case",
+      "upper",
+      "validate_schema",
+      "without_date"
+    ],
+    "reaches domain/io (treated as absent)": [
+      "ipv4",
+      "ipv6"
+    ]
+  },
+  "null_accepted_by_draft": [
+    "and",
+    "cicd",
+    "contains",
+    "ensure_leading",
+    "ensure_trailing",
+    "is_array",
+    "is_date",
+    "is_date_time",
+    "is_date_time_utc",
+    "is_date_utc",
+    "is_empty",
+    "is_integer",
+    "is_negative",
+    "is_null",
+    "is_number",
+    "is_object",
+    "is_positive",
+    "is_string",
+    "is_this_month",
+    "is_this_month_utc",
+    "is_this_year",
+    "is_this_year_utc",
+    "is_today",
+    "is_today_utc",
+    "is_tomorrow",
+    "is_tomorrow_utc",
+    "is_yesterday",
+    "is_yesterday_utc",
+    "number",
+    "or",
+    "pr"
+  ],
+  "functions_needing_null_to_keep_today": [
+    "abs",
+    "absolute",
+    "as_csv",
+    "as_json",
+    "as_json5",
+    "as_line_separated",
+    "as_ordered_list",
+    "as_space_separated",
+    "as_tsv",
+    "as_unordered_list",
+    "basename",
+    "basename_without_index",
+    "camel_case",
+    "can_execute",
+    "capitalize",
+    "date",
+    "date_delta",
+    "decrement_file_index",
+    "dir_leading",
+    "dirname",
+    "ends_with",
+    "ext",
+    "file_exists",
+    "file_index",
+    "file_trailing",
+    "find_first_index",
+    "find_last_index",
+    "first",
+    "frontmatter",
+    "has_alias",
+    "has_binary",
+    "has_builtin_function",
+    "has_command",
+    "has_key",
+    "has_local_skill",
+    "has_skill",
+    "has_user_function",
+    "increment_file_index",
+    "ipv4",
+    "ipv6",
+    "is_indexed_file",
+    "join",
+    "kebab_case",
+    "last",
+    "length",
+    "link",
+    "lower",
+    "markdown_body_empty",
+    "markdown_title",
+    "max",
+    "min",
+    "newer_than",
+    "number",
+    "older_than",
+    "parent_dir",
+    "pascal_case",
+    "ping",
+    "ping_under",
+    "predict_conflicts",
+    "relative",
+    "replace",
+    "replace_first",
+    "replace_last",
+    "round",
+    "snake_case",
+    "starts_with",
+    "terminal",
+    "title_case",
+    "upper",
+    "validate_schema",
+    "without_date"
+  ]
+}
