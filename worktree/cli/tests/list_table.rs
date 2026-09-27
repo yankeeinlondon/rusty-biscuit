@@ -15,8 +15,9 @@ use worktree::listing::{
     BranchComparisons, Caption, Comparison, ParentComparison, TreeRow, build_tree,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing};
+use worktree::remote_head::RemoteHead;
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
-use worktree_cli::commands::list_table::{self, TableFacts};
+use worktree_cli::commands::list_table::{self, RemoteFacts, TableFacts};
 
 const NOW: u64 = 1_790_000_000;
 
@@ -53,6 +54,8 @@ struct Example {
     target: DefaultTarget,
     caption: Caption,
     prs: PrListing,
+    /// The stored live head: `origin/main`'s tip, checked 2 minutes ago.
+    remote_head: RemoteHead,
 }
 
 fn status(dir: &str, branch: Option<&str>, is_main: bool, is_current: bool, dirty: DirtyStatus) -> WorktreeStatus {
@@ -169,6 +172,11 @@ impl Example {
                 ],
                 fetched_at: Some(NOW),
             },
+            remote_head: RemoteHead {
+                branch: "main".to_string(),
+                sha: Some("f".repeat(40)),
+                checked_at: NOW - 120,
+            },
         }
     }
 
@@ -181,6 +189,11 @@ impl Example {
             statuses: &self.statuses,
             comparisons: &self.comparisons,
             prs: &self.prs,
+            remote: Some(RemoteFacts {
+                default_branch: "main",
+                tracking_tip: Some(&self.caption.tracking_sha),
+                answer: Some(&self.remote_head),
+            }),
         }
     }
 }
@@ -231,29 +244,33 @@ fn the_target_header_names_a_remote_or_local_target() {
 
 #[test]
 fn caption_variants_read_as_ruled() {
+    // The comparison alone, without the observation that follows it.
     let caption = |ahead, behind| {
         let mut example = Example::new();
         example.caption.ahead = ahead;
         example.caption.behind = behind;
-        let rendered = plain(&example);
+        let facts = TableFacts { remote: None, ..example.facts() };
+        let rendered = list_table::render(&facts, &plain_terminal(), NOW);
         rendered.lines().nth(1).unwrap().trim().to_string()
     };
-    assert_eq!(caption(0, 7), "main  is 7 commits behind  origin/main");
-    assert_eq!(caption(0, 1), "main  is 1 commit behind  origin/main");
-    assert_eq!(caption(3, 0), "main  is 3 commits ahead of  origin/main");
-    assert_eq!(caption(0, 0), "main  is in sync with  origin/main");
+    assert_eq!(caption(0, 7), "main  is 7 commits behind local tracking ref  origin/main .");
+    assert_eq!(caption(0, 1), "main  is 1 commit behind local tracking ref  origin/main .");
+    assert_eq!(caption(3, 0), "main  is 3 commits ahead of local tracking ref  origin/main .");
+    assert_eq!(caption(0, 0), "main  is in sync with local tracking ref  origin/main .");
     assert_eq!(
         caption(3, 7),
-        "main  has diverged from  origin/main : 3 commits ahead, 7 commits behind"
+        "main  has diverged from local tracking ref  origin/main : 3 commits ahead, 7 commits behind."
     );
 
     let example = Example::new();
     let facts = TableFacts {
         caption: None,
+        remote: None,
         ..example.facts()
     };
     let rendered = list_table::render(&facts, &plain_terminal(), NOW);
     assert!(!rendered.contains("behind"), "no remote, no caption:\n{rendered}");
+    assert!(!rendered.contains("remote"), "no remote, no observation:\n{rendered}");
     assert!(rendered.starts_with("\n┌"), "{rendered:?}");
 }
 
@@ -263,6 +280,7 @@ fn only_the_caption_count_is_colored_yellow() {
     let colored = list_table::render(&example.facts(), &color_terminal(), NOW);
     let caption = colored.lines().nth(1).unwrap();
     assert!(caption.contains("\u{1b}[33m7 commits\u{1b}[0m"), "{caption:?}");
+    assert_eq!(caption.matches("\u{1b}[33m").count(), 1, "the observation has no yellow: {caption:?}");
     assert!(caption.contains(" is "), "{caption:?}");
     assert!(!caption.contains("\u{1b}[33m is"), "{caption:?}");
 }
@@ -544,4 +562,149 @@ fn no_color_counts_read_as_plain_text() {
     let rendered = plain_at(100, &Example::new());
     assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
     assert!(row(&rendered, "fix/wt-ux").contains("clean +2 -1"), "{rendered}");
+}
+
+/// The caption paragraph (comparison and observation), unwrapped, from a
+/// render of `example` with `remote` at `now`.
+fn caption_paragraph(example: &Example, remote: Option<RemoteFacts<'_>>, with_caption: bool, now: u64) -> String {
+    let facts = TableFacts {
+        caption: with_caption.then_some(&example.caption),
+        remote,
+        ..example.facts()
+    };
+    let rendered = list_table::render(&facts, &terminal_at(400, false), now);
+    let paragraph: Vec<&str> = rendered.lines().skip(1).take_while(|line| !line.trim().is_empty()).collect();
+    paragraph.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ")
+}
+
+fn head(sha: Option<&str>, age: u64) -> RemoteHead {
+    RemoteHead {
+        branch: "main".to_string(),
+        sha: sha.map(str::to_string),
+        checked_at: NOW - age,
+    }
+}
+
+#[test]
+fn every_remote_observation_reads_as_ruled() {
+    let example = Example::new();
+    let tip = "f".repeat(40);
+    let other = "e".repeat(40);
+    let observe = |tracking_tip: Option<&str>, answer: Option<&RemoteHead>| {
+        let remote = RemoteFacts {
+            default_branch: "main",
+            tracking_tip,
+            answer,
+        };
+        let text = caption_paragraph(&example, Some(remote), false, NOW);
+        assert!(list_table::observation_markup(&remote, NOW).contains("<dim>"), "the observation is dim");
+        text
+    };
+
+    let matched = head(Some(&tip), 120);
+    let differs = head(Some(&other), 120);
+    let absent = head(None, 120);
+    assert_eq!(observe(Some(&tip), Some(&matched)), "origin/main  matched the remote when checked 2 min ago.");
+    assert_eq!(
+        observe(Some(&tip), Some(&differs)),
+        "origin/main  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs."
+    );
+    assert_eq!(observe(Some(&tip), Some(&absent)), "main  was absent on origin when checked 2 min ago.");
+    assert_eq!(observe(Some(&tip), None), "Remote state has not been verified.");
+    assert_eq!(
+        observe(None, Some(&matched)),
+        "No local tracking ref  origin/main ; the remote branch was present when checked 2 min ago."
+    );
+    assert_eq!(
+        observe(None, Some(&absent)),
+        "No local tracking ref  origin/main ; the remote branch was absent when checked 2 min ago."
+    );
+    assert_eq!(observe(None, None), "No local tracking ref  origin/main ; remote state has not been verified.");
+
+    // An answer dated after the render is no answer, and one for another
+    // branch is not this branch's.
+    let future = RemoteHead { checked_at: NOW + 1, ..matched.clone() };
+    assert_eq!(observe(Some(&tip), Some(&future)), "Remote state has not been verified.");
+    let trunk = RemoteHead { branch: "trunk".to_string(), ..matched.clone() };
+    assert_eq!(observe(Some(&tip), Some(&trunk)), "Remote state has not been verified.");
+}
+
+#[test]
+fn the_observation_follows_the_comparison_in_one_paragraph() {
+    let example = Example::new();
+    let text = caption_paragraph(&example, example.facts().remote, true, NOW);
+    assert_eq!(
+        text,
+        "main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago."
+    );
+}
+
+#[test]
+fn a_stale_answer_keeps_past_tense_and_shows_its_age() {
+    let example = Example::new();
+    let tip = "f".repeat(40);
+    let at = |answer: &RemoteHead, now: u64| {
+        let remote = RemoteFacts {
+            default_branch: "main",
+            tracking_tip: Some(&tip),
+            answer: Some(answer),
+        };
+        caption_paragraph(&example, Some(remote), false, now)
+    };
+    let absent = head(None, 0);
+    assert_eq!(at(&absent, NOW + 3 * 86_400), "main  was absent on origin when checked 3 days ago.");
+    let matched = head(Some(&tip), 0);
+    assert_eq!(at(&matched, NOW + 5 * 3600), "origin/main  matched the remote when checked 5 h ago.");
+}
+
+#[test]
+fn ages_use_the_pr_age_units() {
+    for (seconds, text) in [
+        (0, "less than 1 min"),
+        (59, "less than 1 min"),
+        (60, "1 min"),
+        (3599, "59 min"),
+        (3600, "1 h"),
+        (2 * 86_400 - 60, "47 h"),
+        (2 * 86_400, "2 days"),
+    ] {
+        assert_eq!(list_table::age_text(seconds), text, "{seconds} s");
+    }
+}
+
+#[test]
+fn without_an_origin_leftover_tracking_refs_show_no_caption() {
+    let example = Example::new();
+    let rendered = list_table::render(
+        &TableFacts {
+            caption: None,
+            remote: None,
+            ..example.facts()
+        },
+        &plain_terminal(),
+        NOW,
+    );
+    assert!(rendered.starts_with("\n┌"), "{rendered:?}");
+}
+
+#[test]
+fn a_failed_comparison_still_shows_the_observation() {
+    let example = Example::new();
+    let text = caption_paragraph(&example, example.facts().remote, false, NOW);
+    assert_eq!(text, "origin/main  matched the remote when checked 2 min ago.");
+}
+
+#[test]
+fn a_long_caption_wraps_between_words_within_the_terminal() {
+    let example = Example::new();
+    let rendered = list_table::render(&example.facts(), &terminal_at(60, false), NOW);
+    let lines: Vec<&str> = rendered.lines().skip(1).take_while(|line| !line.trim().is_empty()).collect();
+
+    assert!(lines.len() > 1, "{rendered}");
+    for line in &lines {
+        assert!(line.chars().count() <= 60, "{line:?} is wider than the terminal");
+        assert!(line.starts_with(' '), "continuation lines keep the caption's indent: {line:?}");
+    }
+    let joined = lines.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ");
+    assert_eq!(joined, caption_paragraph(&example, example.facts().remote, true, NOW), "no word was split");
 }

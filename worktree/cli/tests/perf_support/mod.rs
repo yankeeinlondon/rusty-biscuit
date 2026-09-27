@@ -27,9 +27,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
+use worktree::live_remote::RemoteHeads;
 use worktree::pull_requests::{
     OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
+use worktree::remote_head::{refresh_remote_head, remote_head_lock_path, remote_head_store_path};
 
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
@@ -168,18 +170,30 @@ impl MixedFixture {
         command
     }
 
-    /// `wt internal-refresh-prs <main>`, as `wt list` starts it, but owned by
+    /// `wt internal-refresh <main>`, as `wt list` starts it, but owned by
     /// the test: it can be waited for or killed.
     pub fn refresh_worker_via_gitea(&self, gitea: &FakeGitea) -> Command {
         let mut command = self.wt_command_via_gitea(gitea);
-        command.arg("internal-refresh-prs").arg(&self.main);
+        command.arg("internal-refresh").arg(&self.main);
         command
     }
 
     /// `wt` with no proxy, no provider token, and no image terminal; the
     /// caller adds the one proxy its requests go to.
+    ///
+    /// Git's own HTTP transports are refused (`protocol.http(s).allow=never`
+    /// through `GIT_CONFIG_*`), because git honors the same proxy variables:
+    /// otherwise the worker's live-head `ls-remote` would reach the PR
+    /// stand-ins and be counted as a PR request. A live-head test that needs
+    /// git's transport removes `GIT_CONFIG_COUNT`.
     fn wt_command_without_network(&self) -> Command {
         let mut command = self.wt_command();
+        command
+            .env("GIT_CONFIG_COUNT", "2")
+            .env("GIT_CONFIG_KEY_0", "protocol.http.allow")
+            .env("GIT_CONFIG_VALUE_0", "never")
+            .env("GIT_CONFIG_KEY_1", "protocol.https.allow")
+            .env("GIT_CONFIG_VALUE_1", "never");
         for name in [
             "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY",
             "http_proxy", "GH_TOKEN", "GITHUB_TOKEN", "GITEA_TOKEN", "FORGEJO_TOKEN", "CODEBERG_TOKEN",
@@ -222,6 +236,32 @@ impl MixedFixture {
         root.join("worktree").join(real.file_name().expect("store file name"))
     }
 
+    /// The live-head store the spawned `wt` reads and the worker writes; see
+    /// [`MixedFixture::pr_store`] for where it lives.
+    pub fn remote_head_store(&self) -> PathBuf {
+        let real = remote_head_store_path(&self.main).expect("remote-head store path");
+        self.pr_store().with_file_name(real.file_name().expect("store file name"))
+    }
+
+    /// Writes a live head of `main` for the current `origin`, checked `age`
+    /// ago: `sha` is its object ID, or `None` for a verified absence.
+    ///
+    /// A fresh one isolates a test from the worker's live-head half: `wt list`
+    /// launches no worker for it, and a worker skips its request.
+    pub fn seed_remote_head_store(&self, age: Duration, sha: Option<&str>) {
+        let origin = worktree::pull_requests::origin_url(&self.main).expect("the fixture has an origin");
+        let store = self.remote_head_store();
+        fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
+        let json = serde_json::json!({
+            "format_version": 1,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "branch": "main",
+            "sha": sha,
+            "checked_at": unix_now() - age.as_secs(),
+        });
+        fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
+    }
+
     /// Writes a PR store for the current `origin`, fetched `age` ago,
     /// holding one open PR from `branch` into `main`.
     pub fn seed_pr_store(&self, age: Duration, number: u64, branch: &str) {
@@ -257,13 +297,23 @@ impl MixedFixture {
         refresh(&self.pr_store(), &self.main, unix_now, |_| Box::new(NoRequest))
     }
 
-    /// Waits up to `limit` until no worker holds the refresh lock, calling
-    /// `nudge` before each probe (to unblock the worker's request).
+    /// [`MixedFixture::probe_refresh`] for the live-head lock.
+    pub fn probe_head_refresh(&self) -> RefreshOutcome {
+        refresh_remote_head(&self.remote_head_store(), &self.main, unix_now, &NoRequest)
+    }
+
+    /// Waits up to `limit` until no worker for the fixture runs and neither
+    /// refresh lock is held, calling `nudge` before each probe (to unblock the
+    /// worker's request). A free PR lock alone is no proof: the worker's
+    /// live-head half may still be running.
     pub fn wait_until_unlocked(&self, limit: Duration, mut nudge: impl FnMut()) -> bool {
         let deadline = Instant::now() + limit;
         loop {
             nudge();
-            if self.probe_refresh() != RefreshOutcome::Contended {
+            if self.probe_refresh() != RefreshOutcome::Contended
+                && self.probe_head_refresh() != RefreshOutcome::Contended
+                && refresh_workers(&self.main).is_empty()
+            {
                 return true;
             }
             if Instant::now() >= deadline {
@@ -307,19 +357,32 @@ impl Default for MixedFixture {
     }
 }
 
-/// Removes a PR store and its lock sidecar, which on Windows live in the real
-/// user cache (see [`MixedFixture::pr_store`]).
+/// Removes a PR store, the live-head store beside it, and both lock sidecars,
+/// which on Windows live in the real user cache (see
+/// [`MixedFixture::pr_store`]).
 pub struct RemoveOnDrop(pub PathBuf);
 
 impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
         let _ = fs::remove_file(pr_lock_path(&self.0));
+        // `<hash>.prs.json` → `<hash>.remote-head.json`.
+        if let Some(name) = self.0.file_name().and_then(|name| name.to_str()) {
+            let head = self.0.with_file_name(name.replace(".prs.json", ".remote-head.json"));
+            let _ = fs::remove_file(remote_head_lock_path(&head));
+            let _ = fs::remove_file(head);
+        }
     }
 }
 
-/// A source that must never be asked.
+/// A source (PR or live head) that must never be asked.
 pub struct NoRequest;
+
+impl RemoteHeads for NoRequest {
+    fn live_head(&self, _remote: &str, _branch: &str) -> Result<Option<String>, String> {
+        Err("the probe makes no request".into())
+    }
+}
 
 impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
@@ -330,7 +393,7 @@ impl OpenPrSource for NoRequest {
     }
 }
 
-/// A running `wt internal-refresh-prs` for one repository.
+/// A running `wt internal-refresh` for one repository.
 #[derive(Debug)]
 pub struct RefreshWorker {
     pub pid: u32,
@@ -353,9 +416,12 @@ pub fn refresh_workers(main: &Path) -> Vec<RefreshWorker> {
     system
         .processes()
         .iter()
+        // On Linux every thread is listed too, with its process's argv; the
+        // worker runs two, so count processes only.
+        .filter(|(_, process)| process.thread_kind().is_none())
         .filter(|(_, process)| {
             let cmd = process.cmd();
-            let position = cmd.iter().position(|arg| arg == "internal-refresh-prs");
+            let position = cmd.iter().position(|arg| arg == "internal-refresh");
             position
                 .and_then(|at| cmd.get(at + 1))
                 .and_then(|repo| fs::canonicalize(repo).ok())

@@ -28,6 +28,7 @@ use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
 use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
+use worktree::remote_head::remote_head_store_path;
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -430,6 +431,24 @@ impl DesignFixture {
             "pull_requests": pull_requests,
         });
         fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
+
+        // A live head matching `origin/main`, checked just now, so `wt` starts
+        // no worker for the live head alone.
+        let tracking_tip = String::from_utf8(
+            Command::new("git").current_dir(main).args(["rev-parse", "origin/main"]).output().unwrap().stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let head = serde_json::json!({
+            "format_version": 1,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "branch": "main",
+            "sha": tracking_tip,
+            "checked_at": unix_now(),
+        });
+        let head_store = self.store_path(remote_head_store_path(main).expect("remote-head store path"));
+        fs::write(head_store, serde_json::to_vec(&head).unwrap()).expect("write remote-head store");
     }
 
     /// Runs `wt list` in the feature worktree with `COLORFGBG` set, and
@@ -523,8 +542,17 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     let plain = screen.plain();
 
     // Caption: the local and remote badges around a yellow count.
-    let caption = screen.row_with(&["main", "is", "behind", "origin/main"]);
-    assert_eq!(screen.text(caption).trim(), "main  is 1 commit behind  origin/main", "{plain}");
+    let caption = screen.row_with(&["main", "is", "behind", "local tracking ref"]);
+    assert!(
+        screen.text(caption).trim().starts_with("main  is 1 commit behind local tracking ref  origin/main ."),
+        "{plain}"
+    );
+    // The observation follows in the same paragraph, word-wrapped to the pane.
+    let unwrapped = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        unwrapped.contains("origin/main . origin/main matched the remote when checked less than 1 min ago."),
+        "{plain}"
+    );
     screen.assert_span(caption, " main ", "a local badge", |s| s.bg_is(LOCAL_BADGE) && s.fg_is(BADGE_TEXT));
     screen.assert_span(caption, " origin/main ", "a remote badge", |s| {
         s.bg_is(REMOTE_BADGE) && s.fg_is(BADGE_TEXT)

@@ -33,6 +33,12 @@ fn stages(fixture: &MixedFixture, proxy: &ProxyStub) -> (Duration, Duration) {
     )
 }
 
+/// A live-head answer checked just now, so no sample launches a worker for
+/// the live head alone and the PR behavior under measurement is isolated.
+fn seed_fresh_head(fixture: &MixedFixture) {
+    fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
+}
+
 fn best_full_command(fixture: &MixedFixture, proxy: &ProxyStub) -> Duration {
     (0..5)
         .map(|_| {
@@ -55,6 +61,8 @@ fn best_full_command(fixture: &MixedFixture, proxy: &ProxyStub) -> Duration {
 #[serial]
 fn perf_list_meets_sla_with_the_network_down() {
     let fixture = MixedFixture::new().with_github_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let proxy = ProxyStub::refusing();
 
@@ -78,6 +86,8 @@ fn perf_list_meets_sla_with_the_network_down() {
 #[serial]
 fn perf_list_meets_sla_when_the_pr_request_hits_its_deadline() {
     let fixture = MixedFixture::new().with_github_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let proxy = ProxyStub::hanging();
 
@@ -141,6 +151,7 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh() {
     const STALE: Duration = Duration::from_secs(12 * 60 + 5);
     let fixture = MixedFixture::new().with_github_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
     fixture.warm_untracked_cache();
     let proxy = ProxyStub::hanging();
     let origin = origin_url(fixture.main()).expect("origin");

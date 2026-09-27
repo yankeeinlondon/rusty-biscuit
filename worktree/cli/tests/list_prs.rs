@@ -1,8 +1,12 @@
 //! `wt list`'s PR badges through the real binary, with every request sent to
 //! a local stand-in: a fresh store makes no request, a stale store shows its
 //! badges with their age at once and leaves the request to a detached
-//! `wt internal-refresh-prs`, and a refused connection on a miss shows the
+//! `wt internal-refresh`, and a refused connection on a miss shows the
 //! table without badges and stores nothing.
+//!
+//! Each test seeds a fresh live-head answer, so the worker's live-head half
+//! neither starts a worker nor makes a request, and git's own HTTP transport
+//! is refused (see `perf_support`): only PR requests reach the stand-ins.
 //!
 //! The worker's lifecycle runs against [`FakeGitea`], which holds a request
 //! until the test releases it: the parent returns while its worker is
@@ -50,13 +54,22 @@ fn row<'a>(stderr: &'a str, needle: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no table row with {needle:?}:\n{stderr}"))
 }
 
-/// Ends a worker blocked on `proxy` and waits until it released its lock.
+/// Ends a worker blocked on `proxy` and waits until it exited and released
+/// both locks.
 fn finish_worker(fixture: &MixedFixture, proxy: &ProxyStub) {
     assert!(
         fixture.wait_until_unlocked(WORKER_WAIT, || proxy.close_held()),
-        "the worker never released its lock"
+        "the worker never exited or released its locks"
     );
 }
+
+/// A live-head answer checked just now, which isolates a test from the
+/// worker's live-head half.
+fn seed_fresh_head(fixture: &MixedFixture) {
+    fixture.seed_remote_head_store(Duration::ZERO, Some(HEAD_SHA));
+}
+
+const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
 /// On drop, answers every request still held by `gitea` and waits until no
 /// worker for the fixture runs, so none outlives the fixture or its store.
@@ -116,6 +129,7 @@ fn stale_gitea_fixture() -> (MixedFixture, RemoveOnDrop, Vec<u8>) {
     let fixture = MixedFixture::new().with_gitea_origin();
     let cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
+    seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
     (fixture, cleanup, stored)
 }
@@ -130,11 +144,13 @@ fn a_fresh_pr_store_makes_no_request_and_shows_its_badges() {
     let fixture = MixedFixture::new().with_github_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
+    seed_fresh_head(&fixture);
     let proxy = ProxyStub::hanging();
 
     let (_, stderr) = list(&fixture, &proxy);
 
     assert_eq!(proxy.connections(), 0, "a store younger than 60 s skips the request");
+    assert!(refresh_workers(fixture.main()).is_empty(), "two fresh answers start no worker");
     assert!(row(&stderr, "divergent-0").contains("PR #99"), "{stderr}");
     assert!(!stderr.contains("PRs as of"), "fresh results need no age line:\n{stderr}");
 }
@@ -145,6 +161,7 @@ fn a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_reques
     let fixture = MixedFixture::new().with_github_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
+    seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
     let proxy = ProxyStub::hanging();
 
@@ -186,6 +203,7 @@ fn a_changed_origin_hides_the_stored_badges_and_starts_no_worker() {
         .status()
         .expect("git");
     assert!(status.success());
+    seed_fresh_head(&fixture);
     let proxy = ProxyStub::refusing();
 
     let (_, stderr) = list(&fixture, &proxy);
@@ -206,7 +224,7 @@ fn the_worker_command_prints_nothing_and_ignores_a_linked_worktree() {
     let run_worker = |repo: &std::path::Path| {
         let output = fixture
             .wt_command_via(&proxy)
-            .args(["internal-refresh-prs".as_ref(), repo.as_os_str()])
+            .args(["internal-refresh".as_ref(), repo.as_os_str()])
             .output()
             .expect("the worker runs");
         assert!(output.status.success(), "{output:?}");
@@ -225,7 +243,7 @@ fn the_worker_command_prints_nothing_and_ignores_a_linked_worktree() {
 fn the_worker_command_is_hidden_from_help_and_completion() {
     let help = assert_cmd::Command::cargo_bin("wt").unwrap().arg("--help").output().expect("help");
     assert!(help.status.success());
-    assert!(!String::from_utf8_lossy(&help.stdout).contains("internal-refresh-prs"));
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("internal-refresh"));
 
     let completion = assert_cmd::Command::cargo_bin("wt")
         .unwrap()
@@ -236,7 +254,7 @@ fn the_worker_command_is_hidden_from_help_and_completion() {
     assert!(completion.status.success());
     let offered = String::from_utf8_lossy(&completion.stdout);
     assert!(offered.contains("list"), "completion offers subcommands: {offered}");
-    assert!(!offered.contains("internal-refresh-prs"), "{offered}");
+    assert!(!offered.contains("internal-refresh"), "{offered}");
 }
 
 #[test]
@@ -244,6 +262,7 @@ fn the_worker_command_is_hidden_from_help_and_completion() {
 fn with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored() {
     let fixture = MixedFixture::new().with_github_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
     let proxy = ProxyStub::refusing();
 
     let (_, stderr) = list(&fixture, &proxy);
@@ -263,10 +282,11 @@ fn with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored() 
     // The worker it started fails against the refused port and leaves the
     // answer untouched; wait for its lock so it cannot outlive the fixture.
     let deadline = stored_at + WORKER_WAIT;
-    while !pr_lock_path(&fixture.pr_store()).exists() || fixture.probe_refresh() == RefreshOutcome::Contended {
+    while !pr_lock_path(&fixture.pr_store()).exists() {
         assert!(Instant::now() < deadline, "the worker never ran");
         std::thread::sleep(Duration::from_millis(20));
     }
+    assert!(fixture.wait_until_unlocked(WORKER_WAIT, || {}), "the worker never finished");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored);
 }
 
@@ -440,6 +460,7 @@ fn an_origin_change_during_a_workers_request_discards_its_answer() {
 fn an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin() {
     let fixture = MixedFixture::new().with_gitea_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
+    seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
 
     // Control: with no stored answer the foreground request's answer is
@@ -448,11 +469,14 @@ fn an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_ori
     assert!(row(&stderr, "divergent-1").contains("PR #7"), "{stderr}");
     fs::remove_file(fixture.pr_store()).expect("forget the stored answer");
 
+    // Listing reads `origin` once, before the request, so the fresh live head
+    // seeded for the old origin keeps a worker from racing the asserts.
+    const NEW_ORIGIN: &str = "http://gitea.example.invalid/o/other.git";
     let main = fixture.main().to_path_buf();
     gitea.before_reply(move || {
         let status = Command::new("git")
             .current_dir(&main)
-            .args(["remote", "set-url", "origin", "http://gitea.example.invalid/o/other.git"])
+            .args(["remote", "set-url", "origin", NEW_ORIGIN])
             .status()
             .expect("git");
         assert!(status.success());
@@ -464,4 +488,5 @@ fn an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_ori
     assert!(!stderr.contains("PR #"), "badges from the previous origin:\n{stderr}");
     assert!(!stderr.contains("PRs as of"), "{stderr}");
     assert!(!fixture.pr_store().exists(), "an answer for the old origin is not stored");
+    assert!(refresh_workers(fixture.main()).is_empty(), "a PR miss alone starts no worker");
 }
