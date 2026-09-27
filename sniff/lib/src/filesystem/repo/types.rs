@@ -1,7 +1,6 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
@@ -10,7 +9,7 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
-use crate::filesystem::repo::ownership::PackageOwnershipIndex;
+use crate::filesystem::repo::ownership::{PackageAreaIndex, PackageOwnershipIndex};
 use crate::filesystem::repo::standard::{
     DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
 };
@@ -424,8 +423,7 @@ impl RepoInfo {
     /// Find the package area that contains `dir`.
     ///
     /// First checks if `dir` is inside a specific package, then falls back to
-    /// checking whether it sits anywhere within a package area directory.
-    /// Returns `None` when `dir` is outside every known package area, and
+    /// the deepest package area directory containing it. Returns `None` when `dir` is outside every known package area, and
     /// `Some("")` inside a package that sits directly under the repo root.
     pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
         let packages = self.packages.as_deref()?;
@@ -448,27 +446,11 @@ impl RepoInfo {
             return Some(&pkg.package_area);
         }
 
-        // Fall back to checking package area directories. The top-level `""`
-        // area has no directory of its own; joining it would match every path.
-        let areas: HashSet<&str> = packages
-            .iter()
-            .map(|p| p.package_area.as_str())
-            .filter(|a| !a.is_empty())
-            .collect();
-
-        for area in &areas {
-            let area_path = ownership_index.root().join(area);
-            if dir.starts_with(&area_path) {
-                // Return a reference with the right lifetime by finding the
-                // original &str in the packages vec
-                return packages
-                    .iter()
-                    .find(|p| p.package_area == *area)
-                    .map(|p| p.package_area.as_str());
-            }
-        }
-
-        None
+        // Otherwise the deepest area directory containing `dir`, so nested
+        // areas resolve the same way on every call.
+        let areas = PackageAreaIndex::from_packages(ownership_index.root(), packages);
+        let index = areas.lookup_normalized(dir)?;
+        Some(&packages[index].package_area)
     }
 }
 
@@ -849,6 +831,30 @@ mod tests {
         assert_eq!(repo.package_area_for_dir(Path::new("/repo/root")), Some("root"));
         assert_eq!(repo.area_for_dir(Path::new("/repo/root")), "root");
         assert_eq!(repo.area_for_dir(Path::new("/repo")), "");
+    }
+
+    #[test]
+    fn an_unowned_directory_in_nested_areas_resolves_to_the_deepest_area() {
+        let mut repo = monorepo_with_areas();
+        repo.packages.as_mut().unwrap().push(Package {
+            path: PathBuf::from("/repo/sniff/plugins/one"),
+            relative: "sniff/plugins/one".to_string(),
+            package_area: "sniff/plugins".to_string(),
+            name: "one".to_string(),
+            ..Package::default()
+        });
+        // Areas were once scanned from a `HashSet`, so the nested answer
+        // varied between calls; repeat to catch any order dependence.
+        for _ in 0..8 {
+            assert_eq!(
+                repo.package_area_for_dir(Path::new("/repo/sniff/plugins/docs")),
+                Some("sniff/plugins")
+            );
+            assert_eq!(
+                repo.package_area_for_dir(Path::new("/repo/sniff/docs")),
+                Some("sniff")
+            );
+        }
     }
 
     #[test]

@@ -23,7 +23,7 @@ use crate::filesystem::git::remote_refresh::RefSnapshot;
 use crate::filesystem::git::remote_resolver::preferred_remote_order;
 use crate::filesystem::git::{ConventionalCommit, GitRepo};
 use crate::filesystem::path_kind::{ChangeCategory, classify_path};
-use crate::filesystem::repo::ownership::PackageOwnershipIndex;
+use crate::filesystem::repo::ownership::{PackageAreaIndex, PackageOwnershipIndex};
 use crate::filesystem::repo::{RepoInfo, detect_repo_structure};
 use crate::performance::{self, counters};
 use crate::{Result, SniffError};
@@ -370,16 +370,16 @@ fn has_every_category(paths: &[PathBuf], wanted: &BTreeSet<ChangeCategory>) -> b
 }
 
 /// The structure-tier package catalog for one collection, shared by
-/// attribution and the package filters so paths are resolved through one
-/// ownership index.
+/// attribution and the package filters so every path is resolved once, by
+/// [`resolve`](Self::resolve), for both.
 #[derive(Default)]
 struct PackageCatalog {
     /// Present only for a monorepo with a package list.
-    monorepo: Option<(RepoInfo, PackageOwnershipIndex)>,
+    monorepo: Option<(RepoInfo, PackageOwnershipIndex, PackageAreaIndex)>,
     /// Index into the package list of the `package` filter's package.
     package: Option<usize>,
-    /// Indices of the packages inside the `package_area` filter's area.
-    area_packages: Option<Vec<usize>>,
+    /// The `package_area` filter, ASCII lower-cased.
+    area: Option<String>,
 }
 
 impl PackageCatalog {
@@ -393,11 +393,10 @@ impl PackageCatalog {
         let monorepo = info
             .filter(|info| info.is_monorepo && info.packages.is_some())
             .map(|info| {
-                let index = PackageOwnershipIndex::from_packages(
-                    &info.root,
-                    info.packages.as_deref().unwrap_or_default(),
-                );
-                (info, index)
+                let packages = info.packages.as_deref().unwrap_or_default();
+                let owners = PackageOwnershipIndex::from_packages(&info.root, packages);
+                let areas = PackageAreaIndex::from_packages(owners.root(), packages);
+                (info, owners, areas)
             });
 
         if options.package.is_none() && options.package_area.is_none() {
@@ -408,13 +407,12 @@ impl PackageCatalog {
         }
         let Some(packages) = monorepo
             .as_ref()
-            .and_then(|(info, _)| info.packages.as_deref())
+            .and_then(|(info, _, _)| info.packages.as_deref())
         else {
             return Err(SniffError::NotAMonorepo(repo_root.to_path_buf()));
         };
 
         let mut package = None;
-        let mut area_packages = None;
         if let Some(name) = &options.package {
             let matches: Vec<usize> = packages
                 .iter()
@@ -450,70 +448,81 @@ impl PackageCatalog {
             });
         }
 
-        if let Some(area) = &options.package_area {
-            let area = area.to_ascii_lowercase();
-            let prefix = format!("{area}/");
-            let members: Vec<usize> = packages
+        // An area is selectable only when some package carries it or a
+        // descendant area, as in `sniff repo packages`.
+        let area = options.package_area.as_deref().map(str::to_ascii_lowercase);
+        if let Some(wanted) = &area
+            && !packages
                 .iter()
-                .enumerate()
-                .filter(|(_, package)| {
-                    let package_area = package.package_area.to_ascii_lowercase();
-                    package_area == area || package_area.starts_with(&prefix)
-                })
-                .map(|(index, _)| index)
-                .collect();
-            if members.is_empty() {
-                return Err(SniffError::UnknownPackageArea {
-                    area: options.package_area.clone().unwrap_or_default(),
-                    valid: packages
-                        .iter()
-                        .map(|package| package.package_area.as_str())
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                });
-            }
-            area_packages = Some(members);
+                .any(|package| area_selects(wanted, &package.package_area))
+        {
+            return Err(SniffError::UnknownPackageArea {
+                area: options.package_area.clone().unwrap_or_default(),
+                valid: packages
+                    .iter()
+                    .map(|package| package.package_area.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
         }
         Ok(Self {
             monorepo,
             package,
-            area_packages,
+            area,
         })
     }
 
     fn packages(&self) -> Option<&[crate::filesystem::repo::Package]> {
         self.monorepo
             .as_ref()
-            .and_then(|(info, _)| info.packages.as_deref())
+            .and_then(|(info, _, _)| info.packages.as_deref())
     }
 
-    fn owner(&self, path: &Path) -> Option<usize> {
-        self.monorepo
-            .as_ref()
-            .and_then(|(_, index)| index.lookup_relative(path))
+    /// The deepest package owning a root-relative `path`, and the package
+    /// area the path belongs to.
+    ///
+    /// An owned path belongs to its owner's declared area, even where that
+    /// package's directory is itself another package's area. An unowned path
+    /// belongs to the deepest area directory strictly containing it, and the
+    /// root area `""` is never reached that way. Resolution is lexical, so
+    /// deleted and moved paths resolve too.
+    fn resolve(&self, path: &Path) -> (Option<usize>, Option<&str>) {
+        let Some((info, owners, areas)) = &self.monorepo else {
+            return (None, None);
+        };
+        let packages = info.packages.as_deref().unwrap_or_default();
+        let absolute = owners.normalize_relative(path);
+        let owner = owners.lookup_normalized(&absolute);
+        let area = owner.or_else(|| areas.lookup_normalized(absolute.parent()?));
+        (owner, area.map(|index| packages[index].package_area.as_str()))
     }
 
     fn filters_paths(&self) -> bool {
-        self.package.is_some() || self.area_packages.is_some()
+        self.package.is_some() || self.area.is_some()
     }
 
-    /// Whether the changed `paths` satisfy both package filters.
+    /// Whether the changed `paths` satisfy both package filters; different
+    /// paths may satisfy each.
     fn matches(&self, paths: &[PathBuf]) -> bool {
-        let owners: Vec<usize> = paths.iter().filter_map(|path| self.owner(path)).collect();
-        self.package.is_none_or(|package| owners.contains(&package))
-            && self
-                .area_packages
-                .as_ref()
-                .is_none_or(|members| owners.iter().any(|owner| members.contains(owner)))
+        let resolved: Vec<(Option<usize>, Option<&str>)> =
+            paths.iter().map(|path| self.resolve(path)).collect();
+        self.package
+            .is_none_or(|package| resolved.iter().any(|(owner, _)| *owner == Some(package)))
+            && self.area.as_deref().is_none_or(|wanted| {
+                resolved
+                    .iter()
+                    .any(|(_, area)| area.is_some_and(|area| area_selects(wanted, area)))
+            })
     }
 
     /// Package attribution for a monorepo commit; `None` outside a monorepo.
     ///
-    /// A file is attributed only to the deepest package owning it. A file
-    /// directly under a package area but outside every package is left
-    /// unattributed. A moved file's source path counts too.
+    /// Each path contributes its deepest owning package, if any, and its area
+    /// as [`resolve`](Self::resolve) defines it, so a shared file inside an
+    /// area reports the area without a package. A moved file's source path
+    /// counts too.
     fn attribute(&self, files: &[RecentCommitFile]) -> Option<RecentCommitPackages> {
         let packages = self.packages()?;
         let mut names = BTreeSet::new();
@@ -522,9 +531,12 @@ impl PackageCatalog {
             std::iter::once(file.path.as_str()).chain(file.original_path.as_deref())
         });
         for path in paths {
-            if let Some(owner) = self.owner(Path::new(path)) {
+            let (owner, area) = self.resolve(Path::new(path));
+            if let Some(owner) = owner {
                 names.insert(packages[owner].name.clone());
-                areas.insert(packages[owner].package_area.clone());
+            }
+            if let Some(area) = area {
+                areas.insert(area.to_string());
             }
         }
         Some(RecentCommitPackages {
@@ -532,6 +544,15 @@ impl PackageCatalog {
             package_areas: areas.into_iter().collect(),
         })
     }
+}
+
+/// Whether the lower-cased `wanted` selector selects `area`: the area itself
+/// or any area nested under it, compared ASCII case-insensitively.
+fn area_selects(wanted: &str, area: &str) -> bool {
+    let (wanted, area) = (wanted.as_bytes(), area.as_bytes());
+    area.len() >= wanted.len()
+        && area[..wanted.len()].eq_ignore_ascii_case(wanted)
+        && (area.len() == wanted.len() || area[wanted.len()] == b'/')
 }
 
 /// The payload's message fields, parsed per spec Decision 15.
