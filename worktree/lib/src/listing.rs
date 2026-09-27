@@ -152,17 +152,20 @@ fn ahead_behind(target: &str, branch: &str) -> Option<(usize, usize)> {
     Some((ahead, behind))
 }
 
-/// The local default branch measured against `origin/<default>`, the one line
-/// above the table.
+/// The local default branch measured against its **local tracking ref**
+/// `origin/<default>`, as of the last fetch, the one line above the table.
+/// Nothing here comes from the live remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caption {
     /// The local default branch, e.g. `main`.
     pub local: String,
-    /// Its origin peer, e.g. `origin/main`.
+    /// Its local tracking ref, e.g. `origin/main`.
     pub remote: String,
-    /// Local commits the remote lacks.
+    /// The tracking ref's tip, from the same ref snapshot as the counts.
+    pub tracking_sha: String,
+    /// Local commits the tracking ref lacks.
     pub ahead: usize,
-    /// Remote commits the local branch lacks.
+    /// Tracking-ref commits the local branch lacks.
     pub behind: usize,
 }
 
@@ -724,6 +727,7 @@ malformed
         let caption = |ahead, behind| Caption {
             local: "main".into(),
             remote: "origin/main".into(),
+            tracking_sha: "f".repeat(40),
             ahead,
             behind,
         }
@@ -824,12 +828,21 @@ mod repo_tests {
         let target = list.target.clone().unwrap();
         assert_eq!((target.reference.as_str(), target.diverged), ("main", false));
         assert_eq!(list.caption.as_ref().unwrap().remote, "origin/main");
+        let fetched_tip = repo.sha("origin/main");
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, fetched_tip);
+
+        // The caption reads only the local tracking ref: a push nobody has
+        // fetched leaves it in sync, at the old tracking tip.
+        let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+        let list = list_worktrees().unwrap();
+        assert_eq!(caption_state(&list), Some(CaptionState::InSync));
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, fetched_tip);
 
         // PR-driven: origin moved on; the column compares against origin.
-        repo.push_commit_to_origin("main", "upstream.txt");
         repo.git(&["fetch", "-q", "origin"]);
         let list = list_worktrees().unwrap();
         assert_eq!(caption_state(&list), Some(CaptionState::Behind(1)));
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, pushed);
         assert_eq!(list.target.as_ref().unwrap().reference, "origin/main");
         assert_eq!(list.target.as_ref().unwrap().sha, repo.sha("origin/main"));
         assert_eq!(comparisons(&list, "fix/x").target.unwrap().behind, 1);

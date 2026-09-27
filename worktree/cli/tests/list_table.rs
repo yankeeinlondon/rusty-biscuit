@@ -154,6 +154,7 @@ impl Example {
             caption: Caption {
                 local: "main".to_string(),
                 remote: "origin/main".to_string(),
+                tracking_sha: "f".repeat(40),
                 ahead: 0,
                 behind: 7,
             },
