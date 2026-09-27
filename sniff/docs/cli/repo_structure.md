@@ -25,7 +25,10 @@ Detects and displays the structure of a repository, whether single-package or mo
 
 ### Single-Package Repository
 
-For non-monorepos, a summary is shown:
+For a single-package project (a root `Cargo.toml`, `package.json`,
+`pyproject.toml`, `requirements.txt`, `go.mod`, or `composer.json` with no
+workspace), a summary is shown, followed by any [Lockfiles](#lockfiles)
+section:
 
 ```
 Repository

@@ -684,7 +684,7 @@ When `RepoInfo` is serialized, `monorepo_standards` and `monorepo_layers` appear
 
 - `monorepo_standards` — array of detected standards with resolved binary metadata.
 - `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and a required `lockfile` object (`status`, `paths`, `reason`, `extra`, `missing`). **Breaking:** `lockfile` replaces the removed `lockfile_match`; result JSON without it no longer deserializes. See [Lockfile Corroboration](#lockfile-corroboration) below.
-- `standalone_lockfiles` — always present (`[]` when empty). One entry per `poetry.lock`, `pdm.lock`, or `composer.lock` found at the repository root or a discovered package root, with `root` (repository-relative, `""` for the root), `tool` (`poetry`, `pdm`, `composer`), and the same five fields as a layer's `lockfile`. These files are never read: an entry is `not_requested` when corroboration is declined, `unverifiable` + `no_membership_data` otherwise, and `unreadable` + `metadata_failed` when the probe fails. An absent file produces no entry.
+- `standalone_lockfiles` — always present (`[]` when empty). One entry per `poetry.lock`, `pdm.lock`, or `composer.lock` found at the repository root or a discovered package root, with `root` (repository-relative, `""` for the root), `tool` (`poetry`, `pdm`, `composer`), and the same five fields as a layer's `lockfile`. These files are never read: an entry is `not_requested` when corroboration is declined, `unverifiable` + `no_membership_data` otherwise, and `unreadable` + `metadata_failed` when the probe fails. An absent file produces no entry. A single-package project is reported through `detect_repo_with_request_or_root_package`, whose root package may be declared by `composer.json` alone: that PHP-only package has ecosystem `unknown`, no package managers, and the `composer.json` `name`, and never forms a layer.
 
 #### Lockfile Corroboration
 
@@ -733,9 +733,9 @@ The `status` and `reason` values are a frozen snake_case wire vocabulary:
 | `unknown_standard` | `not_applicable`: no known membership authority |
 | `unsupported_version` | `unverifiable`: a recognized lockfile version outside the accepted set |
 | `unsupported_layout` | `unverifiable`: a configuration Sniff does not compare (for example, Rush with subspaces) |
-| `no_membership_data` | `unverifiable`: the format records dependencies, not members (fallback formats and binary `bun.lockb`) |
+| `no_membership_data` | `unverifiable`: the source records dependencies, not members (fallback formats, binary `bun.lockb`, and the uv and npm cases below) |
 | `ambiguous_membership` | `unverifiable`: a member name maps to no local package path, or to more than one |
-| `incomplete_manifest_discovery` | `unverifiable`: the manifest-derived member set is not known to be complete |
+| `incomplete_manifest_discovery` | `unverifiable`: the manifest-derived member set is not known to be complete, for example because a declared member entry is not a string, or the member field itself is not a list |
 | `invalid_member_path` | `unverifiable`: an absolute or unrepresentable member path |
 | `metadata_failed` | `unreadable` |
 | `read_failed` | `unreadable`, including a directory where a file is expected |
@@ -746,7 +746,7 @@ Each authority uses a fixed set of candidate files at its layer root:
 
 | Authority | Lockfile | With corroboration on |
 |---|---|---|
-| pnpm, npm, Yarn, Bun, uv | `pnpm-lock.yaml`, `npm-shrinkwrap.json` / `package-lock.json`, `yarn.lock`, `bun.lock` / `bun.lockb`, `uv.lock` | Compared: `match` or `mismatch` for accepted versions. Other versions, including npm v1 and Yarn Classic, are `unverifiable` + `unsupported_version`; binary `bun.lockb` is `unverifiable` + `no_membership_data` |
+| pnpm, npm, Yarn, Bun, uv | `pnpm-lock.yaml`, `npm-shrinkwrap.json` / `package-lock.json`, `yarn.lock`, `bun.lock` / `bun.lockb`, `uv.lock` | Compared: `match` or `mismatch` for accepted versions. Other versions, including npm v1 and Yarn Classic, are `unverifiable` + `unsupported_version`; binary `bun.lockb` is `unverifiable` + `no_membership_data`, as is a `uv.lock` without `[manifest]` whose local packages are anything but the root alone, and an npm lockfile whose root record has no `workspaces` and that records no local package or link (with one, it is `ambiguous_membership`; an explicit `workspaces: null`, or `resolved: null` on a `link: true` record, is `unreadable` + `parse_failed`); a `[manifest]` without `members` is `unreadable` + `parse_failed` |
 | Cargo | `Cargo.lock` | `members_present` or `members_missing` |
 | Rush | Selected by `rush.json` | Compared only for the ordinary single pnpm workspace layout; every other layout is `unverifiable` + `unsupported_layout` |
 | Go, Gradle, Bazel (Bzlmod) | `go.work.sum`, `gradle.lockfile` or `gradle/dependency-locks/*.lockfile`, `MODULE.bazel.lock` | `unverifiable` + `no_membership_data`, from metadata alone |
@@ -754,7 +754,7 @@ Each authority uses a fixed set of candidate files at its layer root:
 
 Nx, Turborepo, and Lerna never own a layer, so the underlying membership authority supplies the observation.
 
-**Comparison.** Member paths are compared relative to the layer root with `/` separators, and the root itself is excluded from both sets. A uv project whose root is also a package therefore compares only its other members; the root package stays in `RepoInfo.packages`. Paths are normalized lexically, never through the filesystem, so a stale member that no longer exists still shows up in `extra`.
+**Comparison.** Member paths are compared relative to the layer root with `/` separators, and the root itself is excluded from both sets. A uv project whose root is also a package therefore compares only its other members; the root package stays in `RepoInfo.packages`. A declared root-only uv workspace (`[tool.uv.workspace] members = []`) still forms a layer, so its two empty sets can `match` and upgrade the root package to `lockfile` provenance; that one-package repository is not a monorepo. A `pyproject.toml` without a `members` array forms no layer. Paths are normalized lexically, never through the filesystem, so a stale member that no longer exists still shows up in `extra`.
 
 **Cargo.** `Cargo.lock` records packages, not workspace paths, and local crates outside the workspace are also recorded without a `source`, so exact membership cannot be recovered. A member counts as present when a `[[package]]` entry has its name, its resolved manifest version (including `version.workspace = true`), and no `source`. `extra` is always `[]`: extra lockfile entries, whether stale members or unrelated local crates, are invisible. `missing` lists the members with no matching entry. A directory listed in `[workspace].exclude` is not a member, even when a `members` glob also matches it, so it is never reported as missing.
 

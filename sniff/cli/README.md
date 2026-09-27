@@ -488,7 +488,7 @@ table summarises the contract; see the per-subcommand docs under
 | Subcommand | JSON shape |
 |---|---|
 | `repo` (bare, `--json`) | Consolidated `SniffRepo` aggregate with snake_case keys, grouped `context`, top-level `branches`/`worktrees`, and `dirty`/`staged`/`unstaged`/`untracked` scope buckets; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
-| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo; each layer carries a `lockfile` object (which replaces the removed `lockfile_match`) and is corroborated against its lockfile, as in bare `repo --json`. `standalone_lockfiles` (Poetry, PDM, Composer) is omitted when empty; the bare `repo --json` aggregate always carries it under `structure`. Commands that run the structure tier read no lockfile for this. |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). A single-package project, a PHP-only `composer.json` root included, reports its one root package with `is_monorepo: false`. Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo; each layer carries a `lockfile` object (which replaces the removed `lockfile_match`) and is corroborated against its lockfile, as in bare `repo --json`. `standalone_lockfiles` (Poetry, PDM, Composer) is omitted when empty; the bare `repo --json` aggregate always carries it under `structure`. Commands that run the structure tier read no lockfile for this. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
@@ -539,8 +539,8 @@ lockfile.
   whose `status`, `paths`, `reason`, `extra`, and `missing` fields are always
   present. It replaces the removed `lockfile_match` boolean, which is a
   breaking change for scripts that read that key. `standalone_lockfiles` lists
-  the Poetry, PDM, and Composer lockfiles found at a workspace's root or
-  package roots. It is omitted when empty, except under the `repo --json`
+  the Poetry, PDM, and Composer lockfiles found at the repository root or a
+  package root, including a single-package project's root. It is omitted when empty, except under the `repo --json`
   aggregate's `structure`, which always carries it. The
   [library README](../lib/README.md#lockfile-corroboration) defines the
   status and reason vocabulary, the Cargo-only `members_present` /
